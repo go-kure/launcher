@@ -4900,12 +4900,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     container, the setting out of the configuration or of the scrape
     configurations of the monitor objects, serves the web endpoints over
     plain HTTP (with `web.tlsConfig`, while the config reloader and the
-    Thanos sidecar it configures speak HTTPS, so every configuration reload
-    fails, and, without `listenLocal`, so do the probes, and the pods never
-    become ready), refuses the object at reconcile, or, for an
-    `authorization` other than an Alertmanager endpoint's, panics where it
-    generates the configuration that reads it, and exits, to panic again on
-    each restart (`retentionPercentage:
+    Thanos sidecar it configures speak HTTPS, so their requests fail, and
+    without `listenLocal` so do the probes and the pods never become
+    ready), refuses the object at reconcile, or, for an `authorization`
+    other than an Alertmanager endpoint's, panics where it generates the
+    configuration that reads it, and exits, to panic again on each restart,
+    reconciling only between crashes (`retentionPercentage:
     read by the Prometheus operator only for Prometheus 3.11.0 and later; at
     version v3.10.0 it drops it from the configuration it generates, and
     Prometheus runs without it; raise version to 3.11.0 or later, or leave
