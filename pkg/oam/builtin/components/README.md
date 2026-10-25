@@ -4213,7 +4213,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   type keeps the operator's handler; one that sets any gives the patch's
   handler (`MergePatchContainers` and `sanitizeProbeHandlers`,
   `pkg/k8s/merge.go:27-121`), so a patch that gives each probe a handler
-  that does not name `portName` builds. Two `volumes` of one name are refused,
+  that does not name `portName` builds, and so does one that adds a port of
+  `portName`'s name at another number, as a probe names its port by name. Two
+  `volumes` of one name are refused,
   as the API refuses the pods (`volumes[1] "scratch": the name is listed
   already at volumes[0], …`), and so is a `serviceName` that is not a
   DNS-1123 label, the rule of every Service name in this package: the API

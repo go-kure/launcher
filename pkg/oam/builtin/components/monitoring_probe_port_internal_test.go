@@ -1,6 +1,7 @@
 package components
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -48,6 +49,9 @@ func TestRefuseRenamedProbedPort(t *testing.T) {
 		{"a patch of the web port without a name", patch([]corev1.ContainerPort{{ContainerPort: 9090}}, nil, nil, nil), "", generated, ""},
 		{"a patch that names the port as an authored portName does", patch(rename, nil, nil, nil), "http", []corev1.ContainerPort{{Name: "http", ContainerPort: 9090}}, ""},
 		{"no generated web port (listenLocal)", patch(rename, nil, nil, nil), "", nil, ""},
+		// The probes name the port by name, so a port the patch adds under
+		// portName's name serves them.
+		{"a rename and a port the patch adds of portName's name", patch(append(slices.Clone(rename), corev1.ContainerPort{Name: "web", ContainerPort: 9091}), nil, nil, nil), "", generated, ""},
 		{"a rename and no probe of the patch", patch(rename, nil, nil, nil), "", generated, "startup, liveness and readiness probes"},
 		{"a rename of an authored portName", patch(rename, nil, nil, nil), "metrics", []corev1.ContainerPort{{Name: "metrics", ContainerPort: 9090}}, `portName "metrics" the Prometheus operator's startup, liveness and readiness probes`},
 		{"probes by number", patch(rename, http(intstr.FromInt32(9090)), http(intstr.FromInt32(9090)), http(intstr.FromInt32(9090))), "", generated, ""},
