@@ -58,10 +58,10 @@ const (
 	// (PrometheusURIScheme) turn to HTTPS on a tlsConfig at any version, and
 	// so do the probes (BuildProbes) but under listenLocal, where they are an
 	// exec of plain HTTP.
-	promWebTLSUnserved = "mounts no web configuration, so the web endpoint serves plain HTTP while the config reloader and the Thanos sidecar it configures speak HTTPS to it: every configuration reload fails, and, without listenLocal, the probes fail too and the pods never become ready"
+	promWebTLSUnserved = "mounts no web configuration, so the web endpoint serves plain HTTP while the config reloader and the Thanos sidecar it configures speak HTTPS to it, and their requests to it fail; without listenLocal the probes fail too and the pods never become ready"
 	// promOperatorExits: nothing recovers a panic of Sync, which runs in an
 	// errgroup goroutine (pkg/operator/resource_reconciler.go).
-	promOperatorExits = ", and the operator exits, to panic again on each restart, so nothing it manages is reconciled"
+	promOperatorExits = ", and the operator exits, to panic again on each restart, so it reconciles only between crashes"
 	// promAuthorizationPanics: addAuthorizationToYaml indexes the first item
 	// of what addSafeAuthorizationToYaml returns, which is empty below
 	// 2.26.0.
@@ -448,7 +448,7 @@ var prometheusVersionGates = func() []idGate[monitoringv1.PrometheusSpec] {
 		g("apiserverConfig.authorization", "2.26.0", "panics while generating the Kubernetes service discovery of a selected monitor, probe or Alertmanager endpoint"+promOperatorExits, func(s *spec) bool {
 			return s.APIServerConfig != nil && s.APIServerConfig.Authorization != nil
 		}),
-		g("scrapeClasses[].authorization", "2.26.0", "panics while generating the scrape configuration of a monitor that falls back to it"+promOperatorExits, func(s *spec) bool {
+		g("scrapeClasses[].authorization", "2.26.0", "panics while generating the scrape configuration of a selected monitor, probe or ScrapeConfig that falls back to it"+promOperatorExits, func(s *spec) bool {
 			return anyOf(s.ScrapeClasses, func(c *monitoringv1.ScrapeClass) bool { return c.Authorization != nil })
 		}),
 	}
