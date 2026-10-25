@@ -1963,8 +1963,8 @@ and by scope, whatever component or trait emits it.
     mount takes the patch's volume, so the `volumeMounts` entry's volume is not judged);
     a `queryLogFile` or `scrapeFailureLogFile` with a directory (a relative one joined to
     `/etc/prometheus/config_out`, as Prometheus does) no such writable volume is mounted
-    at exactly, other than `/prometheus`, the operator's log-file volume and any
-    directory under `/dev` or `/proc`, unless a prometheus patch sets
+    at exactly, other than `/prometheus`, the operator's log-file volume, and `/dev`,
+    `/proc` or any directory under them (as for `/dev/stdout`), unless a prometheus patch sets
     `readOnlyRootFilesystem: false`; a negative request or limit; and a
     name whose data volume, third rule ConfigMap volume `prometheus-<name>-rulefiles-2`
     or last pod hostname of the last shard is not a DNS-1123 label (no dot, at most 40
