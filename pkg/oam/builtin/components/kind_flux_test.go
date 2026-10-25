@@ -723,15 +723,22 @@ func TestFluxReceiver_RefusesAUserOrPassword(t *testing.T) {
 // default version (go-kure/launcher#984); with an apiVersion, any kind is
 // accepted. Each kind of the default list is held to acceptance by
 // TestReceiverDefaultAPIVersionKinds_AcceptedUnversioned, which reads the list.
+// The refusal suggests the refused kind's own apiVersion, written out here per
+// kind, and the HelmRelease one for a kind outside the API's enum
+// (go-kure/launcher#1010).
 func TestFluxReceiver_UnversionedResourceNeedsADefaultKind(t *testing.T) {
+	const refused = `fluxcd-receiver: resources[1].apiVersion: required for kind %q, which the notification controller has no default version for; set apiVersion, such as %s`
 	cases := []struct {
 		name     string
 		resource map[string]any
 		wantErr  string
 	}{
-		{"HelmRelease without apiVersion", map[string]any{"kind": "HelmRelease", "name": "shop"}, `fluxcd-receiver: resources[1].apiVersion: required for kind "HelmRelease", which the notification controller has no default version for; set apiVersion, such as helm.toolkit.fluxcd.io/v2`},
-		{"Kustomization without apiVersion", map[string]any{"kind": "Kustomization", "name": "*"}, `resources[1].apiVersion: required for kind "Kustomization"`},
-		{"ImagePolicy with an empty apiVersion", map[string]any{"apiVersion": "", "kind": "ImagePolicy", "name": "app"}, `resources[1].apiVersion: required for kind "ImagePolicy"`},
+		{"HelmRelease without apiVersion", map[string]any{"kind": "HelmRelease", "name": "shop"}, fmt.Sprintf(refused, "HelmRelease", "helm.toolkit.fluxcd.io/v2")},
+		{"Kustomization without apiVersion", map[string]any{"kind": "Kustomization", "name": "*"}, fmt.Sprintf(refused, "Kustomization", "kustomize.toolkit.fluxcd.io/v1")},
+		{"ImagePolicy with an empty apiVersion", map[string]any{"apiVersion": "", "kind": "ImagePolicy", "name": "app"}, fmt.Sprintf(refused, "ImagePolicy", "image.toolkit.fluxcd.io/v1")},
+		{"ImageUpdateAutomation without apiVersion", map[string]any{"kind": "ImageUpdateAutomation", "name": "app"}, fmt.Sprintf(refused, "ImageUpdateAutomation", "image.toolkit.fluxcd.io/v1")},
+		{"ExternalArtifact without apiVersion", map[string]any{"kind": "ExternalArtifact", "name": "*"}, fmt.Sprintf(refused, "ExternalArtifact", "source.toolkit.fluxcd.io/v1")},
+		{"a kind outside the enum without apiVersion", map[string]any{"kind": "Provider", "name": "*"}, fmt.Sprintf(refused, "Provider", "helm.toolkit.fluxcd.io/v2 for a HelmRelease")},
 		{"HelmRelease with apiVersion", map[string]any{"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease", "name": "shop"}, ""},
 		{"Kustomization with apiVersion", map[string]any{"apiVersion": "kustomize.toolkit.fluxcd.io/v1", "kind": "Kustomization", "name": "*"}, ""},
 		{"HelmRepository without apiVersion", map[string]any{"kind": "HelmRepository", "name": "*"}, ""},
@@ -746,8 +753,9 @@ func TestFluxReceiver_UnversionedResourceNeedsADefaultKind(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("ToApplicationConfig = %v, want an error that says %q", err, tc.wantErr)
+			// The suffix: HelmRelease's own suggestion is a prefix of the fallback.
+			if err == nil || !strings.HasSuffix(err.Error(), tc.wantErr) {
+				t.Fatalf("ToApplicationConfig = %v, want an error that ends %q", err, tc.wantErr)
 			}
 		})
 	}

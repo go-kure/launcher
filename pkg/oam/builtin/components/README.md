@@ -177,7 +177,7 @@ reads it.
 | `fluxcd-alert` | Alert | Kind-named Flux Alert: the whole `AlertSpec`, strictly decoded; `providerRef` with its `name` and `eventSources`, each with its `kind` and `name`, are required. A source may name the objects of another namespace, and nothing gates it. No environment policy applies — see below. |
 | `fluxcd-kustomization` | Kustomization | Kind-named: the full Flux `KustomizationSpec`, against an existing source; what `oci` lowers to beside an `ocirepository` (`OCIRule`, see below). An authored Flux object, not how an application is delivered. |
 | `fluxcd-provider` | Provider | Kind-named Flux Provider: the whole `ProviderSpec`, strictly decoded; `type` is required, and of an authored Secret reference its `name`. A user or a password in `address` or `proxy` is refused under every policy and under none, and an `address` that is itself the credential under a policy that forbids explicit secrets; the hosts of both are written as authored, and nothing gates `serviceAccountName` — see below. |
-| `fluxcd-receiver` | Receiver | Kind-named Flux Receiver: the whole `ReceiverSpec`, strictly decoded; `type` and `resources`, each with its `kind` and `name`, are required, and of an authored `secretRef` its `name`. A resource without `apiVersion` is refused unless its kind is one the notification controller gives a default version (`Bucket`, `GitRepository`, `HelmChart`, `HelmRepository`, `OCIRepository`, `ImageRepository`, `ArtifactGenerator`; go-kure/launcher#984). The Receiver opens an inbound path on the notification controller, and a resource may name the objects of another namespace; nothing gates either. The API's expression rules are not checked. No environment policy applies — see below. |
+| `fluxcd-receiver` | Receiver | Kind-named Flux Receiver: the whole `ReceiverSpec`, strictly decoded; `type` and `resources`, each with its `kind` and `name`, are required, and of an authored `secretRef` its `name`. A resource without `apiVersion` is refused unless its kind is one the notification controller gives a default version (`Bucket`, `GitRepository`, `HelmChart`, `HelmRepository`, `OCIRepository`, `ImageRepository`, `ArtifactGenerator`; go-kure/launcher#984), and the refusal names the kind's own apiVersion for a kind the API's `kind` enum admits (go-kure/launcher#1010). The Receiver opens an inbound path on the notification controller, and a resource may name the objects of another namespace; nothing gates either. The API's expression rules are not checked. No environment policy applies — see below. |
 | `gateway` | Gateway | Kind-named Gateway API Gateway: the whole `GatewaySpec`, strictly decoded; `gatewayClassName` and `listeners` are required, and of a listener its `name`, `port` and `protocol`. It is not the Gateway a capability names for the `httproute` trait. No capability is required and no environment policy applies — see below. |
 | `gatewayclass` | GatewayClass | Kind-named Gateway API GatewayClass: the whole `GatewayClassSpec` (`controllerName`, required, `parametersRef` and `description`), strictly decoded. Cluster-scoped. No capability is required and no environment policy applies — see below. |
 | `gitrepository` | GitRepository | Kind-named: the full Flux `GitRepositorySpec`. |
@@ -2695,8 +2695,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `ArtifactGenerator`); for any other kind it fails every webhook the
   Receiver gets. So a resource of any other kind without `apiVersion`, or
   with an empty one, is refused at build time (`fluxcd-receiver:
-  resources[1].apiVersion: required for kind "HelmRelease", …; set
-  apiVersion, such as helm.toolkit.fluxcd.io/v2 …`; go-kure/launcher#984).
+  resources[1].apiVersion: required for kind "Kustomization", …; set
+  apiVersion, such as kustomize.toolkit.fluxcd.io/v1`; go-kure/launcher#984).
+  The refusal names the version of the refused kind in the Flux API module
+  launcher pins: `kustomize.toolkit.fluxcd.io/v1` for a `Kustomization`,
+  `helm.toolkit.fluxcd.io/v2` for a `HelmRelease`, `image.toolkit.fluxcd.io/v1`
+  for an `ImagePolicy` or an `ImageUpdateAutomation`, and
+  `source.toolkit.fluxcd.io/v1` for an `ExternalArtifact`, the other kinds the
+  Receiver API's `kind` enum admits. A kind outside the enum gets the
+  HelmRelease version as an example (go-kure/launcher#1010).
 
   **The lists are read from the markers of the Go source, not from a CRD.**
   The API modules of the Flux controllers hold the Go types and ship no CRD;
