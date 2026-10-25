@@ -4977,7 +4977,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
     The operator reads three fields only below some version, refused at it
     and above, and so with `version` unset: an Alertmanager endpoint's
-    `apiVersion: v1` (Prometheus 2.x only; refused from 3.0.0-rc.0),
+    `apiVersion: v1` (Prometheus 2.x only; refused at every 3.x version, prereleases included),
     a remote write entry's `queueConfig.maxRetries` (below 2.11.0), and
     `allowOverlappingBlocks` (from 2.11.0 and below 2.39.0).
   - a field of `thanos` the operator reads only from some Thanos version on,
