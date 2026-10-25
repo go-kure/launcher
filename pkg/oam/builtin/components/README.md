@@ -4917,31 +4917,33 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `scrapeFailureLogFile` named with one: the operator writes the query log
     under `/var/log/prometheus` but adds the `log-file` volume there only for
     the scrape failure log file, on a read-only root filesystem
-    (server/statefulset.go:510, :537; common.go:334-347). A writable volume
-    the author mounts there, in `volumeMounts` or a patch of the
-    `prometheus` container, is accepted; a mount there with `readOnly` set,
-    in either, is not, nor is one of a `configMap`, `secret`, `downwardAPI`
-    or `projected` volume, which the kubelet mounts read-only; where the
-    patch names the path as `volumeMounts` does, the merged mount takes the
-    patch's volume. The path is compared cleaned (`/var/log/prometheus/`
-    is the same directory). Where both name the path alike, the operator's
-    strategic merge keeps `readOnly` if either sets it; where they spell it
-    differently, both mounts stay, and which one the container runtime mounts
-    over the other is not derived, so the read-only one still refuses.
-  - a `queryLogFile` or `scrapeFailureLogFile` named with an absolute
-    directory no writable volume is mounted at: the operator passes the path
-    unchanged (common.go:230-236), and Prometheus cannot create the file on
-    the read-only root filesystem. The data volume at `/prometheus`, the
-    `log-file` volume at `/var/log/prometheus` where the operator adds it,
-    and a writable mount of the author's at exactly that directory, judged
-    as above, count; one at a directory above it does not, since Prometheus
-    does not create the subdirectory. Prometheus joins a relative path with
-    a directory, as `logs/query.log`, to the directory of its configuration,
-    `/etc/prometheus/config_out`, which the operator mounts read-only, so it
-    is judged there. A path under `/dev` or `/proc`, as `/dev/stdout`, is not
-    refused, nor is any where a patch of the `prometheus` container
-    sets `securityContext.readOnlyRootFilesystem` to `false`, which the
-    operator's merge carries over its `true`.
+    (server/statefulset.go:510, :537; common.go:334-347), unless
+    `/var/log/prometheus` is writable all the same, judged as in the next
+    entry.
+  - a `queryLogFile` or `scrapeFailureLogFile` in a directory Prometheus
+    cannot write. A name alone is in `/var/log/prometheus`; the operator
+    passes any other path unchanged (common.go:230-236), and Prometheus
+    joins a relative one, as `logs/query.log`, to the directory of its
+    configuration, `/etc/prometheus/config_out`. The mount that covers the
+    directory most closely, at it or at the nearest directory above it
+    (paths compared cleaned), decides: the data volume at `/prometheus` and
+    the `log-file` volume at `/var/log/prometheus` where the operator adds
+    it are writable; the operator's other mounts, `config_out` among them,
+    are read-only; a mount of the author's, in `volumeMounts` or a patch of
+    the `prometheus` container, is writable unless it sets `readOnly` or
+    mounts a `configMap`, `secret`, `downwardAPI` or `projected` volume,
+    which the kubelet mounts read-only. A patch mount at a path written as
+    an earlier mount's is merged into it by the operator's strategic merge:
+    it takes the patch's volume and keeps `readOnly` if either sets it. Of
+    mounts at one path written differently, as `/data` and `/data/`, any
+    read-only one makes it read-only, since which one the container runtime
+    mounts over the other is not derived. A directory below a writable mount
+    counts as writable, since it may exist on the volume or be made by an
+    init container. Where no mount covers the directory, the root filesystem
+    decides, which the operator makes read-only unless a patch of the
+    `prometheus` container sets `securityContext.readOnlyRootFilesystem` to
+    `false`. A path under `/dev` or `/proc`, as `/dev/stdout`, is not
+    refused.
   - a negative request or limit in `resources`, `thanos.resources` or a
     listed container.
   - a parseable `version` of a major other than 2 or 3: the operator
