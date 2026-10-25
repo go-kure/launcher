@@ -4584,9 +4584,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     methods `sdk` and `oauth`. The entry's own fields are written all the
     same, for a Thanos that does not read them. `azureAd` among them is
     written only where a managed identity survives: an `azureAd` left with
-    no method is refused at reconcile, whether by a dropped `sdk` or
-    `oauth`, whose refusal names it, or with only a `workloadIdentity`,
-    which the operator drops at every version (go-kure/launcher#1020)
+    no method by a dropped `sdk` or `oauth` is refused at reconcile, and
+    the refusal names it
     (`ruleQueryOffset: read by the Prometheus operator only for
     Thanos 0.38.0 and later; at version v0.37.0 it does not pass it to
     Thanos Ruler, and the ruler runs without it; raise version to 0.38.0 or
@@ -4607,13 +4606,39 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     comparison of the operator's package `pkg/thanos` (every Go file of it,
     its tests aside), vendored as for `alertmanager`, and holds each to this
     list.
+  - a remote write entry's `azureAd.workloadIdentity`, `azureAd.scope`, or
+    `sigv4.externalId` with a `roleArn` (go-kure/launcher#1020), at every
+    `version` the operator can parse, after the gates above of `remoteWrite`
+    and of `azureAd`, whose miss leads the operator to refuse the object or
+    may (`remoteWrite` below 0.24.0, a managed identity without a `clientId`
+    below 0.40.0, a method it drops), and ahead of the other gates, so that
+    a `workloadIdentity` whose drop leaves no method, and the object
+    refused, is not refused as a flag the ruler runs without. An
+    `externalId` without a `roleArn` is left to the API server, which
+    refuses it (below).
+    The operator passes them to Thanos at no version: it logs each as ignored,
+    with minimum version `none`, and drops it from the remote write
+    configuration, so the ruler writes without it. An `azureAd` whose only
+    method was `workloadIdentity` is left with none, and the operator
+    refuses the object at reconcile (`remoteWrite[].azureAd.scope: the
+    Prometheus operator does not pass it to Thanos at any version: it drops
+    it from the remote write configuration, and the ruler writes without it;
+    leave remoteWrite[].azureAd.scope unset`).
+    `TestThanosRulerRemoteWriteTexts_MatchVendoredSource` holds the list to
+    every field `createOrUpdateRulerConfigSecret` ignores with minimum
+    version `none`.
 
   **Not checked of what the operator refuses:** a ThanosRuler with neither
   `queryConfig` nor `queryEndpoints` (:141-143), a `version` it cannot parse
   (:145-149), an entry of `additionalArgs` naming a flag it generates
   (`BuildArgs`, :352), and a `web.tlsConfig` its validation refuses
   (`webconfig.New`, :383-386). Each fails the reconcile, and is left to the
-  operator.
+  operator. So is a remote write entry that `validateRemoteWriteSpec`
+  (`pkg/prometheus/operator.go`) refuses: two of `basicAuth`, `oauth2`,
+  `authorization`, `sigv4` and `azureAd`, an `azureAd` with no method or
+  two, or an `oauth` `clientId` that is not a UUID. Where one applies, a
+  refusal above that says the ruler runs or writes without a field is given
+  all the same.
 
   **The group of an excluded object is written.** An `excludedFromEnforcement`
   entry that leaves `group` out (or writes it `null`) is written with
@@ -4631,7 +4656,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **The API's expression rules are not checked.** Two are listed
   (`thanosRulerRulesLeft`) and left to the API server: an `updateStrategy`
   with a `rollingUpdate` must have the type `RollingUpdate`, and the
-  `externalId` of a remote write entry's `sigv4` needs a `roleArn`.
+  `externalId` of a remote write entry's `sigv4` needs a `roleArn`. The kind
+  refuses an `externalId` only with a `roleArn`, as one the operator passes
+  to Thanos at no version (go-kure/launcher#1020), so the second rule still
+  decides one without.
 
   **What the type writes unauthored:** `resources: {}`, on every
   ThanosRuler; and, on an authored `storage`, a `volumeClaimTemplate` with
