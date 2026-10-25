@@ -415,7 +415,10 @@ var prometheusVersionGates = func() []idGate[monitoringv1.PrometheusSpec] {
 		// The first gate missed is the one refused: the operator refuses an
 		// authentication method below its version at reconcile, before it
 		// generates any configuration, so those gates precede azureAd's own,
-		// which it drops below 2.45.0.
+		// which it drops below 2.45.0. An azureAd with no method, which the
+		// operator refuses at every version, is refused ahead of every gate
+		// (refuseAzureADWithoutMethod), so the gate of azureAd fires only on
+		// one with a method.
 		promGate(`remoteWrite[].azureAd.managedIdentity.clientId=""`, "remoteWrite[].azureAd.managedIdentity", "3.5.0",
 			"refuses one without a clientId at reconcile, and the Prometheus is not updated", func(s *spec) bool {
 				return anyOf(s.RemoteWrite, func(r *rw) bool {
@@ -619,6 +622,15 @@ func validatePrometheusVersion(spec *monitoringv1.PrometheusSpec) error {
 		prom, promParsed = v, true
 		if v.Major != 2 && v.Major != 3 {
 			return errors.Errorf("version: %q is not supported by the Prometheus operator, which runs Prometheus of major version 2 or 3 only; name one such as %s", spec.Version, prometheusDefaultVersion)
+		}
+		// Only here can the operator reach validateRemoteWriteSpec: it
+		// fails in NewConfigGenerator on another major or on a version it
+		// cannot parse. It reaches it where it generates the configuration,
+		// not with every monitor selector unset unless the operator is run
+		// with unmanaged configuration disabled, which the kind cannot see,
+		// so the entry is refused wherever the operator may refuse it.
+		if err := refuseAzureADWithoutMethod(spec.RemoteWrite, "one"); err != nil {
+			return err
 		}
 		if err := refuseVersionGates(spec, v, at, "Prometheus", gatesOf(prometheusVersionGates)); err != nil {
 			return err

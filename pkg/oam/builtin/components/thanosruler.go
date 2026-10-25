@@ -164,7 +164,7 @@ func (h *ThanosRulerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"additionalArgs": objects("additionalArgs: further command-line arguments of the thanos-ruler container, passed as they are; launcher does not read them. Upstream documents that an argument the operator already sets, or an invalid one, fails the reconciliation.",
 			"One argument: name (required) and value."),
 		"web": object("web: the web server's settings: tlsConfig and httpConfig." + decoded + "ThanosRulerWebSpec in its API reference."),
-		"remoteWrite": objects("remoteWrite: the remote write endpoints the ruler sends its series to; with one, the ruler keeps no data of its own. Refused below Thanos v0.24.0, where the operator refuses the object at reconcile; a field of an entry is refused below the Thanos version the operator reads it from. At every version the operator can parse, three fields of an entry it passes to Thanos at no version are refused: azureAd.workloadIdentity, azureAd.scope and a sigv4.externalId with a roleArn. The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
+		"remoteWrite": objects("remoteWrite: the remote write endpoints the ruler sends its series to; with one, the ruler keeps no data of its own. Refused below Thanos v0.24.0, where the operator refuses the object at reconcile; a field of an entry is refused below the Thanos version the operator reads it from. At every version the operator can parse, an entry's azureAd with no authentication method is refused, as the operator refuses it at reconcile, and so are three fields of an entry the operator passes to Thanos at no version: azureAd.workloadIdentity, azureAd.scope and a sigv4.externalId with a roleArn. The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
 			"One endpoint: url, required. An empty action of a writeRelabelConfigs rule is refused, since the API server would replace it with replace."+decoded+"RemoteWriteSpec in its API reference."),
 		"terminationGracePeriodSeconds": number("terminationGracePeriodSeconds: how many seconds the pods are given to stop. Unset, the operator's default of 120. At least 0."),
 		"enableFeatures": texts("enableFeatures: the Thanos Ruler feature flags to enable. Refused below Thanos v0.39.0, where the operator drops it.",
@@ -293,8 +293,9 @@ var thanosRulerGenerated = map[string][]string{
 // validateThanosRuler refuses what the operator or the API refuses of the
 // spec alone, then holds the pods as a workload's (validateMonitoringWorkload)
 // and the fields to version (validateThanosRulerVersion), which refuses as
-// well, where the version gates admit the remote write entries, the fields
-// the operator passes to Thanos at no version.
+// well, where the version gates admit the remote write entries, an azureAd
+// with no authentication method and the fields the operator passes to Thanos
+// at no version.
 // What depends on the ThanosRuler's name as well is validateThanosRulerName's.
 //
 // The operator copies the replica count into the StatefulSet as it is

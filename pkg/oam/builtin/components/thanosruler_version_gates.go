@@ -175,17 +175,19 @@ func validateThanosRulerVersion(spec *monitoringv1.ThanosRulerSpec) error {
 
 // refuseThanosRulerAtVersion holds spec to the parsed version v, named by at,
 // refusals ahead of drops, so that no refusal the kind holds is preempted by
-// a text saying the ruler runs or writes without a field. The entries
-// validateRemoteWriteSpec refuses (combined credentials, an azureAd with no
-// method or two, an oauth clientId not a UUID) are not held, and get such a
-// text all the same (the components README lists them). First the gates
-// whose miss leads the operator to refuse the object at reconcile, or may
+// a text saying the ruler runs or writes without a field. The other entries
+// validateRemoteWriteSpec refuses (combined credentials or azureAd methods,
+// an oauth clientId not a UUID) are not held, and get such a text all the
+// same (the components README lists them). First the gates whose miss leads
+// the operator to refuse the object at reconcile, or may
 // (thanosRulerRefusingGate): below thanosRulerMinRemoteWrite remoteWrite
 // itself, and of azureAd a managed identity without a client id and the
-// methods it drops. Then a field the operator passes to Thanos at no version
-// (refuseThanosRulerNeverRead), workloadIdentity first, whose drop may leave
-// an azureAd with no method refused, and last the other gates, of fields it
-// only drops.
+// methods it drops. Then an azureAd authored with no authentication method,
+// which the operator refuses whatever it drops (refuseAzureADWithoutMethod),
+// with the methods that remain at v. Then a field the operator passes to
+// Thanos at no version (refuseThanosRulerNeverRead), workloadIdentity first,
+// whose drop may leave an azureAd with no method refused, and last the other
+// gates, of fields it only drops.
 func refuseThanosRulerAtVersion(spec *monitoringv1.ThanosRulerSpec, v semver.Version, at string) error {
 	var refusing, dropping []versionGate[monitoringv1.ThanosRulerSpec]
 	for _, g := range gatesOf(thanosRulerVersionGates) {
@@ -196,6 +198,9 @@ func refuseThanosRulerAtVersion(spec *monitoringv1.ThanosRulerSpec, v semver.Ver
 		}
 	}
 	if err := refuseVersionGates(spec, v, at, "Thanos", refusing); err != nil {
+		return err
+	}
+	if err := refuseAzureADWithoutMethod(spec.RemoteWrite, thanosRulerAzureADMethodsAt(v)+" (the operator does not pass workloadIdentity to Thanos)"); err != nil {
 		return err
 	}
 	if err := refuseThanosRulerNeverRead(spec); err != nil {
@@ -209,4 +214,19 @@ func refuseThanosRulerAtVersion(spec *monitoringv1.ThanosRulerSpec, v semver.Ver
 // itself, and every gate of an entry's azureAd.
 func thanosRulerRefusingGate(path string) bool {
 	return path == "remoteWrite" || strings.HasPrefix(path, "remoteWrite[].azureAd")
+}
+
+// thanosRulerAzureADMethodsAt names the authentication methods of azureAd the
+// operator passes to Thanos at v, from 0.31.0 on, where the gate of azureAd
+// admits one: a managed identity, needing a client id below 0.40.0, oauth,
+// and sdk from 0.36.0 on (thanosRulerVersionGates).
+func thanosRulerAzureADMethodsAt(v semver.Version) string {
+	managed := "managedIdentity"
+	if v.LT(semver.MustParse("0.40.0")) {
+		managed = "managedIdentity with a clientId"
+	}
+	if v.LT(semver.MustParse("0.36.0")) {
+		return managed + " or oauth"
+	}
+	return managed + ", oauth or sdk"
 }

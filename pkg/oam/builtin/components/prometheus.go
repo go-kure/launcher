@@ -145,7 +145,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 			"One toleration."+core+"Toleration in the Kubernetes API reference."),
 		"topologySpreadConstraints": objects("topologySpreadConstraints: how the pods are spread over topology domains.",
 			"One constraint, and additionalLabelSelectors."+decoded+"TopologySpreadConstraint in its API reference."),
-		"remoteWrite": objects("remoteWrite: the remote write endpoints Prometheus sends its series to. The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
+		"remoteWrite": objects("remoteWrite: the remote write endpoints Prometheus sends its series to. An entry's azureAd must set one authentication method (managedIdentity, oauth, sdk or workloadIdentity): one without is refused at every version of major 2 or 3, as the operator refuses it at reconcile wherever it generates the configuration (not with every monitor selector unset, unless it is run with unmanaged configuration disabled). The deprecated bearerToken of an entry is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential of an entry is the key of a Secret or the path of a file in the container. Launcher does not read a credential written into a header or a URL.",
 			"One endpoint: url, required. An empty action of a writeRelabelConfigs rule is refused, since the API server would replace it with replace."+decoded+"RemoteWriteSpec in its API reference."),
 		"otlp":                object("otlp: the settings of the OTLP receiver, which they turn on. Requires Prometheus v2.55.0 or later, and several of its fields a later one: each is refused below the version the operator writes it from (the components README lists them)." + decoded + "OTLPConfig in its API reference."),
 		"securityContext":     object("securityContext: the pod-level security attributes of the pods. Its windowsOptions.hostProcess is refused under an EnvironmentPolicy that does not allow privileged containers." + core + "PodSecurityContext in the Kubernetes API reference."),
@@ -438,6 +438,31 @@ func validatePrometheus(spec *monitoringv1.PrometheusSpec) error {
 		return err
 	}
 	return validatePrometheusVersion(spec)
+}
+
+// refuseAzureADWithoutMethod refuses a remote write entry's azureAd that
+// sets no authentication method: the operator requires one of
+// managedIdentity, oauth, sdk and workloadIdentity, and refuses the object at
+// reconcile without one, at every version, wherever it generates the remote
+// write configuration (validateRemoteWriteSpec, pkg/prometheus/operator.go:146-149
+// at prometheus-operator v0.94.1), for prometheus and thanosruler alike: for
+// a thanosruler always, for a prometheus not with every monitor selector
+// unset unless it is run with unmanaged configuration disabled
+// (unmanagedPrometheusConfiguration), which the kind cannot see. The CRD
+// states no rule for it. Each kind calls it where the operator reaches its
+// remote write entries, ahead of the version gates (go-kure/launcher#1023):
+// below 2.45.0 the prometheus gate of azureAd says the operator drops it, and
+// the thanosruler texts of the fields it drops say the ruler writes without
+// them, which holds only of an azureAd with a method. set completes "; set
+// ..." with the methods the kind accepts.
+func refuseAzureADWithoutMethod(entries []monitoringv1.RemoteWriteSpec, set string) error {
+	for i, e := range entries {
+		a := e.AzureAD
+		if a != nil && a.ManagedIdentity == nil && a.OAuth == nil && a.SDK == nil && a.WorkloadIdentity == nil {
+			return errors.Errorf("remoteWrite[%d].azureAd: no authentication method: the Prometheus operator requires one of managedIdentity, oauth, sdk and workloadIdentity, and refuses the object at reconcile without one, at every version, wherever it generates the remote write configuration; set %s, or leave azureAd unset", i, set)
+		}
+	}
+	return nil
 }
 
 // refusePrometheusExternalURL refuses a nonempty externalUrl Prometheus exits
