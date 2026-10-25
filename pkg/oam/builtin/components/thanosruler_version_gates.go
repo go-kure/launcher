@@ -1,8 +1,12 @@
 package components
 
 import (
+	"strings"
+
 	"github.com/blang/semver/v4"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // The version gates of the thanosruler kind (go-kure/launcher#976; the class
@@ -16,6 +20,11 @@ import (
 // is judged at the operator's default, prometheusThanosDefaultVersion, which
 // the prometheus kind's sidecar shares (DefaultThanosVersion,
 // pkg/operator/defaults.go).
+
+// thanosRulerMinRemoteWrite is the Thanos version below which the operator
+// refuses a remoteWrite at reconcile (minRemoteWriteVersion,
+// pkg/thanos/operator.go), before it reaches any entry.
+const thanosRulerMinRemoteWrite = "0.24.0"
 
 // The kind's texts of what the operator does with a field below its minimum,
 // completing "at <version> it ...".
@@ -78,10 +87,11 @@ var thanosRulerVersionGates = func() []idGate[monitoringv1.ThanosRulerSpec] {
 		// them: a managed identity without a client id refused, then sdk and
 		// oauth dropped, which leaves the object refused where no method
 		// remains. azureAd itself is written, though ignored, where a managed
-		// identity survives; with only a workloadIdentity, which the operator
-		// drops at every version (go-kure/launcher#1020), the object is
-		// refused.
-		g("remoteWrite", "0.24.0", thanosRulerRefused, func(s *spec) bool { return len(s.RemoteWrite) > 0 }),
+		// identity survives. These gates, of remoteWrite and of azureAd, are
+		// held ahead of every other (refuseThanosRulerAtVersion), and a
+		// workloadIdentity, which the operator drops at every version, after
+		// them and ahead of the others (thanosRulerNeverReadFields).
+		g("remoteWrite", thanosRulerMinRemoteWrite, thanosRulerRefused, func(s *spec) bool { return len(s.RemoteWrite) > 0 }),
 		thanosRulerGate(`remoteWrite[].azureAd.managedIdentity.clientId=""`, "remoteWrite[].azureAd.managedIdentity", "0.40.0",
 			"refuses one without a clientId at reconcile, and the ThanosRuler is not updated", func(s *spec) bool {
 				return anyOf(s.RemoteWrite, func(r *rw) bool {
@@ -104,6 +114,50 @@ var thanosRulerVersionGates = func() []idGate[monitoringv1.ThanosRulerSpec] {
 	}
 }()
 
+// thanosRulerNeverRead is one remote write field the operator passes to
+// Thanos at no version: below is what it does with the field instead,
+// completing "it ...".
+type thanosRulerNeverRead struct {
+	path     string
+	below    string
+	authored func(r *monitoringv1.RemoteWriteSpec) bool
+}
+
+// thanosRulerNeverReadFields are the remote write fields the operator drops
+// at every Thanos version (go-kure/launcher#1020): it logs each as ignored,
+// with minimum version "none", and clears it through one of the entry's
+// pointers (createOrUpdateRulerConfigSecret, pkg/thanos/operator.go). No
+// version gate holds them. A workloadIdentity dropped leaves an azureAd with
+// no other method refused at reconcile, as a dropped oauth or sdk does.
+//
+// TestThanosRulerRemoteWriteTexts_MatchVendoredSource holds the list to the
+// operator's source: every field it logs with minimum version "none" is a
+// row here.
+var thanosRulerNeverReadFields = []thanosRulerNeverRead{
+	{"remoteWrite[].azureAd.workloadIdentity", thanosRulerRemoteWriteNoAuth, func(r *monitoringv1.RemoteWriteSpec) bool {
+		return r.AzureAD != nil && r.AzureAD.WorkloadIdentity != nil
+	}},
+	{"remoteWrite[].azureAd.scope", thanosRulerRemoteWriteDropped, func(r *monitoringv1.RemoteWriteSpec) bool {
+		return r.AzureAD != nil && r.AzureAD.Scope != nil
+	}},
+	// Without a roleArn the API server refuses the object at apply
+	// (thanosRulerRulesLeft), and the operator never reads it.
+	{"remoteWrite[].sigv4.externalId", thanosRulerRemoteWriteDropped, func(r *monitoringv1.RemoteWriteSpec) bool {
+		return r.Sigv4 != nil && r.Sigv4.ExternalID != "" && r.Sigv4.RoleArn != ""
+	}},
+}
+
+// refuseThanosRulerNeverRead refuses the first field of
+// thanosRulerNeverReadFields that an entry of spec's remoteWrite sets.
+func refuseThanosRulerNeverRead(spec *monitoringv1.ThanosRulerSpec) error {
+	for _, f := range thanosRulerNeverReadFields {
+		if anyOf(spec.RemoteWrite, f.authored) {
+			return errors.Errorf("%s: the Prometheus operator does not pass it to Thanos at any version: it %s; leave %s unset", f.path, f.below, f.path)
+		}
+	}
+	return nil
+}
+
 // validateThanosRulerVersion refuses a field of thanosRulerVersionGates that
 // spec authors below its minimum, at version, or the operator's default
 // where it is unset. A version the operator cannot parse is left to it: it
@@ -114,7 +168,45 @@ func validateThanosRulerVersion(spec *monitoringv1.ThanosRulerSpec) error {
 		version, at = *spec.Version, "version "+*spec.Version
 	}
 	if v, err := semver.ParseTolerant(version); err == nil {
-		return refuseVersionGates(spec, v, at, "Thanos", gatesOf(thanosRulerVersionGates))
+		return refuseThanosRulerAtVersion(spec, v, at)
 	}
 	return nil
+}
+
+// refuseThanosRulerAtVersion holds spec to the parsed version v, named by at,
+// refusals ahead of drops, so that no refusal the kind holds is preempted by
+// a text saying the ruler runs or writes without a field. The entries
+// validateRemoteWriteSpec refuses (combined credentials, an azureAd with no
+// method or two, an oauth clientId not a UUID) are not held, and get such a
+// text all the same (the components README lists them). First the gates
+// whose miss leads the operator to refuse the object at reconcile, or may
+// (thanosRulerRefusingGate): below thanosRulerMinRemoteWrite remoteWrite
+// itself, and of azureAd a managed identity without a client id and the
+// methods it drops. Then a field the operator passes to Thanos at no version
+// (refuseThanosRulerNeverRead), workloadIdentity first, whose drop may leave
+// an azureAd with no method refused, and last the other gates, of fields it
+// only drops.
+func refuseThanosRulerAtVersion(spec *monitoringv1.ThanosRulerSpec, v semver.Version, at string) error {
+	var refusing, dropping []versionGate[monitoringv1.ThanosRulerSpec]
+	for _, g := range gatesOf(thanosRulerVersionGates) {
+		if thanosRulerRefusingGate(g.path) {
+			refusing = append(refusing, g)
+		} else {
+			dropping = append(dropping, g)
+		}
+	}
+	if err := refuseVersionGates(spec, v, at, "Thanos", refusing); err != nil {
+		return err
+	}
+	if err := refuseThanosRulerNeverRead(spec); err != nil {
+		return err
+	}
+	return refuseVersionGates(spec, v, at, "Thanos", dropping)
+}
+
+// thanosRulerRefusingGate reports whether the gate of path is one whose miss
+// leads the operator to refuse the object at reconcile, or may: remoteWrite
+// itself, and every gate of an entry's azureAd.
+func thanosRulerRefusingGate(path string) bool {
+	return path == "remoteWrite" || strings.HasPrefix(path, "remoteWrite[].azureAd")
 }

@@ -4,9 +4,11 @@ import (
 	"cmp"
 	"fmt"
 	"go/ast"
+	"go/parser"
 	"go/token"
 	"maps"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -94,19 +96,13 @@ func TestThanosRulerVersionGates_MatchVendoredSource(t *testing.T) {
 		idGateEntriesOf(thanosRulerVersionGates), nil, nil)
 }
 
-// thanosRulerAlwaysDropped are the remote write fields the operator resets at
-// every Thanos version (minimum "none"), which no version gate holds
-// (go-kure/launcher#1020), with the text its reset reads as. The test sees
-// reset calls only: sigv4.externalId, which the operator clears by
-// assignment at every version, is not among them.
-var thanosRulerAlwaysDropped = map[string]string{
-	"remoteWrite[].azureAd.workloadIdentity": thanosRulerRemoteWriteNoAuth,
-	"remoteWrite[].azureAd.scope":            thanosRulerRemoteWriteDropped,
-}
-
 // thanosRulerAzureADMethods are the authentication methods of azureAd, of
 // which validateRemoteWriteSpec (pkg/prometheus/operator.go) requires one.
 var thanosRulerAzureADMethods = []string{"managedIdentity", "oauth", "sdk", "workloadIdentity"}
+
+// thanosRulerIgnoredLog matches the message the operator logs a remote write
+// field it ignores with, naming the field.
+var thanosRulerIgnoredLog = regexp.MustCompile(`^ignoring "([^"]+)" not supported by Thanos$`)
 
 // TestThanosRulerRemoteWriteTexts_MatchVendoredSource holds the text of each
 // remote write field's gate to how the operator resets the field
@@ -116,6 +112,12 @@ var thanosRulerAzureADMethods = []string{"managedIdentity", "oauth", "sdk", "wor
 // its pointers (&rw.AzureAD.OAuth) drops the field. A dropped method of
 // azureAd leaves the object refused where none remains, and azureAd itself,
 // written all the same, is refused where no method survives.
+//
+// A field the operator ignores at every version, with minimum version
+// "none", is held to thanosRulerNeverReadFields instead, in either form the
+// operator writes it: a reset made by resetFieldFn("none"), or the log of a
+// literal field name with minimum version "none" followed by an assignment
+// that clears the field.
 func TestThanosRulerRemoteWriteTexts_MatchVendoredSource(t *testing.T) {
 	src := loadVendoredPromOp(t)
 	const op = "pkg/thanos/operator.go"
@@ -124,10 +126,69 @@ func TestThanosRulerRemoteWriteTexts_MatchVendoredSource(t *testing.T) {
 		t.Fatalf("the excerpt holds no %s", op)
 	}
 	byValue := false
-	want := map[string]string{}
+	want, never := map[string]string{}, map[string]string{}
+	// text is what the operator does with the field at path, cleared through
+	// x: an identifier for a field of the entry itself (rw), nil through one
+	// of its pointers.
+	text := func(path string, x *ast.Ident) string {
+		method := slices.ContainsFunc(thanosRulerAzureADMethods, func(m string) bool { return path == "remoteWrite[].azureAd."+m })
+		switch {
+		case x != nil && x.Name == "rw" && path == "remoteWrite[].azureAd":
+			return thanosRulerRemoteWriteAzureAD
+		case x != nil && x.Name == "rw":
+			return thanosRulerRemoteWriteKept
+		case method:
+			return thanosRulerRemoteWriteNoAuth
+		default:
+			return thanosRulerRemoteWriteDropped
+		}
+	}
+	fieldPath := func(name string) string {
+		return "remoteWrite[]." + strings.Replace(name, "azureAD", "azureAd", 1)
+	}
+	// minimum is the minimum version the reset in scope was made with, by
+	// resetFieldFn: each reset is assigned in the block of its calls, ahead
+	// of them, and the walk is in source order.
+	minimum := ""
 	ast.Inspect(file, func(n ast.Node) bool {
 		if r, ok := n.(*ast.RangeStmt); ok && r.Value != nil && src.text(r.Value) == "rw" {
 			byValue = src.text(r.X) == "tr.Spec.RemoteWrite" && r.Tok == token.DEFINE
+		}
+		if a, ok := n.(*ast.AssignStmt); ok && len(a.Lhs) == 1 && src.text(a.Lhs[0]) == "reset" {
+			fn, isCall := a.Rhs[0].(*ast.CallExpr)
+			var lit *ast.BasicLit
+			if isCall && src.text(fn.Fun) == "resetFieldFn" && len(fn.Args) == 1 {
+				lit, _ = fn.Args[0].(*ast.BasicLit)
+			}
+			v, err := "", error(nil)
+			if lit != nil {
+				v, err = strconv.Unquote(lit.Value)
+			}
+			if lit == nil || err != nil {
+				t.Errorf("%s: reset is not made by resetFieldFn with a literal minimum version", src.fset.Position(a.Pos()))
+			}
+			minimum = v
+			return true
+		}
+		if b, ok := n.(*ast.BlockStmt); ok {
+			for i, s := range b.List {
+				name, logged := thanosRulerIgnoredAtEveryVersion(src, s)
+				if !logged {
+					continue
+				}
+				path := fieldPath(name)
+				var sel *ast.SelectorExpr
+				if i+1 < len(b.List) {
+					sel = thanosRulerClears(src, b.List[i+1], name)
+				}
+				if sel == nil {
+					t.Errorf("%s: %s is logged as ignored at every version, and the next statement does not clear rw.%s", src.fset.Position(s.Pos()), path, name)
+					continue
+				}
+				x, _ := sel.X.(*ast.Ident)
+				never[path] = text(path, x)
+			}
+			return true
 		}
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -152,22 +213,33 @@ func TestThanosRulerRemoteWriteTexts_MatchVendoredSource(t *testing.T) {
 			t.Errorf("%s: reset is not called with a field name and the address of a field", src.fset.Position(call.Pos()))
 			return true
 		}
-		path := "remoteWrite[]." + strings.Replace(name, "azureAD", "azureAd", 1)
-		method := slices.ContainsFunc(thanosRulerAzureADMethods, func(m string) bool { return path == "remoteWrite[].azureAd."+m })
-		switch x, _ := sel.X.(*ast.Ident); {
-		case x != nil && x.Name == "rw" && path == "remoteWrite[].azureAd":
-			want[path] = thanosRulerRemoteWriteAzureAD
-		case x != nil && x.Name == "rw":
-			want[path] = thanosRulerRemoteWriteKept
-		case method:
-			want[path] = thanosRulerRemoteWriteNoAuth
-		default:
-			want[path] = thanosRulerRemoteWriteDropped
+		path := fieldPath(name)
+		x, _ := sel.X.(*ast.Ident)
+		if minimum == "none" {
+			never[path] = text(path, x)
+		} else {
+			want[path] = text(path, x)
 		}
 		return true
 	})
 	if !byValue {
 		t.Fatalf("%s: no loop ranges over tr.Spec.RemoteWrite by value into rw; the texts of the remote write gates rest on that copy", op)
+	}
+	if len(never) == 0 {
+		t.Errorf("%s: no field is ignored at every version; the walk reads neither form", op)
+	}
+	for _, f := range thanosRulerNeverReadFields {
+		w, ok := never[f.path]
+		delete(never, f.path)
+		switch {
+		case !ok:
+			t.Errorf("%s: the operator no longer ignores it at every version", f.path)
+		case f.below != w:
+			t.Errorf("%s: the refusal says the operator %q; its reset says %q", f.path, f.below, w)
+		}
+	}
+	for p := range never {
+		t.Errorf("%s: the operator ignores it at every version, and thanosRulerNeverReadFields does not list it", p)
 	}
 	for _, g := range thanosRulerVersionGates {
 		if g.id != "" || !strings.HasPrefix(g.gate.path, "remoteWrite[].") {
@@ -182,18 +254,202 @@ func TestThanosRulerRemoteWriteTexts_MatchVendoredSource(t *testing.T) {
 			t.Errorf("%s: the gate says the operator %q; its reset says %q", g.gate.path, g.gate.below, w)
 		}
 	}
-	for p, text := range thanosRulerAlwaysDropped {
-		w, ok := want[p]
-		delete(want, p)
-		switch {
-		case !ok:
-			t.Errorf("%s: the operator no longer resets it", p)
-		case w != text:
-			t.Errorf("%s: its reset reads as %q, not %q", p, w, text)
-		}
-	}
 	for p := range want {
 		t.Errorf("%s: the operator resets it, and no gate of the kind holds it", p)
+	}
+}
+
+// thanosRulerClears returns the field s clears, where s assigns its zero
+// value to rw.<name> (the field name case aside): a plain = of "", 0, false
+// or nil. An assignment of anything else, as rw.Sigv4.ExternalID =
+// strings.TrimSpace(rw.Sigv4.ExternalID), keeps the field, and is nil.
+func thanosRulerClears(src *vendoredPromOp, s ast.Stmt, name string) *ast.SelectorExpr {
+	a, ok := s.(*ast.AssignStmt)
+	if !ok || a.Tok != token.ASSIGN || len(a.Lhs) != 1 || len(a.Rhs) != 1 {
+		return nil
+	}
+	sel, ok := a.Lhs[0].(*ast.SelectorExpr)
+	if !ok || !strings.EqualFold(src.text(sel), "rw."+name) {
+		return nil
+	}
+	switch rhs := ast.Unparen(a.Rhs[0]).(type) {
+	case *ast.BasicLit:
+		if rhs.Value == `""` || rhs.Value == "``" || rhs.Value == "0" {
+			return sel
+		}
+	case *ast.Ident:
+		if rhs.Name == "nil" || rhs.Name == "false" {
+			return sel
+		}
+	}
+	return nil
+}
+
+// TestThanosRulerClears holds what the never-read walk reads as clearing a
+// field: the operator's own form, and not an assignment that keeps it.
+func TestThanosRulerClears(t *testing.T) {
+	for stmt, clears := range map[string]bool{
+		`rw.Sigv4.ExternalID = ""`:                                     true,
+		`rw.AzureAD.Scope = nil`:                                       true,
+		`rw.Sigv4.ExternalID = strings.TrimSpace(rw.Sigv4.ExternalID)`: false,
+		`rw.Sigv4.ExternalID = "payments"`:                             false,
+		`rw.Sigv4.ExternalID += ""`:                                    false,
+		`rw.Sigv4.RoleArn = ""`:                                        false,
+		`rw.Sigv4.ExternalID, x = "", 1`:                               false,
+	} {
+		src := &vendoredPromOp{fset: token.NewFileSet()}
+		file, err := parser.ParseFile(src.fset, "s.go", "package p\nfunc f() {\n"+stmt+"\n}\n", 0)
+		if err != nil {
+			t.Fatalf("parse %q: %v", stmt, err)
+		}
+		s := file.Decls[0].(*ast.FuncDecl).Body.List[0]
+		if got := thanosRulerClears(src, s, "sigv4.externalId") != nil || thanosRulerClears(src, s, "azureAD.scope") != nil; got != clears {
+			t.Errorf("%s: clears = %v, want %v", stmt, got, clears)
+		}
+	}
+}
+
+// thanosRulerIgnoredAtEveryVersion reports the field name s logs as ignored
+// with minimum version "none", where s is a call of a method of the
+// operator's logger with a literal message and those literal arguments.
+func thanosRulerIgnoredAtEveryVersion(src *vendoredPromOp, s ast.Stmt) (string, bool) {
+	e, ok := s.(*ast.ExprStmt)
+	if !ok {
+		return "", false
+	}
+	call, ok := e.X.(*ast.CallExpr)
+	if !ok || !strings.HasPrefix(src.text(call.Fun), "o.logger.") || len(call.Args) == 0 {
+		return "", false
+	}
+	lits := make([]string, len(call.Args))
+	for i, a := range call.Args {
+		if lit, isLit := a.(*ast.BasicLit); isLit && lit.Kind == token.STRING {
+			lits[i], _ = strconv.Unquote(lit.Value)
+		}
+	}
+	m := thanosRulerIgnoredLog.FindStringSubmatch(lits[0])
+	if m == nil {
+		return "", false
+	}
+	for i := 1; i+1 < len(lits); i++ {
+		if lits[i] == "minimum_version" && lits[i+1] == "none" {
+			return m[1], true
+		}
+	}
+	return "", false
+}
+
+// thanosRulerNeverReadFixtures author each field of
+// thanosRulerNeverReadFields in a remote write entry the version gates admit
+// at v0.31.0 and later.
+func thanosRulerNeverReadFixtures() map[string]map[string]any {
+	type m = map[string]any
+	rw := func(extra m) m {
+		e := m{"url": "https://metrics.example.com/api/v1/write"}
+		maps.Copy(e, extra)
+		return m{"remoteWrite": []any{e}}
+	}
+	managed := m{"clientId": "00000000-0000-0000-0000-000000000000"}
+	return map[string]map[string]any{
+		"remoteWrite[].azureAd.workloadIdentity": rw(m{"azureAd": m{"cloud": "AzurePublic", "workloadIdentity": m{
+			"clientId": "00000000-0000-0000-0000-000000000000", "tenantId": "00000000-0000-0000-0000-000000000001",
+		}}}),
+		"remoteWrite[].azureAd.scope": rw(m{"azureAd": m{"managedIdentity": managed, "scope": "https://monitor.azure.com/.default"}}),
+		"remoteWrite[].sigv4.externalId": rw(m{"sigv4": m{
+			"region": "eu-west-1", "roleArn": "arn:aws:iam::123456789012:role/metrics", "externalId": "payments",
+		}}),
+	}
+}
+
+// TestThanosRulerNeverRead_Refused: each field of thanosRulerNeverReadFields
+// is refused at every version from v0.31.0 on, where the gates admit its
+// fixture, the default included, naming the path and its own text of what the
+// operator does; below thanosRulerMinRemoteWrite the gate of remoteWrite is
+// refused instead, as the operator refuses the entries before it reads them,
+// and a version the operator cannot parse is left to it. Beside an entry the
+// operator refuses for a managed identity without a client id, that gate is
+// refused instead, as the ruler writes nothing there; beside a field the
+// operator drops (enableFeatures below v0.39.0), it is refused itself, as a
+// workloadIdentity whose drop leaves no method gets the object refused, where
+// the ruler would not run without the flag. The entry without it
+// builds, and so does an externalId without a roleArn, which the API server
+// refuses (thanosRulerRulesLeft).
+func TestThanosRulerNeverRead_Refused(t *testing.T) {
+	fixtures := thanosRulerNeverReadFixtures()
+	unset := map[string]func(entry map[string]any){
+		"remoteWrite[].azureAd.workloadIdentity": func(e map[string]any) {
+			e["azureAd"] = map[string]any{"managedIdentity": map[string]any{"clientId": "00000000-0000-0000-0000-000000000000"}}
+		},
+		"remoteWrite[].azureAd.scope":    func(e map[string]any) { delete(e["azureAd"].(map[string]any), "scope") },
+		"remoteWrite[].sigv4.externalId": func(e map[string]any) { delete(e["sigv4"].(map[string]any), "externalId") },
+	}
+	for _, f := range thanosRulerNeverReadFields {
+		props, ok := fixtures[f.path]
+		delete(fixtures, f.path)
+		t.Run(f.path, func(t *testing.T) {
+			if !ok || unset[f.path] == nil {
+				t.Fatalf("no fixture authors %s", f.path)
+			}
+			want := fmt.Sprintf("%s: the Prometheus operator does not pass it to Thanos at any version: it %s; leave %s unset", f.path, f.below, f.path)
+			for _, version := range []string{"", "v0.31.0", "v0.42.4", "v1.0.0"} {
+				if err := trBuild(props, version); err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("at %q: err = %v, want one mentioning %q", version, err, want)
+				}
+			}
+			if err := trBuild(props, "v0.23.0"); err == nil || !strings.HasPrefix(err.Error(), "remoteWrite: read by the Prometheus operator only for Thanos 0.24.0 and later") {
+				t.Errorf("at v0.23.0: err = %v, want the gate of remoteWrite", err)
+			}
+			if err := trBuild(props, "main"); err != nil {
+				t.Errorf("at an unparsable version: err = %v, want it left to the operator", err)
+			}
+			beside := map[string]any{"remoteWrite": append(slices.Clone(props["remoteWrite"].([]any)), map[string]any{
+				"url": "https://metrics.example.com/api/v1/write", "azureAd": map[string]any{"managedIdentity": map[string]any{}},
+			})}
+			if err := trBuild(beside, "v0.39.0"); err == nil || !strings.HasPrefix(err.Error(), "remoteWrite[].azureAd.managedIdentity: read by the Prometheus operator only for Thanos 0.40.0 and later") {
+				t.Errorf("beside a managed identity without a client id at v0.39.0: err = %v, want its gate", err)
+			}
+			flagged := maps.Clone(props)
+			flagged["enableFeatures"] = []any{"promql-experimental-functions"}
+			if err := trBuild(flagged, "v0.38.0"); err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("with enableFeatures, dropped at v0.38.0: err = %v, want one mentioning %q", err, want)
+			}
+			entry := maps.Clone(props["remoteWrite"].([]any)[0].(map[string]any))
+			for k, v := range entry {
+				if inner, isMap := v.(map[string]any); isMap {
+					entry[k] = maps.Clone(inner)
+				}
+			}
+			unset[f.path](entry)
+			if err := trBuild(map[string]any{"remoteWrite": []any{entry}}, ""); err != nil {
+				t.Errorf("without it: err = %v, want it built", err)
+			}
+		})
+	}
+	for p := range fixtures {
+		t.Errorf("a fixture authors %s, which thanosRulerNeverReadFields does not list", p)
+	}
+	noRole := map[string]any{"remoteWrite": []any{map[string]any{
+		"url": "https://metrics.example.com/api/v1/write", "sigv4": map[string]any{"region": "eu-west-1", "externalId": "payments"},
+	}}}
+	if err := trBuild(noRole, ""); err != nil {
+		t.Errorf("an externalId without a roleArn: err = %v, want it left to the API server", err)
+	}
+	// A workloadIdentity on one entry is refused ahead of a scope on an
+	// earlier one: the operator drops both, then refuses the object for the
+	// azureAd left with no method, so the ruler does not write without scope.
+	scopeThenWorkload := map[string]any{"remoteWrite": []any{
+		map[string]any{"url": "https://metrics.example.com/api/v1/write", "azureAd": map[string]any{
+			"cloud": "AzurePublic", "scope": "https://monitor.azure.com/.default",
+			"managedIdentity": map[string]any{"clientId": "00000000-0000-0000-0000-000000000000"},
+		}},
+		map[string]any{"url": "https://metrics.example.com/api/v1/write", "azureAd": map[string]any{
+			"cloud": "AzurePublic", "workloadIdentity": map[string]any{
+				"clientId": "00000000-0000-0000-0000-000000000000", "tenantId": "00000000-0000-0000-0000-000000000000",
+			},
+		}},
+	}}
+	if err := trBuild(scopeThenWorkload, ""); err == nil || !strings.HasPrefix(err.Error(), "remoteWrite[].azureAd.workloadIdentity: ") {
+		t.Errorf("a scope ahead of a workloadIdentity-only azureAd: err = %v, want the workloadIdentity refused", err)
 	}
 }
 

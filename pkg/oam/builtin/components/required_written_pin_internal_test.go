@@ -111,6 +111,7 @@ var requiredWrittenUnauthorable = map[string]string{
 	"cnpg-pooler template.spec.ephemeralContainers":                          "ephemeral containers cannot be declared on a pod template",
 	"externalsecret data[].sourceRef.generatorRef":                           "the object always carries a storeRef there, and the API takes exactly one",
 	"clusterexternalsecret externalSecretSpec.data[].sourceRef.generatorRef": "the object always carries a storeRef there, and the API takes exactly one",
+	"thanosruler remoteWrite[].azureAd.workloadIdentity":                     "the operator passes it to Thanos at no version, and the kind refuses it at every version it can parse",
 }
 
 // requiredWrittenDecodeRefused are the fields whose omission the kind refuses

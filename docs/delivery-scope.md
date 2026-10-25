@@ -1848,10 +1848,16 @@ and by scope, whatever component or trait emits it.
     first rule ConfigMap volume is not a DNS-1123 label (no dot, at most 38 characters)
     are each refused. So is a field the operator reads only from some Thanos version on,
     where `version` is below it, or the operator's default v0.42.4 where it is unset
-    (go-kure/launcher#976); `web-config` stays reserved whatever `version` names. Left to
+    (go-kure/launcher#976); `web-config` stays reserved whatever `version` names. At
+    every `version` the operator can parse, an entry's `azureAd.workloadIdentity`,
+    `azureAd.scope` and a `sigv4.externalId` with a `roleArn`, which it passes to Thanos
+    at no version, are refused (go-kure/launcher#1020), unless a gate of `remoteWrite` or
+    of `azureAd` is refused first. Left to
     the operator, which fails the reconcile on each: neither
     `queryConfig` nor `queryEndpoints`, a `version` it cannot parse, an argument naming a
-    flag it generates, and a web TLS configuration its validation refuses.
+    flag it generates, a web TLS configuration its validation refuses, and a remote write
+    entry its validation refuses for combining credentials, for an `azureAd` with no
+    method or two, or for an `oauth` `clientId` that is not a UUID.
   - **Credentials: one is held, the rest are stated.** A literal `remoteWrite[].bearerToken`
     (deprecated upstream) is refused under a policy that forbids explicit secrets. A
     credential under a name that does not say so (a `remoteWrite[].headers` value, the
