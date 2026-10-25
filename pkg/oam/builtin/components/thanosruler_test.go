@@ -277,7 +277,11 @@ func thanosRulerRefusals(notA string) []struct {
 		{"a patched port of portName's name at another number", map[string]any{"portName": "metrics", "serviceName": "rules",
 			"containers": []any{map[string]any{"name": "thanos-ruler", "ports": []any{map[string]any{"name": "metrics", "containerPort": 9000}}}}},
 			`containers[0] "thanos-ruler": ports[0] "metrics" at 9000/TCP: the Prometheus operator merges the patch's ports into the container's by number, which leaves another port of that name, the Prometheus operator's port at 10902/TCP`},
-		{"a serviceName that is not a DNS-1035 label", map[string]any{"serviceName": "1rules"}, "serviceName:"},
+		// The package's Service-name rule, a DNS-1123 label
+		// (go-kure/launcher#959); a leading digit is admitted
+		// (TestThanosRuler_OperatorRunsIt).
+		{"a serviceName that is not a DNS-1123 label", map[string]any{"serviceName": "rules.v1"},
+			`serviceName: "rules.v1" is not a valid Service name, which must be a DNS-1123 label`},
 		// The operator copies the count into the StatefulSet (statefulset.go:507).
 		{"negative replicas", map[string]any{"replicas": -1},
 			"replicas: -1 is below 0: the Prometheus operator copies it into the StatefulSet, which the API refuses with fewer than 0; write 0 or more"},
@@ -1002,6 +1006,9 @@ func TestThanosRuler_OperatorRunsIt(t *testing.T) {
 		"a port name of 15 characters": {"portName": "thanosrulerwebx"},
 		"the gRPC port name nowhere":   {"portName": "grpc", "listenLocal": true, "serviceName": "rules"},
 		"an invalid port name nowhere": {"portName": "thanos-ruler-web", "listenLocal": true, "serviceName": "rules"},
+		// A DNS-1123 label, the package's Service-name rule
+		// (go-kure/launcher#959).
+		"a serviceName starting with a digit": {"serviceName": "1rules"},
 		// The operator writes portName into no probe, so a patch that names
 		// the web port otherwise leaves it out of the pods, and one that
 		// renames the gRPC port frees that name.

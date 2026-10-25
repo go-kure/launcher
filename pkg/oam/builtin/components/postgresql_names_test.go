@@ -57,6 +57,49 @@ func TestPostgresqlRule_AuthoredObjectNames(t *testing.T) {
 	}
 }
 
+// A poolerName starting with a digit is a DNS-1123 label, so a valid name for
+// the Pooler and for the Service CloudNativePG names after it, by default from Kubernetes
+// 1.36 (go-kure/launcher#959). The Cluster's own rule stays a DNS-1035 label.
+func TestPostgresqlRule_PoolerNameStartingWithADigit(t *testing.T) {
+	comp := &oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{
+		"pooler":     map[string]any{"enabled": true},
+		"poolerName": "1edge",
+	}}
+	res := lowerPostgresql(t, comp, nil)
+	if got, want := memberNames(res), []string{"cnpg-cluster/db", "cnpg-pooler/1edge"}; !slices.Equal(got, want) {
+		t.Fatalf("emitted %v, want %v", got, want)
+	}
+	eps, err := components.PostgresqlRule{}.Endpoints(comp)
+	if err != nil || len(eps) != 2 {
+		t.Fatalf("Endpoints = %v, %v; want two", eps, err)
+	}
+	if got := eps[1].PodSelector.MatchLabels["cnpg.io/poolerName"]; got != "1edge" {
+		t.Errorf("the pooler endpoint selects cnpg.io/poolerName=%q, want 1edge", got)
+	}
+
+	// The default derived from a component name starting with a digit, where
+	// the Cluster is named apart: the Cluster's rule no longer bounds the
+	// component name, and the Pooler's admits the default.
+	comp = &oam.Component{Name: "1db", Type: "postgresql", Properties: map[string]any{
+		"pooler":            map[string]any{"enabled": true},
+		"clusterObjectName": "db",
+	}}
+	res = lowerPostgresql(t, comp, nil)
+	if got, want := memberNames(res), []string{"cnpg-cluster/1db", "cnpg-pooler/1db-pooler"}; !slices.Equal(got, want) {
+		t.Fatalf("component 1db: emitted %v, want %v", got, want)
+	}
+	if got := res.Components[0].ObjectName(); got != "db" {
+		t.Errorf("component 1db: the Cluster is named %q, want db", got)
+	}
+	eps, err = components.PostgresqlRule{}.Endpoints(comp)
+	if err != nil || len(eps) != 2 {
+		t.Fatalf("component 1db: Endpoints = %v, %v; want two", eps, err)
+	}
+	if got := eps[1].PodSelector.MatchLabels["cnpg.io/poolerName"]; got != "1db-pooler" {
+		t.Errorf("component 1db: the pooler endpoint selects cnpg.io/poolerName=%q, want 1db-pooler", got)
+	}
+}
+
 // A database whose name cannot be part of an object name ("app_data") has no
 // default object name. An authored `objectName` names its Database all the
 // same; without one it is refused, and an invalid one is refused without
@@ -175,12 +218,12 @@ func TestPostgresqlRule_RefusesAuthoredObjectNames(t *testing.T) {
 		{
 			"a dotted poolerName",
 			map[string]any{"pooler": pooler, "poolerName": "edge.v2"},
-			`pooler: poolerName "edge.v2" cannot be the name for role "pooler": not a valid DNS-1035 label: `,
+			`pooler: poolerName "edge.v2" cannot be the name for role "pooler": not a valid DNS-1123 label: `,
 		},
 		{
 			"a poolerName over 63 characters",
 			map[string]any{"pooler": pooler, "poolerName": strings.Repeat("a", 64)},
-			`cannot be the name for role "pooler": not a valid DNS-1035 label: must be no more than 63`,
+			`cannot be the name for role "pooler": not a valid DNS-1123 label: must be no more than 63`,
 		},
 		{
 			"an empty poolerName",

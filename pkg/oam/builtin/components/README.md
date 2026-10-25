@@ -4177,12 +4177,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   into one an earlier port added. Two `volumes` of one name are refused,
   as the API refuses the pods (`volumes[1] "scratch": the name is listed
   already at volumes[0], …`), and so is a `serviceName` that is not a
-  DNS-1035 label (a leading digit included), the rule of every Service name
-  in this package: the API refuses a Service of another name before
-  Kubernetes 1.36 (by default), and the operator fails the reconcile where
-  it finds no governing Service of the name (`serviceName: "1alerts" is not
-  a valid Service name, which must be a DNS-1035 label: …`). Kubernetes 1.36
-  and later admit such a name (go-kure/launcher#959). `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
+  DNS-1123 label, the rule of every Service name in this package: the API
+  refuses a Service of another name, and the operator fails the reconcile
+  where it finds no governing Service of the name (`serviceName:
+  "alerts.v1" is not a valid Service name, which must be a DNS-1123 label:
+  …`). A name starting with a digit (`1alerts`) is accepted; the cluster
+  needs RelaxedServiceNameValidation for it, the default from Kubernetes
+  1.36 (go-kure/launcher#959). `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
   `clusterPeerTimeout` are refused where they parse as a duration of 0 or
   less (`retention: "0s" is not a positive duration: …`): the operator
   empties such a value before it builds the StatefulSet and runs the pods as
@@ -4493,7 +4494,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     ports the operator gives them (`grpc` at 10901/TCP, the web port at
     10902/TCP and `reloader-web` at 8080/TCP, the last two unless
     `listenLocal` is set), and a port name that leaves two of one name is
-    refused, as on `alertmanager`. A `serviceName` must be a DNS-1035 label.
+    refused, as on `alertmanager`. A `serviceName` must be a DNS-1123 label,
+    the package's Service-name rule; a leading digit needs
+    RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36
+    (go-kure/launcher#959, `docs/delivery-scope.md` §3.5).
   - a negative `replicas`: the operator copies the count into the
     StatefulSet as written (:507), which the API refuses.
   - the storage rules of `alertmanager` (:92-133, :441-450): a claim of the
@@ -4731,7 +4735,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   "prometheus": ports[0] "web" at 8080/TCP: the Prometheus operator merges
   the patch's ports into the container's by number, which leaves another port
   of that name, the Prometheus operator's port at 9090/TCP, …`), and so are
-  two `volumes` of one name and a `serviceName` that is not a DNS-1035 label.
+  two `volumes` of one name and a `serviceName` that is not a DNS-1123 label (a
+  leading digit needs RelaxedServiceNameValidation on the cluster, the default
+  from Kubernetes 1.36; go-kure/launcher#959, `docs/delivery-scope.md` §3.5).
   A nonempty `externalUrl` that Prometheus exits on at
   startup is refused too, though the operator and the API accept it: the
   operator passes it unchanged as `--web.external-url`
@@ -5046,13 +5052,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     to it: the engine only lowers a named component.
   - **A `webservice` component name must be a valid Service name.** It always
     emits a Service named after the component, and the API server validates
-    a Service's `metadata.name` as a DNS-1035 label: at most 63 characters,
-    lowercase letters, digits and `-`, starting with a letter and ending with
-    a letter or digit. That is stricter than the DNS-1123 subdomain every
-    component name already passes, so `api.v1`, a 64-character name and
-    `1api` are refused at conversion (`name: "1api" is not a valid Service
-    name, which must be a DNS-1035 label`) instead of building a manifest the
-    cluster rejects on apply (go-kure/launcher#546). `Generate` applies the
+    a Service's `metadata.name` as a DNS-1123 label: at most 63 characters,
+    lowercase letters, digits and `-`, starting and ending with a letter or
+    digit. That is stricter than the DNS-1123 subdomain every component name
+    already passes, so `api.v1` and a 64-character name are refused at
+    conversion (`name: "api.v1" is not a valid Service name, which must be a
+    DNS-1123 label`) instead of building a manifest the cluster rejects on
+    apply (go-kure/launcher#546). A leading digit (`1api`) is accepted: that
+    is the rule under RelaxedServiceNameValidation, the default from Kubernetes 1.36, and a cluster with that gate off refuses such a
+    Service (go-kure/launcher#959, `docs/delivery-scope.md` §3.5). `Generate` applies the
     same rule to the Application name it is handed. `worker` emits no Service
     and keeps accepting such a name, within the container-name rule above.
     The rule holds for the component name whatever the Service is named:
@@ -5063,9 +5071,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     own: the Deployment, the Service (`webservice` only; `worker` generates
     none and does not declare the property) and the ServiceAccount. A name is
     used as written, never shortened. The Deployment's and the ServiceAccount's
-    are DNS-1123 subdomains, the Service's a DNS-1035 label; anything else is
+    are DNS-1123 subdomains, the Service's a DNS-1123 label; anything else is
     refused (`naming the Service: serviceObjectName "web.v1" cannot be the name
-    for role "workload-service": not a valid DNS-1035 label: …`). Without the
+    for role "workload-service": not a valid DNS-1123 label: …`). Without the
     property the `Naming` hook is asked (roles `workload-deployment`,
     `workload-service`, `workload-serviceaccount`), and without an answer the
     object keeps the component name, so a document that sets none builds
@@ -5215,14 +5223,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     TCP port to translate, no allow is synthesized. Without `clusterIP` the
     Service carries no `clusterIP`, as before.
   - **The component name must be a valid Service name.** It becomes the
-    Service's `metadata.name`, which the API server validates as a DNS-1035
+    Service's `metadata.name`, which the API server validates as a DNS-1123
     label: at most 63 characters, lowercase letters, digits and `-`, starting
-    with a letter and ending with a letter or digit. That is stricter than the
-    DNS-1123 subdomain every component name already passes, so `api.v1`, a
-    64-character name and `1api` are refused here (`name: "api.v1" is not a
-    valid Service name, which must be a DNS-1035 label`) instead of building a
-    manifest the cluster rejects on apply. `Generate` applies the same rule to
-    the Application name it is handed.
+    and ending with a letter or digit. That is stricter than the DNS-1123
+    subdomain every component name already passes, so `api.v1` and a
+    64-character name are refused here (`name: "api.v1" is not a valid Service
+    name, which must be a DNS-1123 label`) instead of building a manifest the
+    cluster rejects on apply. `Generate` applies the same rule to the
+    Application name it is handed. A leading digit (`1api`) is accepted: that
+    is the rule under RelaxedServiceNameValidation, the default from Kubernetes 1.36, and a cluster with that gate off refuses such a
+    Service, and an Ingress whose backend names it (go-kure/launcher#959,
+    `docs/delivery-scope.md` §3.5).
   - **Routing traits use the first port.** `ingress`, `httproute` and `expose`
     (which lowers to one of the two) on a `service` component resolve their
     implicit backend to `ports[0].port` and refuse any other port on it,
@@ -8254,12 +8265,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     not emit.** Author it as a headless `service` component (`clusterIP:
     None`, selecting `app: <component>`) and name it here. It has no default:
     unset, the StatefulSet carries `serviceName: ""`. An authored value must be
-    a valid Service name, a DNS-1035 label (at most 63 characters, lowercase
-    letters, digits and `-`, starting with a letter and ending with a letter
-    or digit), and is refused at conversion otherwise (`serviceName: "api.v1"
-    is not a valid Service name, which must be a DNS-1035 label`,
-    go-kure/launcher#546); `Generate` applies the same rule to the config's
-    `ServiceName`. Before go-kure/launcher#690 `serviceName` defaulted to the
+    a valid Service name, a DNS-1123 label (at most 63 characters, lowercase
+    letters, digits and `-`, starting and ending with a letter or digit), and
+    is refused at conversion otherwise (`serviceName: "api.v1" is not a valid
+    Service name, which must be a DNS-1123 label`, go-kure/launcher#546);
+    `Generate` applies the same rule to the config's `ServiceName`. A leading
+    digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36 (go-kure/launcher#959,
+    `docs/delivery-scope.md` §3.5). Before go-kure/launcher#690 `serviceName` defaulted to the
     component name and the component emitted that headless Service itself;
     "Main container ports" has the migration, including why an existing
     StatefulSet must be recreated.
@@ -10197,7 +10209,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`postgresql name "db.main": must be a DNS-1035 label of at most 50
   characters …`). The cap also keeps both endpoint selector values, the
   name and the pooler's default `<name>-pooler`, within the 63-character label-value
-  limit (a `poolerName` or a hook-given name is held to it as a DNS-1035
+  limit (a `poolerName` or a hook-given name is held to it as a DNS-1123
   label, and so is the default where the Cluster is named apart and the
   component name is not bounded by the Cluster's rule). **Behavior-changing** under `launcher.gokure.dev/v1alpha1`:
   such a name used to build and was then refused by CloudNativePG at apply,
@@ -10431,8 +10443,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   resolved in the order of every name role (see "Name roles and the `Naming`
   hook" in `pkg/oam/README.md`): the author's property, else the consumer's
   `Naming` hook, else the default. `poolerName` names the Pooler (role
-  `pooler`, default `<name>-pooler`) and must be a DNS-1035 label, since
-  CloudNativePG names the pooler's Service after it; it is refused when
+  `pooler`, default `<name>-pooler`) and must be a DNS-1123 label, since
+  CloudNativePG names the pooler's Service after it (a leading digit needs
+  RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36, `docs/delivery-scope.md` §3.5); it is refused when
   `pooler.enabled` is not true. `databases[].objectName` names that entry's
   Database object (role `database`, default `<name>-<db>`) and must be a
   DNS-1123 subdomain; the entry's `name` stays the database created in
@@ -10476,7 +10489,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   apart the component name is no longer bounded by the Cluster's rule, so
   the Pooler's default is held to the Pooler's own, by the lowering and where
   endpoints are collected alike, and the refusal says what settles it
-  (`pooler: cnpg-pooler name "db.main-pooler": must be a DNS-1035 label of
+  (`pooler: cnpg-pooler name "db.main-pooler": must be a DNS-1123 label of
   at most 63 characters (CloudNativePG names the pooler's Service after it);
   the default derives from the component name: set poolerName to name the
   Pooler otherwise`). A Pooler cannot carry its Cluster's name, and with the
@@ -10792,8 +10805,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   match expressions").
   `cnpg-pooler` writes no type or instance count of its own, so the operator's
   defaults (`rw`, `1`) apply. Its component name is the Pooler's name and its
-  Service's, so it must be a DNS-1035 label of at most 63 characters, and a
-  pooler named like its cluster is refused, as CloudNativePG's webhook does:
+  Service's, so it must be a DNS-1123 label of at most 63 characters (a
+  leading digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36; CloudNativePG's Pooler
+  webhook checks no name syntax, go-kure/launcher#959,
+  `docs/delivery-scope.md` §3.5), and a pooler named like its cluster is refused, as CloudNativePG's webhook does:
   by the build, and where its endpoint is collected in the same words
   (`cluster.name "main": a pooler cannot have the same name as its cluster`).
   `ApplyPolicy` applies the workload kinds' pod gates to `template.spec` (host
@@ -11706,7 +11721,7 @@ reads it, and hands `ToApplicationConfig` the resolved name as `Component.Object
 handler's config carries it as `ObjectName`, empty when it is the component's name, and
 `Generate` names the object with it. Everything else the handler writes keeps the component
 name: the `app` label and selectors, the pod template's labels, the main container's name.
-A handler's own check of the name (a Service's DNS-1035 label, a CloudNativePG Cluster's
+A handler's own check of the name (a Service's DNS-1123 label, a CloudNativePG Cluster's
 length, a CronJob's 52 characters, a Job's 63 and the room an Indexed job's last index
 needs) runs on the object name, since that is what the object carries.
 

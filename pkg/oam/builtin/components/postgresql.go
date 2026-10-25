@@ -271,7 +271,7 @@ func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 		"backup":            openObj("Barman object-store backup settings (retentionPolicy, destinationPath, endpointURL, secretName)."),
 		"monitoring":        openObj("Monitoring settings, including the PodMonitor toggle and custom queries."),
 		"pooler":            openObj("PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters, image). image is the PgBouncer image, by tag or digest; when omitted the operator chooses it, which a policy registry allowlist refuses."),
-		"poolerName":        {Type: oam.PropertyTypeString, Description: "Name of the generated Pooler, a DNS-1035 label used as written (default: the component name followed by -pooler). Only with pooler.enabled: true."},
+		"poolerName":        {Type: oam.PropertyTypeString, Description: "Name of the generated Pooler, used as written (default: the component name followed by -pooler); a DNS-1123 label, since CloudNativePG names the Pooler's Service after it (one starting with a digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36). Only with pooler.enabled: true."},
 		"bootstrap":         openObj("Cluster bootstrap source (recovery or pg_basebackup)."),
 		"replication":       openObj("Synchronous replication settings (method, number, dataDurability)."),
 		"postgresql":        openObj("PostgreSQL server settings, including the parameters map."),

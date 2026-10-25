@@ -214,9 +214,9 @@ func TestServiceHandler_Rejects(t *testing.T) {
 }
 
 // The component name becomes the Service's name, and the API server validates a Service name as a
-// DNS-1035 label: stricter than the DNS-1123 subdomain every component name already passes. A name
-// that is a valid subdomain but not a valid Service name is refused here, on both entry points, rather
-// than emitted as a Service the cluster rejects on apply.
+// DNS-1123 label (by default from Kubernetes 1.36, go-kure/launcher#959): stricter than the DNS-1123 subdomain
+// every component name already passes. A name that is a valid subdomain but not a valid Service name
+// is refused here, on both entry points, rather than emitted as a Service the cluster rejects on apply.
 func TestServiceHandler_RejectsInvalidServiceName(t *testing.T) {
 	props := func() map[string]any { return map[string]any{"ports": []any{map[string]any{"port": 80}}} }
 	tests := []struct {
@@ -225,7 +225,6 @@ func TestServiceHandler_RejectsInvalidServiceName(t *testing.T) {
 	}{
 		{"dot", "api.v1"},
 		{"longer than 63 characters", strings.Repeat("a", 64)},
-		{"leading digit", "1api"},
 	}
 	h := &components.ServiceHandler{}
 	for _, tt := range tests {
@@ -233,8 +232,8 @@ func TestServiceHandler_RejectsInvalidServiceName(t *testing.T) {
 			comp := &oam.Component{Name: tt.component, Type: "service", Properties: props()}
 			want := "is not a valid Service name"
 			if _, err := h.ToApplicationConfig(comp, "default"); err == nil || !strings.Contains(err.Error(), want) ||
-				!strings.Contains(err.Error(), "DNS-1035 label") {
-				t.Errorf("ToApplicationConfig(%q) error = %v, want one containing %q and the DNS-1035 rule", tt.component, err, want)
+				!strings.Contains(err.Error(), "DNS-1123 label") {
+				t.Errorf("ToApplicationConfig(%q) error = %v, want one containing %q and the DNS-1123 label rule", tt.component, err, want)
 			}
 			if _, err := h.Endpoints(comp); err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("Endpoints(%q) error = %v, want one containing %q", tt.component, err, want)
@@ -243,14 +242,21 @@ func TestServiceHandler_RejectsInvalidServiceName(t *testing.T) {
 	}
 }
 
-// A name at the DNS-1035 limit still builds: the check is the Service-name rule, not a tighter one.
-func TestServiceHandler_AcceptsLongestValidServiceName(t *testing.T) {
-	name := "a" + strings.Repeat("b-", 30) + "cd" // 63 characters
-	if len(name) != 63 {
-		t.Fatalf("test name is %d characters, want 63", len(name))
+// A name at the 63-character limit, and one starting with a digit (no DNS-1035 label, a Service name by default
+// from Kubernetes 1.36), still build: the check is the Service-name rule, not a tighter one.
+func TestServiceHandler_AcceptsValidServiceNames(t *testing.T) {
+	longest := "a" + strings.Repeat("b-", 30) + "cd" // 63 characters
+	if len(longest) != 63 {
+		t.Fatalf("test name is %d characters, want 63", len(longest))
 	}
-	if svc := generateService(t, name, map[string]any{"ports": []any{map[string]any{"port": 80}}}); svc.Name != name {
-		t.Errorf("Service name = %q, want %q", svc.Name, name)
+	for _, name := range []string{longest, "1api"} {
+		if svc := generateService(t, name, map[string]any{"ports": []any{map[string]any{"port": 80}}}); svc.Name != name {
+			t.Errorf("Service name = %q, want %q", svc.Name, name)
+		}
+		comp := &oam.Component{Name: name, Type: "service", Properties: map[string]any{"ports": []any{map[string]any{"port": 80}}}}
+		if _, err := (&components.ServiceHandler{}).Endpoints(comp); err != nil {
+			t.Errorf("Endpoints(%q): %v", name, err)
+		}
 	}
 }
 

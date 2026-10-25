@@ -191,7 +191,7 @@ Decided in the ticket:
 
 ---
 
-## 3. Naming and overrides (go-kure/launcher#785, go-kure/launcher#787, go-kure/launcher#788, go-kure/launcher#792, go-kure/launcher#793)
+## 3. Naming and overrides (go-kure/launcher#785, go-kure/launcher#787, go-kure/launcher#788, go-kure/launcher#792, go-kure/launcher#793, go-kure/launcher#959)
 
 ### 3.1 Current behaviour
 
@@ -272,8 +272,9 @@ Decided in the ticket:
     object of a kind component it emits under its component's name
     (`pkg/oam/naming_lowering.go`).
   - An override from the hook is held to the rule for an authored name: never shortened,
-    a DNS-1123 subdomain (a DNS-1035 label for the Pooler, for the Service of a
-    `webservice` and, of at most 50 characters, for the Cluster of a `postgresql`), refused when invalid or too long. Only launcher's own defaults go through the shortening rule (§3.3).
+    a DNS-1123 subdomain (a DNS-1123 label for the Pooler and for the Service of a
+    `webservice`, §3.5; a DNS-1035 label of at most 50 characters for the Cluster of a
+    `postgresql`), refused when invalid or too long. Only launcher's own defaults go through the shortening rule (§3.3).
   - A lowering rule's request carries the name of the document the rule is lowering,
     which a later document rule may still change. The hook is asked only inside
     `Transform`: `LowerRaws` and a rule driven directly keep the defaults.
@@ -562,6 +563,36 @@ Decided in the ticket:
     and reports an empty component. So does the external-backend NetworkPolicy.
   - Not covered: pods an operator creates from a custom resource whose pod metadata the
     custom resource does not hold.
+
+### 3.5 Shipped (go-kure/launcher#959): Service names and the cluster version
+
+Every name launcher checks because it becomes a Service's name is held to one rule, a
+DNS-1123 label: at most 63 characters, lowercase letters, digits and `-`, starting and
+ending with a letter or digit. A leading digit (`1api`) is accepted.
+
+- **Where.** The name of a `service` component, or its `objectName`
+  (`validateServiceName`, `pkg/oam/builtin/components/service.go`); a `webservice`
+  component name and its `serviceObjectName` (role `workload-service`); a `statefulset`'s
+  `serviceName`; the `serviceName` of an `alertmanager`, a `prometheus` or a `thanosruler`
+  (`pkg/oam/builtin/components/monitoring_workload.go`), the governing Service the
+  operator looks up; a `cnpg-pooler` name (`validateCnpgPoolerName`,
+  `pkg/oam/builtin/components/cnpg_pooler.go`), since CloudNativePG names the pooler's
+  Service after it; and a `postgresql` component's `poolerName` or derived default (role
+  `pooler`). The role rows are `nameSyntaxServiceName` in `pkg/oam/naming.go`.
+- **Why that rule.** It is the API server's under the `RelaxedServiceNameValidation`
+  feature gate: alpha and off by default in Kubernetes 1.34 and 1.35, beta and on by
+  default from 1.36, GA and locked on from 1.37. CloudNativePG's Pooler webhook checks no
+  name syntax of its own.
+- **Documented limit, not a check.** Launcher does not see the target cluster. Where the
+  gate is off (before 1.34; 1.34 and 1.35 unless it is enabled; 1.36 if it is disabled)
+  the API server holds a Service name to a DNS-1035 label and refuses one with a leading
+  digit at creation. On such a cluster an Ingress whose backend names that Service is
+  refused too, since the Ingress backend service name check sits behind the same gate.
+  Launcher builds both, and the cluster refuses them on apply. A document for such a
+  cluster keeps a letter first.
+- **Not this rule.** A CloudNativePG Cluster's name (role `postgresql-cluster`, the
+  `cnpg-cluster` and `postgresql` names) stays a DNS-1035 label of at most 50 characters:
+  that is CloudNativePG's own rule, not the API server's.
 
 ---
 
@@ -1783,7 +1814,7 @@ and by scope, whatever component or trait emits it.
     pods, generated or listed; a container whose ports name two ports alike, a patch's
     taken as merged into the operator's by number, as its strategic merge does
     (go-kure/launcher#947); two `volumes` of one name; a `serviceName` that is not a
-    DNS-1035 label, the rule of every Service name here (go-kure/launcher#959); a web or cluster TLS
+    DNS-1123 label, the rule of every Service name here (go-kure/launcher#959, §3.5); a web or cluster TLS
     configuration the operator's own validation refuses; `dnsPolicy: None` without a
     nameserver, and a pod-level HostProcess without `hostNetwork`; a negative request or
     limit; and a name whose data
@@ -1836,7 +1867,7 @@ and by scope, whatever component or trait emits it.
     writes it, `grpc` included, beside which it adds it (on the container, as the pods
     run the web port after a `thanos-ruler` patch's ports are merged, since the operator
     writes it into no probe); a patched port that leaves two
-    ports of one name, merged by number; a `serviceName` that is not a DNS-1035 label; a
+    ports of one name, merged by number; a `serviceName` that is not a DNS-1123 label (§3.5); a
     negative `replicas`, which the operator copies into the StatefulSet; the storage
     rules of `alertmanager`, under `thanos-ruler-<name>-data`; an entry of `volumes`
     named as a volume the operator adds (`tls-assets`, `web-config`,
@@ -1883,7 +1914,7 @@ and by scope, whatever component or trait emits it.
     nameserver and a pod-level HostProcess without `hostNetwork`, which the API refuses
     of the pods, a container whose ports, as the operator merges a patch's into its
     own by number, name two ports alike, two volumes of one name and a `serviceName`
-    that is not a DNS-1035 label, and an `externalUrl` Prometheus exits on at startup (one that begins or
+    that is not a DNS-1123 label (§3.5), and an `externalUrl` Prometheus exits on at startup (one that begins or
     ends with a quote, or that Go's `net/url` cannot parse; no scheme is held). No capability is required and no default is filled. Beside the probe timings, an empty `portName`, `scrapeInterval`,
     `evaluationInterval` or `thanos.blockSize` is refused, which the CRD defaults, and
     so is an empty `action` of a relabeling rule in the five lists of rules the spec
@@ -2277,3 +2308,4 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | Open | — |
 | [go-kure/launcher#849](https://github.com/go-kure/launcher/issues/849) | Policy refusals carry a class | §5.3 | Shipped | — |
 | [go-kure/launcher#934](https://github.com/go-kure/launcher/issues/934) | Object kind policy (the decision of [go-kure/launcher#922](https://github.com/go-kure/launcher/issues/922)) | §5.4 | Shipped | go-kure/launcher#849 |
+| [go-kure/launcher#959](https://github.com/go-kure/launcher/issues/959) | One rule for every Service-derived name, with its cluster-version limit | §3.5 | Shipped | — |

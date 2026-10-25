@@ -17,12 +17,14 @@ import (
 
 // validateCnpgPoolerName refuses a component name CloudNativePG cannot use as
 // the Pooler's name: the operator creates a Service with the Pooler's own
-// name, so it must be a DNS-1035 label (at most 63 characters, no leading
-// digit, no dot), and the name is also copied into the cnpg.io/poolerName
-// endpoint selector, a label value with the same 63-character limit.
+// name, so it must be a valid Service name (validateServiceName): a DNS-1123
+// label (at most 63 characters, no dot), with the version limit that rule
+// carries for a leading digit. CloudNativePG's own Pooler webhook checks no
+// name syntax. The name is also copied into the cnpg.io/poolerName endpoint
+// selector, a label value with the same 63-character limit.
 func validateCnpgPoolerName(name string) error {
-	if len(validation.IsDNS1035Label(name)) > 0 {
-		return errors.Errorf("cnpg-pooler name %q: must be a DNS-1035 label of at most %d characters (CloudNativePG names the pooler's Service after it)", name, validation.DNS1035LabelMaxLength)
+	if len(validation.IsDNS1123Label(name)) > 0 {
+		return errors.Errorf("cnpg-pooler name %q: must be a DNS-1123 label of at most %d characters (CloudNativePG names the pooler's Service after it)", name, validation.DNS1123LabelMaxLength)
 	}
 	return nil
 }

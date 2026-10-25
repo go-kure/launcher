@@ -170,7 +170,7 @@ func TestComponentEndpoints_NamedProvider(t *testing.T) {
 
 	// An answer the transform refuses is refused here, in the same words.
 	_, err = tr.ComponentEndpointsNamed("shop", comp, func(NameRequest) (string, bool) { return "No_Name", true })
-	const refusal = `the Naming hook returned "No_Name" for role "pooler" in place of "pg-pooler": not a valid DNS-1035 label: `
+	const refusal = `the Naming hook returned "No_Name" for role "pooler" in place of "pg-pooler": not a valid DNS-1123 label: `
 	if err == nil || !strings.Contains(err.Error(), refusal) {
 		t.Errorf("err = %v, want one containing %q", err, refusal)
 	}

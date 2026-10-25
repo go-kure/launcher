@@ -539,14 +539,12 @@ func alertmanagerRefusals(notA string) []struct {
 		}}, `volumes[1] "scratch": the name is listed already at volumes[0], and the API refuses a pod with two volumes of one name`},
 		// The operator gets the governing Service by this name and fails the
 		// reconcile where there is none (pkg/k8s/network.go:135-140). The
-		// name is held to the package's Service-name rule, a DNS-1035 label,
-		// so a leading digit, which a DNS-1123 label admits, is refused too:
-		// the API refuses such a Service before Kubernetes 1.36, by default
-		// (go-kure/launcher#959).
-		{"a serviceName that is not a DNS-1035 label", map[string]any{"serviceName": "Bad_Name"},
-			`serviceName: "Bad_Name" is not a valid Service name, which must be a DNS-1035 label`},
-		{"a serviceName with a leading digit", map[string]any{"serviceName": "1alerts"},
-			`serviceName: "1alerts" is not a valid Service name, which must be a DNS-1035 label`},
+		// name is held to the package's Service-name rule, a DNS-1123 label
+		// (go-kure/launcher#959); a leading digit is admitted (below).
+		{"a serviceName that is not a DNS-1123 label", map[string]any{"serviceName": "Bad_Name"},
+			`serviceName: "Bad_Name" is not a valid Service name, which must be a DNS-1123 label`},
+		{"a dotted serviceName", map[string]any{"serviceName": "alerts.v1"},
+			`serviceName: "alerts.v1" is not a valid Service name, which must be a DNS-1123 label`},
 		// The CRD's quantity pattern admits a sign; the API refuses the
 		// container the operator builds with it.
 		{"a negative cpu request", map[string]any{"resources": map[string]any{"requests": map[string]any{"cpu": "-1"}}},
@@ -1135,6 +1133,9 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		// reads the list; the kind cannot see the value.
 		"a feature flag of an environment variable": {"enableFeatures": []any{"$(AM_FEATURE)"}},
 		"a reference beside a feature flag":         {"enableFeatures": []any{"classic-mode", "$(AM_FEATURE)"}},
+		// A DNS-1123 label, the package's Service-name rule
+		// (go-kure/launcher#959).
+		"a serviceName starting with a digit": {"serviceName": "1alerts"},
 		"an ephemeral claim beside a dormant template": {"storage": map[string]any{
 			"ephemeral": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
 				"accessModes": []any{"ReadWriteOnce"}, "resources": amClaim["resources"],

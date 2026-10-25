@@ -14,11 +14,12 @@ import (
 )
 
 // go-kure/launcher#546: every workload kind that emits a Service holds the Service's name to the
-// rule the API server applies to it, a DNS-1035 label, as the service kind already does. A
-// component name only has to be a DNS-1123 subdomain, so without this check a name such as
-// "1api" built a Service the cluster rejects on apply. statefulset's serviceName names a Service
-// too, authored beside it, and is held to the same rule. Since go-kure/launcher#690 daemonset and
-// statefulset emit no Service, so their component names are not constrained.
+// rule the API server applies to it, as the service kind already does. A component name only has
+// to be a DNS-1123 subdomain, so without this check a name such as "api.v1" built a Service the
+// cluster rejects on apply. The rule is a DNS-1123 label, Kubernetes' default since 1.36
+// (go-kure/launcher#959), so a leading digit ("1api") is accepted. statefulset's serviceName names
+// a Service too, authored beside it, and is held to the same rule. Since go-kure/launcher#690
+// daemonset and statefulset emit no Service, so their component names are not constrained.
 
 // invalidServiceNames are valid component names (DNS-1123 subdomains) that are not valid Service
 // names.
@@ -28,10 +29,13 @@ var invalidServiceNames = []struct {
 }{
 	{"dot", "api.v1"},
 	{"longer than 63 characters", strings.Repeat("a", 64)},
-	{"leading digit", "1api"},
 }
 
-// longestServiceName is a DNS-1035 label at the 63-character limit.
+// leadingDigitServiceName is a DNS-1123 label and no DNS-1035 label: a Service name by default from
+// Kubernetes 1.36 (go-kure/launcher#959).
+const leadingDigitServiceName = "1api"
+
+// longestServiceName is a DNS-1123 label at the 63-character limit.
 func longestServiceName(t *testing.T) string {
 	t.Helper()
 	name := "a" + strings.Repeat("b-", 30) + "cd"
@@ -58,7 +62,7 @@ func wantServiceNameError(t *testing.T, err error, field, value string) {
 	if err == nil {
 		t.Fatalf("got no error, want %s: %q refused as an invalid Service name", field, value)
 	}
-	for _, want := range []string{field + `: "` + value + `"`, "is not a valid Service name", "DNS-1035 label"} {
+	for _, want := range []string{field + `: "` + value + `"`, "is not a valid Service name", "DNS-1123 label"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %q, want it to contain %q", err, want)
 		}
@@ -104,22 +108,26 @@ func TestWorkloadHandlers_RejectInvalidServiceName(t *testing.T) {
 	}
 }
 
-// A name at the DNS-1035 limit still builds, and is the emitted Service's name.
-func TestWorkloadHandlers_AcceptLongestValidServiceName(t *testing.T) {
-	name := longestServiceName(t)
-	for _, tc := range serviceEmittingCases {
-		t.Run(tc.typ, func(t *testing.T) {
-			svcs := servicesIn(buildComponent(t, tc.handler, name, tc.typ, tc.props()))
-			if len(svcs) != 1 || svcs[0].Name != name {
-				t.Fatalf("Services = %v, want exactly one named %q", svcs, name)
-			}
-		})
+// A name at the 63-character limit, and one starting with a digit, still build, and each is the
+// emitted Service's name.
+func TestWorkloadHandlers_AcceptValidServiceNames(t *testing.T) {
+	for _, name := range []string{longestServiceName(t), leadingDigitServiceName} {
+		for _, tc := range serviceEmittingCases {
+			t.Run(tc.typ+"/"+name, func(t *testing.T) {
+				svcs := servicesIn(buildComponent(t, tc.handler, name, tc.typ, tc.props()))
+				if len(svcs) != 1 || svcs[0].Name != name {
+					t.Fatalf("Services = %v, want exactly one named %q", svcs, name)
+				}
+			})
+		}
 	}
 }
 
 // Generate names webservice's Service after the Application, which a library caller builds
-// itself, so it applies the same rule to the name it actually emits.
-func TestWorkloadConfigs_GenerateRejectsInvalidServiceName(t *testing.T) {
+// itself: a name starting with a digit is the emitted Service's name, and a dotted one is
+// refused. The main container's name, a DNS-1123 label too, is checked first, so that refusal is
+// not the Service-name rule's own (TestServiceConfig_GenerateRejectsInvalidServiceName pins it).
+func TestWorkloadConfigs_GenerateServiceName(t *testing.T) {
 	for _, tc := range serviceEmittingCases {
 		t.Run(tc.typ, func(t *testing.T) {
 			cfg, err := tc.handler.ToApplicationConfig(
@@ -127,17 +135,23 @@ func TestWorkloadConfigs_GenerateRejectsInvalidServiceName(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ToApplicationConfig: %v", err)
 			}
-			// "1api" passes the main container's DNS-1123 label check, so only the Service-name
-			// rule can refuse it.
-			_, err = cfg.Generate(stack.NewApplication("1api", "default", cfg))
-			wantServiceNameError(t, err, "name", "1api")
+			objs, err := cfg.Generate(stack.NewApplication(leadingDigitServiceName, "default", cfg))
+			if err != nil {
+				t.Fatalf("Generate(%q): %v", leadingDigitServiceName, err)
+			}
+			if svcs := servicesIn(objs); len(svcs) != 1 || svcs[0].Name != leadingDigitServiceName {
+				t.Errorf("Services = %v, want exactly one named %q", svcs, leadingDigitServiceName)
+			}
+			if _, err := cfg.Generate(stack.NewApplication("api.v1", "default", cfg)); err == nil || !strings.Contains(err.Error(), `"api.v1"`) {
+				t.Errorf("Generate(api.v1) error = %v, want one naming it", err)
+			}
 		})
 	}
 }
 
 // daemonset and statefulset emit no Service (go-kure/launcher#690), so their names are not held
-// to the Service-name rule, with or without container ports. "1api" is a valid container name (a
-// DNS-1123 label) but not a valid Service name.
+// to the Service-name rule, with or without container ports. "1api" was the case before
+// go-kure/launcher#959: a valid container name (a DNS-1123 label) and no DNS-1035 label.
 func TestWorkloadKinds_NoService_AcceptsNonServiceName(t *testing.T) {
 	ports := []any{map[string]any{"name": "http", "containerPort": 9090}}
 	for _, tc := range []struct {
@@ -173,13 +187,14 @@ func TestStatefulsetHandler_RejectsInvalidAuthoredServiceName(t *testing.T) {
 }
 
 // serviceName is projected as authored and decouples nothing from the component name, which no
-// longer names a Service: a component name that is not a valid Service name builds, a serviceName
-// at the limit builds, and neither emits a Service.
+// longer names a Service: a component name starting with a digit builds, a serviceName at the
+// limit or starting with a digit builds, and neither emits a Service.
 func TestStatefulsetHandler_AuthoredServiceNameProjected(t *testing.T) {
 	longest := longestServiceName(t)
 	for _, tc := range []struct{ component, serviceName string }{
 		{"1api", "db"},
 		{"db", longest},
+		{"db", leadingDigitServiceName},
 	} {
 		objs := buildComponent(t, &components.StatefulsetHandler{}, tc.component, "statefulset", map[string]any{
 			"image":       "ghcr.io/org/app:v1",

@@ -342,11 +342,13 @@ func prometheusRefusals(notA string) []struct {
 		}}, `volumes[1] "scratch": the name is listed already at volumes[0], and the API refuses a pod with two volumes of one name`},
 		// The operator gets the governing Service by this name and fails the
 		// reconcile where there is none (pkg/prometheus/server/operator.go:1010
-		// at v0.94.1); the name is held to the package's Service-name rule.
-		{"a serviceName that is not a DNS-1035 label", map[string]any{"serviceName": "Bad_Name"},
-			`serviceName: "Bad_Name" is not a valid Service name, which must be a DNS-1035 label`},
-		{"a serviceName with a leading digit", map[string]any{"serviceName": "1prom"},
-			`serviceName: "1prom" is not a valid Service name, which must be a DNS-1035 label`},
+		// at v0.94.1); the name is held to the package's Service-name rule, a
+		// DNS-1123 label (go-kure/launcher#959); a leading digit is admitted
+		// (TestPrometheus_OperatorRunsIt).
+		{"a serviceName that is not a DNS-1123 label", map[string]any{"serviceName": "Bad_Name"},
+			`serviceName: "Bad_Name" is not a valid Service name, which must be a DNS-1123 label`},
+		{"a dotted serviceName", map[string]any{"serviceName": "prom.v1"},
+			`serviceName: "prom.v1" is not a valid Service name, which must be a DNS-1123 label`},
 		// Prometheus exits at startup on an externalUrl that begins or ends
 		// with a quote, or that net/url cannot parse (computeExternalURL,
 		// cmd/prometheus/main.go:1762-1792 at v3.14.0).
@@ -785,8 +787,11 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 		"the sidecar's port name without a sidecar":         {"portName": "grpc"},
 		"the sidecar's port name with a Service of its own": {"portName": "grpc", "thanos": map[string]any{}, "serviceName": "metrics"},
 		"an invalid port name written nowhere":              {"portName": "prometheus-webui", "listenLocal": true, "serviceName": "metrics"},
-		"emptyDir alone":                                    {"storage": map[string]any{"emptyDir": map[string]any{}}},
-		"a claim template of its own name":                  {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim}}},
+		// A DNS-1123 label, the package's Service-name rule
+		// (go-kure/launcher#959).
+		"a serviceName starting with a digit": {"serviceName": "1prom"},
+		"emptyDir alone":                      {"storage": map[string]any{"emptyDir": map[string]any{}}},
+		"a claim template of its own name":    {"storage": map[string]any{"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "data"}, "spec": amClaim}}},
 		"the operator's name for the data volume beside emptyDir": {"storage": map[string]any{
 			"emptyDir":            map[string]any{},
 			"volumeClaimTemplate": map[string]any{"metadata": map[string]any{"name": "prometheus-fast-db"}},

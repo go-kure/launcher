@@ -221,12 +221,13 @@ func poolerTemplate(list string, entries ...any) map[string]any {
 
 // TestCnpgPoolerHandler_NameBound pins the Pooler-name bound on both entry
 // points: CloudNativePG names the pooler's Service after it, so it must be a
-// DNS-1035 label, and the endpoint selector copies it into a label value.
+// valid Service name, a DNS-1123 label (go-kure/launcher#959), and the
+// endpoint selector copies it into a label value.
 func TestCnpgPoolerHandler_NameBound(t *testing.T) {
 	h := &components.CnpgPoolerHandler{}
-	for _, name := range []string{"1pool", "db.pooler", strings.Repeat("a", 64)} {
+	for _, name := range []string{"db.pooler", strings.Repeat("a", 64)} {
 		comp := &oam.Component{Name: name, Type: "cnpg-pooler", Properties: minimalPooler()}
-		want := fmt.Sprintf("cnpg-pooler name %q: must be a DNS-1035 label of at most 63 characters (CloudNativePG names the pooler's Service after it)", name)
+		want := fmt.Sprintf("cnpg-pooler name %q: must be a DNS-1123 label of at most 63 characters (CloudNativePG names the pooler's Service after it)", name)
 		if _, err := h.ToApplicationConfig(comp, "data"); err == nil || err.Error() != want {
 			t.Errorf("ToApplicationConfig(%q): err = %v, want %q", name, err, want)
 		}
@@ -234,10 +235,26 @@ func TestCnpgPoolerHandler_NameBound(t *testing.T) {
 			t.Errorf("Endpoints(%q): err = %v, want %q", name, err, want)
 		}
 	}
-	longest := strings.Repeat("a", 63)
-	comp := &oam.Component{Name: longest, Type: "cnpg-pooler", Properties: minimalPooler()}
-	if _, err := h.ToApplicationConfig(comp, "data"); err != nil {
-		t.Errorf("ToApplicationConfig(63 characters): %v", err)
+	// The longest name, and one starting with a digit: no DNS-1035 label, a
+	// Service name by default from Kubernetes 1.36.
+	for _, name := range []string{strings.Repeat("a", 63), "1pool"} {
+		comp := &oam.Component{Name: name, Type: "cnpg-pooler", Properties: minimalPooler()}
+		cfg, err := h.ToApplicationConfig(comp, "data")
+		if err != nil {
+			t.Errorf("ToApplicationConfig(%q): %v", name, err)
+			continue
+		}
+		if _, err := h.Endpoints(comp); err != nil {
+			t.Errorf("Endpoints(%q): %v", name, err)
+		}
+		objs, err := cfg.Generate(stack.NewApplication(name, "data", cfg))
+		if err != nil || len(objs) != 1 {
+			t.Errorf("Generate(%q) = %d objects, %v; want the Pooler", name, len(objs), err)
+			continue
+		}
+		if got := (*objs[0]).GetName(); got != name {
+			t.Errorf("Generate(%q): the Pooler is named %q", name, got)
+		}
 	}
 }
 
