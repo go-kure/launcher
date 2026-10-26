@@ -150,6 +150,11 @@ func shadowingAlias(v semver.Version) bool {
 	type cmp = semver.Version
 	return cmp.LT(v, semver.MustParse("3.0.0"))
 }
+
+var shadowingLiteral = func(v semver.Version) bool {
+	type cmp = semver.Version
+	return cmp.LT(v, semver.MustParse("3.0.0"))
+}
 `,
 	"pkg/e/alias.go": `package e
 
@@ -296,13 +301,15 @@ func TestVersionGateWalker_Reads(t *testing.T) {
 
 	// W13 the method expression is read by its call, not by the name of its
 	// receiver type: through a type alias of semver.Version it is reported
-	// too, a local one that shadows an import included
-	// (go-kure/launcher#1033), and a function of another package the file
-	// imports, as cmp.Compare(a, b), is no version method.
+	// too, a local one that shadows an import included, in a function or in
+	// a function literal outside one (go-kure/launcher#1033), and a function
+	// of another package the file imports, as cmp.Compare(a, b), is no
+	// version method.
 	errs = recordGateErrors(t, func(tb testing.TB) { src.versionGates(tb, "pkg/d/typealias.go") })
 	wantAlias := []string{
 		"pkg/d/typealias.go:13:9: typeAlias compares a version through the method expression V.LT, on 2 arguments; the test cannot read its bound",
 		"pkg/d/typealias.go:22:9: shadowingAlias compares a version through the method expression cmp.LT, on 2 arguments; the test cannot read its bound",
+		"pkg/d/typealias.go:27:9: a version comparison outside a function",
 	}
 	if !slices.Equal(errs, wantAlias) {
 		t.Errorf("pkg/d/typealias.go: reported %q, want %q", errs, wantAlias)
