@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // postgresqlRecoveryApp is a postgresql component recovered from an inline
@@ -167,4 +169,63 @@ spec:
 			}
 		})
 	}
+}
+
+// TestBuild_PostgresqlRecoveryArchiveCheckUnderANamingHook: another
+// component's ObjectStore is matched by its component name only where no
+// Naming hook is set. Under a hook that renames it, objectStoreName "old"
+// names no object of the document (a store outside it), so the archive check
+// leaves it to the plugin; a name the author wrote is still matched.
+func TestBuild_PostgresqlRecoveryArchiveCheckUnderANamingHook(t *testing.T) {
+	doc := func(oldBackupExtra string) string {
+		const store = "objectStore:\n            destinationPath: s3://bucket/pg/\n            s3Credentials:\n              inheritFromIAMRole: true\n"
+		return `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  components:
+    - name: old
+      type: postgresql
+      properties:
+        backup:
+          ` + store + oldBackupExtra + `    - name: db
+      type: postgresql
+      properties:
+        backup:
+          ` + store + `        recovery:
+          source:
+            serverName: db
+            objectStoreName: old
+`
+	}
+	hook := renameBy(map[string]string{string(oam.NameRolePostgresqlObjectStore) + " old": "renamed-store"})
+	transform := func(t *testing.T, appYAML string, naming func(oam.NameRequest) (string, bool)) error {
+		t.Helper()
+		transformer := newBuiltinTransformer()
+		app, err := oam.ParseWithExtraTypes([]byte(appYAML), nil, transformer.LowerableTypes())
+		if err != nil {
+			t.Fatalf("parsing: %v", err)
+		}
+		_, err = transformer.Transform(app, oam.TransformContext{Domain: kurelDomain, Naming: naming})
+		return err
+	}
+	const refused = "recovery.source: the cluster would archive its WAL into the folder it is recovered from"
+	t.Run("no hook", func(t *testing.T) {
+		if err := transform(t, doc(""), nil); err == nil || !strings.Contains(err.Error(), refused) {
+			t.Errorf("err = %v, want one containing %q", err, refused)
+		}
+	})
+	t.Run("a hook renames the store", func(t *testing.T) {
+		if err := transform(t, doc(""), hook); err != nil {
+			t.Errorf("refused: %v", err)
+		}
+	})
+	t.Run("a hook, and the author named the store", func(t *testing.T) {
+		err := transform(t, doc("          objectStoreObjectName: old\n"), hook)
+		if err == nil || !strings.Contains(err.Error(), refused) {
+			t.Errorf("err = %v, want one containing %q", err, refused)
+		}
+	})
 }

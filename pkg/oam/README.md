@@ -1363,6 +1363,12 @@ and the scope are the ones the member's handler declares (`ComponentObject`); a 
 member whose type declares no object is refused by the transform. On a context with no
 `Namer` an authored name is validated and set, the hook is not asked and nothing is claimed.
 
+`LoweringContext.HasNamingHook()` reports whether a name resolved without an authored name
+may be the hook's answer. A rule that reads another component of `Document` and needs the
+name that component's object takes knows it only where the author wrote it, or where no hook
+is set: the hook is asked once per name, by the rule that generates the object, never on
+another rule's behalf (`postgresql`'s archive check, go-kure/launcher#1001).
+
 `LoweringContext.ResolveSharedName(base, suffix, identity, spec)` is `ResolveName` for an
 object the components of one document share: one its content identity determines wholly, as
 `NameAllocator.EmitOrAdopt` asks of it (a generated Flux source). The first claim of a name

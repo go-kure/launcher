@@ -316,6 +316,17 @@ func (l LoweringContext) Capability(key string) (CapabilityBinding, bool) {
 	return binding, ok
 }
 
+// HasNamingHook reports whether a name ResolveName or ResolveMemberName resolves
+// without an authored name may be the TransformContext.Naming hook's answer
+// rather than the default. A rule that reads another component of Document and
+// needs the name that component's object will take knows it here only where
+// the author wrote it, or where no hook is set: the hook is asked once per
+// name, by the rule that generates the object, and is not asked on another's
+// behalf.
+func (l LoweringContext) HasNamingHook() bool {
+	return l.Namer != nil && l.Namer.hook != nil
+}
+
 // WithCapabilities returns a copy of l whose Capability reads look up m. It is for a
 // test driver that calls a rule directly; the engine wires the context it hands a rule
 // itself. The copy records nothing: a read through it is counted nowhere.
