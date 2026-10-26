@@ -2228,9 +2228,11 @@ and by scope, whatever component or trait emits it.
     named `<component>-<name>` under role `postgresql-scheduledbackup` (§3.2), held to 63
     characters; its `schedule` is parsed as CloudNativePG's webhook parses it, and one
     of five fields, which that webhook only warns of and reads seconds first, is refused,
-    naming the six-field forms it may have meant. One whose time never comes within the
-    operator's five-year look-ahead (February the 30th) is not refused: the operator records
-    NoSchedule and runs no backup (go-kure/launcher#1032).
+    naming the six-field forms it may have meant. One that finds no time within the
+    operator's five-year look-ahead from some instant (February the 30th, February the
+    29th, a seconds, minutes, hours or months field that selects no value) is refused, since
+    the operator would record NoSchedule and take no further backup; the check is exact, in
+    UTC, over one 400-year cycle (go-kure/launcher#1032).
   - **Breaking:** the former `backup` keys `destinationPath`, `endpointURL` and
     `secretName` and the top-level `objectStore` and `objectStoreObjectName` are refused,
     naming their replacement, and so is `backup: {}`; `backup.retentionPolicy` stays.

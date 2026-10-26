@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -133,6 +134,64 @@ func postgresqlSixFieldForms(fields []string) string {
 	return " (" + strings.Join(forms, ", or ") + ")"
 }
 
+// postgresqlScheduleCycleFirst and postgresqlScheduleCycleLast bound the fixed
+// Gregorian cycle the look-ahead is decided over: 400 years are 146097 days, 20871 weeks, so months, days and
+// weekdays repeat and one cycle decides every year. Fixed years keep the
+// build free of the clock.
+const postgresqlScheduleCycleFirst, postgresqlScheduleCycleLast = 2000, 2399
+
+// postgresqlScheduleStop says why the operator would stop on a schedule that
+// parses, or "" when it would not. The operator (CloudNativePG's
+// ScheduledBackup controller) asks robfig/cron for the next time after now;
+// a zero time records the NoSchedule event and returns without a requeue,
+// before the immediate backup and the next one are considered. robfig/cron
+// searches from the next whole second through the end of the year five
+// years on, and returns zero past it.
+//
+// An `@every` schedule's next time is the current one plus its delay, never
+// zero, so it is admitted, as is any other kind nothing is proven of. A
+// seconds, minutes, hours or months field that selects no value (`,`) never
+// matches, so it is refused without a search. An empty day of month or day of
+// week can still fire (ORed with an unstarred other day field), so it goes to
+// the search.
+//
+// The search is exact, in UTC: for each year of the cycle it asks for the
+// next time after its December 31st 23:59:58. Any instant whose next second
+// falls in that year searches at least as far, so a time found there is one
+// every instant of the year finds. A year with none starts a gap the operator
+// stops in; the first gap start of the cycle is named (a year whose
+// predecessor finds a time, the cycle's last year preceding its first), so
+// the message names no clock year.
+func postgresqlScheduleStop(sched cron.Schedule) string {
+	spec, ok := sched.(*cron.SpecSchedule)
+	if !ok {
+		return ""
+	}
+	for _, f := range []struct {
+		name string
+		bits uint64
+	}{{"seconds", spec.Second}, {"minutes", spec.Minute}, {"hours", spec.Hour}, {"months", spec.Month}} {
+		if f.bits == 0 {
+			return "the " + f.name + " field selects no value, so its time never comes and the operator records NoSchedule and takes no backup for it"
+		}
+	}
+	var none [postgresqlScheduleCycleLast - postgresqlScheduleCycleFirst + 1]bool
+	for i := range none {
+		year := postgresqlScheduleCycleFirst + i
+		none[i] = spec.Next(time.Date(year, time.December, 31, 23, 59, 58, 0, time.UTC)).IsZero()
+	}
+	for i := range none {
+		if none[i] && !none[(i+len(none)-1)%len(none)] {
+			year := postgresqlScheduleCycleFirst + i
+			return fmt.Sprintf("no time from the end of %d through the end of %d (UTC), longer than the five years the operator looks ahead, so the operator records NoSchedule there and takes no further backup for it; choose a schedule whose time comes at least every five years", year, year+5)
+		}
+	}
+	if none[0] {
+		return "its time never comes, so the operator records NoSchedule for it and takes no backup, not even the immediate one"
+	}
+	return ""
+}
+
 // schemaPostgresqlBackup declares `backup`. The blocks launcher defines are
 // declared key by key; the vendored values inside the object store (the
 // credentials and the CA reference) are open objects the parser decodes
@@ -195,7 +254,7 @@ func schemaPostgresqlBackup() oam.PropertySchema {
 					Description: "One schedule: a cnpg-scheduledbackup named <component>-<name>, of method plugin.",
 					Properties: map[string]oam.PropertySchema{
 						"name":                 {Type: oam.PropertyTypeString, Required: true, Description: "Required, unique among the schedules. The ScheduledBackup is named <component>-<name>, at most 63 characters."},
-						"schedule":             {Type: oam.PropertyTypeString, Required: true, Description: "Required. When a backup is taken, as a cron expression of six fields, the first of which is the seconds (\"0 0 3 * * *\" is every day at 03:00). It must parse as the operator parses it. A schedule that parses but whose time never comes within the operator's five-year look-ahead (February the 30th) is not refused: the operator records NoSchedule for it and runs no backup."},
+						"schedule":             {Type: oam.PropertyTypeString, Required: true, Description: "Required. When a backup is taken, as a cron expression of six fields, the first of which is the seconds (\"0 0 3 * * *\" is every day at 03:00). It must parse as the operator parses it, and its time must come within the operator's five-year look-ahead from every instant (computed in UTC), since the operator otherwise records NoSchedule and takes no further backup: February the 30th, a field of the seconds, minutes, hours or months that selects no value, and February the 29th (no time from the end of 2096 through 2101) are refused. An @every schedule is accepted."},
 						"immediate":            {Type: oam.PropertyTypeBoolean, Description: "Whether a first backup is taken as soon as the ScheduledBackup is created. Default true."},
 						"suspend":              {Type: oam.PropertyTypeBoolean, Description: "true, no backup is scheduled until it is set back."},
 						"target":               {Type: oam.PropertyTypeString, Enum: []any{"primary", "prefer-standby"}, Description: "Which instance takes the backup: primary or prefer-standby. Unset, the operator's default."},
@@ -452,10 +511,8 @@ func parsePostgresqlBackupSchedules(backup map[string]any) ([]PostgresqlBackupSc
 		// module requires, so a schedule refused here is one the webhook
 		// refuses. Its pin in go.mod follows that module's when the vendored
 		// CloudNativePG moves.
-		// Whether the schedule ever fires is not judged here
-		// (go-kure/launcher#1032): one the operator finds no time for within
-		// five years only gets a NoSchedule event there.
-		if _, err := cron.Parse(schedule); err != nil {
+		parsed, err := cron.Parse(schedule)
+		if err != nil {
 			return nil, errors.Errorf("%s.schedule %q: not a cron expression the operator accepts: %s", label, schedule, err.Error())
 		}
 		// Five fields parse, seconds first (the day of the week is the one
@@ -468,6 +525,11 @@ func parsePostgresqlBackupSchedules(backup map[string]any) ([]PostgresqlBackupSc
 		if fields := strings.Fields(schedule); len(fields) == 5 {
 			return nil, errors.Errorf("%s.schedule %q: five fields, which the operator reads seconds first (seconds, minutes, hours, day of month, month), not as a crontab line; write six fields, seconds first%s",
 				label, schedule, postgresqlSixFieldForms(fields))
+		}
+		// A schedule the operator finds no time for stops its ScheduledBackup
+		// for good (go-kure/launcher#1032): see postgresqlScheduleStop.
+		if stop := postgresqlScheduleStop(parsed); stop != "" {
+			return nil, errors.Errorf("%s.schedule %q: %s", label, schedule, stop)
 		}
 		s.Schedule = schedule
 		if v, err := parseBoolField(raw, "immediate", label+".immediate"); err != nil {

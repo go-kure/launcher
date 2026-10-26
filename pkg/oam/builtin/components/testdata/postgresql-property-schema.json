@@ -107,7 +107,7 @@
             },
             "schedule": {
               "type": "string",
-              "description": "Required. When a backup is taken, as a cron expression of six fields, the first of which is the seconds (\"0 0 3 * * *\" is every day at 03:00). It must parse as the operator parses it. A schedule that parses but whose time never comes within the operator's five-year look-ahead (February the 30th) is not refused: the operator records NoSchedule for it and runs no backup.",
+              "description": "Required. When a backup is taken, as a cron expression of six fields, the first of which is the seconds (\"0 0 3 * * *\" is every day at 03:00). It must parse as the operator parses it, and its time must come within the operator's five-year look-ahead from every instant (computed in UTC), since the operator otherwise records NoSchedule and takes no further backup: February the 30th, a field of the seconds, minutes, hours or months that selects no value, and February the 29th (no time from the end of 2096 through 2101) are refused. An @every schedule is accepted.",
               "required": true
             },
             "suspend": {
