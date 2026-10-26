@@ -5091,6 +5091,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       not; set `readOnly`, it binds the file read-only
       (`kubelet_pods.go:425`), leaving no link to follow, so a file at its
       own path is refused too.
+    - A directory: the path of any mount the operator makes but the web
+      configuration file, which is a key of its Secret mounted by `subPath`
+      (`pkg/webconfig/config.go:272-278`). `/prometheus`,
+      `/etc/prometheus/config_out` and `/var/log/prometheus` are emptyDir
+      or claim directories (`common.go:252-283`, `:334-347`), the rest
+      Secret, ConfigMap or projected volumes mounted whole. Prometheus
+      cannot open a directory as a file, so a log file at one's own path is
+      refused, writable or not; a file under a writable one is admitted.
 
     A patch mount at a path written as an earlier mount's is merged into it
     by the operator's strategic merge: it takes the patch's volume, and keeps

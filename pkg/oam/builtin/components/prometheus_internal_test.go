@@ -6,8 +6,79 @@ import (
 	"strings"
 	"testing"
 
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
 )
+
+// TestPrometheus_LogFileAtOperatorMount names as queryLogFile each path the
+// operator mounts a volume at in the prometheus container, of a spec that makes
+// it mount every one of them, and a file under each writable one. Every mount
+// but the web configuration file is of a directory, which Prometheus cannot
+// open as a file: config_out and the log-file volume are emptyDirs
+// (pkg/prometheus/common.go:252-268 and :334-347 at prometheus-operator
+// v0.94.1), the data volume an emptyDir or a claim's subPath directory holding
+// the TSDB (common.go:277-283, server/statefulset.go:454), the rest Secret,
+// ConfigMap or projected volumes mounted whole (common.go:269-332,
+// server/statefulset.go:528-534, pkg/webconfig/tls_credentials.go:130-134 and
+// :171-175); the web configuration is a key of its Secret mounted by subPath
+// (pkg/webconfig/config.go:272-278). A mount the model gains fails here until
+// it has a row.
+func TestPrometheus_LogFileAtOperatorMount(t *testing.T) {
+	const directory = "is the directory the Prometheus operator mounts a volume at in the prometheus container, so Prometheus cannot open it as a file"
+	scrape := "scrape.log"
+	spec := &monitoringv1.PrometheusSpec{}
+	spec.Secrets = []string{"remote"}
+	spec.ConfigMaps = []string{"targets"}
+	spec.ScrapeFailureLogFile = &scrape
+	spec.Web = &monitoringv1.PrometheusWebSpec{WebConfigFileFields: monitoringv1.WebConfigFileFields{TLSConfig: &monitoringv1.WebTLSConfig{
+		KeySecret: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "web-tls"}, Key: "tls.key"},
+		Cert:      monitoringv1.SecretOrConfigMap{ConfigMap: &corev1.ConfigMapKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "web-cert"}, Key: "tls.crt"}},
+		ClientCA:  monitoringv1.SecretOrConfigMap{Secret: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "web-ca"}, Key: "ca.crt"}},
+	}}}
+	refused := map[string]string{
+		"/prometheus":                                        directory,
+		"/etc/prometheus/config_out":                         directory,
+		"/var/log/prometheus":                                directory,
+		"/etc/prometheus/certs":                              directory,
+		"/etc/prometheus/secrets/remote":                     directory,
+		"/etc/prometheus/configmaps/targets":                 directory,
+		"/etc/prometheus/rules/prometheus-fast-rulefiles-0":  directory,
+		"/etc/prometheus/rules/prometheus-fast-rulefiles-1":  directory,
+		"/etc/prometheus/rules/prometheus-fast-rulefiles-2":  directory,
+		"/etc/prometheus/web_config/secret/web-tls-key":      directory,
+		"/etc/prometheus/web_config/configmap/web-cert-cert": directory,
+		"/etc/prometheus/web_config/secret/web-ca-ca":        directory,
+		"/etc/prometheus/web_config/web-config.yaml":         "is the read-only mount at /etc/prometheus/web_config/web-config.yaml in the prometheus container, so Prometheus cannot write the file",
+	}
+	var generated []string
+	for _, m := range prometheusMounts("fast", spec) {
+		if m.operator {
+			generated = append(generated, m.path)
+		}
+	}
+	var listed []string
+	for p := range refused {
+		listed = append(listed, p)
+	}
+	slices.Sort(generated)
+	slices.Sort(listed)
+	if !slices.Equal(generated, listed) {
+		t.Fatalf("the operator's mounts are %v, the rows %v", generated, listed)
+	}
+	for p, want := range refused {
+		spec.QueryLogFile = p
+		err := validatePrometheusLogFiles("fast", spec)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("queryLogFile %s: got %v, want %q", p, err, want)
+		}
+	}
+	for _, p := range []string{"/prometheus/query.log", "/etc/prometheus/config_out/query.log", "/var/log/prometheus/query.log"} {
+		spec.QueryLogFile = p
+		if err := validatePrometheusLogFiles("fast", spec); err != nil {
+			t.Errorf("queryLogFile %s: %v", p, err)
+		}
+	}
+}
 
 // TestThanosDroppedMountFields: the fields thanosDroppedMountFields names are
 // every field of corev1.VolumeMount but name and mountPath, which the operator
