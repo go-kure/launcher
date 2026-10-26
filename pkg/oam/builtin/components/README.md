@@ -5117,7 +5117,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       or claim directories (`common.go:252-283`, `:334-347`), the rest
       Secret, ConfigMap or projected volumes mounted whole. So is the path of
       an author's mount, in `volumeMounts` or a patch, without `subPath` or
-      `subPathExpr`, of an `emptyDir`, `configMap`, `secret`, `downwardAPI`,
+      `subPathExpr`, of an `emptyDir`, including a volume with no source,
+      which the API server defaults to one, `configMap`, `secret`, `downwardAPI`,
       `projected`, `gitRepo`, `nfs`, `iscsi` or `fc` volume, or a `hostPath`
       of `type: Directory` or `DirectoryOrCreate`, or of one of the
       operator's volumes of those types (`config-out` is an emptyDir; not
