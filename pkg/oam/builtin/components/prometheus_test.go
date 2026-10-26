@@ -568,9 +568,12 @@ func prometheusRefusals(notA string) []struct {
 		}}, `thanos.volumeMounts[0].bindMountOptions: not carried`},
 		// The operator adds no volume for a query log file named without a
 		// directory beside a scrape failure log file named with one
-		// (server/statefulset.go:510, :537; common.go:334-347).
-		{"a query log file beside a scrape failure log file in a directory", map[string]any{"queryLogFile": "query.log", "scrapeFailureLogFile": "/var/log/scrape/failures.log"},
-			`queryLogFile: "query.log" names no directory, so the Prometheus operator configures it under /var/log/prometheus, but beside scrapeFailureLogFile "/var/log/scrape/failures.log", which names one, it mounts no volume there`},
+		// (server/statefulset.go:510, :537; common.go:334-347), so the
+		// author's read-only mount at its directory decides.
+		{"a query log file beside a scrape failure log file in a directory under a configMap", map[string]any{"queryLogFile": "query.log", "scrapeFailureLogFile": "/var/log/scrape/failures.log",
+			"volumes":      []any{map[string]any{"name": "cfg", "configMap": map[string]any{"name": "cfg"}}},
+			"volumeMounts": []any{map[string]any{"name": "cfg", "mountPath": "/var/log/prometheus"}}},
+			`queryLogFile: "query.log" names no directory, so the Prometheus operator configures it under /var/log/prometheus, but beside scrapeFailureLogFile "/var/log/scrape/failures.log", which names one, it mounts no volume there, and the mount at /var/log/prometheus that covers that file is read-only or binds a regular file, so Prometheus cannot create it`},
 		// A read-only mount at the file itself decides before a writable mount
 		// at its directory.
 		{"a query log file named alone at a read-only mount of the file under a writable directory", map[string]any{"queryLogFile": "query.log", "scrapeFailureLogFile": "/dev/stdout",
@@ -581,13 +584,6 @@ func prometheusRefusals(notA string) []struct {
 			"volumes":      []any{map[string]any{"name": "cfg", "configMap": map[string]any{"name": "cfg"}}},
 			"volumeMounts": []any{map[string]any{"name": "cfg", "mountPath": "/var/log/prometheus/query.log", "subPath": "query.log"}}},
 			`queryLogFile: "query.log" is the read-only mount at /var/log/prometheus/query.log in the prometheus container`},
-		// The operator passes a log file named with a directory unchanged
-		// (common.go:230-236), and the root filesystem is read-only
-		// (server/statefulset.go:349).
-		{"a query log file in a directory without a mount", map[string]any{"queryLogFile": "/var/log/query.log"},
-			`queryLogFile: "/var/log/query.log" is in /var/log, where no volume is known to be mounted, and the prometheus container's root filesystem is read-only, so Prometheus cannot create the file; mount a writable volume at /var/log or a directory above it, or name a standard stream such as /dev/stdout`},
-		{"a scrape failure log file in a directory without a mount", map[string]any{"scrapeFailureLogFile": "/var/log/scrape/failures.log"},
-			`scrapeFailureLogFile: "/var/log/scrape/failures.log" is in /var/log/scrape, where no volume is known to be mounted`},
 		// Prometheus opens an absolute path as written, with O_CREAT, which
 		// the kernel refuses on a trailing slash (fs/namei.c:3620-3622 at
 		// Linux v6.12) and on a directory (:3750-3751), which /, "." and ".."
@@ -666,8 +662,6 @@ func prometheusRefusals(notA string) []struct {
 		{"a log file at the author's configMap mount of the file", map[string]any{"queryLogFile": "/logs/query.log",
 			"volumes": []any{map[string]any{"name": "logs", "configMap": map[string]any{"name": "logs"}}}, "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/logs/query.log", "subPath": "query.log"}}},
 			`queryLogFile: "/logs/query.log" is the read-only mount at /logs/query.log in the prometheus container, so Prometheus cannot write the file; mount a writable volume there, or name a standard stream`},
-		{"a log file in the operator's log directory without its volume", map[string]any{"queryLogFile": "/var/log/prometheus/query.log"},
-			`queryLogFile: "/var/log/prometheus/query.log" is in /var/log/prometheus, where no volume is known to be mounted`},
 		// A hostPath of type File or FileOrCreate is a regular file, the
 		// kubelet checks following links (pkg/volume/hostpath/host_path.go:488-493
 		// at Kubernetes v1.37.1), so mounted readOnly at the file itself it
@@ -787,8 +781,52 @@ func prometheusRefusals(notA string) []struct {
 			`queryLogFile: "/etc/prometheus/web_config/secret/web-ca-ca/q.log" is in /etc/prometheus/web_config/secret/web-ca-ca, under the read-only mount at /etc/prometheus/web_config/secret/web-ca-ca`},
 		// Only $( a name ) is a reference the config reloader expands; any
 		// other $( reaches Prometheus as written.
-		{"a log file with a $( that is no reference", map[string]any{"queryLogFile": "/logs/$(/query.log"},
-			`queryLogFile: "/logs/$(/query.log" is in /logs/$(, where no volume is known to be mounted`},
+		{"a log file with a $( that is no reference", map[string]any{"queryLogFile": "/logs/$(/query.log",
+			"volumes":      []any{map[string]any{"name": "cfg", "configMap": map[string]any{"name": "cfg"}}},
+			"volumeMounts": []any{map[string]any{"name": "cfg", "mountPath": "/logs"}}},
+			`queryLogFile: "/logs/$(/query.log" is in /logs/$(, under the read-only mount at /logs in the prometheus container`},
+		// Under /dev, a mount of the pod's is judged as anywhere else: a
+		// configMap is read-only, an emptyDir a directory at its path.
+		{"a query log file under a configMap at a device path", map[string]any{"queryLogFile": "/dev/logs/query.log",
+			"volumes":      []any{map[string]any{"name": "cfg", "configMap": map[string]any{"name": "cfg"}}},
+			"volumeMounts": []any{map[string]any{"name": "cfg", "mountPath": "/dev/logs"}}},
+			`queryLogFile: "/dev/logs/query.log" is in /dev/logs, under the read-only mount at /dev/logs in the prometheus container`},
+		{"a scrape failure log file under a configMap at a device path", map[string]any{"scrapeFailureLogFile": "/dev/logs/failures.log",
+			"volumes":      []any{map[string]any{"name": "cfg", "configMap": map[string]any{"name": "cfg"}}},
+			"volumeMounts": []any{map[string]any{"name": "cfg", "mountPath": "/dev/logs"}}},
+			`scrapeFailureLogFile: "/dev/logs/failures.log" is in /dev/logs, under the read-only mount at /dev/logs in the prometheus container`},
+		{"a query log file at an emptyDir at a device path", map[string]any{"queryLogFile": "/dev/data",
+			"volumes": []any{map[string]any{"name": "v", "emptyDir": map[string]any{}}}, "volumeMounts": []any{map[string]any{"name": "v", "mountPath": "/dev/data"}}},
+			`queryLogFile: "/dev/data" is the path of the emptyDir volume v mounted as a directory in the prometheus container`},
+		{"a scrape failure log file at an emptyDir at a device path", map[string]any{"scrapeFailureLogFile": "/dev/data",
+			"volumes": []any{map[string]any{"name": "v", "emptyDir": map[string]any{}}}, "volumeMounts": []any{map[string]any{"name": "v", "mountPath": "/dev/data"}}},
+			`scrapeFailureLogFile: "/dev/data" is the path of the emptyDir volume v mounted as a directory in the prometheus container`},
+		// The container runtime mounts each mount of the pod through the
+		// directories above it, made before it is (fs/namei.c:2418-2433 at
+		// Linux v6.12), so a log file at one is a directory wherever the
+		// container runs, whatever the root filesystem.
+		{"a log file at a directory above the operator's mounts", map[string]any{"queryLogFile": "/etc"},
+			`queryLogFile: "/etc" is a directory above the mount at /etc/prometheus/config_out in the prometheus container, which the container runtime mounts through it, so Prometheus cannot open it as a file`},
+		{"a log file at the operator's configuration directory", map[string]any{"queryLogFile": "/etc/prometheus"},
+			`queryLogFile: "/etc/prometheus" is a directory above the mount at /etc/prometheus/config_out in the prometheus container`},
+		{"a scrape failure log file at the operator's configuration directory", map[string]any{"scrapeFailureLogFile": "/etc/prometheus"},
+			`scrapeFailureLogFile: "/etc/prometheus" is a directory above the mount at /etc/prometheus/config_out in the prometheus container`},
+		{"a log file at the operator's configuration directory on a writable root filesystem", map[string]any{"queryLogFile": "/etc/prometheus",
+			"containers": []any{map[string]any{"name": "prometheus", "securityContext": map[string]any{"readOnlyRootFilesystem": false}}}},
+			`queryLogFile: "/etc/prometheus" is a directory above the mount at /etc/prometheus/config_out in the prometheus container`},
+		// A mount of the author's at / is made before the operator's, so
+		// these still go through /etc/prometheus.
+		{"a log file at the operator's configuration directory under the author's mount at the root", map[string]any{"queryLogFile": "/etc/prometheus",
+			"volumes": []any{map[string]any{"name": "root", "emptyDir": map[string]any{}}}, "volumeMounts": []any{map[string]any{"name": "root", "mountPath": "/"}}},
+			`queryLogFile: "/etc/prometheus" is a directory above the mount at /etc/prometheus/config_out in the prometheus container`},
+		{"a log file at the directory above the operator's log-file volume", map[string]any{"queryLogFile": "/var/log", "scrapeFailureLogFile": "scrape.log"},
+			`queryLogFile: "/var/log" is a directory above the mount at /var/log/prometheus in the prometheus container`},
+		{"a log file at the directory above the operator's log-file volume on a writable root filesystem", map[string]any{"queryLogFile": "/var/log", "scrapeFailureLogFile": "scrape.log",
+			"containers": []any{map[string]any{"name": "prometheus", "securityContext": map[string]any{"readOnlyRootFilesystem": false}}}},
+			`queryLogFile: "/var/log" is a directory above the mount at /var/log/prometheus in the prometheus container`},
+		{"a log file at a directory above the author's mount", map[string]any{"queryLogFile": "/data",
+			"volumes": []any{map[string]any{"name": "v", "emptyDir": map[string]any{}}}, "volumeMounts": []any{map[string]any{"name": "v", "mountPath": "/data/x"}}},
+			`queryLogFile: "/data" is a directory above the mount at /data/x in the prometheus container`},
 		// The API refuses two mounts at one path written alike.
 		{"two mounts at one path", map[string]any{"volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}},
 			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/scratch"}, map[string]any{"name": "extra", "mountPath": "/scratch", "subPath": "a"}}},
@@ -1221,8 +1259,39 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 		"a query log file named alone at a writable mount of the file": {"queryLogFile": "query.log", "scrapeFailureLogFile": "/dev/stdout",
 			"volumes": extra("logs"), "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/var/log/prometheus/query.log", "subPath": "query.log"}}},
 		"a log file in the operator's log directory": {"queryLogFile": "/var/log/prometheus/query.log", "scrapeFailureLogFile": "scrape.log"},
-		"a log file in a device directory":           {"queryLogFile": "/dev/fd/1"},
-		"a log file in a process directory":          {"queryLogFile": "/proc/self/fd/1"},
+		// No mount covers these, and the root filesystem's content is not
+		// judged: the stock image builds on busybox:latest, unpinned, and an
+		// authored image's content is not derivable; it may hold a link to a
+		// writable volume, and containerd mounts an image VOLUME writable.
+		"a query log file in a directory without a mount":                          {"queryLogFile": "/var/log/query.log"},
+		"a query log file in /etc without a mount":                                 {"queryLogFile": "/etc/query.log"},
+		"a scrape failure log file in a directory without a mount":                 {"scrapeFailureLogFile": "/var/log/scrape/failures.log"},
+		"a log file in the operator's log directory without its volume":            {"queryLogFile": "/var/log/prometheus/query.log"},
+		"a query log file beside a scrape failure log file in a directory":         {"queryLogFile": "query.log", "scrapeFailureLogFile": "/var/log/scrape/failures.log"},
+		"a log file with a $( that is no reference in a directory without a mount": {"queryLogFile": "/logs/$(/query.log"},
+		// A ".." element may follow a link, so the cleaned path need not be
+		// the file opened (fs/namei.c:2418-2426 at Linux v6.12).
+		"a log file with a .. element under the operator's log directory":     {"queryLogFile": "/var/log/prometheus/../query.log"},
+		"a log file with a .. element cleaned onto a directory above a mount": {"queryLogFile": "/tmp/../etc/prometheus"},
+		// No mount the container runtime or the kubelet adds is modelled:
+		// each is mounted only under conditions the kind does not see, or a
+		// mount of the pod's may hide it.
+		"a log file at the process filesystem":          {"queryLogFile": "/proc"},
+		"a log file at the device directory":            {"queryLogFile": "/dev"},
+		"a log file at the system filesystem":           {"queryLogFile": "/sys"},
+		"a log file under the system filesystem":        {"queryLogFile": "/sys/x"},
+		"a log file at the cgroup filesystem":           {"queryLogFile": "/sys/fs/cgroup"},
+		"a log file at the pseudo-terminal directory":   {"queryLogFile": "/dev/pts"},
+		"a log file under the termination message":      {"queryLogFile": "/dev/termination-log/x"},
+		"a log file under the hosts file":               {"queryLogFile": "/etc/hosts/x"},
+		"a log file at the resolver configuration":      {"queryLogFile": "/etc/resolv.conf"},
+		"a log file at the mount table link":            {"queryLogFile": "/etc/mtab"},
+		"a log file at the service account token":       {"queryLogFile": "/var/run/secrets/kubernetes.io/serviceaccount"},
+		"a log file in the service account token":       {"queryLogFile": "/var/run/secrets/kubernetes.io/serviceaccount/query.log"},
+		"a log file above the service account token":    {"queryLogFile": "/var/run/secrets"},
+		"a log file at shared memory under a pod mount": {"queryLogFile": "/dev/shm", "volumes": extra("dev"), "volumeMounts": []any{map[string]any{"name": "dev", "mountPath": "/dev"}}},
+		"a log file in a device directory":              {"queryLogFile": "/dev/fd/1"},
+		"a log file in a process directory":             {"queryLogFile": "/proc/self/fd/1"},
 		// Prometheus joins a relative path with a directory to the
 		// configuration's directory, config_out, from v2.21.0 for a
 		// queryLogFile and at every version for a scrapeFailureLogFile, and

@@ -1999,8 +1999,8 @@ and by scope, whatever component or trait emits it.
     and `mountPath`, which the operator drops; an entry of either at the path of an
     earlier entry of the same field written alike (a path written otherwise is admitted,
     as on `alertmanager`, go-kure/launcher#1050); a `queryLogFile` named without a directory beside a `scrapeFailureLogFile`
-    named with one, where the operator mounts no volume for it, unless the file there
-    is writable all the same; a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot
+    named with one, where the operator mounts no volume for it, only where a mount
+    covers the file there read-only or binds a regular file; a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot
     write, judged at what runs at the version named (an absolute path whose last element
     as written, before it is cleaned, is empty, `.` or `..`, `/` included, is refused
     before anything else, since Prometheus opens it as written with `O_CREAT`, which the
@@ -2008,7 +2008,11 @@ and by scope, whatever component or trait emits it.
     `/var/log/prometheus`; a relative path with a directory, which Prometheus joins to
     `/etc/prometheus/config_out`, an emptyDir an `initContainer` may fill with a link to a
     writable volume, is not judged; a path with a reference `$(NAME)`, which the config reloader
-    expands, is not judged, any other `$(` is), where the mount covering the
+    expands, is not judged, any other `$(` is; an absolute path with a `..` element
+    before its last, which follows a link on the way before it goes up, is not judged;
+    a path at a directory above a mount of the prometheus container, as `/etc/prometheus`,
+    is refused, as the container runtime mounts the deeper mount through it, making it a
+    directory, go-kure/launcher#1055), where the mount covering the
     file most closely, at the file itself (a `subPath` mount of the file), at its
     directory or above, decides: `/prometheus`, the operator's log-file volume and
     `config_out`, an emptyDir, are writable; its certificate, secret, configMap,
@@ -2043,12 +2047,15 @@ and by scope, whatever component or trait emits it.
     volumes, whose names are hashed, count as
     writable, so the check refuses only where it knows Prometheus cannot open the file
     for writing: the file or its directory is read-only, its directory is a regular file,
-    its path is a directory mounted there, or it is absolute and ends in a slash,
-    `/.` or `/..`, judged as written before it is cleaned;
-    where no mount covers it, the read-only root
-    filesystem refuses unless a prometheus patch sets `readOnlyRootFilesystem: false`, and
-    a file in `/dev`, `/proc` or a directory under them (as `/dev/stdout`) is not
-    refused unless it ends in a slash, `/.` or `/..`, nor is a log file below the version it is read from, which the version gate
+    its path is a directory mounted there or above a mount, or it is absolute and ends in
+    a slash, `/.` or `/..`, judged as written before it is cleaned;
+    where no mount covers it, it is on the image's root filesystem, whose content is not
+    judged, since the stock image builds on `busybox:latest`, unpinned, and an authored
+    image's content is not derivable (go-kure/launcher#1055); no mount the container
+    runtime or the kubelet adds is modelled, as `/dev`, `/proc`, `/sys`, the service
+    account token, `/etc/hosts` or `/etc/resolv.conf`, so a path under `/dev` or `/proc`
+    (as `/dev/stdout`) is judged by the pod's mounts alone, like any other; nor is a log
+    file below the version it is read from judged, which the version gate
     refuses instead; a negative request or limit; and a
     name whose data volume, third rule ConfigMap volume `prometheus-<name>-rulefiles-2`
     or last pod hostname of the last shard is not a DNS-1123 label (no dot, at most 40

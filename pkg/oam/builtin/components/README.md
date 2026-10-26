@@ -5013,11 +5013,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     relative path and its absolute form), CRI-O makes only one of them
     (go-kure/launcher#1050).
   - a `queryLogFile` named without a directory beside a
-    `scrapeFailureLogFile` named with one: the operator writes the query log
-    under `/var/log/prometheus` but adds the `log-file` volume there only for
-    the scrape failure log file, on a read-only root filesystem
-    (server/statefulset.go:510, :537; common.go:334-347), unless the file
-    there is writable all the same, judged as in the next entry.
+    `scrapeFailureLogFile` named with one, where the mount that covers
+    `/var/log/prometheus/<name>` most closely is read-only or binds a
+    regular file: the operator writes the query log under
+    `/var/log/prometheus` but adds the `log-file` volume there only for the
+    scrape failure log file (server/statefulset.go:510, :537;
+    common.go:334-347). Where no mount covers it, the file is on the root
+    filesystem, which is not judged (next entry).
   - a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot write. This
     check follows what runs at the version named, unlike the reserved paths
     above.
@@ -5047,6 +5049,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       does not see (`--config-envsubst-file`, common.go:378; Thanos
       `pkg/reloader/reloader.go:703`). Any other `$(` reaches Prometheus as
       written and is judged so.
+    - An absolute path with a `..` element before its last, as
+      `/var/log/prometheus/../query.log`, is not judged: the kernel follows a
+      link on the way before it takes the `..` (`fs/namei.c:2418-2426`), so
+      the cleaned path may name another file than the one opened.
+    - A path at a directory above a mount of the `prometheus` container, the
+      operator's or the author's, as `/etc/prometheus`, or `/var/log` where
+      the operator mounts its `log-file` volume, is refused
+      (go-kure/launcher#1055): the container runtime mounts the deeper mount
+      through it, so it is a directory wherever the container runs
+      (`fs/namei.c:2418-2433`), and Prometheus cannot open it as a file
+      (`:3750-3751`).
 
     Which mount decides: the one that covers the file most closely, at the
     file itself (as a `subPath` mount of an existing file, which Prometheus
@@ -5141,16 +5154,26 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     admit of unseen content may). The check refuses only where it knows
     Prometheus cannot open the file for writing: the file or its directory
     is read-only, its directory is a regular file, its path is a directory
-    mounted there, or it is absolute and ends in a slash, `/.` or `/..`. A directory below a writable mount counts as
+    mounted there or above a mount, or it is absolute and ends in a slash,
+    `/.` or `/..`. A directory below a writable mount counts as
     writable, since it may exist on the volume or be made by an init
     container: `/prometheus/wal` is made by Prometheus opening its TSDB
     before its first configuration load opens the query log
     (`cmd/prometheus/main.go:1438` at v3.14.0). Where no mount covers the
-    file, the root filesystem decides, which the operator makes read-only
-    unless a patch of the
-    `prometheus` container sets `securityContext.readOnlyRootFilesystem` to
-    `false`. A file in `/dev`, `/proc` or a directory under them, as
-    `/dev/stdout`, is not refused unless it ends in a slash, `/.` or `/..`. Nor here, or in the previous entry, is a
+    file, it is on the image's root filesystem, whose content is not judged
+    (go-kure/launcher#1055): the stock image builds on `busybox:latest`,
+    unpinned, and an authored image's content is not derivable; a link in
+    it may lead to a writable volume, which Prometheus follows, and
+    containerd mounts an image `VOLUME` writable. The operator makes the
+    root filesystem read-only (server/statefulset.go:349), so such a file
+    may still fail at runtime. No mount the container runtime or the
+    kubelet adds is modelled, as `/dev`, `/proc`, `/sys`, the service
+    account token, `/etc/hosts`, `/etc/resolv.conf` or the `/etc/mtab`
+    link: each is made only under conditions the kind does not see, or may
+    be hidden by a mount of the pod's. So a path under `/dev` or `/proc`,
+    as `/dev/stdout`, is judged by the pod's mounts alone, like any other:
+    a read-only or directory mount the pod makes there is refused as
+    anywhere. Not judged here, or in the previous entry, is a
     field the operator drops at the version it compares, `queryLogFile`
     below Prometheus v2.16.0 and `scrapeFailureLogFile` below v2.55.0: the
     version gate refuses it instead. Where the read-only mount that decides
