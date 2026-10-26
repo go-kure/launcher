@@ -1942,7 +1942,9 @@ and by scope, whatever component or trait emits it.
   Prometheus 3.0.0, a relabeling rule's `targetLabel` that is not a legacy label name
   (`[a-zA-Z_][a-zA-Z0-9_]*`), in an Alertmanager endpoint's or a scrape class's lists, is
   refused for the actions whose target the operator checks, as it refuses the object at
-  reconcile; from 3.0.0 it judges names by the UTF-8 scheme (go-kure/launcher#1018). Unlike on `alertmanager`, an image named without a `version`, or a `version` the
+  reconcile; from 3.0.0 it judges names by the UTF-8 scheme (go-kure/launcher#1018). So is
+  a `labelmap` rule's `replacement` there that is not such a name with `$var` and `${var}`
+  references allowed (go-kure/launcher#1038). Unlike on `alertmanager`, an image named without a `version`, or a `version` the
   operator cannot parse, is not refused.
   - **No field is renamed.** The spec has no top-level `labels` or `annotations`, so
     `externalLabels` keeps its upstream name; it is not checked as Kubernetes labels are.

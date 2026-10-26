@@ -1,6 +1,7 @@
 package components
 
 import (
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -667,7 +668,7 @@ func validatePrometheusVersion(spec *monitoringv1.PrometheusSpec) error {
 		if err := refuseVersionMisses(misses, authoredRange(spec, gates, prometheusVersionCeilings), at, "version"); err != nil {
 			return err
 		}
-		if err := refusePromRelabelTargetLabels(spec, v, at); err != nil {
+		if err := refusePromRelabelLabelNames(spec, v, at); err != nil {
 			return err
 		}
 	}
@@ -704,12 +705,23 @@ const prometheusUTF8LabelNamesMinimum = "3.0.0"
 // validator.go); it reads an empty action as replace.
 var promTargetLabelActions = []string{"replace", "hashmod", "lowercase", "uppercase", "keepequal", "dropequal"}
 
-// refusePromRelabelTargetLabels refuses, at a version v below
-// prometheusUTF8LabelNamesMinimum, named at, the targetLabel of a rule of a
-// relabeling list the operator validates (promRelabelLists) that is not a
-// legacy label name, for an action whose targetLabel it checks: the operator
-// refuses the object at reconcile. An empty targetLabel is not judged here.
-func refusePromRelabelTargetLabels(spec *monitoringv1.PrometheusSpec, v semver.Version, at string) error {
+// promRelabelLabelmapLegacy is the pattern the operator holds the replacement
+// of a labelmap rule to below prometheusUTF8LabelNamesMinimum: a legacy label
+// name in which $var and ${var} references may stand for any part
+// (relabelTargetLegacy and (*LabelConfigValidator).isValidLabelNameWithRegexVar,
+// pkg/prometheus/validation/validator.go at prometheus-operator v0.94.1).
+var promRelabelLabelmapLegacy = regexp.MustCompile(`^(?:(?:[a-zA-Z_]|\$(?:\{\w+\}|\w+))+\w*)+$`)
+
+// refusePromRelabelLabelNames refuses, at a version v below
+// prometheusUTF8LabelNamesMinimum, named at, a label name of a rule of a
+// relabeling list the operator validates (promRelabelLists) outside the
+// legacy scheme: the targetLabel of an action whose targetLabel it checks,
+// not a legacy label name (go-kure/launcher#1018), or the replacement of a
+// labelmap rule, not a legacy label name with references
+// (promRelabelLabelmapLegacy; go-kure/launcher#1038). The operator refuses
+// the object at reconcile. An empty targetLabel is not judged here, nor an
+// unset replacement, which the operator does not check.
+func refusePromRelabelLabelNames(spec *monitoringv1.PrometheusSpec, v semver.Version, at string) error {
 	if v.GTE(semver.MustParse(prometheusUTF8LabelNamesMinimum)) {
 		return nil
 	}
@@ -720,12 +732,15 @@ func refusePromRelabelTargetLabels(spec *monitoringv1.PrometheusSpec, v semver.V
 				if action == "" {
 					action = "replace"
 				}
-				if rc.TargetLabel == "" || !slices.Contains(promTargetLabelActions, action) || model.LegacyValidation.IsValidLabelName(rc.TargetLabel) {
-					continue
+				rule := strings.Replace(l.path, "[]", "["+strconv.Itoa(i)+"]", 1) + "[" + strconv.Itoa(j) + "]"
+				if rc.TargetLabel != "" && slices.Contains(promTargetLabelActions, action) && !model.LegacyValidation.IsValidLabelName(rc.TargetLabel) {
+					return errors.Errorf("%s.targetLabel: %q is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*), the only names the Prometheus operator accepts for a %s action below Prometheus %s; at %s it %s; name a legacy label, or set version to %s or later",
+						rule, rc.TargetLabel, action, prometheusUTF8LabelNamesMinimum, at, promRefused, prometheusUTF8LabelNamesMinimum)
 				}
-				path := strings.Replace(l.path, "[]", "["+strconv.Itoa(i)+"]", 1) + "[" + strconv.Itoa(j) + "].targetLabel"
-				return errors.Errorf("%s: %q is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*), the only names the Prometheus operator accepts for a %s action below Prometheus %s; at %s it %s; name a legacy label, or set version to %s or later",
-					path, rc.TargetLabel, action, prometheusUTF8LabelNamesMinimum, at, promRefused, prometheusUTF8LabelNamesMinimum)
+				if action == "labelmap" && rc.Replacement != nil && !promRelabelLabelmapLegacy.MatchString(*rc.Replacement) {
+					return errors.Errorf("%s.replacement: %q is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*) in which $var and ${var} references may stand for any part, the only replacements the Prometheus operator accepts for a labelmap action below Prometheus %s; at %s it %s; name such a replacement, or set version to %s or later",
+						rule, *rc.Replacement, prometheusUTF8LabelNamesMinimum, at, promRefused, prometheusUTF8LabelNamesMinimum)
+				}
 			}
 		}
 	}
