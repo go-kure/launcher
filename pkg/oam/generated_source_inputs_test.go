@@ -156,7 +156,7 @@ func TestGeneratedSource_LateMakerRefused(t *testing.T) {
 	t.Run("after a Flux consumer", func(t *testing.T) {
 		early := Component{Name: "early", Type: "flux-consumer"}
 		_, err := sourceInputTransform(t, true, map[string][]string{"maker": {"early"}}, maker, early)
-		for _, want := range []string{`ocirepository "app-source"`, `Secret "x"`, `component "maker"`, `component "early", another consumer`} {
+		for _, want := range []string{`ocirepository "app-source"`, `Secret "x"`, `component "maker"`, `component "early", another consumer`, `the group of "maker", which makes it, for "early"`} {
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("error = %v, want it to contain %s", err, want)
 			}

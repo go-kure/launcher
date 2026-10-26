@@ -258,9 +258,9 @@ func checkGeneratedSourceInputOrder(order *componentOrder, sources map[*stack.Ap
 				}
 				s := source[r]
 				return &TransformError{Message: fmt.Sprintf(
-					"%s %q reads %s %q, which a trait of component %q makes in a later group than component %q, another consumer of %q: %q waits for the source, the source for the %s, and the %s's group for %q, so the delivery never converges; put the trait on a consumer in the earliest group, or provide the %s in the Flux namespace %q",
+					"%s %q reads %s %q, which a trait of component %q makes in a later group than component %q, another consumer of %q: %q waits for the source, the source for the %s, and the group of %q, which makes it, for %q, so the delivery never converges; put the trait on a consumer in the earliest group, or provide the %s in the Flux namespace %q",
 					s.component.Type, s.component.Name, kind, name, maker.name, first.name, s.component.Name,
-					first.name, kind, kind, first.name, kind, ns)}
+					first.name, kind, maker.name, first.name, kind, ns)}
 			}
 		}
 	}
