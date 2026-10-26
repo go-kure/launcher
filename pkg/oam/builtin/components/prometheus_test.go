@@ -694,6 +694,10 @@ func prometheusRefusals(notA string) []struct {
 			`queryLogFile: "logs/query.log", which Prometheus joins to the directory of its configuration, /etc/prometheus/config_out, as /etc/prometheus/config_out/logs/query.log, is in /etc/prometheus/config_out/logs, under the read-only mount at /etc/prometheus/config_out in the prometheus container`},
 		{"a scrape failure log in a relative directory", map[string]any{"scrapeFailureLogFile": "logs/scrape.log"},
 			`scrapeFailureLogFile: "logs/scrape.log", which Prometheus joins to the directory of its configuration, /etc/prometheus/config_out, as /etc/prometheus/config_out/logs/scrape.log, is in /etc/prometheus/config_out/logs`},
+		// Unlike a queryLogFile, one is joined at a version that does not
+		// parse too: every version that reads it joins it.
+		{"a scrape failure log in a relative directory at a version that does not parse", map[string]any{"version": "not-a-version", "scrapeFailureLogFile": "logs/scrape.log"},
+			`scrapeFailureLogFile: "logs/scrape.log", which Prometheus joins to the directory of its configuration, /etc/prometheus/config_out, as /etc/prometheus/config_out/logs/scrape.log, is in /etc/prometheus/config_out/logs`},
 		{"a log file in a relative directory at v2.21.0", map[string]any{"version": "v2.21.0", "queryLogFile": "logs/query.log"},
 			`queryLogFile: "logs/query.log", which Prometheus joins to the directory of its configuration`},
 		{"a log file in a relative directory on a writable root filesystem", map[string]any{"queryLogFile": "logs/query.log",
@@ -1121,7 +1125,8 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 		// Prometheus joins a relative path to the configuration's directory
 		// only from v2.21.0, and reads it from its working directory before,
 		// which an image or a patch may change, so the file is not judged.
-		"a log file in a relative directory below v2.21.0": {"version": "v2.20.0", "queryLogFile": "logs/query.log"},
+		"a log file in a relative directory below v2.21.0":                    {"version": "v2.20.0", "queryLogFile": "logs/query.log"},
+		"a log file in a relative directory at a version that does not parse": {"version": "not-a-version", "queryLogFile": "logs/query.log"},
 		// A patch's args replace the operator's, so --config.file, and the
 		// directory a relative path is joined to, may be another.
 		"a log file in a relative directory with a patch setting args": {"queryLogFile": "../query.log",
