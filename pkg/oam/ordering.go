@@ -253,8 +253,8 @@ func waitingDeps(entries []componentEntry, deps map[string][]string) map[string]
 					continue
 				}
 				if !cloned {
-					out = make(map[string][]string, len(deps)+1)
-					maps.Copy(out, deps)
+					// deps is not nil here: deps[as] held d.
+					out = maps.Clone(deps)
 					cloned = true
 				}
 				out[name] = append(slices.Clip(out[name]), d)
