@@ -10838,8 +10838,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     Cluster waits for the store: the store is in a group before the Cluster's,
     with the placements and the bundle traits the members get, and waits for
     what an authored rule makes the component wait for, as all of its objects
-    do. Where it does not, nothing is ordered, and the store is applied with
-    the Cluster.
+    do. It waits for the components the rules name, not for the members
+    another component's lowering adds for them (another `postgresql`
+    component's Pooler and Databases), which this lowering does not see
+    (go-kure/launcher#1041); the Cluster waits for those. Where it does not,
+    nothing is ordered, and the store is applied with the Cluster.
   **Behavior-changing**: the former `bootstrap.recovery` is refused, whatever
   its value (`bootstrap.recovery: moved to recovery (…)`), and so is an
   external cluster's in-tree `barmanObjectStore`

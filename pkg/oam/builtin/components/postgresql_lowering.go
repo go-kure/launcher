@@ -395,7 +395,13 @@ func postgresqlDependencyRules(doc *oam.Application, cluster string, members, pr
 	for _, m := range members {
 		rules = append(rules, map[string]any{"component": m, "dependsOn": []any{cluster}})
 	}
-	if waitsFor := postgresqlAuthoredPrerequisites(doc, cluster); len(waitsFor) > 0 {
+	// An authored rule making the component wait for its own recovery store
+	// says what the Cluster's order already does; the store does not wait for
+	// itself.
+	waitsFor := slices.DeleteFunc(postgresqlAuthoredPrerequisites(doc, cluster), func(d any) bool {
+		return slices.Contains(prerequisites, d.(string))
+	})
+	if len(waitsFor) > 0 {
 		for _, p := range prerequisites {
 			rules = append(rules, map[string]any{"component": p, "dependsOn": slices.Clone(waitsFor)})
 		}

@@ -106,6 +106,19 @@ func TestBuild_PostgresqlRecoveryStoreOrdering(t *testing.T) {
 			t.Errorf("groups = %v, want %v", got, want)
 		}
 	})
+	// A rule making db wait for its own store says what the order already
+	// does: the store does not wait for itself.
+	t.Run("db waits for its own store", func(t *testing.T) {
+		const policies = postgresqlOrderPolicy + "          - component: db\n            dependsOn: [db-recovery-source]\n"
+		cluster, _, err := transformWithBuiltins(t, postgresqlRecoveryApp(traits, "", policies))
+		if err != nil {
+			t.Fatalf("transforming: %v", err)
+		}
+		want := []string{"shop-00: db-recovery-source", "shop-01: db", "shop-02: db-pooler", "shop-03: api"}
+		if got := groupNames(t, cluster); !slices.Equal(got, want) {
+			t.Errorf("groups = %v, want %v", got, want)
+		}
+	})
 	// A placement of db places the store too: with plugin in the tier before,
 	// the store waits for it, which no dependency rule says.
 	t.Run("a placement after another tier", func(t *testing.T) {
