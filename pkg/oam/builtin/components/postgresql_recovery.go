@@ -415,16 +415,18 @@ func (f postgresqlFolder) same(o postgresqlFolder) bool {
 // backup folder (backup.objectStore and backup.serverName, else the name of
 // the Cluster, cluster) with the recovery source's, read from the inline
 // store or from the store objectStoreName names when the document emits it:
-// this component's backup store, another postgresql component's, or a
-// cnpg-objectstore component. The plugin checks the destination before it
-// archives (CheckWalArchiveDestination); a store outside the document is left
-// to that check.
+// this component's backup store, another postgresql component's backup store
+// or inline recovery store, or a cnpg-objectstore component. The plugin
+// checks the destination before it archives (CheckWalArchiveDestination); a
+// store outside the document is left to that check.
 //
 // Another component's store is known by the name its author wrote (its
-// objectStoreObjectName or objectName), else by its component name where no
-// Naming hook is set. Where one is, an unauthored name may be the hook's
-// answer, which that component's lowering asks for and this one does not
-// see: such a store is not matched, and is left to the plugin's check.
+// objectStoreObjectName or objectName), else, where no Naming hook is set, by
+// its default name: the component's for a backup store or a
+// cnpg-objectstore, "<component>-recovery-source" for an inline recovery
+// store. Where a hook is set, an unauthored name may be the hook's answer,
+// which that component's lowering asks for and this one does not see: such a
+// store is not matched, and is left to the plugin's check.
 func postgresqlArchivesIntoSource(comp *oam.Component, lctx oam.LoweringContext, c *PostgresqlConfig, cluster string) error {
 	if c.Backup == nil || c.Recovery == nil {
 		return nil
@@ -458,9 +460,13 @@ func postgresqlArchivesIntoSource(comp *oam.Component, lctx oam.LoweringContext,
 // postgresqlDocumentStore returns the configuration of the ObjectStore named
 // name that a component of doc other than self emits, or nil: a postgresql
 // component's backup store or a cnpg-objectstore component, each known by its
-// authored name, else by its component name unless hooked (a Naming hook is
-// set, whose answer for it is not known here). A component that does not
-// parse is skipped: it is refused when it is lowered.
+// authored name, else by its component name, or a postgresql component's
+// inline recovery store, known by its default name
+// ("<component>-recovery-source", oam.GeneratedName); either unauthored name
+// only unless hooked (a Naming hook is set, whose answer for it is not known
+// here). A store that does not parse is skipped, each store of a postgresql
+// component on its own (one whose backup does not parse can still match by its
+// recovery store): the component is refused when it is lowered.
 func postgresqlDocumentStore(doc *oam.Application, self, name string, hooked bool) *barmanapi.BarmanObjectStoreConfiguration {
 	if doc == nil {
 		return nil
@@ -471,17 +477,24 @@ func postgresqlDocumentStore(doc *oam.Application, self, name string, hooked boo
 		}
 		switch other.Type {
 		case "postgresql":
-			backup, err := parsePostgresqlBackup(other.Properties)
-			if err != nil || backup == nil {
+			if backup, err := parsePostgresqlBackup(other.Properties); err == nil && backup != nil {
+				raw, _ := other.Properties["backup"].(map[string]any)
+				authored, _, err := parseRawStringField(raw, postgresqlObjectStoreNameProperty, "")
+				if err == nil && postgresqlKnownStoreName(other.Name, authored, hooked) == name {
+					return &backup.ObjectStore
+				}
+			}
+			// Its inline recovery store has no authored name: it is known by
+			// its default one (postgresqlRecoveryStoreMember) unless hooked.
+			if hooked {
 				continue
 			}
-			raw, _ := other.Properties["backup"].(map[string]any)
-			authored, _, err := parseRawStringField(raw, postgresqlObjectStoreNameProperty, "")
-			if err != nil {
+			recovery, err := parsePostgresqlRecovery(other.Properties)
+			if err != nil || recovery == nil || recovery.ObjectStore == nil {
 				continue
 			}
-			if postgresqlKnownStoreName(other.Name, authored, hooked) == name {
-				return &backup.ObjectStore
+			if inline, err := oam.GeneratedName(other.Name, postgresqlRecoverySourceSuffix); err == nil && inline == name {
+				return recovery.ObjectStore
 			}
 		case "cnpg-objectstore":
 			authored, _ := other.Properties[oam.ObjectNameProperty].(string)

@@ -93,6 +93,35 @@ func TestLoweringResolveName_Order(t *testing.T) {
 	})
 }
 
+// TestGeneratedName_IsResolveNamesDefault: GeneratedName is the name
+// ResolveName gives where no name is authored and no hook is set, a shortened
+// one included, and fails where ResolveName fails to build it.
+func TestGeneratedName_IsResolveNamesDefault(t *testing.T) {
+	const suffix = "recovery-source"
+	plain := NameSpec{Role: NameRolePostgresqlRecoveryObjectStore, Kind: schema.GroupKind{Group: "barmancloud.cnpg.io", Kind: "ObjectStore"}}
+	long := strings.Repeat(strings.Repeat("a", 59)+".", 3) + strings.Repeat("a", 60)
+	if len(long+"-"+suffix) <= ShortenLimitSubdomain {
+		t.Fatalf("the long base %q is not too long for the suffix", long)
+	}
+	for _, base := range []string{"db", long} {
+		lctx := LoweringContext{Namer: NewNameAllocator(), Component: &Component{Name: base}}
+		resolved, err := lctx.ResolveName(base, suffix, plain)
+		if err != nil {
+			t.Fatalf("ResolveName(%q): %v", base, err)
+		}
+		if got, err := GeneratedName(base, suffix); err != nil || got != resolved {
+			t.Errorf("GeneratedName(%q) = %q, %v; want %q", base, got, err, resolved)
+		}
+	}
+
+	lctx := LoweringContext{Namer: NewNameAllocator(), Component: &Component{Name: "db"}}
+	_, resolveErr := lctx.ResolveName("db_1", suffix, plain)
+	_, err := GeneratedName("db_1", suffix)
+	if resolveErr == nil || err == nil || err.Error() != resolveErr.Error() {
+		t.Errorf("GeneratedName error = %v, ResolveName error = %v; want the same refusal", err, resolveErr)
+	}
+}
+
 // NameRequest.Application is the name of the document the rule is lowering, as
 // it stands when the name is made: the document in the context, else the origin
 // document's, and the one a caller outside lowering names (ComponentEndpointsNamed)
