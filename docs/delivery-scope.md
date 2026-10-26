@@ -2027,8 +2027,9 @@ and by scope, whatever component or trait emits it.
     at a path written as an earlier one's is merged into it, replacing that mount's volume
     with its own; of mounts at one path written differently, one writable makes
     it writable); the web TLS credentials' volumes, whose names are hashed, count as
-    writable, so the check refuses only where it knows the file or its
-    directory is read-only; where no mount covers it, as a `queryLogFile` named alone
+    writable, so the check refuses only where it knows Prometheus cannot open the file
+    for writing: the file or its directory is read-only, its directory is a regular file,
+    or its path is a directory the operator mounts; where no mount covers it, as a `queryLogFile` named alone
     beside a `scrapeFailureLogFile` named with a directory, for which the operator mounts
     no volume, it is admitted, since the image, the operator's default included, may hold
     it on the read-only root filesystem as a link to a writable volume

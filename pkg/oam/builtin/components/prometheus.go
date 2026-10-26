@@ -501,8 +501,9 @@ func refusePrometheusExternalURL(value string) error {
 // validatePrometheusLogFiles refuses a queryLogFile or
 // scrapeFailureLogFile Prometheus cannot write in the prometheus container
 // (prometheusPathWritable): one whose closest covering mount, at the file
-// itself, at its directory or above, is read-only, in the pods of the
-// Prometheus named name. A file no mount covers is on the root filesystem,
+// itself, at its directory or above, is read-only or binds a regular file the
+// file would be created under, or one at the path of a directory the operator
+// mounts, in the pods of the Prometheus named name. A file no mount covers is on the root filesystem,
 // whose image may hold it as a link to a writable volume, so it is admitted;
 // that includes a queryLogFile named without a directory beside a
 // scrapeFailureLogFile named with one, for which the operator mounts no
