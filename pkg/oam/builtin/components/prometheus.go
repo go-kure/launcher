@@ -590,7 +590,8 @@ func prometheusLogFileUnresolved(file string) bool {
 const prometheusConfigOutDirectory = "/etc/prometheus/config_out"
 
 // prometheusMount is a mount of the prometheus container as the kubelet gets
-// it: its path, and whether a file can be created under it.
+// it: its path, and whether Prometheus can write at it: the file itself, or a
+// file created under it.
 type prometheusMount struct {
 	path     string
 	writable bool

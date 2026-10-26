@@ -500,9 +500,8 @@ func prometheusRefusals(notA string) []struct {
 		// (server/statefulset.go:510, :537; common.go:334-347).
 		{"a query log file beside a scrape failure log file in a directory", map[string]any{"queryLogFile": "query.log", "scrapeFailureLogFile": "/var/log/scrape/failures.log"},
 			`queryLogFile: "query.log" names no directory, so the Prometheus operator configures it under /var/log/prometheus, but beside scrapeFailureLogFile "/var/log/scrape/failures.log", which names one, it mounts no volume there`},
-		// A read-only mount there leaves Prometheus unable to open the file,
-		// and the operator's merge keeps readOnly where either mount sets it
-		// (pkg/k8s/merge.go:55).
+		// A read-only mount at the file itself decides before a writable mount
+		// at its directory.
 		{"a query log file named alone at a read-only mount of the file under a writable directory", map[string]any{"queryLogFile": "query.log", "scrapeFailureLogFile": "/dev/stdout",
 			"volumes":      []any{map[string]any{"name": "logs", "emptyDir": map[string]any{}}, map[string]any{"name": "cfg", "configMap": map[string]any{"name": "cfg"}}},
 			"volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/var/log/prometheus"}, map[string]any{"name": "cfg", "mountPath": "/var/log/prometheus/query.log", "subPath": "query.log"}}},
@@ -511,6 +510,9 @@ func prometheusRefusals(notA string) []struct {
 			"volumes":      []any{map[string]any{"name": "cfg", "configMap": map[string]any{"name": "cfg"}}},
 			"volumeMounts": []any{map[string]any{"name": "cfg", "mountPath": "/var/log/prometheus/query.log", "subPath": "query.log"}}},
 			`queryLogFile: "query.log" is the read-only mount at /var/log/prometheus/query.log in the prometheus container`},
+		// A read-only mount there leaves Prometheus unable to open the file,
+		// and the operator's merge keeps readOnly where either mount sets it
+		// (pkg/k8s/merge.go:55).
 		{"a query log file with a read-only mount at its directory", map[string]any{"queryLogFile": "query.log", "scrapeFailureLogFile": "/dev/stdout",
 			"volumes":      []any{map[string]any{"name": "logs", "emptyDir": map[string]any{}}},
 			"volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/var/log/prometheus", "readOnly": true}}},
@@ -997,7 +999,9 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 		"a query log file named alone below a writable mount": {"queryLogFile": "query.log", "scrapeFailureLogFile": "/dev/stdout",
 			"volumes": extra("logs"), "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/var/log"}}},
 		// Prometheus opens the file for appending, which needs no write to
-		// the directory, so a writable mount of the file itself admits.
+		// the directory, so a writable mount of the file itself admits. The
+		// kubelet makes a missing subPath a directory, so the file must
+		// already exist on the volume, or be made by an init container.
 		"a log file at a writable mount of the file in a directory without a mount": {"queryLogFile": "/logs/query.log",
 			"volumes": extra("logs"), "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/logs/query.log", "subPath": "query.log"}}},
 		"a query log file named alone at a writable mount of the file": {"queryLogFile": "query.log", "scrapeFailureLogFile": "/dev/stdout",
