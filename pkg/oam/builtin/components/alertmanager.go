@@ -153,7 +153,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"clusterTLS":                   object("clusterTLS: the mutual TLS configuration of the gossip protocol: server and client, both required. Refused where version is under v0.24.0, for which the operator mounts no cluster TLS configuration. A server or client the operator refuses is refused: a server without a certificate or a key, a client without a certificate, or either naming one twice." + decoded + "ClusterTLSConfig in its API reference."),
 		"alertmanagerConfiguration":    object("alertmanagerConfiguration: the Alertmanager configuration, taken from the AlertmanagerConfig object `name` names in the same namespace, with global parameters and notification templates; it takes precedence over configSecret. A template whose key an earlier one names is refused: the operator skips it. Experimental upstream. Every credential in it is the key of a Secret." + decoded + "AlertmanagerConfiguration in its API reference."),
 		"automountServiceAccountToken": flag("automountServiceAccountToken: whether a service account token is mounted into the pods."),
-		"enableFeatures": texts("enableFeatures: the Alertmanager feature flags to enable. Refused where version is under v0.27.0, which the operator does not pass them to. The operator joins them with \",\" and Alertmanager exits on an element it does not take, an empty one included, and on classic-mode with utf8-strict-mode: such a list is refused at version, unset the operator's default v0.34.0; above 0.34 no name is refused. A list of one empty element, which the operator passes as a flag without a value, is refused at any version. A list that refers to an environment variable, as $(AM_FEATURE), is left alone, as the kubelet expands it first. A reference runs from $( to the first ) after it, and one whose name no variable can have, an empty one or one with =, a character beyond ASCII or one not printable, as $(), is read as written, as are $( without its closing parenthesis and $$, read as $, as the kubelet passes them.",
+		"enableFeatures": texts("enableFeatures: the Alertmanager feature flags to enable. Refused where version is under v0.27.0, which the operator does not pass them to. The operator joins them with \",\" and Alertmanager exits on an element it does not take, an empty one included, and on classic-mode with utf8-strict-mode: such a list is refused at version, unset the operator's default v0.34.0; above 0.34 no name is refused. A list of one empty element, which the operator passes as a flag without a value, is refused at any version. An element that refers to an environment variable, as $(AM_FEATURE), is left alone, as the kubelet expands it first; the other elements are judged, and classic-mode with utf8-strict-mode is refused where neither refers to one. A reference runs from $( to the first ) after it, and one whose name no variable can have, an empty one or one with =, a character beyond ASCII or one not printable, as $(), is read as written, as are $( without its closing parenthesis and $$, read as $, as the kubelet passes them.",
 			"The name of one feature flag."),
 		"additionalArgs": objects("additionalArgs: further command-line arguments of the alertmanager container, passed as they are. An argument naming a flag the operator generates for the spec and version, or its negation with no-, is refused: the operator then fails to build the pods. Without a version, the flags of the operator's default version are held, which is every such flag. Beyond that name launcher does not read them: an argument can change what the fields above configure.",
 			"One argument: name (required) and value."),
@@ -641,20 +641,36 @@ func refuseUnusableAdvertiseAddress(spec *monitoringv1.AlertmanagerSpec) error {
 	return nil
 }
 
-// kubeletArgument returns an argument of a container as the kubelet passes it
-// to the process, and whether it refers to an environment variable, whose
-// value the kind cannot see: the kubelet reads $( to the first ) after it as a
-// reference and expands it, reads $$ as $, and leaves $( without a closing
+// kubeletPart is a run of an argument of a container as the kubelet passes it
+// to the process: text the process sees as it is, or, where ref is set, a
+// reference to an environment variable, whose value the kind cannot see, with
+// text the reference as written.
+type kubeletPart struct {
+	text string
+	ref  bool
+}
+
+// kubeletArgumentParts returns an argument of a container as the kubelet
+// passes it to the process, in order, each reference a part of its own and the
+// text between them one part: the kubelet reads $( to the first ) after it as
+// a reference and expands it, reads $$ as $, and leaves $( without a closing
 // parenthesis, and $ before any other rune, as written (Expand and
 // tryReadVariableName, third_party/forked/golang/expansion/expand.go:39-105 at
-// Kubernetes v1.37.1). A reference to a variable the container does not have
-// is left as written too (MappingFuncFor, expand.go:23-34 there). The kind
-// cannot tell which names the container has, as envFrom and the Services'
-// variables add names it does not see, so a reference counts unless no
-// variable can have its name (envVariableNameCanExist); that one is kept
-// as written.
-func kubeletArgument(value string) (string, bool) {
+// Kubernetes v1.37.1), and it does not read what it expands a reference to
+// again. A reference to a variable the container does not have is left as
+// written too (MappingFuncFor, expand.go:23-34 there). The kind cannot tell
+// which names the container has, as envFrom and the Services' variables add
+// names it does not see, so a reference counts unless no variable can have its
+// name (envVariableNameCanExist); that one is kept as written text.
+func kubeletArgumentParts(value string) []kubeletPart {
+	var parts []kubeletPart
 	var b strings.Builder
+	flush := func() {
+		if b.Len() > 0 {
+			parts = append(parts, kubeletPart{text: b.String()})
+			b.Reset()
+		}
+	}
 	for i := 0; i < len(value); i++ {
 		if value[i] != '$' || i+1 == len(value) {
 			b.WriteByte(value[i])
@@ -671,9 +687,11 @@ func kubeletArgument(value string) (string, bool) {
 				break
 			}
 			if envVariableNameCanExist(value[i+2 : i+2+end]) {
-				return "", true
+				flush()
+				parts = append(parts, kubeletPart{text: value[i : i+3+end], ref: true})
+			} else {
+				b.WriteString(value[i : i+3+end])
 			}
-			b.WriteString(value[i : i+3+end])
 			size = end + 2
 		default:
 			// An invalid byte is decoded as utf8.RuneError, which the kubelet
@@ -682,6 +700,21 @@ func kubeletArgument(value string) (string, bool) {
 			b.WriteRune(r)
 		}
 		i += size
+	}
+	flush()
+	return parts
+}
+
+// kubeletArgument returns an argument of a container as the kubelet passes it
+// to the process (kubeletArgumentParts), and whether it refers to an
+// environment variable; where it does, the argument is returned as "".
+func kubeletArgument(value string) (string, bool) {
+	var b strings.Builder
+	for _, p := range kubeletArgumentParts(value) {
+		if p.ref {
+			return "", true
+		}
+		b.WriteString(p.text)
 	}
 	return b.String(), false
 }

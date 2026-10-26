@@ -1,6 +1,9 @@
 package components
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // TestKubeletArgument pins kubeletArgument to Expand and tryReadVariableName
 // (third_party/forked/golang/expansion/expand.go:39-105 at Kubernetes
@@ -43,6 +46,67 @@ func TestKubeletArgument(t *testing.T) {
 			got, refers := kubeletArgument(c.in)
 			if got != c.want || refers != c.refers {
 				t.Errorf("kubeletArgument(%q) = %q, %v; want %q, %v", c.in, got, refers, c.want, c.refers)
+			}
+		})
+	}
+}
+
+// TestKubeletArgumentParts pins where kubeletArgumentParts finds the
+// references of an argument, as Expand and tryReadVariableName read them
+// (third_party/forked/golang/expansion/expand.go:39-105 at Kubernetes
+// v1.37.1), and the text between them as the kubelet passes it.
+func TestKubeletArgumentParts(t *testing.T) {
+	text := func(s string) kubeletPart { return kubeletPart{text: s} }
+	ref := func(s string) kubeletPart { return kubeletPart{text: s, ref: true} }
+	cases := []struct {
+		name, in string
+		want     []kubeletPart
+	}{
+		{"empty", "", nil},
+		{"text only", "classic-mode,utf8-strict-mode", []kubeletPart{text("classic-mode,utf8-strict-mode")}},
+		{"an escaped $", "$$(X),a", []kubeletPart{text("$(X),a")}},
+		{"an unclosed reference", "a,$(X", []kubeletPart{text("a,$(X")}},
+		{"one reference", "$(X)", []kubeletPart{ref("$(X)")}},
+		{"a reference of a name with ,", "$(A,B),c", []kubeletPart{ref("$(A,B)"), text(",c")}},
+		{"two references", "$(X)$(Y)", []kubeletPart{ref("$(X)"), ref("$(Y)")}},
+		{"a reference between texts", "a,x$(X)y,b", []kubeletPart{text("a,x"), ref("$(X)"), text("y,b")}},
+		// No variable has an empty name or one with '=', so these are text,
+		// joined with the text around them.
+		{"an empty reference", "a$()b", []kubeletPart{text("a$()b")}},
+		{"a reference of a name with =", "$(a=b,$(X)),c", []kubeletPart{text("$(a=b,$(X)),c")}},
+		{"$ before a byte above 0x7F", "$\xffa", []kubeletPart{text("$�a")}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := kubeletArgumentParts(c.in); !slices.Equal(got, c.want) {
+				t.Errorf("kubeletArgumentParts(%q) = %v; want %v", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestAlertmanagerFeatureElements pins how the joined enableFeatures value is
+// split where references lie in it.
+func TestAlertmanagerFeatureElements(t *testing.T) {
+	name := func(s string) alertmanagerFeatureElement { return alertmanagerFeatureElement{name: s} }
+	touched := func(s string) alertmanagerFeatureElement {
+		return alertmanagerFeatureElement{name: s, touched: true}
+	}
+	cases := []struct {
+		name, in string
+		want     []alertmanagerFeatureElement
+	}{
+		{"no reference", "a,,b", []alertmanagerFeatureElement{name("a"), name(""), name("b")}},
+		{"a reference alone", "a,$(X)", []alertmanagerFeatureElement{name("a"), touched("")}},
+		{"a reference with a prefix and a suffix", "x$(X)y,b", []alertmanagerFeatureElement{touched("xy"), name("b")}},
+		{"a reference of a name with ,", "$(A,B),b", []alertmanagerFeatureElement{touched(""), name("b")}},
+		{"a trailing empty element", "$(X),", []alertmanagerFeatureElement{touched(""), name("")}},
+		{"an escaped reference", "$$(X),$(Y)", []alertmanagerFeatureElement{name("$(X)"), touched("")}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := alertmanagerFeatureElements(c.in); !slices.Equal(got, c.want) {
+				t.Errorf("alertmanagerFeatureElements(%q) = %v; want %v", c.in, got, c.want)
 			}
 		})
 	}

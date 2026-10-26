@@ -487,6 +487,33 @@ func alertmanagerRefusals(notA string) []struct {
 		// written, which no version takes.
 		{"a feature flag of an escaped reference", map[string]any{"enableFeatures": []any{"$$(AM_FEATURE)"}},
 			`enableFeatures: not a feature flag of Alertmanager 0.34`},
+		{"an escaped reference beside a feature flag", map[string]any{"enableFeatures": []any{"$$(AM_FEATURE)", "classic-mode"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
+		// Alertmanager exits on an element no reference lies in whatever the
+		// kubelet expands a reference in another element to.
+		{"an unknown feature flag beside a reference", map[string]any{"enableFeatures": []any{"no-such-feature", "$(AM_FEATURE)"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34, at the operator's default version v0.34.0`},
+		{"an unknown feature flag after a reference of a name with a comma", map[string]any{"enableFeatures": []any{"$(A,B)", "no-such-feature"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
+		{"an empty feature flag beside a reference", map[string]any{"enableFeatures": []any{"", "$(AM_FEATURE)"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
+		{"an empty feature flag in an element before a reference", map[string]any{"enableFeatures": []any{"classic-mode,,$(X)"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
+		{"an empty feature flag after a reference", map[string]any{"enableFeatures": []any{"$(X)", ""}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
+		{"both matcher modes beside a reference", map[string]any{"enableFeatures": []any{"classic-mode", "utf8-strict-mode", "$(X)"}},
+			`enableFeatures: classic-mode with utf8-strict-mode`},
+		// No variable has an empty name or one with '=', so the kubelet passes
+		// such a reference as written.
+		{"an empty reference beside a feature flag", map[string]any{"enableFeatures": []any{"$()", "classic-mode"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
+		{"a reference of a name with =", map[string]any{"enableFeatures": []any{"$(a=b)"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
+		// The first ')' closes the name "a=b,$(X", which no variable has.
+		{"a reference in a reference of a name with =", map[string]any{"enableFeatures": []any{"$(a=b,$(X))"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
+		{"an escaped reference beside a reference", map[string]any{"enableFeatures": []any{"$$(X),$(Y)"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
 		// The API requires the names of a pod's init containers and containers
 		// to be unique together.
 		{"a container named as the generated init container", container(map[string]any{"name": "init-config-reloader", "image": "registry.example/team/proxy:1.2.3"}),
@@ -1230,6 +1257,12 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		// reads the list; the kind cannot see the value.
 		"a feature flag of an environment variable": {"enableFeatures": []any{"$(AM_FEATURE)"}},
 		"a reference beside a feature flag":         {"enableFeatures": []any{"classic-mode", "$(AM_FEATURE)"}},
+		"a reference after a prefix":                {"enableFeatures": []any{"x$(AM_FEATURE)"}},
+		"a reference before a suffix":               {"enableFeatures": []any{"$(AM_FEATURE)x"}},
+		// The kubelet reads a reference to the first ')', a ',' in its name
+		// included, here across the list's entries.
+		"a reference of a name with a comma": {"enableFeatures": []any{"$(A,no-such-feature)"}},
+		"a reference across two entries":     {"enableFeatures": []any{"$(A", "B)"}},
 		// A DNS-1123 label, the package's Service-name rule
 		// (go-kure/launcher#959).
 		"a serviceName starting with a digit": {"serviceName": "1alerts"},

@@ -4004,10 +4004,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     which Alertmanager's flag parser refuses (kingpin v2.4.0
     `flags.go:126-130`) before it exits; leave `enableFeatures` unset for no
     feature. The joined list is read as the kubelet passes it, which reads
-    `$$` as `$` and leaves `$(` without its closing parenthesis as written; one
-    that refers to an environment variable, as `$(AM_FEATURE)`, is not refused,
-    since the kubelet expands it to a value the component cannot see. A
-    reference runs from `$(` to the first `)` after it; one whose name no
+    `$$` as `$` and leaves `$(` without its closing parenthesis as written; an
+    element that refers to an environment variable, as `$(AM_FEATURE)` or
+    `x$(AM_FEATURE)`, is not refused, since the kubelet expands it to a value
+    the component cannot see, and the other elements are judged
+    (`["no-such-feature", "$(AM_FEATURE)"]` is refused). `classic-mode` with
+    `utf8-strict-mode` is refused where neither refers to one. A reference is
+    found in the joined list before it is split, so one whose name holds a `,`
+    spans elements. A reference runs from `$(` to the first `)` after it; one whose name no
     variable can have, an empty one or one with `=`, a character beyond ASCII
     or one not printable, as `$()`, is passed as written and judged as such. The
     names, by minor: `classic-mode`, `receiver-name-in-metrics`
