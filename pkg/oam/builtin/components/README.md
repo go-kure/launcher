@@ -5038,10 +5038,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     opens for appending without writing to its directory), at its directory
     or at the nearest directory above it (paths compared cleaned, a relative
     `mountPath` taken from `/` as the kubelet does).
-    - Writable: the data volume at `/prometheus`, and the `log-file` volume
-      at `/var/log/prometheus` where the operator adds it.
-    - Read-only, the operator's: `config_out`; the certificate, secret and
-      configMap mounts; each rule ConfigMap's at
+    - Writable: the data volume at `/prometheus`, the `log-file` volume at
+      `/var/log/prometheus` where the operator adds it, and `config_out`. The
+      operator mounts `config_out` read-only, but it is an emptyDir the config
+      reloader writes, which an `initContainer` can reach too, so a link in it
+      may lead to a writable volume.
+    - Read-only, the operator's: the certificate, secret and configMap mounts; each rule ConfigMap's at
       `/etc/prometheus/rules/prometheus-<name>-rulefiles-<n>`, of which the
       operator mounts at least three (server/statefulset.go:514-534); and,
       from Prometheus v2.24.0 (server/statefulset.go:196), the web
@@ -5050,28 +5052,40 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       `secret/` or `configmap/` `<name>-cert` and `<name>-ca`,
       `pkg/webconfig/tls_credentials.go:54-97`).
     - A mount of the author's, in `volumeMounts` or a patch of the
-      `prometheus` container, is writable unless it sets `readOnly` or its
-      volume is one the kubelet both writes and mounts read-only: a
-      `configMap`, `secret`, `downwardAPI` or `projected` volume, or one of
-      the operator's own volumes, which the spec cannot define: `config`,
-      `tls-assets`, `web-config`, `thanos-prometheus-http-client-file`, a
-      rule ConfigMap's, and `secret-<name>`/`configmap-<name>`. The kubelet's
-      only links in those point inside the volume (`AtomicWriter`,
+      `prometheus` container, is read-only only where its volume is one the
+      kubelet both writes and mounts read-only: a `configMap`, `secret`,
+      `downwardAPI` or `projected` volume, or one of the operator's own
+      volumes, which the spec cannot define: `config`, `tls-assets`,
+      `web-config`, `thanos-prometheus-http-client-file`, a rule ConfigMap's,
+      and `secret-<name>`/`configmap-<name>`. The kubelet's only links in
+      those point inside the volume (`AtomicWriter`,
       `pkg/volume/util/atomic_writer.go:217`, `:230`, `:482` at Kubernetes
       v1.37.1), so no file in one leads to a writable volume.
-    - Admitted as writable: an author's mount of an `image` volume, or of a
-      `persistentVolumeClaim` or inline `csi` volume set `readOnly`. These
-      are mounted read-only, but their content is not seen, and a link in it
-      may lead to a writable volume, which Prometheus follows, opening the
-      file for appending (`util/logging/file.go:43` at v3.7.0). So is a mount
-      of the operator's `config-out`, an emptyDir read-only only in its own
-      mount, and of its data or `log-file` volume. The web TLS credentials'
-      volumes are named with a hash the kind does not derive, so an author's
-      mount of one counts as writable.
+    - Admitted as writable, `readOnly` set or not: an author's mount of any
+      other volume, as an `emptyDir`, `hostPath`, `image`,
+      `persistentVolumeClaim` or inline `csi` volume, or the operator's
+      `config-out`, data or `log-file` volume. Its content is not seen here,
+      an `initContainer` may write it, and a link in it may lead to a
+      writable volume, which Prometheus follows, opening the file for
+      appending (`util/logging/file.go:43` at v3.7.0)
+      (go-kure/launcher#1051). The web TLS credentials' volumes are named
+      with a hash the kind does not derive, so an author's mount of one
+      counts as writable.
+    - A regular file: a mount of a `hostPath` volume of `type: File` or
+      `FileOrCreate`. The kubelet checks the path is a regular file,
+      following links (`pkg/volume/hostpath/host_path.go:488-493`,
+      `pkg/volume/util/hostutil/hostutil.go:82`); a `subPath` binds the
+      same file or, naming a path below it, fails to resolve and the
+      container does not start
+      (`pkg/volume/util/subpath/subpath_linux.go:199-202`). No file can be
+      created under it, so a file below it is refused, `readOnly` set or
+      not; set `readOnly`, it binds the file read-only
+      (`kubelet_pods.go:425`), leaving no link to follow, so a file at its
+      own path is refused too.
 
     A patch mount at a path written as an earlier mount's is merged into it
-    by the operator's strategic merge: it takes the patch's volume and keeps
-    `readOnly` if either sets it. Of mounts at one path written differently,
+    by the operator's strategic merge: it takes the patch's volume, and keeps
+    the earlier mount's `readOnly` where it leaves it unset. Of mounts at one path written differently,
     as `/data` and `data/`, in `volumeMounts` or a patch, one writable makes
     it writable, since which one the container runtime mounts over the other
     is not derived. The check refuses only where it knows the file or its
