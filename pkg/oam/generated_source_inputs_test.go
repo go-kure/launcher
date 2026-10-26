@@ -49,12 +49,11 @@ func (r sourceConsumerRule) LowerComponent(comp *Component, lctx LoweringContext
 	return result, nil
 }
 
-// sourceInputTransform transforms comps under the Flux namespace "flux" (none
-// when fluxNS is false) with deps as the dependency policy. The generated
+// sourceInputTransform transforms comps under the Flux namespace "flux" with deps as the dependency policy. The generated
 // source reads Secret "x"; "flux" is a Flux object reading nothing, "fx" one
 // reading "x", "w" a workload. A "claim" trait makes Secret "x" (claimed where
 // it lands), "decorate" decorates its application.
-func sourceInputTransform(t *testing.T, fluxNS bool, deps map[string][]string, comps ...Component) (*stack.Cluster, error) {
+func sourceInputTransform(t *testing.T, deps map[string][]string, comps ...Component) (*stack.Cluster, error) {
 	t.Helper()
 	tr := NewTransformer(map[string]ComponentHandler{
 		"ocirepository": &siblingStubHandler{typ: "ocirepository", build: func() stack.ApplicationConfig { return &readerStub{secrets: []string{"x"}} }},
@@ -70,11 +69,7 @@ func sourceInputTransform(t *testing.T, fluxNS bool, deps map[string][]string, c
 	doc := siblingDoc(comps...)
 	doc.Metadata.Namespace = "ns"
 	doc.Spec.Policies = []ApplicationPolicy{{Name: "order", Type: "dependency"}}
-	ctx := TransformContext{}
-	if fluxNS {
-		ctx.FluxNamespace = "flux"
-	}
-	cluster, _, err := tr.TransformWithPolicy(doc, ctx)
+	cluster, _, err := tr.TransformWithPolicy(doc, TransformContext{FluxNamespace: "flux"})
 	return cluster, err
 }
 
@@ -119,7 +114,7 @@ func TestGeneratedSource_TraitInputsFollowItsReads(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := Component{Name: "c", Type: tc.typ, Traits: tc.traits}
-			cluster, err := sourceInputTransform(t, true, nil, c)
+			cluster, err := sourceInputTransform(t, nil, c)
 			if err != nil {
 				t.Fatalf("TransformWithPolicy: %v", err)
 			}
@@ -135,46 +130,35 @@ func TestGeneratedSource_TraitInputsFollowItsReads(t *testing.T) {
 			if tc.want == "ns" {
 				collides, admitted = nsOther, fluxOther
 			}
-			if _, err := sourceInputTransform(t, true, nil, c, collides); err == nil || !strings.Contains(err.Error(), `Secret "`+tc.want+`/x"`) {
+			if _, err := sourceInputTransform(t, nil, c, collides); err == nil || !strings.Contains(err.Error(), `Secret "`+tc.want+`/x"`) {
 				t.Errorf("with %s: error = %v, want a collision naming Secret %s/x", collides.Type, err, tc.want)
 			}
-			if _, err := sourceInputTransform(t, true, nil, c, admitted); err != nil {
+			if _, err := sourceInputTransform(t, nil, c, admitted); err != nil {
 				t.Errorf("with %s: TransformWithPolicy: %v", admitted.Type, err)
 			}
 		})
 	}
 }
 
-// TestGeneratedSource_LateMakerRefused: under a Flux namespace, the Flux
-// consumer whose trait makes the generated source's Secret in a later group
-// than another Flux consumer is refused; a workload ordered after the source
-// is no consumer, so one in an earlier group than the maker is admitted, and
-// the Secret moves. Without a Flux namespace nothing is refused.
-func TestGeneratedSource_LateMakerRefused(t *testing.T) {
+// TestGeneratedSource_LateMaker: the Flux consumer whose trait makes the
+// generated source's Secret is admitted in a later group than another consumer
+// of the source, Flux object or workload, and the Secret moves
+// (go-kure/launcher#1039 tracks the delivery that then waits on itself).
+func TestGeneratedSource_LateMaker(t *testing.T) {
 	claim := Trait{Type: "claim", Properties: map[string]any{}}
 	maker := Component{Name: "maker", Type: "flux-consumer", Traits: []Trait{claim}}
-	t.Run("after a Flux consumer", func(t *testing.T) {
-		early := Component{Name: "early", Type: "flux-consumer"}
-		_, err := sourceInputTransform(t, true, map[string][]string{"maker": {"early"}}, maker, early)
-		for _, want := range []string{`ocirepository "app-source"`, `Secret "x"`, `component "maker"`, `component "early", another consumer`, `the group of "maker", which makes it, for "early"`} {
-			if err == nil || !strings.Contains(err.Error(), want) {
-				t.Errorf("error = %v, want it to contain %s", err, want)
+	for _, typ := range []string{"flux-consumer", "workload-consumer"} {
+		t.Run("after a "+typ, func(t *testing.T) {
+			early := Component{Name: "early", Type: typ}
+			cluster, err := sourceInputTransform(t, map[string][]string{"maker": {"early"}}, maker, early)
+			if err != nil {
+				t.Fatalf("TransformWithPolicy: %v", err)
 			}
-		}
-		if _, err := sourceInputTransform(t, false, map[string][]string{"maker": {"early"}}, maker, early); err != nil {
-			t.Errorf("without a Flux namespace: TransformWithPolicy: %v", err)
-		}
-	})
-	t.Run("after a workload consumer", func(t *testing.T) {
-		early := Component{Name: "early", Type: "workload-consumer"}
-		cluster, err := sourceInputTransform(t, true, map[string][]string{"maker": {"early"}}, maker, early)
-		if err != nil {
-			t.Fatalf("TransformWithPolicy: %v", err)
-		}
-		if in := clusterApplication(cluster, "maker-in"); in == nil || in.Namespace != "flux" {
-			t.Errorf("maker-in = %+v, want it in the Flux namespace", in)
-		}
-	})
+			if in := clusterApplication(cluster, "maker-in"); in == nil || in.Namespace != "flux" {
+				t.Errorf("maker-in = %+v, want it in the Flux namespace", in)
+			}
+		})
+	}
 }
 
 // TestFluxInputReaders: a Flux object's readers gain the generated sources it

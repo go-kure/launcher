@@ -1,7 +1,6 @@
 package oam
 
 import (
-	"fmt"
 	"slices"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -191,78 +190,4 @@ func generatedSourceReaders(order *componentOrder) map[*stack.Application][]*sta
 		}
 	}
 	return out
-}
-
-// checkGeneratedSourceInputOrder refuses, under a Flux namespace (ns), a trait
-// object a generated source reads that a component makes in a later group than
-// another consumer of that source (go-kure/launcher#1016). Each group depends
-// on the one before it (buildCluster), so the earlier consumer waits for the
-// source, the source for the trait object, and the maker's group for the
-// earlier consumer: the delivery never converges. The consumers of a source
-// are the Flux objects sources (generatedSourceReaders) names it for; a
-// workload ordered after it does not wait on it. Without a Flux namespace it
-// refuses nothing (go-kure/launcher#1039).
-func checkGeneratedSourceInputOrder(order *componentOrder, sources map[*stack.Application][]*stack.Application, owned []traitSubApps, ns string) error {
-	if ns == "" || len(sources) == 0 {
-		return nil
-	}
-	type consumer struct {
-		group int
-		name  string
-	}
-	// Every application of a group entry, a sibling group's members included,
-	// under the group and the component it is part of.
-	at := make(map[*stack.Application]consumer)
-	// The earliest consumer of each source: groups are walked in order, so the
-	// first one seen.
-	earliest := make(map[*stack.Application]consumer)
-	for i, group := range order.groups {
-		for _, e := range group {
-			apps := []*stack.Application{e.app}
-			for _, m := range e.members {
-				apps = append(apps, m.app)
-			}
-			for _, a := range apps {
-				c := consumer{group: i, name: e.component.Name}
-				at[a] = c
-				for _, s := range sources[a] {
-					if _, seen := earliest[s]; !seen {
-						earliest[s] = c
-					}
-				}
-			}
-		}
-	}
-	source := make(map[*stack.Application]componentEntry, len(order.sources))
-	for _, s := range order.sources {
-		source[s.app] = s
-	}
-	for _, o := range owned {
-		maker, ok := at[o.owner]
-		if !ok {
-			continue
-		}
-		for _, r := range o.readers {
-			first, ok := earliest[r]
-			if !ok || maker.group <= first.group {
-				continue
-			}
-			for _, sub := range o.subApps {
-				in, ok := sub.Config.(fluxNamespaceInput)
-				if !ok {
-					continue
-				}
-				kind, name := in.FluxNamespaceInput()
-				if !fluxObjectReads([]*stack.Application{r}, kind, name) {
-					continue
-				}
-				s := source[r]
-				return &TransformError{Message: fmt.Sprintf(
-					"%s %q reads %s %q, which a trait of component %q makes in a later group than component %q, another consumer of %q: %q waits for the source, the source for the %s, and the group of %q, which makes it, for %q, so the delivery never converges; put the trait on a consumer in the earliest group, or provide the %s in the Flux namespace %q",
-					s.component.Type, s.component.Name, kind, name, maker.name, first.name, s.component.Name,
-					first.name, kind, maker.name, first.name, kind, ns)}
-			}
-		}
-	}
-	return nil
 }

@@ -263,10 +263,11 @@ func TestFluxNamespace_OCISharedSourceForms(t *testing.T) {
 }
 
 // TestFluxNamespace_OCISharedSourceLateMaker: a consumer that makes the shared
-// source's Secret in a later group than another consumer is refused under a
-// Flux namespace, as that delivery never converges; one in the earliest group
-// is admitted. Without a Flux namespace the same document is admitted, as it
-// was (go-kure/launcher#1039).
+// source's Secret in a later group than another consumer of it is admitted,
+// and the Secret moves with the source, with or without the order. That
+// delivery waits on itself (the earlier consumer waits for the source, the
+// source for the Secret); it is the documented limit, go-kure/launcher#1039.
+// Without a Flux namespace the Secret stays with its component.
 func TestFluxNamespace_OCISharedSourceLateMaker(t *testing.T) {
 	pair := func() []oam.Component {
 		return []oam.Component{
@@ -274,34 +275,22 @@ func TestFluxNamespace_OCISharedSourceLateMaker(t *testing.T) {
 			ociFluxNSComponent(t, "b", "secretRef"),
 		}
 	}
-	t.Run("refused", func(t *testing.T) {
-		_, err := ociBuild(t, fluxNSTarget, dependsOn("a", "b"), pair()...)
-		if err == nil {
-			t.Fatal("build succeeded, want the late maker refused")
-		}
-		for _, want := range []string{
-			`Secret "shared"`, `trait of component "a"`, `component "b", another consumer`,
-			"put the trait on a consumer in the earliest group", "provide the Secret in the Flux namespace",
-		} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("build error = %v, want it to contain %q", err, want)
+	for _, tc := range []struct {
+		name, fluxNS, want string
+		policies           []oam.ApplicationPolicy
+	}{
+		{"the maker in a later group", fluxNSTarget, fluxNSTarget, dependsOn("a", "b")},
+		{"the maker in the earliest group", fluxNSTarget, fluxNSTarget, dependsOn("b", "a")},
+		{"no Flux namespace", "", "default", dependsOn("a", "b")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ociBuild(t, tc.fluxNS, tc.policies, pair()...)
+			if err != nil {
+				t.Fatalf("build: %v", err)
 			}
-		}
-	})
-	t.Run("the maker in the earliest group", func(t *testing.T) {
-		got, err := ociBuild(t, fluxNSTarget, dependsOn("b", "a"), pair()...)
-		if err != nil {
-			t.Fatalf("build: %v", err)
-		}
-		requireOCIObjects(t, got, "ExternalSecret "+fluxNSTarget+"/shared")
-	})
-	t.Run("no Flux namespace", func(t *testing.T) {
-		got, err := ociBuild(t, "", dependsOn("a", "b"), pair()...)
-		if err != nil {
-			t.Fatalf("build: %v", err)
-		}
-		requireOCIObjects(t, got, "ExternalSecret default/shared")
-	})
+			requireOCIObjects(t, got, "ExternalSecret "+tc.want+"/shared")
+		})
+	}
 }
 
 // fluxPairRule lowers a "flux-pair" component to a same-name sibling group of
