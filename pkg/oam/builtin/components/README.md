@@ -5189,6 +5189,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the operator, and an action refused below its version is refused first.
     `TestPrometheusRelabelTargetLabels_MatchVendoredSource` holds the
     threshold, the actions and the lists to the operator's source.
+  - a `labelmap` rule's `replacement`, where set, that is not a legacy label
+    name in which `$var` and `${var}` references may stand for any part
+    (`relabelTargetLegacy`, `pkg/prometheus/validation/validator.go`), such
+    as `service.$1`, below Prometheus 3.0.0, in the same four lists and on
+    the same terms: the operator judges it by the UTF-8 scheme from 3.0.0,
+    and refuses the object at reconcile below it (go-kure/launcher#1038).
+    `TestPrometheusRelabelLabelmapReplacement_MatchVendoredSource` holds the
+    pattern and the action to the operator's source.
   - a field of `thanos` the operator reads only from some Thanos version on,
     where `thanos.version` is below it; unset, the operator's default
     v0.42.4, at which none is refused (an empty `thanos.version` is not

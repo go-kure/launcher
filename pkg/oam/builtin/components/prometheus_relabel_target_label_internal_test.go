@@ -1,15 +1,17 @@
 package components
 
 import (
+	"cmp"
 	"go/ast"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 // TestPrometheusRelabelTargetLabels_MatchVendoredSource holds
-// refusePromRelabelTargetLabels to the operator's source: the version from
+// refusePromRelabelLabelNames to the operator's source: the version from
 // which ValidationSchemeForPrometheus (pkg/operator/validations.go) returns
 // the UTF-8 scheme, and the legacy one below it; the validator judging a
 // targetLabel by that scheme, reading an empty action as replace, for the
@@ -222,6 +224,182 @@ func TestPrometheusRelabelTargetLabels_Refused(t *testing.T) {
 		}
 		// A version the operator cannot parse is left to it.
 		if err := promBuild(t, author([]any{rule("replace", "service.name")}), "version", "main"); err != nil {
+			t.Errorf("%s at an unparsable version: err = %v, want it left to the operator", list, err)
+		}
+	}
+}
+
+// TestPrometheusRelabelLabelmapReplacement_MatchVendoredSource holds the
+// labelmap half of refusePromRelabelLabelNames to the operator's source
+// (pkg/prometheus/validation/validator.go): the validator judges the
+// replacement of a labelmap rule, where set, and of no other action, by
+// isValidLabelNameWithRegexVar, which below the UTF-8 scheme's version
+// (TestPrometheusRelabelTargetLabels_MatchVendoredSource) matches
+// relabelTargetLegacy, the pattern promRelabelLabelmapLegacy holds.
+func TestPrometheusRelabelLabelmapReplacement_MatchVendoredSource(t *testing.T) {
+	src := loadVendoredPromOp(t)
+	const val = "pkg/prometheus/validation/validator.go"
+	file := src.files[val]
+	if file == nil {
+		t.Fatalf("the excerpt holds no %s", val)
+	}
+	var pattern string
+	funcs := map[string]*ast.FuncDecl{}
+	for _, d := range file.Decls {
+		switch d := d.(type) {
+		case *ast.FuncDecl:
+			funcs[funcName(d)] = d
+		case *ast.GenDecl:
+			for _, s := range d.Specs {
+				vs, ok := s.(*ast.ValueSpec)
+				if !ok || len(vs.Names) != 1 || vs.Names[0].Name != "relabelTargetLegacy" || len(vs.Values) != 1 {
+					continue
+				}
+				call, ok := vs.Values[0].(*ast.CallExpr)
+				if !ok || src.text(call.Fun) != "regexp.MustCompile" || len(call.Args) != 1 {
+					t.Fatalf("%s: relabelTargetLegacy is %s, not one regexp.MustCompile", val, src.text(vs.Values[0]))
+				}
+				lit, ok := call.Args[0].(*ast.BasicLit)
+				if !ok {
+					t.Fatalf("%s: relabelTargetLegacy compiles %s, not a literal", val, src.text(call.Args[0]))
+				}
+				var err error
+				if pattern, err = strconv.Unquote(lit.Value); err != nil {
+					t.Fatalf("%s: relabelTargetLegacy: %v", val, err)
+				}
+			}
+		}
+	}
+	if pattern != promRelabelLabelmapLegacy.String() {
+		t.Errorf("%s: relabelTargetLegacy is %q; promRelabelLabelmapLegacy is %q", val, pattern, promRelabelLabelmapLegacy.String())
+	}
+
+	withVar := funcs["(*LabelConfigValidator).isValidLabelNameWithRegexVar"]
+	if withVar == nil {
+		t.Fatalf("%s declares no isValidLabelNameWithRegexVar", val)
+	}
+	body := withVar.Body.List
+	sw, isSwitch := ast.Stmt(nil), false
+	if len(body) == 2 {
+		sw = body[1]
+		_, isSwitch = sw.(*ast.SwitchStmt)
+	}
+	if !isSwitch || src.text(body[0]) != "validationScheme := operator.ValidationSchemeForPrometheus(lcv.v)" || src.text(sw.(*ast.SwitchStmt).Tag) != "validationScheme" {
+		t.Fatalf("%s: isValidLabelNameWithRegexVar is not a switch on the scheme of the version", val)
+	}
+	var cases []string
+	for _, s := range sw.(*ast.SwitchStmt).Body.List {
+		cc := s.(*ast.CaseClause)
+		var when []string
+		for _, e := range cc.List {
+			when = append(when, src.text(e))
+		}
+		var run []string
+		for _, r := range cc.Body {
+			run = append(run, src.text(r))
+		}
+		cases = append(cases, cmp.Or(strings.Join(when, ", "), "default")+": "+strings.Join(run, "; "))
+	}
+	if want := []string{
+		"model.UTF8Validation: return validationScheme.IsValidLabelName(labelName)",
+		"default: return relabelTargetLegacy.MatchString(labelName)",
+	}; !slices.Equal(cases, want) {
+		t.Errorf("%s: isValidLabelNameWithRegexVar runs %q, not relabelTargetLegacy below the UTF-8 scheme (%q)", val, cases, want)
+	}
+
+	validate := funcs["(*LabelConfigValidator).ValidateRelabelConfig"]
+	if validate == nil {
+		t.Fatalf("%s declares no ValidateRelabelConfig", val)
+	}
+	var judged []string
+	ast.Inspect(validate.Body, func(n ast.Node) bool {
+		if s, ok := n.(*ast.IfStmt); ok && strings.Contains(src.text(s.Cond), "isValidLabelNameWithRegexVar") {
+			judged = append(judged, src.text(s.Cond))
+		}
+		return true
+	})
+	if want := []string{"action == string(relabel.LabelMap) && (rc.Replacement != nil) && !lcv.isValidLabelNameWithRegexVar(*rc.Replacement)"}; !slices.Equal(judged, want) {
+		t.Errorf("%s: ValidateRelabelConfig judges by isValidLabelNameWithRegexVar where %q; refusePromRelabelLabelNames holds %q", val, judged, want)
+	}
+}
+
+// TestPrometheusRelabelLabelmapReplacement_Refused: the replacement of a
+// labelmap rule outside promRelabelLabelmapLegacy, in each list the operator
+// validates, is refused below Prometheus 3.0.0, naming the rule; from 3.0.0
+// on, and at the operator's default where version is unset, it builds. A
+// legacy name with references builds below 3.0.0, and so do an unset
+// replacement and such a replacement for another action.
+func TestPrometheusRelabelLabelmapReplacement_Refused(t *testing.T) {
+	type m = map[string]any
+	endpoint := m{"namespace": "monitoring", "name": "alertmanager-operated", "port": "web"}
+	with := func(base m, key string, rules []any) m {
+		out := maps.Clone(base)
+		out[key] = rules
+		return out
+	}
+	lists := map[string]func(rules []any) m{
+		"alerting.alertmanagers[].relabelings": func(r []any) m {
+			return m{"alerting": m{"alertmanagers": []any{endpoint, with(endpoint, "relabelings", r)}}}
+		},
+		"alerting.alertmanagers[].alertRelabelings": func(r []any) m {
+			return m{"alerting": m{"alertmanagers": []any{endpoint, with(endpoint, "alertRelabelings", r)}}}
+		},
+		"scrapeClasses[].relabelings": func(r []any) m {
+			return m{"scrapeClasses": []any{m{"name": "first"}, m{"name": "second", "relabelings": r}}}
+		},
+		"scrapeClasses[].metricRelabelings": func(r []any) m {
+			return m{"scrapeClasses": []any{m{"name": "first"}, m{"name": "second", "metricRelabelings": r}}}
+		},
+	}
+	for _, l := range promRelabelLists {
+		if lists[l.path] == nil {
+			t.Errorf("no fixture authors %s", l.path)
+		}
+	}
+	labelmap := func(action string, replacement any) m {
+		r := m{"action": action, "regex": "__meta_kubernetes_pod_label_(.+)"}
+		if replacement != nil {
+			r["replacement"] = replacement
+		}
+		return r
+	}
+	for list, author := range lists {
+		owner := strings.Replace(list, "[]", "[1]", 1)
+		for _, replacement := range []string{"service.$1", "1_$1", "service-${1}", ""} {
+			props := author([]any{labelmap("labelmap", "service_$1"), labelmap("labelmap", replacement)})
+			want := owner + `[1].replacement: ` + strconv.Quote(replacement) + ` is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*) in which $var and ${var} references may stand for any part, the only replacements the Prometheus operator accepts for a labelmap action below Prometheus 3.0.0; at version %s it refuses the object at reconcile, and the Prometheus is not updated; name such a replacement, or set version to 3.0.0 or later`
+			for _, version := range []string{"v2.55.0", "v3.0.0-rc.0"} {
+				if err := promBuild(t, props, "version", version); err == nil || !strings.Contains(err.Error(), strings.Replace(want, "%s", version, 1)) {
+					t.Errorf("%s, %q at %s: err = %v, want the replacement refused", list, replacement, version, err)
+				}
+			}
+			if replacement == "" {
+				// The UTF-8 scheme refuses an empty name too: not this
+				// version's doing, and not judged here.
+				continue
+			}
+			for _, version := range []string{"v3.0.0", ""} {
+				if err := promBuild(t, props, "version", version); err != nil {
+					t.Errorf("%s, %q at %q: err = %v, want it built", list, replacement, version, err)
+				}
+			}
+		}
+		for _, replacement := range []string{"service_$1", "${1}", "$1", "_${name}_x$2"} {
+			if err := promBuild(t, author([]any{labelmap("labelmap", replacement)}), "version", "v2.55.0"); err != nil {
+				t.Errorf("%s, %q: err = %v, want it built: a legacy name with references", list, replacement, err)
+			}
+		}
+		// The operator compares the action case-insensitively.
+		if err := promBuild(t, author([]any{labelmap("LabelMap", "service.$1")}), "version", "v2.55.0"); err == nil || !strings.Contains(err.Error(), "for a labelmap action") {
+			t.Errorf("%s, LabelMap: err = %v, want the replacement refused", list, err)
+		}
+		if err := promBuild(t, author([]any{labelmap("labelmap", nil)}), "version", "v2.55.0"); err != nil {
+			t.Errorf("%s, no replacement: err = %v, want it built: the operator checks only a replacement set", list, err)
+		}
+		if err := promBuild(t, author([]any{m{"action": "replace", "sourceLabels": []any{"__name__"}, "targetLabel": "service_name", "replacement": "service.$1"}}), "version", "v2.55.0"); err != nil {
+			t.Errorf("%s, replace: err = %v, want it built: the operator checks the replacement of labelmap only", list, err)
+		}
+		if err := promBuild(t, author([]any{labelmap("labelmap", "service.$1")}), "version", "main"); err != nil {
 			t.Errorf("%s at an unparsable version: err = %v, want it left to the operator", list, err)
 		}
 	}
