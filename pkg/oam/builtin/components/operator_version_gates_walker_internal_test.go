@@ -122,6 +122,10 @@ func parsedRange(v semver.Version) {
 func notAComparison(v semver.Version) {
 	_ = semver.Version.String(v)
 }
+
+var below = semver.Version.LT(minimum, semver.MustParse("3.0.0"))
+
+var less = semver.Version.LT
 `,
 	"pkg/d/typealias.go": `package d
 
@@ -140,6 +144,11 @@ func typeAlias(v V) bool {
 
 func otherPackages(a, b string) bool {
 	return cmp.Compare(a, b) < 0 && corev1.Compare(a, b)
+}
+
+func shadowingAlias(v semver.Version) bool {
+	type cmp = semver.Version
+	return cmp.LT(v, semver.MustParse("3.0.0"))
 }
 `,
 	"pkg/e/alias.go": `package e
@@ -268,8 +277,9 @@ func TestVersionGateWalker_Reads(t *testing.T) {
 
 	// W11 a method expression of a comparison method of semver.Version, and
 	// a range of semver, in a function or outside one, carry no bound the
-	// walker reads; it reports each, and nothing of a method expression that
-	// compares nothing.
+	// walker reads; it reports each, called or, outside a function, taken as
+	// a value (go-kure/launcher#1033), and nothing of a method expression
+	// that compares nothing.
 	errs = recordGateErrors(t, func(tb testing.TB) { src.versionGates(tb, "pkg/d/forms.go") })
 	wantForms := []string{
 		"pkg/d/forms.go:3:15: a version comparison outside a function",
@@ -277,6 +287,8 @@ func TestVersionGateWalker_Reads(t *testing.T) {
 		"pkg/d/forms.go:11:5: pointerMethodExpr compares a version through the method expression (*semver.Version).GTE, on 2 arguments; the test cannot read its bound",
 		"pkg/d/forms.go:16:5: mustRange compares a version through the range semver.MustParseRange; the test cannot read its bound",
 		"pkg/d/forms.go:21:10: parsedRange compares a version through the range semver.ParseRange; the test cannot read its bound",
+		"pkg/d/forms.go:29:13: a version comparison outside a function",
+		"pkg/d/forms.go:31:12: a version comparison outside a function",
 	}
 	if !slices.Equal(errs, wantForms) {
 		t.Errorf("pkg/d/forms.go: reported\n%s\nwant\n%s", strings.Join(errs, "\n"), strings.Join(wantForms, "\n"))
@@ -284,10 +296,14 @@ func TestVersionGateWalker_Reads(t *testing.T) {
 
 	// W13 the method expression is read by its call, not by the name of its
 	// receiver type: through a type alias of semver.Version it is reported
-	// too, and a function of another package the file imports, as
-	// cmp.Compare(a, b), is no version method.
+	// too, a local one that shadows an import included
+	// (go-kure/launcher#1033), and a function of another package the file
+	// imports, as cmp.Compare(a, b), is no version method.
 	errs = recordGateErrors(t, func(tb testing.TB) { src.versionGates(tb, "pkg/d/typealias.go") })
-	wantAlias := []string{"pkg/d/typealias.go:13:9: typeAlias compares a version through the method expression V.LT, on 2 arguments; the test cannot read its bound"}
+	wantAlias := []string{
+		"pkg/d/typealias.go:13:9: typeAlias compares a version through the method expression V.LT, on 2 arguments; the test cannot read its bound",
+		"pkg/d/typealias.go:22:9: shadowingAlias compares a version through the method expression cmp.LT, on 2 arguments; the test cannot read its bound",
+	}
 	if !slices.Equal(errs, wantAlias) {
 		t.Errorf("pkg/d/typealias.go: reported %q, want %q", errs, wantAlias)
 	}
