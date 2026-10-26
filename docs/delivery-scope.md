@@ -2031,7 +2031,8 @@ and by scope, whatever component or trait emits it.
     file at the path of a directory mounted in the prometheus container, which Prometheus
     cannot open as a file: any mount of the operator's but the web configuration file, as
     `/prometheus`, `/etc/prometheus/config_out` or `/var/log/prometheus`, and an author's
-    mount without `subPath` or `subPathExpr` of an `emptyDir`, `configMap`, `secret`,
+    mount without `subPath` or `subPathExpr` of an `emptyDir`, including a volume with no
+    source, `configMap`, `secret`,
     `downwardAPI`, `projected`, `gitRepo`, `nfs`, `iscsi` or `fc` volume, a `hostPath`
     of `type: Directory` or `DirectoryOrCreate`, or one of the operator's volumes of those
     types but the data volume, whose type `storage` decides, and the hashed web TLS

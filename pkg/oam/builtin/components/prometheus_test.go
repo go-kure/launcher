@@ -270,24 +270,33 @@ func prometheusRefusals(notA string) []struct {
 		}
 		return props
 	}
-	directoryAtLogWant := func(kind string) string {
-		return `queryLogFile: "/logs" is the path of the ` + kind + ` volume v mounted as a directory in the prometheus container, so Prometheus cannot open it as a file; name a file under it`
+	directoryAtLogWant := func(kind string, readOnly bool) string {
+		advice := "name a file under it"
+		if readOnly {
+			advice = "name a file under a writable volume, or a standard stream such as /dev/stdout"
+		}
+		return `queryLogFile: "/logs" is the path of the ` + kind + ` volume v mounted as a directory in the prometheus container, so Prometheus cannot open it as a file; ` + advice
 	}
+	// A file under a read-only volume is refused too, so the refusal of
+	// one at its path names another place.
 	directoryVolumes := []struct {
-		kind   string
-		source map[string]any
+		kind     string
+		source   map[string]any
+		readOnly bool
 	}{
-		{"emptyDir", map[string]any{"emptyDir": map[string]any{}}},
-		{"configMap", map[string]any{"configMap": map[string]any{"name": "logs"}}},
-		{"secret", map[string]any{"secret": map[string]any{"secretName": "logs"}}},
-		{"downwardAPI", map[string]any{"downwardAPI": map[string]any{}}},
-		{"projected", map[string]any{"projected": map[string]any{}}},
-		{"gitRepo", map[string]any{"gitRepo": map[string]any{"repository": "https://git.example/logs.git"}}},
-		{"nfs", map[string]any{"nfs": map[string]any{"server": "nfs.example", "path": "/exports/logs"}}},
-		{"iscsi", map[string]any{"iscsi": map[string]any{"targetPortal": "10.0.0.1:3260", "iqn": "iqn.2001-04.com.example:logs", "lun": 0}}},
-		{"fc", map[string]any{"fc": map[string]any{"targetWWNs": []any{"500a0981891b8dc5"}, "lun": 0}}},
-		{"hostPath", map[string]any{"hostPath": map[string]any{"path": "/srv/logs", "type": "Directory"}}},
-		{"hostPath", map[string]any{"hostPath": map[string]any{"path": "/srv/logs", "type": "DirectoryOrCreate"}}},
+		{"emptyDir", map[string]any{"emptyDir": map[string]any{}}, false},
+		// The API server defaults a volume with no source to an emptyDir.
+		{"emptyDir", map[string]any{}, false},
+		{"configMap", map[string]any{"configMap": map[string]any{"name": "logs"}}, true},
+		{"secret", map[string]any{"secret": map[string]any{"secretName": "logs"}}, true},
+		{"downwardAPI", map[string]any{"downwardAPI": map[string]any{}}, true},
+		{"projected", map[string]any{"projected": map[string]any{}}, true},
+		{"gitRepo", map[string]any{"gitRepo": map[string]any{"repository": "https://git.example/logs.git"}}, false},
+		{"nfs", map[string]any{"nfs": map[string]any{"server": "nfs.example", "path": "/exports/logs"}}, false},
+		{"iscsi", map[string]any{"iscsi": map[string]any{"targetPortal": "10.0.0.1:3260", "iqn": "iqn.2001-04.com.example:logs", "lun": 0}}, false},
+		{"fc", map[string]any{"fc": map[string]any{"targetWWNs": []any{"500a0981891b8dc5"}, "lun": 0}}, false},
+		{"hostPath", map[string]any{"hostPath": map[string]any{"path": "/srv/logs", "type": "Directory"}}, false},
+		{"hostPath", map[string]any{"hostPath": map[string]any{"path": "/srv/logs", "type": "DirectoryOrCreate"}}, false},
 	}
 	// webTLSLogFile names file as the query log of a Prometheus serving
 	// TLS from a key Secret and a certificate ConfigMap, with tls's fields
@@ -321,7 +330,10 @@ func prometheusRefusals(notA string) []struct {
 			if h, ok := d.source["hostPath"].(map[string]any); ok {
 				name += " of type " + h["type"].(string)
 			}
-			directories = append(directories, row{name, directoryAtLog(d.source, patch), directoryAtLogWant(d.kind)})
+			if len(d.source) == 0 {
+				name += " with no source"
+			}
+			directories = append(directories, row{name, directoryAtLog(d.source, patch), directoryAtLogWant(d.kind, d.readOnly)})
 		}
 	}
 	return append(directories, []row{
@@ -1379,6 +1391,8 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 		// judged a directory, an emptyDir with storage unset included.
 		"a log file at an author's mount of the data volume": {"queryLogFile": "/logs",
 			"volumeMounts": []any{map[string]any{"name": "prometheus-fast-db", "mountPath": "/logs"}}},
+		"a log file under a volume with no source": {"queryLogFile": "/logs/query.log",
+			"volumes": []any{map[string]any{"name": "v"}}, "volumeMounts": logsMount},
 		"a log file at the path of a claim's volume": {"queryLogFile": "/logs",
 			"volumes": []any{map[string]any{"name": "v", "persistentVolumeClaim": map[string]any{"claimName": "logs"}}}, "volumeMounts": logsMount},
 		"a log file at the path of an ephemeral volume": {"queryLogFile": "/logs",
