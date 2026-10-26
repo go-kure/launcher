@@ -52,9 +52,11 @@ var alertmanagerFeatureFlags = []alertmanagerFeatureFlagsOfMinor{
 // utf8-strict-mode (NewFlags, featurecontrol/featurecontrol.go:135-180 at
 // v0.34.0), and then exits (cmd/alertmanager/main.go:104-108 at v0.34.0). So
 // an element with a "," in it is read as two. The value is read as the kubelet
-// passes it (kubeletArgument): $$ as $, and a list that refers to an
-// environment variable, as $(AM_FEATURE), is not refused, as the kind cannot
-// see what the kubelet expands it to. Below 0.27.0 the version gate
+// passes it (alertmanagerFeatureElements): $$ as $, and an element a reference
+// to an environment variable lies in, as $(AM_FEATURE), is left alone, as the
+// kind cannot see what the kubelet expands it to; the other elements are
+// judged, and classic-mode with utf8-strict-mode is refused where both are
+// such elements. Below 0.27.0 the version gate
 // has refused a nonempty list already; above the table's last minor the names
 // are not known, and are not refused. No message names the value, as
 // refuseUnservableExternalURL names none.
@@ -66,8 +68,7 @@ func refuseUnusableAlertmanagerFeatures(spec *monitoringv1.AlertmanagerSpec, ver
 	if joined == "" {
 		return errors.New("enableFeatures: one empty element: the Prometheus operator passes it as --enable-feature without a value, and Alertmanager exits at startup on a flag without its value; leave enableFeatures unset to enable no feature")
 	}
-	joined, refers := kubeletArgument(joined)
-	if refers || version.Major != 0 {
+	if version.Major != 0 {
 		return nil
 	}
 	i := slices.IndexFunc(alertmanagerFeatureFlags, func(r alertmanagerFeatureFlagsOfMinor) bool { return r.minor == version.Minor })
@@ -76,7 +77,11 @@ func refuseUnusableAlertmanagerFeatures(spec *monitoringv1.AlertmanagerSpec, ver
 	}
 	names := alertmanagerFeatureFlags[i].names
 	classic, utf8Strict := false, false
-	for name := range strings.SplitSeq(joined, ",") {
+	for _, element := range alertmanagerFeatureElements(joined) {
+		if element.touched {
+			continue
+		}
+		name := element.name
 		if !slices.Contains(names, name) {
 			return errors.Errorf("enableFeatures: not a feature flag of Alertmanager 0.%d, at %s: the Prometheus operator passes the list joined with \",\" as --enable-feature, and Alertmanager exits at startup on an element it does not take, an empty one included; it takes %s", version.Minor, at, strings.Join(names, ", "))
 		}
@@ -87,4 +92,36 @@ func refuseUnusableAlertmanagerFeatures(spec *monitoringv1.AlertmanagerSpec, ver
 		return errors.New("enableFeatures: classic-mode with utf8-strict-mode: Alertmanager exits at startup on both; name one of them")
 	}
 	return nil
+}
+
+// alertmanagerFeatureElement is an element of the enableFeatures value
+// Alertmanager splits on ",": its name as the kubelet passes it, or, where
+// touched, an element a reference to an environment variable lies in, whose
+// name the kind cannot see.
+type alertmanagerFeatureElement struct {
+	name    string
+	touched bool
+}
+
+// alertmanagerFeatureElements returns the elements of joined, the list joined
+// with ",", as Alertmanager splits the argument the kubelet passes it. The
+// references are found in joined as a whole (kubeletArgumentParts) before it
+// is split, as a reference spans the list's elements where its name holds a
+// "," (tryReadVariableName reads to the first ")"), and a "," in what the
+// kubelet expands a reference to lies in the touched element.
+func alertmanagerFeatureElements(joined string) []alertmanagerFeatureElement {
+	elements := []alertmanagerFeatureElement{{}}
+	for _, p := range kubeletArgumentParts(joined) {
+		if p.ref {
+			elements[len(elements)-1].touched = true
+			continue
+		}
+		for j, text := range strings.Split(p.text, ",") {
+			if j > 0 {
+				elements = append(elements, alertmanagerFeatureElement{})
+			}
+			elements[len(elements)-1].name += text
+		}
+	}
+	return elements
 }
