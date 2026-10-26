@@ -481,6 +481,18 @@ func otherImports(file *ast.File) map[string]bool {
 	return names
 }
 
+// declImports are the otherImports of file that decl does not shadow: a name
+// decl declares is not the import it shadows, as type cmp = semver.Version
+// makes cmp.LT(v, w) a method expression of semver's, in a function or in a
+// function literal outside one (go-kure/launcher#1033).
+func declImports(file *ast.File, decl ast.Decl) map[string]bool {
+	others := otherImports(file)
+	for name := range localNames(decl) {
+		delete(others, name)
+	}
+	return others
+}
+
 // majorVersion matches a path element naming a major version.
 var majorVersion = regexp.MustCompile(`^v[0-9]+$`)
 
@@ -532,13 +544,13 @@ func (v *vendoredPromOp) versionGates(t testing.TB, files ...string) []operatorG
 		if imp := renamedSemver(file); imp != nil {
 			t.Errorf("%s: %s imports %s as %s; the walker reads it only as semver", v.fset.Position(imp.Pos()), rel, semverImportPath, imp.Name.Name)
 		}
-		others := otherImports(file)
 		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
 			if !ok {
 				// A comparison outside a function would escape the walk, and
 				// so would a version method taken there as a value, as var
 				// less = semver.Version.LT (go-kure/launcher#1033).
+				others := declImports(file, decl)
 				inspectWithStack(decl, func(n ast.Node, stack []ast.Node) {
 					if readAt(n, stack) != noRead || unreadForm(n, others) != "" || methodValue(n, stack) != "" {
 						t.Errorf("%s: a version comparison outside a function", v.fset.Position(n.Pos()))
@@ -592,13 +604,7 @@ func (v *vendoredPromOp) funcGates(t testing.TB, rel string, fd *ast.FuncDecl) [
 	t.Helper()
 	fn := funcName(fd)
 	locals := localNames(fd)
-	// A name fd declares is not the import it shadows: type cmp =
-	// semver.Version makes cmp.LT(v, w) a method expression of semver's
-	// (go-kure/launcher#1033).
-	others := otherImports(v.files[rel])
-	for name := range locals {
-		delete(others, name)
-	}
+	others := declImports(v.files[rel], fd)
 	byNode := map[ast.Node]*operatorGate{}
 	var order []ast.Node
 	inspectWithStack(fd, func(n ast.Node, stack []ast.Node) {
@@ -647,20 +653,20 @@ func (v *vendoredPromOp) funcGates(t testing.TB, rel string, fd *ast.FuncDecl) [
 	return gates
 }
 
-// localNames are the names fd declares: its receiver, parameters and
-// results, and every name declared in its body or a function literal's, a
-// type included. The walker resolves no such name to a package-level one or
-// to an import, in whatever scope of fd it is declared: a name shadowed
-// anywhere is judged as shadowed everywhere, which can only report a call
-// more, never one less.
-func localNames(fd *ast.FuncDecl) map[string]bool {
+// localNames are the names decl declares: a function's receiver, parameters
+// and results, and every name declared in its body or a function literal's,
+// a type included, outside a function too. The walker resolves no such name
+// to a package-level one or to an import, in whatever scope of decl it is
+// declared: a name shadowed anywhere is judged as shadowed everywhere, which
+// can only report a call more, never one less.
+func localNames(decl ast.Decl) map[string]bool {
 	names := map[string]bool{}
 	add := func(ids ...*ast.Ident) {
 		for _, id := range ids {
 			names[id.Name] = true
 		}
 	}
-	ast.Inspect(fd, func(n ast.Node) bool {
+	ast.Inspect(decl, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.Field:
 			add(n.Names...)
