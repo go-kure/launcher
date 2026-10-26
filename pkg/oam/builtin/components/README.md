@@ -4089,6 +4089,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the API refuses two mounts written alike, and of two written otherwise,
     as `/data` and `/data/`, the container runtime mounts one over the other.
     The message names both entries.
+
+    Admitted: a reserved path written otherwise than the operator writes it,
+    as `/alertmanager/`, and an entry written relative beside an earlier one
+    written from `/`, as `data` and `/data`. The API compares mount paths as
+    written (`pkg/apis/core/validation/validation.go:3192-3195` at
+    Kubernetes v1.37.1) and the kubelet joins a relative one to the root
+    (`makeMounts`, `pkg/kubelet/kubelet_pods.go:400-402`), so both mounts
+    stay, and two mounts of one volume with like options there work. A rule
+    for such pairs grounded in what the runtime does is go-kure/launcher#1050.
   - an entry of `additionalArgs` whose name, or that name with `no-` added or
     taken away, is a flag the operator generates for the spec: it then fails
     to build the pods (`BuildArgs`, `pkg/operator/argument.go:26-79`). The
@@ -4581,7 +4590,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - an entry of `volumeMounts` at the path of an earlier one, compared cleaned:
     the API refuses two mounts written alike, and of two written otherwise,
     as `/data` and `/data/`, the container runtime mounts one over the other.
-    The message names both entries.
+    The message names both entries. As on `alertmanager`, a reserved path
+    written otherwise, relative or with a trailing `/`, is admitted, and so is
+    an entry written relative beside an earlier one written from `/`, as
+    `data` and `/data` (go-kure/launcher#1050).
   - `dnsPolicy: None` without `dnsConfig.nameservers`: the API refuses the
     pods the operator copies them into (:539-540).
   - a name the operator's objects cannot be named after: the data volume
@@ -4990,48 +5002,91 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     an earlier one of the same field, compared cleaned: the API refuses two
     mounts written alike, and of two written otherwise, as `/data` and
     `/data/`, the container runtime mounts one over the other. The message
-    names both entries.
+    names both entries. As on `alertmanager`, a reserved path written
+    otherwise, relative or with a trailing `/`, is admitted, and so is an
+    entry written relative beside an earlier one written from `/`, as `data`
+    and `/data` (go-kure/launcher#1050).
   - a `queryLogFile` named without a directory beside a
     `scrapeFailureLogFile` named with one: the operator writes the query log
     under `/var/log/prometheus` but adds the `log-file` volume there only for
     the scrape failure log file, on a read-only root filesystem
     (server/statefulset.go:510, :537; common.go:334-347), unless the file
     there is writable all the same, judged as in the next entry.
-  - a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot write. A name alone is in `/var/log/prometheus`; the operator
-    passes any other path unchanged (common.go:230-236). A path the kind
-    cannot resolve is not judged: a relative one with a directory, as
-    `logs/query.log`, which Prometheus joins to the directory of its
-    configuration, `/etc/prometheus/config_out`, from v2.21.0 and reads from
-    its working directory before, and one with a `$(` reference, which the
-    config reloader expands from variables the kind does not see
-    (`--config-envsubst-file`, common.go:378). The mount that covers the
-    file most closely, at the file itself (as a `subPath` mount of an
-    existing file, which Prometheus opens for appending without writing to
-    its directory), at its directory or at the nearest directory above it
-    (paths compared cleaned, a relative `mountPath` taken from `/` as the
-    kubelet does), decides: the data volume at `/prometheus` and the
-    `log-file` volume at `/var/log/prometheus` where the operator adds it
-    are writable; `config_out` and the operator's certificate, secret,
-    configMap and web configuration mounts (the last from Prometheus
-    v2.24.0, where the operator adds it, server/statefulset.go:196) are
-    read-only; a mount of the
-    author's, in `volumeMounts` or a patch of the `prometheus` container, is
-    writable unless it sets `readOnly` or mounts a `configMap`, `secret`,
-    `downwardAPI` or `projected` volume, which the kubelet mounts read-only.
-    Other read-only sources are not modelled: the rule ConfigMap and web TLS
-    mounts are not listed, so a directory in one is judged by the listed
-    mounts alone; an author's mount of an image volume, a CSI volume set
-    `readOnly`, or one of the operator's own volumes counts as writable. A
-    patch mount at a path written as an earlier mount's is merged into it by
-    the operator's strategic merge: it takes the patch's volume and keeps
+  - a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot write. This
+    check follows what runs at the version named, unlike the reserved paths
+    above.
+
+    Where the file is:
+    - A name alone is in `/var/log/prometheus`; the operator passes any other
+      path unchanged (common.go:230-236).
+    - A relative path with a directory, as `logs/query.log`, is joined by
+      Prometheus to the directory of its configuration,
+      `/etc/prometheus/config_out` (`--config.file`, promcfg.go:1258), with
+      `filepath.Join`, and judged where that puts it: usually under the
+      operator's read-only `config_out`; a `../` may take it out of there.
+      `queryLogFile` is joined from Prometheus v2.21.0; below that, or at a
+      version that does not parse, Prometheus opens it from its working
+      directory, which `image` or a patch's `workingDir` may change, so it is
+      not judged. `scrapeFailureLogFile` is joined at every version that
+      reads it. Where a patch of the `prometheus` container sets `args` or
+      `command`, neither is judged: the operator's strategic merge replaces
+      its arguments with the patch's (server/statefulset.go:366), which may
+      name another `--config.file`.
+    - A path with a reference `$(NAME)`, a name of letters, digits and `_`,
+      is not judged: the config reloader expands it from variables the kind
+      does not see (`--config-envsubst-file`, common.go:378; Thanos
+      `pkg/reloader/reloader.go:703`). Any other `$(` reaches Prometheus as
+      written and is judged so.
+
+    Which mount decides: the one that covers the file most closely, at the
+    file itself (as a `subPath` mount of an existing file, which Prometheus
+    opens for appending without writing to its directory), at its directory
+    or at the nearest directory above it (paths compared cleaned, a relative
+    `mountPath` taken from `/` as the kubelet does).
+    - Writable: the data volume at `/prometheus`, and the `log-file` volume
+      at `/var/log/prometheus` where the operator adds it.
+    - Read-only, the operator's: `config_out`; the certificate, secret and
+      configMap mounts; each rule ConfigMap's at
+      `/etc/prometheus/rules/prometheus-<name>-rulefiles-<n>`, of which the
+      operator mounts at least three (server/statefulset.go:514-534); and,
+      from Prometheus v2.24.0 (server/statefulset.go:196), the web
+      configuration and the web TLS credentials' directories under
+      `/etc/prometheus/web_config/` (`secret/<keySecret>-key`, and
+      `secret/` or `configmap/` `<name>-cert` and `<name>-ca`,
+      `pkg/webconfig/tls_credentials.go:54-97`).
+    - A mount of the author's, in `volumeMounts` or a patch of the
+      `prometheus` container, is writable unless it sets `readOnly` or its
+      volume is one the kubelet both writes and mounts read-only: a
+      `configMap`, `secret`, `downwardAPI` or `projected` volume, or one of
+      the operator's own volumes, which the spec cannot define: `config`,
+      `tls-assets`, `web-config`, `thanos-prometheus-http-client-file`, a
+      rule ConfigMap's, and `secret-<name>`/`configmap-<name>`. The kubelet's
+      only links in those point inside the volume (`AtomicWriter`,
+      `pkg/volume/util/atomic_writer.go:217`, `:230`, `:482` at Kubernetes
+      v1.37.1), so no file in one leads to a writable volume.
+    - Admitted as writable: an author's mount of an `image` volume, or of a
+      `persistentVolumeClaim` or inline `csi` volume set `readOnly`. These
+      are mounted read-only, but their content is not seen, and a link in it
+      may lead to a writable volume, which Prometheus follows, opening the
+      file for appending (`util/logging/file.go:43` at v3.7.0). So is a mount
+      of the operator's `config-out`, an emptyDir read-only only in its own
+      mount, and of its data or `log-file` volume. The web TLS credentials'
+      volumes are named with a hash the kind does not derive, so an author's
+      mount of one counts as writable.
+
+    A patch mount at a path written as an earlier mount's is merged into it
+    by the operator's strategic merge: it takes the patch's volume and keeps
     `readOnly` if either sets it. Of mounts at one path written differently,
-    as `/data` and `/data/`, one writable makes it writable, since which one
-    the container runtime mounts over the other is not derived. The check
-    refuses only where it knows the file or its directory is read-only. A
-    directory below a writable mount counts as writable, since it may exist
-    on the volume or be made by an init container. Where no mount covers the
-    file, the root filesystem
-    decides, which the operator makes read-only unless a patch of the
+    as `/data` and `data/`, in `volumeMounts` or a patch, one writable makes
+    it writable, since which one the container runtime mounts over the other
+    is not derived. The check refuses only where it knows the file or its
+    directory is read-only. A directory below a writable mount counts as
+    writable, since it may exist on the volume or be made by an init
+    container: `/prometheus/wal` is made by Prometheus opening its TSDB
+    before its first configuration load opens the query log
+    (`cmd/prometheus/main.go:1438` at v3.14.0). Where no mount covers the
+    file, the root filesystem decides, which the operator makes read-only
+    unless a patch of the
     `prometheus` container sets `securityContext.readOnlyRootFilesystem` to
     `false`. A file in `/dev`, `/proc` or a directory under them, as
     `/dev/stdout`, is not refused. Nor here, or in the previous entry, is a
@@ -5039,7 +5094,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     below Prometheus v2.16.0 and `scrapeFailureLogFile` below v2.55.0: the
     version gate refuses it instead. Where the read-only mount that decides
     is at a path the operator mounts a volume at, which `volumeMounts` may not
-    name, the refusal advises a file under a writable volume rather than a
+    name as the operator writes it, the refusal advises a file under a writable volume rather than a
     mount there.
   - a negative request or limit in `resources`, `thanos.resources` or a
     listed container.

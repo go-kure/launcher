@@ -1830,7 +1830,8 @@ and by scope, whatever component or trait emits it.
     name the operator cuts to 63 characters after a `-`; an entry of
     `volumeMounts` at a path the operator mounts at in the alertmanager container (not
     the TLS credentials' mounts), or at the path of an earlier entry, compared cleaned
-    (`/data` beside `/data/`); an entry of `additionalArgs` naming, or negating with
+    (`/data` beside `/data/`; a path written relative, or a reserved one written
+    otherwise, is admitted, go-kure/launcher#1050); an entry of `additionalArgs` naming, or negating with
     `no-`, a flag the operator generates for the spec, on which it fails to build the
     pods; two `alertmanagerConfiguration.templates` of one key, of which the operator
     loads only the first; a name shared by an init container and a container of the
@@ -1897,7 +1898,8 @@ and by scope, whatever component or trait emits it.
     `remote-write-config`, each Secret key's, the rule ConfigMaps'
     `thanos-ruler-<name>-rulefiles-<n>`, the data volume); an entry of `volumeMounts` at
     a path it mounts at in the thanos-ruler container, or at the path of an earlier
-    entry, compared cleaned; `dnsPolicy: None` without a
+    entry, compared cleaned (a path written relative, or a reserved one written
+    otherwise, is admitted, go-kure/launcher#1050); `dnsPolicy: None` without a
     nameserver, which the operator copies into the pods; and a name whose data volume or
     first rule ConfigMap volume is not a DNS-1123 label (no dot, at most 38 characters)
     are each refused. So is a field the operator reads only from some Thanos version on,
@@ -1991,25 +1993,34 @@ and by scope, whatever component or trait emits it.
     (`/prometheus` where object storage is configured, `/etc/thanos/config`, which it
     mounts from Thanos 0.24.0, whatever version is named), or with any field but `name`
     and `mountPath`, which the operator drops; an entry of either at the path of an
-    earlier entry of the same field, compared cleaned; a `queryLogFile` named without a directory
-    beside a `scrapeFailureLogFile`
+    earlier entry of the same field, compared cleaned (a path written relative, or a
+    reserved one written otherwise, is admitted, go-kure/launcher#1050); a `queryLogFile` named without a directory beside a `scrapeFailureLogFile`
     named with one, where the operator mounts no volume for it, unless the file there
     is writable all the same; a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot
-    write (a name alone in `/var/log/prometheus`; a relative path with a directory, which
-    Prometheus joins to `/etc/prometheus/config_out` from v2.21.0 only, and a path with a
-    `$(` reference, which the config reloader expands, are not judged), where the mount covering the
+    write, judged at what runs at the version named (a name alone is in
+    `/var/log/prometheus`; a relative path with a directory is judged where Prometheus
+    joins it to `/etc/prometheus/config_out`, `queryLogFile` from v2.21.0 only, and is
+    not judged below that, nor where a prometheus patch sets `args` or `command`, which
+    may name another `--config.file`; a path with a reference `$(NAME)`, which the config reloader
+    expands, is not judged, any other `$(` is), where the mount covering the
     file most closely, at the file itself (a `subPath` mount of the file), at its
     directory or above, decides: `/prometheus` and the operator's
-    log-file volume are writable, `config_out` and its certificate, secret, configMap and
-    web configuration mounts (the last from Prometheus v2.24.0) read-only, and a mount of the author's, in `volumeMounts` or a
+    log-file volume are writable; `config_out` and its certificate, secret, configMap,
+    rule ConfigMap, web configuration and web TLS mounts (the last two from Prometheus
+    v2.24.0) read-only; and a mount of the author's, in `volumeMounts` or a
     prometheus patch, read-only where it sets `readOnly` or mounts a `configMap`, `secret`,
-    `downwardAPI` or `projected` volume, which the kubelet mounts read-only (a patch mount
+    `downwardAPI` or `projected` volume, which the kubelet writes, or one of the operator's
+    Secret, ConfigMap or projected volumes (`config`, `tls-assets`, `web-config`,
+    `thanos-prometheus-http-client-file`, a rule ConfigMap's, `secret-<name>`,
+    `configmap-<name>`), while one of its `config-out` emptyDir, data or `log-file` volume
+    is writable, and so counts one of an `image` volume or a `persistentVolumeClaim` or
+    inline `csi` volume set `readOnly`, whose unseen content may hold a link to a writable
+    volume, which Prometheus follows (a patch mount
     at a path written as an earlier one's is merged into it, replacing that mount's volume
     with its own and keeping `readOnly` from either; of mounts at one path written differently, one writable makes
-    it writable); an author's mount of an image volume, a `readOnly` CSI volume or one of
-    the operator's own volumes counts as writable, and the rule ConfigMap and web TLS
-    mounts are not listed, so the check refuses only where it knows the file or its
-    directory is read-only; where no listed mount covers it, the read-only root
+    it writable); the web TLS credentials' volumes, whose names are hashed, count as
+    writable, so the check refuses only where it knows the file or its
+    directory is read-only; where no mount covers it, the read-only root
     filesystem refuses unless a prometheus patch sets `readOnlyRootFilesystem: false`, and
     a file in `/dev`, `/proc` or a directory under them (as `/dev/stdout`) is never
     refused, nor is a log file below the version it is read from, which the version gate
