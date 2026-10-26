@@ -5012,16 +5012,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     operator's included; where the kubelet makes the two paths equal (a
     relative path and its absolute form), CRI-O makes only one of them
     (go-kure/launcher#1050).
+  - a `queryLogFile` named without a directory beside a
+    `scrapeFailureLogFile` named with one: the operator writes the query log
+    under `/var/log/prometheus` but adds the `log-file` volume there only for
+    the scrape failure log file, on a read-only root filesystem
+    (server/statefulset.go:510, :537; common.go:334-347), unless the file
+    there is writable all the same, judged as in the next entry.
   - a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot write. This
     check follows what runs at the version named, unlike the reserved paths
     above.
 
     Where the file is:
     - A name alone is in `/var/log/prometheus`; the operator passes any other
-      path unchanged (common.go:230-236). For a `queryLogFile` named alone
-      beside a `scrapeFailureLogFile` named with a directory, the operator
-      adds no `log-file` volume there (server/statefulset.go:510, :537;
-      common.go:334-347).
+      path unchanged (common.go:230-236).
     - A relative path with a directory, as `logs/query.log`, is not judged.
       Prometheus joins it to the directory of its configuration,
       `/etc/prometheus/config_out` (`--config.file`, promcfg.go:1258), a
@@ -5030,12 +5033,6 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       `initContainer` may mount it writable and leave a link there to a
       writable volume, which Prometheus follows when it opens the file
       (Prometheus `util/logging/file.go:43`).
-    - An absolute path with a `..` element, as
-      `/prometheus/link/../../logs/query.log`, is not judged. Prometheus opens
-      it as written (prometheus/common `JoinDir` keeps an absolute path), so
-      the kernel follows an element that is a link, in the image or a
-      volume's content, before the `..` after it, reaching a place the
-      cleaned path does not name.
     - A path with a reference `$(NAME)`, a name of letters, digits and `_`,
       is not judged: the config reloader expands it from variables the kind
       does not see (`--config-envsubst-file`, common.go:378; Thanos
@@ -5113,14 +5110,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     container: `/prometheus/wal` is made by Prometheus opening its TSDB
     before its first configuration load opens the query log
     (`cmd/prometheus/main.go:1438` at v3.14.0). Where no mount covers the
-    file, it is admitted (go-kure/launcher#1055): it is on the root
-    filesystem, which the operator makes read-only
-    (server/statefulset.go:349), but the image may hold it as a link to a
-    writable volume, which Prometheus follows (`util/logging/file.go:43`),
-    and the image is not known here, the operator's default included, whose
-    base the operator's `--prometheus-default-base-image` flag sets
-    (`cmd/operator/main.go:169`). A file in `/dev`, `/proc` or a directory
-    under them, as `/dev/stdout`, is not refused. Nor here is a
+    file, the root filesystem decides, which the operator makes read-only
+    unless a patch of the
+    `prometheus` container sets `securityContext.readOnlyRootFilesystem` to
+    `false`. A file in `/dev`, `/proc` or a directory under them, as
+    `/dev/stdout`, is not refused. Nor here, or in the previous entry, is a
     field the operator drops at the version it compares, `queryLogFile`
     below Prometheus v2.16.0 and `scrapeFailureLogFile` below v2.55.0: the
     version gate refuses it instead. Where the read-only mount that decides
