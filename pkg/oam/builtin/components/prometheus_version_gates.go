@@ -662,8 +662,8 @@ func validatePrometheusVersion(spec *monitoringv1.PrometheusSpec) error {
 			return err
 		}
 		gates := gatesOf(prometheusVersionGates)
-		misses := append(gateMisses(spec, v, at, "Prometheus", "version", gates),
-			ceilingMisses(spec, v, at, "Prometheus", "version", prometheusVersionCeilings)...)
+		misses := append(gateMisses(spec, v, at, "Prometheus", gates),
+			ceilingMisses(spec, v, at, "Prometheus", prometheusVersionCeilings)...)
 		if err := refuseVersionMisses(misses, authoredRange(spec, gates, prometheusVersionCeilings), at, "version"); err != nil {
 			return err
 		}

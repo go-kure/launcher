@@ -5092,10 +5092,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     remoteWrite[].messageVersion (read from Prometheus 2.54.0),
     remoteWrite[].azureAd.sdk (read from Prometheus 2.52.0); the Prometheus
     operator does not run the object as authored there; raise version to
-    2.54.0 or later, or leave those fields unset`). The version it suggests
-    is one at which every gated field authored is read, a ceiling not missed
-    at `version` included (`allowOverlappingBlocks` bounds it below 2.39.0);
-    where there is none, it suggests only leaving the fields unset. A field
+    2.54.0 or later, or leave those fields unset`). The version a refusal
+    suggests, of one field or of several, is one at which every gated field
+    authored is read, a minimum or a ceiling not missed at `version`
+    included (`allowOverlappingBlocks` bounds it from 2.11.0 on and below
+    2.39.0); where there is none, it suggests only leaving the fields refused
+    unset (go-kure/launcher#1047). A field
     authored with the parent or the field it needs, both below their
     versions, is one of several. The gates under v2.45.0, the oldest
     Prometheus in the operator's compatibility matrix, are below the range
