@@ -1380,6 +1380,13 @@ document it emits. Where `<base>-<suffix>` is no valid name (a suffix with a cha
 object name takes), an authored name is still used; without one the name is refused, and the
 hook, which has no default to be asked about, is not asked.
 
+`GeneratedName(base, suffix)` returns that default: `<base>-<suffix>`, shortened to a
+DNS-1123 subdomain by the one rule for generated names (`ShortenNameWithSuffix`), or the
+error `ResolveName` gives where it cannot be built. It is the name an object takes where
+no name is authored and no hook is set (`HasNamingHook` false), so a rule can tell the name
+another component's lowering gives such an object without lowering it: the `postgresql`
+rule matches another component's inline recovery store by it (go-kure/launcher#1044).
+
 `LoweringContext.ResolveMemberName(member, spec)` names the one object of a kind component
 the rule is about to emit under the component's name, where the rule lets the author and the
 hook choose that name (the HelmRelease of a `helm` component, the Kustomization and the kept

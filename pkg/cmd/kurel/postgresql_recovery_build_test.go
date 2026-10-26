@@ -326,4 +326,80 @@ spec:
 			t.Errorf("err = %v, want one containing %q", err, refused)
 		}
 	})
+	// Another component's inline recovery store has no authored name: it is
+	// matched by its default name where no hook is set, and left to the
+	// plugin where one is (go-kure/launcher#1044).
+	sibling := func(name string) string {
+		return `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  components:
+    - name: ` + name + `
+      type: postgresql
+      properties:
+        clusterObjectName: origin
+        recovery:
+          source:
+            serverName: first
+            objectStore:
+              destinationPath: s3://bucket/pg/
+              s3Credentials:
+                inheritFromIAMRole: true
+    - name: db
+      type: postgresql
+      properties:
+        backup:
+          objectStore:
+            destinationPath: s3://bucket/pg/
+            s3Credentials:
+              inheritFromIAMRole: true
+        recovery:
+          source:
+            serverName: db
+            objectStoreName: ` + name + `-recovery-source
+`
+	}
+	t.Run("another component's inline recovery store, no hook", func(t *testing.T) {
+		if err := transform(t, sibling("old"), nil); err == nil || !strings.Contains(err.Error(), refused) {
+			t.Errorf("err = %v, want one containing %q", err, refused)
+		}
+	})
+	t.Run("another component's inline recovery store, a hook renames it", func(t *testing.T) {
+		hook := renameBy(map[string]string{string(oam.NameRolePostgresqlRecoveryObjectStore) + " old-recovery-source": "renamed-source"})
+		if err := transform(t, sibling("old"), hook); err != nil {
+			t.Errorf("refused: %v", err)
+		}
+	})
+	// A component name too long for the suffix shortens the store's name by
+	// the one rule for generated names: the store is matched by the name it
+	// is emitted under.
+	t.Run("another component's inline recovery store, a shortened name", func(t *testing.T) {
+		long := strings.Repeat(strings.Repeat("a", 59)+".", 3) + strings.Repeat("a", 60)
+		store, err := oam.GeneratedName(long, "recovery-source")
+		if err != nil {
+			t.Fatalf("GeneratedName: %v", err)
+		}
+		if store == long+"-recovery-source" {
+			t.Fatalf("store name %q was not shortened", store)
+		}
+		unreferenced := strings.Replace(sibling(long), "objectStoreName: "+long+"-recovery-source", "objectStoreName: elsewhere", 1)
+		cluster, _, err := transformWithBuiltins(t, unreferenced)
+		if err != nil {
+			t.Fatalf("transforming: %v", err)
+		}
+		var apps []string
+		for _, a := range cluster.Node.Bundle.Applications {
+			apps = append(apps, a.Name)
+		}
+		if !slices.Contains(apps, store) {
+			t.Fatalf("applications = %v, want the store emitted as %q", apps, store)
+		}
+		named := strings.Replace(sibling(long), "objectStoreName: "+long+"-recovery-source", "objectStoreName: "+store, 1)
+		if err := transform(t, named, nil); err == nil || !strings.Contains(err.Error(), refused) {
+			t.Errorf("err = %v, want one containing %q", err, refused)
+		}
+	})
 }

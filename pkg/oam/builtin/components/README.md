@@ -10904,10 +10904,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     else the Cluster's name) against those of the source, read from the inline
     store, from the component's own backup store, or from the store another
     component of the document emits (a `postgresql` component's backup store
-    or a `cnpg-objectstore`, its `labels` and `annotations` aside), known by
-    the name its author wrote, else by its component name where no `Naming`
-    hook is set. A store outside the document, or another component's store
-    the author did not name while a hook is set (its name may be the hook's
+    or a `cnpg-objectstore`, its `labels` and `annotations` aside, known by
+    the name its author wrote, else by its component name; or a `postgresql`
+    component's inline recovery store, by its default name
+    `<component>-recovery-source`, shortened as every generated name is;
+    go-kure/launcher#1044), an unauthored name only where no `Naming` hook is
+    set. A store outside the document, or another component's store the
+    author did not name while a hook is set (its name may be the hook's
     answer, asked by that component's lowering), is left to the plugin's own
     check before it archives.
   - **Ordering.** The recovering Cluster reads its source store before it can

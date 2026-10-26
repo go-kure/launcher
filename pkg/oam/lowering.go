@@ -541,6 +541,16 @@ func (n *NameAllocator) NameOrAdopt(base, suffix, identity string, origin Origin
 	return name, adopted, nil
 }
 
+// GeneratedName returns the default name LoweringContext.ResolveName builds
+// from base and suffix: "<base>-<suffix>", shortened to a DNS-1123 subdomain by
+// the one rule for generated names. It is the name an object takes where no
+// name is authored and no Naming hook is set, so a rule can know the name
+// another component's lowering gives such an object without lowering it. It
+// fails where ResolveName would fail to build that default.
+func GeneratedName(base, suffix string) (string, error) {
+	return generatedName(base, suffix)
+}
+
 func generatedName(base, suffix string) (string, error) {
 	// The characters are checked on the name as built: shortening replaces the
 	// cut part by a digest, which would hide an invalid character in it. Only
