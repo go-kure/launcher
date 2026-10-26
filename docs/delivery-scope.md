@@ -2000,10 +2000,9 @@ and by scope, whatever component or trait emits it.
     named with one, where the operator mounts no volume for it, unless the file there
     is writable all the same; a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot
     write, judged at what runs at the version named (a name alone is in
-    `/var/log/prometheus`; a relative path with a directory is judged where Prometheus
-    joins it to `/etc/prometheus/config_out`, `queryLogFile` from v2.21.0 only, and is
-    not judged below that, nor where a prometheus patch sets `args` or `command`, which
-    may name another `--config.file`; a path with a reference `$(NAME)`, which the config reloader
+    `/var/log/prometheus`; a relative path with a directory, which Prometheus joins to
+    `/etc/prometheus/config_out`, an emptyDir an `initContainer` may fill with a link to a
+    writable volume, is not judged; a path with a reference `$(NAME)`, which the config reloader
     expands, is not judged, any other `$(` is), where the mount covering the
     file most closely, at the file itself (a `subPath` mount of the file), at its
     directory or above, decides: `/prometheus` and the operator's

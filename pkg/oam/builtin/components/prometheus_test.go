@@ -687,22 +687,6 @@ func prometheusRefusals(notA string) []struct {
 		{"a log file in the web TLS client CA's Secret mount", webTLSLogFile("/etc/prometheus/web_config/secret/web-ca-ca/q.log",
 			map[string]any{"client_ca": map[string]any{"secret": map[string]any{"name": "web-ca", "key": "ca.crt"}}}),
 			`queryLogFile: "/etc/prometheus/web_config/secret/web-ca-ca/q.log" is in /etc/prometheus/web_config/secret/web-ca-ca, under the read-only mount at /etc/prometheus/web_config/secret/web-ca-ca`},
-		// From v2.21.0 Prometheus joins a relative path to the directory of
-		// its configuration, which the operator mounts read-only, and so
-		// does every version that reads scrapeFailureLogFile.
-		{"a log file in a relative directory", map[string]any{"queryLogFile": "logs/query.log"},
-			`queryLogFile: "logs/query.log", which Prometheus joins to the directory of its configuration, /etc/prometheus/config_out, as /etc/prometheus/config_out/logs/query.log, is in /etc/prometheus/config_out/logs, under the read-only mount at /etc/prometheus/config_out in the prometheus container`},
-		{"a scrape failure log in a relative directory", map[string]any{"scrapeFailureLogFile": "logs/scrape.log"},
-			`scrapeFailureLogFile: "logs/scrape.log", which Prometheus joins to the directory of its configuration, /etc/prometheus/config_out, as /etc/prometheus/config_out/logs/scrape.log, is in /etc/prometheus/config_out/logs`},
-		// Unlike a queryLogFile, one is joined at a version that does not
-		// parse too: every version that reads it joins it.
-		{"a scrape failure log in a relative directory at a version that does not parse", map[string]any{"version": "not-a-version", "scrapeFailureLogFile": "logs/scrape.log"},
-			`scrapeFailureLogFile: "logs/scrape.log", which Prometheus joins to the directory of its configuration, /etc/prometheus/config_out, as /etc/prometheus/config_out/logs/scrape.log, is in /etc/prometheus/config_out/logs`},
-		{"a log file in a relative directory at v2.21.0", map[string]any{"version": "v2.21.0", "queryLogFile": "logs/query.log"},
-			`queryLogFile: "logs/query.log", which Prometheus joins to the directory of its configuration`},
-		{"a log file in a relative directory on a writable root filesystem", map[string]any{"queryLogFile": "logs/query.log",
-			"containers": []any{map[string]any{"name": "prometheus", "securityContext": map[string]any{"readOnlyRootFilesystem": false}}}},
-			`queryLogFile: "logs/query.log", which Prometheus joins to the directory of its configuration`},
 		// Only $( a name ) is a reference the config reloader expands; any
 		// other $( reaches Prometheus as written.
 		{"a log file with a $( that is no reference", map[string]any{"queryLogFile": "/logs/$(/query.log"},
@@ -1122,26 +1106,21 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 		"a log file in the operator's log directory": {"queryLogFile": "/var/log/prometheus/query.log", "scrapeFailureLogFile": "scrape.log"},
 		"a log file in a device directory":           {"queryLogFile": "/dev/fd/1"},
 		"a log file in a process directory":          {"queryLogFile": "/proc/self/fd/1"},
-		// Prometheus joins a relative path to the configuration's directory
-		// only from v2.21.0, and reads it from its working directory before,
-		// which an image or a patch may change, so the file is not judged.
-		"a log file in a relative directory below v2.21.0":                    {"version": "v2.20.0", "queryLogFile": "logs/query.log"},
-		"a log file in a relative directory at a version that does not parse": {"version": "not-a-version", "queryLogFile": "logs/query.log"},
-		// A patch's args replace the operator's, so --config.file, and the
-		// directory a relative path is joined to, may be another.
-		"a log file in a relative directory with a patch setting args": {"queryLogFile": "../query.log",
-			"containers": []any{map[string]any{"name": "prometheus", "args": []any{"--config.file=/prometheus/config/prometheus.env.yaml"}}}},
-		"a scrape failure log in a relative directory with a patch setting args": {"scrapeFailureLogFile": "../scrape.log",
-			"containers": []any{map[string]any{"name": "prometheus", "args": []any{"--config.file=/prometheus/config/prometheus.env.yaml"}}}},
-		"a log file in a relative directory with a patch setting command": {"queryLogFile": "logs/query.log",
-			"containers": []any{map[string]any{"name": "prometheus", "command": []any{"/bin/prometheus", "--config.file=/prometheus/config/prometheus.env.yaml"}}}},
-		// The path joined, a writable mount covering it decides.
-		"a log file in a relative directory with a writable mount there": {"queryLogFile": "logs/query.log",
-			"volumes": extra("logs"), "containers": []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/etc/prometheus/config_out/logs"}}}}},
-		// A ../ takes the joined path out of the configuration's directory,
-		// to where the root filesystem decides.
-		"a log file in a relative directory above the configuration on a writable root filesystem": {"queryLogFile": "../../../tmp/query.log",
-			"containers": []any{map[string]any{"name": "prometheus", "securityContext": map[string]any{"readOnlyRootFilesystem": false}}}},
+		// Prometheus joins a relative path with a directory to the
+		// configuration's directory, config_out, from v2.21.0 for a
+		// queryLogFile and at every version for a scrapeFailureLogFile, and
+		// reads a queryLogFile from its working directory before. config_out
+		// is an emptyDir an initContainer may mount writable and fill with a
+		// link to a writable volume, which Prometheus follows when it opens
+		// the file (util/logging/file.go:43 at Prometheus v3.7.0), so the
+		// file is not judged at any version, nor where a ../ takes it out.
+		"a log file in a relative directory":                                                   {"queryLogFile": "logs/query.log"},
+		"a log file in a relative directory at v2.21.0":                                        {"version": "v2.21.0", "queryLogFile": "logs/query.log"},
+		"a log file in a relative directory below v2.21.0":                                     {"version": "v2.20.0", "queryLogFile": "logs/query.log"},
+		"a log file in a relative directory at a version that does not parse":                  {"version": "not-a-version", "queryLogFile": "logs/query.log"},
+		"a scrape failure log in a relative directory":                                         {"scrapeFailureLogFile": "logs/scrape.log"},
+		"a scrape failure log in a relative directory at a version that does not parse":        {"version": "not-a-version", "scrapeFailureLogFile": "logs/scrape.log"},
+		"a log file in a relative directory above the configuration on a read-only filesystem": {"queryLogFile": "../../../tmp/query.log"},
 		// Prometheus opens the TSDB, which makes <storage>/wal, before its
 		// first configuration load opens the query log
 		// (cmd/prometheus/main.go:1438 at Prometheus v3.14.0), and the data
