@@ -2024,15 +2024,26 @@ and by scope, whatever component or trait emits it.
     link to a writable volume, which Prometheus follows (go-kure/launcher#1051), except a mount
     of a `hostPath` volume of `type: File` or `FileOrCreate`, a regular file, under which no
     file can be created and which, set `readOnly`, the kubelet binds read-only, and a log
-    file at the path of a directory the operator mounts, any of its mounts but the web
-    configuration file, as `/prometheus`, `/etc/prometheus/config_out` or
-    `/var/log/prometheus`, which Prometheus cannot open as a file (a patch mount
+    file at the path of a directory mounted in the prometheus container, which Prometheus
+    cannot open as a file: any mount of the operator's but the web configuration file, as
+    `/prometheus`, `/etc/prometheus/config_out` or `/var/log/prometheus`, and an author's
+    mount without `subPath` or `subPathExpr` of an `emptyDir`, `configMap`, `secret`,
+    `downwardAPI`, `projected`, `gitRepo`, `nfs`, `iscsi` or `fc` volume, a `hostPath`
+    of `type: Directory` or `DirectoryOrCreate`, or one of the operator's volumes of those
+    types but the data volume, whose type `storage` decides, and the hashed web TLS
+    volumes (go-kure/launcher#1059; a mount with a `subPath`, and a
+    `persistentVolumeClaim`, `ephemeral`, `csi`, `flexVolume`, `image` or other `hostPath`
+    volume, are not judged a directory, as what is at the path is unseen) (a patch mount
     at a path written as an earlier one's is merged into it, replacing that mount's volume
-    with its own; of mounts at one path written differently, one writable makes
-    it writable); the web TLS credentials' volumes, whose names are hashed, count as
+    with its own and keeping its `subPath` where it sets none; of mounts at one path
+    written differently, one writable makes it writable, and they are a directory only
+    where every one is; the path to a mount resolves to that mount; a link redirected by a
+    later, deeper mount is not modelled (a refusal there may be false, and an admit there
+    may fail at runtime, as an admit of unseen content may)); the web TLS credentials'
+    volumes, whose names are hashed, count as
     writable, so the check refuses only where it knows Prometheus cannot open the file
     for writing: the file or its directory is read-only, its directory is a regular file,
-    its path is a directory the operator mounts, or it is absolute and ends in a slash,
+    its path is a directory mounted there, or it is absolute and ends in a slash,
     `/.` or `/..`, judged as written before it is cleaned;
     where no mount covers it, the read-only root
     filesystem refuses unless a prometheus patch sets `readOnlyRootFilesystem: false`, and

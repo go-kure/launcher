@@ -257,6 +257,38 @@ func prometheusRefusals(notA string) []struct {
 		return props
 	}
 	const operatorVolumeAtLogsWant = `queryLogFile: "/logs/query.log" is in /logs, under the read-only mount at /logs in the prometheus container`
+	// directoryAtLog mounts a volume of source at /logs, the query log's
+	// path, in volumeMounts or a patch of the prometheus container.
+	directoryAtLog := func(source map[string]any, patch bool) map[string]any {
+		volume := map[string]any{"name": "v"}
+		maps.Copy(volume, source)
+		mounts := []any{map[string]any{"name": "v", "mountPath": "/logs"}}
+		props := map[string]any{"queryLogFile": "/logs", "volumes": []any{volume}, "volumeMounts": mounts}
+		if patch {
+			delete(props, "volumeMounts")
+			props["containers"] = []any{map[string]any{"name": "prometheus", "volumeMounts": mounts}}
+		}
+		return props
+	}
+	directoryAtLogWant := func(kind string) string {
+		return `queryLogFile: "/logs" is the path of the ` + kind + ` volume v mounted as a directory in the prometheus container, so Prometheus cannot open it as a file; name a file under it`
+	}
+	directoryVolumes := []struct {
+		kind   string
+		source map[string]any
+	}{
+		{"emptyDir", map[string]any{"emptyDir": map[string]any{}}},
+		{"configMap", map[string]any{"configMap": map[string]any{"name": "logs"}}},
+		{"secret", map[string]any{"secret": map[string]any{"secretName": "logs"}}},
+		{"downwardAPI", map[string]any{"downwardAPI": map[string]any{}}},
+		{"projected", map[string]any{"projected": map[string]any{}}},
+		{"gitRepo", map[string]any{"gitRepo": map[string]any{"repository": "https://git.example/logs.git"}}},
+		{"nfs", map[string]any{"nfs": map[string]any{"server": "nfs.example", "path": "/exports/logs"}}},
+		{"iscsi", map[string]any{"iscsi": map[string]any{"targetPortal": "10.0.0.1:3260", "iqn": "iqn.2001-04.com.example:logs", "lun": 0}}},
+		{"fc", map[string]any{"fc": map[string]any{"targetWWNs": []any{"500a0981891b8dc5"}, "lun": 0}}},
+		{"hostPath", map[string]any{"hostPath": map[string]any{"path": "/srv/logs", "type": "Directory"}}},
+		{"hostPath", map[string]any{"hostPath": map[string]any{"path": "/srv/logs", "type": "DirectoryOrCreate"}}},
+	}
 	// webTLSLogFile names file as the query log of a Prometheus serving
 	// TLS from a key Secret and a certificate ConfigMap, with tls's fields
 	// over those, and a writable volume patched at /etc/prometheus/web_config.
@@ -270,11 +302,29 @@ func prometheusRefusals(notA string) []struct {
 			"volumes":    []any{map[string]any{"name": "web", "emptyDir": map[string]any{}}},
 			"containers": []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "web", "mountPath": "/etc/prometheus/web_config"}}}}}
 	}
-	return []struct {
+	type row = struct {
 		name  string
 		props map[string]any
 		want  string
-	}{
+	}
+	// Each of these volumes is a directory at its mount path, so a log file
+	// there is refused as one, mounted by volumeMounts or a patch, before a
+	// read-only one is refused as read-only (EISDIR, fs/namei.c:3750-3751 at
+	// Linux v6.12, before the write check).
+	var directories []row
+	for _, d := range directoryVolumes {
+		for _, patch := range []bool{false, true} {
+			name := "a log file at the path of the author's " + d.kind + " volume"
+			if patch {
+				name = "a log file at the path of a patch's " + d.kind + " volume"
+			}
+			if h, ok := d.source["hostPath"].(map[string]any); ok {
+				name += " of type " + h["type"].(string)
+			}
+			directories = append(directories, row{name, directoryAtLog(d.source, patch), directoryAtLogWant(d.kind)})
+		}
+	}
+	return append(directories, []row{
 		{"unknown key", map[string]any{"replicaCount": 3}, notA + "monitoring.coreos.com/v1 PrometheusSpec"},
 		{"the object's spec", map[string]any{"spec": map[string]any{"replicas": 3}}, notA},
 		{"shards a string", map[string]any{"shards": "two"}, notA},
@@ -644,6 +694,13 @@ func prometheusRefusals(notA string) []struct {
 			"volumes":    []any{map[string]any{"name": "file", "hostPath": map[string]any{"path": "/srv/query.log", "type": "File"}}},
 			"containers": []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "file", "mountPath": "/prometheus", "readOnly": true}}}}},
 			`queryLogFile: "/prometheus" is the read-only mount at /prometheus in the prometheus container, so Prometheus cannot write the file; the Prometheus operator mounts the volume at /prometheus, so name a file under a writable volume`},
+		// With storage set but disableMountSubPath, the data mount has no
+		// subPath to keep, so an emptyDir patched there is a directory.
+		{"a log file at the data mount patched with an emptyDir, storage mounted without a subPath", map[string]any{"queryLogFile": "/prometheus",
+			"storage":    map[string]any{"emptyDir": map[string]any{}, "disableMountSubPath": true},
+			"volumes":    []any{map[string]any{"name": "logs", "emptyDir": map[string]any{}}},
+			"containers": []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/prometheus"}}}}},
+			`queryLogFile: "/prometheus" is the directory the Prometheus operator mounts a volume at in the prometheus container`},
 		// A patch mount that leaves readOnly unset keeps the earlier mount's
 		// (strategic merge, pkg/k8s/merge.go:55 at prometheus-operator v0.94.1).
 		{"a log file at a readOnly mount patched with a hostPath file", map[string]any{"scrapeFailureLogFile": "/logs/failures.log",
@@ -691,6 +748,25 @@ func prometheusRefusals(notA string) []struct {
 		{"a log file under the operator's volume of a secret", operatorVolumeAtLogs("secret-remote", map[string]any{"secrets": []any{"remote"}}), operatorVolumeAtLogsWant},
 		{"a log file under the operator's volume of a configMap", operatorVolumeAtLogs("configmap-rules", map[string]any{"configMaps": []any{"rules"}}), operatorVolumeAtLogsWant},
 		{"a log file under the operator's sidecar client volume", operatorVolumeAtLogs("thanos-prometheus-http-client-file", map[string]any{"thanos": map[string]any{}}), operatorVolumeAtLogsWant},
+		// The operator's config-out volume is an emptyDir
+		// (pkg/prometheus/common.go:252-260 at prometheus-operator v0.94.1),
+		// mounted at /logs as a directory.
+		{"a log file at the author's mount of the operator's config-out volume", map[string]any{"queryLogFile": "/logs",
+			"volumeMounts": []any{map[string]any{"name": "config-out", "mountPath": "/logs"}}},
+			`queryLogFile: "/logs" is the path of the emptyDir volume config-out mounted as a directory in the prometheus container`},
+		// With a subPath, the mount is not judged a directory, but a
+		// configMap's stays read-only.
+		{"a log file at a configMap mount with a subPath", map[string]any{"queryLogFile": "/logs",
+			"volumes":      []any{map[string]any{"name": "v", "configMap": map[string]any{"name": "logs"}}},
+			"volumeMounts": []any{map[string]any{"name": "v", "mountPath": "/logs", "subPath": "query.log"}}},
+			`queryLogFile: "/logs" is the read-only mount at /logs in the prometheus container, so Prometheus cannot write the file`},
+		// A configMap patched over the web configuration file keeps its
+		// subPath (pkg/k8s/merge.go:55 at prometheus-operator v0.94.1), so it
+		// is read-only there, not a directory.
+		{"a log file at the web configuration file patched with a configMap", map[string]any{"queryLogFile": "/etc/prometheus/web_config/web-config.yaml",
+			"volumes":    []any{map[string]any{"name": "v", "configMap": map[string]any{"name": "logs"}}},
+			"containers": []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "v", "mountPath": "/etc/prometheus/web_config/web-config.yaml"}}}}},
+			`queryLogFile: "/etc/prometheus/web_config/web-config.yaml" is the read-only mount at /etc/prometheus/web_config/web-config.yaml in the prometheus container, so Prometheus cannot write the file`},
 		// The operator mounts each rule ConfigMap read-only at
 		// /etc/prometheus/rules/<ConfigMap>, at least three of them.
 		{"a log file in a rule ConfigMap's mount on a writable root filesystem", map[string]any{"queryLogFile": "/etc/prometheus/rules/prometheus-fast-rulefiles-0/q.log",
@@ -730,7 +806,7 @@ func prometheusRefusals(notA string) []struct {
 			"resources: cpu: request -1 is below 0"},
 		{"a negative sidecar memory limit", map[string]any{"thanos": map[string]any{"resources": map[string]any{"limits": map[string]any{"memory": "-1Gi"}}}},
 			"thanos: resources: memory: limit -1Gi is below 0"},
-	}
+	}...)
 }
 
 // TestPrometheus_ExternalURL: Prometheus checks no scheme of externalUrl, so
@@ -1042,6 +1118,7 @@ func TestPrometheus_Name(t *testing.T) {
 func TestPrometheus_OperatorRunsIt(t *testing.T) {
 	h := &components.PrometheusHandler{}
 	extra := func(name string) []any { return []any{map[string]any{"name": name, "emptyDir": map[string]any{}}} }
+	logsMount := []any{map[string]any{"name": "v", "mountPath": "/logs"}}
 	for name, props := range map[string]map[string]any{
 		"zero replicas":                                     {"replicas": 0},
 		"a port name of 15 characters":                      {"portName": "prometheuswebui"},
@@ -1216,6 +1293,73 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 		"a log file under a readOnly hostPath directory mount": {"queryLogFile": "/logs/query.log",
 			"volumes":      []any{map[string]any{"name": "logs", "hostPath": map[string]any{"path": "/srv/logs", "type": "Directory"}}},
 			"volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/logs", "readOnly": true}}},
+		// What these volumes put at their mount path is the claim's volume's,
+		// the driver's or the runtime's (an image volume may be an OCI
+		// artifact on CRI-O), which the kind does not see, so a log file
+		// there is not judged a directory.
+		// With storage set the data mount carries prometheus-db as its subPath
+		// (SubPathForStorage, pkg/prometheus/common.go:216-224 and :278-282 at
+		// prometheus-operator v0.94.1), which an emptyDir patched there keeps,
+		// so it mounts an entry of the volume, not the volume as a directory.
+		"a log file at the data mount patched with an emptyDir, storage set": {"queryLogFile": "/prometheus",
+			"storage":    map[string]any{"emptyDir": map[string]any{}},
+			"volumes":    []any{map[string]any{"name": "logs", "emptyDir": map[string]any{}}},
+			"containers": []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/prometheus"}}}}},
+		// The data volume's type is storage's (server/statefulset.go:104-135
+		// at prometheus-operator v0.94.1), so an author's mount of it is not
+		// judged a directory, an emptyDir with storage unset included.
+		"a log file at an author's mount of the data volume": {"queryLogFile": "/logs",
+			"volumeMounts": []any{map[string]any{"name": "prometheus-fast-db", "mountPath": "/logs"}}},
+		"a log file at the path of a claim's volume": {"queryLogFile": "/logs",
+			"volumes": []any{map[string]any{"name": "v", "persistentVolumeClaim": map[string]any{"claimName": "logs"}}}, "volumeMounts": logsMount},
+		"a log file at the path of an ephemeral volume": {"queryLogFile": "/logs",
+			"volumes": []any{map[string]any{"name": "v", "ephemeral": map[string]any{"volumeClaimTemplate": map[string]any{"spec": amClaim}}}}, "volumeMounts": logsMount},
+		"a log file at the path of a CSI volume": {"queryLogFile": "/logs",
+			"volumes": []any{map[string]any{"name": "v", "csi": map[string]any{"driver": "csi.example"}}}, "volumeMounts": logsMount},
+		"a log file at the path of an image volume": {"queryLogFile": "/logs",
+			"volumes": []any{map[string]any{"name": "v", "image": map[string]any{"reference": "registry.example/team/logs:1.2.3"}}}, "volumeMounts": logsMount},
+		"a log file at the path of a flexVolume": {"queryLogFile": "/logs",
+			"volumes": []any{map[string]any{"name": "v", "flexVolume": map[string]any{"driver": "example/logs"}}}, "volumeMounts": logsMount},
+		// No kubelet plugin of its own (cmd/kubelet/app/plugins.go:55-68 at
+		// Kubernetes v1.37.1): a CSI driver or nothing mounts it.
+		"a log file at the path of a cephfs volume": {"queryLogFile": "/logs",
+			"volumes": []any{map[string]any{"name": "v", "cephfs": map[string]any{"monitors": []any{"10.0.0.1:6789"}}}}, "volumeMounts": logsMount},
+		// The kubelet checks no hostPath of no type, and a device or a socket
+		// is no directory.
+		"a log file at the path of a hostPath of no type": {"queryLogFile": "/logs",
+			"volumes": []any{map[string]any{"name": "v", "hostPath": map[string]any{"path": "/srv/query.log"}}}, "volumeMounts": logsMount},
+		"a log file at the path of a character device hostPath": {"queryLogFile": "/logs",
+			"volumes": []any{map[string]any{"name": "v", "hostPath": map[string]any{"path": "/dev/console", "type": "CharDevice"}}}, "volumeMounts": logsMount},
+		"a log file at the path of a socket hostPath": {"queryLogFile": "/logs",
+			"volumes": []any{map[string]any{"name": "v", "hostPath": map[string]any{"path": "/run/logs.sock", "type": "Socket"}}}, "volumeMounts": logsMount},
+		// The kubelet makes a missing subPath a directory, but an existing
+		// one, which an init container may have written, may be a file
+		// (kubelet_pods.go:349-368 at Kubernetes v1.37.1).
+		"a log file at an emptyDir mount with a subPath": {"queryLogFile": "/logs",
+			"volumes": extra("v"), "volumeMounts": []any{map[string]any{"name": "v", "mountPath": "/logs", "subPath": "query.log"}}},
+		"a log file at an emptyDir mount with a subPathExpr": {"queryLogFile": "/logs",
+			"volumes": extra("v"), "volumeMounts": []any{map[string]any{"name": "v", "mountPath": "/logs", "subPathExpr": "$(POD_NAME).log"}}},
+		// Which of two mounts at one path written differently the runtime
+		// mounts last is not derived, so it is a directory only where both
+		// are.
+		"a log file at an emptyDir and a claim's volume at one path spelled two ways": {"queryLogFile": "/logs",
+			"volumes":      []any{map[string]any{"name": "v", "emptyDir": map[string]any{}}, map[string]any{"name": "c", "persistentVolumeClaim": map[string]any{"claimName": "logs"}}},
+			"volumeMounts": []any{map[string]any{"name": "v", "mountPath": "/logs"}, map[string]any{"name": "c", "mountPath": "/logs/"}}},
+		// A patch mount at a path it shares with an earlier one keeps that
+		// mount's subPath where it sets none, as the operator's strategic
+		// merge keeps the fields a patch leaves out (pkg/k8s/merge.go:55 at
+		// prometheus-operator v0.94.1).
+		"a log file at an emptyDir subPath mount patched without a subPath": {"queryLogFile": "/logs",
+			"volumes":      []any{map[string]any{"name": "v", "emptyDir": map[string]any{}}, map[string]any{"name": "w", "emptyDir": map[string]any{}}},
+			"volumeMounts": []any{map[string]any{"name": "v", "mountPath": "/logs", "subPath": "query.log"}},
+			"containers":   []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "w", "mountPath": "/logs"}}}}},
+		"a log file at an emptyDir subPath mount patched with a subPath of its own": {"queryLogFile": "/logs",
+			"volumes":      []any{map[string]any{"name": "v", "emptyDir": map[string]any{}}, map[string]any{"name": "w", "emptyDir": map[string]any{}}},
+			"volumeMounts": []any{map[string]any{"name": "v", "mountPath": "/logs", "subPath": "query.log"}},
+			"containers":   []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "w", "mountPath": "/logs", "subPath": "other.log"}}}}},
+		"a log file at the web configuration file patched with an emptyDir": {"queryLogFile": "/etc/prometheus/web_config/web-config.yaml",
+			"volumes":    extra("v"),
+			"containers": []any{map[string]any{"name": "prometheus", "volumeMounts": []any{map[string]any{"name": "v", "mountPath": "/etc/prometheus/web_config/web-config.yaml"}}}}},
 		"a log file under a read-only mount on a writable root filesystem": {"queryLogFile": "/var/log/query.log",
 			"volumes": extra("logs"), "volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "/var/log", "readOnly": true}},
 			"containers": []any{map[string]any{"name": "prometheus", "securityContext": map[string]any{"readOnlyRootFilesystem": false}}}},

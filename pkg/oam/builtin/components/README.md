@@ -5102,19 +5102,46 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       (`pkg/webconfig/config.go:272-278`). `/prometheus`,
       `/etc/prometheus/config_out` and `/var/log/prometheus` are emptyDir
       or claim directories (`common.go:252-283`, `:334-347`), the rest
-      Secret, ConfigMap or projected volumes mounted whole. Prometheus
+      Secret, ConfigMap or projected volumes mounted whole. So is the path of
+      an author's mount, in `volumeMounts` or a patch, without `subPath` or
+      `subPathExpr`, of an `emptyDir`, `configMap`, `secret`, `downwardAPI`,
+      `projected`, `gitRepo`, `nfs`, `iscsi` or `fc` volume, or a `hostPath`
+      of `type: Directory` or `DirectoryOrCreate`, or of one of the
+      operator's volumes of those types (`config-out` is an emptyDir; not
+      the data volume `prometheus-<name>-db`, whose type `storage` decides,
+      nor the web TLS credentials' volumes, whose names are hashed): each
+      is set up as a directory at its path (`emptyDir` `SetUpAt`, the
+      kubelet-written types on a wrapped emptyDir, `nfs`, `iscsi` and `fc`
+      on a directory they make, `hostPath` checked or made one). Prometheus
       cannot open a directory as a file, so a log file at one's own path is
-      refused, writable or not; a file under a writable one is admitted.
+      refused, writable or not, before a read-only one is refused as
+      read-only; a file under a writable one is admitted. Not judged a
+      directory: a mount with a `subPath` (the kubelet makes a missing one a
+      directory, but an existing one may be a file), and a
+      `persistentVolumeClaim`, `ephemeral`, `csi`, `flexVolume` or `image`
+      volume, a `hostPath` of another type or of none, and the in-tree
+      types with no kubelet plugin of their own, whose content at the path
+      is the claim's, the driver's or the runtime's. A `hostPath` of
+      `type: Socket` is admitted too, though opening a socket fails.
 
     A patch mount at a path written as an earlier mount's is merged into it
     by the operator's strategic merge: it takes the patch's volume, and keeps
-    the earlier mount's `readOnly` where it leaves it unset. Of mounts at one path written differently,
+    the earlier mount's `readOnly`, `subPath` and `subPathExpr` where it
+    leaves them unset. The operator's data mount at `/prometheus` carries
+    `subPath: prometheus-db` where `storage` is set and
+    `disableMountSubPath` is not (`SubPathForStorage`, common.go:216-224,
+    :278-282), so a patch there is not judged a directory then; the
+    operator's own data mount is. Of mounts at one path written differently,
     as `/data` and `data/`, in `volumeMounts` or a patch, one writable makes
-    it writable, since which one the container runtime mounts over the other
-    is not derived. The check refuses only where it knows Prometheus cannot
-    open the file for writing: the file or its directory is read-only, its
-    directory is a regular file, its path is a directory the operator
-    mounts, or it is absolute and ends in a slash, `/.` or `/..`. A directory below a writable mount counts as
+    it writable, and they are a directory only where every one is, since
+    which one the container runtime mounts over the other is not derived.
+    Paths are compared as written: the path to a mount resolves to that
+    mount; a link redirected by a later, deeper mount is not modelled (a
+    refusal there may be false, and an admit there may fail at runtime, as an
+    admit of unseen content may). The check refuses only where it knows
+    Prometheus cannot open the file for writing: the file or its directory
+    is read-only, its directory is a regular file, its path is a directory
+    mounted there, or it is absolute and ends in a slash, `/.` or `/..`. A directory below a writable mount counts as
     writable, since it may exist on the volume or be made by an init
     container: `/prometheus/wal` is made by Prometheus opening its TSDB
     before its first configuration load opens the query log
