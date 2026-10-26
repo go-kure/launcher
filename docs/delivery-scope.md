@@ -2005,20 +2005,22 @@ and by scope, whatever component or trait emits it.
     writable volume, is not judged; a path with a reference `$(NAME)`, which the config reloader
     expands, is not judged, any other `$(` is), where the mount covering the
     file most closely, at the file itself (a `subPath` mount of the file), at its
-    directory or above, decides: `/prometheus` and the operator's
-    log-file volume are writable; `config_out` and its certificate, secret, configMap,
+    directory or above, decides: `/prometheus`, the operator's log-file volume and
+    `config_out`, an emptyDir, are writable; its certificate, secret, configMap,
     rule ConfigMap, web configuration and web TLS mounts (the last two from Prometheus
     v2.24.0) read-only; and a mount of the author's, in `volumeMounts` or a
-    prometheus patch, read-only where it sets `readOnly` or mounts a `configMap`, `secret`,
+    prometheus patch, read-only only where it mounts a `configMap`, `secret`,
     `downwardAPI` or `projected` volume, which the kubelet writes, or one of the operator's
     Secret, ConfigMap or projected volumes (`config`, `tls-assets`, `web-config`,
     `thanos-prometheus-http-client-file`, a rule ConfigMap's, `secret-<name>`,
-    `configmap-<name>`), while one of its `config-out` emptyDir, data or `log-file` volume
-    is writable, and so counts one of an `image` volume or a `persistentVolumeClaim` or
-    inline `csi` volume set `readOnly`, whose unseen content may hold a link to a writable
-    volume, which Prometheus follows (a patch mount
+    `configmap-<name>`), while one of any other volume is writable, `readOnly` set or not
+    (an `emptyDir`, `hostPath`, `image`, `persistentVolumeClaim` or `csi` volume, or the
+    operator's `config-out`, data or `log-file` volume), whose unseen content may hold a
+    link to a writable volume, which Prometheus follows (go-kure/launcher#1051), except a mount
+    of a `hostPath` volume of `type: File` or `FileOrCreate`, a regular file, under which no
+    file can be created and which, set `readOnly`, the kubelet binds read-only (a patch mount
     at a path written as an earlier one's is merged into it, replacing that mount's volume
-    with its own and keeping `readOnly` from either; of mounts at one path written differently, one writable makes
+    with its own; of mounts at one path written differently, one writable makes
     it writable); the web TLS credentials' volumes, whose names are hashed, count as
     writable, so the check refuses only where it knows the file or its
     directory is read-only; where no mount covers it, the read-only root
