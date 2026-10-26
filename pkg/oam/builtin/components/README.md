@@ -5019,19 +5019,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     Where the file is:
     - A name alone is in `/var/log/prometheus`; the operator passes any other
       path unchanged (common.go:230-236).
-    - A relative path with a directory, as `logs/query.log`, is joined by
-      Prometheus to the directory of its configuration,
-      `/etc/prometheus/config_out` (`--config.file`, promcfg.go:1258), with
-      `filepath.Join`, and judged where that puts it: usually under the
-      operator's read-only `config_out`; a `../` may take it out of there.
-      `queryLogFile` is joined from Prometheus v2.21.0; below that, or at a
-      version that does not parse, Prometheus opens it from its working
-      directory, which `image` or a patch's `workingDir` may change, so it is
-      not judged. `scrapeFailureLogFile` is joined at every version that
-      reads it. Where a patch of the `prometheus` container sets `args` or
-      `command`, neither is judged: the operator's strategic merge replaces
-      its arguments with the patch's (server/statefulset.go:366), which may
-      name another `--config.file`.
+    - A relative path with a directory, as `logs/query.log`, is not judged.
+      Prometheus joins it to the directory of its configuration,
+      `/etc/prometheus/config_out` (`--config.file`, promcfg.go:1258), a
+      `queryLogFile` from v2.21.0 only; before that it opens one from its
+      working directory. `config_out` is an emptyDir (common.go:253-259): an
+      `initContainer` may mount it writable and leave a link there to a
+      writable volume, which Prometheus follows when it opens the file
+      (Prometheus `util/logging/file.go:43`).
     - A path with a reference `$(NAME)`, a name of letters, digits and `_`,
       is not judged: the config reloader expands it from variables the kind
       does not see (`--config-envsubst-file`, common.go:378; Thanos
