@@ -1,6 +1,8 @@
 package components
 
 import (
+	"strings"
+
 	"github.com/blang/semver/v4"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -89,40 +91,135 @@ func refuseVersionGates[S any](spec *S, version semver.Version, at, product stri
 }
 
 // refuseVersionGatesAt is refuseVersionGates for the version of field, as
-// thanos.version. It refuses the first path of gates that spec authors below
-// its minimum, at the highest minimum spec misses for that path: a path read
+// thanos.version, refusing the misses of gateMisses (refuseVersionMisses).
+func refuseVersionGatesAt[S any](spec *S, version semver.Version, at, product, field string, gates []versionGate[S]) error {
+	return refuseVersionMisses(gateMisses(spec, version, at, product, field, gates), authoredRange(spec, gates, nil), at, field)
+}
+
+// versionMiss is a field spec authors outside the versions the operator reads
+// it at.
+type versionMiss struct {
+	// path is the property.
+	path string
+	// read names the versions the operator reads it at: "from Prometheus
+	// 2.54.0", "below Prometheus 2.39.0" or "for Prometheus 2.x".
+	read string
+	// minimum is the version it is read from, empty for a ceiling.
+	minimum string
+	// alone is the refusal of the field where it is the only miss: what the
+	// operator does with it, and how to fix it.
+	alone error
+}
+
+// gateMisses is every path of gates that spec authors below its minimum, in
+// table order, each at the highest minimum spec misses for it: a path read
 // from several versions, by where the operator reads it, is refused where any
 // of them would drop it, naming the version that reads it everywhere.
-func refuseVersionGatesAt[S any](spec *S, version semver.Version, at, product, field string, gates []versionGate[S]) error {
+func gateMisses[S any](spec *S, version semver.Version, at, product, field string, gates []versionGate[S]) []versionMiss {
 	missed := func(g versionGate[S]) bool {
 		return g.authored(spec) && version.LT(semver.MustParse(g.minimum))
 	}
+	var misses []versionMiss
+	seen := map[string]bool{}
 	for i, g := range gates {
-		if !missed(g) {
+		if seen[g.path] || !missed(g) {
 			continue
 		}
+		seen[g.path] = true
 		for _, o := range gates[i+1:] {
 			if o.path == g.path && missed(o) && semver.MustParse(o.minimum).GT(semver.MustParse(g.minimum)) {
 				g = o
 			}
 		}
-		return errors.Errorf("%s: read by the Prometheus operator only for %s %s and later; at %s it %s; raise %s to %s or later, or leave %s unset", g.path, product, g.minimum, at, g.below, field, g.minimum, g.path)
+		misses = append(misses, versionMiss{
+			path: g.path, read: "from " + product + " " + g.minimum, minimum: g.minimum,
+			alone: errors.Errorf("%s: read by the Prometheus operator only for %s %s and later; at %s it %s; raise %s to %s or later, or leave %s unset", g.path, product, g.minimum, at, g.below, field, g.minimum, g.path),
+		})
 	}
-	return nil
+	return misses
 }
 
-// refuseVersionCeilings refuses the first field of ceilings that spec authors
-// at or above its maximum, as refuseVersionGatesAt does under a minimum.
-func refuseVersionCeilings[S any](spec *S, version semver.Version, at, product, field string, ceilings []versionCeiling[S]) error {
+// ceilingMisses is every field of ceilings that spec authors at or above its
+// maximum, in table order.
+func ceilingMisses[S any](spec *S, version semver.Version, at, product, field string, ceilings []versionCeiling[S]) []versionMiss {
+	var misses []versionMiss
 	for _, c := range ceilings {
 		if !c.authored(spec) || version.LT(semver.MustParse(c.maximum)) {
 			continue
 		}
-		bound, lower := product+" below "+c.maximum, "below "+c.maximum
+		bound, lower, read := product+" below "+c.maximum, "below "+c.maximum, "below "+product+" "+c.maximum
 		if c.shown != "" {
-			bound, lower = c.shown, "to "+c.shown
+			bound, lower, read = c.shown, "to "+c.shown, "for "+c.shown
 		}
-		return errors.Errorf("%s: read by the Prometheus operator only for %s; at %s it %s; lower %s %s, or leave %s unset", c.path, bound, at, c.above, field, lower, c.path)
+		misses = append(misses, versionMiss{
+			path: c.path, read: read,
+			alone: errors.Errorf("%s: read by the Prometheus operator only for %s; at %s it %s; lower %s %s, or leave %s unset", c.path, bound, at, c.above, field, lower, c.path),
+		})
 	}
-	return nil
+	return misses
+}
+
+// versionRange is the versions at which the operator reads every field of
+// some gates and ceilings that a spec authors, missed at its version or not:
+// from the highest minimum among them on (from, empty for none), and below
+// the lowest maximum (below, empty for none). lower and within word that
+// maximum for a fix: "below 2.39.0" both, or, for a ceiling shown as
+// "Prometheus 2.x", "to Prometheus 2.x" and "within Prometheus 2.x".
+type versionRange struct {
+	from, below, lower, within string
+}
+
+// authoredRange is the versionRange of the gates and ceilings spec authors.
+func authoredRange[S any](spec *S, gates []versionGate[S], ceilings []versionCeiling[S]) versionRange {
+	var r versionRange
+	for _, g := range gates {
+		if g.authored(spec) && (r.from == "" || semver.MustParse(g.minimum).GT(semver.MustParse(r.from))) {
+			r.from = g.minimum
+		}
+	}
+	for _, c := range ceilings {
+		if c.authored(spec) && (r.below == "" || semver.MustParse(c.maximum).LT(semver.MustParse(r.below))) {
+			r.below, r.lower, r.within = c.maximum, "below "+c.maximum, "below "+c.maximum
+			if c.shown != "" {
+				r.lower, r.within = "to "+c.shown, "within "+c.shown
+			}
+		}
+	}
+	return r
+}
+
+// refuseVersionMisses refuses misses, the fields spec authors outside the
+// versions the operator reads them at, judged at the version of field, named
+// by at. A single miss is refused with what the operator does with it. Of
+// several, each may be preempted by another the operator reaches first (a
+// refusal at reconcile, before the configuration a drop is from; a panic
+// generating one part of it, before another), so no single consequence is
+// claimed: the refusal names every field with its versions, and states that
+// the object does not run as authored (go-kure/launcher#1022). The version it
+// suggests is in authored, the versions every field spec authors is read at,
+// so that it does not drop a field read at the version spec names; where
+// there is none, it suggests only leaving the fields unset.
+func refuseVersionMisses(misses []versionMiss, authored versionRange, at, field string) error {
+	switch len(misses) {
+	case 0:
+		return nil
+	case 1:
+		return misses[0].alone
+	}
+	named := make([]string, len(misses))
+	for i, m := range misses {
+		named[i] = m.path + " (read " + m.read + ")"
+	}
+	var fix string
+	switch r := authored; {
+	case r.below == "":
+		fix = "raise " + field + " to " + r.from + " or later, or leave those fields unset"
+	case r.from == "":
+		fix = "lower " + field + " " + r.lower + ", or leave those fields unset"
+	case semver.MustParse(r.from).LT(semver.MustParse(r.below)):
+		fix = "name a " + field + " from " + r.from + " on and " + r.within + ", or leave those fields unset"
+	default:
+		fix = "the operator reads the fields authored at no single " + field + " (from " + r.from + " on and " + r.within + "): leave those fields unset"
+	}
+	return errors.Errorf("%s: refused: fields outside their versions at %s: %s; the Prometheus operator does not run the object as authored there; %s", field, at, strings.Join(named, ", "), fix)
 }

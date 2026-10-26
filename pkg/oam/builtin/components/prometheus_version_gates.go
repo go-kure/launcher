@@ -632,7 +632,8 @@ func prometheusVersionDrops(spec *monitoringv1.PrometheusSpec, path string) bool
 //
 // It then refuses a field the operator reads only from a later version than
 // the one it compares (prometheusVersionGates), or only below an earlier one
-// (prometheusVersionCeilings). That is version where set. Unset, it is judged
+// (prometheusVersionCeilings); several, of either table, are refused together
+// (refuseVersionMisses). That is version where set. Unset, it is judged
 // against the default of the operator release launcher vendors, as the
 // deployed operator's is unknown at build time. A version the operator cannot
 // parse is left to it: no gate applies there. Where thanos is set, the
@@ -660,10 +661,10 @@ func validatePrometheusVersion(spec *monitoringv1.PrometheusSpec) error {
 		if err := refuseAzureADWithoutMethod(spec.RemoteWrite, "one"); err != nil {
 			return err
 		}
-		if err := refuseVersionGates(spec, v, at, "Prometheus", gatesOf(prometheusVersionGates)); err != nil {
-			return err
-		}
-		if err := refuseVersionCeilings(spec, v, at, "Prometheus", "version", prometheusVersionCeilings); err != nil {
+		gates := gatesOf(prometheusVersionGates)
+		misses := append(gateMisses(spec, v, at, "Prometheus", "version", gates),
+			ceilingMisses(spec, v, at, "Prometheus", "version", prometheusVersionCeilings)...)
+		if err := refuseVersionMisses(misses, authoredRange(spec, gates, prometheusVersionCeilings), at, "version"); err != nil {
 			return err
 		}
 		if err := refusePromRelabelTargetLabels(spec, v, at); err != nil {

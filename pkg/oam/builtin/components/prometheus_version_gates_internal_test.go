@@ -441,10 +441,11 @@ type promGateFixture struct {
 	// entry of the operator's compatibility matrix of the previous major
 	// (v2.55.1).
 	below string
-	// path and bound are what the refusal names and the version the fixture
-	// builds at, where they are not the id's own path and minimum: a parent
-	// the fixture authors with it, refused first or at a higher minimum
-	// (masked), or the highest minimum on its path.
+	// path and bound are, where they are not the id's own path and minimum,
+	// another field the fixture authors with it below its version, a parent
+	// or a field it needs, which the refusal names with the id's as two
+	// fields outside their versions (masked), or the highest minimum on the
+	// id's path; bound is also the version the fixture builds at.
 	path, bound string
 }
 
@@ -622,7 +623,7 @@ func prometheusGateFixtures() map[string]promGateFixture {
 		fixtures[o.path+".tlsConfig"] = f(o.holder(m{"oauth2": oauth2(m{"tlsConfig": m{"insecureSkipVerify": true}})}), "v2.42.0")
 	}
 	// The proxy settings. noProxy and proxyConnectHeader need proxyUrl,
-	// which is refused first, at the same minimum, where it is gated too.
+	// which is refused with them, at the same minimum, where it is gated too.
 	proxies := map[string]func(m) m{
 		"apiserverConfig":          api,
 		"alerting.alertmanagers[]": am,
@@ -703,9 +704,11 @@ func promBuild(t *testing.T, props map[string]any, field, version string) error 
 
 // TestPrometheusVersionGates_Refused: each id of the gate tables, authored
 // alone with a version under its minimum, is refused naming the path, the
-// product, the bound and the version; at its bound it builds, and with the
-// version unset too, where the operator's default, above every minimum, is
-// compared. A field that is also a ceiling's is refused unset instead.
+// product, the bound and the version, or, authored with another field below
+// its version, naming both with their versions (refuseVersionMisses); at its
+// bound it builds, and with the version unset too, where the operator's
+// default, above every minimum, is compared. A field that is also a
+// ceiling's is refused unset instead.
 func TestPrometheusVersionGates_Refused(t *testing.T) {
 	fixtures := prometheusGateFixtures()
 	for _, table := range []struct {
@@ -737,9 +740,19 @@ func TestPrometheusVersionGates_Refused(t *testing.T) {
 				if semver.MustParse(bound).LT(minimum) {
 					t.Fatalf("bound %s is under the id's minimum %s", bound, g.gate.minimum)
 				}
-				want := fmt.Sprintf("%s: read by the Prometheus operator only for %s %s and later; at %s %s it ", path, table.product, bound, table.field, fx.below)
-				if err := promBuild(t, fx.props, table.field, fx.below); err == nil || !strings.Contains(err.Error(), want) {
-					t.Errorf("at %s: err = %v, want one mentioning %q", fx.below, err, want)
+				want := []string{fmt.Sprintf("%s: read by the Prometheus operator only for %s %s and later; at %s %s it ", path, table.product, bound, table.field, fx.below)}
+				if fx.path != "" {
+					want = []string{
+						fmt.Sprintf("%s: refused: fields outside their versions at %s %s: ", table.field, table.field, fx.below),
+						fmt.Sprintf("%s (read from %s %s)", path, table.product, bound),
+						fmt.Sprintf("%s (read from %s %s)", g.gate.path, table.product, g.gate.minimum),
+					}
+				}
+				err = promBuild(t, fx.props, table.field, fx.below)
+				for _, w := range want {
+					if err == nil || !strings.Contains(err.Error(), w) {
+						t.Errorf("at %s: err = %v, want one mentioning %q", fx.below, err, w)
+					}
 				}
 				if err := promBuild(t, fx.props, table.field, "v"+bound); err != nil {
 					t.Errorf("at v%s: err = %v, want it built", bound, err)
@@ -823,6 +836,9 @@ func TestPrometheusVersionGates_Cases(t *testing.T) {
 	blockSize := func(thanos m) m {
 		return m{"thanos": merge(m{"objectStorageConfig": m{"name": "objstore", "key": "objstore.yml"}, "blockSize": "4h"}, thanos)}
 	}
+	rw := func(extra m) m {
+		return m{"remoteWrite": []any{merge(m{"url": "https://metrics.example.com/api/v1/write"}, extra)}}
+	}
 	cases := []struct {
 		name    string
 		props   m
@@ -859,9 +875,29 @@ func TestPrometheusVersionGates_Cases(t *testing.T) {
 			"thanos.blockSize: read by the Prometheus operator only where it disables local compaction"},
 		{"blockSize with an unparsable thanos.version", blockSize(m{"version": "main"}), "version", "", ""},
 		{"blockSize with an empty thanos.version, which the operator cannot parse", blockSize(m{"version": ""}), "version", "", ""},
-		{"an azureAd method below both its version and azureAd's is refused as the method", m{"remoteWrite": []any{m{
+		{"an azureAd method below both its version and azureAd's names both", m{"remoteWrite": []any{m{
 			"url": "https://metrics.example.com/api/v1/write", "azureAd": m{"sdk": m{"tenantId": "00000000-0000-0000-0000-000000000001"}},
-		}}}, "version", "v2.44.0", "remoteWrite[].azureAd.sdk: read by the Prometheus operator only for Prometheus 2.52.0 and later; at version v2.44.0 it refuses the object at reconcile"},
+		}}}, "version", "v2.44.0", "version: refused: fields outside their versions at version v2.44.0: remoteWrite[].azureAd.sdk (read from Prometheus 2.52.0), remoteWrite[].azureAd (read from Prometheus 2.45.0); the Prometheus operator does not run the object as authored there; raise version to 2.52.0 or later, or leave those fields unset"},
+		// go-kure/launcher#1022: of several fields below their versions, the
+		// operator may reach any consequence first, so none is claimed.
+		{"a dropped and a refused field name both, and no consequence", rw(m{"messageVersion": "V1.0", "azureAd": m{"sdk": m{"tenantId": "00000000-0000-0000-0000-000000000001"}}}), "version", "v2.50.0",
+			"version: refused: fields outside their versions at version v2.50.0: remoteWrite[].messageVersion (read from Prometheus 2.54.0), remoteWrite[].azureAd.sdk (read from Prometheus 2.52.0); the Prometheus operator does not run the object as authored there; raise version to 2.54.0 or later, or leave those fields unset"},
+		{"a panicking and a refused field name both", rw(m{"authorization": m{"credentials": m{"name": "token", "key": "token"}}, "azureAd": m{"sdk": m{"tenantId": "00000000-0000-0000-0000-000000000001"}}}), "version", "v2.25.0",
+			"version: refused: fields outside their versions at version v2.25.0: "},
+		{"otlp and a panicking remote write authorization name both", merge(m{"otlp": m{"promoteResourceAttributes": []any{"service.instance.id"}}}, rw(m{"authorization": m{"credentials": m{"name": "token", "key": "token"}}})), "version", "v2.25.0",
+			"(read from Prometheus 2.26.0)"},
+		{"a field below its minimum and one at its ceiling name both, and no single version", rw(m{"messageVersion": "V1.0", "queueConfig": m{"maxRetries": 5}}), "version", "v2.40.0",
+			"version: refused: fields outside their versions at version v2.40.0: remoteWrite[].messageVersion (read from Prometheus 2.54.0), remoteWrite[].queueConfig.maxRetries (read below Prometheus 2.11.0); the Prometheus operator does not run the object as authored there; the operator reads the fields authored at no single version (from 2.54.0 on and below 2.11.0): leave those fields unset"},
+		// The version suggested keeps every field authored read, a ceiling
+		// the version named does not miss included.
+		{"a ceiling not missed bounds the version suggested", merge(m{"allowOverlappingBlocks": true}, rw(m{"followRedirects": true})), "version", "v2.10.0",
+			"; the Prometheus operator does not run the object as authored there; name a version from 2.26.0 on and below 2.39.0, or leave those fields unset"},
+		{"a ceiling not missed leaves no version to suggest", merge(m{"allowOverlappingBlocks": true}, rw(m{"messageVersion": "V1.0"})), "version", "v2.10.0",
+			"; the Prometheus operator does not run the object as authored there; the operator reads the fields authored at no single version (from 2.54.0 on and below 2.39.0): leave those fields unset"},
+		{"a ceiling shown as a major bounds the version suggested", merge(am("v1"), rw(m{"messageVersion": "V1.0", "azureAd": m{"sdk": m{"tenantId": "00000000-0000-0000-0000-000000000001"}}})), "version", "v2.50.0",
+			"; the Prometheus operator does not run the object as authored there; name a version from 2.54.0 on and within Prometheus 2.x, or leave those fields unset"},
+		{"two ceilings missed suggest below the lower, from the minima met", merge(am("v1"), m{"allowOverlappingBlocks": true}), "version", "v3.0.0",
+			"version: refused: fields outside their versions at version v3.0.0: alerting.alertmanagers[].apiVersion (read for Prometheus 2.x), allowOverlappingBlocks (read below Prometheus 2.39.0); the Prometheus operator does not run the object as authored there; name a version from 2.11.0 on and below 2.39.0, or leave those fields unset"},
 		{"a remote write authorization below 2.26.0 names the panic", m{"remoteWrite": []any{m{
 			"url": "https://metrics.example.com/api/v1/write", "authorization": m{"credentials": m{"name": "token", "key": "token"}},
 		}}}, "version", "v2.25.0", "at version v2.25.0 it panics while generating the configuration"},

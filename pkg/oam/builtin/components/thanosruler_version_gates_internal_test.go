@@ -366,7 +366,8 @@ func thanosRulerNeverReadFixtures() map[string]map[string]any {
 // fixture, the default included, naming the path and its own text of what the
 // operator does; below thanosRulerMinRemoteWrite the gate of remoteWrite is
 // refused instead, as the operator refuses the entries before it reads them,
-// and a version the operator cannot parse is left to it. Beside an entry the
+// with azureAd's where the fixture authors one (refuseVersionMisses), and a
+// version the operator cannot parse is left to it. Beside an entry the
 // operator refuses for a managed identity without a client id, that gate is
 // refused instead, as the ruler writes nothing there; beside a field the
 // operator drops (enableFeatures below v0.39.0), it is refused itself, as a
@@ -396,8 +397,12 @@ func TestThanosRulerNeverRead_Refused(t *testing.T) {
 					t.Errorf("at %q: err = %v, want one mentioning %q", version, err, want)
 				}
 			}
-			if err := trBuild(props, "v0.23.0"); err == nil || !strings.HasPrefix(err.Error(), "remoteWrite: read by the Prometheus operator only for Thanos 0.24.0 and later") {
-				t.Errorf("at v0.23.0: err = %v, want the gate of remoteWrite", err)
+			below := "remoteWrite: read by the Prometheus operator only for Thanos 0.24.0 and later"
+			if _, azure := props["remoteWrite"].([]any)[0].(map[string]any)["azureAd"]; azure {
+				below = "version: refused: fields outside their versions at version v0.23.0: remoteWrite (read from Thanos 0.24.0), remoteWrite[].azureAd (read from Thanos 0.31.0); "
+			}
+			if err := trBuild(props, "v0.23.0"); err == nil || !strings.HasPrefix(err.Error(), below) {
+				t.Errorf("at v0.23.0: err = %v, want the gate of remoteWrite, with azureAd's where it is authored", err)
 			}
 			if err := trBuild(props, "main"); err != nil {
 				t.Errorf("at an unparsable version: err = %v, want it left to the operator", err)
@@ -461,7 +466,9 @@ func TestThanosRulerNeverRead_Refused(t *testing.T) {
 // version: the scope it would drop, or what is left where the
 // workloadIdentity of the fixture is unset. Below v0.31.0 the gate of azureAd
 // is refused instead, and below thanosRulerMinRemoteWrite that of
-// remoteWrite; a version the operator cannot parse is left to it.
+// remoteWrite too, each named with enableFeatures's as fields outside their
+// versions (refuseVersionMisses); a version the operator cannot parse is left
+// to it.
 func TestThanosRulerAzureADWithoutMethod_Refused(t *testing.T) {
 	type m = map[string]any
 	rw := func(azure m) m {
@@ -492,11 +499,11 @@ func TestThanosRulerAzureADWithoutMethod_Refused(t *testing.T) {
 				t.Errorf("%s at %q: err = %v, want %q", name, version, err, want(set))
 			}
 		}
-		if err := trBuild(props, "v0.30.0"); err == nil || !strings.HasPrefix(err.Error(), "remoteWrite[].azureAd: read by the Prometheus operator only for Thanos 0.31.0 and later") {
-			t.Errorf("%s at v0.30.0: err = %v, want the gate of azureAd", name, err)
+		if err := trBuild(props, "v0.30.0"); err == nil || !strings.HasPrefix(err.Error(), "version: refused: fields outside their versions at version v0.30.0: enableFeatures (read from Thanos 0.39.0), remoteWrite[].azureAd (read from Thanos 0.31.0); ") {
+			t.Errorf("%s at v0.30.0: err = %v, want the gates of enableFeatures and azureAd", name, err)
 		}
-		if err := trBuild(props, "v0.23.0"); err == nil || !strings.HasPrefix(err.Error(), "remoteWrite: read by the Prometheus operator only for Thanos 0.24.0 and later") {
-			t.Errorf("%s at v0.23.0: err = %v, want the gate of remoteWrite", name, err)
+		if err := trBuild(props, "v0.23.0"); err == nil || !strings.HasPrefix(err.Error(), "version: refused: fields outside their versions at version v0.23.0: enableFeatures (read from Thanos 0.39.0), remoteWrite (read from Thanos 0.24.0), remoteWrite[].azureAd (read from Thanos 0.31.0); ") {
+			t.Errorf("%s at v0.23.0: err = %v, want the gates of enableFeatures, remoteWrite and azureAd", name, err)
 		}
 		if err := trBuild(props, "main"); err != nil {
 			t.Errorf("%s at an unparsable version: err = %v, want it left to the operator", name, err)
@@ -549,9 +556,10 @@ func thanosRulerGateFixtures() map[string]promGateFixture {
 		"remoteWrite[].messageVersion":                      f(rw(m{"messageVersion": "V2.0"}), "v0.36.0"),
 		"remoteWrite[].roundRobinDNS":                       f(rw(m{"roundRobinDNS": true}), "v0.37.0"),
 		`remoteWrite[].azureAd.managedIdentity.clientId=""`: f(azure(m{"managedIdentity": m{}}), "v0.39.0"),
-		"remoteWrite[].azureAd.oauth": f(azure(m{"oauth": m{
+		// azureAd itself is gated at the same minimum, and named with it.
+		"remoteWrite[].azureAd.oauth": {props: azure(m{"oauth": m{
 			"clientId": "00000000-0000-0000-0000-000000000000", "clientSecret": ref("azure", "secret"), "tenantId": "00000000-0000-0000-0000-000000000001",
-		}}), "v0.30.0"),
+		}}), below: "v0.30.0", path: "remoteWrite[].azureAd"},
 	}
 }
 
@@ -568,9 +576,10 @@ func trBuild(props map[string]any, version string) error {
 
 // TestThanosRulerVersionGates_Refused: each id of thanosRulerVersionGates,
 // authored alone with a version under its minimum, is refused naming the
-// path, the bound, the version and its own text of what the operator does;
-// at its bound it builds, and with the version unset too, where the
-// operator's default is compared.
+// path, the bound, the version and its own text of what the operator does,
+// or, authored with another field below its version, naming both with their
+// versions (refuseVersionMisses); at its bound it builds, and with the
+// version unset too, where the operator's default is compared.
 func TestThanosRulerVersionGates_Refused(t *testing.T) {
 	fixtures := thanosRulerGateFixtures()
 	for _, g := range thanosRulerVersionGates {
@@ -586,13 +595,21 @@ func TestThanosRulerVersionGates_Refused(t *testing.T) {
 			if err != nil || !below.LT(minimum) {
 				t.Fatalf("below %s: want a version that parses and is under %s (err %v)", fx.below, g.gate.minimum, err)
 			}
-			if fx.path != "" || fx.bound != "" {
-				t.Fatalf("the fixture of %s names another gate (%s at %s): each gate of the kind is refused alone", id, fx.path, fx.bound)
-			}
 			path, bound := g.gate.path, g.gate.minimum
-			want := fmt.Sprintf("%s: read by the Prometheus operator only for Thanos %s and later; at version %s it %s; ", path, bound, fx.below, g.gate.below)
-			if err := trBuild(fx.props, fx.below); err == nil || !strings.Contains(err.Error(), want) {
-				t.Errorf("at %s: err = %v, want one mentioning %q", fx.below, err, want)
+			want := []string{fmt.Sprintf("%s: read by the Prometheus operator only for Thanos %s and later; at version %s it %s; ", path, bound, fx.below, g.gate.below)}
+			if fx.path != "" {
+				bound = cmp.Or(fx.bound, bound)
+				want = []string{
+					fmt.Sprintf("version: refused: fields outside their versions at version %s: ", fx.below),
+					fmt.Sprintf("%s (read from Thanos %s)", fx.path, bound),
+					fmt.Sprintf("%s (read from Thanos %s)", path, g.gate.minimum),
+				}
+			}
+			err = trBuild(fx.props, fx.below)
+			for _, w := range want {
+				if err == nil || !strings.Contains(err.Error(), w) {
+					t.Errorf("at %s: err = %v, want one mentioning %q", fx.below, err, w)
+				}
 			}
 			if err := trBuild(fx.props, "v"+bound); err != nil {
 				t.Errorf("at v%s: err = %v, want it built", bound, err)
@@ -625,6 +642,10 @@ func TestThanosRulerVersionGates_Cases(t *testing.T) {
 			"remoteWrite: read by the Prometheus operator only for Thanos 0.24.0 and later; at version v0.23.9 it refuses the object at reconcile"},
 		{"a prerelease below its release", m{"ruleQueryOffset": "30s"}, "v0.38.0-rc.0",
 			"ruleQueryOffset: read by the Prometheus operator only for Thanos 0.38.0 and later; at version v0.38.0-rc.0 it does not pass it to Thanos Ruler"},
+		// go-kure/launcher#1022: a refused and a dropped field are named
+		// together, with no consequence claimed for either.
+		{"a refused and a dropped field name both", m{"ruleQueryOffset": "30s", "remoteWrite": []any{m{"url": "https://metrics.example.com/api/v1/write"}}}, "v0.23.0",
+			"version: refused: fields outside their versions at version v0.23.0: ruleQueryOffset (read from Thanos 0.38.0), remoteWrite (read from Thanos 0.24.0); the Prometheus operator does not run the object as authored there; raise version to 0.38.0 or later, or leave those fields unset"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

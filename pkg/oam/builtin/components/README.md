@@ -3967,7 +3967,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     reconcile (`clusterPeerName: read by the Prometheus operator only for
     Alertmanager 0.30.0 and later; at version v0.28.1 it does not pass it to
     Alertmanager, and the pods run without it; raise version to 0.30.0 or
-    later, or leave clusterPeerName unset`). Pods: `logFormat` other than `logfmt` (0.16.0),
+    later, or leave clusterPeerName unset`). Several such fields are
+    refused together, each named with its version and no consequence
+    claimed for any, as on `prometheus` (go-kure/launcher#1022). Pods: `logFormat` other than `logfmt` (0.16.0),
     `web.getConcurrency` and `web.timeout` (0.17.0), `web.tlsConfig` and
     `web.httpConfig` (0.22.0), `clusterTLS` (0.24.0), `clusterLabel` (0.26.0),
     `enableFeatures` (0.27.0), `limits.maxSilences` and
@@ -4608,7 +4610,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (`ruleQueryOffset: read by the Prometheus operator only for
     Thanos 0.38.0 and later; at version v0.37.0 it does not pass it to
     Thanos Ruler, and the ruler runs without it; raise version to 0.38.0 or
-    later, or leave ruleQueryOffset unset`). Flags (`makeStatefulSetSpec`):
+    later, or leave ruleQueryOffset unset`). Several such fields, refused
+    at reconcile or dropped, are refused together ahead of the checks
+    below, each named with its version and no consequence claimed for any,
+    as on `prometheus` (go-kure/launcher#1022). Flags (`makeStatefulSetSpec`):
     `web.tlsConfig` and `web.httpConfig` (0.21.0), `ruleOutageTolerance` and
     `ruleGracePeriod` (0.30.0), `ruleConcurrentEval` above 0 and
     `grpcServerTlsConfig.minVersion` (0.37.0), `ruleQueryOffset` (0.38.0),
@@ -4631,8 +4636,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     operator refuses it at reconcile whatever it drops
     (`validateRemoteWriteSpec`, which it applies to the ruler's entries
     too). The gates above of `remoteWrite` and of `azureAd`, which refuse
-    any `azureAd` below 0.31.0, are refused ahead of it; it is refused
-    ahead of the other gates and of the fields below, naming the methods
+    any `azureAd` below 0.31.0, are refused ahead of it, as are several
+    gated fields together; it is refused ahead of a single other gate and
+    of the fields below, naming the methods
     the operator passes to Thanos at the version: from 0.40.0 on
     `remoteWrite[0].azureAd: no authentication method: … at every version,
     wherever it generates the remote write configuration; set
@@ -5076,7 +5082,22 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     version v3.10.0 it drops it from the configuration it generates, and
     Prometheus runs without it; raise version to 3.11.0 or later, or leave
     retentionPercentage unset`). Where a field holds several gates, the
-    highest it misses is named. The gates under v2.45.0, the oldest
+    highest it misses is named. Where the spec authors several fields
+    outside their versions, the three below read only under some version
+    included, the operator may reach any one's consequence first (a refusal
+    at reconcile, before the configuration a drop is from; a panic
+    generating one part, before another), so none is claimed: the refusal
+    names each field with the versions it is read at (go-kure/launcher#1022;
+    `version: refused: fields outside their versions at version v2.50.0:
+    remoteWrite[].messageVersion (read from Prometheus 2.54.0),
+    remoteWrite[].azureAd.sdk (read from Prometheus 2.52.0); the Prometheus
+    operator does not run the object as authored there; raise version to
+    2.54.0 or later, or leave those fields unset`). The version it suggests
+    is one at which every gated field authored is read, a ceiling not missed
+    at `version` included (`allowOverlappingBlocks` bounds it below 2.39.0);
+    where there is none, it suggests only leaving the fields unset. A field
+    authored with the parent or the field it needs, both below their
+    versions, is one of several. The gates under v2.45.0, the oldest
     Prometheus in the operator's compatibility matrix, are below the range
     the operator tests, and are kept.
     - flags: `rules.alert.forOutageTolerance`, `forGracePeriod` and

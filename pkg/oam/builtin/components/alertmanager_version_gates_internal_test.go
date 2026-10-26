@@ -2,12 +2,14 @@ package components
 
 import (
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/blang/semver/v4"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 )
@@ -284,4 +286,44 @@ func TestAlertmanagerVersionGates_Refused(t *testing.T) {
 	for path := range fixtures {
 		t.Errorf("a fixture authors %s, which the table does not list", path)
 	}
+
+	// go-kure/launcher#1022: two gated fields authored together below both
+	// minima are refused together, each named with its minimum, with no
+	// consequence claimed for either.
+	var pair []versionGate[monitoringv1.AlertmanagerSpec]
+	fixtures = alertmanagerGateFixtures()
+	for _, g := range alertmanagerVersionGates {
+		if len(pair) == 0 || (len(pair) == 1 && g.minimum != pair[0].minimum && !overlapping(fixtures[g.path], fixtures[pair[0].path])) {
+			pair = append(pair, g)
+		}
+	}
+	if len(pair) != 2 {
+		t.Fatalf("no two gates of distinct minima with disjoint fixtures")
+	}
+	props := maps.Clone(fixtures[pair[0].path])
+	maps.Copy(props, fixtures[pair[1].path])
+	lowest := min(semver.MustParse(pair[0].minimum).Minor, semver.MustParse(pair[1].minimum).Minor)
+	below := fmt.Sprintf("v0.%d.0", lowest-1)
+	err := build(props, below)
+	for _, want := range []string{
+		"version: refused: fields outside their versions at version " + below + ": ",
+		pair[0].path + " (read from Alertmanager " + pair[0].minimum + ")",
+		pair[1].path + " (read from Alertmanager " + pair[1].minimum + ")",
+		"; the Prometheus operator does not run the object as authored there; ",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s and %s at %s: err = %v, want one mentioning %q", pair[0].path, pair[1].path, below, err, want)
+		}
+	}
+}
+
+// overlapping reports whether two fixtures author a top-level property in
+// common, so that one could not be merged into the other.
+func overlapping(a, b map[string]any) bool {
+	for k := range a {
+		if _, ok := b[k]; ok {
+			return true
+		}
+	}
+	return false
 }

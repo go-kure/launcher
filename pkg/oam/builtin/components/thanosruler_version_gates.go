@@ -187,8 +187,14 @@ func validateThanosRulerVersion(spec *monitoringv1.ThanosRulerSpec) error {
 // with the methods that remain at v. Then a field the operator passes to
 // Thanos at no version (refuseThanosRulerNeverRead), workloadIdentity first,
 // whose drop may leave an azureAd with no method refused, and last the other
-// gates, of fields it only drops.
+// gates, of fields it only drops. Where spec authors several fields below
+// their versions, refusing or dropping, all are refused at once, ahead of the
+// rest, with no consequence claimed for any (refuseVersionMisses): that order
+// is the kind's, not the operator's.
 func refuseThanosRulerAtVersion(spec *monitoringv1.ThanosRulerSpec, v semver.Version, at string) error {
+	if misses := gateMisses(spec, v, at, "Thanos", "version", gatesOf(thanosRulerVersionGates)); len(misses) > 1 {
+		return refuseVersionMisses(misses, authoredRange(spec, gatesOf(thanosRulerVersionGates), nil), at, "version")
+	}
 	var refusing, dropping []versionGate[monitoringv1.ThanosRulerSpec]
 	for _, g := range gatesOf(thanosRulerVersionGates) {
 		if thanosRulerRefusingGate(g.path) {
