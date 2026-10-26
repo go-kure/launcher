@@ -35,6 +35,12 @@ import (
 // the rule built them from, so what the component became waits as it did
 // (inheritOrder).
 //
+// An order after a generated source (orderComponents) also says that c reads
+// through it: when c is a Flux object, the source's reads decide, with c's
+// own, where the objects of c's traits land under a Flux namespace (the oci
+// rule's shared OCIRepository and the Secret a consumer's trait makes for it;
+// go-kure/launcher#1016). An order after any other component orders alone.
+//
 // Declaring never changes another copy of c: each call gives c a new slice.
 func (c *Component) OrderAfter(names ...string) {
 	if c == nil || len(names) == 0 {
@@ -176,7 +182,9 @@ func (e componentEntry) ruleOrder() []string {
 // wherever the consumer is placed. For the same reason no placement or
 // dependency policy can place it in a tier or make it wait, and an order after
 // it needs no group. A source that fails one of those conditions is a
-// component like any other, in a group.
+// component like any other, in a group. A Flux object ordered after a
+// generated source reads through it (Component.OrderAfter,
+// generatedSourceReaders).
 //
 // A dependency on a name no component has is ignored, as it always was: the
 // dependency policy refuses one itself. A rule's order after such a name, or
