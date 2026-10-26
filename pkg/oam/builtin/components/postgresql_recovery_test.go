@@ -216,6 +216,10 @@ func TestPostgresqlRecovery_ArchiveIntoSource(t *testing.T) {
 	other := []oam.Component{
 		{Name: "old", Type: "postgresql", Properties: map[string]any{"backup": map[string]any{"objectStore": map[string]any{"destinationPath": "s3://bucket/pg", "endpointURL": "https://s3.example", "s3Credentials": iam}}}},
 		{Name: "shared", Type: "cnpg-objectstore", Properties: map[string]any{"objectName": "shared-store", "configuration": map[string]any{"destinationPath": "s3://bucket/pg", "endpointURL": "https://s3.example", "s3Credentials": iam}}},
+		// The object's labels and annotations are the engine's, not the
+		// spec's: the store is matched as the undecorated one is.
+		{Name: "labelled", Type: "cnpg-objectstore", Properties: map[string]any{"labels": map[string]any{"team": "platform"}, "configuration": map[string]any{"destinationPath": "s3://bucket/pg", "endpointURL": "https://s3.example", "s3Credentials": iam}}},
+		{Name: "annotated", Type: "cnpg-objectstore", Properties: map[string]any{"annotations": map[string]any{"team": "platform"}, "configuration": map[string]any{"destinationPath": "s3://bucket/pg", "endpointURL": "https://s3.example", "s3Credentials": iam}}},
 	}
 	const refused = "recovery.source: the cluster would archive its WAL into the folder it is recovered from"
 	cases := []struct {
@@ -231,6 +235,8 @@ func TestPostgresqlRecovery_ArchiveIntoSource(t *testing.T) {
 		{"another postgresql's store", map[string]any{"backup": backup(""), "recovery": source("db", "old")}, refused},
 		{"a cnpg-objectstore by its objectName", map[string]any{"backup": backup(""), "recovery": source("db", "shared-store")}, refused},
 		{"a cnpg-objectstore by its component name", map[string]any{"backup": backup(""), "recovery": source("db", "shared")}, ""},
+		{"a cnpg-objectstore with labels", map[string]any{"backup": backup(""), "recovery": source("db", "labelled")}, refused},
+		{"a cnpg-objectstore with annotations", map[string]any{"backup": backup(""), "recovery": source("db", "annotated")}, refused},
 		{"a store outside the document", map[string]any{"backup": backup(""), "recovery": source("db", "elsewhere")}, ""},
 		{"no backup", map[string]any{"recovery": source("db", "old")}, ""},
 	}

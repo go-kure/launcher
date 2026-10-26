@@ -55,7 +55,7 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 		}
 		recoveryStore = &member
 	}
-	if err := postgresqlArchivesIntoSource(comp, lctx.Document, c, cluster.ObjectName()); err != nil {
+	if err := postgresqlArchivesIntoSource(comp, lctx, c, cluster.ObjectName()); err != nil {
 		return oam.LoweringResult{}, err
 	}
 

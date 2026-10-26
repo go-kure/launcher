@@ -406,11 +406,12 @@ func (f postgresqlFolder) String() string {
 // archives (CheckWalArchiveDestination); a store outside the document is left
 // to that check.
 //
-// Another component's store is known by the name its document gives it (its
-// objectStoreObjectName or objectName, else its component name): a naming
-// hook's answer for it is resolved when that component is lowered, and is not
-// seen here.
-func postgresqlArchivesIntoSource(comp *oam.Component, doc *oam.Application, c *PostgresqlConfig, cluster string) error {
+// Another component's store is known by the name its author wrote (its
+// objectStoreObjectName or objectName), else by its component name where no
+// Naming hook is set. Where one is, an unauthored name may be the hook's
+// answer, which that component's lowering asks for and this one does not
+// see: such a store is not matched, and is left to the plugin's check.
+func postgresqlArchivesIntoSource(comp *oam.Component, lctx oam.LoweringContext, c *PostgresqlConfig, cluster string) error {
 	if c.Backup == nil || c.Recovery == nil {
 		return nil
 	}
@@ -427,7 +428,7 @@ func postgresqlArchivesIntoSource(comp *oam.Component, doc *oam.Application, c *
 		if name == own {
 			source = &c.Backup.ObjectStore
 		} else {
-			source = postgresqlDocumentStore(doc, comp.Name, name)
+			source = postgresqlDocumentStore(lctx.Document, comp.Name, name, lctx.HasNamingHook())
 		}
 	}
 	if source == nil {
@@ -442,10 +443,11 @@ func postgresqlArchivesIntoSource(comp *oam.Component, doc *oam.Application, c *
 
 // postgresqlDocumentStore returns the configuration of the ObjectStore named
 // name that a component of doc other than self emits, or nil: a postgresql
-// component's backup store or a cnpg-objectstore component, each known by the
-// name the document gives it. A component that does not parse is skipped: it
-// is refused when it is lowered.
-func postgresqlDocumentStore(doc *oam.Application, self, name string) *barmanapi.BarmanObjectStoreConfiguration {
+// component's backup store or a cnpg-objectstore component, each known by its
+// authored name, else by its component name unless hooked (a Naming hook is
+// set, whose answer for it is not known here). A component that does not
+// parse is skipped: it is refused when it is lowered.
+func postgresqlDocumentStore(doc *oam.Application, self, name string, hooked bool) *barmanapi.BarmanObjectStoreConfiguration {
 	if doc == nil {
 		return nil
 	}
@@ -460,24 +462,24 @@ func postgresqlDocumentStore(doc *oam.Application, self, name string) *barmanapi
 				continue
 			}
 			raw, _ := other.Properties["backup"].(map[string]any)
-			storeName := other.Name
-			if authored, _, err := parseRawStringField(raw, postgresqlObjectStoreNameProperty, ""); err == nil && authored != "" {
-				storeName = authored
+			authored, _, err := parseRawStringField(raw, postgresqlObjectStoreNameProperty, "")
+			if err != nil {
+				continue
 			}
-			if storeName == name {
+			if postgresqlKnownStoreName(other.Name, authored, hooked) == name {
 				return &backup.ObjectStore
 			}
 		case "cnpg-objectstore":
-			storeName := other.Name
-			if authored, ok := other.Properties[oam.ObjectNameProperty].(string); ok && authored != "" {
-				storeName = authored
-			}
-			if storeName != name {
+			authored, _ := other.Properties[oam.ObjectNameProperty].(string)
+			if postgresqlKnownStoreName(other.Name, authored, hooked) != name {
 				continue
 			}
-			// objectName is the engine's, not the spec's.
+			// The object's name, labels and annotations are the engine's, read
+			// off the component before the kind sees the spec.
 			props := maps.Clone(other.Properties)
 			delete(props, oam.ObjectNameProperty)
+			delete(props, oam.ObjectLabelsProperty)
+			delete(props, oam.ObjectAnnotationsProperty)
 			spec, _, err := decodeKindSpec[barmanv1.ObjectStoreSpec](props, "barmancloud.cnpg.io/v1 ObjectStoreSpec")
 			if err != nil {
 				continue
@@ -486,4 +488,19 @@ func postgresqlDocumentStore(doc *oam.Application, self, name string) *barmanapi
 		}
 	}
 	return nil
+}
+
+// postgresqlKnownStoreName is the name another component's ObjectStore takes,
+// where it is known here: the authored one, else the component's name where
+// no Naming hook is set (hooked false); "" where it is not known, which no
+// objectStoreName equals.
+func postgresqlKnownStoreName(component, authored string, hooked bool) string {
+	switch {
+	case authored != "":
+		return authored
+	case hooked:
+		return ""
+	default:
+		return component
+	}
 }
