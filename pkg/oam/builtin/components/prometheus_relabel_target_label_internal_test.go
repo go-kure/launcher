@@ -429,6 +429,15 @@ func TestPrometheusRelabelLabelNames_SuggestAuthoredVersion(t *testing.T) {
 			"; name a legacy label: the operator reads the fields authored at no version from 3.0.0 on and below 2.39.0"},
 		"apiVersion v1": {m{"alerting": m{"alertmanagers": []any{endpoint}}}, "v2.55.0",
 			"; name such a replacement: the operator reads the fields authored at no version from 3.0.0 on and within Prometheus 2.x"},
+		// The other way round: a field refused from its ceiling on is not
+		// suggested a version below 3.0.0, where the operator refuses the
+		// label name.
+		"ceiling missed, replacement": {m{"allowOverlappingBlocks": true, "scrapeClasses": classes(labelmap)}, "v3.0.0",
+			"allowOverlappingBlocks: read by the Prometheus operator only for Prometheus below 2.39.0; at version v3.0.0 it does not pass it to Prometheus, and the pods run without it; the operator reads the fields authored at no single version (from 3.0.0 on and below 2.39.0): leave allowOverlappingBlocks unset"},
+		"ceiling missed, targetLabel": {m{"allowOverlappingBlocks": true, "scrapeClasses": classes(target)}, "v3.0.0",
+			"(from 3.0.0 on and below 2.39.0): leave allowOverlappingBlocks unset"},
+		"ceiling missed, legacy names": {m{"allowOverlappingBlocks": true, "scrapeClasses": classes(m{"action": "labelmap", "regex": "(.+)", "replacement": "service_$1"})}, "v3.0.0",
+			"; name a version from 2.11.0 on and below 2.39.0, or leave allowOverlappingBlocks unset"},
 	} {
 		if err := promBuild(t, c.props, "version", c.version); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: err = %v, want one with %q", name, err, c.want)

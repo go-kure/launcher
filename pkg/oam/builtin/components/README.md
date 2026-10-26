@@ -5202,7 +5202,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     suggests a version from 3.0.0 on only where every gated field authored is
     read there too: with `allowOverlappingBlocks` (below 2.39.0) or an
     Alertmanager endpoint's `apiVersion: v1` (Prometheus 2.x), it suggests
-    only the name.
+    only the name. The other way round, a refusal of a field above suggests no
+    version below 3.0.0 where a label name outside the legacy scheme is
+    authored: at `version: v3.0.0`, `allowOverlappingBlocks` beside a
+    `replacement` of `service.$1` is only to be left unset.
   - a field of `thanos` the operator reads only from some Thanos version on,
     where `thanos.version` is below it; unset, the operator's default
     v0.42.4, at which none is refused (an empty `thanos.version` is not
