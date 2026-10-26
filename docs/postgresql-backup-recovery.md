@@ -193,13 +193,15 @@ Then query the data you expect, and the data you expect to be absent.
   went. The components README lists them all.
 - **Archiving into the source.** A cluster that would archive its WAL into the
   folder it is recovered from is refused at build where launcher sees both
-  stores: inline stores, the component's own backup store, and the backup store
-  or `cnpg-objectstore` another component of the document emits under the name
-  its author wrote. A store outside the document, another component's store
-  whose name the author did not write while a naming hook is set, and another
-  `postgresql` component's inline recovery store (go-kure/launcher#1044) are
-  left to the plugin, which checks before it first archives and refuses a
-  destination that already holds WAL.
+  stores: inline stores, the component's own backup store, and a store another
+  component of the document emits (a `postgresql` component's backup store or
+  inline recovery store, or a `cnpg-objectstore`). Another component's store is
+  known by the name its author wrote, else, where no naming hook is set, by its
+  default name: the component's name, or `<component>-recovery-source` for an
+  inline recovery store (go-kure/launcher#1044). A store outside the document,
+  and another component's store whose name the author did not write while a
+  naming hook is set, are left to the plugin, which checks before it first
+  archives and refuses a destination that already holds WAL.
 - **At apply.** A missing CRD fails it. An older CRD can drop fields silently:
   read the objects back.
 - **At run time.** A wrong endpoint, CA or credential shows as
