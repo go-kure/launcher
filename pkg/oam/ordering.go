@@ -2,6 +2,7 @@ package oam
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -49,6 +50,70 @@ func (c *Component) OrderAfter(names ...string) {
 	c.orderAfter = append(slices.Clip(c.orderAfter), names...)
 }
 
+// WaitsAs declares that c waits for what the document's dependency rules make
+// the component named name wait for: c follows every component a rule makes
+// name follow, other than c itself, as if each rule named c too.
+//
+// It is for a lowering rule's output, as OrderAfter is: a component one
+// invocation emits that must not wait for the component it lowers (the
+// postgresql rule's inline recovery store, which its Cluster is ordered after)
+// still waits for what that component waits for. The rules are read once every
+// lowering has run, so a rule another component's lowering generates counts as
+// an authored one does. A name no rule makes wait for anything adds nothing,
+// and what name waits for only by a WaitsAs of its own is not passed on.
+//
+// Like OrderAfter, it survives copies of the component and further lowering
+// (inheritWaits), but not serialization; declaring never changes another copy
+// of c.
+func (c *Component) WaitsAs(name string) {
+	if c == nil || name == "" {
+		return
+	}
+	c.waitsAs = append(slices.Clip(c.waitsAs), name)
+}
+
+// inheritedBy reports, for each component a rule emitted for one component,
+// whether it inherits that component's order (inheritOrder, inheritWaits).
+func inheritedBy(emitted []Component) []bool {
+	prerequisite := map[string]bool{}
+	count := map[string]int{}
+	for i := range emitted {
+		count[emitted[i].Name]++
+		for _, name := range emitted[i].orderAfter {
+			prerequisite[name] = true
+		}
+	}
+	inherits := make([]bool, len(emitted))
+	for i := range emitted {
+		c := &emitted[i]
+		inherits[i] = !hoistableSource(c) || !prerequisite[c.Name] || count[c.Name] != 1
+	}
+	return inherits
+}
+
+// inheritWaits makes the components a rule emitted for one component wait as
+// each of names, the components that one waited as (Component.WaitsAs), so
+// what it became waits as it did (lowerDocumentBody). It leaves the components
+// inheritOrder leaves, for the same reason, and runs before inheritOrder,
+// which changes what that decision reads.
+func inheritWaits(emitted []Component, names []string) {
+	if len(names) == 0 {
+		return
+	}
+	inherits := inheritedBy(emitted)
+	for i := range emitted {
+		if !inherits[i] {
+			continue
+		}
+		c := &emitted[i]
+		for _, name := range names {
+			if !slices.Contains(c.waitsAs, name) {
+				c.WaitsAs(name)
+			}
+		}
+	}
+}
+
 // inheritOrder orders the components a rule emitted for one component after
 // each of names, the components that one was ordered after, so what it became
 // waits as it did (lowerDocumentBody).
@@ -68,19 +133,12 @@ func inheritOrder(emitted []Component, names []string) {
 	if len(names) == 0 {
 		return
 	}
-	prerequisite := map[string]bool{}
-	count := map[string]int{}
+	inherits := inheritedBy(emitted)
 	for i := range emitted {
-		count[emitted[i].Name]++
-		for _, name := range emitted[i].orderAfter {
-			prerequisite[name] = true
-		}
-	}
-	for i := range emitted {
-		c := &emitted[i]
-		if hoistableSource(c) && prerequisite[c.Name] && count[c.Name] == 1 {
+		if !inherits[i] {
 			continue
 		}
+		c := &emitted[i]
 		for _, name := range names {
 			if !slices.Contains(c.orderAfter, name) {
 				c.OrderAfter(name)
@@ -169,10 +227,48 @@ func (e componentEntry) ruleOrder() []string {
 	return names
 }
 
+// waitsAs returns the names the entry's lowering rule made it wait as: its
+// component's, or every member's for a collapsed sibling group.
+func (e componentEntry) waitsAs() []string {
+	if len(e.members) == 0 {
+		return e.component.waitsAs
+	}
+	var names []string
+	for _, m := range e.members {
+		names = append(names, m.component.waitsAs...)
+	}
+	return names
+}
+
+// waitingDeps returns deps with what each entry waits as (Component.WaitsAs):
+// an entry waiting as a name follows every component deps makes that name
+// follow, other than the entry itself. deps itself is never changed.
+func waitingDeps(entries []componentEntry, deps map[string][]string) map[string][]string {
+	out, cloned := deps, false
+	for _, e := range entries {
+		name := e.component.Name
+		for _, as := range e.waitsAs() {
+			for _, d := range deps[as] {
+				if d == name || slices.Contains(out[name], d) {
+					continue
+				}
+				if !cloned {
+					out = make(map[string][]string, len(deps)+1)
+					maps.Copy(out, deps)
+					cloned = true
+				}
+				out[name] = append(slices.Clip(out[name]), d)
+			}
+		}
+	}
+	return out
+}
+
 // orderComponents groups entries by what orders them: entries' tiers (the tier
 // annotation or a placement, "" for neither), deps (the dependency policy:
 // component name to the names it follows) and what each component's lowering
-// rule declared (Component.OrderAfter).
+// rule declared (Component.OrderAfter, and Component.WaitsAs, which adds to
+// deps: waitingDeps).
 //
 // A generated source is a Flux source (generatedSourceTypes) a lowering rule
 // emitted, ordered a component after, and ordered after nothing itself, that is
@@ -193,6 +289,7 @@ func (e componentEntry) ruleOrder() []string {
 // A cycle is refused, naming each component of it and what ordered it. A
 // dependency rule against the placement order is such a cycle.
 func orderComponents(entries []componentEntry, deps map[string][]string) (*componentOrder, error) {
+	deps = waitingDeps(entries, deps)
 	pos := make(map[string]int, len(entries))
 	for i, e := range entries {
 		pos[e.component.Name] = i

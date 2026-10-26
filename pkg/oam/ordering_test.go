@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -120,6 +121,31 @@ func (relayRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringRes
 	}}, nil
 }
 
+// waitingPairRule lowers a component of type typ into "<name>", ordered after
+// "<name>-store", and the store, of type store, that waits as "<name>": as the
+// postgresql rule's recovery store, the store follows what "<name>" follows.
+type waitingPairRule struct{ typ, store string }
+
+func (r waitingPairRule) ComponentType() string                   { return r.typ }
+func (waitingPairRule) PropertySchema() map[string]PropertySchema { return map[string]PropertySchema{} }
+func (r waitingPairRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
+	store := Component{Name: comp.Name + "-store", Type: r.store}
+	store.WaitsAs(comp.Name)
+	out := Component{Name: comp.Name, Type: "webservice"}
+	out.OrderAfter(store.Name)
+	return LoweringResult{Components: []Component{out, store}}, nil
+}
+
+// loneSourceRule lowers a "lone-source" component into a "helmrepository" of the
+// same name, which nothing else it emits is ordered after.
+type loneSourceRule struct{}
+
+func (loneSourceRule) ComponentType() string                     { return "lone-source" }
+func (loneSourceRule) PropertySchema() map[string]PropertySchema { return map[string]PropertySchema{} }
+func (loneSourceRule) LowerComponent(comp *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: comp.Name, Type: "helmrepository"}}}, nil
+}
+
 // danglingRule orders the component it emits after one the document does not hold.
 type danglingRule struct{}
 
@@ -174,6 +200,9 @@ func orderingTransformer(deps map[string][]string, tiers map[string]Tier) (*Tran
 	tr.RegisterComponentLowering(chartsRule{typ: "charts-later-first", laterFirst: true})
 	tr.RegisterComponentLowering(chartsRule{typ: "charts-earlier-first"})
 	tr.RegisterComponentLowering(danglingRule{})
+	tr.RegisterComponentLowering(waitingPairRule{typ: "waiting-pair", store: "relay"})
+	tr.RegisterComponentLowering(waitingPairRule{typ: "waiting-source-pair", store: "lone-source"})
+	tr.RegisterComponentLowering(loneSourceRule{})
 	tr.RegisterPolicy("dependency", &depsPolicyHandler{deps: deps})
 	tr.RegisterPolicy("placement", &tiersPolicyHandler{tiers: tiers})
 	return tr, sources
@@ -554,6 +583,162 @@ func TestOrdering_OrderAfter_CopySemantics(t *testing.T) {
 	a.OrderAfter("z")
 	if !slices.Equal(a.orderAfter, []string{"x", "z"}) || !slices.Equal(b.orderAfter, []string{"x", "y"}) {
 		t.Errorf("a = %v, b = %v, want [x z] and [x y]", a.orderAfter, b.orderAfter)
+	}
+}
+
+// --- waiting as another component ---
+
+// TestOrdering_WaitsAs_SurvivesFurtherLowering: a component that waits as
+// another, lowered again by a rule that builds its output from scratch, passes
+// the wait to everything it becomes: the relay's two components both follow
+// what "x" follows, and "x" follows them.
+func TestOrdering_WaitsAs_SurvivesFurtherLowering(t *testing.T) {
+	tr, _ := orderingTransformer(map[string][]string{"x": {"seed"}}, nil)
+	app := orderingApp(makeComponent("seed", "webservice"), makeComponent("x", "waiting-pair"))
+	cluster, err := tr.Transform(app, TransformContext{})
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	assertOrdered(t, cluster, nil, []group{
+		{name: "myapp-00", applications: []string{"seed"}},
+		{name: "myapp-01", applications: []string{"x-store", "x-store-extra"}, dependsOn: []string{"myapp-00"}},
+		{name: "myapp-02", applications: []string{"x"}, dependsOn: []string{"myapp-01"}},
+	})
+}
+
+// TestOrdering_WaitsAs_InheritedByAGeneratedSource: a component that waits as
+// another, lowered again into a generated source nothing else its rule emits is
+// ordered after, passes the wait to the source, which is then refused as one an
+// authored rule makes wait is, where an inherited OrderAfter would have made it
+// an ordinary component.
+func TestOrdering_WaitsAs_InheritedByAGeneratedSource(t *testing.T) {
+	tr, _ := orderingTransformer(map[string][]string{"x": {"seed"}}, nil)
+	app := orderingApp(makeComponent("seed", "webservice"), makeComponent("x", "waiting-source-pair"))
+	_, err := tr.Transform(app, TransformContext{})
+	if err == nil || !strings.Contains(err.Error(), `helmrepository "x-store" cannot wait on seed`) {
+		t.Errorf("Transform error = %v, want the generated source's inherited wait refused", err)
+	}
+}
+
+// TestOrdering_WaitsAs_CopySemantics: declaring a wait on one copy of a
+// component leaves another copy as it was.
+func TestOrdering_WaitsAs_CopySemantics(t *testing.T) {
+	// Spare capacity, so an append that does not clip would write both copies'
+	// next name into one shared array.
+	a := Component{Name: "a", waitsAs: make([]string, 0, 4)}
+	a.WaitsAs("x")
+	b := a
+	b.WaitsAs("y")
+	a.WaitsAs("z")
+	if !slices.Equal(a.waitsAs, []string{"x", "z"}) || !slices.Equal(b.waitsAs, []string{"x", "y"}) {
+		t.Errorf("a = %v, b = %v, want [x z] and [x y]", a.waitsAs, b.waitsAs)
+	}
+}
+
+// TestOrdering_WaitsAs_Groups: what a component waiting as another follows,
+// read off the dependency rules once every lowering has run.
+func TestOrdering_WaitsAs_Groups(t *testing.T) {
+	waiting := func(name, as string) componentEntry {
+		c := Component{Name: name}
+		c.WaitsAs(as)
+		return componentEntry{component: c}
+	}
+	entry := func(name string) componentEntry { return componentEntry{component: Component{Name: name}} }
+	source := componentEntry{component: Component{Name: "src", Type: "helmrepository", synthesized: true}}
+	consumer := Component{Name: "r"}
+	consumer.OrderAfter("src")
+	names := func(entries []componentEntry) []string {
+		var out []string
+		for _, e := range entries {
+			out = append(out, e.component.Name)
+		}
+		return out
+	}
+	tests := []struct {
+		name    string
+		entries []componentEntry
+		deps    map[string][]string
+		sources []string
+		groups  [][]string
+	}{
+		{
+			name:    "it follows what the other follows, not itself",
+			entries: []componentEntry{entry("a"), entry("b"), entry("c"), waiting("s", "b")},
+			deps:    map[string][]string{"b": {"a", "s"}},
+			groups:  [][]string{{"a", "c"}, {"s"}, {"b"}},
+		},
+		{
+			name:    "no dependency rule adds nothing",
+			entries: []componentEntry{waiting("s", "b"), entry("b")},
+			groups:  [][]string{{"s", "b"}},
+		},
+		{
+			name:    "a name no rule makes wait adds nothing",
+			entries: []componentEntry{waiting("s", "nobody"), entry("a"), entry("b")},
+			deps:    map[string][]string{"b": {"a"}},
+			groups:  [][]string{{"s", "a"}, {"b"}},
+		},
+		{
+			name: "a sibling group waits as any member does",
+			entries: []componentEntry{
+				{component: Component{Name: "g"}, members: []componentEntry{entry("g"), waiting("g", "x")}},
+				entry("x"), entry("y"),
+			},
+			deps:   map[string][]string{"x": {"y"}},
+			groups: [][]string{{"y"}, {"g", "x"}},
+		},
+		{
+			name:    "an inherited wait on a generated source adds no edge",
+			entries: []componentEntry{source, {component: consumer}, entry("b"), waiting("s", "b")},
+			deps:    map[string][]string{"b": {"src"}},
+			sources: []string{"src"},
+			groups:  [][]string{{"r", "b", "s"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := maps.Clone(tt.deps)
+			order, err := orderComponents(tt.entries, tt.deps)
+			if err != nil {
+				t.Fatalf("orderComponents: %v", err)
+			}
+			if got := names(order.sources); !slices.Equal(got, tt.sources) {
+				t.Errorf("sources = %v, want %v", got, tt.sources)
+			}
+			var groups [][]string
+			for _, g := range order.groups {
+				groups = append(groups, names(g))
+			}
+			if !slices.EqualFunc(groups, tt.groups, slices.Equal) {
+				t.Errorf("groups = %v, want %v", groups, tt.groups)
+			}
+			if !maps.EqualFunc(tt.deps, before, slices.Equal) {
+				t.Errorf("deps = %v, changed from %v", tt.deps, before)
+			}
+		})
+	}
+}
+
+// TestOrdering_WaitsAs_Refusals: an inherited wait is a dependency like any
+// other, so it closes a cycle and cannot make a generated source wait.
+func TestOrdering_WaitsAs_Refusals(t *testing.T) {
+	a := Component{Name: "a"}
+	a.WaitsAs("b")
+	_, err := orderComponents([]componentEntry{{component: a}, {component: Component{Name: "b"}}, {component: Component{Name: "c"}}},
+		map[string][]string{"b": {"c"}, "c": {"a"}})
+	const cycle = `components cannot be ordered: "a" is after "c" (dependency policy), "c" is after "a" (dependency policy)`
+	if err == nil || err.Error() != cycle {
+		t.Errorf("orderComponents error = %v\nwant %s", err, cycle)
+	}
+
+	src := Component{Name: "src", Type: "helmrepository", synthesized: true}
+	src.WaitsAs("x")
+	consumer := Component{Name: "r"}
+	consumer.OrderAfter("src")
+	_, err = orderComponents([]componentEntry{{component: src}, {component: consumer}, {component: Component{Name: "x"}}, {component: Component{Name: "y"}}},
+		map[string][]string{"x": {"y"}})
+	if err == nil || !strings.Contains(err.Error(), `helmrepository "src" cannot wait on y`) {
+		t.Errorf("orderComponents error = %v, want the generated source's wait refused", err)
 	}
 }
 

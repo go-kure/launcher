@@ -52,6 +52,15 @@ const postgresqlRecoveryPlugin = `    - name: plugin
         port: 9443
 `
 
+// postgresqlRecoveryUpstream is a second postgresql component, upstream, with
+// a pooler, for a document to make db wait for.
+const postgresqlRecoveryUpstream = `    - name: upstream
+      type: postgresql
+      properties:
+        pooler:
+          enabled: true
+`
+
 // TestBuild_PostgresqlRecoveryStoreOrdering: the recovering Cluster reads its
 // source store before it can become ready, so the store never waits for the
 // Cluster. Where the document orders its components, the Cluster waits for
@@ -104,6 +113,46 @@ func TestBuild_PostgresqlRecoveryStoreOrdering(t *testing.T) {
 		want := []string{"shop-00: plugin", "shop-01: db-recovery-source", "shop-02: db", "shop-03: db-pooler", "shop-04: api"}
 		if got := groupNames(t, cluster); !slices.Equal(got, want) {
 			t.Errorf("groups = %v, want %v", got, want)
+		}
+	})
+	// What db waits for, the store waits for, including the rules another
+	// component's lowering generates: making db wait for upstream makes it
+	// wait for upstream's Pooler too (go-kure/launcher#1041).
+	t.Run("db waits for a postgresql component with a pooler", func(t *testing.T) {
+		const policies = postgresqlOrderPolicy + "          - component: db\n            dependsOn: [upstream]\n"
+		cluster, _, err := transformWithBuiltins(t, postgresqlRecoveryApp(traits, postgresqlRecoveryUpstream, policies))
+		if err != nil {
+			t.Fatalf("transforming: %v", err)
+		}
+		want := []string{"shop-00: upstream", "shop-01: upstream-pooler", "shop-02: db-recovery-source", "shop-03: db", "shop-04: db-pooler", "shop-05: api"}
+		if got := groupNames(t, cluster); !slices.Equal(got, want) {
+			t.Errorf("groups = %v, want %v", got, want)
+		}
+	})
+	// No edge is lost: whatever db's Cluster follows, authored or generated, the
+	// store follows too, and the Cluster still follows the store.
+	t.Run("the store follows everything db follows", func(t *testing.T) {
+		const policies = postgresqlOrderPolicy + "          - component: db\n            dependsOn: [plugin, upstream]\n"
+		cluster, _, err := transformWithBuiltins(t, postgresqlRecoveryApp(traits, postgresqlRecoveryPlugin+postgresqlRecoveryUpstream, policies))
+		if err != nil {
+			t.Fatalf("transforming: %v", err)
+		}
+		level := map[string]int{}
+		for i, group := range cluster.Node.Bundle.Children {
+			for _, a := range group.Applications {
+				level[a.Name] = i
+			}
+		}
+		for _, before := range []string{"plugin", "upstream", "upstream-pooler"} {
+			if level[before] >= level["db"] {
+				t.Fatalf("db is in group %d, not after %s in group %d", level["db"], before, level[before])
+			}
+			if level[before] >= level["db-recovery-source"] {
+				t.Errorf("db-recovery-source is in group %d, not after %s in group %d", level["db-recovery-source"], before, level[before])
+			}
+		}
+		if level["db-recovery-source"] >= level["db"] {
+			t.Errorf("db is in group %d, not after db-recovery-source in group %d", level["db"], level["db-recovery-source"])
 		}
 	})
 	// A rule making db wait for its own store says what the order already

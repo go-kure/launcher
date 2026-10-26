@@ -91,6 +91,9 @@ type Component struct {
 	// one after with OrderAfter (ordering.go). Unexported, so a document can
 	// neither author nor carry one.
 	orderAfter []string
+	// waitsAs holds the names of the components a lowering rule made this one
+	// wait as with WaitsAs (ordering.go). Unexported, as orderAfter is.
+	waitsAs []string
 	// objectName is the name the engine resolved for a kind component's object
 	// (withObjectName, object_name.go), "" before that and on every other
 	// component. Unexported, so a document can neither author nor carry one: the

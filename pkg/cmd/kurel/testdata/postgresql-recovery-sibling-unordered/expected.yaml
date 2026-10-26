@@ -1,0 +1,157 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  labels:
+    launcher.gokure.dev/component: upstream
+  name: upstream
+  namespace: shop
+spec:
+  affinity: {}
+  enablePDB: false
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  instances: 1
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateStrategy: unsupervised
+  resources: {}
+  storage:
+    size: 1Gi
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  labels:
+    launcher.gokure.dev/component: upstream
+  name: upstream-pooler
+  namespace: shop
+spec:
+  cluster:
+    name: upstream
+  instances: 3
+  pgbouncer:
+    poolMode: session
+  type: rw
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  labels:
+    launcher.gokure.dev/component: db
+  name: db
+  namespace: shop
+spec:
+  affinity: {}
+  bootstrap:
+    recovery:
+      source: db-recovery-source
+  enablePDB: false
+  externalClusters:
+  - name: db-recovery-source
+    plugin:
+      name: barman-cloud.cloudnative-pg.io
+      parameters:
+        barmanObjectName: db-recovery-source
+        serverName: origin
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  instances: 1
+  postgresql:
+    syncReplicaElectionConstraint:
+      enabled: false
+  primaryUpdateStrategy: unsupervised
+  resources: {}
+  storage:
+    size: 1Gi
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  labels:
+    launcher.gokure.dev/component: db
+  name: db-recovery-source
+  namespace: shop
+spec:
+  configuration:
+    destinationPath: s3://bucket/origin/
+    s3Credentials:
+      inheritFromIAMRole: true
+  instanceSidecarConfiguration:
+    resources: {}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  labels:
+    launcher.gokure.dev/component: db
+  name: db-pooler
+  namespace: shop
+spec:
+  cluster:
+    name: db
+  instances: 3
+  pgbouncer:
+    poolMode: session
+  type: rw
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: api
+    launcher.gokure.dev/component: api
+  name: api
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: api
+        launcher.gokure.dev/component: api
+    spec:
+      containers:
+      - image: ghcr.io/example/api:v1.0.0
+        name: api
+        ports:
+        - containerPort: 9090
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      serviceAccountName: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: api
+    launcher.gokure.dev/component: api
+  name: api
+  namespace: shop
+spec:
+  ports:
+  - name: http
+    port: 9090
+    protocol: TCP
+    targetPort: 9090
+  selector:
+    app: api
+  type: ClusterIP
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app: api
+    launcher.gokure.dev/component: api
+  name: api
+  namespace: shop

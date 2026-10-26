@@ -242,7 +242,8 @@ group only once the group before it is ready, so a store ordered after the
 Cluster would never be applied. So, where the document orders its components,
 the Cluster is ordered after the store instead: the store gets a group of its
 own before the Cluster's, with the placements and bundle traits the members
-get, and waits for what an authored rule makes the component wait for. Leaving it unordered there would leave its group and bundle undecided.
+get, and waits for what the document's dependency rules make the component wait
+for, including the rules another component's lowering adds (`Component.WaitsAs`). Leaving it unordered there would leave its group and bundle undecided.
 Where the document does not order its components, nothing is ordered, and the
 store is applied with the Cluster, as the backup store is.
 

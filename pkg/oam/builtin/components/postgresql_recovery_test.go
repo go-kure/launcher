@@ -329,3 +329,42 @@ func TestPostgresqlRecovery_StoreBundleTraits(t *testing.T) {
 		t.Errorf("policies = %+v, want %+v", res.Policies, want)
 	}
 }
+
+// TestPostgresqlRecovery_StoreTakesNoWaitRule: a rule making the component
+// wait gives the store no rule of its own. The store waits as the component
+// (oam.Component.WaitsAs), so it follows what every dependency rule of the
+// settled document makes the component follow, which the transform reads; a
+// rule the store took here could name only what the document authored
+// (go-kure/launcher#1041).
+func TestPostgresqlRecovery_StoreTakesNoWaitRule(t *testing.T) {
+	recovering := func(pooler bool) oam.Component {
+		return oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{
+			"pooler": map[string]any{"enabled": pooler},
+			"recovery": map[string]any{
+				"source": map[string]any{"serverName": "origin", "objectStore": recoveryStore("endpointURL", "https://s3.example")},
+			},
+		}}
+	}
+	ordered := func(comp oam.Component) *oam.Application {
+		return &oam.Application{Spec: oam.ApplicationSpec{
+			Components: []oam.Component{{Name: "x", Type: "webservice"}, comp},
+			Policies: []oam.ApplicationPolicy{{Name: "order", Type: "dependency", Properties: map[string]any{
+				"rules": []any{map[string]any{"component": "db", "dependsOn": []any{"x"}}},
+			}}},
+		}}
+	}
+
+	comp := recovering(true)
+	res := lowerPostgresql(t, &comp, ordered(comp))
+	want := []oam.ApplicationPolicy{{Name: "db-dependencies", Type: "dependency", Properties: map[string]any{
+		"rules": []any{map[string]any{"component": "db-pooler", "dependsOn": []any{"db"}}},
+	}}}
+	if !reflect.DeepEqual(res.Policies, want) {
+		t.Errorf("with a pooler: policies = %+v, want %+v", res.Policies, want)
+	}
+
+	comp = recovering(false)
+	if res := lowerPostgresql(t, &comp, ordered(comp)); len(res.Policies) != 0 {
+		t.Errorf("without members: policies = %+v, want none", res.Policies)
+	}
+}
