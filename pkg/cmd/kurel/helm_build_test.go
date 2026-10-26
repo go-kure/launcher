@@ -82,6 +82,44 @@ func TestBuildCommand_HelmSharesOneSource(t *testing.T) {
 	}
 }
 
+// TestBuildCommand_HelmOCIDigest: source.digest on an inline OCI source builds
+// into an OCIRepository whose spec.ref carries the digest beside the tag
+// (go-kure/launcher#1064), so the terminal takes what the rule generates.
+func TestBuildCommand_HelmOCIDigest(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	app := `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: default
+spec:
+  components:
+    - name: api
+      type: helm
+      properties:
+        version: 1.0.0
+        source:
+          url: oci://ghcr.io/example/charts/api
+          digest: "` + digest + `"
+`
+	docs, out, err := buildDocs(t, app)
+	if err != nil {
+		t.Fatalf("build failed: %v\noutput: %s", err, out)
+	}
+	var refs []map[string]any
+	for _, d := range docs {
+		if d["kind"] != "OCIRepository" {
+			continue
+		}
+		spec, _ := d["spec"].(map[string]any)
+		ref, _ := spec["ref"].(map[string]any)
+		refs = append(refs, ref)
+	}
+	if len(refs) != 1 || refs[0]["tag"] != "1.0.0" || refs[0]["digest"] != digest {
+		t.Errorf("OCIRepository refs = %v, want exactly one with tag 1.0.0 and digest %s\noutput:\n%s", refs, digest, out)
+	}
+}
+
 // assertSourcesInApplicationBundle checks the shape a generated source gives an
 // application (go-kure/launcher#783): the application bundle shop holds exactly
 // the sources as its own applications, ahead of its groups, and no group holds

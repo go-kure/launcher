@@ -6,6 +6,7 @@ import (
 	"maps"
 	"math"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -272,6 +273,85 @@ func TestHelmRule_OCIWithoutVersion(t *testing.T) {
 	source := componentByType(t, comps, "ocirepository")
 	if _, ok := source.Properties["ref"]; ok {
 		t.Errorf("source properties = %v, want no ref without a version", source.Properties)
+	}
+}
+
+// helmTestDigest is a well-formed OCI manifest digest of 64 copies of c.
+func helmTestDigest(c string) string { return "sha256:" + strings.Repeat(c, 64) }
+
+// TestHelmRule_FluxOCIDigest: source.digest on an inline OCI source becomes the
+// generated OCIRepository's ref.digest, beside ref.tag when version is set and
+// alone without it, and the source is named after the identity of URL, version
+// and digest (go-kure/launcher#1064). A null digest is absent: the source is the
+// one an unset digest generates.
+func TestHelmRule_FluxOCIDigest(t *testing.T) {
+	const url = "oci://ghcr.io/example/charts/podinfo"
+	digest := helmTestDigest("a")
+	layer := map[string]any{"mediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip", "operation": "copy"}
+	cases := []struct {
+		name     string
+		props    map[string]any
+		identity string
+		ref      map[string]any
+	}{
+		{"with version", map[string]any{"version": "6.5.0", "source": map[string]any{"url": url, "digest": digest}},
+			`oci-digest:{"url":"` + url + `","version":"6.5.0","digest":"` + digest + `"}`,
+			map[string]any{"tag": "6.5.0", "digest": digest}},
+		{"without version", map[string]any{"source": map[string]any{"url": url, "digest": digest}},
+			`oci-digest:{"url":"` + url + `","version":"","digest":"` + digest + `"}`,
+			map[string]any{"digest": digest}},
+		{"kind OCIRepository", map[string]any{"version": "6.5.0", "source": map[string]any{"url": url, "kind": "OCIRepository", "digest": digest}},
+			`oci-digest:{"url":"` + url + `","version":"6.5.0","digest":"` + digest + `"}`,
+			map[string]any{"tag": "6.5.0", "digest": digest}},
+		{"null digest", map[string]any{"version": "6.5.0", "source": map[string]any{"url": url, "digest": nil}},
+			"oci:" + url + ":6.5.0",
+			map[string]any{"tag": "6.5.0"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			comps := lowerHelm(t, helmLowering("shop"), "podinfo", tc.props)
+			source := componentByType(t, comps, "ocirepository")
+			wantName := helmSourceName("shop", tc.identity)
+			if source.Name != wantName {
+				t.Errorf("source name = %q, want %q", source.Name, wantName)
+			}
+			want := map[string]any{"url": url, "ref": tc.ref, "layerSelector": layer}
+			if !reflect.DeepEqual(source.Properties, want) {
+				t.Errorf("source properties = %v, want %v", source.Properties, want)
+			}
+			release := componentByType(t, comps, "helmrelease")
+			if want := map[string]any{"chartRef": map[string]any{"kind": "OCIRepository", "name": wantName}}; !reflect.DeepEqual(release.Properties, want) {
+				t.Errorf("release properties = %v, want %v", release.Properties, want)
+			}
+		})
+	}
+}
+
+// TestHelmRule_OCIDigestIsPartOfTheIdentity: two components with one OCI URL
+// and version share a source only when their digests are equal; a digest and no
+// digest, or two different digests, give two sources (go-kure/launcher#1064).
+func TestHelmRule_OCIDigestIsPartOfTheIdentity(t *testing.T) {
+	lctx := helmLowering("shop")
+	oci := func(digest string) map[string]any {
+		src := map[string]any{"url": "oci://ghcr.io/example/charts/podinfo"}
+		if digest != "" {
+			src["digest"] = digest
+		}
+		return map[string]any{"version": "6.5.0", "source": src}
+	}
+	a := lowerHelm(t, lctx, "a", oci(helmTestDigest("a")))
+	b := lowerHelm(t, lctx, "b", oci(helmTestDigest("a")))
+	if len(b) != 1 || b[0].Type != "helmrelease" {
+		t.Fatalf("second claimant of one digest emitted %+v, want only its release (the source is adopted)", b)
+	}
+	shared := componentByType(t, a, "ocirepository").Name
+	if got := b[0].Properties["chartRef"].(map[string]any)["name"]; got != shared {
+		t.Errorf("b references source %v, want the shared %s", got, shared)
+	}
+	c := componentByType(t, lowerHelm(t, lctx, "c", oci(helmTestDigest("b"))), "ocirepository").Name
+	d := componentByType(t, lowerHelm(t, lctx, "d", oci("")), "ocirepository").Name
+	if c == shared || d == shared || c == d {
+		t.Errorf("sources of digest a, digest b and no digest = %s, %s, %s; want three different names", shared, c, d)
 	}
 }
 
@@ -620,6 +700,42 @@ func TestHelmRule_Refusals(t *testing.T) {
 		{"flux scopeOverrides", map[string]any{"chart": "a", "source": repo, "scopeOverrides": []any{map[string]any{"apiVersion": "example.io/v1", "kind": "Gadget", "scope": "Namespaced"}}}, "helm: delivery: flux does not support scopeOverrides (only a client-side render reads it)"},
 		{"template scopeOverrides malformed", template(map[string]any{"scopeOverrides": []any{map[string]any{"apiVersion": "example.io/v1", "kind": "Gadget", "scope": "namespaced"}}}), `helm: scopeOverrides[0]: scope "namespaced" is invalid; must be "Cluster" or "Namespaced"`},
 	}
+	// source.digest (go-kure/launcher#1064): only on an inline OCI source, only
+	// in its one form, and not under delivery: template.
+	digest := helmTestDigest("a")
+	const notOCI = "helm: source.digest is only valid with an inline OCI source (an oci:// source.url, source.kind unset or OCIRepository); a HelmRepository, GitRepository or Bucket source has no manifest digest, and a referenced source pins its own"
+	for _, tc := range []struct {
+		name   string
+		source map[string]any
+	}{
+		{"inline HelmRepository", map[string]any{"url": "https://charts.example.com", "digest": digest}},
+		{"inline kind HelmRepository", map[string]any{"url": "https://charts.example.com", "kind": "HelmRepository", "digest": digest}},
+		{"inline GitRepository", map[string]any{"url": "https://github.com/example/charts", "kind": "GitRepository", "ref": map[string]any{"branch": "main"}, "digest": digest}},
+		{"inline Bucket", map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts", "digest": digest}},
+		{"OCIRepository reference", map[string]any{"name": "x", "kind": "OCIRepository", "digest": digest}},
+		{"HelmRepository reference", map[string]any{"name": "x", "kind": "HelmRepository", "digest": digest}},
+		{"HelmChart reference", map[string]any{"name": "x", "kind": "HelmChart", "digest": digest}},
+	} {
+		cases = append(cases, struct {
+			name  string
+			props map[string]any
+			want  string
+		}{"digest on " + tc.name, map[string]any{"chart": "a", "source": tc.source}, notOCI})
+	}
+	for _, malformed := range []string{"", strings.Repeat("a", 64), "sha256:" + strings.Repeat("A", 64), "sha256:" + strings.Repeat("a", 63), "sha256:" + strings.Repeat("a", 65), "sha256:" + strings.Repeat("g", 64), "sha512:" + strings.Repeat("a", 128), " " + digest} {
+		cases = append(cases, struct {
+			name  string
+			props map[string]any
+			want  string
+		}{"malformed digest " + strconv.Quote(malformed), map[string]any{"version": "1.0.0", "source": map[string]any{"url": "oci://ghcr.io/example/charts/podinfo", "digest": malformed}},
+			"helm: source.digest " + strconv.Quote(malformed) + " must be sha256: followed by 64 lowercase hex digits"})
+	}
+	cases = append(cases, struct {
+		name  string
+		props map[string]any
+		want  string
+	}{"template OCI with digest", map[string]any{"delivery": "template", "version": "1.0.0", "source": map[string]any{"url": "oci://ghcr.io/example/charts/podinfo", "digest": digest}},
+		"helm: delivery: template does not support source.digest (the client-side render fetches the chart by version and does not pin it to a digest; only the OCIRepository delivery: flux generates reads it)"})
 	for _, key := range []string{"interval", "targetNamespace", "driftDetection", "install", "upgrade", "valuesFrom"} {
 		cases = append(cases, struct {
 			name  string

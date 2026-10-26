@@ -66,7 +66,8 @@ var helmOwnedKeys = append(slices.Clone(helmPassthroughKeys), helmSecretValuesKe
 //   - delivery: flux (the default) emits a `helmrelease` component carrying the
 //     authored name, traits and annotations. With an inline source it also
 //     emits the source the release reads: a `helmrepository` for an http(s)://
-//     URL, an `ocirepository` for an oci:// URL (ref.tag = version), a
+//     URL, an `ocirepository` for an oci:// URL (ref.tag = version,
+//     ref.digest = source.digest, go-kure/launcher#1064), a
 //     `gitrepository` for source.kind GitRepository (url plus exactly one
 //     source.ref field), or a `bucket` for source.kind Bucket (endpoint and
 //     bucketName instead of a url).
@@ -78,7 +79,7 @@ var helmOwnedKeys = append(slices.Clone(helmPassthroughKeys), helmSecretValuesKe
 // the source's content identity (helmSourceIdentity), and resolved through
 // LoweringContext.ResolveSharedName under the role oam.NameRoleHelmSource: helm
 // components of one document that share a
-// source identity (the URL, with the version for OCI and the ref for Git, or a
+// source identity (the URL, with the version and any digest for OCI and the ref for Git, or a
 // Bucket's location) share one source, and the second one only references it. Two documents never share or collide on a generated source,
 // because the document name is part of its name. The source uses its terminal's
 // own interval default, never the release interval, so the identity says
@@ -103,7 +104,8 @@ var helmOwnedKeys = append(slices.Clone(helmPassthroughKeys), helmSecretValuesKe
 // depth of source, is refused. delivery: template refuses every key only a
 // HelmRelease reads (helmFluxOnlyKeys), source.name (it generates no source and
 // reads none from the cluster), valuesMode: configMap, valuesConfigMapName,
-// valuesSecretName and helmReleaseName, and an OCI source without a version, each with a helm:
+// valuesSecretName and helmReleaseName, source.digest (the render does not pin
+// to a digest), and an OCI source without a version, each with a helm:
 // message naming what the author wrote rather than the terminal it would reach.
 // delivery: flux refuses scopeOverrides, which only a client-side render reads:
 // under delivery: template it is checked as the manifests component checks its
@@ -171,6 +173,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 				"kind":      {Type: oam.PropertyTypeString, Enum: []any{"HelmRepository", "GitRepository", "Bucket", "OCIRepository", "HelmChart"}, Description: "Source kind. With url it is inferred from the scheme when unset and must agree with it (HelmRepository or OCIRepository); a Git repository URL needs kind GitRepository set. Kind Bucket with endpoint and bucketName generates a Bucket. With name alone (a reference) it is required and may be any of the five."},
 				"name":      str("Alone: the name of an existing source CR to reference. Beside an inline source (url, or a Bucket's endpoint and bucketName): the name of the generated source, in place of <document>-source-<digest>, used as written; it must differ from every component name of the document, and components that write the same name share the source only when their source is the same. Not supported under delivery: template."),
 				"namespace": str("Namespace of the referenced source CR. Only with a reference: refused beside an inline source, whose generated source is created beside the HelmRelease."),
+				"digest":    str("Manifest digest of an inline oci:// chart: sha256: followed by 64 lowercase hex digits. It becomes the generated OCIRepository's ref.digest, beside the ref.tag from version when one is set; Flux then pulls by digest. Only with an inline OCI source (an oci:// url, kind unset or OCIRepository): refused with a HelmRepository, GitRepository or Bucket source and with a reference. Refused under delivery: template, whose client-side render fetches the chart by version and does not pin it to a digest."),
 				"ref": {
 					Type:        oam.PropertyTypeObject,
 					Description: "Git reference of an inline GitRepository source (its spec.ref): exactly one of branch, tag, semver, name, commit. Required with an inline kind GitRepository, and only valid there.",
@@ -238,9 +241,9 @@ type helmProperties struct {
 
 // helmSource is an inline source or a reference to an existing source CR
 // (name, kind, optional namespace). Inline, it is a URL with an optional kind
-// (and with kind GitRepository a ref), or with kind Bucket an endpoint and
-// bucketName (plus provider, region, prefix) and no URL; a name beside either
-// names the generated source.
+// (and with kind GitRepository a ref, with an OCI URL a digest), or with kind
+// Bucket an endpoint and bucketName (plus provider, region, prefix) and no URL;
+// a name beside either names the generated source.
 type helmSource struct {
 	URL        string      `json:"url"`
 	Kind       string      `json:"kind"`
@@ -252,6 +255,9 @@ type helmSource struct {
 	Provider   string      `json:"provider"`
 	Region     string      `json:"region"`
 	Prefix     string      `json:"prefix"`
+	// The authored manifest digest of an inline OCI source; nil when absent or
+	// null. A present empty string is an authored digest, and refused.
+	Digest *string `json:"digest"`
 }
 
 // helmGitRef is an inline GitRepository source's reference, emitted as its
@@ -462,12 +468,37 @@ func decodeHelm(src map[string]any) (*helmProperties, map[string]any, map[string
 	if s.Ref != nil && (s.Kind != "GitRepository" || s.URL == "") {
 		return fail(errors.Errorf("%s: source.ref is only valid with an inline source.kind GitRepository", helmType))
 	}
+	if s.Digest != nil {
+		// A kind OCIRepository with another scheme is left to
+		// inlineChartSourceKind, whose message names the URL's scheme.
+		if !s.inline() || (s.Kind != "" && s.Kind != "OCIRepository") || (s.Kind == "" && !strings.HasPrefix(s.URL, "oci://")) {
+			return fail(errors.Errorf("%s: source.digest is only valid with an inline OCI source (an oci:// source.url, source.kind unset or OCIRepository); a HelmRepository, GitRepository or Bucket source has no manifest digest, and a referenced source pins its own", helmType))
+		}
+		if !ociSHA256Digest(*s.Digest) {
+			return fail(errors.Errorf("%s: source.digest %q must be sha256: followed by 64 lowercase hex digits", helmType, *s.Digest))
+		}
+	}
 	switch props.ValuesMode {
 	case "", "inline", "configMap":
 	default:
 		return fail(errors.Errorf("%s: unsupported valuesMode %q; supported values: inline, configMap", helmType, props.ValuesMode))
 	}
 	return props, passthrough, secretValues, nil
+}
+
+// ociSHA256Digest reports whether s is an OCI manifest digest in the one form
+// the helm rule takes: digestPrefix followed by 64 lowercase hex digits.
+func ociSHA256Digest(s string) bool {
+	hexDigits, ok := strings.CutPrefix(s, digestPrefix)
+	if !ok || len(hexDigits) != 64 {
+		return false
+	}
+	for _, c := range hexDigits {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // refuseFoldedKeys refuses two keys of m that are equal under Unicode case
@@ -932,8 +963,16 @@ func helmGeneratedSource(lctx oam.LoweringContext, comp *oam.Component, kind str
 			"mediaType": helmChartContentMediaType,
 			"operation": "copy",
 		}}
+		// With both, Flux pulls by digest; the tag stays readable beside it.
+		ref := map[string]any{}
 		if version != "" {
-			source.Properties["ref"] = map[string]any{"tag": version}
+			ref["tag"] = version
+		}
+		if src.Digest != nil {
+			ref["digest"] = *src.Digest
+		}
+		if len(ref) > 0 {
+			source.Properties["ref"] = ref
 		}
 	}
 	return source, adopted, nil
@@ -1016,19 +1055,26 @@ func helmSourceIdentity(kind, url, version string) string {
 
 // helmGeneratedSourceIdentity is the content identity of the source an inline
 // source generates. A GitRepository's is its URL and ref, a Bucket's every key
-// that locates it, each as JSON so that no separator inside a URL or endpoint
-// can make two of them collide; a HelmRepository's and an OCIRepository's stay
-// helmSourceIdentity's, so their generated names do not change.
+// that locates it, and an OCIRepository's with a digest its URL, version and
+// digest, each as JSON so that no separator inside a URL or endpoint can make
+// two of them collide; a HelmRepository's and an OCIRepository's without a
+// digest stay helmSourceIdentity's, so their generated names do not change.
 func helmGeneratedSourceIdentity(kind string, src *helmSource, version string) (string, error) {
 	var prefix string
 	var content any
-	switch kind {
-	case "GitRepository":
+	switch {
+	case kind == "OCIRepository" && src.Digest != nil:
+		prefix, content = "oci-digest:", struct {
+			URL     string `json:"url"`
+			Version string `json:"version"`
+			Digest  string `json:"digest"`
+		}{src.URL, version, *src.Digest}
+	case kind == "GitRepository":
 		prefix, content = "git:", struct {
 			URL string     `json:"url"`
 			Ref helmGitRef `json:"ref"`
 		}{src.URL, *src.Ref}
-	case "Bucket":
+	case kind == "Bucket":
 		prefix, content = "bucket:", struct {
 			Provider   string `json:"provider"`
 			Endpoint   string `json:"endpoint"`
@@ -1067,6 +1113,11 @@ func lowerHelmTemplate(comp *oam.Component, props *helmProperties, passthrough, 
 	}
 	if props.HelmReleaseName != nil {
 		return oam.LoweringResult{}, errors.Errorf("%s: delivery: template does not support helmReleaseName (the chart is rendered at build time, so no HelmRelease is generated; releaseName names the render's release)", helmType)
+	}
+	// Only a generated OCIRepository reads it; dropping it would let an author
+	// believe the render is pinned.
+	if src.Digest != nil {
+		return oam.LoweringResult{}, errors.Errorf("%s: delivery: template does not support source.digest (the client-side render fetches the chart by version and does not pin it to a digest; only the OCIRepository delivery: flux generates reads it)", helmType)
 	}
 	if src.Kind == "GitRepository" || src.Kind == "Bucket" {
 		return oam.LoweringResult{}, errors.Errorf("%s: delivery: template does not support source.kind %s (a client-side render fetches the chart from a HelmRepository or OCIRepository only)", helmType, src.Kind)
