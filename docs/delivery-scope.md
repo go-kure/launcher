@@ -2020,7 +2020,10 @@ and by scope, whatever component or trait emits it.
     operator's `config-out`, data or `log-file` volume), whose unseen content may hold a
     link to a writable volume, which Prometheus follows (go-kure/launcher#1051), except a mount
     of a `hostPath` volume of `type: File` or `FileOrCreate`, a regular file, under which no
-    file can be created and which, set `readOnly`, the kubelet binds read-only (a patch mount
+    file can be created and which, set `readOnly`, the kubelet binds read-only, and a log
+    file at the path of a directory the operator mounts, any of its mounts but the web
+    configuration file, as `/prometheus`, `/etc/prometheus/config_out` or
+    `/var/log/prometheus`, which Prometheus cannot open as a file (a patch mount
     at a path written as an earlier one's is merged into it, replacing that mount's volume
     with its own; of mounts at one path written differently, one writable makes
     it writable); the web TLS credentials' volumes, whose names are hashed, count as
