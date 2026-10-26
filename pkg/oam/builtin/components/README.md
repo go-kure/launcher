@@ -10122,12 +10122,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   every consumer is ordered after (go-kure/launcher#1016). A workload that
   needs the Secret in the application namespace gets a second Secret of its
   own; or provide the Secret in the Flux namespace. One consumer making it is
-  enough; two consumers making the same Secret collide. Under a Flux
-  namespace a consumer that makes it in a later group than another consumer
-  of the same source (a `dependency` policy orders it after that one) is
-  refused, as the earlier consumer waits for the source and the source for
-  the Secret: put the trait on a consumer in the earliest group, or provide
-  the Secret in the Flux namespace.
+  enough; two consumers making the same Secret collide. A consumer that
+  makes it in a later group than another consumer of the same source (a
+  `dependency` policy orders it after that one) is admitted, but that
+  delivery never converges, as the earlier consumer waits for the source and
+  the source for the Secret (go-kure/launcher#1039): put the trait on a
+  consumer in the earliest group, or provide the Secret in the Flux
+  namespace.
   - *A component alone on its artifact* lowers to a same-name group: both
     objects are named after the component (unless `kustomizationName` or
     `source.objectName` names them, below) and deploy as one unit, the

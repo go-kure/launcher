@@ -361,9 +361,10 @@ trait sub-applications with its workloads, whatever a Flux member reads. A Flux 
 rule orders after a generated source (`Component.OrderAfter`) reads through that source as well: a
 trait sub-application of the component follows when the source reads it (the `oci` rule's shared
 source reads the Secret one consumer's trait makes, go-kure/launcher#1016). A workload ordered after
-a source gains nothing from it. When the consumer whose trait makes it sits in a later group than
-another Flux consumer of the source, the transform refuses it: the earlier consumer waits for the
-source, which waits for that Secret. The config reports what it reads (`FluxNamespaceReads`: a
+a source gains nothing from it. A consumer whose trait makes it in a later group than another Flux
+consumer of the source is not refused, but that delivery waits on itself: the earlier consumer waits
+for the source, which waits for that Secret (go-kure/launcher#1039). Put the trait on a consumer in
+the earliest group, or provide the Secret in the Flux namespace. The config reports what it reads (`FluxNamespaceReads`: a
 HelmRelease's `valuesFrom`, `kubeConfig` and chart-template `verify` Secret, a source's
 `secretRef`, `certSecretRef`, `proxySecretRef` and the Secrets under `verify` and `sts`); a
 sub-application config names the ConfigMap or Secret it produces (`FluxNamespaceInput`: the

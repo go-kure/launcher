@@ -938,9 +938,6 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := checkGeneratedSourceInputOrder(order, ctx.generatedSourceReaders, *ctx.traitSubApps, ctx.FluxNamespace); err != nil {
-		return nil, nil, err
-	}
 	// Traits have now wrapped what they wrap, so a sibling group's members are
 	// checked as phase 4 will read them through the group's config.
 	if err := checkSiblingGroups(entries); err != nil {
