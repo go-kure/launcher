@@ -5028,7 +5028,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     decides, which the operator makes read-only unless a patch of the
     `prometheus` container sets `securityContext.readOnlyRootFilesystem` to
     `false`. A file in `/dev`, `/proc` or a directory under them, as
-    `/dev/stdout`, is not refused.
+    `/dev/stdout`, is not refused. Nor here, or in the previous entry, is a
+    field the operator drops at the version it compares, `queryLogFile`
+    below Prometheus v2.16.0 and `scrapeFailureLogFile` below v2.55.0: the
+    version gate refuses it instead. Where the read-only mount that decides
+    is at a path the operator mounts a volume at, which `volumeMounts` may not
+    name, the refusal advises a file under a writable volume rather than a
+    mount there.
   - a negative request or limit in `resources`, `thanos.resources` or a
     listed container.
   - a parseable `version` of a major other than 2 or 3: the operator

@@ -505,6 +505,8 @@ func alertmanagerRefusals(notA string) []struct {
 			`enableFeatures: classic-mode with utf8-strict-mode`},
 		// No variable has an empty name or one with '=', so the kubelet passes
 		// such a reference as written.
+		{"an empty reference", map[string]any{"enableFeatures": []any{"$()"}},
+			`enableFeatures: not a feature flag of Alertmanager 0.34`},
 		{"an empty reference beside a feature flag", map[string]any{"enableFeatures": []any{"$()", "classic-mode"}},
 			`enableFeatures: not a feature flag of Alertmanager 0.34`},
 		{"a reference of a name with =", map[string]any{"enableFeatures": []any{"$(a=b)"}},
