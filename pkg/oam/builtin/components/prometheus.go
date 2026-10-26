@@ -35,6 +35,21 @@ import (
 // upstream json tags.
 type PrometheusHandler struct{}
 
+// The Prometheus versions from which the operator writes attach_metadata into
+// the service discovery of a PodMonitor and of a ServiceMonitor
+// (mergeAttachMetadataForTopology, pkg/prometheus/promcfg.go at v0.94.1).
+// Topology sharding falls back to a node's zone label through it, and below
+// them it has none to fall back to. Neither the operator's
+// PrometheusTopologySharding feature gate nor the cluster's pod topology
+// labels, which decide whether the operator falls back at all, are visible
+// at build, so the kind documents the limit and refuses nothing
+// (go-kure/launcher#1019). TestPrometheusTopologyNodeZone_MatchVendoredSource
+// holds them to the operator's source.
+const (
+	prometheusTopologyNodeZonePodMonitor     = "2.35.0"
+	prometheusTopologyNodeZoneServiceMonitor = "2.37.0"
+)
+
 // CanHandle returns true for the prometheus component type.
 func (h *PrometheusHandler) CanHandle(componentType string) bool {
 	return componentType == "prometheus"
@@ -106,7 +121,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 			"One reference: name."),
 		"replicas":                    number("replicas: the number of Prometheus pods of each shard. replicas times shards is held to the EnvironmentPolicy's replica maximum as the operator counts them: an unset or negative replicas as 1, an unset shards as 1. Nothing is written, and no replica default of the policy is applied."),
 		"shards":                      number("shards: the number of shards the scraped targets are spread over, one StatefulSet each. Unset, the API fills 1. Below 1 is refused, since the operator runs 1 shard for it. Held with replicas: see replicas. Scaling the shards down or up moves no data."),
-		"shardingStrategy":            object("shardingStrategy: how targets are spread over the shards: mode, Address (the default, by a hash of the target's address) or Topology (behind the operator's PrometheusTopologySharding feature gate), with topology." + decoded + "ShardingStrategy in its API reference."),
+		"shardingStrategy":            object("shardingStrategy: how targets are spread over the shards: mode, Address (the default, by a hash of the target's address) or Topology (behind the operator's PrometheusTopologySharding feature gate), with topology. With Topology, on a cluster that does not label pods with their zone, a target with no EndpointSlice zone, as a PodMonitor's, takes the zone of its node, which the operator reads only from Prometheus " + prometheusTopologyNodeZonePodMonitor + " for PodMonitors and " + prometheusTopologyNodeZoneServiceMonitor + " for ServiceMonitors; below them such a target has no zone and no shard scrapes it. Not refused: the feature gate and the cluster's pod labels are not visible at build." + decoded + "ShardingStrategy in its API reference."),
 		"replicaExternalLabelName":    text("replicaExternalLabelName: the name of the external label that holds the replica's name. Unset, prometheus_replica; empty, no such label."),
 		"prometheusExternalLabelName": text("prometheusExternalLabelName: the name of the external label that holds the Prometheus's name. Unset, prometheus; empty, no such label."),
 		"logLevel":                    text("logLevel: the log level of Prometheus and its config-reloader: debug, info, warn or error."),
