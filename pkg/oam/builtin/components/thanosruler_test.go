@@ -1093,7 +1093,7 @@ func TestThanosRuler_OperatorRunsIt(t *testing.T) {
 		// /data (go-kure/launcher#1050).
 		"two mounts at one path, one with a trailing slash":       trMounts("/scratch", "/scratch/"),
 		"two mounts at one path, one written relative":            trMounts("data", "/data"),
-		"a mount at the data volume's path with a trailing slash": trMount(nil, "/thanos/data/"),
+		"a mount at the data volume's path with a trailing slash": trMount(trVolume(nil, "extra"), "/thanos/data/"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := coreKindErr(h, "thanosruler", "fast", props); err != nil {
