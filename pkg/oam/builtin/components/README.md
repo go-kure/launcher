@@ -10995,9 +10995,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     set. A store outside the document, or another component's store the
     author did not name while a hook is set (its name may be the hook's
     answer, asked by that component's lowering), is left to the plugin's own
-    check before it archives, and so is another `postgresql` component's
-    inline recovery store, which the check does not read
-    (go-kure/launcher#1044).
+    check before it archives.
   - **Ordering.** The recovering Cluster reads its source store before it can
     become ready, so the store never waits for the Cluster as the other members
     do. Where the document orders its components (a `dependency` policy), the
