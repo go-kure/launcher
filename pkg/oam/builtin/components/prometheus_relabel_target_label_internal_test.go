@@ -328,7 +328,8 @@ func TestPrometheusRelabelLabelmapReplacement_MatchVendoredSource(t *testing.T) 
 // validates, is refused below Prometheus 3.0.0, naming the rule; from 3.0.0
 // on, and at the operator's default where version is unset, it builds. A
 // legacy name with references builds below 3.0.0, and so do an unset
-// replacement and such a replacement for another action.
+// replacement, an empty one, which the operator refuses at every version,
+// and such a replacement for another action.
 func TestPrometheusRelabelLabelmapReplacement_Refused(t *testing.T) {
 	type m = map[string]any
 	endpoint := m{"namespace": "monitoring", "name": "alertmanager-operated", "port": "web"}
@@ -365,18 +366,13 @@ func TestPrometheusRelabelLabelmapReplacement_Refused(t *testing.T) {
 	}
 	for list, author := range lists {
 		owner := strings.Replace(list, "[]", "[1]", 1)
-		for _, replacement := range []string{"service.$1", "1_$1", "service-${1}", ""} {
+		for _, replacement := range []string{"service.$1", "1_$1", "service-${1}"} {
 			props := author([]any{labelmap("labelmap", "service_$1"), labelmap("labelmap", replacement)})
 			want := owner + `[1].replacement: ` + strconv.Quote(replacement) + ` is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*) in which $var and ${var} references may stand for any part, the only replacements the Prometheus operator accepts for a labelmap action below Prometheus 3.0.0; at version %s it refuses the object at reconcile, and the Prometheus is not updated; name such a replacement, or set version to 3.0.0 or later`
 			for _, version := range []string{"v2.55.0", "v3.0.0-rc.0"} {
 				if err := promBuild(t, props, "version", version); err == nil || !strings.Contains(err.Error(), strings.Replace(want, "%s", version, 1)) {
 					t.Errorf("%s, %q at %s: err = %v, want the replacement refused", list, replacement, version, err)
 				}
-			}
-			if replacement == "" {
-				// The UTF-8 scheme refuses an empty name too: not this
-				// version's doing, and not judged here.
-				continue
 			}
 			for _, version := range []string{"v3.0.0", ""} {
 				if err := promBuild(t, props, "version", version); err != nil {
@@ -396,11 +392,62 @@ func TestPrometheusRelabelLabelmapReplacement_Refused(t *testing.T) {
 		if err := promBuild(t, author([]any{labelmap("labelmap", nil)}), "version", "v2.55.0"); err != nil {
 			t.Errorf("%s, no replacement: err = %v, want it built: the operator checks only a replacement set", list, err)
 		}
+		// The UTF-8 scheme refuses an empty name too: not the version's
+		// doing, and left to the operator.
+		if err := promBuild(t, author([]any{labelmap("labelmap", "")}), "version", "v2.55.0"); err != nil {
+			t.Errorf("%s, empty replacement: err = %v, want it left to the operator", list, err)
+		}
 		if err := promBuild(t, author([]any{m{"action": "replace", "sourceLabels": []any{"__name__"}, "targetLabel": "service_name", "replacement": "service.$1"}}), "version", "v2.55.0"); err != nil {
 			t.Errorf("%s, replace: err = %v, want it built: the operator checks the replacement of labelmap only", list, err)
 		}
 		if err := promBuild(t, author([]any{labelmap("labelmap", "service.$1")}), "version", "main"); err != nil {
 			t.Errorf("%s at an unparsable version: err = %v, want it left to the operator", list, err)
+		}
+	}
+}
+
+// TestPrometheusRelabelLabelNames_SuggestAuthoredVersion: the version a
+// refusal of a label name suggests is one at which every gated field
+// authored is read (go-kure/launcher#1047): from 3.0.0 on and below a
+// ceiling authored, or, where no version is both, none.
+func TestPrometheusRelabelLabelNames_SuggestAuthoredVersion(t *testing.T) {
+	type m = map[string]any
+	labelmap := m{"action": "labelmap", "regex": "(.+)", "replacement": "service.$1"}
+	target := m{"action": "replace", "sourceLabels": []any{"__name__"}, "targetLabel": "service.name"}
+	classes := func(rule m) []any { return []any{m{"name": "c", "relabelings": []any{rule}}} }
+	endpoint := m{"namespace": "monitoring", "name": "alertmanager-operated", "port": "web", "apiVersion": "v1", "relabelings": []any{labelmap}}
+	for name, c := range map[string]struct {
+		props   m
+		version string
+		want    string
+	}{
+		"no ceiling": {m{"scrapeClasses": classes(labelmap)}, "v2.38.0",
+			"; name such a replacement, or set version to 3.0.0 or later"},
+		"allowOverlappingBlocks": {m{"allowOverlappingBlocks": true, "scrapeClasses": classes(labelmap)}, "v2.38.0",
+			"; name such a replacement: the operator reads the fields authored at no version from 3.0.0 on and below 2.39.0"},
+		"targetLabel, allowOverlappingBlocks": {m{"allowOverlappingBlocks": true, "scrapeClasses": classes(target)}, "v2.38.0",
+			"; name a legacy label: the operator reads the fields authored at no version from 3.0.0 on and below 2.39.0"},
+		"apiVersion v1": {m{"alerting": m{"alertmanagers": []any{endpoint}}}, "v2.55.0",
+			"; name such a replacement: the operator reads the fields authored at no version from 3.0.0 on and within Prometheus 2.x"},
+	} {
+		if err := promBuild(t, c.props, "version", c.version); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want one with %q", name, err, c.want)
+		}
+	}
+
+	// No ceiling the kind has today lies above 3.0.0; the fix holds one that
+	// would, and a minimum above 3.0.0, all the same.
+	for _, c := range []struct {
+		authored versionRange
+		want     string
+	}{
+		{versionRange{from: "2.11.0"}, "x, or set version to 3.0.0 or later"},
+		{versionRange{from: "3.2.0"}, "x, or set version to 3.2.0 or later"},
+		{versionRange{below: "3.5.0", lower: "below 3.5.0", within: "below 3.5.0"}, "x, or name a version from 3.0.0 on and below 3.5.0"},
+		{versionRange{from: "3.5.0", below: "3.5.0", lower: "below 3.5.0", within: "below 3.5.0"}, "x: the operator reads the fields authored at no version from 3.5.0 on and below 3.5.0"},
+	} {
+		if got := promLabelNameFix("x", c.authored); got != c.want {
+			t.Errorf("promLabelNameFix(%+v) = %q, want %q", c.authored, got, c.want)
 		}
 	}
 }

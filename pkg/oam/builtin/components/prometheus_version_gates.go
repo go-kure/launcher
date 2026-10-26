@@ -668,7 +668,7 @@ func validatePrometheusVersion(spec *monitoringv1.PrometheusSpec) error {
 		if err := refuseVersionMisses(misses, authoredRange(spec, gates, prometheusVersionCeilings), at, "version"); err != nil {
 			return err
 		}
-		if err := refusePromRelabelLabelNames(spec, v, at); err != nil {
+		if err := refusePromRelabelLabelNames(spec, v, at, authoredRange(spec, gates, prometheusVersionCeilings)); err != nil {
 			return err
 		}
 	}
@@ -720,8 +720,11 @@ var promRelabelLabelmapLegacy = regexp.MustCompile(`^(?:(?:[a-zA-Z_]|\$(?:\{\w+\
 // labelmap rule, not a legacy label name with references
 // (promRelabelLabelmapLegacy; go-kure/launcher#1038). The operator refuses
 // the object at reconcile. An empty targetLabel is not judged here, nor an
-// unset replacement, which the operator does not check.
-func refusePromRelabelLabelNames(spec *monitoringv1.PrometheusSpec, v semver.Version, at string) error {
+// unset replacement, which the operator does not check, nor an empty one,
+// which it refuses at every version. The version the refusal suggests is
+// bounded by authored, the versions every gated field spec authors is read
+// at (promLabelNameFix).
+func refusePromRelabelLabelNames(spec *monitoringv1.PrometheusSpec, v semver.Version, at string, authored versionRange) error {
 	if v.GTE(semver.MustParse(prometheusUTF8LabelNamesMinimum)) {
 		return nil
 	}
@@ -734,17 +737,36 @@ func refusePromRelabelLabelNames(spec *monitoringv1.PrometheusSpec, v semver.Ver
 				}
 				rule := strings.Replace(l.path, "[]", "["+strconv.Itoa(i)+"]", 1) + "[" + strconv.Itoa(j) + "]"
 				if rc.TargetLabel != "" && slices.Contains(promTargetLabelActions, action) && !model.LegacyValidation.IsValidLabelName(rc.TargetLabel) {
-					return errors.Errorf("%s.targetLabel: %q is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*), the only names the Prometheus operator accepts for a %s action below Prometheus %s; at %s it %s; name a legacy label, or set version to %s or later",
-						rule, rc.TargetLabel, action, prometheusUTF8LabelNamesMinimum, at, promRefused, prometheusUTF8LabelNamesMinimum)
+					return errors.Errorf("%s.targetLabel: %q is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*), the only names the Prometheus operator accepts for a %s action below Prometheus %s; at %s it %s; %s",
+						rule, rc.TargetLabel, action, prometheusUTF8LabelNamesMinimum, at, promRefused, promLabelNameFix("name a legacy label", authored))
 				}
-				if action == "labelmap" && rc.Replacement != nil && !promRelabelLabelmapLegacy.MatchString(*rc.Replacement) {
-					return errors.Errorf("%s.replacement: %q is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*) in which $var and ${var} references may stand for any part, the only replacements the Prometheus operator accepts for a labelmap action below Prometheus %s; at %s it %s; name such a replacement, or set version to %s or later",
-						rule, *rc.Replacement, prometheusUTF8LabelNamesMinimum, at, promRefused, prometheusUTF8LabelNamesMinimum)
+				if action == "labelmap" && rc.Replacement != nil && *rc.Replacement != "" && !promRelabelLabelmapLegacy.MatchString(*rc.Replacement) {
+					return errors.Errorf("%s.replacement: %q is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*) in which $var and ${var} references may stand for any part, the only replacements the Prometheus operator accepts for a labelmap action below Prometheus %s; at %s it %s; %s",
+						rule, *rc.Replacement, prometheusUTF8LabelNamesMinimum, at, promRefused, promLabelNameFix("name such a replacement", authored))
 				}
 			}
 		}
 	}
 	return nil
+}
+
+// promLabelNameFix is how a label name refused below
+// prometheusUTF8LabelNamesMinimum is fixed: by name, the fix in the legacy
+// scheme, or by a version from that minimum on at which every gated field
+// authored is read too (authored, go-kure/launcher#1047); where there is
+// none, by name only.
+func promLabelNameFix(name string, authored versionRange) string {
+	if authored.from == "" || semver.MustParse(authored.from).LT(semver.MustParse(prometheusUTF8LabelNamesMinimum)) {
+		authored.from = prometheusUTF8LabelNamesMinimum
+	}
+	switch {
+	case authored.below == "":
+		return name + ", or set version to " + authored.from + " or later"
+	case semver.MustParse(authored.from).LT(semver.MustParse(authored.below)):
+		return name + ", or name a version from " + authored.from + " on and " + authored.within
+	default:
+		return name + ": the operator reads the fields authored at no version from " + authored.from + " on and " + authored.within
+	}
 }
 
 // The least Prometheus and Thanos versions from which the operator, where the
