@@ -596,8 +596,9 @@ func prometheusMountsWebConfig(spec *monitoringv1.PrometheusSpec) bool {
 // prometheusJoinsLogFile reports whether Prometheus joins a relative path
 // with a directory in field to the directory of its configuration file:
 // scrapeFailureLogFile at every version that reads it, queryLogFile from
-// v2.21.0 (validatePrometheusLogFiles). A version that does not parse joins
-// nothing here, as which Prometheus runs is not known.
+// v2.21.0 (validatePrometheusLogFiles). At a version that does not parse a
+// queryLogFile is not joined, as which Prometheus runs is not known; a
+// scrapeFailureLogFile still is, as every version that reads it joins it.
 func prometheusJoinsLogFile(spec *monitoringv1.PrometheusSpec, field string) bool {
 	if field == "scrapeFailureLogFile" {
 		return true
