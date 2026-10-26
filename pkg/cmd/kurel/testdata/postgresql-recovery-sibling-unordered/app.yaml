@@ -1,0 +1,29 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  components:
+  - name: upstream
+    type: postgresql
+    properties:
+      pooler:
+        enabled: true
+  - name: db
+    type: postgresql
+    properties:
+      pooler:
+        enabled: true
+      recovery:
+        source:
+          serverName: origin
+          objectStore:
+            destinationPath: "s3://bucket/origin/"
+            s3Credentials:
+              inheritFromIAMRole: true
+  - name: api
+    type: webservice
+    properties:
+      image: ghcr.io/example/api:v1.0.0
+      port: 9090

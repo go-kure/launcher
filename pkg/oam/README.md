@@ -42,7 +42,9 @@ declarations order components:
 - **A `dependency` policy rule.**
 - **A lowering rule's order between the components it emits** (`Component.OrderAfter`).
   The `helm` rule orders its release after the source it generates, and the `oci` rule
-  each Kustomization after the source several `oci` components share.
+  each Kustomization after the source several `oci` components share. A rule can also
+  make a component it emits wait as another (`Component.WaitsAs`): it then follows what
+  the `dependency` rules make that one follow.
 
 An application is always one bundle, named after the Application. With nothing declared
 it is flat: the one bundle holds every component. Otherwise the components are split into
@@ -2624,6 +2626,24 @@ The built-in users are the `helm` rule, which orders the release after the sourc
 generates or adopts, and the `oci` rule, which does the same for each Kustomization of a
 source several `oci` components share (go-kure/launcher#784). A component alone on its
 artifact orders nothing: its source is a member of its same-name sibling group.
+
+**Waiting as another component.** A component a rule emits that must not wait for the
+component it lowers, but must still wait for what that one waits for, declares it with
+`Component.WaitsAs(name)` (go-kure/launcher#1041). It follows every component the
+document's `dependency` rules make `name` follow, itself excepted, as if each rule named
+it too. The rules are read once every lowering has run, so a rule another component's
+lowering generates counts as an authored one does, though the rule lowering the
+component could not see it. A name no rule makes wait adds nothing, and what `name`
+waits for only by a `WaitsAs` of its own is not passed on.
+It is an edge like a dependency rule's: it can close a cycle, which is refused naming
+the `dependency policy`, and a generated source that declares one and would wait is
+refused as a dependency rule making it wait is. Like `OrderAfter` it survives copies and
+further lowering, a generated source aside, is not serialized, and cannot be authored.
+Unlike `OrderAfter`, a wait a generated source inherits that way (one nothing else its
+rule emits is ordered after) does not make it an ordinary component: it is still a
+generated source, refused as above if the wait would make it wait.
+The built-in user is the `postgresql` rule: the inline recovery store waits as the
+component, and the Cluster is ordered after the store.
 
 A source that several components share is always a component a rule emits once and the
 others adopt. The engine has no other sharing mechanism: the `SourceDeduplicatable`

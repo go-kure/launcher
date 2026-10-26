@@ -1403,6 +1403,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// The order an earlier rule gave the component (Component.OrderAfter),
 			// read before this rule can touch its copy.
 			inheritedOrder := comp.orderAfter
+			inheritedWaits := comp.waitsAs
 			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, Origin: compOrigin, Namer: namer}
 			result, err := rule.LowerComponent(&comp, lctx)
 			if err != nil {
@@ -1443,6 +1444,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			}
 			// What the component became waits as the component did, whether or not
 			// the rule built its output from the component it was handed.
+			inheritWaits(result.Components, inheritedWaits)
 			inheritOrder(result.Components, inheritedOrder)
 			clearForwardingMarks(result.Components)
 			// Only a component-position rule may emit a same-name sibling group: the
