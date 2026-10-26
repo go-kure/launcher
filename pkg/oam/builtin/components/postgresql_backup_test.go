@@ -139,6 +139,40 @@ func TestPostgresqlBackup_Refusals(t *testing.T) {
 			`backup.schedules[0].schedule "0 45 * * *": five fields, which the operator reads seconds first (seconds, minutes, hours, day of month, month), not as a crontab line; write six fields, seconds first ("0 45 * * * *" as the operator reads it)`},
 		{"a schedule of a minute out of range", scheduleWith(map[string]any{"schedule": "0 61 * * * *"}),
 			`backup.schedules[0].schedule "0 61 * * * *": not a cron expression the operator accepts: `},
+
+		// Schedules that parse but that the operator finds no time for
+		// within its five-year look-ahead (go-kure/launcher#1032).
+		{"February the 30th", scheduleWith(map[string]any{"schedule": "0 0 3 30 2 *"}),
+			`backup.schedules[0].schedule "0 0 3 30 2 *": its time never comes, so the operator records NoSchedule for it`},
+		// The next Friday January the 1st after 2010 is 2016.
+		{"a Friday January the 1st at midnight", scheduleWith(map[string]any{"schedule": "0 0 0 */31 1 FRI"}),
+			`backup.schedules[0].schedule "0 0 0 */31 1 FRI": no time from the end of 2010 through the end of 2015 (UTC), longer than the five years the operator looks ahead, so the operator records NoSchedule there and takes no further backup for it; choose a schedule whose time comes at least every five years`},
+		{"a Friday January the 1st at 03:00", scheduleWith(map[string]any{"schedule": "0 0 3 */31 1 FRI"}),
+			"no time from the end of 2010 through the end of 2015 (UTC)"},
+		// The gap starts at the cycle's first year: its predecessor is the
+		// cycle's last.
+		{"a Wednesday March the 1st", scheduleWith(map[string]any{"schedule": "0 0 0 */31 3 WED"}),
+			"no time from the end of 2000 through the end of 2005 (UTC)"},
+		// 2100 is no leap year, and 2104 is more than five years past 2098.
+		{"February the 29th", scheduleWith(map[string]any{"schedule": "0 0 3 29 2 *"}),
+			"no time from the end of 2096 through the end of 2101 (UTC)"},
+		{"February the 29th, twice", scheduleWith(map[string]any{"schedule": "0 0,30 3 29 2 *"}),
+			"no time from the end of 2096 through the end of 2101 (UTC)"},
+		// A starred day of the week is ANDed: a Sunday February the 29th.
+		{"a Sunday February the 29th", scheduleWith(map[string]any{"schedule": "0 0 0 29 2 */7"}),
+			"no time from the end of 2004 through the end of 2009 (UTC)"},
+		{"seconds that select no value", scheduleWith(map[string]any{"schedule": ", * * * * *"}),
+			`backup.schedules[0].schedule ", * * * * *": the seconds field selects no value, so its time never comes`},
+		{"minutes that select no value", scheduleWith(map[string]any{"schedule": "0 , * * * *"}),
+			"the minutes field selects no value"},
+		{"hours that select no value", scheduleWith(map[string]any{"schedule": "0 0 , * * *"}),
+			"the hours field selects no value"},
+		{"months that select no value", scheduleWith(map[string]any{"schedule": "0 0 0 * , *"}),
+			"the months field selects no value"},
+		// An empty day of month ANDed with a starred day of the week.
+		{"days of the month that select no value", scheduleWith(map[string]any{"schedule": "0 0 0 , * *"}),
+			`backup.schedules[0].schedule "0 0 0 , * *": its time never comes`},
+
 		{"a target of neither", scheduleWith(map[string]any{"target": "standby"}),
 			`backup.schedules[0].target "standby": must be primary or prefer-standby`},
 		{"an owner reference of neither", scheduleWith(map[string]any{"backupOwnerReference": "owner"}),
@@ -286,18 +320,18 @@ func TestPostgresqlBackup_Lowering(t *testing.T) {
 	}
 }
 
-// The bounded wal and data values admit their lower bound, and a null one is
-// absence, not a value to check: each lowers, and a null key is not carried.
-// TestPostgresqlBackup_RareSchedulesAdmitted pins that a schedule that parses
-// is not refused, however rarely or never its time comes: it lowers, carried
-// as authored, and the operator judges it (go-kure/launcher#1032).
-func TestPostgresqlBackup_RareSchedulesAdmitted(t *testing.T) {
+// TestPostgresqlBackup_SchedulesThatComeAdmitted pins that a schedule whose
+// time comes within five years from every instant, or an @every one, lowers,
+// carried as authored (go-kure/launcher#1032).
+func TestPostgresqlBackup_SchedulesThatComeAdmitted(t *testing.T) {
 	for _, schedule := range []string{
-		"0 0 0 */31 1 FRI", // a Friday January the 1st: 2010, 2016, 2021, 2027
-		"0 0 3 29 2 *",     // February the 29th
-		"0 0 3 30 2 *",     // February the 30th: never
-		"0 0 3 , * MON",    // an empty day of month ORed with Mondays: every Monday
+		"0 0 0 1 1 *", // once a year, at its first second
+		"@yearly",
+		"0 0 3 , * MON", // an empty day of month ORed with Mondays: every Monday
 		"@every 1h",
+		"@every 87600h",    // ten years, but its next time is never zero
+		"59 59 23 31 12 *", // once a year, at its last second
+		"0 0 3 28 2 *",     // February the 28th
 	} {
 		t.Run(schedule, func(t *testing.T) {
 			res := lowerPostgresql(t, &oam.Component{Name: "db", Type: "postgresql", Properties: scheduleWith(map[string]any{"schedule": schedule})}, nil)
@@ -314,6 +348,25 @@ func TestPostgresqlBackup_RareSchedulesAdmitted(t *testing.T) {
 	}
 }
 
+// TestPostgresqlBackup_ScheduleRefusalRepeats pins that the look-ahead's
+// refusal reads the same on every build: it is decided over fixed years, not
+// from the clock.
+func TestPostgresqlBackup_ScheduleRefusalRepeats(t *testing.T) {
+	lower := func() string {
+		comp := &oam.Component{Name: "db", Type: "postgresql", Properties: scheduleWith(map[string]any{"schedule": "0 0 3 29 2 *"})}
+		_, err := components.PostgresqlRule{}.LowerComponent(comp, oam.LoweringContext{Namer: oam.NewNameAllocator()})
+		if err == nil {
+			t.Fatal("February the 29th lowered")
+		}
+		return err.Error()
+	}
+	if first, second := lower(), lower(); first != second {
+		t.Errorf("the refusal differs between builds:\n%s\n%s", first, second)
+	}
+}
+
+// The bounded wal and data values admit their lower bound, and a null one is
+// absence, not a value to check: each lowers, and a null key is not carried.
 func TestPostgresqlBackup_BoundedValuesAdmitted(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

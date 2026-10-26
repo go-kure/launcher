@@ -10808,11 +10808,23 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     parses, read as a crontab line and as the operator reads it
     (`backup.schedules[0].schedule "0 3 * * *": five fields, … write six
     fields, seconds first ("0 0 3 * * *" as a crontab line, or "0 3 * * * *"
-    as the operator reads it)`). A descriptor (`@daily`) is accepted. A
-    schedule that parses but whose time never comes within the operator's
-    five-year look-ahead (`0 0 3 30 2 *`, February the 30th) is not refused:
-    the operator records NoSchedule for it and runs no backup, not even the
-    immediate one (go-kure/launcher#1032).
+    as the operator reads it)`). A descriptor (`@daily`) is accepted.
+    A schedule must also find a time within the operator's look-ahead from
+    every instant (go-kure/launcher#1032): the operator asks for the next time
+    after now, searching through the end of the year five years on, and on
+    none records NoSchedule and takes no further backup for that
+    ScheduledBackup, not even the immediate one, with no retry. The search is
+    computed in UTC, exactly, over one 400-year Gregorian cycle (fixed years,
+    so a build does not depend on the clock): February the 30th
+    (`0 0 3 30 2 *`) is refused as a time that never comes, and February the
+    29th (`0 0 3 29 2 *`) is refused too, since 2100 is no leap year
+    (`… no time from the end of 2096 through the end of 2101 (UTC), longer
+    than the five years the operator looks ahead …`). A seconds, minutes,
+    hours or months field that selects no value (`,`) is refused outright,
+    naming the field. An empty day of month or day of week can still fire:
+    `0 0 3 , * MON` (ORed with Mondays) is accepted, `0 0 0 , * *` (ANDed with
+    a starred day of week) is refused. `@every` is accepted, however long its
+    delay; how often a backup is taken is not judged.
     `immediate` defaults to `true` (a new Cluster gets a base backup at once),
     `backupOwnerReference` to `self` (`none`, `self` or `cluster`), `target`
     is `primary` or `prefer-standby` and `suspend` is written only when
