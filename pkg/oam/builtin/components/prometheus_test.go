@@ -538,10 +538,39 @@ func prometheusRefusals(notA string) []struct {
 			`queryLogFile: "/var/log/query.log" is in /var/log, where no volume is known to be mounted, and the prometheus container's root filesystem is read-only, so Prometheus cannot create the file; mount a writable volume at /var/log or a directory above it, or name a standard stream such as /dev/stdout`},
 		{"a scrape failure log file in a directory without a mount", map[string]any{"scrapeFailureLogFile": "/var/log/scrape/failures.log"},
 			`scrapeFailureLogFile: "/var/log/scrape/failures.log" is in /var/log/scrape, where no volume is known to be mounted`},
+		// Prometheus opens an absolute path as written, with O_CREAT, which
+		// the kernel refuses on a trailing slash (fs/namei.c:3620-3622 at
+		// Linux v6.12) and on a directory (:3750-3751), which /, "." and ".."
+		// resolve to, whatever the mount, link or reference; the path is
+		// judged before it is cleaned.
 		{"a query log file at the root directory", map[string]any{"queryLogFile": "/"},
-			`queryLogFile: "/" is in /, where no volume is known to be mounted`},
+			`queryLogFile: "/" ends in a slash, "." or "..", so it names a directory, and Prometheus, which opens an absolute path as written, cannot open it as a file; end the path in a file name`},
 		{"a scrape failure log file at the root directory", map[string]any{"scrapeFailureLogFile": "/"},
-			`scrapeFailureLogFile: "/" is in /, where no volume is known to be mounted`},
+			`scrapeFailureLogFile: "/" ends in a slash, "." or ".."`},
+		{"a query log file with a trailing slash in config_out", map[string]any{"queryLogFile": "/etc/prometheus/config_out/query.log/"},
+			`queryLogFile: "/etc/prometheus/config_out/query.log/" ends in a slash`},
+		{"a query log file with two trailing slashes in config_out", map[string]any{"queryLogFile": "/etc/prometheus/config_out/query.log//"},
+			`queryLogFile: "/etc/prometheus/config_out/query.log//" ends in a slash`},
+		{`a query log file ending in "." in config_out`, map[string]any{"queryLogFile": "/etc/prometheus/config_out/query.log/."},
+			`queryLogFile: "/etc/prometheus/config_out/query.log/." ends in a slash, "." or ".."`},
+		{`a query log file ending in ".." in config_out`, map[string]any{"queryLogFile": "/etc/prometheus/config_out/logs/query/.."},
+			`queryLogFile: "/etc/prometheus/config_out/logs/query/.." ends in a slash, "." or ".."`},
+		{"a scrape failure log file with a trailing slash in config_out", map[string]any{"scrapeFailureLogFile": "/etc/prometheus/config_out/scrape.log/"},
+			`scrapeFailureLogFile: "/etc/prometheus/config_out/scrape.log/" ends in a slash`},
+		{"a scrape failure log file with two trailing slashes in config_out", map[string]any{"scrapeFailureLogFile": "/etc/prometheus/config_out/scrape.log//"},
+			`scrapeFailureLogFile: "/etc/prometheus/config_out/scrape.log//" ends in a slash`},
+		{`a scrape failure log file ending in "." in config_out`, map[string]any{"scrapeFailureLogFile": "/etc/prometheus/config_out/scrape.log/."},
+			`scrapeFailureLogFile: "/etc/prometheus/config_out/scrape.log/." ends in a slash, "." or ".."`},
+		{`a scrape failure log file ending in ".." in config_out`, map[string]any{"scrapeFailureLogFile": "/etc/prometheus/config_out/logs/scrape/.."},
+			`scrapeFailureLogFile: "/etc/prometheus/config_out/logs/scrape/.." ends in a slash, "." or ".."`},
+		{"a scrape failure log file with a trailing slash in the data volume", map[string]any{"scrapeFailureLogFile": "/prometheus/scrape.log/"},
+			`scrapeFailureLogFile: "/prometheus/scrape.log/" ends in a slash`},
+		{"a query log file with a trailing slash in the data volume", map[string]any{"queryLogFile": "/prometheus/query.log/"},
+			`queryLogFile: "/prometheus/query.log/" ends in a slash`},
+		{"a query log file with a trailing slash under /dev", map[string]any{"queryLogFile": "/dev/stdout/"},
+			`queryLogFile: "/dev/stdout/" ends in a slash`},
+		{"a log file with a reference and a trailing slash", map[string]any{"queryLogFile": "/prometheus/$(POD_NAME)/"},
+			`queryLogFile: "/prometheus/$(POD_NAME)/" ends in a slash`},
 		// The kubelet mounts a configMap volume read-only whatever the mount
 		// says (kubelet_pods.go:409, :425 at Kubernetes v1.37.1).
 		{"a log file in a directory with a configMap mounted there", map[string]any{"queryLogFile": "/var/log/query.log",
@@ -1222,6 +1251,13 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 		"a log file with a reference in its directory":           {"queryLogFile": "/logs/$(POD_NAME)/query.log"},
 		"a scrape failure log with a reference in its directory": {"scrapeFailureLogFile": "/logs/$(POD_NAME)/scrape.log"},
 		"a query log file named alone by a reference":            {"queryLogFile": "$(LOG_FILE)", "scrapeFailureLogFile": "/dev/stdout"},
+		// A relative path is not judged, whatever it ends in: Prometheus
+		// joins it to config_out with filepath.Join (JoinDir,
+		// config/config.go:96-101 at prometheus/common v0.67.5), which drops
+		// a trailing slash; a queryLogFile below v2.21.0 is opened from the
+		// working directory as written.
+		"a relative query log file with a trailing slash":     {"queryLogFile": "logs/query.log/"},
+		"a relative scrape failure log with a trailing slash": {"scrapeFailureLogFile": "logs/scrape.log/"},
 		// Below Prometheus v2.24.0 the operator mounts no web configuration.
 		"a log file at the web configuration file below v2.24.0": {"version": "v2.23.0", "queryLogFile": "/etc/prometheus/web_config/web-config.yaml",
 			"containers": []any{map[string]any{"name": "prometheus", "securityContext": map[string]any{"readOnlyRootFilesystem": false}}}},

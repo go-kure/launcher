@@ -2001,7 +2001,10 @@ and by scope, whatever component or trait emits it.
     as on `alertmanager`, go-kure/launcher#1050); a `queryLogFile` named without a directory beside a `scrapeFailureLogFile`
     named with one, where the operator mounts no volume for it, unless the file there
     is writable all the same; a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot
-    write, judged at what runs at the version named (a name alone is in
+    write, judged at what runs at the version named (an absolute path whose last element
+    as written, before it is cleaned, is empty, `.` or `..`, `/` included, is refused
+    before anything else, since Prometheus opens it as written with `O_CREAT`, which the
+    kernel refuses on a trailing slash and on a directory; a name alone is in
     `/var/log/prometheus`; a relative path with a directory, which Prometheus joins to
     `/etc/prometheus/config_out`, an emptyDir an `initContainer` may fill with a link to a
     writable volume, is not judged; a path with a reference `$(NAME)`, which the config reloader
@@ -2029,10 +2032,12 @@ and by scope, whatever component or trait emits it.
     it writable); the web TLS credentials' volumes, whose names are hashed, count as
     writable, so the check refuses only where it knows Prometheus cannot open the file
     for writing: the file or its directory is read-only, its directory is a regular file,
-    or its path is a directory the operator mounts; where no mount covers it, the read-only root
+    its path is a directory the operator mounts, or it is absolute and ends in a slash,
+    `/.` or `/..`, judged as written before it is cleaned;
+    where no mount covers it, the read-only root
     filesystem refuses unless a prometheus patch sets `readOnlyRootFilesystem: false`, and
-    a file in `/dev`, `/proc` or a directory under them (as `/dev/stdout`) is never
-    refused, nor is a log file below the version it is read from, which the version gate
+    a file in `/dev`, `/proc` or a directory under them (as `/dev/stdout`) is not
+    refused unless it ends in a slash, `/.` or `/..`, nor is a log file below the version it is read from, which the version gate
     refuses instead; a negative request or limit; and a
     name whose data volume, third rule ConfigMap volume `prometheus-<name>-rulefiles-2`
     or last pod hostname of the last shard is not a DNS-1123 label (no dot, at most 40
