@@ -108,6 +108,10 @@ func (c *SecretConfig) ComponentName() string { return c.componentName }
 // valuesFrom). Satisfies pkg/oam.fluxNamespaceInput.
 func (c *SecretConfig) FluxNamespaceInput() (kind, name string) { return "Secret", c.Name }
 
+// ProducesFluxNamespaceInput is true: the trait creates the Secret it names.
+// Satisfies pkg/oam.fluxNamespaceProducer.
+func (c *SecretConfig) ProducesFluxNamespaceInput() bool { return true }
+
 // ApplyPolicy refuses the Secret under a policy that forbids explicit secrets
 // (oam.ExplicitSecretPolicy). A policy that does not implement that interface
 // allows it. The transform reports the refusal as a violation naming the

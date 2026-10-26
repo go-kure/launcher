@@ -26,9 +26,18 @@ const fluxVerifyProviderDefault = "cosign"
 // (refuseEmptyFluxVerifyProvider), so an empty provider is unauthored, or empty
 // in a config built directly in Go, where the two cannot be told apart.
 func fillFluxVerifyProvider(provider *string) {
-	if *provider == "" {
-		*provider = fluxVerifyProviderDefault
+	*provider = effectiveFluxVerifyProvider(*provider)
+}
+
+// effectiveFluxVerifyProvider is the provider a verification is generated
+// with: provider, or the API's default when it is empty. A config's own
+// provider stays empty until Generate fills a copy (fillFluxVerifyProvider), so
+// what the source does is read through this.
+func effectiveFluxVerifyProvider(provider string) string {
+	if provider == "" {
+		return fluxVerifyProviderDefault
 	}
+	return provider
 }
 
 // refuseEmptyFluxVerifyProvider refuses an authored "" for the provider of the

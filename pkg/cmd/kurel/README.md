@@ -275,7 +275,8 @@ application carries none. This is kurel's fixed
 choice over the launcher library default (`gokure.dev`); other embedders set their own
 domain through `TransformContext.Domain`. See the
 [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) for the derivation
-and precedence rules.
+and precedence rules. kurel leaves `TransformContext.GroupsWaitForFluxObjects` unset: its
+delivery is the default, so a late Secret maker for a shared generated source is admitted.
 
 | Flag | Description |
 |------|-------------|

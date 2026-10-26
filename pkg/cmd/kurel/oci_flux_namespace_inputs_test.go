@@ -95,6 +95,13 @@ type ociObject struct{ namespace, component string }
 // fluxNSBuild keys them.
 func ociBuild(t *testing.T, fluxNS string, policies []oam.ApplicationPolicy, comps ...oam.Component) (map[string]ociObject, error) {
 	t.Helper()
+	return ociBuildWaiting(t, fluxNS, false, policies, comps...)
+}
+
+// ociBuildWaiting is ociBuild for a delivery that makes a group Ready only once
+// its Flux objects are when wait is set (TransformContext.GroupsWaitForFluxObjects).
+func ociBuildWaiting(t *testing.T, fluxNS string, wait bool, policies []oam.ApplicationPolicy, comps ...oam.Component) (map[string]ociObject, error) {
+	t.Helper()
 	app := &oam.Application{
 		APIVersion: oam.SupportedAPIVersion,
 		Kind:       "Application",
@@ -104,7 +111,7 @@ func ociBuild(t *testing.T, fluxNS string, policies []oam.ApplicationPolicy, com
 	capabilities := map[string]oam.CapabilityBinding{
 		"certificate": {Rendering: map[string]any{"issuerRef": map[string]any{"name": "letsencrypt-prod", "kind": "ClusterIssuer"}}},
 	}
-	cluster, err := newBuiltinTransformer().Transform(app, oam.TransformContext{FluxNamespace: fluxNS, Domain: kurelDomain, Capabilities: capabilities})
+	cluster, err := newBuiltinTransformer().Transform(app, oam.TransformContext{FluxNamespace: fluxNS, GroupsWaitForFluxObjects: wait, Domain: kurelDomain, Capabilities: capabilities})
 	if err != nil {
 		return nil, err
 	}
@@ -262,34 +269,70 @@ func TestFluxNamespace_OCISharedSourceForms(t *testing.T) {
 	})
 }
 
-// TestFluxNamespace_OCISharedSourceLateMaker: a consumer that makes the shared
-// source's Secret in a later group than another consumer of it is admitted,
-// and the Secret moves with the source, with or without the order. That
-// delivery waits on itself (the earlier consumer waits for the source, the
-// source for the Secret); it is the documented limit, go-kure/launcher#1039.
-// Without a Flux namespace the Secret stays with its component.
+// TestFluxNamespace_OCISharedSourceLateMaker: with groups waiting for their
+// Flux objects, a consumer whose trait makes the shared source's Secret in a
+// later group than another consumer of it is refused: the earlier consumer's
+// group waits for it, it for the source, the source for the Secret, and the
+// Secret's group for the earlier one (go-kure/launcher#1039). Under the default
+// delivery the same document is admitted, and the Secret moves with the source
+// under a Flux namespace. Also admitted: the maker in the earliest group, an
+// external-secret under creationPolicy Merge or None (the Secret exists apart
+// from it), and a later maker of a Secret the source does not read. Each row
+// runs under a Flux namespace and without one.
 func TestFluxNamespace_OCISharedSourceLateMaker(t *testing.T) {
-	pair := func() []oam.Component {
-		return []oam.Component{
-			ociFluxNSComponent(t, "a", "secretRef", externalSecretTrait("shared")),
-			ociFluxNSComponent(t, "b", "secretRef"),
-		}
+	policyTrait := func(policy string) oam.Trait {
+		tr := externalSecretTrait("shared")
+		tr.Properties["target"] = map[string]any{"creationPolicy": policy}
+		return tr
 	}
+	later, earliest := dependsOn("a", "b"), dependsOn("b", "a")
 	for _, tc := range []struct {
-		name, fluxNS, want string
-		policies           []oam.ApplicationPolicy
+		name     string
+		ref      string
+		trait    oam.Trait
+		wait     bool
+		policies []oam.ApplicationPolicy
+		refused  bool
 	}{
-		{"the maker in a later group", fluxNSTarget, fluxNSTarget, dependsOn("a", "b")},
-		{"the maker in the earliest group", fluxNSTarget, fluxNSTarget, dependsOn("b", "a")},
-		{"no Flux namespace", "", "default", dependsOn("a", "b")},
+		{"refused: external-secret by secretRef", "secretRef", externalSecretTrait("shared"), true, later, true},
+		{"refused: secret by proxySecretRef", "proxySecretRef", secretTrait("shared"), true, later, true},
+		{"refused: certificate by certSecretRef", "certSecretRef", certificateTrait("shared"), true, later, true},
+		{"admitted: external-secret, the default delivery", "secretRef", externalSecretTrait("shared"), false, later, false},
+		{"admitted: secret, the default delivery", "proxySecretRef", secretTrait("shared"), false, later, false},
+		{"admitted: certificate, the default delivery", "certSecretRef", certificateTrait("shared"), false, later, false},
+		{"admitted: the maker in the earliest group", "secretRef", externalSecretTrait("shared"), true, earliest, false},
+		{"admitted: creationPolicy Merge", "secretRef", policyTrait("Merge"), true, later, false},
+		{"admitted: creationPolicy None", "secretRef", policyTrait("None"), true, later, false},
+		{"admitted: a Secret the source does not read", "secretRef", externalSecretTrait("other"), true, later, false},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := ociBuild(t, tc.fluxNS, tc.policies, pair()...)
-			if err != nil {
-				t.Fatalf("build: %v", err)
-			}
-			requireOCIObjects(t, got, "ExternalSecret "+tc.want+"/shared")
-		})
+		for _, fluxNS := range []string{fluxNSTarget, ""} {
+			t.Run(tc.name+"/fluxNamespace="+fluxNS, func(t *testing.T) {
+				got, err := ociBuildWaiting(t, fluxNS, tc.wait, tc.policies,
+					ociFluxNSComponent(t, "a", tc.ref, tc.trait),
+					ociFluxNSComponent(t, "b", tc.ref))
+				if !tc.refused {
+					if err != nil {
+						t.Fatalf("build: %v", err)
+					}
+					if !tc.wait && tc.trait.Type == "external-secret" {
+						want := "default"
+						if fluxNS != "" {
+							want = fluxNS
+						}
+						requireOCIObjects(t, got, "ExternalSecret "+want+"/shared")
+					}
+					return
+				}
+				if err == nil {
+					t.Fatal("build admitted it, want the late maker refused")
+				}
+				for _, want := range []string{`requires Secret "shared"`, `component "a"`, `component "b"`, "never converges"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("build error = %v, want it to contain %s", err, want)
+					}
+				}
+			})
+		}
 	}
 }
 
