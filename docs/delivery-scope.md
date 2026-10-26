@@ -1829,9 +1829,11 @@ and by scope, whatever component or trait emits it.
     `secrets` or of `configMaps` the operator gives one volume name, or one whose volume
     name the operator cuts to 63 characters after a `-`; an entry of
     `volumeMounts` at a path the operator mounts at in the alertmanager container (not
-    the TLS credentials' mounts), or at the path of an earlier entry, compared cleaned
-    (`/data` beside `/data/`; a path written relative, or a reserved one written
-    otherwise, is admitted, go-kure/launcher#1050); an entry of `additionalArgs` naming, or negating with
+    the TLS credentials' mounts), or at the path of an earlier entry written alike (a
+    path written otherwise than another mount's, or than a path the operator mounts at,
+    is admitted: both mounts are made, and one may hide the other, the operator's
+    included; where the kubelet makes the two paths equal, a relative path and its
+    absolute form, CRI-O makes only one of them, go-kure/launcher#1050); an entry of `additionalArgs` naming, or negating with
     `no-`, a flag the operator generates for the spec, on which it fails to build the
     pods; two `alertmanagerConfiguration.templates` of one key, of which the operator
     loads only the first; a name shared by an init container and a container of the
@@ -1898,8 +1900,8 @@ and by scope, whatever component or trait emits it.
     `remote-write-config`, each Secret key's, the rule ConfigMaps'
     `thanos-ruler-<name>-rulefiles-<n>`, the data volume); an entry of `volumeMounts` at
     a path it mounts at in the thanos-ruler container, or at the path of an earlier
-    entry, compared cleaned (a path written relative, or a reserved one written
-    otherwise, is admitted, go-kure/launcher#1050); `dnsPolicy: None` without a
+    entry written alike (a path written otherwise is admitted, as on `alertmanager`,
+    go-kure/launcher#1050); `dnsPolicy: None` without a
     nameserver, which the operator copies into the pods; and a name whose data volume or
     first rule ConfigMap volume is not a DNS-1123 label (no dot, at most 38 characters)
     are each refused. So is a field the operator reads only from some Thanos version on,
@@ -1995,8 +1997,8 @@ and by scope, whatever component or trait emits it.
     (`/prometheus` where object storage is configured, `/etc/thanos/config`, which it
     mounts from Thanos 0.24.0, whatever version is named), or with any field but `name`
     and `mountPath`, which the operator drops; an entry of either at the path of an
-    earlier entry of the same field, compared cleaned (a path written relative, or a
-    reserved one written otherwise, is admitted, go-kure/launcher#1050); a `queryLogFile` named without a directory beside a `scrapeFailureLogFile`
+    earlier entry of the same field written alike (a path written otherwise is admitted,
+    as on `alertmanager`, go-kure/launcher#1050); a `queryLogFile` named without a directory beside a `scrapeFailureLogFile`
     named with one, where the operator mounts no volume for it, unless the file there
     is writable all the same; a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot
     write, judged at what runs at the version named (a name alone is in

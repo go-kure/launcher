@@ -4085,19 +4085,24 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `/etc/alertmanager/configmaps/<name>` for each entry of `secrets` and
     `configMaps` (:531-556, :575-692). The mounts of the web and cluster TLS
     credentials are left to the API, as their volumes are.
-  - an entry of `volumeMounts` at the path of an earlier one, compared cleaned:
-    the API refuses two mounts written alike, and of two written otherwise,
-    as `/data` and `/data/`, the container runtime mounts one over the other.
-    The message names both entries.
+  - an entry of `volumeMounts` at the path of an earlier one written alike: the
+    API compares mount paths as written and refuses two mounts at one path
+    (`pkg/apis/core/validation/validation.go:3177-3227` at Kubernetes
+    v1.37.1). The message names both entries.
 
-    Admitted: a reserved path written otherwise than the operator writes it,
-    as `/alertmanager/`, and an entry written relative beside an earlier one
-    written from `/`, as `data` and `/data`. The API compares mount paths as
-    written (`pkg/apis/core/validation/validation.go:3192-3195` at
-    Kubernetes v1.37.1) and the kubelet joins a relative one to the root
-    (`makeMounts`, `pkg/kubelet/kubelet_pods.go:400-402`), so both mounts
-    stay, and two mounts of one volume with like options there work. A rule
-    for such pairs grounded in what the runtime does is go-kure/launcher#1050.
+    Admitted: a path written otherwise than another entry's, or than a path
+    the operator mounts at, as `/data/` or `data` beside `/data`, or
+    `/alertmanager/`: both mounts are made, and one may hide the other, the
+    operator's included; where the kubelet makes the two paths equal (a
+    relative path and its absolute form), CRI-O makes only one of them
+    (go-kure/launcher#1050). The kubelet makes a relative path absolute and
+    keeps the mounts in order (`makeMounts`,
+    `pkg/kubelet/kubelet_pods.go:280-441`); containerd keeps that order at one
+    cleaned path, the later mount on top
+    (`internal/cri/opts/spec_linux_opts.go:69` at containerd v2.4.2); CRI-O
+    sorts without keeping it, and keeps one of two mounts the kubelet made
+    equal (`server/container_create.go:1290-1306` at CRI-O v1.37.2); runc
+    makes every mount it is given. A hidden volume is not judged.
   - an entry of `additionalArgs` whose name, or that name with `no-` added or
     taken away, is a flag the operator generates for the spec: it then fails
     to build the pods (`BuildArgs`, `pkg/operator/argument.go:26-79`). The
@@ -4587,13 +4592,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     of each Secret key's volume above, and
     `/etc/thanos/rules/thanos-ruler-<name>-rulefiles-<n>` (:297-302, :394,
     :441-471, :601-626).
-  - an entry of `volumeMounts` at the path of an earlier one, compared cleaned:
-    the API refuses two mounts written alike, and of two written otherwise,
-    as `/data` and `/data/`, the container runtime mounts one over the other.
-    The message names both entries. As on `alertmanager`, a reserved path
-    written otherwise, relative or with a trailing `/`, is admitted, and so is
-    an entry written relative beside an earlier one written from `/`, as
-    `data` and `/data` (go-kure/launcher#1050).
+  - an entry of `volumeMounts` at the path of an earlier one written alike:
+    the API refuses two mounts at one path. The message names both entries.
+    As on `alertmanager`, a path written otherwise than another entry's, or
+    than a path the operator mounts at, as `/thanos/data/`, is admitted: both
+    mounts are made, and one may hide the other, the operator's included;
+    where the kubelet makes the two paths equal (a relative path and its
+    absolute form), CRI-O makes only one of them (go-kure/launcher#1050).
   - `dnsPolicy: None` without `dnsConfig.nameservers`: the API refuses the
     pods the operator copies them into (:539-540).
   - a name the operator's objects cannot be named after: the data volume
@@ -4999,13 +5004,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     copies only those two into the sidecar's mount (:642-647).
     `TestThanosDroppedMountFields` holds the list to every field of the type.
   - an entry of `volumeMounts`, or of `thanos.volumeMounts`, at the path of
-    an earlier one of the same field, compared cleaned: the API refuses two
-    mounts written alike, and of two written otherwise, as `/data` and
-    `/data/`, the container runtime mounts one over the other. The message
-    names both entries. As on `alertmanager`, a reserved path written
-    otherwise, relative or with a trailing `/`, is admitted, and so is an
-    entry written relative beside an earlier one written from `/`, as `data`
-    and `/data` (go-kure/launcher#1050).
+    an earlier one of the same field written alike: the API refuses two
+    mounts at one path. The message names both entries. As on
+    `alertmanager`, a path written otherwise than another entry's, or than a
+    path the operator mounts at, as `/etc/prometheus/config_out/`, is
+    admitted: both mounts are made, and one may hide the other, the
+    operator's included; where the kubelet makes the two paths equal (a
+    relative path and its absolute form), CRI-O makes only one of them
+    (go-kure/launcher#1050).
   - a `queryLogFile` named without a directory beside a
     `scrapeFailureLogFile` named with one: the operator writes the query log
     under `/var/log/prometheus` but adds the `log-file` volume there only for

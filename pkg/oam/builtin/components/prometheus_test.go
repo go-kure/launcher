@@ -680,14 +680,13 @@ func prometheusRefusals(notA string) []struct {
 		// other $( reaches Prometheus as written.
 		{"a log file with a $( that is no reference", map[string]any{"queryLogFile": "/logs/$(/query.log"},
 			`queryLogFile: "/logs/$(/query.log" is in /logs/$(, where no volume is known to be mounted`},
-		// Of two mounts at one path the API refuses those written alike, and
-		// the runtime mounts one over the other where they are not.
+		// The API refuses two mounts at one path written alike.
 		{"two mounts at one path", map[string]any{"volumes": []any{map[string]any{"name": "extra", "emptyDir": map[string]any{}}},
-			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/scratch"}, map[string]any{"name": "extra", "mountPath": "/scratch/", "subPath": "a"}}},
-			`volumeMounts[1] "/scratch/": the mount path is that of volumeMounts[0] "/scratch", and a container takes one mount at a path`},
+			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/scratch"}, map[string]any{"name": "extra", "mountPath": "/scratch", "subPath": "a"}}},
+			`volumeMounts[1] "/scratch": the mount path is that of volumeMounts[0] "/scratch", and the API refuses a container with two mounts at one path`},
 		{"two sidecar mounts at one path", map[string]any{"thanos": map[string]any{
 			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/scratch"}, map[string]any{"name": "other", "mountPath": "/scratch"}},
-		}}, `thanos.volumeMounts[1] "/scratch": the mount path is that of thanos.volumeMounts[0] "/scratch"`},
+		}}, `thanos.volumeMounts[1] "/scratch": the mount path is that of thanos.volumeMounts[0] "/scratch", and the API refuses a container with two mounts at one path`},
 		// The operator runs 1 shard for a count below 1 (shardsNumber,
 		// common.go:118-129).
 		{"a shard count of 0", map[string]any{"shards": 0}, "shards: 0 is below 1: the Prometheus operator runs 1 shard for it; write 1"},
@@ -1061,13 +1060,32 @@ func TestPrometheus_OperatorRunsIt(t *testing.T) {
 		"a log file with a writable and a read-only mount at its directory spelled two ways": {"queryLogFile": "/var/log/query.log",
 			"volumes":      []any{map[string]any{"name": "cfg", "configMap": map[string]any{"name": "cfg"}}, map[string]any{"name": "logs", "emptyDir": map[string]any{}}},
 			"volumeMounts": []any{map[string]any{"name": "cfg", "mountPath": "var/log"}, map[string]any{"name": "logs", "mountPath": "/var/log"}}},
-		// The API compares mount paths as written and the kubelet joins a
-		// relative one to the root, so two mounts at one path written
-		// otherwise both stay; of one volume with like options they show
-		// the same directory (go-kure/launcher#1050).
+		// The API compares mount paths as written (validation.go:3177-3227
+		// at Kubernetes v1.37.1), and the kubelet makes a relative one
+		// absolute and keeps the order (kubelet_pods.go:280-441); containerd
+		// and runc make both mounts, the later on top, and CRI-O keeps one of
+		// two the kubelet made equal, which one not derived
+		// (server/container_create.go:1290-1306 at CRI-O v1.37.2). Of one
+		// volume with like options the pod sees the same directory either
+		// way; of two, one may be hidden, which the kind does not judge
+		// (go-kure/launcher#1050).
 		"two mounts of one volume at one path, one written relative": {
 			"volumes":      extra("logs"),
 			"volumeMounts": []any{map[string]any{"name": "logs", "mountPath": "logs"}, map[string]any{"name": "logs", "mountPath": "/logs"}}},
+		"two mounts of two volumes at one path, one written relative": {
+			"volumes":      []any{map[string]any{"name": "a", "emptyDir": map[string]any{}}, map[string]any{"name": "b", "emptyDir": map[string]any{}}},
+			"volumeMounts": []any{map[string]any{"name": "a", "mountPath": "data"}, map[string]any{"name": "b", "mountPath": "/data"}}},
+		"two mounts at one path, one with a trailing slash": {"volumes": extra("extra"),
+			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/scratch"}, map[string]any{"name": "extra", "mountPath": "/scratch/", "subPath": "a"}}},
+		// The operator appends volumeMounts after its config_out mount
+		// (common.go:263-285 at prometheus-operator v0.94.1); containerd
+		// sorts the mounts stably by depth, so this one is made after the
+		// operator's and is on top (internal/cri/opts/spec_linux_opts.go:69
+		// at containerd v2.4.2), and CRI-O sorts them unstably, so which is
+		// on top is not derived. Whether the pod then starts depends on the
+		// volume's content, which an init container may fill.
+		"an author's emptyDir at the generated configuration's path with a trailing slash": {"volumes": extra("extra"),
+			"volumeMounts": []any{map[string]any{"name": "extra", "mountPath": "/etc/prometheus/config_out/"}}},
 		"a mount of the generated configuration at its path with a trailing slash": {
 			"volumeMounts": []any{map[string]any{"name": "config-out", "mountPath": "/etc/prometheus/config_out/", "readOnly": true}}},
 		"a mount of the generated configuration at its path written relative": {

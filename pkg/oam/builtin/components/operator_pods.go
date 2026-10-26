@@ -220,10 +220,22 @@ type operatorContainerMounts struct {
 // mounts a volume at in that container: it appends the field's entries to its
 // own mounts, and the API refuses a container with two mounts at one path.
 //
-// It refuses too an entry at the path of an earlier one, compared cleaned: the
-// API refuses two mounts written alike, and of two written otherwise, as /data
-// and /data/, the container runtime mounts one over the other, so the
-// container does not see the volume of the one beneath.
+// It refuses too an entry at the path of an earlier one written alike, as the
+// API does: it compares mount paths as written (ValidateVolumeMounts,
+// pkg/apis/core/validation/validation.go:3177-3227 at Kubernetes v1.37.1).
+// A path written otherwise, as data, /data and /data/, is admitted, and so is
+// one written otherwise than a path the operator mounts at. The kubelet makes
+// a relative path absolute, leaves an absolute one as written and keeps the
+// mounts in order (makeMounts, pkg/kubelet/kubelet_pods.go:280-441), up to
+// the runtime; containerd keeps that order at one cleaned path, so the later
+// mount is made on top (sort.Stable, internal/cri/opts/spec_linux_opts.go:69
+// at containerd v2.4.2); CRI-O sorts without keeping it, and of two mounts
+// the kubelet made equal keeps only one (server/container_create.go:51-73,
+// :1290-1306 at CRI-O v1.37.2); runc makes every mount it is given
+// (libcontainer/rootfs_linux.go:192-196 at runc v1.5.2). So a pair written
+// otherwise runs, and one of its mounts may hide or replace the other, the
+// operator's included, since the operator appends the spec's entries among
+// its own mounts. A hidden volume is not judged here.
 func refuseGeneratedMounts(m operatorContainerMounts) error {
 	generated := make(map[string]string, len(m.generated))
 	maps.Copy(generated, m.generated)
@@ -238,11 +250,10 @@ func refuseGeneratedMounts(m operatorContainerMounts) error {
 		if what, ok := reservedAs(generated, m.patterns, vm.MountPath); ok {
 			return errors.Errorf("%s[%d] %q: the mount path is %s, and the API refuses a container with two mounts at one path; mount the volume elsewhere", m.field, i, vm.MountPath, what)
 		}
-		cleaned := path.Clean(vm.MountPath)
-		if j, ok := authored[cleaned]; ok {
-			return errors.Errorf("%s[%d] %q: the mount path is that of %s[%d] %q, and a container takes one mount at a path; mount one of the two volumes elsewhere", m.field, i, vm.MountPath, m.field, j, m.mounts[j].MountPath)
+		if j, ok := authored[vm.MountPath]; ok {
+			return errors.Errorf("%s[%d] %q: the mount path is that of %s[%d] %q, and the API refuses a container with two mounts at one path; mount one of the two volumes elsewhere", m.field, i, vm.MountPath, m.field, j, m.mounts[j].MountPath)
 		}
-		authored[cleaned] = i
+		authored[vm.MountPath] = i
 	}
 	return nil
 }

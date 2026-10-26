@@ -363,10 +363,9 @@ func thanosRulerRefusals(notA string) []struct {
 			`volumeMounts[0] "/etc/thanos/config/alertrelabel-config": the mount path is a path the Prometheus operator mounts a Secret key of the spec at`},
 		{"a mount at a rule ConfigMap's path", trMount(nil, "/etc/thanos/rules/thanos-ruler-fast-rulefiles-0"),
 			`volumeMounts[0] "/etc/thanos/rules/thanos-ruler-fast-rulefiles-0": the mount path is the path the Prometheus operator mounts the volume of a rule ConfigMap it generates at`},
-		// Of two mounts at one path the API refuses those written alike, and
-		// the runtime mounts one over the other where they are not.
-		{"two mounts at one path", trMounts("/scratch", "/scratch/"),
-			`volumeMounts[1] "/scratch/": the mount path is that of volumeMounts[0] "/scratch", and a container takes one mount at a path`},
+		// The API refuses two mounts at one path written alike.
+		{"two mounts at one path", trMounts("/scratch", "/scratch"),
+			`volumeMounts[1] "/scratch": the mount path is that of volumeMounts[0] "/scratch", and the API refuses a container with two mounts at one path`},
 	}
 }
 
@@ -1088,6 +1087,13 @@ func TestThanosRuler_OperatorRunsIt(t *testing.T) {
 		"a mount beside the operator's configuration":  trMount(nil, "/etc/thanos/config/extra"),
 		"a mount below the rule ConfigMaps' directory": trMount(nil, "/etc/thanos/rules/extra"),
 		"two mounts at different paths":                trMounts("/scratch", "/scratch/other"),
+		// The API compares mount paths as written; the runtime makes both
+		// mounts, one of which may hide the other, the operator's included,
+		// and on CRI-O only one of two the kubelet made equal, as data and
+		// /data (go-kure/launcher#1050).
+		"two mounts at one path, one with a trailing slash":       trMounts("/scratch", "/scratch/"),
+		"two mounts at one path, one written relative":            trMounts("data", "/data"),
+		"a mount at the data volume's path with a trailing slash": trMount(nil, "/thanos/data/"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := coreKindErr(h, "thanosruler", "fast", props); err != nil {
