@@ -2000,7 +2000,7 @@ and by scope, whatever component or trait emits it.
     earlier entry of the same field written alike (a path written otherwise is admitted,
     as on `alertmanager`, go-kure/launcher#1050); a `queryLogFile` named without a directory beside a `scrapeFailureLogFile`
     named with one, where the operator mounts no volume for it, only where a mount
-    covers the file there read-only or binds a regular file; a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot
+    covers the file there read-only, binds a regular file above it, or binds one at it with `readOnly` set; a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot
     write, judged at what runs at the version named (an absolute path whose last element
     as written, before it is cleaned, is empty, `.` or `..`, `/` included, is refused
     before anything else, since Prometheus opens it as written with `O_CREAT`, which the

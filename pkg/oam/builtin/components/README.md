@@ -5014,8 +5014,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (go-kure/launcher#1050).
   - a `queryLogFile` named without a directory beside a
     `scrapeFailureLogFile` named with one, where the mount that covers
-    `/var/log/prometheus/<name>` most closely is read-only or binds a
-    regular file: the operator writes the query log under
+    `/var/log/prometheus/<name>` most closely is read-only, or binds a
+    regular file above it, or binds one at it with `readOnly` set: the
+    operator writes the query log under
     `/var/log/prometheus` but adds the `log-file` volume there only for the
     scrape failure log file (server/statefulset.go:510, :537;
     common.go:334-347). Where no mount covers it, the file is on the root
