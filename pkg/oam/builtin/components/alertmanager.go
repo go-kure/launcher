@@ -103,7 +103,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"storage":      object("storage: where the Alertmanager pods keep their data: emptyDir, ephemeral or volumeClaimTemplate, in that order of precedence; the operator uses the first that is set. A claim template's name beside emptyDir or ephemeral is refused unless it is alertmanager-<name>-db: the operator mounts the data volume under it and creates it under that name. On the volumeClaimTemplate arm, a claim template's name must be a DNS-1123 label, which the operator names the data volume with, and not the name of a volume the operator adds. A claim of the arm in use, ephemeral or volumeClaimTemplate, must request storage above 0 (spec.resources.requests.storage), and an ephemeral one name its access modes; unset or empty access modes of volumeClaimTemplate are ReadWriteOnce. An emptyDir claims nothing. Unset, the storage is the operator's to decide: no storage default of the policy is applied. The storage the claim template of the arm in use requests is held to the EnvironmentPolicy's storage maximum; a claim template of an arm after it is not, nor the size limit of an emptyDir. A key the consumer reserves is refused in the labels and annotations of volumeClaimTemplate where it is the arm in use, which the operator copies onto its StatefulSet's volume claim template; beside emptyDir or ephemeral they are not read, nor those of the ephemeral arm's claim template. No claim template takes a component label." + decoded + "StorageSpec in its API reference."),
 		"volumes": objects("volumes: further volumes of the Alertmanager pods, beside the ones the operator generates. A volume named as one of those (config-volume, tls-assets, config-out, web-config, cluster-tls-config, the secrets, configMaps and templates volumes, the data volume) is refused; web-config and cluster-tls-config whatever version names. Two entries of secrets, or of configMaps, whose volumes the operator gives one name are refused as well, and so are two entries of one name. The TLS credentials' volumes, whose names the operator hashes, are left to the API. Held to the EnvironmentPolicy as a pod's volumes are: hostPath, the storage a generic ephemeral volume's claim requests, the registry of an image volume.",
 			"One volume."+core+"Volume in the Kubernetes API reference."),
-		"volumeMounts": objects("volumeMounts: further volume mounts of the alertmanager container. A mount path the operator mounts a volume at is refused: /alertmanager, /etc/alertmanager/config, config_out and certs, the web and cluster TLS configuration files whatever version names, /etc/alertmanager/templates where alertmanagerConfiguration.templates is set, and /etc/alertmanager/secrets/<name> and configmaps/<name> of each entry of secrets and configMaps. The mounts of the TLS credentials are left to the API.",
+		"volumeMounts": objects("volumeMounts: further volume mounts of the alertmanager container. A mount path the operator mounts a volume at is refused: /alertmanager, /etc/alertmanager/config, config_out and certs, the web and cluster TLS configuration files whatever version names, /etc/alertmanager/templates where alertmanagerConfiguration.templates is set, and /etc/alertmanager/secrets/<name> and configmaps/<name> of each entry of secrets and configMaps; so is the path of an earlier entry, compared cleaned. The mounts of the TLS credentials are left to the API.",
 			"One volume mount."+core+"VolumeMount in the Kubernetes API reference."),
 		"persistentVolumeClaimRetentionPolicy": object("persistentVolumeClaimRetentionPolicy: whether the claims of the StatefulSet are deleted when it is deleted (whenDeleted) or scaled down (whenScaled): Retain, the default, or Delete." + core + "StatefulSetPersistentVolumeClaimRetentionPolicy in the Kubernetes API reference."),
 		"externalUrl":                          text("externalUrl: the URL under which the Alertmanager web service is reached from outside, which the links in its notifications are built from. The Prometheus operator passes it to Alertmanager unchanged, which exits at startup on one it cannot parse, and from v0.19.0 on one not of scheme http or https: both are refused, the second where version is unset or v0.19.0 or later, its prereleases included."),
@@ -671,6 +671,9 @@ func kubeletArgumentParts(value string) []kubeletPart {
 			b.Reset()
 		}
 	}
+	// unclosed is set once a $( has no ) after it: no later one has either,
+	// so the rest is not scanned again for each.
+	unclosed := false
 	for i := 0; i < len(value); i++ {
 		if value[i] != '$' || i+1 == len(value) {
 			b.WriteByte(value[i])
@@ -681,8 +684,12 @@ func kubeletArgumentParts(value string) []kubeletPart {
 		case '$':
 			b.WriteByte('$')
 		case '(':
-			end := strings.IndexByte(value[i+2:], ')')
+			end := -1
+			if !unclosed {
+				end = strings.IndexByte(value[i+2:], ')')
+			}
 			if end < 0 {
+				unclosed = true
 				b.WriteString("$(")
 				break
 			}

@@ -582,6 +582,47 @@ var prometheusThanosVersionGates = func() []idGate[monitoringv1.PrometheusSpec] 
 	}
 }()
 
+// prometheusMountsWebConfig reports whether the operator mounts the web
+// configuration file in the prometheus container, which it does from
+// Prometheus v2.24.0 (WithMinimumVersion, pkg/prometheus/server/
+// statefulset.go:196-205 at prometheus-operator v0.94.1). A version it cannot
+// parse builds no StatefulSet, so no mount is counted there.
+func prometheusMountsWebConfig(spec *monitoringv1.PrometheusSpec) bool {
+	v, ok := prometheusComparedVersion(spec)
+	return ok && v.GTE(semver.MustParse("2.24.0"))
+}
+
+// prometheusComparedVersion is the Prometheus version the operator compares,
+// parsed with semver.ParseTolerant as it parses it: version, or its default
+// where version is unset. It reports false for a version that does not parse.
+func prometheusComparedVersion(spec *monitoringv1.PrometheusSpec) (semver.Version, bool) {
+	version := prometheusDefaultVersion
+	if spec.Version != "" {
+		version = spec.Version
+	}
+	v, err := semver.ParseTolerant(version)
+	return v, err == nil
+}
+
+// prometheusVersionDrops reports whether the operator drops the field at path
+// at the version it compares: spec authors it, and the version is below the
+// minimum of one of its prometheusVersionGates. validatePrometheusVersion
+// refuses such a field, naming the version it needs, so a check that would
+// refuse it for another reason first leaves it to that gate. A version that
+// does not parse drops nothing here.
+func prometheusVersionDrops(spec *monitoringv1.PrometheusSpec, path string) bool {
+	v, ok := prometheusComparedVersion(spec)
+	if !ok {
+		return false
+	}
+	for _, g := range prometheusVersionGates {
+		if g.gate.path == path && g.gate.authored(spec) && v.LT(semver.MustParse(g.gate.minimum)) {
+			return true
+		}
+	}
+	return false
+}
+
 // validatePrometheusVersion refuses what the operator does not run at the
 // version it compares. The operator parses version, or its own default where
 // it is unset, with semver.ParseTolerant, fails the reconcile where that
@@ -598,20 +639,6 @@ var prometheusThanosVersionGates = func() []idGate[monitoringv1.PrometheusSpec] 
 // (prometheusThanosVersionGates), or at the operator's default Thanos
 // version, and where both versions parse, thanos.blockSize is held to the
 // compaction mode they choose (refuseDelayedCompactionBlockSize).
-// prometheusMountsWebConfig reports whether the operator mounts the web
-// configuration file in the prometheus container, which it does from
-// Prometheus v2.24.0 (WithMinimumVersion, pkg/prometheus/server/
-// statefulset.go:196-205 at prometheus-operator v0.94.1). A version it cannot
-// parse builds no StatefulSet, so no mount is counted there.
-func prometheusMountsWebConfig(spec *monitoringv1.PrometheusSpec) bool {
-	version := prometheusDefaultVersion
-	if spec.Version != "" {
-		version = spec.Version
-	}
-	v, err := semver.ParseTolerant(version)
-	return err == nil && v.GTE(semver.MustParse("2.24.0"))
-}
-
 func validatePrometheusVersion(spec *monitoringv1.PrometheusSpec) error {
 	version, at := prometheusDefaultVersion, "the operator's default version "+prometheusDefaultVersion
 	if spec.Version != "" {

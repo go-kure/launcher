@@ -40,6 +40,10 @@ func TestKubeletArgument(t *testing.T) {
 		{"an opener before the closer of a later reference without =", "[$(x]:$(PORT)", "", true},
 		// The first ')' ends the first reference, so the second is read.
 		{"a reference after one no variable has, closed first", "$(a=b)$(PORT)", "", true},
+		// After an unclosed $( no later one closes, and $$ is still read
+		// as $.
+		{"repeated unclosed openers", "$($($(POD_IP", "$($($(POD_IP", false},
+		{"an escape after an unclosed opener", "$(a$$b$(c", "$(a$b$(c", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

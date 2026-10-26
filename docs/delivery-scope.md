@@ -1993,15 +1993,16 @@ and by scope, whatever component or trait emits it.
     web configuration mounts (the last from Prometheus v2.24.0) read-only, and a mount of the author's, in `volumeMounts` or a
     prometheus patch, read-only where it sets `readOnly` or mounts a `configMap`, `secret`,
     `downwardAPI` or `projected` volume, which the kubelet mounts read-only (a patch mount
-    at a path written as an earlier one's is merged into it, taking its volume and keeping
-    `readOnly` from either; of mounts at one path written differently, one writable makes
+    at a path written as an earlier one's is merged into it, replacing that mount's volume
+    with its own and keeping `readOnly` from either; of mounts at one path written differently, one writable makes
     it writable); an author's mount of an image volume, a `readOnly` CSI volume or one of
     the operator's own volumes counts as writable, and the rule ConfigMap and web TLS
     mounts are not listed, so the check refuses only where it knows the file or its
     directory is read-only; where no listed mount covers it, the read-only root
     filesystem refuses unless a prometheus patch sets `readOnlyRootFilesystem: false`, and
     a file in `/dev`, `/proc` or a directory under them (as `/dev/stdout`) is never
-    refused; a negative request or limit; and a
+    refused, nor is a log file below the version it is read from, which the version gate
+    refuses instead; a negative request or limit; and a
     name whose data volume, third rule ConfigMap volume `prometheus-<name>-rulefiles-2`
     or last pod hostname of the last shard is not a DNS-1123 label (no dot, at most 40
     characters, fewer where the authored shards and replicas make the hostname longer),
