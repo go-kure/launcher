@@ -5217,6 +5217,25 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   of a `sigv4`, a remote write entry's or an Alertmanager endpoint's, needs
   a `roleArn`.
 
+  **Topology sharding below the node metadata versions is not refused**
+  (go-kure/launcher#1019). With `shardingStrategy.mode: Topology`, the
+  operator assigns each target to the shards of its zone: the zone of its
+  EndpointSlice, else the pod's zone label where the cluster sets one
+  (Kubernetes 1.35 and later, `PodTopologyLabelsAdmission`), else its
+  node's zone label. For the node's, the operator writes
+  `attach_metadata: {node: true}` into the service discovery of every
+  PodMonitor from Prometheus 2.35.0 and every ServiceMonitor from 2.37.0,
+  and below them drops it (`mergeAttachMetadataForTopology`,
+  `pkg/prometheus/promcfg.go`). There a target with no EndpointSlice zone,
+  as every PodMonitor's, has no zone, and no shard scrapes it. Whether
+  topology sharding is active at all depends on the operator's
+  `PrometheusTopologySharding` feature gate, and the fallback on the
+  cluster's pod labels; neither is visible at build, so the kind refuses
+  nothing and documents the limit. A cluster without pod topology labels
+  that shards by topology runs Prometheus 2.37.0 or later.
+  `TestPrometheusTopologyNodeZone_MatchVendoredSource` holds both versions
+  to the vendored `promcfg.go`.
+
   **What the type writes unauthored:** `arbitraryFSAccessThroughSMs: {}`,
   `resources: {}` and `rules: {alert: {}}`, on every Prometheus; on an
   authored `thanos`, its `resources: {}`; and, on an authored `storage`, a
