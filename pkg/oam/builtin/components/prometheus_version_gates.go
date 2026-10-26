@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
@@ -665,10 +666,18 @@ func validatePrometheusVersion(spec *monitoringv1.PrometheusSpec) error {
 		gates := gatesOf(prometheusVersionGates)
 		misses := append(gateMisses(spec, v, at, "Prometheus", gates),
 			ceilingMisses(spec, v, at, "Prometheus", prometheusVersionCeilings)...)
-		if err := refuseVersionMisses(misses, authoredRange(spec, gates, prometheusVersionCeilings), at, "version"); err != nil {
+		authored := authoredRange(spec, gates, prometheusVersionCeilings)
+		// A label name outside the legacy scheme is accepted only from
+		// prometheusUTF8LabelNamesMinimum on, so the version a refusal of a
+		// field suggests is held to it too.
+		withNames := authored
+		if refused, _ := promNonLegacyLabelName(spec); refused != "" {
+			withNames = authored.atLeast(prometheusUTF8LabelNamesMinimum)
+		}
+		if err := refuseVersionMisses(misses, withNames, at, "version"); err != nil {
 			return err
 		}
-		if err := refusePromRelabelLabelNames(spec, v, at, authoredRange(spec, gates, prometheusVersionCeilings)); err != nil {
+		if err := refusePromRelabelLabelNames(spec, v, at, authored); err != nil {
 			return err
 		}
 	}
@@ -728,6 +737,18 @@ func refusePromRelabelLabelNames(spec *monitoringv1.PrometheusSpec, v semver.Ver
 	if v.GTE(semver.MustParse(prometheusUTF8LabelNamesMinimum)) {
 		return nil
 	}
+	refused, name := promNonLegacyLabelName(spec)
+	if refused == "" {
+		return nil
+	}
+	return errors.Errorf("%s; at %s it %s; %s", refused, at, promRefused, promLabelNameFix(name, authored))
+}
+
+// promNonLegacyLabelName is the first label name spec authors that
+// refusePromRelabelLabelNames refuses below prometheusUTF8LabelNamesMinimum:
+// refused, the refusal less the version and its fix, and name, how it is
+// fixed by name. refused is "" where there is none.
+func promNonLegacyLabelName(spec *monitoringv1.PrometheusSpec) (refused, name string) {
 	for _, l := range promRelabelLists {
 		for i, list := range l.of(spec) {
 			for j, rc := range list {
@@ -737,17 +758,17 @@ func refusePromRelabelLabelNames(spec *monitoringv1.PrometheusSpec, v semver.Ver
 				}
 				rule := strings.Replace(l.path, "[]", "["+strconv.Itoa(i)+"]", 1) + "[" + strconv.Itoa(j) + "]"
 				if rc.TargetLabel != "" && slices.Contains(promTargetLabelActions, action) && !model.LegacyValidation.IsValidLabelName(rc.TargetLabel) {
-					return errors.Errorf("%s.targetLabel: %q is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*), the only names the Prometheus operator accepts for a %s action below Prometheus %s; at %s it %s; %s",
-						rule, rc.TargetLabel, action, prometheusUTF8LabelNamesMinimum, at, promRefused, promLabelNameFix("name a legacy label", authored))
+					return fmt.Sprintf("%s.targetLabel: %q is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*), the only names the Prometheus operator accepts for a %s action below Prometheus %s",
+						rule, rc.TargetLabel, action, prometheusUTF8LabelNamesMinimum), "name a legacy label"
 				}
 				if action == "labelmap" && rc.Replacement != nil && *rc.Replacement != "" && !promRelabelLabelmapLegacy.MatchString(*rc.Replacement) {
-					return errors.Errorf("%s.replacement: %q is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*) in which $var and ${var} references may stand for any part, the only replacements the Prometheus operator accepts for a labelmap action below Prometheus %s; at %s it %s; %s",
-						rule, *rc.Replacement, prometheusUTF8LabelNamesMinimum, at, promRefused, promLabelNameFix("name such a replacement", authored))
+					return fmt.Sprintf("%s.replacement: %q is not a legacy label name ([a-zA-Z_][a-zA-Z0-9_]*) in which $var and ${var} references may stand for any part, the only replacements the Prometheus operator accepts for a labelmap action below Prometheus %s",
+						rule, *rc.Replacement, prometheusUTF8LabelNamesMinimum), "name such a replacement"
 				}
 			}
 		}
 	}
-	return nil
+	return "", ""
 }
 
 // promLabelNameFix is how a label name refused below
@@ -756,9 +777,7 @@ func refusePromRelabelLabelNames(spec *monitoringv1.PrometheusSpec, v semver.Ver
 // authored is read too (authored, go-kure/launcher#1047); where there is
 // none, by name only.
 func promLabelNameFix(name string, authored versionRange) string {
-	if authored.from == "" || semver.MustParse(authored.from).LT(semver.MustParse(prometheusUTF8LabelNamesMinimum)) {
-		authored.from = prometheusUTF8LabelNamesMinimum
-	}
+	authored = authored.atLeast(prometheusUTF8LabelNamesMinimum)
 	switch {
 	case authored.below == "":
 		return name + ", or set version to " + authored.from + " or later"

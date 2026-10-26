@@ -189,6 +189,15 @@ func authoredRange[S any](spec *S, gates []versionGate[S], ceilings []versionCei
 	return r
 }
 
+// atLeast is r from minimum on: from is raised to it where below it or
+// unset.
+func (r versionRange) atLeast(minimum string) versionRange {
+	if r.from == "" || semver.MustParse(r.from).LT(semver.MustParse(minimum)) {
+		r.from = minimum
+	}
+	return r
+}
+
 // refuseVersionMisses refuses misses, the fields spec authors outside the
 // versions the operator reads them at, judged at the version of field, named
 // by at. A single miss is refused with what the operator does with it. Of
