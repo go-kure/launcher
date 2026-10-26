@@ -352,10 +352,8 @@ func postgresqlMemberPolicies(lctx oam.LoweringContext, cluster string, members,
 		return name
 	}
 	var out []oam.ApplicationPolicy
-	if len(members) > 0 {
-		if rules := postgresqlDependencyRules(lctx.Document, cluster, members); rules != nil {
-			out = append(out, oam.ApplicationPolicy{Name: free(cluster + "-dependencies"), Type: "dependency", Properties: map[string]any{"rules": rules}})
-		}
+	if rules := postgresqlDependencyRules(lctx.Document, cluster, members, prerequisites); len(rules) > 0 {
+		out = append(out, oam.ApplicationPolicy{Name: free(cluster + "-dependencies"), Type: "dependency", Properties: map[string]any{"rules": rules}})
 	}
 	// Placements are numbered rather than named after the member: a member's
 	// name may already be as long as a policy name can be, the Cluster's cannot.
@@ -385,14 +383,25 @@ func postgresqlMemberPolicies(lctx oam.LoweringContext, cluster string, members,
 //
 // Each member waits for the Cluster. Each component an authored rule makes wait
 // for the postgresql component also waits for every member, as it waited for
-// all of postgresql's objects.
-func postgresqlDependencyRules(doc *oam.Application, cluster string, members []string) []any {
+// all of postgresql's objects. A prerequisite (the inline recovery store,
+// which the Cluster waits for) waits for what an authored rule makes the
+// postgresql component wait for, as all of postgresql's objects did: the
+// Cluster gets that rule by its component name, the prerequisite here.
+func postgresqlDependencyRules(doc *oam.Application, cluster string, members, prerequisites []string) []any {
 	if !documentOrdersComponents(doc) {
 		return nil
 	}
-	rules := make([]any, 0, len(members))
+	rules := make([]any, 0, len(members)+len(prerequisites))
 	for _, m := range members {
 		rules = append(rules, map[string]any{"component": m, "dependsOn": []any{cluster}})
+	}
+	if waitsFor := postgresqlAuthoredPrerequisites(doc, cluster); len(waitsFor) > 0 {
+		for _, p := range prerequisites {
+			rules = append(rules, map[string]any{"component": p, "dependsOn": slices.Clone(waitsFor)})
+		}
+	}
+	if len(members) == 0 {
+		return rules
 	}
 	seen := map[string]bool{}
 	for _, p := range doc.Spec.Policies {
@@ -416,6 +425,33 @@ func postgresqlDependencyRules(doc *oam.Application, cluster string, members []s
 		}
 	}
 	return rules
+}
+
+// postgresqlAuthoredPrerequisites returns what the document's dependency rules
+// make the postgresql component wait for, each once, in rule order. A
+// malformed rule is skipped: the dependency handler refuses the authored
+// policy itself.
+func postgresqlAuthoredPrerequisites(doc *oam.Application, cluster string) []any {
+	var out []any
+	for _, p := range doc.Spec.Policies {
+		if p.Type != "dependency" {
+			continue
+		}
+		authored, _ := p.Properties["rules"].([]any)
+		for _, r := range authored {
+			rule, _ := r.(map[string]any)
+			if component, _ := rule["component"].(string); component != cluster {
+				continue
+			}
+			dependsOn, _ := rule["dependsOn"].([]any)
+			for _, d := range dependsOn {
+				if name, ok := d.(string); ok && name != "" && !slices.Contains(out, any(name)) {
+					out = append(out, name)
+				}
+			}
+		}
+	}
+	return out
 }
 
 // postgresqlPlacementTiers returns the tiers the document's placement policies

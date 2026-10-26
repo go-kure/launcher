@@ -12,8 +12,9 @@ import (
 // postgresqlRecoveryApp is a postgresql component recovered from an inline
 // object store, so that it emits the recovery ObjectStore beside its Cluster,
 // with a pooler, followed by traitsYAML (indented for the component's traits
-// list), and a webservice, then policiesYAML (for spec.policies, or empty).
-func postgresqlRecoveryApp(traitsYAML, policiesYAML string) string {
+// list), and a webservice, then extraComponentsYAML (more components, or
+// empty) and policiesYAML (for spec.policies, or empty).
+func postgresqlRecoveryApp(traitsYAML, extraComponentsYAML, policiesYAML string) string {
 	return `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Application
 metadata:
@@ -39,8 +40,17 @@ spec:
       properties:
         image: ghcr.io/example/api:v1.0.0
         port: 9090
-` + policiesYAML
+` + extraComponentsYAML + policiesYAML
 }
+
+// postgresqlRecoveryPlugin is a webservice, plugin, for a document to make db
+// wait for, or to place in a tier of its own.
+const postgresqlRecoveryPlugin = `    - name: plugin
+      type: webservice
+      properties:
+        image: ghcr.io/example/plugin:v1.0.0
+        port: 9443
+`
 
 // TestBuild_PostgresqlRecoveryStoreOrdering: the recovering Cluster reads its
 // source store before it can become ready, so the store never waits for the
@@ -51,7 +61,7 @@ spec:
 func TestBuild_PostgresqlRecoveryStoreOrdering(t *testing.T) {
 	const traits = "        - type: prune-protection\n"
 	t.Run("an unordered document", func(t *testing.T) {
-		bundles := postgresqlBundles(t, postgresqlRecoveryApp(traits, ""))
+		bundles := postgresqlBundles(t, postgresqlRecoveryApp(traits, "", ""))
 		if got := slices.Sorted(maps.Keys(bundles)); !slices.Equal(got, []string{"shop"}) {
 			t.Fatalf("bundles = %v, want the one bundle shop", got)
 		}
@@ -64,7 +74,7 @@ func TestBuild_PostgresqlRecoveryStoreOrdering(t *testing.T) {
 		}
 	})
 	t.Run("an ordered document", func(t *testing.T) {
-		cluster, _, err := transformWithBuiltins(t, postgresqlRecoveryApp(traits, postgresqlOrderPolicy))
+		cluster, _, err := transformWithBuiltins(t, postgresqlRecoveryApp(traits, "", postgresqlOrderPolicy))
 		if err != nil {
 			t.Fatalf("transforming: %v", err)
 		}
@@ -74,11 +84,37 @@ func TestBuild_PostgresqlRecoveryStoreOrdering(t *testing.T) {
 		}
 	})
 	t.Run("an ordered document with a placement", func(t *testing.T) {
-		cluster, _, err := transformWithBuiltins(t, postgresqlRecoveryApp(traits, postgresqlOrderPolicy+postgresqlPlacementPolicy))
+		cluster, _, err := transformWithBuiltins(t, postgresqlRecoveryApp(traits, "", postgresqlOrderPolicy+postgresqlPlacementPolicy))
 		if err != nil {
 			t.Fatalf("transforming: %v", err)
 		}
 		want := []string{"shop-00: db-recovery-source", "shop-01: db", "shop-02: db-pooler", "shop-03: api"}
+		if got := groupNames(t, cluster); !slices.Equal(got, want) {
+			t.Errorf("groups = %v, want %v", got, want)
+		}
+	})
+	// What the author makes db wait for, all of db's objects wait for, the
+	// store included, and the Cluster still waits for the store.
+	t.Run("db waits for another component", func(t *testing.T) {
+		const policies = postgresqlOrderPolicy + "          - component: db\n            dependsOn: [plugin]\n"
+		cluster, _, err := transformWithBuiltins(t, postgresqlRecoveryApp(traits, postgresqlRecoveryPlugin, policies))
+		if err != nil {
+			t.Fatalf("transforming: %v", err)
+		}
+		want := []string{"shop-00: plugin", "shop-01: db-recovery-source", "shop-02: db", "shop-03: db-pooler", "shop-04: api"}
+		if got := groupNames(t, cluster); !slices.Equal(got, want) {
+			t.Errorf("groups = %v, want %v", got, want)
+		}
+	})
+	// A placement of db places the store too: with plugin in the tier before,
+	// the store waits for it, which no dependency rule says.
+	t.Run("a placement after another tier", func(t *testing.T) {
+		const infra = "    - name: where-plugin\n      type: placement\n      properties:\n        component: plugin\n        tier: infra\n"
+		cluster, _, err := transformWithBuiltins(t, postgresqlRecoveryApp(traits, postgresqlRecoveryPlugin, postgresqlOrderPolicy+postgresqlPlacementPolicy+infra))
+		if err != nil {
+			t.Fatalf("transforming: %v", err)
+		}
+		want := []string{"shop-infra: plugin", "shop-01: db-recovery-source", "shop-02: db", "shop-03: db-pooler", "shop-04: api"}
 		if got := groupNames(t, cluster); !slices.Equal(got, want) {
 			t.Errorf("groups = %v, want %v", got, want)
 		}
