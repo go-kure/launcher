@@ -12,8 +12,9 @@ import (
 // Both land in the Flux namespace together, so a Secret one of the component's
 // traits makes and the source reads (secretRef, certSecretRef, proxySecretRef)
 // moves there with them, and is claimed there (go-kure/launcher#1012). A
-// source several components share is not of the group: a consumer's trait
-// Secret it reads stays (go-kure/launcher#1016).
+// source several components share, or one a component names, is generated on
+// its own and every consumer ordered after it: a Secret a consumer's trait
+// makes and the source reads moves there too (go-kure/launcher#1016).
 
 const ociFluxNSURL = "oci://registry.example.com/manifests/app"
 
@@ -84,49 +85,223 @@ func TestFluxNamespace_OCIUnreadTraitSecretStays(t *testing.T) {
 	}
 }
 
-// TestFluxNamespace_OCISharedSourceTraitSecretStays: two components share the
-// source, which reads "shared"; the trait Secret of one of them stays in the
-// application namespace, as the shared source is no member of its group
-// (go-kure/launcher#1016).
-func TestFluxNamespace_OCISharedSourceTraitSecretStays(t *testing.T) {
+// ociObject is where a generated object landed and the component that owns
+// it ("" for one the document as a whole owns).
+type ociObject struct{ namespace, component string }
+
+// ociBuild transforms comps and policies with fluxNS as the Flux namespace
+// ("" for none), as kurel build does, checks the generated objects for
+// in-document collisions, and returns every object keyed "Kind ns/name", as
+// fluxNSBuild keys them.
+func ociBuild(t *testing.T, fluxNS string, policies []oam.ApplicationPolicy, comps ...oam.Component) (map[string]ociObject, error) {
+	t.Helper()
 	app := &oam.Application{
 		APIVersion: oam.SupportedAPIVersion,
 		Kind:       "Application",
 		Metadata:   oam.Metadata{Name: "app", Namespace: "default"},
-		Spec: oam.ApplicationSpec{Components: []oam.Component{
-			ociFluxNSComponent(t, "a", "secretRef", externalSecretTrait("shared")),
-			ociFluxNSComponent(t, "b", "secretRef"),
-		}},
+		Spec:       oam.ApplicationSpec{Components: comps, Policies: policies},
 	}
-	cluster, err := newBuiltinTransformer().Transform(app, oam.TransformContext{FluxNamespace: fluxNSTarget, Domain: kurelDomain})
+	capabilities := map[string]oam.CapabilityBinding{
+		"certificate": {Rendering: map[string]any{"issuerRef": map[string]any{"name": "letsencrypt-prod", "kind": "ClusterIssuer"}}},
+	}
+	cluster, err := newBuiltinTransformer().Transform(app, oam.TransformContext{FluxNamespace: fluxNS, Domain: kurelDomain, Capabilities: capabilities})
 	if err != nil {
-		t.Fatalf("Transform: %v", err)
+		return nil, err
 	}
 	apps, err := oam.GenerateApplications(cluster)
 	if err != nil {
-		t.Fatalf("GenerateApplications: %v", err)
+		return nil, err
 	}
-	// Every generated object, keyed "Kind/name", as fluxNSObjects keys them.
-	got := map[string]string{}
-	var sources int
+	if err := oam.CheckInDocumentCollisions(apps); err != nil {
+		return nil, err
+	}
+	got := map[string]ociObject{}
 	for _, a := range apps {
 		for _, o := range a.Objects {
-			if o == nil {
-				continue
-			}
-			kind := (*o).GetObjectKind().GroupVersionKind().Kind
-			got[kind+"/"+(*o).GetName()] = (*o).GetNamespace()
-			if kind == "OCIRepository" {
-				sources++
+			if o != nil {
+				got[(*o).GetObjectKind().GroupVersionKind().Kind+" "+(*o).GetNamespace()+"/"+(*o).GetName()] = ociObject{(*o).GetNamespace(), a.Component}
 			}
 		}
 	}
-	if sources != 1 {
-		t.Fatalf("got %d OCIRepositories, want the one a and b share; got %v", sources, got)
+	return got, nil
+}
+
+// requireOCIObjects fails for each of want ("Kind ns/name") got lacks.
+func requireOCIObjects(t *testing.T, got map[string]ociObject, want ...string) {
+	t.Helper()
+	for _, w := range want {
+		if _, ok := got[w]; !ok {
+			t.Errorf("no %s among the generated objects; got %v", w, got)
+		}
 	}
-	if ns := got["ExternalSecret/shared"]; ns != "default" {
-		t.Errorf("ExternalSecret/shared namespace = %q, want %q; got %v", ns, "default", got)
+}
+
+// ociSources returns the OCIRepositories got holds.
+func ociSources(got map[string]ociObject) []string {
+	var out []string
+	for k := range got {
+		if strings.HasPrefix(k, "OCIRepository ") {
+			out = append(out, k)
+		}
 	}
+	return out
+}
+
+// dependsOn is a dependency policy ordering component after on.
+func dependsOn(component, on string) []oam.ApplicationPolicy {
+	return []oam.ApplicationPolicy{{Name: "order", Type: "dependency", Properties: map[string]any{
+		"rules": []any{map[string]any{"component": component, "dependsOn": []any{on}}},
+	}}}
+}
+
+// TestFluxNamespace_OCISharedSourceTraitSecretMoves: two components share the
+// source, which reads "shared"; the trait object of the one that makes it
+// lands in the Flux namespace with the source, owned by that component, and
+// is claimed there (go-kure/launcher#1016).
+func TestFluxNamespace_OCISharedSourceTraitSecretMoves(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		ref   string
+		trait oam.Trait
+		moved string // the trait's object, "Kind"
+	}{
+		{"external-secret read by secretRef", "secretRef", externalSecretTrait("shared"), "ExternalSecret"},
+		{"secret read by secretRef", "secretRef", secretTrait("shared"), "Secret"},
+		{"external-secret read by certSecretRef", "certSecretRef", externalSecretTrait("shared"), "ExternalSecret"},
+		{"certificate read by certSecretRef", "certSecretRef", certificateTrait("shared"), "Certificate"},
+		{"external-secret read by proxySecretRef", "proxySecretRef", externalSecretTrait("shared"), "ExternalSecret"},
+		{"secret read by proxySecretRef", "proxySecretRef", secretTrait("shared"), "Secret"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pair := func() []oam.Component {
+				return []oam.Component{
+					ociFluxNSComponent(t, "a", tc.ref, tc.trait),
+					ociFluxNSComponent(t, "b", tc.ref),
+				}
+			}
+			t.Run("moved with the source", func(t *testing.T) {
+				got, err := ociBuild(t, fluxNSTarget, nil, pair()...)
+				if err != nil {
+					t.Fatalf("build: %v", err)
+				}
+				sources := ociSources(got)
+				if len(sources) != 1 {
+					t.Fatalf("got OCIRepositories %v, want the one a and b share", sources)
+				}
+				if s := got[sources[0]]; s.namespace != fluxNSTarget || s.component != "" {
+					t.Errorf("%s = %+v, want the Flux namespace, owned by the document", sources[0], s)
+				}
+				key := tc.moved + " " + fluxNSTarget + "/shared"
+				requireOCIObjects(t, got, key)
+				if o, ok := got[key]; ok && o.component != "a" {
+					t.Errorf("%s owned by component %q, want %q", key, o.component, "a")
+				}
+			})
+			t.Run("claimed in the Flux namespace", func(t *testing.T) {
+				x := fluxNSComponent(t, "x", "helmrepository", map[string]any{"secretRef": secretRef("shared")}, externalSecretTrait("shared"))
+				_, err := ociBuild(t, fluxNSTarget, nil, append(pair(), x)...)
+				want := `name collision: Secret "` + fluxNSTarget + `/shared"`
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("build error = %v, want it to contain %q", err, want)
+				}
+			})
+			t.Run("not claimed in the application namespace", func(t *testing.T) {
+				x := fluxNSComponent(t, "x", "deployment", nil, externalSecretTrait("shared"))
+				got, err := ociBuild(t, fluxNSTarget, nil, append(pair(), x)...)
+				if err != nil {
+					t.Fatalf("build: %v", err)
+				}
+				requireOCIObjects(t, got, tc.moved+" "+fluxNSTarget+"/shared", "ExternalSecret default/shared")
+			})
+		})
+	}
+}
+
+// TestFluxNamespace_OCISharedSourceForms: the trait object the shared source
+// reads moves whichever consumer makes it and whichever form shares the
+// source; one it does not read stays; two consumers making it collide.
+func TestFluxNamespace_OCISharedSourceForms(t *testing.T) {
+	named := func(name string, traits ...oam.Trait) oam.Component {
+		return fluxNSComponent(t, name, "oci", map[string]any{
+			"source": map[string]any{"url": ociFluxNSURL, "name": "src", "secretRef": secretRef("shared")},
+		}, traits...)
+	}
+	t.Run("the adopting consumer makes it", func(t *testing.T) {
+		got, err := ociBuild(t, fluxNSTarget, nil,
+			ociFluxNSComponent(t, "a", "secretRef"),
+			ociFluxNSComponent(t, "b", "secretRef", externalSecretTrait("shared")))
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		requireOCIObjects(t, got, "ExternalSecret "+fluxNSTarget+"/shared")
+	})
+	t.Run("a single consumer names the source", func(t *testing.T) {
+		got, err := ociBuild(t, fluxNSTarget, nil, named("a", externalSecretTrait("shared")))
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		requireOCIObjects(t, got, "OCIRepository "+fluxNSTarget+"/src", "ExternalSecret "+fluxNSTarget+"/shared")
+	})
+	t.Run("not read by the source", func(t *testing.T) {
+		got, err := ociBuild(t, fluxNSTarget, nil,
+			ociFluxNSComponent(t, "a", "secretRef", externalSecretTrait("other")),
+			ociFluxNSComponent(t, "b", "secretRef"))
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		requireOCIObjects(t, got, "ExternalSecret default/other")
+	})
+	t.Run("both consumers make it", func(t *testing.T) {
+		_, err := ociBuild(t, fluxNSTarget, nil,
+			ociFluxNSComponent(t, "a", "secretRef", externalSecretTrait("shared")),
+			ociFluxNSComponent(t, "b", "secretRef", externalSecretTrait("shared")))
+		want := `name collision: Secret "` + fluxNSTarget + `/shared"`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("build error = %v, want it to contain %q", err, want)
+		}
+	})
+}
+
+// TestFluxNamespace_OCISharedSourceLateMaker: a consumer that makes the shared
+// source's Secret in a later group than another consumer is refused under a
+// Flux namespace, as that delivery never converges; one in the earliest group
+// is admitted. Without a Flux namespace the same document is admitted, as it
+// was (go-kure/launcher#1039).
+func TestFluxNamespace_OCISharedSourceLateMaker(t *testing.T) {
+	pair := func() []oam.Component {
+		return []oam.Component{
+			ociFluxNSComponent(t, "a", "secretRef", externalSecretTrait("shared")),
+			ociFluxNSComponent(t, "b", "secretRef"),
+		}
+	}
+	t.Run("refused", func(t *testing.T) {
+		_, err := ociBuild(t, fluxNSTarget, dependsOn("a", "b"), pair()...)
+		if err == nil {
+			t.Fatal("build succeeded, want the late maker refused")
+		}
+		for _, want := range []string{
+			`Secret "shared"`, `trait of component "a"`, `component "b", another consumer`,
+			"put the trait on a consumer in the earliest group", "provide the Secret in the Flux namespace",
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("build error = %v, want it to contain %q", err, want)
+			}
+		}
+	})
+	t.Run("the maker in the earliest group", func(t *testing.T) {
+		got, err := ociBuild(t, fluxNSTarget, dependsOn("b", "a"), pair()...)
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		requireOCIObjects(t, got, "ExternalSecret "+fluxNSTarget+"/shared")
+	})
+	t.Run("no Flux namespace", func(t *testing.T) {
+		got, err := ociBuild(t, "", dependsOn("a", "b"), pair()...)
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		requireOCIObjects(t, got, "ExternalSecret default/shared")
+	})
 }
 
 // fluxPairRule lowers a "flux-pair" component to a same-name sibling group of

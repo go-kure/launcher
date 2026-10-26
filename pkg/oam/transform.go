@@ -161,6 +161,11 @@ type TransformContext struct {
 	// appended, recorded by applyEntryTraits and read
 	// by postProcessFluxNamespace. Internal only, shared like subAppDecorations.
 	traitSubApps *[]traitSubApps
+	// generatedSourceReaders maps each Flux object a lowering rule ordered after
+	// a generated source to those sources (generatedSourceReaders), set once the
+	// order is known and read by applyEntryTraits (fluxInputReaders). Internal
+	// only; a map, so every by-value ctx copy reads the one set.
+	generatedSourceReaders map[*stack.Application][]*stack.Application
 	// subAppOrigins says who named each sub-application of the transform, a
 	// trait's (recordSubAppOrigins) or a synthesized NetworkPolicy's
 	// (resolveSynthesizedPolicyNames), for checkBundleApplicationNames. Internal
@@ -927,9 +932,13 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	if err != nil {
 		return nil, nil, err
 	}
+	ctx.generatedSourceReaders = generatedSourceReaders(order)
 
 	cluster, err := t.buildCluster(app, order, ctx)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := checkGeneratedSourceInputOrder(order, ctx.generatedSourceReaders, *ctx.traitSubApps, ctx.FluxNamespace); err != nil {
 		return nil, nil, err
 	}
 	// Traits have now wrapped what they wrap, so a sibling group's members are
@@ -1626,7 +1635,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			if len(e.members) > 0 {
 				member = entry.component.Type
 			}
-			readers := fluxInputReaders(e, fluxMembers, entry.app)
+			readers := fluxInputReaders(e, fluxMembers, entry.app, ctx.generatedSourceReaders)
 			resolved.naming = ctx.names.forTrait(entry.component.Name, member, trait, step.first+position)
 			if resolved.naming != nil {
 				resolved.naming.objectName = entry.component.ObjectName()
@@ -1701,7 +1710,9 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			subApps = append(subApps, added...)
 			// Recorded under the member the trait ran on, not the group, with the
 			// readers its claim asked: a group's Flux member's trait objects move
-			// when any Flux member reads them, a non-Flux member's never.
+			// when any Flux member reads them, a non-Flux member's never, and a
+			// Flux object's also when a generated source it is ordered after
+			// reads them (go-kure/launcher#1016).
 			if len(added) > 0 && ctx.traitSubApps != nil {
 				*ctx.traitSubApps = append(*ctx.traitSubApps, traitSubApps{owner: entry.app, readers: readers, subApps: added})
 			}

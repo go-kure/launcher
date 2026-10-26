@@ -10115,14 +10115,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   as on `ocirepository`; `source.serviceAccountName` names a ServiceAccount
   in that namespace. A Secret-making trait (`secret`,
   `external-secret`, `certificate`) goes to the Kustomization, not the source.
-  The Secret it makes moves to the Flux namespace when the source the
-  component keeps to itself reads it, as the two land there together
-  (go-kure/launcher#1012). A source generated on its own, one several
-  components share or one `source.name` names (even for a single consumer),
-  is no part of any component's group, so a consumer's trait Secret it reads
-  is not moved (go-kure/launcher#1016): provide the Secret in the Flux
-  namespace, or let the component keep its source (`source.objectName`, or,
-  for a component alone on its artifact, no `source.name`).
+  The Secret it makes moves to the Flux namespace when the source reads it,
+  whichever form the source takes: the source the component keeps to itself,
+  as the two land there together (go-kure/launcher#1012), or one generated on
+  its own, which several components share or `source.name` names, and which
+  every consumer is ordered after (go-kure/launcher#1016). A workload that
+  needs the Secret in the application namespace gets a second Secret of its
+  own; or provide the Secret in the Flux namespace. One consumer making it is
+  enough; two consumers making the same Secret collide. Under a Flux
+  namespace a consumer that makes it in a later group than another consumer
+  of the same source (a `dependency` policy orders it after that one) is
+  refused, as the earlier consumer waits for the source and the source for
+  the Secret: put the trait on a consumer in the earliest group, or provide
+  the Secret in the Flux namespace.
   - *A component alone on its artifact* lowers to a same-name group: both
     objects are named after the component (unless `kustomizationName` or
     `source.objectName` names them, below) and deploy as one unit, the
