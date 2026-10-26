@@ -267,6 +267,10 @@ func (c *CertificateConfig) ComponentName() string { return c.componentName }
 // pkg/oam.fluxNamespaceInput.
 func (c *CertificateConfig) FluxNamespaceInput() (kind, name string) { return "Secret", c.SecretName }
 
+// ProducesFluxNamespaceInput is true: cert-manager writes the Secret from the
+// Certificate the trait creates. Satisfies pkg/oam.fluxNamespaceProducer.
+func (c *CertificateConfig) ProducesFluxNamespaceInput() bool { return true }
+
 // ApplyPolicy is a no-op: certificates have no enforceable policy fields.
 func (c *CertificateConfig) ApplyPolicy(_ oam.Policy) error { return nil }
 

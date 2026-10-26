@@ -454,9 +454,9 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 // createsTarget reports whether the External Secrets Operator creates the
 // produced Secret: under creationPolicy Owner (the default) and Orphan it does,
 // so its name is the trait's to resolve (NameRoleExternalSecret). Under Merge
-// and None it writes into a Secret that exists apart from the trait, and the
-// name refers to that Secret: it is used as written, neither resolved nor
-// claimed.
+// it writes into a Secret that exists apart from the trait, and under None it
+// writes no Secret at all; either way the name refers to a Secret the trait
+// does not make: it is used as written, neither resolved nor claimed.
 func (c *ExternalSecretConfig) createsTarget() bool {
 	return c.CreationPolicy != creationPolicyMerge && c.CreationPolicy != creationPolicyNone
 }
@@ -592,6 +592,11 @@ func (c *ExternalSecretConfig) ComponentName() string { return c.componentName }
 func (c *ExternalSecretConfig) FluxNamespaceInput() (kind, name string) {
 	return "Secret", c.TargetSecretName
 }
+
+// ProducesFluxNamespaceInput reports whether the trait makes the Secret it
+// names (createsTarget): under Merge and None the Secret exists apart from it.
+// Satisfies pkg/oam.fluxNamespaceProducer.
+func (c *ExternalSecretConfig) ProducesFluxNamespaceInput() bool { return c.createsTarget() }
 
 // Generate creates an ExternalSecret CRD resource.
 func (c *ExternalSecretConfig) Generate(app *stack.Application) ([]*client.Object, error) {

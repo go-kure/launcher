@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"fmt"
 	"slices"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -23,6 +24,28 @@ type fluxNamespaceReader interface {
 // "ConfigMap" or "Secret".
 type fluxNamespaceInput interface {
 	FluxNamespaceInput() (kind, name string)
+}
+
+// fluxNamespaceProducer is implemented by a fluxNamespaceInput config that
+// reports whether its trait makes the object it names.
+// ProducesFluxNamespaceInput is true only when applying this trait creates the
+// named object; a reference to an object that exists apart from the trait
+// returns false: an external-secret trait under creationPolicy Merge or None.
+// checkGeneratedSourceMakerOrder refuses only a producer, so a config without
+// it is never refused (go-kure/launcher#1039).
+type fluxNamespaceProducer interface {
+	ProducesFluxNamespaceInput() bool
+}
+
+// fluxSourceRequiredReader is implemented by a Flux source config that reports
+// the Secrets the source cannot become Ready without, in its own namespace: an
+// OCIRepository's secretRef, and its verify.trustedRootSecretRef only under the
+// cosign provider. It is narrower than its fluxNamespaceReader reads, which
+// move a trait object the source may read. checkGeneratedSourceMakerOrder
+// refuses only a Secret a source requires, so a source without it is never
+// refused (go-kure/launcher#1039).
+type fluxSourceRequiredReader interface {
+	FluxSourceRequiredSecrets() []string
 }
 
 // traitSubApps is the application a trait ran on and the sub-applications it
@@ -190,4 +213,117 @@ func generatedSourceReaders(order *componentOrder) map[*stack.Application][]*sta
 		}
 	}
 	return out
+}
+
+// checkGeneratedSourceMakerOrder refuses a Secret a generated source requires
+// (fluxSourceRequiredReader) that a trait makes (fluxNamespaceProducer) on a
+// component in a later group than a consumer of that source, for a delivery
+// that makes a group Ready only once its Flux objects are
+// (TransformContext.GroupsWaitForFluxObjects; go-kure/launcher#1039). Each
+// group depends on the one before it (buildCluster), so the earlier consumer's
+// group waits for the consumer, the consumer for the source, the source for the
+// Secret, and the Secret's group for the earlier group: the delivery never
+// converges. Under the default delivery a group is Ready once applied, and it
+// does.
+//
+// A consumer is a Flux object a lowering rule ordered after the source (sources,
+// generatedSourceReaders), by its own component's order: in a sibling group the
+// member's, not the group's, since a workload member's order says nothing of a
+// Flux member waiting on the source. A workload does not wait on it. The makers
+// are the trait objects a source moves with (traitSubApps.readers), so a trait
+// on a workload is not looked at. Anything the check cannot prove is admitted:
+// a trait object that is no producer or does not say, a source that does not
+// report what it requires, a Secret outside the source's namespace (ns, or the
+// source's own without one).
+func checkGeneratedSourceMakerOrder(order *componentOrder, sources map[*stack.Application][]*stack.Application, owned []traitSubApps, ns string) error {
+	if len(order.sources) == 0 || len(sources) == 0 {
+		return nil
+	}
+	source := make(map[string]componentEntry, len(order.sources))
+	byApp := make(map[*stack.Application]componentEntry, len(order.sources))
+	for _, s := range order.sources {
+		source[s.component.Name] = s
+		byApp[s.app] = s
+	}
+	type consumer struct {
+		group int
+		name  string
+	}
+	// Every application of a group entry, a sibling group's members included,
+	// under the group and the component it is part of.
+	at := make(map[*stack.Application]consumer)
+	// The earliest consumer of each source: groups are walked in order, so the
+	// first one seen.
+	earliest := make(map[*stack.Application]consumer)
+	for i, group := range order.groups {
+		for _, e := range group {
+			c := consumer{group: i, name: e.component.Name}
+			at[e.app] = c
+			objects := []componentEntry{e}
+			if len(e.members) > 0 {
+				objects = e.members
+			}
+			for _, m := range e.members {
+				at[m.app] = c
+			}
+			for _, o := range objects {
+				if _, ok := sources[o.app]; !ok {
+					continue
+				}
+				for _, name := range o.component.orderAfter {
+					s, ok := source[name]
+					if !ok {
+						continue
+					}
+					if _, seen := earliest[s.app]; !seen {
+						earliest[s.app] = c
+					}
+				}
+			}
+		}
+	}
+	for _, o := range owned {
+		maker, ok := at[o.owner]
+		if !ok {
+			continue
+		}
+		for _, r := range o.readers {
+			first, ok := earliest[r]
+			if !ok || maker.group <= first.group {
+				continue
+			}
+			req, ok := r.Config.(fluxSourceRequiredReader)
+			if !ok {
+				continue
+			}
+			required := req.FluxSourceRequiredSecrets()
+			where := r.Namespace
+			if ns != "" {
+				where = ns
+			}
+			for _, sub := range o.subApps {
+				in, ok := sub.Config.(fluxNamespaceInput)
+				if !ok {
+					continue
+				}
+				kind, name := in.FluxNamespaceInput()
+				if kind != "Secret" || !slices.Contains(required, name) || sub.Namespace != where {
+					continue
+				}
+				if p, ok := sub.Config.(fluxNamespaceProducer); !ok || !p.ProducesFluxNamespaceInput() {
+					continue
+				}
+				s := byApp[r]
+				provide := "provide the Secret apart from the document"
+				if ns != "" {
+					provide += fmt.Sprintf(" in the Flux namespace %q", ns)
+				}
+				return &TransformError{Message: fmt.Sprintf(
+					"%s %q requires Secret %q, which a trait of component %q makes in group %q, later than component %q in group %q, a consumer of %q; with each group waiting for its Flux objects, %q's group waits for %q, %q for the source, the source for the Secret, and the group of %q, which makes it, for %q's, so the delivery never converges: put the trait on a consumer in the earliest group, or %s",
+					s.component.Type, s.component.Name, name, maker.name, order.suffixes[maker.group], first.name, order.suffixes[first.group], s.component.Name,
+					first.name, first.name, first.name, maker.name, first.name, provide)}
+			}
+		}
+	}
+	return nil
 }

@@ -31,8 +31,16 @@ type TransformContext struct {
 	TeamID        string
 	Namespace     string // overrides OAM metadata.namespace when set; a DNS-1123 label
 	FluxNamespace string // Flux control-plane namespace; "" means use component namespace; a DNS-1123 label
-	Policy        Policy
-	Capabilities  map[string]CapabilityBinding
+	// GroupsWaitForFluxObjects is the consumer's statement that its delivery
+	// makes a group Ready only once the group's Flux objects are Ready: kure's
+	// UmbrellasDoNotWait, for example, or wait: true on the group bundles. Under
+	// it the transform refuses a Secret a generated source requires that a
+	// trait makes in a later group than a consumer of the source, which would
+	// never converge (go-kure/launcher#1039). Unset: launcher assumes default
+	// delivery and does not refuse.
+	GroupsWaitForFluxObjects bool
+	Policy                   Policy
+	Capabilities             map[string]CapabilityBinding
 	// EgressPeers carries downstream-supplied, graph-derived egress destinations keyed
 	// by OAM component name. Non-authorable: never sourced from OAM YAML or
 	// capability rendering, and never merged into trait properties. nil on the
@@ -969,6 +977,13 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 	postProcessFluxNamespace(cluster, *ctx.traitSubApps, ctx.FluxNamespace)
+	// Where the trait objects landed, before a decorator hides what the check
+	// reads on them.
+	if ctx.GroupsWaitForFluxObjects {
+		if err := checkGeneratedSourceMakerOrder(order, ctx.generatedSourceReaders, *ctx.traitSubApps, ctx.FluxNamespace); err != nil {
+			return nil, nil, err
+		}
+	}
 	// Last: a decorator hides the interfaces the steps above read on a trait
 	// sub-application (the NetworkPolicy synthesis collectors among them).
 	if err := decorateSubApplications(*ctx.subAppDecorations); err != nil {

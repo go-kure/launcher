@@ -10188,11 +10188,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   own; or provide the Secret in the Flux namespace. One consumer making it is
   enough; two consumers making the same Secret collide. A consumer that
   makes it in a later group than another consumer of the same source (a
-  `dependency` policy orders it after that one) is admitted, but that
-  delivery never converges, as the earlier consumer waits for the source and
-  the source for the Secret (go-kure/launcher#1039): put the trait on a
-  consumer in the earliest group, or provide the Secret in the Flux
-  namespace.
+  `dependency` policy orders it after that one) is admitted under the
+  default delivery, which converges. Under
+  `TransformContext.GroupsWaitForFluxObjects`, a delivery that makes a group
+  Ready only once its Flux objects are, it never would: the earlier
+  consumer waits for the source, the source for the Secret, and the
+  Secret's group for the earlier one. The transform then refuses it
+  (go-kure/launcher#1039): put the trait on a consumer in the earliest
+  group, or provide the Secret apart from the document. An
+  `external-secret` under `target.creationPolicy: Merge` or `None` makes no
+  Secret and is admitted; so is a `verify.trustedRootSecretRef` under a
+  provider other than `cosign`, which source-controller does not read.
   - *A component alone on its artifact* lowers to a same-name group: both
     objects are named after the component (unless `kustomizationName` or
     `source.objectName` names them, below) and deploy as one unit, the

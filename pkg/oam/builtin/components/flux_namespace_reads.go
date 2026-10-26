@@ -118,6 +118,38 @@ func (c *OCIRepositoryConfig) FluxNamespaceReads() (configMaps, secrets []string
 	return r.configMaps, r.secrets
 }
 
+// FluxSourceRequiredSecrets reports the Secrets the HelmRepository cannot
+// become Ready without: its secretRef and certSecretRef. Satisfies
+// pkg/oam.fluxSourceRequiredReader.
+func (c *HelmRepositoryConfig) FluxSourceRequiredSecrets() []string {
+	var r fluxReads
+	r.secretRef(c.Spec.SecretRef)
+	r.secretRef(c.Spec.CertSecretRef)
+	return r.secrets
+}
+
+// FluxSourceRequiredSecrets reports the Secrets the OCIRepository cannot
+// become Ready without: its secretRef, certSecretRef and proxySecretRef, and
+// for a verification its secretRef, and its trustedRootSecretRef only under
+// the cosign provider, the one source-controller reads it for. The provider is
+// the one the source is generated with (effectiveFluxVerifyProvider). Unlike
+// FluxNamespaceReads, which moves a trait Secret the source may read, this is
+// what a delivery that waits on the source waits for (go-kure/launcher#1039).
+// Satisfies pkg/oam.fluxSourceRequiredReader.
+func (c *OCIRepositoryConfig) FluxSourceRequiredSecrets() []string {
+	var r fluxReads
+	r.secretRef(c.Spec.SecretRef)
+	r.secretRef(c.Spec.CertSecretRef)
+	r.secretRef(c.Spec.ProxySecretRef)
+	if v := c.Spec.Verify; v != nil {
+		r.secretRef(v.SecretRef)
+		if effectiveFluxVerifyProvider(v.Provider) == "cosign" {
+			r.secretRef(v.TrustedRootSecretRef)
+		}
+	}
+	return r.secrets
+}
+
 // FluxNamespaceReads reports the GitRepository's secretRef, proxySecretRef and
 // verification secretRef.
 func (c *GitRepositoryConfig) FluxNamespaceReads() (configMaps, secrets []string) {

@@ -221,8 +221,10 @@ not the app — chooses the implementation:
   hook's answer, else `secretName`. It is resolved before anything reads it, so the
   ExternalSecret's `target.name`, the `envFrom` secretRef and the secret volume below all
   carry it. A reference to the produced Secret the author wrote elsewhere does not follow a
-  rename. Under `target.creationPolicy: Merge` or `None` ESO creates no Secret: the name
-  refers to one that exists apart, and is used as written, neither resolved nor claimed. The
+  rename. Under `target.creationPolicy: Merge` or `None` ESO creates no Secret (`Merge`
+  writes into one that exists apart, `None` writes none): the name refers to a Secret the
+  trait does not make, and is used as written, neither resolved nor claimed, and the trait
+  reports no production of it (`ProducesFluxNamespaceInput`). The
   ExternalSecret itself is named by the required `secretName` and claimed with no role.
 
   The produced Secret is otherwise emit-only — nothing references it unless the trait is told
@@ -877,9 +879,13 @@ SecretStore`) is resolved in the ExternalSecret's own namespace, so a store of t
 exist in the Flux namespace too. Likewise a Certificate's `ClusterIssuer` serves it anywhere, while
 a namespaced `Issuer` must exist in the Flux namespace. The transform cannot see which stores or
 issuers a cluster has, so it does not check this. The four sub-application
-configs name their object through `FluxNamespaceInput() (kind, name string)`; the component configs
+configs name their object through `FluxNamespaceInput() (kind, name string)`, and say through
+`ProducesFluxNamespaceInput() bool` whether their trait makes it: true for the `secret`,
+`certificate` and `configmap` traits, and for `external-secret` except under creationPolicy `Merge`
+or `None`. A test holds every built-in `FluxNamespaceInput` to having both. The component configs
 report what they read through `FluxNamespaceReads()`, which every decorator forwards. See the
-`pkg/oam` README for the full rule.
+`pkg/oam` README for the full rule, and for the late-maker refusal the producer answer feeds
+(go-kure/launcher#1039).
 
 The `helm` component's `valuesMode: configMap` relies on this: its rule appends a synthesized
 `configmap` trait holding the values to the `helmrelease` it lowers to, and names that ConfigMap
