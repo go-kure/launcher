@@ -1998,13 +1998,13 @@ and by scope, whatever component or trait emits it.
     mounts from Thanos 0.24.0, whatever version is named), or with any field but `name`
     and `mountPath`, which the operator drops; an entry of either at the path of an
     earlier entry of the same field written alike (a path written otherwise is admitted,
-    as on `alertmanager`, go-kure/launcher#1050); a `queryLogFile` named without a directory beside a `scrapeFailureLogFile`
-    named with one, where the operator mounts no volume for it, unless the file there
-    is writable all the same; a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot
+    as on `alertmanager`, go-kure/launcher#1050); a `queryLogFile` or `scrapeFailureLogFile` Prometheus cannot
     write, judged at what runs at the version named (a name alone is in
     `/var/log/prometheus`; a relative path with a directory, which Prometheus joins to
     `/etc/prometheus/config_out`, an emptyDir an `initContainer` may fill with a link to a
-    writable volume, is not judged; a path with a reference `$(NAME)`, which the config reloader
+    writable volume, is not judged; nor is an absolute path with a `..` element, which
+    Prometheus opens as written, so a link before the `..` may lead elsewhere than the path
+    cleaned; a path with a reference `$(NAME)`, which the config reloader
     expands, is not judged, any other `$(` is), where the mount covering the
     file most closely, at the file itself (a `subPath` mount of the file), at its
     directory or above, decides: `/prometheus`, the operator's log-file volume and
@@ -2025,9 +2025,11 @@ and by scope, whatever component or trait emits it.
     with its own; of mounts at one path written differently, one writable makes
     it writable); the web TLS credentials' volumes, whose names are hashed, count as
     writable, so the check refuses only where it knows the file or its
-    directory is read-only; where no mount covers it, the read-only root
-    filesystem refuses unless a prometheus patch sets `readOnlyRootFilesystem: false`, and
-    a file in `/dev`, `/proc` or a directory under them (as `/dev/stdout`) is never
+    directory is read-only; where no mount covers it, as a `queryLogFile` named alone
+    beside a `scrapeFailureLogFile` named with a directory, for which the operator mounts
+    no volume, it is admitted, since the image, the operator's default included, may hold
+    it on the read-only root filesystem as a link to a writable volume
+    (go-kure/launcher#1055), and a file in `/dev`, `/proc` or a directory under them (as `/dev/stdout`) is never
     refused, nor is a log file below the version it is read from, which the version gate
     refuses instead; a negative request or limit; and a
     name whose data volume, third rule ConfigMap volume `prometheus-<name>-rulefiles-2`
