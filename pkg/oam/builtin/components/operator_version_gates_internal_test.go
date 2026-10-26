@@ -536,9 +536,11 @@ func (v *vendoredPromOp) versionGates(t testing.TB, files ...string) []operatorG
 		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
 			if !ok {
-				// A comparison outside a function would escape the walk.
+				// A comparison outside a function would escape the walk, and
+				// so would a version method taken there as a value, as var
+				// less = semver.Version.LT (go-kure/launcher#1033).
 				inspectWithStack(decl, func(n ast.Node, stack []ast.Node) {
-					if readAt(n, stack) != noRead || unreadForm(n, others) != "" {
+					if readAt(n, stack) != noRead || unreadForm(n, others) != "" || methodValue(n, stack) != "" {
 						t.Errorf("%s: a version comparison outside a function", v.fset.Position(n.Pos()))
 					}
 				})
@@ -565,6 +567,16 @@ func calledAt(path []ast.Node, sel *ast.SelectorExpr) bool {
 	return false
 }
 
+// methodValue names the version method n, whose ancestors are stack, takes
+// as a value: a selector of one of versionMethods that is not called, as
+// f := v.GTE or semver.Version.LT passed on. "" is none.
+func methodValue(n ast.Node, stack []ast.Node) string {
+	if sel, ok := n.(*ast.SelectorExpr); ok && versionMethods[sel.Sel.Name] && !calledAt(stack, sel) {
+		return sel.Sel.Name
+	}
+	return ""
+}
+
 // funcName is fd's name with its receiver: makeStatefulSetSpec,
 // (*httpClientConfig).sanitize.
 func funcName(fd *ast.FuncDecl) string {
@@ -580,7 +592,13 @@ func (v *vendoredPromOp) funcGates(t testing.TB, rel string, fd *ast.FuncDecl) [
 	t.Helper()
 	fn := funcName(fd)
 	locals := localNames(fd)
+	// A name fd declares is not the import it shadows: type cmp =
+	// semver.Version makes cmp.LT(v, w) a method expression of semver's
+	// (go-kure/launcher#1033).
 	others := otherImports(v.files[rel])
+	for name := range locals {
+		delete(others, name)
+	}
 	byNode := map[ast.Node]*operatorGate{}
 	var order []ast.Node
 	inspectWithStack(fd, func(n ast.Node, stack []ast.Node) {
@@ -588,8 +606,8 @@ func (v *vendoredPromOp) funcGates(t testing.TB, rel string, fd *ast.FuncDecl) [
 			t.Errorf("%s: %s compares a version through %s; the test cannot read its bound", v.fset.Position(n.Pos()), fn, form)
 			return
 		}
-		if sel, ok := n.(*ast.SelectorExpr); ok && versionMethods[sel.Sel.Name] && !calledAt(stack, sel) {
-			t.Errorf("%s: %s takes the version method %s as a value; the test cannot read its bound", v.fset.Position(n.Pos()), fn, sel.Sel.Name)
+		if name := methodValue(n, stack); name != "" {
+			t.Errorf("%s: %s takes the version method %s as a value; the test cannot read its bound", v.fset.Position(n.Pos()), fn, name)
 			return
 		}
 		read := readAt(n, stack)
@@ -630,8 +648,11 @@ func (v *vendoredPromOp) funcGates(t testing.TB, rel string, fd *ast.FuncDecl) [
 }
 
 // localNames are the names fd declares: its receiver, parameters and
-// results, and every name declared in its body or a function literal's.
-// The walker resolves no such name to a package-level one.
+// results, and every name declared in its body or a function literal's, a
+// type included. The walker resolves no such name to a package-level one or
+// to an import, in whatever scope of fd it is declared: a name shadowed
+// anywhere is judged as shadowed everywhere, which can only report a call
+// more, never one less.
 func localNames(fd *ast.FuncDecl) map[string]bool {
 	names := map[string]bool{}
 	add := func(ids ...*ast.Ident) {
@@ -645,6 +666,8 @@ func localNames(fd *ast.FuncDecl) map[string]bool {
 			add(n.Names...)
 		case *ast.ValueSpec:
 			add(n.Names...)
+		case *ast.TypeSpec:
+			add(n.Name)
 		case *ast.AssignStmt:
 			if n.Tok == token.DEFINE {
 				for _, e := range n.Lhs {
