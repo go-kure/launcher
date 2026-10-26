@@ -5023,13 +5023,22 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     above.
 
     Where the file is:
+    - An absolute path whose last element as written is empty, `.` or `..`,
+      as `/etc/prometheus/config_out/query.log/`, `/`,
+      `/etc/prometheus/config_out/query.log/.` or `…/config_out/logs/..`, is
+      refused before any other judging and before it is cleaned, whatever it
+      expands to or links through: Prometheus opens it as written
+      (prometheus/common `JoinDir` keeps an absolute path) with `O_CREAT`,
+      which the kernel refuses on a trailing slash (`fs/namei.c:3620-3622` at
+      Linux v6.12) and on a directory (`:3750-3751`), which `/`, `.` and `..`
+      resolve to where they resolve at all.
     - A name alone is in `/var/log/prometheus`; the operator passes any other
       path unchanged (common.go:230-236).
     - A relative path with a directory, as `logs/query.log`, is not judged.
       Prometheus joins it to the directory of its configuration,
       `/etc/prometheus/config_out` (`--config.file`, promcfg.go:1258), a
-      `queryLogFile` from v2.21.0 only; before that it opens one from its
-      working directory. `config_out` is an emptyDir (common.go:253-259): an
+      `queryLogFile` from v2.21.0 only, cleaning a trailing slash away;
+      before that it opens one from its working directory, as written. `config_out` is an emptyDir (common.go:253-259): an
       `initContainer` may mount it writable and leave a link there to a
       writable volume, which Prometheus follows when it opens the file
       (Prometheus `util/logging/file.go:43`).
@@ -5104,8 +5113,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     it writable, since which one the container runtime mounts over the other
     is not derived. The check refuses only where it knows Prometheus cannot
     open the file for writing: the file or its directory is read-only, its
-    directory is a regular file, or its path is a directory the operator
-    mounts. A directory below a writable mount counts as
+    directory is a regular file, its path is a directory the operator
+    mounts, or it is absolute and ends in a slash, `/.` or `/..`. A directory below a writable mount counts as
     writable, since it may exist on the volume or be made by an init
     container: `/prometheus/wal` is made by Prometheus opening its TSDB
     before its first configuration load opens the query log
@@ -5114,7 +5123,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     unless a patch of the
     `prometheus` container sets `securityContext.readOnlyRootFilesystem` to
     `false`. A file in `/dev`, `/proc` or a directory under them, as
-    `/dev/stdout`, is not refused. Nor here, or in the previous entry, is a
+    `/dev/stdout`, is not refused unless it ends in a slash, `/.` or `/..`. Nor here, or in the previous entry, is a
     field the operator drops at the version it compares, `queryLogFile`
     below Prometheus v2.16.0 and `scrapeFailureLogFile` below v2.55.0: the
     version gate refuses it instead. Where the read-only mount that decides
