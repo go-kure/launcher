@@ -595,6 +595,19 @@ func prometheusMountsWebConfig(spec *monitoringv1.PrometheusSpec) bool {
 	return ok && v.GTE(semver.MustParse("2.24.0"))
 }
 
+// prometheusJoinsLogFile reports whether Prometheus joins a relative path
+// with a directory in field to the directory of its configuration file:
+// scrapeFailureLogFile at every version that reads it, queryLogFile from
+// v2.21.0 (validatePrometheusLogFiles). A version that does not parse joins
+// nothing here, as which Prometheus runs is not known.
+func prometheusJoinsLogFile(spec *monitoringv1.PrometheusSpec, field string) bool {
+	if field == "scrapeFailureLogFile" {
+		return true
+	}
+	v, ok := prometheusComparedVersion(spec)
+	return ok && v.GTE(semver.MustParse("2.21.0"))
+}
+
 // prometheusComparedVersion is the Prometheus version the operator compares,
 // parsed with semver.ParseTolerant as it parses it: version, or its default
 // where version is unset. It reports false for a version that does not parse.
