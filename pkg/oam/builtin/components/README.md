@@ -10888,7 +10888,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   beforehand: launcher neither creates nor checks them. The build cannot see
   the cluster: a missing CRD fails the apply, while an older CRD can prune a
   field it does not know without an error. Check the installed versions, and
-  read the applied object back.
+  read the applied object back. The backup and recovery guide
+  (`docs/postgresql-backup-recovery.md`) walks through both, with the checks
+  that show a backup and a recovery working.
   **Behavior-changing**: the former `backup` keys `destinationPath`,
   `endpointURL` and `secretName`, which built the Cluster's in-tree
   `barmanObjectStore`, and the top-level `objectStore` and
@@ -10993,7 +10995,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     set. A store outside the document, or another component's store the
     author did not name while a hook is set (its name may be the hook's
     answer, asked by that component's lowering), is left to the plugin's own
-    check before it archives.
+    check before it archives, and so is another `postgresql` component's
+    inline recovery store, which the check does not read
+    (go-kure/launcher#1044).
   - **Ordering.** The recovering Cluster reads its source store before it can
     become ready, so the store never waits for the Cluster as the other members
     do. Where the document orders its components (a `dependency` policy), the
