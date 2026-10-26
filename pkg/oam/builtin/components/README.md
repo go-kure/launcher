@@ -5105,8 +5105,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the earlier mount's `readOnly` where it leaves it unset. Of mounts at one path written differently,
     as `/data` and `data/`, in `volumeMounts` or a patch, one writable makes
     it writable, since which one the container runtime mounts over the other
-    is not derived. The check refuses only where it knows the file or its
-    directory is read-only. A directory below a writable mount counts as
+    is not derived. The check refuses only where it knows Prometheus cannot
+    open the file for writing: the file or its directory is read-only, its
+    directory is a regular file, or its path is a directory the operator
+    mounts. A directory below a writable mount counts as
     writable, since it may exist on the volume or be made by an init
     container: `/prometheus/wal` is made by Prometheus opening its TSDB
     before its first configuration load opens the query log
