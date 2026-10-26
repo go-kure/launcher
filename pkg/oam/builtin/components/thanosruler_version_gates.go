@@ -192,7 +192,7 @@ func validateThanosRulerVersion(spec *monitoringv1.ThanosRulerSpec) error {
 // rest, with no consequence claimed for any (refuseVersionMisses): that order
 // is the kind's, not the operator's.
 func refuseThanosRulerAtVersion(spec *monitoringv1.ThanosRulerSpec, v semver.Version, at string) error {
-	if misses := gateMisses(spec, v, at, "Thanos", "version", gatesOf(thanosRulerVersionGates)); len(misses) > 1 {
+	if misses := gateMisses(spec, v, at, "Thanos", gatesOf(thanosRulerVersionGates)); len(misses) > 1 {
 		return refuseVersionMisses(misses, authoredRange(spec, gatesOf(thanosRulerVersionGates), nil), at, "version")
 	}
 	var refusing, dropping []versionGate[monitoringv1.ThanosRulerSpec]

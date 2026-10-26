@@ -785,13 +785,15 @@ func TestPrometheusVersionGates_Ceilings(t *testing.T) {
 	}{
 		"alerting.alertmanagers[].apiVersion=v1": {
 			m{"alerting": m{"alertmanagers": []any{m{"namespace": "monitoring", "name": "alertmanager-operated", "port": "web", "apiVersion": "v1"}}}},
-			"v3.0.0-rc.0", "v2.55.1", "Prometheus 2.x", "lower version to Prometheus 2.x",
+			// read from 2.11.0 on too: the fix names both bounds
+			// (go-kure/launcher#1047).
+			"v3.0.0-rc.0", "v2.55.1", "Prometheus 2.x", "name a version from 2.11.0 on and within Prometheus 2.x, or leave alerting.alertmanagers[].apiVersion unset",
 		},
 		"remoteWrite[].queueConfig.maxRetries": {
 			m{"remoteWrite": []any{m{"url": "https://metrics.example.com/api/v1/write", "queueConfig": m{"maxRetries": 3}}}},
-			"v2.11.0", "v2.10.0", "Prometheus below 2.11.0", "lower version below 2.11.0",
+			"v2.11.0", "v2.10.0", "Prometheus below 2.11.0", "lower version below 2.11.0, or leave remoteWrite[].queueConfig.maxRetries unset",
 		},
-		"allowOverlappingBlocks": {m{"allowOverlappingBlocks": true}, "v2.39.0", "v2.38.0", "Prometheus below 2.39.0", "lower version below 2.39.0"},
+		"allowOverlappingBlocks": {m{"allowOverlappingBlocks": true}, "v2.39.0", "v2.38.0", "Prometheus below 2.39.0", "name a version from 2.11.0 on and below 2.39.0, or leave allowOverlappingBlocks unset"},
 	}
 	for _, c := range prometheusVersionCeilings {
 		id := cmp.Or(c.id, c.path)
@@ -898,6 +900,17 @@ func TestPrometheusVersionGates_Cases(t *testing.T) {
 			"; the Prometheus operator does not run the object as authored there; name a version from 2.54.0 on and within Prometheus 2.x, or leave those fields unset"},
 		{"two ceilings missed suggest below the lower, from the minima met", merge(am("v1"), m{"allowOverlappingBlocks": true}), "version", "v3.0.0",
 			"version: refused: fields outside their versions at version v3.0.0: alerting.alertmanagers[].apiVersion (read for Prometheus 2.x), allowOverlappingBlocks (read below Prometheus 2.39.0); the Prometheus operator does not run the object as authored there; name a version from 2.11.0 on and below 2.39.0, or leave those fields unset"},
+		// go-kure/launcher#1047: a single field outside its versions is fixed
+		// within the same bounds, of the fields authored but not missed too, a
+		// minimum or a ceiling.
+		{"a single field below its minimum suggests no version a ceiling not missed excludes", merge(m{"allowOverlappingBlocks": true}, rw(m{"messageVersion": "V1.0"})), "version", "v2.20.0",
+			"remoteWrite[].messageVersion: read by the Prometheus operator only for Prometheus 2.54.0 and later; at version v2.20.0 it drops it from the configuration it generates, and Prometheus runs without it; the operator reads the fields authored at no single version (from 2.54.0 on and below 2.39.0): leave remoteWrite[].messageVersion unset"},
+		{"a single field below its minimum is bounded by a ceiling not missed", merge(m{"allowOverlappingBlocks": true}, rw(m{"followRedirects": true})), "version", "v2.20.0",
+			"; name a version from 2.26.0 on and below 2.39.0, or leave remoteWrite[].followRedirects unset"},
+		{"a single field at its ceiling is bounded by a minimum met", merge(am("v1"), rw(m{"messageVersion": "V1.0"})), "version", "v3.0.0",
+			"alerting.alertmanagers[].apiVersion: read by the Prometheus operator only for Prometheus 2.x; at version v3.0.0 it drops it from the configuration it generates, and Prometheus sends alerts through the Alertmanager API v2; name a version from 2.54.0 on and within Prometheus 2.x, or leave alerting.alertmanagers[].apiVersion unset"},
+		{"a single field at its ceiling suggests no version a minimum met excludes", merge(m{"allowOverlappingBlocks": true}, rw(m{"messageVersion": "V1.0"})), "version", "v3.0.0",
+			"allowOverlappingBlocks: read by the Prometheus operator only for Prometheus below 2.39.0; at version v3.0.0 it does not pass it to Prometheus, and the pods run without it; the operator reads the fields authored at no single version (from 2.54.0 on and below 2.39.0): leave allowOverlappingBlocks unset"},
 		{"a remote write authorization below 2.26.0 names the panic", m{"remoteWrite": []any{m{
 			"url": "https://metrics.example.com/api/v1/write", "authorization": m{"credentials": m{"name": "token", "key": "token"}},
 		}}}, "version", "v2.25.0", "at version v2.25.0 it panics while generating the configuration"},
