@@ -300,10 +300,15 @@ func parsePostgresqlRecoveryTarget(recovery map[string]any) (*cnpgv1.RecoveryTar
 	if t.BackupID == "" && len(selectors) == 1 && (selectors[0] == "xid" || selectors[0] == "name" || selectors[0] == "immediate") {
 		return nil, errors.Errorf("%s.backupID: required with %s.%s (the base backup is found by time or lsn only)", path, path, selectors[0])
 	}
+	// Without backupID the plugin picks the base backup by comparing the
+	// timeline with the backup's, written in decimal: "01" or "+1" would match
+	// none, so the parsed integer is what is written.
 	if t.TargetTLI != "" && t.TargetTLI != "latest" {
-		if tli, err := strconv.Atoi(t.TargetTLI); err != nil || tli < 1 {
+		tli, err := strconv.Atoi(t.TargetTLI)
+		if err != nil || tli < 1 {
 			return nil, errors.Errorf("%s.timeline %q: must be latest or a positive integer", path, t.TargetTLI)
 		}
+		t.TargetTLI = strconv.Itoa(tli)
 	}
 	if t == (cnpgv1.RecoveryTarget{}) {
 		return nil, nil
@@ -395,6 +400,15 @@ func (f postgresqlFolder) String() string {
 	return fmt.Sprintf("endpointURL %q, destinationPath %q, serverName %q", f.endpointURL, f.destinationPath, f.serverName)
 }
 
+// same reports whether f and o are one folder. Barman joins the destination
+// path and the server name as os.path.join does, so one trailing slash on the
+// path adds nothing, and a second one does.
+func (f postgresqlFolder) same(o postgresqlFolder) bool {
+	f.destinationPath = strings.TrimSuffix(f.destinationPath, "/")
+	o.destinationPath = strings.TrimSuffix(o.destinationPath, "/")
+	return f == o
+}
+
 // postgresqlArchivesIntoSource refuses a component that would archive its WAL
 // into the folder it is recovered from, where launcher can see both: the
 // recovered Cluster's WAL would land among the source's. It compares the
@@ -435,7 +449,7 @@ func postgresqlArchivesIntoSource(comp *oam.Component, lctx oam.LoweringContext,
 		return nil
 	}
 	from := postgresqlFolder{source.EndpointURL, source.DestinationPath, c.Recovery.ServerName}
-	if from != archive {
+	if !from.same(archive) {
 		return nil
 	}
 	return errors.Errorf("recovery.source: the cluster would archive its WAL into the folder it is recovered from (%s), where the source cluster's backups and WAL are; set backup.serverName, or another backup.objectStore destinationPath", archive)

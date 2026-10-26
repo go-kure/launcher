@@ -10825,7 +10825,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - `recovery.target` is where the recovery stops, the vendored
     `RecoveryTarget`: `time`, `lsn`, `xid`, `name` and `immediate`, at most one
     of them; `backupID`; `timeline` (`latest` or a positive integer, written as
-    a string); `exclusive`. What CloudNativePG's webhook refuses without
+    a string, and emitted in plain decimal: the plugin matches it against the
+    backups' timelines as text, so `"01"` is written `"1"`); `exclusive`. What CloudNativePG's webhook refuses without
     looking at a cluster is refused at build: two targets (an authored
     `immediate`, `false` included, counts), a `time` or `lsn` that does not
     parse as the operator parses it, an `xid` that is no 32-bit integer, a
@@ -10840,7 +10841,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - A cluster that would archive its WAL into the folder it is recovered from
     is refused where launcher sees both (`recovery.source: the cluster would
     archive its WAL into the folder it is recovered from …`): the endpoint,
-    the destination path and the server name of `backup` (its `serverName`,
+    the destination path (one trailing `/` aside, as Barman joins it with the
+    server name) and the server name of `backup` (its `serverName`,
     else the Cluster's name) against those of the source, read from the inline
     store, from the component's own backup store, or from the store another
     component of the document emits (a `postgresql` component's backup store

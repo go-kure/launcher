@@ -391,7 +391,7 @@ func postgresqlDependencyRules(doc *oam.Application, cluster string, members, pr
 	if !documentOrdersComponents(doc) {
 		return nil
 	}
-	rules := make([]any, 0, len(members)+len(prerequisites))
+	var rules []any
 	for _, m := range members {
 		rules = append(rules, map[string]any{"component": m, "dependsOn": []any{cluster}})
 	}

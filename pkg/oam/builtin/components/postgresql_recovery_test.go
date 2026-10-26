@@ -120,6 +120,16 @@ func TestPostgresqlRecovery_Lowering(t *testing.T) {
 			store:     "db-recovery-source",
 		},
 		{
+			// The plugin compares the timeline with the backup's in decimal.
+			name: "to a time on a timeline written with a sign and a zero",
+			recovery: map[string]any{
+				"source": map[string]any{"serverName": "origin", "objectStoreName": "origin"},
+				"target": map[string]any{"time": "2026-10-20 03:00:00", "timeline": "+01"},
+			},
+			bootstrap: cnpgv1.BootstrapRecovery{Source: "db-recovery-source", RecoveryTarget: &cnpgv1.RecoveryTarget{TargetTime: "2026-10-20 03:00:00", TargetTLI: "1"}},
+			store:     "origin",
+		},
+		{
 			// immediate counts whenever it is set, false included.
 			name:      "immediate false, with a backup ID",
 			recovery:  recoveryTarget(map[string]any{"immediate": false, "backupID": "20261020T030000", "exclusive": true}),
@@ -231,6 +241,8 @@ func TestPostgresqlRecovery_ArchiveIntoSource(t *testing.T) {
 		{"its own store, a named folder", map[string]any{"backup": backup("v2"), "recovery": source("v2", "db")}, refused},
 		{"its own store, another folder", map[string]any{"backup": backup("v2"), "recovery": source("db", "db")}, ""},
 		{"an inline store of the same path", map[string]any{"backup": backup(""), "recovery": inline("db", "s3://bucket/pg")}, refused},
+		{"an inline store of the same path with a trailing slash", map[string]any{"backup": backup(""), "recovery": inline("db", "s3://bucket/pg/")}, refused},
+		{"an inline store of the same path with two trailing slashes", map[string]any{"backup": backup(""), "recovery": inline("db", "s3://bucket/pg//")}, ""},
 		{"an inline store of another path", map[string]any{"backup": backup(""), "recovery": inline("db", "s3://bucket/other")}, ""},
 		{"another postgresql's store", map[string]any{"backup": backup(""), "recovery": source("db", "old")}, refused},
 		{"a cnpg-objectstore by its objectName", map[string]any{"backup": backup(""), "recovery": source("db", "shared-store")}, refused},
