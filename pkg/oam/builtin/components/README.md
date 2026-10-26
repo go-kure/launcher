@@ -5195,8 +5195,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     as `service.$1`, below Prometheus 3.0.0, in the same four lists and on
     the same terms: the operator judges it by the UTF-8 scheme from 3.0.0,
     and refuses the object at reconcile below it (go-kure/launcher#1038).
-    `TestPrometheusRelabelLabelmapReplacement_MatchVendoredSource` holds the
-    pattern and the action to the operator's source.
+    An empty `replacement` is left to the operator, which refuses it at every
+    version. `TestPrometheusRelabelLabelmapReplacement_MatchVendoredSource`
+    holds the pattern and the action to the operator's source. Like the
+    refusals of fields above, a refusal of a `targetLabel` or a `replacement`
+    suggests a version from 3.0.0 on only where every gated field authored is
+    read there too: with `allowOverlappingBlocks` (below 2.39.0) or an
+    Alertmanager endpoint's `apiVersion: v1` (Prometheus 2.x), it suggests
+    only the name.
   - a field of `thanos` the operator reads only from some Thanos version on,
     where `thanos.version` is below it; unset, the operator's default
     v0.42.4, at which none is refused (an empty `thanos.version` is not
