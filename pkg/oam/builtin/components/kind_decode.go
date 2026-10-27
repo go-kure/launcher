@@ -47,6 +47,33 @@ func decodeKindSpec[T any](props map[string]any, kind string) (*T, map[string]an
 	return spec, stripped, nil
 }
 
+// unknownKeyHint is a type's UnsupportedFieldHint for a decode error, which
+// names the unknown key but not its depth: the hint is given when that key is
+// a top-level key of props and hint has one for it. It is "" or starts with
+// "; ".
+func unknownKeyHint(props map[string]any, err error, hint func(key string) string) string {
+	for _, k := range slices.Sorted(maps.Keys(props)) {
+		if !strings.Contains(err.Error(), "unknown field "+strconv.Quote(k)) {
+			continue
+		}
+		if h := hint(k); h != "" {
+			return "; " + h
+		}
+	}
+	return ""
+}
+
+// withUnknownKeyHint returns err with unknownKeyHint appended, and err itself
+// when there is no hint. It is for a kind whose parser a caller reaches
+// without the document check, which appends the same hint there.
+func withUnknownKeyHint(props map[string]any, err error, hint func(key string) string) error {
+	h := unknownKeyHint(props, err, hint)
+	if h == "" {
+		return err
+	}
+	return errors.Errorf("%w%s", err, h)
+}
+
 // defaultedZeroFields lists the fields of one upstream spec type on which an
 // authored 0, false, "" or empty list [] cannot be carried: the type's
 // encoding omits a zero or an empty list there, and the object's defaulter

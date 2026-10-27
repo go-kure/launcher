@@ -20,7 +20,6 @@ import (
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
-	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
@@ -69,8 +68,8 @@ var fluxKindRows = []struct {
 	// defaulted is the kind's defaulted-zero list (policyFreeKind.defaultedZeros).
 	defaulted map[string]string
 }{
-	{fluxcdAlertType, reflect.TypeFor[notificationv1beta3.AlertSpec](), fluxcdAlertKind.required, nil, durationForms(fluxcdAlertKind.durations), fluxcdAlertKind.defaultedZeros.fields},
-	{fluxcdProviderType, reflect.TypeFor[notificationv1beta3.ProviderSpec](), fluxcdProviderKind.required, nil, durationForms(fluxcdProviderKind.durations), fluxcdProviderKind.defaultedZeros.fields},
+	{fluxcdAlertType, reflect.TypeFor[notificationv1.AlertSpec](), fluxcdAlertKind.required, nil, durationForms(fluxcdAlertKind.durations), fluxcdAlertKind.defaultedZeros.fields},
+	{fluxcdProviderType, reflect.TypeFor[notificationv1.ProviderSpec](), fluxcdProviderKind.required, nil, durationForms(fluxcdProviderKind.durations), fluxcdProviderKind.defaultedZeros.fields},
 	{fluxcdReceiverType, reflect.TypeFor[notificationv1.ReceiverSpec](), fluxcdReceiverKind.required, nil, durationForms(fluxcdReceiverKind.durations), fluxcdReceiverKind.defaultedZeros.fields},
 	{imagePolicyType, reflect.TypeFor[imagev1.ImagePolicySpec](), imagePolicyKind.required, nil, durationForms(imagePolicyKind.durations), imagePolicyKind.defaultedZeros.fields},
 	{imageRepositoryType, reflect.TypeFor[imagev1.ImageRepositorySpec](), imageRepositoryKind.required, nil, durationForms(imageRepositoryKind.durations), imageRepositoryKind.defaultedZeros.fields},
@@ -164,7 +163,7 @@ func fluxMarkersRead(t *testing.T, markers func(kindField) (fieldMarkers, bool))
 	t.Helper()
 	for path, want := range map[string]bool{"providerRef": true, "providerRef.name": true, "eventSeverity": false} {
 		found := false
-		walkFluxFields(reflect.TypeFor[notificationv1beta3.AlertSpec](), markers, func(f kindField) {
+		walkFluxFields(reflect.TypeFor[notificationv1.AlertSpec](), markers, func(f kindField) {
 			if f.path != path {
 				return
 			}
@@ -762,7 +761,7 @@ func TestEmitFluxKind(t *testing.T) {
 		for _, timeout := range []time.Duration{30 * time.Second, long} {
 			repo := func() *sourcev1.OCIRepository {
 				return &sourcev1.OCIRepository{Spec: sourcev1.OCIRepositorySpec{
-					Interval: metav1.Duration{Duration: 10 * time.Minute},
+					Interval: &metav1.Duration{Duration: 10 * time.Minute},
 					Timeout:  &metav1.Duration{Duration: timeout},
 				}}
 			}

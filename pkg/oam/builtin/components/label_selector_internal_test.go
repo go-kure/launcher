@@ -27,7 +27,6 @@ import (
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
-	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
@@ -224,8 +223,8 @@ var strictlyDecodedTypes = typesByName([]namedType{
 	{"networkingv1.ServiceCIDRSpec", reflect.TypeFor[networkingv1.ServiceCIDRSpec]()},
 	{"nodev1.RuntimeClass", reflect.TypeFor[nodev1.RuntimeClass]()},
 	{"notificationv1.ReceiverSpec", reflect.TypeFor[notificationv1.ReceiverSpec]()},
-	{"notificationv1beta3.AlertSpec", reflect.TypeFor[notificationv1beta3.AlertSpec]()},
-	{"notificationv1beta3.ProviderSpec", reflect.TypeFor[notificationv1beta3.ProviderSpec]()},
+	{"notificationv1.AlertSpec", reflect.TypeFor[notificationv1.AlertSpec]()},
+	{"notificationv1.ProviderSpec", reflect.TypeFor[notificationv1.ProviderSpec]()},
 	{"podTemplateProperties", reflect.TypeFor[podTemplateProperties]()},
 	{"policyv1.PodDisruptionBudgetSpec", reflect.TypeFor[policyv1.PodDisruptionBudgetSpec]()},
 	{"rbacv1.ClusterRole", reflect.TypeFor[rbacv1.ClusterRole]()},

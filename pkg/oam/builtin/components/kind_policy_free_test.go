@@ -20,7 +20,6 @@ import (
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
-	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
@@ -521,15 +520,15 @@ var policyFreeKinds = []policyFreeKind{
 	},
 	{
 		component: "fluxcd-alert", handler: &components.FluxcdAlertHandler{},
-		gvk: notificationv1beta3.GroupVersion.WithKind(notificationv1beta3.AlertKind),
-		typ: reflect.TypeFor[notificationv1beta3.AlertSpec](), namespaced: true, flux: true,
+		gvk: notificationv1.GroupVersion.WithKind(notificationv1.AlertKind),
+		typ: reflect.TypeFor[notificationv1.AlertSpec](), namespaced: true, flux: true,
 		minimal: fluxAlertMinimal(),
 		full:    fluxAlertFull(),
 	},
 	{
 		component: "fluxcd-provider", handler: &components.FluxcdProviderHandler{},
-		gvk: notificationv1beta3.GroupVersion.WithKind(notificationv1beta3.ProviderKind),
-		typ: reflect.TypeFor[notificationv1beta3.ProviderSpec](), namespaced: true, flux: true, held: true,
+		gvk: notificationv1.GroupVersion.WithKind(notificationv1.ProviderKind),
+		typ: reflect.TypeFor[notificationv1.ProviderSpec](), namespaced: true, flux: true, held: true,
 		minimal: fluxProviderMinimal(),
 		full:    fluxProviderFull(),
 	},
@@ -1627,7 +1626,7 @@ func TestPolicyFreeKinds_GenerateCopies(t *testing.T) {
 			".Spec.EventMetadata",
 		},
 		"fluxcd-provider": {
-			".Spec.Interval", ".Spec.Timeout", ".Spec.ProxySecretRef", ".Spec.SecretRef", ".Spec.CertSecretRef",
+			".Spec.Timeout", ".Spec.ProxySecretRef", ".Spec.SecretRef", ".Spec.CertSecretRef",
 		},
 		"fluxcd-receiver": {
 			".Spec.Interval", ".Spec.Events", ".Spec.Resources", ".Spec.Resources[0].CrossNamespaceObjectReference.MatchLabels", ".Spec.SecretRef",
@@ -2546,7 +2545,8 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"null sources", map[string]any{"providerRef": map[string]any{"name": "slack"}, "eventSources": nil}, "eventSources: required"},
 			{"source without a kind", fluxAlertWith(map[string]any{"name": "slack"}, map[string]any{"name": "web"}), "eventSources[0].kind: required"},
 			{"a later source without a name", fluxAlertWith(map[string]any{"name": "slack"}, fluxAlertSource(), map[string]any{"kind": "HelmRelease"}), "eventSources[1].name: required"},
-			{"unknown key", withProperty(fluxAlertMinimal(), "provider", "slack"), notA + "notification.toolkit.fluxcd.io/v1beta3 AlertSpec"},
+			{"unknown key", withProperty(fluxAlertMinimal(), "provider", "slack"), notA + "notification.toolkit.fluxcd.io/v1 AlertSpec"},
+			{"summary, which the v1 API removed", withProperty(fluxAlertMinimal(), "summary", "releases"), "unknown field \"summary\"; the notification.toolkit.fluxcd.io/v1 Alert has no summary; it is the eventMetadata key `summary`"},
 			{"the object's spec", map[string]any{"spec": fluxAlertMinimal()}, notA},
 			{"source sub-key", fluxAlertWith(map[string]any{"name": "slack"}, withProperty(fluxAlertSource(), "labels", map[string]any{"team": "shop"})), notA},
 			{"provider sub-key", fluxAlertWith(map[string]any{"name": "slack", "namespace": "ops"}, fluxAlertSource()), notA},
@@ -2557,19 +2557,18 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 		"fluxcd-provider": {
 			{"no properties", nil, ": required"},
 			{"no type", map[string]any{"channel": "releases"}, "type: required"},
-			{"unknown key", withProperty(fluxProviderMinimal(), "token", "s3cr3t"), notA + "notification.toolkit.fluxcd.io/v1beta3 ProviderSpec"},
+			{"unknown key", withProperty(fluxProviderMinimal(), "token", "s3cr3t"), notA + "notification.toolkit.fluxcd.io/v1 ProviderSpec"},
 			{"the object's spec", map[string]any{"spec": fluxProviderMinimal()}, notA},
 			{"secret sub-key", withProperty(fluxProviderMinimal(), "secretRef", map[string]any{"name": "provider-token", "namespace": "shop"}), notA},
 			{"secret without a name", withProperty(fluxProviderMinimal(), "secretRef", map[string]any{}), "secretRef.name: required"},
 			{"proxy secret without a name", withProperty(fluxProviderMinimal(), "proxySecretRef", map[string]any{}), "proxySecretRef.name: required"},
 			{"certificate secret without a name", withProperty(fluxProviderMinimal(), "certSecretRef", map[string]any{}), "certSecretRef.name: required"},
 			{"suspend a string", withProperty(fluxProviderMinimal(), "suspend", "yes"), notA},
-			{"interval not a duration", withProperty(fluxProviderMinimal(), "interval", "soon"), notA},
-			{"interval in a unit the API refuses", withProperty(fluxProviderMinimal(), "interval", "500us"), `fluxcd-provider: interval "500us" is invalid: must be a Flux duration`},
+			{"interval, which the v1 API removed", withProperty(fluxProviderMinimal(), "interval", "10m"), `unknown field "interval"; the notification.toolkit.fluxcd.io/v1 Provider has no interval`},
 			{"timeout in hours, which its pattern does not take", withProperty(fluxProviderMinimal(), "timeout", "1h"), `fluxcd-provider: timeout "1h" is invalid: must be a Flux duration`},
 			{"timeout emitted below a millisecond", withProperty(fluxProviderMinimal(), "Timeout", "0.5ms"), `fluxcd-provider: timeout "0.5ms" is invalid: it would be emitted as "500µs"`},
 			{"a user in the address", withProperty(fluxProviderMinimal(), "address", "https://flux:s3cr3t@hooks.example/notify"), "fluxcd-provider: address must not carry a user or password"},
-			{"a user in the proxy", withProperty(fluxProviderMinimal(), "proxy", "http://flux:s3cr3t@proxy.example:3128"), "fluxcd-provider: proxy must not carry a user or password"},
+			{"proxy, which the v1 API removed", withProperty(fluxProviderMinimal(), "proxy", "http://proxy.example:3128"), `unknown field "proxy"; the notification.toolkit.fluxcd.io/v1 Provider has no proxy; proxySecretRef names a Secret`},
 			{"two spellings", withProperty(fluxProviderMinimal(), "Type", "msteams"), "sets the same field as"},
 		},
 		"fluxcd-receiver": {

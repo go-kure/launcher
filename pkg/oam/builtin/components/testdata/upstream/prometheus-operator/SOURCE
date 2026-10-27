@@ -2,8 +2,8 @@
 # Licensed under the Apache License, Version 2.0 (each file carries its header);
 # LICENSE is the project's copy of the licence and NOTICE its notice file, at the same tag.
 # The components tests check each file against its git blob id below.
-tag v0.94.1
-tag-object eb84171b4e460327bef8ab3c88996408e084dac1
+tag v0.94.2
+tag-object 2ea17f5f5ee2ca41cea921bf69011f49a2ea2351
 licence LICENSE 74e6ec6963979ae506d5a6b1d59adb7f3bdaf045
 notice NOTICE e520005cdda30b725b5534ce120ee905fd40b55a
 file pkg/alertmanager/amcfg.go 4414ca0c9f6824ae0b6c4bfcf743a27eaeeca079

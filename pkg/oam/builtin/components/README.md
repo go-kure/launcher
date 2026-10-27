@@ -176,7 +176,7 @@ reads it.
 | `externalsecret` | ExternalSecret | Kind-named External Secrets Operator ExternalSecret: the whole `ExternalSecretSpec` (`secretStoreRef`, `target`, `refreshPolicy`, `refreshInterval`, `syncWindows`, `data`, `dataFrom`), strictly decoded; no top-level field is required. The store is the author's. The environment policy reaches one field: a `target.manifest` of a kind the policy checks is refused. No capability is required. Beside the `external-secret` trait — see below. |
 | `fluxcd-alert` | Alert | Kind-named Flux Alert: the whole `AlertSpec`, strictly decoded; `providerRef` with its `name` and `eventSources`, each with its `kind` and `name`, are required. A source may name the objects of another namespace, and nothing gates it. No environment policy applies — see below. |
 | `fluxcd-kustomization` | Kustomization | Kind-named: the full Flux `KustomizationSpec`, against an existing source; what `oci` lowers to beside an `ocirepository` (`OCIRule`, see below). An authored Flux object, not how an application is delivered. |
-| `fluxcd-provider` | Provider | Kind-named Flux Provider: the whole `ProviderSpec`, strictly decoded; `type` is required, and of an authored Secret reference its `name`. A user or a password in `address` or `proxy` is refused under every policy and under none, and an `address` that is itself the credential under a policy that forbids explicit secrets; the hosts of both are written as authored, and nothing gates `serviceAccountName` — see below. |
+| `fluxcd-provider` | Provider | Kind-named Flux Provider: the whole `ProviderSpec`, strictly decoded; `type` is required, and of an authored Secret reference its `name`. A user or a password in `address` is refused under every policy and under none, and an `address` that is itself the credential under a policy that forbids explicit secrets; the host is written as authored, and nothing gates `serviceAccountName` — see below. |
 | `fluxcd-receiver` | Receiver | Kind-named Flux Receiver: the whole `ReceiverSpec`, strictly decoded; `type` and `resources`, each with its `kind` and `name`, are required, and of an authored `secretRef` its `name`. A resource without `apiVersion` is refused unless its kind is one the notification controller gives a default version (`Bucket`, `GitRepository`, `HelmChart`, `HelmRepository`, `OCIRepository`, `ImageRepository`, `ArtifactGenerator`; go-kure/launcher#984), and the refusal names the kind's own apiVersion for a kind the API's `kind` enum admits (go-kure/launcher#1010). The Receiver opens an inbound path on the notification controller, and a resource may name the objects of another namespace; nothing gates either. The API's expression rules are not checked. No environment policy applies — see below. |
 | `gateway` | Gateway | Kind-named Gateway API Gateway: the whole `GatewaySpec`, strictly decoded; `gatewayClassName` and `listeners` are required, and of a listener its `name`, `port` and `protocol`. It is not the Gateway a capability names for the `httproute` trait. No capability is required and no environment policy applies — see below. |
 | `gatewayclass` | GatewayClass | Kind-named Gateway API GatewayClass: the whole `GatewayClassSpec` (`controllerName`, required, `parametersRef` and `description`), strictly decoded. Cluster-scoped. No capability is required and no environment policy applies — see below. |
@@ -441,7 +441,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `externalsecrets.CreateClusterSecretStore` | external-secrets.io/v1 ClusterSecretStore (cluster-scoped) | kind | `clustersecretstore` | strict decode of `SecretStoreSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. `provider` must be written with exactly one provider; of that provider, the fields the API requires that the type would write empty, and the four it would default. A credential written as a `value`, and the data of the `fake` provider, are refused under a policy that forbids explicit secrets. No capability is required. |
 | `externalsecrets.CreateExternalSecret` | external-secrets.io/v1 ExternalSecret | kind | `externalsecret` | strict decode of `ExternalSecretSpec` | Its labels and annotations are the `labels` and `annotations` properties. No top-level field must be written. A generator named as the source of one key of `data` is refused. A `target.manifest` whose `apiVersion` is no API version is refused. A `target.manifest` of a kind the environment policy checks (a workload, a claim, a PersistentVolume, a HorizontalPodAutoscaler) is refused, and a core Secret there under a policy that forbids explicit secrets. No capability is required. The `external-secret` trait builds an ExternalSecret for a workload through the same constructor, from a hand-written parser. |
 | `externalsecrets.CreateSecretStore` | external-secrets.io/v1 SecretStore | kind | `secretstore` | strict decode of `SecretStoreSpec` | As `clustersecretstore`, in the build namespace. Its labels and annotations are the `labels` and `annotations` properties. |
-| `fluxcd.CreateAlert` | notification.toolkit.fluxcd.io/v1beta3 Alert | kind | `fluxcd-alert` | strict decode of `AlertSpec` | `providerRef` with its `name` and `eventSources` must be written, and of a source its `kind` and `name`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. It lands in the Flux namespace when one is set. No environment policy applies. The type name carries a prefix: an alert, in this package, also reads as an alerting rule. |
+| `fluxcd.CreateAlert` | notification.toolkit.fluxcd.io/v1 Alert | kind | `fluxcd-alert` | strict decode of `AlertSpec` | `providerRef` with its `name` and `eventSources` must be written, and of a source its `kind` and `name`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. It lands in the Flux namespace when one is set. No environment policy applies. The type name carries a prefix: an alert, in this package, also reads as an alerting rule. |
 | `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | kind | `artifactgenerator` | strict decode of `ArtifactGeneratorSpec` | `sources` and `artifacts` must be written; of a source its `alias`, `kind` and `name`, of an artifact its `name` and `copy`, of a copy its `from` and `to`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. The API's expression rule, which holds an artifact's `name` to an object name where no `pathPattern` is set, is not checked. It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateBucket` | source.toolkit.fluxcd.io/v1 Bucket | kind | `bucket` | strict decode of `BucketSpec` | - |
 | `fluxcd.CreateExternalArtifact` | source.toolkit.fluxcd.io/v1 ExternalArtifact | not authorable | - | - | Written by the controller that produces the artifact. |
@@ -456,7 +456,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `fluxcd.CreateImageUpdateAutomation` | image.toolkit.fluxcd.io/v1 ImageUpdateAutomation | kind | `imageupdateautomation` | strict decode of `ImageUpdateAutomationSpec` | `sourceRef` with its `kind` and `name` and `interval` must be written, and of an authored `git` its `commit` with the author's `email`: the fields the linked Go source marks required, not held to a CRD. `sourceRef.kind` is defaulted by the API and required here, since the type writes it empty. The source's `namespace` is written as authored, and so is where the automation pushes. `interval` is held to the pattern of a Flux duration. It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateKustomization` | kustomize.toolkit.fluxcd.io/v1 Kustomization | kind | `fluxcd-kustomization` | strict decode of `KustomizationSpec` | `oci` lowers onto it. `targetNamespace` is never defaulted. |
 | `fluxcd.CreateOCIRepository` | source.toolkit.fluxcd.io/v1 OCIRepository | kind | `ocirepository` | strict decode of `OCIRepositorySpec` | `oci` lowers onto it. |
-| `fluxcd.CreateProvider` | notification.toolkit.fluxcd.io/v1beta3 Provider | kind | `fluxcd-provider` | strict decode of `ProviderSpec` | `type` must be written, and of an authored `secretRef`, `proxySecretRef` or `certSecretRef` its `name`: the fields the linked Go source marks required, not held to a CRD. `interval` and `timeout` are each held to the pattern of their field; `timeout` takes no `h`, and one of an hour or more is written in minutes. It lands in the Flux namespace when one is set. A user or a password in `address` or `proxy` is refused. Under a policy that forbids explicit secrets an `address` that is the credential is refused too: that of `discord`, `generic`, `generic-hmac`, `googlechat`, `lark`, `msteams`, `rocket` and `slack`, and an `azureeventhub` address that holds `SharedAccessKey`. |
+| `fluxcd.CreateProvider` | notification.toolkit.fluxcd.io/v1 Provider | kind | `fluxcd-provider` | strict decode of `ProviderSpec` | `type` must be written, and of an authored `secretRef`, `proxySecretRef` or `certSecretRef` its `name`: the fields the linked Go source marks required, not held to a CRD. `timeout` is held to the pattern of its field: it takes no `h`, and one of an hour or more is written in minutes. It lands in the Flux namespace when one is set. A user or a password in `address` is refused. Under a policy that forbids explicit secrets an `address` that is the credential is refused too: that of `discord`, `generic`, `generic-hmac`, `googlechat`, `lark`, `msteams`, `rocket` and `slack`, and an `azureeventhub` address that holds `SharedAccessKey`. |
 | `fluxcd.CreateReceiver` | notification.toolkit.fluxcd.io/v1 Receiver | kind | `fluxcd-receiver` | strict decode of `ReceiverSpec` | `type` and `resources` must be written, of each resource its `kind` and `name`, of an authored `secretRef` its `name`, and of an OIDC provider its `issuerURL` and `validations` with the fields of each validation and variable: the fields the linked Go source marks required, not held to a CRD. A resource's `apiVersion` must be written unless the controller defaults it for the kind. `interval` is held to the pattern of a Flux duration. It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateResourceSet` | fluxcd.controlplane.io/v1 ResourceSet | held | - | - | Its `resourcesTemplate` is, in the API's words, "a Go template that generates the list of Kubernetes resources to reconcile". The operator renders it on the cluster, so no build sees the objects and none can be held to a rule: the kind would be a way round every rule a policy holds a workload or a Secret to (go-kure/launcher#790). |
 | `fluxcd.CreateResourceSetInputProvider` | fluxcd.controlplane.io/v1 ResourceSetInputProvider | kind | `resourcesetinputprovider` | strict decode of `ResourceSetInputProviderSpec` | `type` must be written, of an authored `secretRef` or `certSecretRef` its `name` and of a schedule its `cron`: the fields the linked Go source marks required. A schedule's `window` is held to the pattern of a Flux duration by its authored text; `filter.limit` cannot be authored as 0, nor a schedule's `timeZone` as empty. It lands in the Flux namespace when one is set. A user or a password in `url` is refused, and the host of `url` is held to the allowed registries of the environment policy. |
@@ -2365,8 +2365,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 - **fluxcd-alert, fluxcd-provider, fluxcd-receiver, imagepolicy, imagerepository, imageupdateautomation, artifactgenerator, resourcesetinputprovider**
   (go-kure/launcher#790) are the kind-named projections of objects of the
   Flux APIs beside the sources, the HelmRelease and the Kustomization: a
-  notification.toolkit.fluxcd.io/v1beta3 Alert and Provider, a
-  notification.toolkit.fluxcd.io/v1 Receiver, an
+  notification.toolkit.fluxcd.io/v1 Alert, Provider and Receiver, an
   image.toolkit.fluxcd.io/v1 ImagePolicy, ImageRepository and
   ImageUpdateAutomation, a
   source.extensions.fluxcd.io/v1beta1 ArtifactGenerator, and a
@@ -2428,9 +2427,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - `fluxcd-provider`: the object makes the notification controller send
     the events of the Alerts that name it to `address`, which the API calls
     "the endpoint, in a generic sense, to where alerts are sent" (for some
-    types "a project ID or a namespace"), through `proxy` or the proxy the
-    Secret of `proxySecretRef` holds. Both are hosts outside the cluster
-    unless the receiver runs in it, and launcher writes both as authored.
+    types "a project ID or a namespace"), through the proxy the Secret of
+    `proxySecretRef` holds. Both are hosts outside the cluster unless the
+    receiver runs in it; launcher writes `address` as authored and does not
+    read the Secret.
     **`serviceAccountName` names the account the controller authenticates
     as:** in the API's words "the Kubernetes ServiceAccount used to
     authenticate with cloud provider services through workload identity",
@@ -2537,13 +2537,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   type, decoded strictly at every depth: an unknown key is refused wherever
   it sits (a source, a reference, a policy).
   - `fluxcd-alert` (`AlertSpec`): `providerRef`, `eventSources`,
-    `eventSeverity`, `inclusionList`, `exclusionList`, `eventMetadata`,
-    `summary` (deprecated by the API for `eventMetadata`) and `suspend`.
-  - `fluxcd-provider` (`ProviderSpec`): `type`, `interval` (in the API's
-    words "Deprecated and not used in v1beta3"), `channel`, `username`,
-    `address`, `timeout`, `proxy` (deprecated by the API for
-    `proxySecretRef`), `proxySecretRef`, `secretRef`, `certSecretRef` (each a
-    `name`), `serviceAccountName`, `suspend` and `commitStatusExpr`.
+    `eventSeverity`, `inclusionList`, `exclusionList`, `eventMetadata` and
+    `suspend`. The v1 Alert has no `summary`: it is the `eventMetadata`
+    key `summary`, and an authored `summary` is refused with that hint.
+  - `fluxcd-provider` (`ProviderSpec`): `type`, `channel`, `username`,
+    `address`, `timeout`, `proxySecretRef`, `secretRef`, `certSecretRef`
+    (each a `name`), `serviceAccountName`, `suspend` and
+    `commitStatusExpr`. The v1 Provider has no `interval` (unused under
+    v1beta3 too) and no `proxy` (the Secret `proxySecretRef` names holds the
+    proxy's address, and optionally its username and password); an authored
+    one is refused with that hint. `type` takes every value of the API's
+    enum, `zoom`, `incident.io` and `mastodon` among them; each reads its
+    token from the Secret `secretRef` names.
     **`commitStatusExpr` is a CEL expression the controller evaluates** to
     the message of a commit status; launcher writes it as authored and does
     not parse it.
@@ -2730,8 +2735,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     or more than one: the type calls it a union, and no marker holds it to
     one;
   - of a `fluxcd-provider`, the enumeration of `type`, the lengths of
-    `channel`, `username`, `address` and `proxy`, and the pattern of `proxy`
-    (an `http` or `https` URL); an `address` that is no URL with a host is
+    `channel`, `username` and `address`; an `address` that is no URL with a host is
     written as authored unless it holds an `@` (Policy, below);
   - of a `fluxcd-receiver`, the enumerations (`type`, a resource's `kind`),
     the lengths of a resource's `name` and `namespace`, the pattern of an
@@ -2814,12 +2818,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - **No field of an Alert holds a secret or a host.** The address and the
     credentials are the Provider's. `eventMetadata` is a free map, written to
     the object as authored under a policy that forbids explicit secrets too.
-  - **A user or a password in a Provider's `address` or `proxy` is
+  - **A user or a password in a Provider's `address` is
     refused**, under every policy and under none, by the rule that refuses
     one in an inline chart source's URL (`fluxcd-provider: address must not
     carry a user or password, which would be written in plain text into the
     Provider; …`): it would sit in the object in plain text. An `address`
-    or a `proxy` that is no URL with a host is refused when it holds an `@`
+    that is no URL with a host is refused when it holds an `@`
     (an `address` with no `@` passes, since the API allows a project ID or a
     namespace there); `bot:pw@host` and `bot@host` parse as URLs with no
     user, so parsing alone does not clear them.
@@ -2828,7 +2832,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     address: the address of a msteams Provider is the credential it posts
     with, …`), since the object is in the build's output; the message names
     the type and quotes nothing of the value. Read in the notification
-    controller's source at v1.9.4 (`internal/notifier`): `discord`,
+    controller's source at v1.10.0 (`internal/notifier`): `discord`,
     `rocket`, `msteams`, `googlechat` and `lark` post to the address with no
     token of their own, so it is a webhook URL whose path or query holds the
     token; `slack` does the same where its Secret holds no token, and the
@@ -2848,16 +2852,29 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the API's values of `type`. **A token in the path or the query of an
     address of another type is not something the kind can tell**, and is
     written as authored. **Not held:**
-    the hosts of `address` and `proxy`: the Provider sends events there and
+    the host of `address`: the Provider sends events there and
     fetches no artifact, so no dimension of the policy speaks of them;
     `serviceAccountName`. The credentials, the proxy configuration and the
     certificates of `secretRef`, `proxySecretRef` and `certSecretRef` are
     Secrets the object names, not values.
+  - **Flux 2.10 or later.** The Alert and the Provider are of the v1 API,
+    which notification-controller serves from Flux 2.10 on; an older
+    cluster refuses them. Launcher does not read the cluster's Flux
+    version.
+  - **What the v1.10.0 controller refuses in the Secrets, which launcher
+    never reads.** A `proxy` key in the Secret `secretRef` names: the proxy
+    goes under the `address` key of the Secret `proxySecretRef` names
+    (`internal/server/event_handlers.go`). TLS data in `secretRef` for a
+    commit-status type: it goes in the Secret `certSecretRef` names. A
+    static `token` for `azureeventhub` (`internal/notifier/azure_eventhub.go`):
+    the type authenticates with a SAS connection string in `address` or through
+    workload identity. A Provider migrated from v1beta3 that relied on any
+    of these builds; the controller refuses it when it sends an event.
   - **A `pagerduty` Provider's routing key in `channel` is an identifier,
     not a credential**, and is written as authored under every policy, one
     that forbids explicit secrets included (go-kure/launcher#975). The
     controller hands `channel` to the pagerduty notifier as its Events API
-    routing key (`internal/notifier/factory.go`, `pagerduty.go` at v1.9.4).
+    routing key (`internal/notifier/factory.go`, `pagerduty.go` at v1.10.0).
     The key reaches only the Events API of the service it routes to, where
     it opens alerts and acknowledges or resolves one by its `dedup_key`; it
     reads nothing and changes no configuration. Launcher does not hold it
@@ -2867,7 +2884,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - **No field of a Receiver holds an image or a secret.** The token is in
     the Secret `secretRef` names. **A user or a password in an OIDC
     provider's `issuerURL` is refused**, under every policy and under none,
-    by the same rule as a Provider's `proxy` (`fluxcd-receiver:
+    by the same rule as a Provider's `address` (`fluxcd-receiver:
     oidcProviders[1].issuerURL must not carry a user or password, which
     would be written in plain text into the Receiver; …`), and so is one
     that does not parse, or is no URL with a host and holds an `@`; the
@@ -2919,7 +2936,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     would be written in plain text into the ResourceSetInputProvider; …`):
     the credentials belong in the Secret `secretRef` names. A `url` that is
     no URL with a host is refused too when it holds an `@`, as a Provider's
-    `proxy` is. **The host of
+    `address` is. **The host of
     `url` is held to the allowed registries, whatever the type:** the answer
     of that host decides what a ResourceSet deploys, the `ExternalService`
     call sends the referenced credential to it, and one rule holds a type a
@@ -9683,7 +9700,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `GitRepository` or `Bucket`, the Go type leaves an empty one out of the object, and the
   kind does not choose a source's kind for the author, so a reference without one is
   refused with `chart.spec.sourceRef.kind: required (…)`. Which of the three it is stays the
-  CRD's to check. An authored `chart.spec.verify` that names no `provider` is written with
+  CRD's to check. An authored `chart` without `chart.spec.sourceRef`, or without
+  `chart.spec.chart`, is refused the same way: the API's rules require both for a template
+  of kind HelmChart. The template's `kind` is HelmChart, its default; `kind: OCIRepository`,
+  which the linked helm-controller API (v1.7.1) also takes, is refused (go-kure/launcher#1072), and a chart in an OCI
+  registry is an `ocirepository` component and a `chartRef` to it. So are the
+  OCIRepository fields the template inlines and a template of kind HelmChart does not read,
+  whatever their value (`false` and `null` included): `url`, `ref`, `layerSelector`,
+  `provider`, `secretRef`, `serviceAccountName`, `certSecretRef`, `proxySecretRef`,
+  `timeout`, `ignore`, `insecure`, `suspend`, and `verify.matchOIDCIdentity` and
+  `verify.trustedRootSecretRef`; a source's own settings go on the source `sourceRef`
+  names. An authored `chart.spec.verify` that names no `provider` is written with
   `provider: cosign`, the API's default: the Go type writes the field whether or not it was
   authored, so the API's default never applies, and the object is then what the API would
   have made of the omitted field. An authored `provider: ""` is refused, since the type

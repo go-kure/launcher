@@ -768,7 +768,17 @@ func TestFluxSourceHandlers_GenerateDoesNotAlias(t *testing.T) {
 			if got := secretRefName(cfgSpec).String(); got != authored {
 				t.Errorf("config's secretRef.name edited through a render: %q, want %q", got, authored)
 			}
-			if d := cfgSpec.FieldByName("Interval").Interface().(metav1.Duration); d.Duration != 0 {
+			// An OCIRepository's interval is a pointer, every other kind's a value.
+			var d metav1.Duration
+			switch v := cfgSpec.FieldByName("Interval").Interface().(type) {
+			case metav1.Duration:
+				d = v
+			case *metav1.Duration:
+				if v != nil {
+					d = *v
+				}
+			}
+			if d.Duration != 0 {
 				t.Errorf("Generate wrote the interval default into the config: %v", d.Duration)
 			}
 		})

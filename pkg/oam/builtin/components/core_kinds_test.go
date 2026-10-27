@@ -16,7 +16,6 @@ import (
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
-	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
@@ -127,8 +126,8 @@ var coreKindSchemas = []struct {
 	// object, less its identity.
 	{"endpointslice", reflect.TypeFor[discoveryv1.EndpointSlice](), &components.EndpointSliceHandler{}, namespacedObjectIdentityExcluded("a discovery.k8s.io/v1 EndpointSlice")},
 	{"externalsecret", reflect.TypeFor[esv1.ExternalSecretSpec](), &components.ExternalSecretHandler{}, nil},
-	{"fluxcd-alert", reflect.TypeFor[notificationv1beta3.AlertSpec](), &components.FluxcdAlertHandler{}, nil},
-	{"fluxcd-provider", reflect.TypeFor[notificationv1beta3.ProviderSpec](), &components.FluxcdProviderHandler{}, nil},
+	{"fluxcd-alert", reflect.TypeFor[notificationv1.AlertSpec](), &components.FluxcdAlertHandler{}, nil},
+	{"fluxcd-provider", reflect.TypeFor[notificationv1.ProviderSpec](), &components.FluxcdProviderHandler{}, nil},
 	{"fluxcd-receiver", reflect.TypeFor[notificationv1.ReceiverSpec](), &components.FluxcdReceiverHandler{}, nil},
 	{"gateway", reflect.TypeFor[gatewayv1.GatewaySpec](), &components.GatewayHandler{}, nil},
 	{"gatewayclass", reflect.TypeFor[gatewayv1.GatewayClassSpec](), &components.GatewayClassHandler{}, nil},

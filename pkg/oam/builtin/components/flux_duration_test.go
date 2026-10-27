@@ -162,7 +162,7 @@ func TestKindNamedFluxConfigs_GenerateChecksDurationFields(t *testing.T) {
 		return func(d *metav1.Duration) stack.ApplicationConfig {
 			spec := helmv2.HelmReleaseSpec{Chart: &helmv2.HelmChartTemplate{Spec: helmv2.HelmChartTemplateSpec{
 				Chart:     "podinfo",
-				SourceRef: helmv2.CrossNamespaceObjectReference{Kind: "HelmRepository", Name: "podinfo"},
+				SourceRef: &helmv2.CrossNamespaceObjectReference{Kind: "HelmRepository", Name: "podinfo"},
 			}}}
 			set(&spec, d)
 			return &components.HelmReleaseConfig{Name: "src", Spec: spec}

@@ -53,8 +53,7 @@ func fluxAlertFull() map[string]any {
 		},
 		"inclusionList": []any{".*succeeded.*"},
 		"exclusionList": []any{"^Dependencies do not meet ready condition.*"},
-		"eventMetadata": map[string]any{"cluster": "east", "env": "production"},
-		"summary":       "releases of the shop",
+		"eventMetadata": map[string]any{"cluster": "east", "env": "production", "summary": "releases of the shop"},
 		"suspend":       true,
 	}
 }
@@ -148,18 +147,16 @@ func fluxProviderMinimal() map[string]any {
 	return map[string]any{"type": "slack"}
 }
 
-// fluxProviderFull sets every field of a ProviderSpec. Its address and its
-// proxy name hosts no fixture's policy allows, and its three Secrets are read
-// from the namespace the object lands in.
+// fluxProviderFull sets every field of a ProviderSpec. Its address names a
+// host no fixture's policy allows, and its three Secrets are read from the
+// namespace the object lands in.
 func fluxProviderFull() map[string]any {
 	return map[string]any{
 		"type":               "github",
-		"interval":           "10m",
 		"channel":            "releases",
 		"username":           "flux",
 		"address":            "https://github.other.example/shop/fleet",
 		"timeout":            "20s",
-		"proxy":              "http://proxy.other.example:3128",
 		"proxySecretRef":     map[string]any{"name": "provider-proxy"},
 		"secretRef":          map[string]any{"name": "provider-token"},
 		"serviceAccountName": "notifier",
@@ -469,7 +466,7 @@ func TestFluxKinds_UnheldPassEveryPolicy(t *testing.T) {
 }
 
 // TestFluxProvider_RefusesAUserOrPassword: a user or a password in a
-// fluxcd-provider's `address` or `proxy` is refused when the component is
+// fluxcd-provider's `address` is refused when the component is
 // read, so under every policy and under none, and the refusal does not repeat
 // the value. An address that is no URL with a host is written as authored
 // unless it holds an `@`, and so is a credential in a path or a query, which
@@ -487,16 +484,11 @@ func TestFluxProvider_RefusesAUserOrPassword(t *testing.T) {
 		{"a user in an address with no scheme", "address", secret + "@hooks.example", "fluxcd-provider: address holds an @ and is no URL with a host"},
 		{"a user in a URL with no host", "address", "https://bot:" + secret + "@/services", "fluxcd-provider: address holds an @ and is no URL with a host"},
 		{"an @ in the path of a URL", "address", "https://hooks.example/team@shop", ""},
-		{"a user and a password in the proxy", "proxy", "http://bot:" + secret + "@proxy.example:3128", "fluxcd-provider: proxy must not carry a user or password"},
-		{"a proxy that is no URL", "proxy", "http://proxy.example:" + secret, "fluxcd-provider: proxy is not a valid URL"},
-		{"a user and a password in a proxy with no scheme", "proxy", "bot:" + secret + "@proxy.example:3128", "fluxcd-provider: proxy holds an @ and is no URL with a host"},
-		{"a user in a proxy with no scheme", "proxy", secret + "@proxy.example", "fluxcd-provider: proxy holds an @ and is no URL with a host"},
 		{"an address with no user", "address", "https://hooks.example/services", ""},
 		{"a project ID", "address", "shop-fleet", ""},
 		{"a host and a port that parse as no URL", "address", "10.0.0.7:4222", ""},
 		{"a token in the path", "address", "https://hooks.example/services/" + secret, ""},
 		{"a token in the query", "address", "https://hooks.example/notify?token=" + secret, ""},
-		{"a proxy with no user", "proxy", "http://proxy.example:3128", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -878,5 +870,55 @@ func TestFluxKinds_ReportReads(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestFluxNotificationKinds_RemovedKeyHint: a key the v1 Alert or Provider no
+// longer has (summary, interval, proxy) gets the pointer to what replaced it,
+// at the authored-property check kurel build runs first and at the strict
+// decode a library caller reaches directly; any other unknown key gets the
+// plain error.
+func TestFluxNotificationKinds_RemovedKeyHint(t *testing.T) {
+	alert, provider := &components.FluxcdAlertHandler{}, &components.FluxcdProviderHandler{}
+	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"fluxcd-alert": alert, "fluxcd-provider": provider}, nil)
+	for _, tc := range []struct {
+		typ     string
+		handler oam.ComponentHandler
+		minimal func() map[string]any
+		key     string
+		hint    string
+	}{
+		{"fluxcd-alert", alert, fluxAlertMinimal, "summary", "it is the eventMetadata key `summary`"},
+		{"fluxcd-alert", alert, fluxAlertMinimal, "bogus", ""},
+		{"fluxcd-provider", provider, fluxProviderMinimal, "interval", "the notification.toolkit.fluxcd.io/v1 Provider has no interval"},
+		{"fluxcd-provider", provider, fluxProviderMinimal, "proxy", "proxySecretRef names a Secret that holds the proxy's address"},
+		{"fluxcd-provider", provider, fluxProviderMinimal, "bogus", ""},
+	} {
+		t.Run(tc.typ+"/"+tc.key, func(t *testing.T) {
+			props := func() map[string]any { return withProperty(tc.minimal(), tc.key, "x") }
+			app := &oam.Application{
+				Metadata: oam.Metadata{Name: "shop", Namespace: "shop"},
+				Spec:     oam.ApplicationSpec{Components: []oam.Component{{Name: "notify", Type: tc.typ, Properties: props()}}},
+			}
+			authored := tr.ValidateAuthoredProperties(app)
+			if authored == nil || !strings.Contains(authored.Error(), `unsupported field "`+tc.key+`"`) {
+				t.Fatalf("ValidateAuthoredProperties: error = %v, want the unsupported-field error", authored)
+			}
+			_, decoded := tc.handler.ToApplicationConfig(&oam.Component{Name: "notify", Type: tc.typ, Properties: props()}, "shop")
+			if decoded == nil || !strings.Contains(decoded.Error(), `unknown field "`+tc.key+`"`) {
+				t.Fatalf("ToApplicationConfig: error = %v, want the unknown-field error", decoded)
+			}
+			for _, err := range []error{authored, decoded} {
+				if tc.hint == "" {
+					if strings.Contains(err.Error(), "notification.toolkit.fluxcd.io/v1 Alert has") || strings.Contains(err.Error(), "notification.toolkit.fluxcd.io/v1 Provider has") {
+						t.Errorf("error %q carries a removed-key hint for %s", err, tc.key)
+					}
+					continue
+				}
+				if !strings.Contains(err.Error(), tc.hint) {
+					t.Errorf("error %q: want the hint %q", err, tc.hint)
+				}
+			}
+		})
 	}
 }

@@ -105,7 +105,7 @@ func TestKindNamedFluxConfigs_GenerateChecksInterval(t *testing.T) {
 			return &components.HelmReleaseConfig{Name: "src", Spec: helmv2.HelmReleaseSpec{
 				Chart: &helmv2.HelmChartTemplate{Spec: helmv2.HelmChartTemplateSpec{
 					Chart:     "podinfo",
-					SourceRef: helmv2.CrossNamespaceObjectReference{Kind: "HelmRepository", Name: "podinfo"},
+					SourceRef: &helmv2.CrossNamespaceObjectReference{Kind: "HelmRepository", Name: "podinfo"},
 				}},
 				Interval: metav1.Duration{Duration: d},
 			}}
@@ -117,7 +117,7 @@ func TestKindNamedFluxConfigs_GenerateChecksInterval(t *testing.T) {
 		},
 		"ocirepository": func(d time.Duration) stack.ApplicationConfig {
 			return &components.OCIRepositoryConfig{Name: "src", Spec: sourcev1.OCIRepositorySpec{
-				URL: "oci://ghcr.io/org/manifests", Interval: metav1.Duration{Duration: d},
+				URL: "oci://ghcr.io/org/manifests", Interval: &metav1.Duration{Duration: d},
 			}}
 		},
 		"gitrepository": func(d time.Duration) stack.ApplicationConfig {
