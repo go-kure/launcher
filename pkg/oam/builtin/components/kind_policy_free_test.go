@@ -159,8 +159,7 @@ var policyFreeKinds = []policyFreeKind{
 		minimal: artifactGeneratorMinimal(),
 		full:    artifactGeneratorFull(),
 		unfixtured: map[string]string{
-			"managedNamespaces":  "refused (go-kure/launcher#1073)",
-			"serviceAccountName": "refused (go-kure/launcher#1073)",
+			"managedNamespaces": "refused (go-kure/launcher#1073)",
 		},
 	},
 	{
@@ -2187,16 +2186,14 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"source without an alias", artifactGeneratorWith(map[string]any{"kind": "GitRepository", "name": "app"}), "sources[0].alias: required"},
 			{"source without a kind", artifactGeneratorWith(map[string]any{"alias": "app", "name": "app"}), "sources[0].kind: required"},
 			{"second source without a name", artifactGeneratorWith(artifactGeneratorSource(), map[string]any{"alias": "base", "kind": "OCIRepository"}), "sources[1].name: required"},
-			// The fields source-watcher v2.3 adds are refused, whatever their
-			// value (go-kure/launcher#1073).
+			// managedNamespaces is refused, whatever its value
+			// (go-kure/launcher#1073).
 			{"managedNamespaces", withProperty(artifactGeneratorMinimal(), "managedNamespaces", map[string]any{"prune": true, "allowedNames": []any{"shop"}}), "managedNamespaces: not supported by this component yet (go-kure/launcher#1073)"},
 			{"managedNamespaces null", withProperty(artifactGeneratorMinimal(), "managedNamespaces", nil), "managedNamespaces: not supported"},
-			{"serviceAccountName", withProperty(artifactGeneratorMinimal(), "serviceAccountName", "generator"), "serviceAccountName: not supported"},
-			{"serviceAccountName empty, folded", withProperty(artifactGeneratorMinimal(), "ServiceAccountName", ""), "serviceAccountName: not supported"},
-			{"an artifact's namespace", artifactGeneratorWithArtifact(withProperty(artifactGeneratorArtifact(), "namespace", "other")), "artifacts[0].namespace: not supported"},
-			// The deferred-field pass reads numbers exact, so a number a float64
-			// cannot hold reaches the decode, which refuses it as the string the
-			// field is.
+			{"managedNamespaces folded", withProperty(artifactGeneratorMinimal(), "ManagedNamespaces", map[string]any{}), "managedNamespaces: not supported"},
+			// The managedNamespaces pass reads only the authored keys, so a
+			// number a float64 cannot hold reaches the decode, which refuses it
+			// as the string the field is.
 			{"a number a float64 cannot hold", artifactGeneratorWithArtifact(withProperty(artifactGeneratorArtifact(), "revision", json.Number("1e400"))), "revision of type string"},
 			{"no artifacts", map[string]any{"sources": []any{artifactGeneratorSource()}}, "artifacts: required"},
 			{"artifact without a name", withProperty(artifactGeneratorMinimal(), "artifacts", []any{map[string]any{"copy": []any{artifactGeneratorCopy()}}}), "artifacts[0].name: required"},

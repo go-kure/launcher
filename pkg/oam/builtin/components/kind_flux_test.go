@@ -315,8 +315,10 @@ func artifactGeneratorMinimal() map[string]any {
 	return artifactGeneratorWith(artifactGeneratorSource())
 }
 
-// artifactGeneratorFull sets every field of an ArtifactGeneratorSpec. Its
-// second source is an OCIRepository of another namespace.
+// artifactGeneratorFull sets every field of an ArtifactGeneratorSpec but
+// `managedNamespaces`, which the kind refuses. Its second source is an
+// OCIRepository of another namespace, and its artifact's namespace a
+// placeholder.
 func artifactGeneratorFull() map[string]any {
 	return map[string]any{
 		"commonMetadata": map[string]any{
@@ -327,10 +329,11 @@ func artifactGeneratorFull() map[string]any {
 			map[string]any{"alias": "apps", "kind": "GitRepository", "name": "fleet"},
 			map[string]any{"alias": "base", "kind": "OCIRepository", "name": "base-manifests", "namespace": "platform"},
 		},
-		"pathPattern": "@apps/apps/{app}",
+		"pathPattern":        "@apps/apps/{app}",
+		"serviceAccountName": "artifact-writer",
 		"artifacts": []any{
 			map[string]any{
-				"name": "{app}", "revision": "@apps", "originRevision": "@apps",
+				"name": "{app}", "namespace": "{app}", "revision": "@apps", "originRevision": "@apps",
 				"inputsFrom": "@apps/apps/{app}/inputs.yaml",
 				"copy": []any{
 					map[string]any{"from": "@base/**", "to": "@artifact/", "exclude": []any{"*.md"}, "strategy": "Overwrite"},
@@ -426,6 +429,49 @@ func TestArtifactGenerator_OptionalFalseIsTheDefault(t *testing.T) {
 	}
 	if second, _ := copies[1].(map[string]any); second == nil || second["optional"] != true {
 		t.Errorf("copy[1] = %v, want optional: true as authored", copies[1])
+	}
+}
+
+// TestArtifactGenerator_AccountAndArtifactNamespaceAsAuthored:
+// `serviceAccountName` and an artifact's `namespace`, a literal one or a
+// placeholder, are written as authored, with and without a Flux namespace:
+// launcher fills no namespace in for an artifact that names none, and holds
+// neither to the application's namespace or the Flux namespace.
+func TestArtifactGenerator_AccountAndArtifactNamespaceAsAuthored(t *testing.T) {
+	kind := fluxKindRow(t, "artifactgenerator")
+	props := func() map[string]any {
+		return map[string]any{
+			"sources":            []any{artifactGeneratorSource()},
+			"pathPattern":        "@app/apps/{app}",
+			"serviceAccountName": "artifact-writer",
+			"artifacts": []any{
+				map[string]any{"name": "literal", "namespace": "other", "copy": []any{artifactGeneratorCopy()}},
+				map[string]any{"name": "{app}", "namespace": "{app}", "copy": []any{artifactGeneratorCopy()}},
+				artifactGeneratorArtifact(),
+			},
+		}
+	}
+	for _, fluxNS := range []string{"", "flux-system"} {
+		objs, err := fluxKindTransform(kind, fluxNS, oam.Component{Name: "web", Properties: props()})
+		if err != nil {
+			t.Fatalf("transform with the Flux namespace %q: %v", fluxNS, err)
+		}
+		if len(objs) != 1 {
+			t.Fatalf("generated %d objects with the Flux namespace %q, want one", len(objs), fluxNS)
+		}
+		spec, _ := policyFreeJSON(t, objs[0])["spec"].(map[string]any)
+		if spec["serviceAccountName"] != "artifact-writer" {
+			t.Errorf("Flux namespace %q: serviceAccountName = %v, want the authored artifact-writer", fluxNS, spec["serviceAccountName"])
+		}
+		artifacts, _ := spec["artifacts"].([]any)
+		if len(artifacts) != 3 {
+			t.Fatalf("Flux namespace %q: spec.artifacts = %v, want three", fluxNS, spec["artifacts"])
+		}
+		for i, want := range []any{"other", "{app}", nil} {
+			if a, _ := artifacts[i].(map[string]any); a == nil || a["namespace"] != want {
+				t.Errorf("Flux namespace %q: artifacts[%d] = %v, want namespace %v", fluxNS, i, artifacts[i], want)
+			}
+		}
 	}
 }
 

@@ -125,7 +125,7 @@ var fluxRulesLeft = map[string]map[string]string{
 	},
 	artifactGeneratorType: {
 		`spec: has(self.pathPattern) && size(self.pathPattern) > 0 || self.artifacts.all(a, a.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$') && a.name.size() <= 253)`:          "without a `pathPattern`, an artifact whose `name` is no Kubernetes object name builds and is refused at apply: " + fluxNoCRD,
-		`spec: has(self.pathPattern) && size(self.pathPattern) > 0 || self.artifacts.all(a, !has(a.__namespace__) || (a.__namespace__.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$') && a.__namespace__.size() <= 63))`: "an artifact's `namespace` is refused (go-kure/launcher#1073), so the rule never applies to what the kind builds",
+		`spec: has(self.pathPattern) && size(self.pathPattern) > 0 || self.artifacts.all(a, !has(a.__namespace__) || (a.__namespace__.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$') && a.__namespace__.size() <= 63))`: "without a `pathPattern`, an artifact whose `namespace` is no namespace name builds and is refused at apply: " + fluxNoCRD,
 		"spec.managedNamespaces.metadata: has(self.fromSource) || (has(self.from) && size(self.from) > 0)":                                                                                                          "`managedNamespaces` is refused (go-kure/launcher#1073), so the rule never applies to what the kind builds",
 		"spec.managedNamespaces.metadata.fromSource: (has(self.allowedAnnotations) && size(self.allowedAnnotations) > 0) || (has(self.allowedLabels) && size(self.allowedLabels) > 0)":                              "`managedNamespaces` is refused (go-kure/launcher#1073), so the rule never applies to what the kind builds",
 	},

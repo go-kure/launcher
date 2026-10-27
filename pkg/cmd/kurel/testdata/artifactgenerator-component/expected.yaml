@@ -11,6 +11,7 @@ spec:
     - from: '@app/deploy/**'
       to: '@artifact/'
     name: app-manifests
+    namespace: shop
   sources:
   - alias: app
     kind: GitRepository
@@ -36,11 +37,13 @@ spec:
       to: '@artifact/values.yaml'
     inputsFrom: '@apps/apps/{app}/inputs.yaml'
     name: '{app}'
+    namespace: '{app}'
     originRevision: '@apps'
   commonMetadata:
     labels:
       team: shop
   pathPattern: '@apps/apps/{app}'
+  serviceAccountName: artifact-writer
   sources:
   - alias: apps
     kind: GitRepository
