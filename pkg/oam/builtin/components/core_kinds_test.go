@@ -78,7 +78,10 @@ var coreKindSchemas = []struct {
 		"sha":       "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
 	}},
 	{"apiservice", reflect.TypeFor[apiregistrationv1.APIServiceSpec](), &components.APIServiceHandler{}, nil},
-	{"artifactgenerator", reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), &components.ArtifactGeneratorHandler{}, nil},
+	{"artifactgenerator", reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), &components.ArtifactGeneratorHandler{}, map[string]string{
+		"managedNamespaces":  "refused until the kind models the Namespaces it makes the controller create, label and prune (go-kure/launcher#1073)",
+		"serviceAccountName": "refused until the kind models the account the controller acts as (go-kure/launcher#1073)",
+	}},
 	{"backendtlspolicy", reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), &components.BackendTLSPolicyHandler{}, nil},
 	{"certificate", reflect.TypeFor[certv1.CertificateSpec](), &components.CertificateHandler{}, nil},
 	{"cilium-bgpadvertisement", reflect.TypeFor[ciliumv2.CiliumBGPAdvertisementSpec](), &components.CiliumBGPAdvertisementHandler{}, nil},

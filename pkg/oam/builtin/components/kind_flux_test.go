@@ -270,7 +270,8 @@ func imageUpdateAutomationFull() map[string]any {
 				"options": map[string]any{"merge_request.create": ""},
 			},
 		},
-		"interval": "30m",
+		"interval":          "30m",
+		"policyChangeDelay": "2m",
 		"policySelector": map[string]any{
 			"matchLabels":      map[string]any{"team": "shop"},
 			"matchExpressions": []any{map[string]any{"key": "tier", "operator": "In", "values": []any{"web"}}},
@@ -301,6 +302,12 @@ func artifactGeneratorArtifact() map[string]any {
 // sources and one artifact.
 func artifactGeneratorWith(sources ...any) map[string]any {
 	return map[string]any{"sources": append([]any{}, sources...), "artifacts": []any{artifactGeneratorArtifact()}}
+}
+
+// artifactGeneratorWithArtifact is the properties of an artifactgenerator with
+// one source and the one artifact.
+func artifactGeneratorWithArtifact(artifact map[string]any) map[string]any {
+	return map[string]any{"sources": []any{artifactGeneratorSource()}, "artifacts": []any{artifact}}
 }
 
 // artifactGeneratorMinimal is the least an artifactgenerator may author.

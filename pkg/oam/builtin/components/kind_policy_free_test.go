@@ -158,6 +158,10 @@ var policyFreeKinds = []policyFreeKind{
 		typ: reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), namespaced: true, flux: true,
 		minimal: artifactGeneratorMinimal(),
 		full:    artifactGeneratorFull(),
+		unfixtured: map[string]string{
+			"managedNamespaces":  "refused (go-kure/launcher#1073)",
+			"serviceAccountName": "refused (go-kure/launcher#1073)",
+		},
 	},
 	{
 		component: "backendtlspolicy", handler: &components.BackendTLSPolicyHandler{},
@@ -2183,6 +2187,15 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"source without an alias", artifactGeneratorWith(map[string]any{"kind": "GitRepository", "name": "app"}), "sources[0].alias: required"},
 			{"source without a kind", artifactGeneratorWith(map[string]any{"alias": "app", "name": "app"}), "sources[0].kind: required"},
 			{"second source without a name", artifactGeneratorWith(artifactGeneratorSource(), map[string]any{"alias": "base", "kind": "OCIRepository"}), "sources[1].name: required"},
+			// The fields source-watcher v2.3 adds are refused, whatever their
+			// value (go-kure/launcher#1073).
+			{"managedNamespaces", withProperty(artifactGeneratorMinimal(), "managedNamespaces", map[string]any{"prune": true, "allowedNames": []any{"shop"}}), "managedNamespaces: not supported by this component yet (go-kure/launcher#1073)"},
+			{"managedNamespaces null", withProperty(artifactGeneratorMinimal(), "managedNamespaces", nil), "managedNamespaces: not supported"},
+			{"serviceAccountName", withProperty(artifactGeneratorMinimal(), "serviceAccountName", "generator"), "serviceAccountName: not supported"},
+			{"serviceAccountName empty, folded", withProperty(artifactGeneratorMinimal(), "ServiceAccountName", ""), "serviceAccountName: not supported"},
+			{"an artifact's namespace", artifactGeneratorWithArtifact(withProperty(artifactGeneratorArtifact(), "namespace", "other")), "artifacts[0].namespace: not supported"},
+			{"an artifact's inputsFrom", artifactGeneratorWithArtifact(withProperty(artifactGeneratorArtifact(), "inputsFrom", "@app/inputs.yaml")), "artifacts[0].inputsFrom: not supported"},
+			{"a copy's optional false", artifactGeneratorWithArtifact(map[string]any{"name": "app", "copy": []any{artifactGeneratorCopy(), withProperty(artifactGeneratorCopy(), "optional", false)}}), "artifacts[0].copy[1].optional: not supported"},
 			{"no artifacts", map[string]any{"sources": []any{artifactGeneratorSource()}}, "artifacts: required"},
 			{"artifact without a name", withProperty(artifactGeneratorMinimal(), "artifacts", []any{map[string]any{"copy": []any{artifactGeneratorCopy()}}}), "artifacts[0].name: required"},
 			{"artifact without a copy", withProperty(artifactGeneratorMinimal(), "artifacts", []any{map[string]any{"name": "app"}}), "artifacts[0].copy: required"},
