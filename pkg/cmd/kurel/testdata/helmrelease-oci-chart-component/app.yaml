@@ -1,0 +1,25 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: podinfo
+  namespace: default
+spec:
+  components:
+    - name: podinfo
+      type: helmrelease
+      properties:
+        interval: 10m
+        chart:
+          kind: OCIRepository
+          spec:
+            url: oci://ghcr.io/stefanprodan/charts/podinfo
+            ref:
+              tag: 6.7.0
+            interval: 30m
+            timeout: 59m59s
+            verify:
+              matchOIDCIdentity:
+                - issuer: ^https://token.actions.githubusercontent.com$
+                  subject: ^https://github.com/stefanprodan/podinfo.*$
+        values:
+          replicaCount: 2

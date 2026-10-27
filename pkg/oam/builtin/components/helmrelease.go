@@ -31,13 +31,17 @@ const helmReleaseDefaultInterval = 60 * time.Minute
 
 // HelmReleaseHandler handles the kind-named `helmrelease` component: a 1:1
 // projection of Flux's HelmReleaseSpec. It emits exactly one HelmRelease and
-// creates no source: spec.chart or spec.chartRef names an existing one. Values
-// in a ConfigMap are the `helm` component's valuesMode: configMap, which
-// lowers to a helmrelease plus a configmap trait (go-kure/launcher#702).
+// no source object: spec.chartRef, or the sourceRef of a chart template of kind
+// HelmChart, names an existing one, and for a chart template of kind
+// OCIRepository helm-controller generates the OCIRepository itself
+// (go-kure/launcher#1072). Values in a ConfigMap are the `helm` component's
+// valuesMode: configMap, which lowers to a helmrelease plus a configmap trait
+// (go-kure/launcher#702).
 type HelmReleaseHandler struct{}
 
 // helmReleaseDurations are HelmReleaseSpec's duration fields, nested ones
-// included. All take the same form.
+// included. All take the form with h but chart.spec.timeout, the timeout of
+// the OCIRepository a chart template inlines, which takes no h.
 var helmReleaseDurations = []fluxDurationField[helmv2.HelmReleaseSpec]{
 	{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration { return &s.Interval }},
 	{path: []string{"timeout"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration { return s.Timeout }},
@@ -46,6 +50,12 @@ var helmReleaseDurations = []fluxDurationField[helmv2.HelmReleaseSpec]{
 			return nil
 		}
 		return s.Chart.Spec.Interval
+	}},
+	{path: []string{"chart", "spec", "timeout"}, form: fluxduration.SourceTimeout, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration {
+		if s.Chart == nil {
+			return nil
+		}
+		return s.Chart.Spec.Timeout
 	}},
 	{path: []string{"install", "timeout"}, form: fluxduration.Interval, get: func(s *helmv2.HelmReleaseSpec) *metav1.Duration {
 		if s.Install == nil {
@@ -115,7 +125,7 @@ func (h *HelmReleaseHandler) PropertySchema() map[string]oam.PropertySchema {
 		return oam.PropertySchema{Type: oam.PropertyTypeBoolean, Description: desc}
 	}
 	return map[string]oam.PropertySchema{
-		"chart":              object("HelmRelease spec.chart: a chart template of kind HelmChart (the default), naming a chart (`spec.chart`, required) in an existing HelmRepository, GitRepository or Bucket source (`spec.sourceRef`, required). The kind OCIRepository is refused, and so are the OCIRepository fields the template inlines, which helm-controller does not read for a HelmChart. Exactly one of chart and chartRef is required."),
+		"chart":              object("HelmRelease spec.chart: a chart template; `kind` is the kind of the source object helm-controller generates from it. Kind HelmChart (the default) names a chart (`spec.chart`, required) in an existing HelmRepository, GitRepository or Bucket source (`spec.sourceRef`, required); the OCIRepository fields the template inlines are refused, as helm-controller does not read them for a HelmChart. Kind OCIRepository takes the OCIRepository fields, with the chart's `spec.url` (oci://, required) held to the allowed registries, and helm-controller generates the OCIRepository `<namespace>-<name>` in the HelmRelease's namespace; `spec.chart`, `sourceRef`, `valuesFiles` and `ignoreMissingValuesFiles` are refused, `version` takes only `*` and `reconcileStrategy` only ChartVersion, and `spec.timeout` must be under an hour. Exactly one of chart and chartRef is required."),
 		"chartRef":           object("HelmRelease spec.chartRef: a reference to an existing OCIRepository, ExternalArtifact or HelmChart source. Exactly one of chart and chartRef is required."),
 		"interval":           str("HelmRelease spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
 		"kubeConfig":         object("HelmRelease spec.kubeConfig: a kubeconfig reference for a remote cluster."),
@@ -167,10 +177,10 @@ func (h *HelmReleaseHandler) UnsupportedFieldHint(key string) string {
 // ToApplicationConfig decodes the component's properties strictly into a
 // helmv2.HelmReleaseSpec. Any key HelmReleaseSpec does not declare, at any
 // depth, and any wrongly typed value is an error. Checks: exactly one of chart
-// and chartRef, the kind of a chart's source reference, values a JSON object,
-// each valuesFrom entry within the ValuesReference CRD's constraints, and
-// chart.spec.verify.provider not an authored "". Every other constraint is
-// left to Flux's own CRD admission.
+// and chartRef, the chart template's rules (checkHelmReleaseChartTemplate),
+// values a JSON object, each valuesFrom entry within the ValuesReference CRD's
+// constraints, and chart.spec.verify.provider not an authored "". Every other
+// constraint is left to Flux's own CRD admission.
 func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	spec, _, err := builtin.DecodeStrictJSON[helmv2.HelmReleaseSpec](component.Properties)
 	if err != nil {
@@ -180,14 +190,23 @@ func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, names
 		}
 		return nil, errors.Errorf("helmrelease: properties do not decode as a HelmReleaseSpec: %w%s", err, hint)
 	}
-	if err := checkAuthoredFluxDurations("helmrelease", component.Properties, helmReleaseDurations); err != nil {
+	durations := helmReleaseDurations
+	if spec.Chart != nil && isHelmChartTemplateKind(spec.Chart.Kind) {
+		// chart.spec.timeout is refused as inert below, whatever its text.
+		durations = slices.DeleteFunc(slices.Clone(durations), func(f fluxDurationField[helmv2.HelmReleaseSpec]) bool {
+			return f.name() == "chart.spec.timeout"
+		})
+	}
+	if err := checkAuthoredFluxDurations("helmrelease", component.Properties, durations); err != nil {
 		return nil, err
 	}
 	if err := refuseEmptyFluxVerifyProvider(component.Properties, "chart", "spec", "verify"); err != nil {
 		return nil, err
 	}
-	if err := refuseAuthoredInertChartFields(component.Properties); err != nil {
-		return nil, err
+	if spec.Chart != nil && isHelmChartTemplateKind(spec.Chart.Kind) {
+		if err := refuseAuthoredInertChartFields(component.Properties); err != nil {
+			return nil, err
+		}
 	}
 	cfg := &HelmReleaseConfig{
 		Name:       component.Name,
@@ -230,8 +249,17 @@ type HelmReleaseConfig struct {
 	fluxNS string
 }
 
-// ApplyPolicy is a no-op: a HelmRelease has no resource-limit policy.
-func (c *HelmReleaseConfig) ApplyPolicy(_ oam.Policy) error { return nil }
+// ApplyPolicy holds the url of a chart template of kind OCIRepository to the
+// policy's allowed registries, as the ocirepository component holds its own
+// (enforceFluxSourceOCIHost): it is the repository helm-controller generates an
+// OCIRepository for. Nothing else of a HelmRelease names a host: a chartRef and
+// the sourceRef of a chart template of kind HelmChart name existing sources.
+func (c *HelmReleaseConfig) ApplyPolicy(p oam.Policy) error {
+	if ch := c.Spec.Chart; ch != nil && ch.Kind == sourcev1.OCIRepositoryKind {
+		return enforceFluxSourceOCIHost("helmrelease", "chart.spec.url", ch.Spec.URL, true, p)
+	}
+	return nil
+}
 
 // SetFluxNamespace moves the HelmRelease to ns. Satisfies
 // pkg/oam.fluxNamespaceSettable.
@@ -274,17 +302,12 @@ func (c *HelmReleaseConfig) validate() error {
 	return nil
 }
 
-// helmReleaseChartOCIRefusal is the refusal of a chart template of kind
-// OCIRepository, which this component does not take (go-kure/launcher#1072).
-const helmReleaseChartOCIRefusal = "chart.kind: OCIRepository is not supported by this component (go-kure/launcher#1072); a chart in an OCI registry is an ocirepository component and a chartRef to it"
-
 // helmReleaseChartInertFields are the chart.spec fields of a chart template
 // that helm-controller does not carry into the HelmChart it generates. The
 // template inlines an OCIRepositorySpec, which a template of kind
-// OCIRepository reads and one of kind HelmChart, the only kind this component
-// takes, does not: helm-controller v1.7.1 maps chart, version, interval,
-// reconcileStrategy, valuesFiles, ignoreMissingValuesFiles, sourceRef and
-// verify's provider and secretRef
+// OCIRepository reads and one of kind HelmChart does not: helm-controller
+// v1.7.1 maps chart, version, interval, reconcileStrategy, valuesFiles,
+// ignoreMissingValuesFiles, sourceRef and verify's provider and secretRef
 // (internal/reconcile/helmchart_template.go:225-258), and the API refuses url
 // without kind OCIRepository (api/v2/helmrelease_types.go:373). The two
 // fields of the inlined spec that are read, interval and verify, are not
@@ -319,24 +342,82 @@ var helmReleaseChartVerifyInertFields = map[string]func(*sourcev1.OCIRepositoryV
 // helmReleaseChartInertRefusal is the refusal of an inert chart template field
 // at path.
 func helmReleaseChartInertRefusal(path string) error {
-	return errors.Errorf("%s: not read for a chart template of kind HelmChart, the only kind this component takes; helm-controller does not carry it into the HelmChart it generates (it is a field of the OCIRepository a template of kind OCIRepository generates, go-kure/launcher#1072). A source's own settings go on the source sourceRef names", path)
+	return errors.Errorf("%s: not read for a chart template of kind HelmChart (the default); helm-controller does not carry it into the HelmChart it generates. It is a field of the OCIRepository a template of chart.kind OCIRepository generates; for a HelmChart, a source's own settings go on the source sourceRef names", path)
+}
+
+// isHelmChartTemplateKind reports whether a chart template of kind generates
+// a HelmChart: kind HelmChart, or none, its default.
+func isHelmChartTemplateKind(kind string) bool {
+	return kind == "" || kind == sourcev1.HelmChartKind
 }
 
 // checkHelmReleaseChartTemplate holds a chart template to what helm-controller
-// generates a HelmChart from: kind HelmChart or none, a chart and a source
-// reference with its kind, which the API requires for that kind
-// (api/v2/helmrelease_types.go:374) and the type leaves out of the object
-// when empty, and none of the inert fields set. A kind does not choose the
-// source's kind for the author.
+// generates from it, by its kind, which takes the API's two values
+// (api/v2/helmrelease_types.go:393): a HelmChart (checkHelmChartTemplate) or
+// an OCIRepository (checkOCIRepositoryChartTemplate).
 func checkHelmReleaseChartTemplate(ch *helmv2.HelmChartTemplate) error {
-	switch ch.Kind {
-	case "", sourcev1.HelmChartKind:
-	case sourcev1.OCIRepositoryKind:
-		return errors.New(helmReleaseChartOCIRefusal)
-	default:
-		return errors.Errorf("chart.kind %q: the Flux API takes HelmChart (the default) or OCIRepository, and this component takes HelmChart only", ch.Kind)
+	switch {
+	case isHelmChartTemplateKind(ch.Kind):
+		return checkHelmChartTemplate(&ch.Spec)
+	case ch.Kind == sourcev1.OCIRepositoryKind:
+		return checkOCIRepositoryChartTemplate(&ch.Spec)
 	}
-	s := &ch.Spec
+	return errors.Errorf("chart.kind %q: the Flux API takes HelmChart (the default) or OCIRepository", ch.Kind)
+}
+
+// helmReleaseChartOCIMaxTimeout bounds chart.spec.timeout under kind
+// OCIRepository: helm-controller copies the template into a typed
+// OCIRepository and converts it with DefaultUnstructuredConverter before it
+// applies it (helm-controller v1.7.1
+// internal/reconcile/helmchart_template.go:130,152), which writes a
+// metav1.Duration as Duration.String(). An hour or more then carries an h,
+// which the OCIRepository's timeout pattern refuses
+// (source-controller api v1.10.1 v1/ocirepository_types.go:132-134), whatever
+// the component writes.
+const helmReleaseChartOCIMaxTimeout = time.Hour
+
+// checkOCIRepositoryChartTemplate holds a chart template of kind OCIRepository
+// to the API's rules for that kind (api/v2/helmrelease_types.go:372-380): a url,
+// starting with oci://, and no chart, sourceRef, valuesFiles or
+// ignoreMissingValuesFiles, a version only of "*" and a reconcileStrategy only
+// of ChartVersion. The rules are read on the decoded spec, so a value the type
+// leaves out of the object, an ignoreMissingValuesFiles: false or an empty
+// valuesFiles, is unauthored, as it is in the object. Last, a timeout must be
+// under an hour (helmReleaseChartOCIMaxTimeout).
+func checkOCIRepositoryChartTemplate(s *helmv2.HelmChartTemplateSpec) error {
+	if err := checkFluxSourceURL("helmrelease", "chart.spec.url", s.URL, "oci://"); err != nil {
+		return errors.Errorf("%w under chart.kind OCIRepository", err)
+	}
+	refused := func(field string) error {
+		return errors.Errorf("chart.spec.%s: not taken under chart.kind OCIRepository, which generates an OCIRepository for the chart artifact chart.spec.url names (the Flux API refuses it)", field)
+	}
+	switch {
+	case s.Chart != "":
+		return refused("chart")
+	case s.SourceRef != nil:
+		return refused("sourceRef")
+	case len(s.ValuesFiles) > 0:
+		return refused("valuesFiles")
+	case s.IgnoreMissingValuesFiles:
+		return refused("ignoreMissingValuesFiles")
+	case s.Version != "" && s.Version != "*":
+		return errors.Errorf("chart.spec.version %q: under chart.kind OCIRepository only \"*\" is taken; the version is the tag or digest chart.spec.ref names (the Flux API refuses another)", s.Version)
+	case s.ReconcileStrategy != "" && s.ReconcileStrategy != sourcev1.ReconcileStrategyChartVersion:
+		return errors.Errorf("chart.spec.reconcileStrategy %q: under chart.kind OCIRepository only %s is taken (the Flux API refuses another)", s.ReconcileStrategy, sourcev1.ReconcileStrategyChartVersion)
+	}
+	if t := s.Timeout; t != nil && t.Duration >= helmReleaseChartOCIMaxTimeout {
+		return errors.Errorf("chart.spec.timeout %s: under chart.kind OCIRepository it must be under an hour: helm-controller writes the OCIRepository it generates with the timeout in hours, which the OCIRepository's timeout does not take. For a longer timeout, use an ocirepository component and a chartRef to it", fluxduration.SourceTimeout.Format(t.Duration))
+	}
+	return nil
+}
+
+// checkHelmChartTemplate holds a chart template of kind HelmChart to what
+// helm-controller generates a HelmChart from: a chart and a source reference
+// with its kind, which the API requires for that kind
+// (api/v2/helmrelease_types.go:374) and the type leaves out of the object when
+// empty, and none of the inert fields set. A kind does not choose the source's
+// kind for the author.
+func checkHelmChartTemplate(s *helmv2.HelmChartTemplateSpec) error {
 	if s.SourceRef == nil {
 		return errors.New("chart.spec.sourceRef: required (the HelmRepository, GitRepository or Bucket the chart is in)")
 	}

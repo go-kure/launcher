@@ -17,6 +17,7 @@ import (
 	"time"
 
 	fluxoperatorv1 "github.com/controlplaneio-fluxcd/flux-operator/api/v1"
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
@@ -665,7 +666,19 @@ func TestFluxKinds_DurationsMatchMarkers(t *testing.T) {
 	lines := linkedMarkerLines(t, markerModules)
 	duration := reflect.TypeFor[metav1.Duration]()
 	reached := 0
+	type durationRow struct {
+		component string
+		typ       reflect.Type
+		durations map[string]fluxduration.Form
+	}
+	var rows []durationRow
 	for _, kind := range fluxKindRows {
+		rows = append(rows, durationRow{kind.component, kind.typ, kind.durations})
+	}
+	// helmrelease is no row of fluxKindRows, which holds a kind's required list
+	// too; its durations are held here (go-kure/launcher#1072).
+	rows = append(rows, durationRow{"helmrelease", reflect.TypeFor[helmv2.HelmReleaseSpec](), durationForms(helmReleaseDurations)})
+	for _, kind := range rows {
 		t.Run(kind.component, func(t *testing.T) {
 			want := map[string]fluxduration.Form{}
 			walkKindFields(kind.typ, func(kindField) bool { return false }, func(f kindField) {

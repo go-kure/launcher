@@ -184,7 +184,7 @@ reads it.
 | `grpcroute` | GRPCRoute | Kind-named GRPCRoute: the whole `GRPCRouteSpec` (`parentRefs`, `useDefaultGateways`, `hostnames`, `rules`), strictly decoded, on the `httproute` kind's recipe: nothing required or filled, no NetworkPolicy allow rule and no environment policy — see below. |
 | `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
 | `helmchart` | HelmChart | Kind-named: the full Flux `HelmChartSpec`, a chart from an existing source. Not the composite removed under this name (go-kure/launcher#350); that is `helm`. |
-| `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source. |
+| `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source, or an OCI chart helm-controller fetches itself (`chart.kind: OCIRepository`). |
 | `helmrepository` | HelmRepository | Kind-named: the full Flux `HelmRepositorySpec`, and nothing else. |
 | `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`, `secretValues`, `scopeOverrides`. What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. |
 | `horizontalpodautoscaler` | HorizontalPodAutoscaler | Kind-named HorizontalPodAutoscaler: the whole `HorizontalPodAutoscalerSpec`, strictly decoded; `scaleTargetRef` and `maxReplicas` are required. `maxReplicas` is held to the environment policy's replica maximum, no default filled; the target is the author's and is not checked — see below. |
@@ -449,7 +449,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `fluxcd.CreateFluxReport` | fluxcd.controlplane.io/v1 FluxReport | not authorable | - | - | Written by the Flux operator. |
 | `fluxcd.CreateGitRepository` | source.toolkit.fluxcd.io/v1 GitRepository | kind | `gitrepository` | strict decode of `GitRepositorySpec` | - |
 | `fluxcd.CreateHelmChart` | source.toolkit.fluxcd.io/v1 HelmChart | kind | `helmchart` | strict decode of `HelmChartSpec` | - |
-| `fluxcd.CreateHelmRelease` | helm.toolkit.fluxcd.io/v2 HelmRelease | kind | `helmrelease` | strict decode of `HelmReleaseSpec` | `helm` lowers onto it. |
+| `fluxcd.CreateHelmRelease` | helm.toolkit.fluxcd.io/v2 HelmRelease | kind | `helmrelease` | strict decode of `HelmReleaseSpec` | `helm` lowers onto it. Against an existing source, or an OCI chart helm-controller fetches itself (`chart.kind: OCIRepository`), whose `chart.spec.url` is held to the allowed registries. |
 | `fluxcd.CreateHelmRepository` | source.toolkit.fluxcd.io/v1 HelmRepository | kind | `helmrepository` | strict decode of `HelmRepositorySpec` | - |
 | `fluxcd.CreateImagePolicy` | image.toolkit.fluxcd.io/v1 ImagePolicy | kind | `imagepolicy` | strict decode of `ImagePolicySpec` | `imageRepositoryRef` with its `name` and `policy` must be written, and of a `semver` policy its `range`: the fields the linked Go source marks required, not held to a CRD. The repository's `namespace` is written as authored. `interval` is held to the pattern of a Flux duration; the API's two expression rules, which tie it to `digestReflectionPolicy: Always`, are not checked. It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateImageRepository` | image.toolkit.fluxcd.io/v1 ImageRepository | kind | `imagerepository` | strict decode of `ImageRepositorySpec` | `image` and `interval` must be written, and of an authored `secretRef`, `proxySecretRef` or `certSecretRef` its `name`, of an authored `accessFrom` its `namespaceSelectors`: the fields the linked Go source marks required, not held to a CRD. `interval` and `timeout` are each held to the pattern of their field; `timeout` takes no `h`, and one of an hour or more is written in minutes. It lands in the Flux namespace when one is set. The registry of `image` is held to the allowed registries of the environment policy; no tag rule applies. |
@@ -9664,8 +9664,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (go-kure/launcher#327, part of the Helm-family redesign go-kure/launcher#336). Its
   properties are exactly the top-level JSON keys of `HelmReleaseSpec` in the
   helm-controller API version `go.mod` links; a test ties the published schema to that struct, so a helm-controller bump that adds or
-  drops a spec field fails the suite until the schema follows. It creates no source:
-  `chart.spec.sourceRef` or `chartRef` names one that already exists.
+  drops a spec field fails the suite until the schema follows. It emits no source object:
+  `chart.spec.sourceRef` or `chartRef` names one that already exists, and with
+  `chart.kind: OCIRepository` helm-controller generates one (see **Chart template of kind
+  OCIRepository**).
 
   **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON` into
   `HelmReleaseSpec`. A key the struct does not declare,
@@ -9698,26 +9700,27 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the same way, in the same form (go-kure/launcher#606): `timeout`, `chart.spec.interval`,
   `install.timeout`, `upgrade.timeout`, `test.timeout`, `rollback.timeout`,
   `uninstall.timeout`, and `install.strategy.retryInterval` and
-  `upgrade.strategy.retryInterval`. A nested key matches case-insensitively at every level, as
-  the decode does. Exactly one of
+  `upgrade.strategy.retryInterval`. `chart.spec.timeout`, read only under
+  `chart.kind: OCIRepository`, takes no `h`, as an `ocirepository`'s timeout does not, and must
+  be under an hour (see **Chart template of kind OCIRepository**). A nested key matches
+  case-insensitively at every level, as the decode does. Exactly one of
   `chart` and `chartRef` is required. The published schema lists both as optional and says
   so in the handler's `exclusive` group (go-kure/launcher#790): a validator built from it
-  refuses both and neither, as the build does. Under an authored `chart`, `chart.spec.sourceRef.kind`
+  refuses both and neither, as the build does. The template's `kind` is HelmChart, its
+  default, or OCIRepository (see **Chart template of kind OCIRepository**); any other is
+  refused. Under an authored `chart` of kind HelmChart, `chart.spec.sourceRef.kind`
   is required (go-kure/launcher#790): the API requires it and takes `HelmRepository`,
   `GitRepository` or `Bucket`, the Go type leaves an empty one out of the object, and the
   kind does not choose a source's kind for the author, so a reference without one is
   refused with `chart.spec.sourceRef.kind: required (…)`. Which of the three it is stays the
-  CRD's to check. An authored `chart` without `chart.spec.sourceRef`, or without
-  `chart.spec.chart`, is refused the same way: the API's rules require both for a template
-  of kind HelmChart. The template's `kind` is HelmChart, its default; `kind: OCIRepository`,
-  which the linked helm-controller API (v1.7.1) also takes, is refused (go-kure/launcher#1072), and a chart in an OCI
-  registry is an `ocirepository` component and a `chartRef` to it. So are the
-  OCIRepository fields the template inlines and a template of kind HelmChart does not read,
-  whatever their value (`false` and `null` included): `url`, `ref`, `layerSelector`,
-  `provider`, `secretRef`, `serviceAccountName`, `certSecretRef`, `proxySecretRef`,
-  `timeout`, `ignore`, `insecure`, `suspend`, and `verify.matchOIDCIdentity` and
-  `verify.trustedRootSecretRef`; a source's own settings go on the source `sourceRef`
-  names. An authored `chart.spec.verify` that names no `provider` is written with
+  CRD's to check. A template of kind HelmChart without `chart.spec.sourceRef`, or without
+  `chart.spec.chart`, is refused the same way: the API's rules require both for that kind.
+  So, under kind HelmChart, are the OCIRepository fields the template inlines, which that
+  kind does not read, whatever their value (`false` and `null` included): `url`, `ref`,
+  `layerSelector`, `provider`, `secretRef`, `serviceAccountName`, `certSecretRef`,
+  `proxySecretRef`, `timeout`, `ignore`, `insecure`, `suspend`, and
+  `verify.matchOIDCIdentity` and `verify.trustedRootSecretRef`; a source's own settings go
+  on the source `sourceRef` names. An authored `chart.spec.verify` that names no `provider` is written with
   `provider: cosign`, the API's default: the Go type writes the field whether or not it was
   authored, so the API's default never applies, and the object is then what the API would
   have made of the omitted field. An authored `provider: ""` is refused, since the type
@@ -9740,6 +9743,28 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   else is checked here: the enum checks on `driftDetection.mode`, `install.crds` and
   `upgrade.crds` are left to the HelmRelease CRD's own admission, and so are the limits of
   an authored `releaseName`.
+
+  **Chart template of kind OCIRepository** (go-kure/launcher#1072). With
+  `chart.kind: OCIRepository`, helm-controller generates an OCIRepository for the chart
+  artifact `chart.spec.url` names. The component holds the template to the Flux API's rules
+  for that kind (helm-controller API v1.7.1): `chart.spec.url` is required and starts with
+  `oci://`; `chart`, `sourceRef`, `valuesFiles` and `ignoreMissingValuesFiles` are refused;
+  `version` takes only `*` and `reconcileStrategy` only `ChartVersion`, since the chart's
+  version is the tag or digest `chart.spec.ref` names. The OCIRepository fields the template
+  inlines, refused under kind HelmChart (above), are taken and written as authored. Under a
+  non-empty allowlist `chart.spec.url` is held to the allowed registries as an
+  `ocirepository`'s `url` is: its registry named explicitly, with a repository path after it.
+  `chart.spec.timeout` takes no `h` and must be under an hour: helm-controller writes the
+  OCIRepository it generates through the unstructured converter, which writes a duration of
+  an hour or more with an `h`, and the OCIRepository's timeout refuses that whatever form it
+  was authored in. For a longer timeout, use an `ocirepository` component and a `chartRef`
+  to it. helm-controller names the OCIRepository `<namespace>-<name>` after the HelmRelease,
+  in the HelmRelease's namespace, gives it the template's interval (else the HelmRelease's)
+  and the chart layer as its layer selector, takes over an object of that name and deletes
+  it with the HelmRelease or when the chart changes. So an object of that identity the build
+  generates is refused as a collision (see the collision contract in `pkg/oam`'s README).
+  Prefer an `ocirepository` component and a `chartRef` when several releases share the
+  source or it is authored on its own.
 
   **Release name** (go-kure/launcher#785). A component that authors no `releaseName` gets
   `spec.releaseName` set to the component name, so every HelmRelease in the output names its
@@ -9791,7 +9816,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   The ConfigMaps and Secrets the HelmRelease reads from its own namespace — `valuesFrom`,
   `kubeConfig.secretRef` / `configMapRef`, and `chart.spec.verify.secretRef` when
   helm-controller creates the HelmChart beside the release (`chart.spec.sourceRef` names no
-  namespace, or names the Flux namespace) — must live in the Flux namespace too. A `configmap`, `external-secret` or `certificate` trait on the
+  namespace, or names the Flux namespace), and under `chart.kind: OCIRepository` the
+  `chart.spec.secretRef`, `certSecretRef`, `proxySecretRef`, `verify.secretRef` and
+  `verify.trustedRootSecretRef` of the OCIRepository it generates beside the release — must
+  live in the Flux namespace too. A `configmap`, `external-secret` or `certificate` trait on the
   component whose object one of them names moves there with the release; one none of them names
   stays in the application namespace with the release's workloads (go-kure/launcher#740). A
   trait ConfigMap named in `valuesFrom` therefore leaves the application namespace even when the
@@ -12753,7 +12781,7 @@ match expression), has no member: those are refused on every kind
 | `grpcroute` | 34 | | | | 34 |
 | `servicemonitor`, `podmonitor`, `prometheus-probe` | 19 each | | | 19 | |
 | `alertmanager` | 241 | 18 | 8 | 207 | 8 |
-| `helmrelease` | 17 | | | | 17 |
+| `helmrelease` | 23 | | | | 23 |
 | `fluxcd-kustomization` | 14 | | | | 14 |
 | `bucket`, `ocirepository` | 7 each | | | | 7 |
 | `gitrepository` | 6 | | | | 6 |
@@ -12796,7 +12824,9 @@ exactly that value.
 **Method.** For each field the kind's API requires and its Go type writes unauthored,
 `TestKindComponents_RequiredWrittenNotRefused` builds the kind with the field authored, with
 the required fields around it filled, then builds it again with the field taken out. The field
-is a member when the second build succeeds and the object still holds the field. A field under
+is a member when the second build succeeds and the object still holds the field. A
+`helmrelease`'s fields of the OCIRepository its chart template inlines are measured under a
+template of `chart.kind` OCIRepository, the only kind that reads them. A field under
 a path the kind refuses whatever is authored there is skipped, and the test names those paths
 with their reason: a `cilium-networkpolicy`'s `nodeSelector`, a `cnpg-pooler`'s
 `template.spec.ephemeralContainers`, and the `generatorRef` of an `externalsecret`'s or a
