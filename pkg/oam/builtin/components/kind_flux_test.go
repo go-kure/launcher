@@ -432,6 +432,41 @@ func TestArtifactGenerator_OptionalFalseIsTheDefault(t *testing.T) {
 	}
 }
 
+// TestArtifactGenerator_ManagedNamespacesReasonAtAuthoredCheck: an authored
+// `managedNamespaces`, null and case-folded included, is refused with its
+// reason at the authored-property check kurel build runs before the handler
+// sees the properties, and any other unknown key gets no such reason.
+func TestArtifactGenerator_ManagedNamespacesReasonAtAuthoredCheck(t *testing.T) {
+	const reason = "managedNamespaces is refused: it hands the controller the lifecycle of cluster-scoped Namespaces"
+	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"artifactgenerator": &components.ArtifactGeneratorHandler{}}, nil)
+	for _, tc := range []struct {
+		key        string
+		value      any
+		wantReason bool
+	}{
+		{"managedNamespaces", map[string]any{"prune": true, "allowedNames": []any{"shop"}}, true},
+		{"managedNamespaces", nil, true},
+		{"ManagedNamespaces", map[string]any{}, true},
+		{"bogus", "x", false},
+	} {
+		t.Run(fmt.Sprintf("%s=%v", tc.key, tc.value), func(t *testing.T) {
+			app := &oam.Application{
+				Metadata: oam.Metadata{Name: "shop", Namespace: "shop"},
+				Spec: oam.ApplicationSpec{Components: []oam.Component{{
+					Name: "gen", Type: "artifactgenerator", Properties: withProperty(artifactGeneratorMinimal(), tc.key, tc.value),
+				}}},
+			}
+			err := tr.ValidateAuthoredProperties(app)
+			if err == nil || !strings.Contains(err.Error(), `unsupported field "`+tc.key+`"`) {
+				t.Fatalf("ValidateAuthoredProperties: error = %v, want the unsupported-field error", err)
+			}
+			if got := strings.Contains(err.Error(), reason); got != tc.wantReason {
+				t.Errorf("error %q: carries the managedNamespaces reason = %v, want %v", err, got, tc.wantReason)
+			}
+		})
+	}
+}
+
 // TestArtifactGenerator_AccountAndArtifactNamespaceAsAuthored:
 // `serviceAccountName` and an artifact's `namespace`, a literal one or a
 // placeholder, are written as authored, with and without a Flux namespace:

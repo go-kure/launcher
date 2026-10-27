@@ -79,7 +79,7 @@ var coreKindSchemas = []struct {
 	}},
 	{"apiservice", reflect.TypeFor[apiregistrationv1.APIServiceSpec](), &components.APIServiceHandler{}, nil},
 	{"artifactgenerator", reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), &components.ArtifactGeneratorHandler{}, map[string]string{
-		"managedNamespaces": "refused until the kind models the Namespaces it makes the controller create, label and prune (go-kure/launcher#1073)",
+		"managedNamespaces": "refused: it hands the controller the lifecycle of cluster-scoped Namespaces, which it creates, adopts and, with prune, deletes with everything in them",
 	}},
 	{"backendtlspolicy", reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), &components.BackendTLSPolicyHandler{}, nil},
 	{"certificate", reflect.TypeFor[certv1.CertificateSpec](), &components.CertificateHandler{}, nil},
