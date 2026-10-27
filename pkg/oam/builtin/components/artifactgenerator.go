@@ -71,7 +71,7 @@ func (h *ArtifactGeneratorHandler) PropertySchema() map[string]oam.PropertySchem
 			Description: "Required. " + spec + "artifacts: the artifacts to generate.",
 			Items: &oam.PropertySchema{
 				Type: oam.PropertyTypeObject, AdditionalProperties: true,
-				Description: "One artifact: `name` and `copy` (each entry with `from`, `@<alias>/<glob>`, and `to`, `@artifact/<path>`, both required, and `exclude` and `strategy`: Overwrite, Merge or Extract), both required, and `revision` and `originRevision` (`@<alias>`).",
+				Description: "One artifact: `name` and `copy` (each entry with `from`, `@<alias>/<glob>`, and `to`, `@artifact/<path>`, both required, and `exclude`, `strategy`: Overwrite, Merge or Extract, and `optional`, which lets a copy that matches no file pass), both required, and `revision` and `originRevision` (`@<alias>`), and `inputsFrom`, `@<alias>/<path>` of a YAML file whose content the generated ExternalArtifact exports in its status.",
 			},
 		},
 	}
@@ -130,15 +130,15 @@ func (h *ArtifactGeneratorHandler) ToApplicationConfig(component *oam.Component,
 // source-watcher v2.3 adds, which the kind refuses until it models what they
 // reach (go-kure/launcher#1073): `managedNamespaces` creates, labels and prunes
 // Namespaces, `serviceAccountName` names the account the controller acts as,
-// an artifact's `namespace` writes it into another namespace and its
-// `inputsFrom` reads from one, and a copy's `optional` lets a copy that
-// matches nothing pass. An authored one is refused whatever its value: a
-// false, a "" or a null the typed spec cannot tell from an unauthored field
-// is still not the kind's to write.
+// and an artifact's `namespace` writes it into another namespace. An authored
+// one is refused whatever its value: a "" or a null the typed spec cannot tell
+// from an unauthored field is still not the kind's to write. An artifact's
+// `inputsFrom` and a copy's `optional` are written as authored: the one reads
+// a file of the generator's own sources or artifact, the other lets a copy
+// that matches nothing pass.
 var (
 	artifactGeneratorDeferredFields         = []string{"managedNamespaces", "serviceAccountName"}
-	artifactGeneratorDeferredArtifactFields = []string{"inputsFrom", "namespace"}
-	artifactGeneratorDeferredCopyFields     = []string{"optional"}
+	artifactGeneratorDeferredArtifactFields = []string{"namespace"}
 )
 
 // artifactGeneratorDeferredRefusal is the refusal of a deferred field at path.
@@ -156,16 +156,8 @@ func refuseDeferredArtifactGeneratorSpec(s *swv1beta1.ArtifactGeneratorSpec) err
 		return artifactGeneratorDeferredRefusal("serviceAccountName")
 	}
 	for i, a := range s.OutputArtifacts {
-		switch {
-		case a.InputsFrom != "":
-			return artifactGeneratorDeferredRefusal(fmt.Sprintf("artifacts[%d].inputsFrom", i))
-		case a.Namespace != "":
+		if a.Namespace != "" {
 			return artifactGeneratorDeferredRefusal(fmt.Sprintf("artifacts[%d].namespace", i))
-		}
-		for j, c := range a.Copy {
-			if c.Optional {
-				return artifactGeneratorDeferredRefusal(fmt.Sprintf("artifacts[%d].copy[%d].optional", i, j))
-			}
 		}
 	}
 	return nil
@@ -195,27 +187,9 @@ func refuseAuthoredDeferredArtifactGeneratorFields(authored map[string]any) erro
 	}
 	artifacts, _ := props[k].([]any)
 	for i, item := range artifacts {
-		artifact, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		at := fmt.Sprintf("artifacts[%d].", i)
-		if err := refuseDeferredKeys(artifact, at, artifactGeneratorDeferredArtifactFields); err != nil {
-			return err
-		}
-		ck, err := foldedKey(artifact, "copy", []string{fmt.Sprintf("artifacts[%d]", i)})
-		if err != nil {
-			return err
-		}
-		if ck == "" {
-			continue
-		}
-		copies, _ := artifact[ck].([]any)
-		for j, c := range copies {
-			if c, ok := c.(map[string]any); ok {
-				if err := refuseDeferredKeys(c, fmt.Sprintf("%scopy[%d].", at, j), artifactGeneratorDeferredCopyFields); err != nil {
-					return err
-				}
+		if artifact, ok := item.(map[string]any); ok {
+			if err := refuseDeferredKeys(artifact, fmt.Sprintf("artifacts[%d].", i), artifactGeneratorDeferredArtifactFields); err != nil {
+				return err
 			}
 		}
 	}

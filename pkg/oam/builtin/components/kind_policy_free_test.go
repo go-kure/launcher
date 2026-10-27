@@ -2194,8 +2194,6 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"serviceAccountName", withProperty(artifactGeneratorMinimal(), "serviceAccountName", "generator"), "serviceAccountName: not supported"},
 			{"serviceAccountName empty, folded", withProperty(artifactGeneratorMinimal(), "ServiceAccountName", ""), "serviceAccountName: not supported"},
 			{"an artifact's namespace", artifactGeneratorWithArtifact(withProperty(artifactGeneratorArtifact(), "namespace", "other")), "artifacts[0].namespace: not supported"},
-			{"an artifact's inputsFrom", artifactGeneratorWithArtifact(withProperty(artifactGeneratorArtifact(), "inputsFrom", "@app/inputs.yaml")), "artifacts[0].inputsFrom: not supported"},
-			{"a copy's optional false", artifactGeneratorWithArtifact(map[string]any{"name": "app", "copy": []any{artifactGeneratorCopy(), withProperty(artifactGeneratorCopy(), "optional", false)}}), "artifacts[0].copy[1].optional: not supported"},
 			// The deferred-field pass reads numbers exact, so a number a float64
 			// cannot hold reaches the decode, which refuses it as the string the
 			// field is.
