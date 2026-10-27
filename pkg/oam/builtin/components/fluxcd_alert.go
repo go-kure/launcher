@@ -1,7 +1,7 @@
 package components
 
 import (
-	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
+	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -16,11 +16,11 @@ import (
 const fluxcdAlertType = "fluxcd-alert"
 
 // FluxcdAlertHandler handles OAM fluxcd-alert components: the kind-named
-// projection of a notification.toolkit.fluxcd.io/v1beta3 Alert
+// projection of a notification.toolkit.fluxcd.io/v1 Alert
 // (go-kure/launcher#790).
 //
 // Its properties are exactly the top-level fields of
-// notificationv1beta3.AlertSpec, under their json names, decoded strictly
+// notificationv1.AlertSpec, under their json names, decoded strictly
 // (decodeKindSpec). It emits the Alert, named after the component unless
 // `objectName` names it, in the Flux namespace when one is set and else in the
 // build namespace, and nothing else. No environment policy applies: see
@@ -42,10 +42,10 @@ func (h *FluxcdAlertHandler) ContractMetadata() oam.ContractMetadata {
 // ComponentObject declares the fluxcd-alert kind's Alert, which lands in the
 // Flux namespace when one is set.
 func (h *FluxcdAlertHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
-	return schema.GroupKind{Group: notificationv1beta3.GroupVersion.Group, Kind: notificationv1beta3.AlertKind}, oam.ObjectScopeFlux
+	return schema.GroupKind{Group: notificationv1.GroupVersion.Group, Kind: notificationv1.AlertKind}, oam.ObjectScopeFlux
 }
 
-// PropertySchema declares every top-level notificationv1beta3.AlertSpec field
+// PropertySchema declares every top-level notificationv1.AlertSpec field
 // by its json name.
 func (h *FluxcdAlertHandler) PropertySchema() map[string]oam.PropertySchema {
 	const spec = "Alert spec."
@@ -71,10 +71,23 @@ func (h *FluxcdAlertHandler) PropertySchema() map[string]oam.PropertySchema {
 		},
 		"inclusionList": regexes(spec + "inclusionList: only events whose message matches one of these are sent."),
 		"exclusionList": regexes(spec + "exclusionList: events whose message matches one of these are not sent."),
-		"eventMetadata": fluxSourceObject(spec + "eventMetadata: keys and string values added to every event sent; one the event already carries is kept."),
-		"summary":       fluxSourceString(spec + "summary: a short description of the impact, at most 255 characters. Deprecated upstream for eventMetadata."),
+		"eventMetadata": fluxSourceObject(spec + "eventMetadata: keys and string values added to every event sent. A key wins over the same key from an `event.toolkit.fluxcd.io/` annotation on the object the event is about, and the controller's own event metadata wins over it. A short description of the impact goes under the key `summary`."),
 		"suspend":       fluxSourceBool(spec + "suspend: stop sending events for this Alert."),
 	}
+}
+
+// fluxcdAlertSummaryHint points a fluxcd-alert document that still sets
+// `summary`, which the v1 Alert no longer has, at what replaced it.
+const fluxcdAlertSummaryHint = "the notification.toolkit.fluxcd.io/v1 Alert has no summary; it is the eventMetadata key `summary`"
+
+// UnsupportedFieldHint returns the pointer to eventMetadata for the removed
+// summary key, and "" for any other key. pkg/oam appends it to the
+// unsupported-field error of an authored fluxcd-alert component.
+func (h *FluxcdAlertHandler) UnsupportedFieldHint(key string) string {
+	if key != "summary" {
+		return ""
+	}
+	return fluxcdAlertSummaryHint
 }
 
 // fluxcdAlertKind is the fluxcd-alert kind: see fluxKind. The API requires
@@ -83,9 +96,9 @@ func (h *FluxcdAlertHandler) PropertySchema() map[string]oam.PropertySchema {
 // to the API server. TestFluxKinds_RequiredMatchMarkers holds the list to the
 // markers of the upstream source. An Alert reads no ConfigMap or Secret: the
 // Provider it names does.
-var fluxcdAlertKind = &fluxKind[notificationv1beta3.AlertSpec]{
-	policyFreeKind: policyFreeKind[notificationv1beta3.AlertSpec]{
-		upstream:       "notification.toolkit.fluxcd.io/v1beta3 AlertSpec",
+var fluxcdAlertKind = &fluxKind[notificationv1.AlertSpec]{
+	policyFreeKind: policyFreeKind[notificationv1.AlertSpec]{
+		upstream:       "notification.toolkit.fluxcd.io/v1 AlertSpec",
 		defaultedZeros: fluxDefaultedZeros(map[string]string{"eventSeverity": `"info"`}),
 		required: map[string]string{
 			"providerRef":         "the Provider the events are sent to",
@@ -94,7 +107,7 @@ var fluxcdAlertKind = &fluxKind[notificationv1beta3.AlertSpec]{
 			"eventSources[].kind": "the kind of the objects, such as Kustomization or HelmRelease",
 			"eventSources[].name": "the name of the object, or `*` for every object of the kind, or with `matchLabels` every one that carries those labels",
 		},
-		build: func(name, namespace string, spec *notificationv1beta3.AlertSpec) client.Object {
+		build: func(name, namespace string, spec *notificationv1.AlertSpec) client.Object {
 			alert := fluxcd.CreateAlert(name, namespace)
 			spec.DeepCopyInto(&alert.Spec)
 			return alert
@@ -104,5 +117,9 @@ var fluxcdAlertKind = &fluxKind[notificationv1beta3.AlertSpec]{
 
 // ToApplicationConfig decodes an OAM fluxcd-alert component into its config.
 func (h *FluxcdAlertHandler) ToApplicationConfig(component *oam.Component, _ string) (stack.ApplicationConfig, error) {
-	return fluxcdAlertKind.config(component)
+	cfg, err := fluxcdAlertKind.config(component)
+	if err != nil {
+		return nil, withUnknownKeyHint(component.Properties, err, h.UnsupportedFieldHint)
+	}
+	return cfg, nil
 }

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
+	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -52,9 +52,9 @@ func TestFluxProvider_AddressCredential(t *testing.T) {
 		"a generic Provider with an empty address": {map[string]any{"type": "generic", "address": ""}, ""},
 	}
 	credentialTypes := []string{
-		notificationv1beta3.DiscordProvider, notificationv1beta3.GenericProvider, notificationv1beta3.GenericHMACProvider,
-		notificationv1beta3.GoogleChatProvider, notificationv1beta3.LarkProvider, notificationv1beta3.MSTeamsProvider,
-		notificationv1beta3.RocketProvider, notificationv1beta3.SlackProvider,
+		notificationv1.DiscordProvider, notificationv1.GenericProvider, notificationv1.GenericHMACProvider,
+		notificationv1.GoogleChatProvider, notificationv1.LarkProvider, notificationv1.MSTeamsProvider,
+		notificationv1.RocketProvider, notificationv1.SlackProvider,
 	}
 	for _, typ := range credentialTypes {
 		rows["a "+typ+" webhook"] = row{
@@ -86,7 +86,7 @@ func TestFluxProvider_AddressCredential(t *testing.T) {
 				if len(objs) != 1 {
 					t.Fatalf("generated %d objects, want one", len(objs))
 				}
-				provider, ok := objs[0].(*notificationv1beta3.Provider)
+				provider, ok := objs[0].(*notificationv1.Provider)
 				if !ok {
 					t.Fatalf("generated a %T, want the Provider", objs[0])
 				}

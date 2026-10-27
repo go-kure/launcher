@@ -21,7 +21,6 @@ import (
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
-	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
@@ -501,9 +500,9 @@ var apiSetKinds = []apiSetKind{
 	{component: "cnpg-subscription", typ: reflect.TypeFor[cnpgv1.SubscriptionSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"subscriptions.yaml", "v1")},
 	{component: "csidriver", typ: reflect.TypeFor[storagev1.CSIDriverSpec](), source: markerAPISource},
 	{component: "endpointslice", typ: reflect.TypeFor[discoveryv1.EndpointSlice](), source: markerAPISource, skip: objectIdentity},
-	{component: "fluxcd-alert", typ: reflect.TypeFor[notificationv1beta3.AlertSpec](), source: markerAPISource},
+	{component: "fluxcd-alert", typ: reflect.TypeFor[notificationv1.AlertSpec](), source: markerAPISource},
 	{component: "fluxcd-kustomization", typ: reflect.TypeFor[kustv1.KustomizationSpec](), source: markerAPISource},
-	{component: "fluxcd-provider", typ: reflect.TypeFor[notificationv1beta3.ProviderSpec](), source: markerAPISource},
+	{component: "fluxcd-provider", typ: reflect.TypeFor[notificationv1.ProviderSpec](), source: markerAPISource},
 	{component: "fluxcd-receiver", typ: reflect.TypeFor[notificationv1.ReceiverSpec](), source: markerAPISource},
 	{component: "gateway", typ: reflect.TypeFor[gatewayv1.GatewaySpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gateways"), "v1")},
 	{component: "gatewayclass", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gatewayclasses"), "v1")},

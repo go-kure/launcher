@@ -21,7 +21,7 @@ type OCIRepositoryHandler struct{}
 
 // ociRepositoryDurations are OCIRepositorySpec's duration fields. timeout takes no h unit.
 var ociRepositoryDurations = []fluxDurationField[sourcev1.OCIRepositorySpec]{
-	{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *sourcev1.OCIRepositorySpec) *metav1.Duration { return &s.Interval }},
+	{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *sourcev1.OCIRepositorySpec) *metav1.Duration { return s.Interval }},
 	{path: []string{"timeout"}, form: fluxduration.SourceTimeout, get: func(s *sourcev1.OCIRepositorySpec) *metav1.Duration { return s.Timeout }},
 }
 
@@ -126,7 +126,11 @@ func (c *OCIRepositoryConfig) Generate(_ *stack.Application) ([]*client.Object, 
 	repo := fluxcd.CreateOCIRepository(kindObjectName(c.ObjectName, c.Name), fluxSourceNamespace(c.Namespace, c.fluxNS))
 	// A deep copy, so no render shares a pointer or slice with the config.
 	repo.Spec = *c.Spec.DeepCopy()
-	defaultFluxSourceInterval(&repo.Spec.Interval)
+	// The type leaves an unset interval nil; the API requires the field.
+	if repo.Spec.Interval == nil {
+		repo.Spec.Interval = &metav1.Duration{}
+	}
+	defaultFluxSourceInterval(repo.Spec.Interval)
 	if repo.Spec.Verify != nil {
 		fillFluxVerifyProvider(&repo.Spec.Verify.Provider)
 	}

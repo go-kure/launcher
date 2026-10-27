@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -113,7 +115,7 @@ func (h *HelmReleaseHandler) PropertySchema() map[string]oam.PropertySchema {
 		return oam.PropertySchema{Type: oam.PropertyTypeBoolean, Description: desc}
 	}
 	return map[string]oam.PropertySchema{
-		"chart":              object("HelmRelease spec.chart: a chart template naming a chart in an existing HelmRepository, GitRepository or Bucket source. Exactly one of chart and chartRef is required."),
+		"chart":              object("HelmRelease spec.chart: a chart template of kind HelmChart (the default), naming a chart (`spec.chart`, required) in an existing HelmRepository, GitRepository or Bucket source (`spec.sourceRef`, required). The kind OCIRepository is refused, and so are the OCIRepository fields the template inlines, which helm-controller does not read for a HelmChart. Exactly one of chart and chartRef is required."),
 		"chartRef":           object("HelmRelease spec.chartRef: a reference to an existing OCIRepository, ExternalArtifact or HelmChart source. Exactly one of chart and chartRef is required."),
 		"interval":           str("HelmRelease spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
 		"kubeConfig":         object("HelmRelease spec.kubeConfig: a kubeconfig reference for a remote cluster."),
@@ -184,6 +186,9 @@ func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, names
 	if err := refuseEmptyFluxVerifyProvider(component.Properties, "chart", "spec", "verify"); err != nil {
 		return nil, err
 	}
+	if err := refuseAuthoredInertChartFields(component.Properties); err != nil {
+		return nil, err
+	}
 	cfg := &HelmReleaseConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
@@ -247,11 +252,10 @@ func (c *HelmReleaseConfig) validate() error {
 	if (c.Spec.Chart == nil) == (c.Spec.ChartRef == nil) {
 		return errors.New("helmrelease: exactly one of chart and chartRef is required")
 	}
-	// The API marks the kind of a chart's source reference required, and the
-	// type leaves an empty one out of the object. A kind does not choose the
-	// source's kind for the author.
-	if c.Spec.Chart != nil && c.Spec.Chart.Spec.SourceRef.Kind == "" {
-		return errors.New("chart.spec.sourceRef.kind: required (the Flux API takes HelmRepository, GitRepository or Bucket)")
+	if c.Spec.Chart != nil {
+		if err := checkHelmReleaseChartTemplate(c.Spec.Chart); err != nil {
+			return err
+		}
 	}
 	if err := checkFluxDurations("helmrelease", &c.Spec, helmReleaseDurations); err != nil {
 		return err
@@ -265,6 +269,149 @@ func (c *HelmReleaseConfig) validate() error {
 	for i := range c.Spec.ValuesFrom {
 		if err := checkHelmReleaseValuesRef(&c.Spec.ValuesFrom[i]); err != nil {
 			return errors.Errorf("helmrelease: valuesFrom[%d].%w", i, err)
+		}
+	}
+	return nil
+}
+
+// helmReleaseChartOCIRefusal is the refusal of a chart template of kind
+// OCIRepository, which this component does not take (go-kure/launcher#1072).
+const helmReleaseChartOCIRefusal = "chart.kind: OCIRepository is not supported by this component (go-kure/launcher#1072); a chart in an OCI registry is an ocirepository component and a chartRef to it"
+
+// helmReleaseChartInertFields are the chart.spec fields of a chart template
+// that helm-controller does not carry into the HelmChart it generates. The
+// template inlines an OCIRepositorySpec, which a template of kind
+// OCIRepository reads and one of kind HelmChart, the only kind this component
+// takes, does not: helm-controller v1.7.1 maps chart, version, interval,
+// reconcileStrategy, valuesFiles, ignoreMissingValuesFiles, sourceRef and
+// verify's provider and secretRef
+// (internal/reconcile/helmchart_template.go:225-258), and the API refuses url
+// without kind OCIRepository (api/v2/helmrelease_types.go:373). The two
+// fields of the inlined spec that are read, interval and verify, are not
+// listed. Each field maps to whether a spec sets it, for a config built
+// directly in Go; an authored one is refused whatever its value
+// (refuseAuthoredInertChartFields).
+// TestHelmReleaseChartInertFields_CoverInlinedSpec holds the list to the
+// inlined type.
+var helmReleaseChartInertFields = map[string]func(*helmv2.HelmChartTemplateSpec) bool{
+	"url":                func(s *helmv2.HelmChartTemplateSpec) bool { return s.URL != "" },
+	"ref":                func(s *helmv2.HelmChartTemplateSpec) bool { return s.Reference != nil },
+	"layerSelector":      func(s *helmv2.HelmChartTemplateSpec) bool { return s.LayerSelector != nil },
+	"provider":           func(s *helmv2.HelmChartTemplateSpec) bool { return s.Provider != "" },
+	"secretRef":          func(s *helmv2.HelmChartTemplateSpec) bool { return s.SecretRef != nil },
+	"serviceAccountName": func(s *helmv2.HelmChartTemplateSpec) bool { return s.ServiceAccountName != "" },
+	"certSecretRef":      func(s *helmv2.HelmChartTemplateSpec) bool { return s.CertSecretRef != nil },
+	"proxySecretRef":     func(s *helmv2.HelmChartTemplateSpec) bool { return s.ProxySecretRef != nil },
+	"timeout":            func(s *helmv2.HelmChartTemplateSpec) bool { return s.Timeout != nil },
+	"ignore":             func(s *helmv2.HelmChartTemplateSpec) bool { return s.Ignore != nil },
+	"insecure":           func(s *helmv2.HelmChartTemplateSpec) bool { return s.Insecure },
+	"suspend":            func(s *helmv2.HelmChartTemplateSpec) bool { return s.Suspend },
+}
+
+// helmReleaseChartVerifyInertFields are the chart.spec.verify fields
+// helm-controller does not carry into the generated HelmChart, held as
+// helmReleaseChartInertFields are.
+var helmReleaseChartVerifyInertFields = map[string]func(*sourcev1.OCIRepositoryVerification) bool{
+	"matchOIDCIdentity":    func(v *sourcev1.OCIRepositoryVerification) bool { return v.MatchOIDCIdentity != nil },
+	"trustedRootSecretRef": func(v *sourcev1.OCIRepositoryVerification) bool { return v.TrustedRootSecretRef != nil },
+}
+
+// helmReleaseChartInertRefusal is the refusal of an inert chart template field
+// at path.
+func helmReleaseChartInertRefusal(path string) error {
+	return errors.Errorf("%s: not read for a chart template of kind HelmChart, the only kind this component takes; helm-controller does not carry it into the HelmChart it generates (it is a field of the OCIRepository a template of kind OCIRepository generates, go-kure/launcher#1072). A source's own settings go on the source sourceRef names", path)
+}
+
+// checkHelmReleaseChartTemplate holds a chart template to what helm-controller
+// generates a HelmChart from: kind HelmChart or none, a chart and a source
+// reference with its kind, which the API requires for that kind
+// (api/v2/helmrelease_types.go:374) and the type leaves out of the object
+// when empty, and none of the inert fields set. A kind does not choose the
+// source's kind for the author.
+func checkHelmReleaseChartTemplate(ch *helmv2.HelmChartTemplate) error {
+	switch ch.Kind {
+	case "", sourcev1.HelmChartKind:
+	case sourcev1.OCIRepositoryKind:
+		return errors.New(helmReleaseChartOCIRefusal)
+	default:
+		return errors.Errorf("chart.kind %q: the Flux API takes HelmChart (the default) or OCIRepository, and this component takes HelmChart only", ch.Kind)
+	}
+	s := &ch.Spec
+	if s.SourceRef == nil {
+		return errors.New("chart.spec.sourceRef: required (the HelmRepository, GitRepository or Bucket the chart is in)")
+	}
+	if s.SourceRef.Kind == "" {
+		return errors.New("chart.spec.sourceRef.kind: required (the Flux API takes HelmRepository, GitRepository or Bucket)")
+	}
+	if s.Chart == "" {
+		return errors.New("chart.spec.chart: required (the name or path of the chart in its source)")
+	}
+	for _, field := range slices.Sorted(maps.Keys(helmReleaseChartInertFields)) {
+		if helmReleaseChartInertFields[field](s) {
+			return helmReleaseChartInertRefusal("chart.spec." + field)
+		}
+	}
+	if s.Verify != nil {
+		for _, field := range slices.Sorted(maps.Keys(helmReleaseChartVerifyInertFields)) {
+			if helmReleaseChartVerifyInertFields[field](s.Verify) {
+				return helmReleaseChartInertRefusal("chart.spec.verify." + field)
+			}
+		}
+	}
+	return nil
+}
+
+// refuseAuthoredInertChartFields refuses an inert chart template field an
+// author wrote, whatever its value: a false, a "" or a null the typed spec
+// cannot tell from an unauthored field is still not the component's to read.
+// Keys match case-insensitively, as the decode's do. The properties are read
+// in their JSON form, as the decode reads them.
+func refuseAuthoredInertChartFields(authored map[string]any) error {
+	raw, err := json.Marshal(authored)
+	if err != nil {
+		return errors.Wrap(err, "helmrelease: properties do not encode as JSON")
+	}
+	var props map[string]any
+	if err := json.Unmarshal(raw, &props); err != nil {
+		return errors.Wrap(err, "helmrelease: properties do not read as a JSON object")
+	}
+	node := props
+	var at []string
+	for _, key := range []string{"chart", "spec"} {
+		k, err := foldedKey(node, key, at)
+		if err != nil || k == "" {
+			return err
+		}
+		next, ok := node[k].(map[string]any)
+		if !ok {
+			return nil
+		}
+		node = next
+		at = append(at, k)
+	}
+	if err := refuseInertChartKeys(node, "chart.spec.", slices.Sorted(maps.Keys(helmReleaseChartInertFields))); err != nil {
+		return err
+	}
+	k, err := foldedKey(node, "verify", at)
+	if err != nil || k == "" {
+		return err
+	}
+	verify, ok := node[k].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return refuseInertChartKeys(verify, "chart.spec.verify.", slices.Sorted(maps.Keys(helmReleaseChartVerifyInertFields)))
+}
+
+// refuseInertChartKeys refuses the first key of node, in key order, that matches
+// one of fields case-insensitively (helmReleaseChartInertRefusal, at prefix
+// and the field's json name).
+func refuseInertChartKeys(node map[string]any, prefix string, fields []string) error {
+	for _, k := range slices.Sorted(maps.Keys(node)) {
+		for _, field := range fields {
+			if strings.EqualFold(k, field) {
+				return helmReleaseChartInertRefusal(prefix + field)
+			}
 		}
 	}
 	return nil

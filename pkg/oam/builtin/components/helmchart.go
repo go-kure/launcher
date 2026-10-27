@@ -1,11 +1,6 @@
 package components
 
 import (
-	"maps"
-	"slices"
-	"strconv"
-	"strings"
-
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
@@ -112,15 +107,7 @@ func (h *HelmChartHandler) ToApplicationConfig(component *oam.Component, namespa
 // top-level key of props and one of the composite's. It is "" or starts with
 // "; ".
 func (h *HelmChartHandler) decodeHint(props map[string]any, err error) string {
-	for _, k := range slices.Sorted(maps.Keys(props)) {
-		if !strings.Contains(err.Error(), "unknown field "+strconv.Quote(k)) {
-			continue
-		}
-		if hint := h.UnsupportedFieldHint(k); hint != "" {
-			return "; " + hint
-		}
-	}
-	return ""
+	return unknownKeyHint(props, err, h.UnsupportedFieldHint)
 }
 
 // HelmChartConfig implements stack.ApplicationConfig for helmchart components.

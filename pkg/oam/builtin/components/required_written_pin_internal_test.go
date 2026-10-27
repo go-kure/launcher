@@ -24,7 +24,6 @@ import (
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
-	notificationv1beta3 "github.com/fluxcd/notification-controller/api/v1beta3"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 	"github.com/go-kure/kure/pkg/stack"
@@ -96,7 +95,6 @@ var requiredWrittenValidDefaults = map[string]string{
 	"helmchart verify.provider":              `"cosign"`,
 	"helmrelease interval":                   `"1h0m0s"`,
 	"helmrelease chart.spec.verify.provider": `"cosign"`,
-	"ocirepository interval":                 `"1h0m0s"`,
 	"ocirepository verify.provider":          `"cosign"`,
 }
 
@@ -110,6 +108,11 @@ var requiredWrittenUnauthorable = map[string]string{
 	"cilium-networkpolicy specs[].nodeSelector":                              "a node selector belongs to a CiliumClusterwideNetworkPolicy",
 	"cnpg-pooler template.spec.ephemeralContainers":                          "ephemeral containers cannot be declared on a pod template",
 	"externalsecret data[].sourceRef.generatorRef":                           "the object always carries a storeRef there, and the API takes exactly one",
+	"helmrelease chart.spec.secretRef":                                       "a field of the OCIRepository a chart template inlines, which a template of kind HelmChart does not read",
+	"helmrelease chart.spec.certSecretRef":                                   "a field of the OCIRepository a chart template inlines, which a template of kind HelmChart does not read",
+	"helmrelease chart.spec.proxySecretRef":                                  "a field of the OCIRepository a chart template inlines, which a template of kind HelmChart does not read",
+	"helmrelease chart.spec.verify.matchOIDCIdentity":                        "a field of the OCIRepository a chart template inlines, which a template of kind HelmChart does not read",
+	"helmrelease chart.spec.verify.trustedRootSecretRef":                     "a field of the OCIRepository a chart template inlines, which a template of kind HelmChart does not read",
 	"clusterexternalsecret externalSecretSpec.data[].sourceRef.generatorRef": "the object always carries a storeRef there, and the API takes exactly one",
 	"thanosruler remoteWrite[].azureAd.workloadIdentity":                     "the operator passes it to Thanos at no version, and the kind refuses it at every version it can parse",
 }
@@ -401,13 +404,13 @@ var requiredWrittenKinds = []pinKind{
 	{component: "externalsecret", handler: &ExternalSecretHandler{}, typ: reflect.TypeFor[esv1.ExternalSecretSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[esv1.ExternalSecretSpec](), true),
 		base:   map[string]any{"secretStoreRef": map[string]any{"name": "vault"}, "data": []any{externalSecretsPinData()}}},
-	{component: "fluxcd-alert", handler: &FluxcdAlertHandler{}, typ: reflect.TypeFor[notificationv1beta3.AlertSpec](),
-		schema: pinMarkerSchema(reflect.TypeFor[notificationv1beta3.AlertSpec](), false)},
+	{component: "fluxcd-alert", handler: &FluxcdAlertHandler{}, typ: reflect.TypeFor[notificationv1.AlertSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[notificationv1.AlertSpec](), false)},
 	{component: "fluxcd-kustomization", handler: &FluxcdKustomizationHandler{}, typ: reflect.TypeFor[kustv1.KustomizationSpec](),
 		schema: pinMarkerSchema(reflect.TypeFor[kustv1.KustomizationSpec](), false),
 		base:   map[string]any{"sourceRef": map[string]any{"kind": "GitRepository", "name": "fleet"}}},
-	{component: "fluxcd-provider", handler: &FluxcdProviderHandler{}, typ: reflect.TypeFor[notificationv1beta3.ProviderSpec](),
-		schema: pinMarkerSchema(reflect.TypeFor[notificationv1beta3.ProviderSpec](), false)},
+	{component: "fluxcd-provider", handler: &FluxcdProviderHandler{}, typ: reflect.TypeFor[notificationv1.ProviderSpec](),
+		schema: pinMarkerSchema(reflect.TypeFor[notificationv1.ProviderSpec](), false)},
 	// A resource of a kind with no default version needs its apiVersion
 	// (refuseReceiverUnversionedResources), which the sample "x" kind is.
 	{component: "fluxcd-receiver", handler: &FluxcdReceiverHandler{}, typ: reflect.TypeFor[notificationv1.ReceiverSpec](),

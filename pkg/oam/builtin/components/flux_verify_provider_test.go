@@ -250,7 +250,7 @@ func TestHelmRelease_ChartSourceKindRequired(t *testing.T) {
 
 	cfg := &components.HelmReleaseConfig{Name: "app", Namespace: "default", Spec: helmv2.HelmReleaseSpec{
 		Chart: &helmv2.HelmChartTemplate{Spec: helmv2.HelmChartTemplateSpec{
-			Chart: "app", SourceRef: helmv2.CrossNamespaceObjectReference{Name: "charts"},
+			Chart: "app", SourceRef: &helmv2.CrossNamespaceObjectReference{Name: "charts"},
 		}},
 	}}
 	if _, err := cfg.Generate(stack.NewApplication("app", "default", cfg)); err == nil || !strings.HasPrefix(err.Error(), want) {

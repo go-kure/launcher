@@ -1,6 +1,10 @@
 package components
 
-import "github.com/fluxcd/pkg/apis/meta"
+import (
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	"github.com/fluxcd/pkg/apis/meta"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+)
 
 // Every component config that moves to the Flux namespace (SetFluxNamespace)
 // also reports the ConfigMaps and Secrets its Flux object reads by name from the
@@ -61,10 +65,24 @@ func (c *HelmReleaseConfig) FluxNamespaceReads() (configMaps, secrets []string) 
 			r.secret(k.SecretRef.Name)
 		}
 	}
-	if ch := c.Spec.Chart; ch != nil && ch.GetNamespace(c.fluxNamespace()) == c.fluxNamespace() && ch.Spec.Verify != nil {
+	if ch := c.Spec.Chart; ch != nil && helmChartTemplateNamespace(ch, c.fluxNamespace()) == c.fluxNamespace() && ch.Spec.Verify != nil {
 		r.secretRef(ch.Spec.Verify.SecretRef)
 	}
 	return r.configMaps, r.secrets
+}
+
+// helmChartTemplateNamespace returns the namespace helm-controller generates
+// the HelmChart of a chart template in, for a HelmRelease in hrNamespace: the
+// namespace of its sourceRef when one is set, else hrNamespace
+// (HelmRelease.GetHelmChartTemplateReference, helm-controller api v1.7.1
+// v2/helmrelease_types.go:1633-1649). The sourceRef rule is for kind
+// HelmChart, the only kind the component takes; another kind lands in
+// hrNamespace.
+func helmChartTemplateNamespace(ch *helmv2.HelmChartTemplate, hrNamespace string) string {
+	if (ch.Kind == "" || ch.Kind == sourcev1.HelmChartKind) && ch.Spec.SourceRef != nil && ch.Spec.SourceRef.Namespace != "" {
+		return ch.Spec.SourceRef.Namespace
+	}
+	return hrNamespace
 }
 
 // FluxNamespaceReads reports the Kustomization's decryption Secret, its
