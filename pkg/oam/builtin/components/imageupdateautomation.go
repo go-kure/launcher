@@ -60,6 +60,10 @@ func (h *ImageUpdateAutomationHandler) PropertySchema() map[string]oam.PropertyS
 			Type: oam.PropertyTypeString, Required: true,
 			Description: "Required. " + spec + "interval: the least time between two runs of the automation, as a Flux duration.",
 		},
+		"policyChangeDelay": {
+			Type:        oam.PropertyTypeString,
+			Description: spec + "policyChangeDelay: how long a run an ImagePolicy change triggers waits, so that the image updates that arrive within it are committed together, as a Flux duration; with `policySelector` set, only a change to a selected policy triggers one. Unset, the automation runs as soon as a policy changes.",
+		},
 		"policySelector": fluxSourceObject(spec + "policySelector: a label selector over the ImagePolicies of the object's namespace whose selections are applied; every one of them when unset."),
 		"update":         fluxSourceObject(spec + "update: how the files are updated: `strategy` (`Setters`, the API's default) and the `path` of the directory to update, the root of the repository when unset."),
 		"suspend":        fluxSourceBool(spec + "suspend: stop running this automation."),
@@ -78,7 +82,8 @@ func (h *ImageUpdateAutomationHandler) PropertySchema() map[string]oam.PropertyS
 // marker. TestFluxKinds_RequiredMatchMarkers holds the list to the markers of
 // the upstream source, and the two of an expression to the source of
 // metav1.LabelSelectorRequirement by the schema generators' rule.
-// `interval` is held to the form its pattern takes. The object reads one
+// `interval` and `policyChangeDelay` are held to the form their pattern
+// takes. The object reads one
 // Secret from its own namespace, the signing key's.
 var imageUpdateAutomationKind = &fluxKind[autov1.ImageUpdateAutomationSpec]{
 	policyFreeKind: policyFreeKind[autov1.ImageUpdateAutomationSpec]{
@@ -109,6 +114,7 @@ var imageUpdateAutomationKind = &fluxKind[autov1.ImageUpdateAutomationSpec]{
 	},
 	durations: []fluxDurationField[autov1.ImageUpdateAutomationSpec]{
 		{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *autov1.ImageUpdateAutomationSpec) *metav1.Duration { return &s.Interval }},
+		{path: []string{"policyChangeDelay"}, form: fluxduration.Interval, get: func(s *autov1.ImageUpdateAutomationSpec) *metav1.Duration { return s.PolicyChangeDelay }},
 	},
 }
 

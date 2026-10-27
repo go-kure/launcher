@@ -324,6 +324,22 @@ var labelReachNotRead = []labelReachUnread{
 		field:  "github.com/cilium/cilium/pkg/policy/api.AWSGroup.Labels",
 		reason: "no metadata of any object: the tags a rule selects cloud instances by",
 	},
+
+	// The metadata an ArtifactGenerator's managedNamespaces hands on to the
+	// Namespaces the controller manages: the artifactgenerator kind refuses
+	// managedNamespaces (go-kure/launcher#1073), so none of it is built.
+	{
+		field:  "github.com/fluxcd/source-watcher/api/v2/v1beta1.ManagedNamespacesMetadata.From",
+		reason: "refused with managedNamespaces (go-kure/launcher#1073)",
+	},
+	{
+		field:  "github.com/fluxcd/source-watcher/api/v2/v1beta1.NamespaceMetadataFromSource.AllowedAnnotations",
+		reason: "refused with managedNamespaces (go-kure/launcher#1073)",
+	},
+	{
+		field:  "github.com/fluxcd/source-watcher/api/v2/v1beta1.NamespaceMetadataFromSource.AllowedLabels",
+		reason: "refused with managedNamespaces (go-kure/launcher#1073)",
+	},
 }
 
 // labelReachUnwalked are fields that hand metadata on and that the walk cannot
