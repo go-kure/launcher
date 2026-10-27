@@ -42,11 +42,14 @@ func (r *fluxReads) secretRef(ref *meta.LocalObjectReference) {
 }
 
 // FluxNamespaceReads reports the HelmRelease's valuesFrom ConfigMaps and
-// Secrets, its kubeConfig ConfigMap or Secret, and the chart template's
-// verification Secret when the HelmChart helm-controller creates lands in the
-// HelmRelease's namespace (sourceRef names no namespace, or names that one). The
-// values ConfigMap of valuesMode: configMap is this config's own object and
-// moves with it.
+// Secrets, its kubeConfig ConfigMap or Secret, and the Secrets of the object
+// helm-controller generates from its chart template, when that lands in the
+// HelmRelease's namespace. For kind HelmChart that is the verification Secret,
+// when sourceRef names no namespace or names that one. For kind OCIRepository,
+// which always lands there, it is every Secret the OCIRepository component
+// reports: secretRef, certSecretRef, proxySecretRef, and the verification's
+// secretRef and trustedRootSecretRef. The values ConfigMap of valuesMode:
+// configMap is this config's own object and moves with it.
 func (c *HelmReleaseConfig) FluxNamespaceReads() (configMaps, secrets []string) {
 	var r fluxReads
 	for _, v := range c.Spec.ValuesFrom {
@@ -65,18 +68,27 @@ func (c *HelmReleaseConfig) FluxNamespaceReads() (configMaps, secrets []string) 
 			r.secret(k.SecretRef.Name)
 		}
 	}
-	if ch := c.Spec.Chart; ch != nil && helmChartTemplateNamespace(ch, c.fluxNamespace()) == c.fluxNamespace() && ch.Spec.Verify != nil {
+	switch ch := c.Spec.Chart; {
+	case ch == nil:
+	case ch.Kind == sourcev1.OCIRepositoryKind:
+		r.secretRef(ch.Spec.SecretRef)
+		r.secretRef(ch.Spec.CertSecretRef)
+		r.secretRef(ch.Spec.ProxySecretRef)
+		if v := ch.Spec.Verify; v != nil {
+			r.secretRef(v.SecretRef)
+			r.secretRef(v.TrustedRootSecretRef)
+		}
+	case helmChartTemplateNamespace(ch, c.fluxNamespace()) == c.fluxNamespace() && ch.Spec.Verify != nil:
 		r.secretRef(ch.Spec.Verify.SecretRef)
 	}
 	return r.configMaps, r.secrets
 }
 
 // helmChartTemplateNamespace returns the namespace helm-controller generates
-// the HelmChart of a chart template in, for a HelmRelease in hrNamespace: the
-// namespace of its sourceRef when one is set, else hrNamespace
+// the object of a chart template in, for a HelmRelease in hrNamespace: for kind
+// HelmChart the namespace of its sourceRef when one is set, else hrNamespace
 // (HelmRelease.GetHelmChartTemplateReference, helm-controller api v1.7.1
-// v2/helmrelease_types.go:1633-1649). The sourceRef rule is for kind
-// HelmChart, the only kind the component takes; another kind lands in
+// v2/helmrelease_types.go:1633-1649). Kind OCIRepository always lands in
 // hrNamespace.
 func helmChartTemplateNamespace(ch *helmv2.HelmChartTemplate, hrNamespace string) string {
 	if (ch.Kind == "" || ch.Kind == sourcev1.HelmChartKind) && ch.Spec.SourceRef != nil && ch.Spec.SourceRef.Namespace != "" {

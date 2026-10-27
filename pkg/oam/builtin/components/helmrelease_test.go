@@ -369,10 +369,11 @@ func TestHelmReleaseHandler_Refuses(t *testing.T) {
 		// value is an unknown key, with a pointer to what replaced it.
 		{"valuesMode configMap", map[string]any{"chart": hrChart(), "valuesMode": "configMap", "values": map[string]any{"a": 1}}, `unknown field "valuesMode"; helmrelease no longer takes valuesMode (go-kure/launcher#702)`},
 		{"valuesMode inline", map[string]any{"chart": hrChart(), "valuesMode": "inline"}, `unknown field "valuesMode"; helmrelease no longer takes valuesMode`},
-		// The chart template (helm-controller api v1.7.1): kind HelmChart only
-		// (go-kure/launcher#1072), with a sourceRef and a chart, and none of the
-		// OCIRepository fields it inlines, whatever their value.
-		{"chart kind OCIRepository", hrChartWith(map[string]any{"kind": "OCIRepository"}, nil), "chart.kind: OCIRepository is not supported by this component (go-kure/launcher#1072)"},
+		// The chart template (helm-controller api v1.7.1): of kind HelmChart,
+		// a sourceRef and a chart, and none of the OCIRepository fields it
+		// inlines, whatever their value. Kind OCIRepository's own rules are
+		// TestHelmReleaseOCIChart_Refuses'.
+		{"chart kind OCIRepository with a HelmChart template", hrChartWith(map[string]any{"kind": "OCIRepository"}, nil), "helmrelease: chart.spec.url is required under chart.kind OCIRepository"},
 		{"chart kind another", hrChartWith(map[string]any{"kind": "GitRepository"}, nil), `chart.kind "GitRepository": the Flux API takes HelmChart (the default) or OCIRepository`},
 		{"chart without a sourceRef", map[string]any{"chart": map[string]any{"spec": map[string]any{"chart": "podinfo"}}}, "chart.spec.sourceRef: required"},
 		{"chart sourceRef without a kind", map[string]any{"chart": map[string]any{"spec": map[string]any{"chart": "podinfo", "sourceRef": map[string]any{"name": "podinfo"}}}}, "chart.spec.sourceRef.kind: required"},
@@ -381,6 +382,8 @@ func TestHelmReleaseHandler_Refuses(t *testing.T) {
 		{"chart url", hrChartWith(nil, map[string]any{"url": "oci://ghcr.io/org/charts/podinfo"}), "chart.spec.url: not read for a chart template of kind HelmChart"},
 		{"chart suspend false", hrChartWith(nil, map[string]any{"suspend": false}), "chart.spec.suspend: not read for a chart template of kind HelmChart"},
 		{"chart insecure null", hrChartWith(nil, map[string]any{"insecure": nil}), "chart.spec.insecure: not read for a chart template of kind HelmChart"},
+		// Refused as inert, not held to the form kind OCIRepository reads it in.
+		{"chart timeout with h", hrChartWith(nil, map[string]any{"timeout": "1h"}), "chart.spec.timeout: not read for a chart template of kind HelmChart"},
 		{"chart proxySecretRef", hrChartWith(nil, map[string]any{"proxySecretRef": map[string]any{"name": "p"}}), "chart.spec.proxySecretRef: not read for a chart template of kind HelmChart"},
 		{"chart folded key", hrChartWith(nil, map[string]any{"LayerSelector": map[string]any{}}), "chart.spec.layerSelector: not read for a chart template of kind HelmChart"},
 		{"chart verify matchOIDCIdentity", hrChartWith(nil, map[string]any{"verify": map[string]any{"provider": "cosign", "matchOIDCIdentity": []any{}}}), "chart.spec.verify.matchOIDCIdentity: not read for a chart template of kind HelmChart"},

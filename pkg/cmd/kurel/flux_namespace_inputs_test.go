@@ -107,6 +107,14 @@ func hrChart(sourceRef map[string]any, verify map[string]any) map[string]any {
 	return map[string]any{"spec": spec}
 }
 
+// hrOCIChart is a chart template of kind OCIRepository with the spec keys of
+// spec added to its url.
+func hrOCIChart(spec map[string]any) map[string]any {
+	s := map[string]any{"url": "oci://registry.example.com/charts/app"}
+	maps.Copy(s, spec)
+	return map[string]any{"kind": "OCIRepository", "spec": s}
+}
+
 // TestFluxNamespace_ReadInputsFollow: for every same-namespace ConfigMap or
 // Secret reference of every moving Flux kind, the trait object it names moves
 // with it, and the Flux object itself moves.
@@ -135,6 +143,24 @@ func TestFluxNamespace_ReadInputsFollow(t *testing.T) {
 		{"helmrelease chart verify secretRef", "helmrelease",
 			map[string]any{"chart": hrChart(map[string]any{"kind": "HelmRepository", "name": "example"},
 				map[string]any{"provider": "cosign", "secretRef": secretRef("creds")})},
+			es, "HelmRelease/c", "ExternalSecret/creds"},
+		// The OCIRepository helm-controller generates for a chart template of
+		// kind OCIRepository is in the HelmRelease's namespace, and reads its
+		// Secrets there (go-kure/launcher#1072).
+		{"helmrelease OCI chart secretRef", "helmrelease",
+			map[string]any{"chart": hrOCIChart(map[string]any{"secretRef": secretRef("creds")})},
+			es, "HelmRelease/c", "ExternalSecret/creds"},
+		{"helmrelease OCI chart certSecretRef from a certificate", "helmrelease",
+			map[string]any{"chart": hrOCIChart(map[string]any{"certSecretRef": secretRef("repo-tls")})},
+			certificateTrait("repo-tls"), "HelmRelease/c", "Certificate/repo-tls"},
+		{"helmrelease OCI chart proxySecretRef", "helmrelease",
+			map[string]any{"chart": hrOCIChart(map[string]any{"proxySecretRef": secretRef("creds")})},
+			es, "HelmRelease/c", "ExternalSecret/creds"},
+		{"helmrelease OCI chart verify secretRef", "helmrelease",
+			map[string]any{"chart": hrOCIChart(map[string]any{"verify": map[string]any{"provider": "cosign", "secretRef": secretRef("creds")}})},
+			es, "HelmRelease/c", "ExternalSecret/creds"},
+		{"helmrelease OCI chart verify trustedRootSecretRef", "helmrelease",
+			map[string]any{"chart": hrOCIChart(map[string]any{"verify": map[string]any{"provider": "cosign", "trustedRootSecretRef": secretRef("creds")}})},
 			es, "HelmRelease/c", "ExternalSecret/creds"},
 		{"fluxcd-kustomization decryption secretRef", "fluxcd-kustomization",
 			map[string]any{"decryption": map[string]any{"provider": "sops", "secretRef": secretRef("creds")}},

@@ -109,11 +109,6 @@ var requiredWrittenUnauthorable = map[string]string{
 	"cnpg-pooler template.spec.ephemeralContainers":                          "ephemeral containers cannot be declared on a pod template",
 	"artifactgenerator managedNamespaces":                                    "refused until the kind models the Namespaces it makes the controller manage (go-kure/launcher#1073)",
 	"externalsecret data[].sourceRef.generatorRef":                           "the object always carries a storeRef there, and the API takes exactly one",
-	"helmrelease chart.spec.secretRef":                                       "a field of the OCIRepository a chart template inlines, which a template of kind HelmChart does not read",
-	"helmrelease chart.spec.certSecretRef":                                   "a field of the OCIRepository a chart template inlines, which a template of kind HelmChart does not read",
-	"helmrelease chart.spec.proxySecretRef":                                  "a field of the OCIRepository a chart template inlines, which a template of kind HelmChart does not read",
-	"helmrelease chart.spec.verify.matchOIDCIdentity":                        "a field of the OCIRepository a chart template inlines, which a template of kind HelmChart does not read",
-	"helmrelease chart.spec.verify.trustedRootSecretRef":                     "a field of the OCIRepository a chart template inlines, which a template of kind HelmChart does not read",
 	"clusterexternalsecret externalSecretSpec.data[].sourceRef.generatorRef": "the object always carries a storeRef there, and the API takes exactly one",
 	"thanosruler remoteWrite[].azureAd.workloadIdentity":                     "the operator passes it to Thanos at no version, and the kind refuses it at every version it can parse",
 }
@@ -160,6 +155,21 @@ type pinKind struct {
 	prefixes []string
 	// base is properties that build once the required fields are filled.
 	base map[string]any
+	// altBase, when set, is the base of the paths under one of altPrefixes:
+	// properties that build as base does, for fields base cannot author.
+	altBase     map[string]any
+	altPrefixes []string
+}
+
+// baseFor returns the base a path is measured on, built by bases: altBase's
+// for a path under one of altPrefixes, else base's.
+func (k pinKind) baseFor(path string, bases [2]map[string]any) map[string]any {
+	for _, prefix := range k.altPrefixes {
+		if rest, ok := strings.CutPrefix(path, prefix); ok && (rest == "" || rest[0] == '.' || rest[0] == '[') {
+			return bases[1]
+		}
+	}
+	return bases[0]
 }
 
 // pinCRDSchema reads the named version of the CRD in file, a path under the
@@ -435,6 +445,14 @@ var requiredWrittenKinds = []pinKind{
 		schema: pinMarkerSchema(reflect.TypeFor[helmv2.HelmReleaseSpec](), false),
 		// A marker schema holds no enum, so a list element whose kind is one is
 		// authored with a valid kind.
+		// The fields of the OCIRepository a chart template inlines are read
+		// only under chart.kind OCIRepository (go-kure/launcher#1072).
+		altBase: map[string]any{
+			"chart":      map[string]any{"kind": "OCIRepository", "spec": map[string]any{"url": "oci://registry.example.com/app"}},
+			"valuesFrom": []any{map[string]any{"kind": "ConfigMap", "name": "values"}},
+		},
+		altPrefixes: []string{"chart.spec.secretRef", "chart.spec.certSecretRef", "chart.spec.proxySecretRef",
+			"chart.spec.verify.matchOIDCIdentity", "chart.spec.verify.trustedRootSecretRef"},
 		base: map[string]any{
 			"chartRef":   map[string]any{"kind": "OCIRepository", "name": "app"},
 			"valuesFrom": []any{map[string]any{"kind": "ConfigMap", "name": "values"}},
@@ -688,10 +706,17 @@ func measureRequiredWritten(t *testing.T, k pinKind) (m pinMeasure) {
 	if prefixes == nil {
 		prefixes = []string{""}
 	}
-	base := pinCopy(k.base)
-	pinFill(base, schema, "")
-	if _, err := pinBuild(k, base); err != nil {
-		t.Fatalf("the base properties do not build: %v; properties %s", err, pinJSON(base))
+	var bases [2]map[string]any
+	for i, b := range []map[string]any{k.base, k.altBase} {
+		if i == 1 && b == nil {
+			bases[1] = bases[0]
+			break
+		}
+		bases[i] = pinCopy(b)
+		pinFill(bases[i], schema, "")
+		if _, err := pinBuild(k, bases[i]); err != nil {
+			t.Fatalf("the base properties do not build: %v; properties %s", err, pinJSON(bases[i]))
+		}
 	}
 	measured := 0
 	// A promoted field can share its JSON name with a shallower one (the
@@ -706,7 +731,7 @@ func measureRequiredWritten(t *testing.T, k pinKind) (m pinMeasure) {
 			}
 			seen[path] = true
 			measured++
-			with, err := pinControl(k, base, path, schema)
+			with, err := pinControl(k, k.baseFor(path, bases), path, schema)
 			if err != nil {
 				if ancestor, ok := pinRefusedAncestor(path, err); ok {
 					if _, listed := requiredWrittenUnauthorable[k.component+" "+ancestor]; listed {

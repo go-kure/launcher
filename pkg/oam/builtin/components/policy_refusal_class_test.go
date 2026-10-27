@@ -341,6 +341,14 @@ func TestPolicyRefusalClass_ComponentApplyPolicy(t *testing.T) {
 			props: props(map[string]any{"url": "oci://registry/app"}),
 		},
 		{
+			name: "helmrelease, OCI chart registry", class: oam.RefusalRegistry, typ: "helmrelease", handler: &components.HelmReleaseHandler{},
+			props: props(map[string]any{"chart": map[string]any{"kind": "OCIRepository", "spec": map[string]any{"url": "oci://registry.other.example/charts/app"}}}),
+		},
+		{
+			name: "helmrelease, OCI chart registry not named explicitly", class: oam.RefusalRegistry, typ: "helmrelease", handler: &components.HelmReleaseHandler{},
+			props: props(map[string]any{"chart": map[string]any{"kind": "OCIRepository", "spec": map[string]any{"url": "oci://registry/app"}}}),
+		},
+		{
 			name: "bucket, source host", class: oam.RefusalRegistry, typ: "bucket", handler: &components.BucketHandler{},
 			props: props(map[string]any{"bucketName": "manifests", "endpoint": "minio.other.example:9000"}),
 		},
