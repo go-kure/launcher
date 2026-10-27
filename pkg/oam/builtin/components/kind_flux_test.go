@@ -331,9 +331,10 @@ func artifactGeneratorFull() map[string]any {
 		"artifacts": []any{
 			map[string]any{
 				"name": "{app}", "revision": "@apps", "originRevision": "@apps",
+				"inputsFrom": "@apps/apps/{app}/inputs.yaml",
 				"copy": []any{
 					map[string]any{"from": "@base/**", "to": "@artifact/", "exclude": []any{"*.md"}, "strategy": "Overwrite"},
-					map[string]any{"from": "@apps/apps/{app}/values.yaml", "to": "@artifact/values.yaml", "strategy": "Merge"},
+					map[string]any{"from": "@apps/apps/{app}/values.yaml", "to": "@artifact/values.yaml", "strategy": "Merge", "optional": true},
 				},
 			},
 		},
@@ -389,6 +390,43 @@ func fluxKindTransform(kind policyFreeKind, fluxNS string, components ...oam.Com
 		}
 	}
 	return out, nil
+}
+
+// TestArtifactGenerator_OptionalFalseIsTheDefault: a copy's authored
+// `optional: false` builds and is not written, as the API's default; an
+// authored `true` and an artifact's `inputsFrom` are written as authored.
+func TestArtifactGenerator_OptionalFalseIsTheDefault(t *testing.T) {
+	kind := fluxKindRow(t, "artifactgenerator")
+	artifact := map[string]any{"name": "app", "inputsFrom": "@app/inputs.yaml", "copy": []any{
+		withProperty(artifactGeneratorCopy(), "optional", false),
+		withProperty(artifactGeneratorCopy(), "optional", true),
+	}}
+	objs, err := fluxKindTransform(kind, "", oam.Component{Name: "web", Properties: artifactGeneratorWithArtifact(artifact)})
+	if err != nil {
+		t.Fatalf("transform: %v", err)
+	}
+	if len(objs) != 1 {
+		t.Fatalf("generated %d objects, want one", len(objs))
+	}
+	spec, _ := policyFreeJSON(t, objs[0])["spec"].(map[string]any)
+	artifacts, _ := spec["artifacts"].([]any)
+	if len(artifacts) != 1 {
+		t.Fatalf("spec.artifacts = %v, want one artifact", spec["artifacts"])
+	}
+	got, _ := artifacts[0].(map[string]any)
+	if got["inputsFrom"] != "@app/inputs.yaml" {
+		t.Errorf("inputsFrom = %v, want the authored @app/inputs.yaml", got["inputsFrom"])
+	}
+	copies, _ := got["copy"].([]any)
+	if len(copies) != 2 {
+		t.Fatalf("copy = %v, want two copies", got["copy"])
+	}
+	if first, _ := copies[0].(map[string]any); first == nil || first["optional"] != nil {
+		t.Errorf("copy[0] = %v, want no optional: an authored false is the API's default", copies[0])
+	}
+	if second, _ := copies[1].(map[string]any); second == nil || second["optional"] != true {
+		t.Errorf("copy[1] = %v, want optional: true as authored", copies[1])
+	}
 }
 
 // TestFluxKinds_LandInTheFluxNamespace: through the transform, each kind's

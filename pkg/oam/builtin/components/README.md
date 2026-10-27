@@ -442,7 +442,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `externalsecrets.CreateExternalSecret` | external-secrets.io/v1 ExternalSecret | kind | `externalsecret` | strict decode of `ExternalSecretSpec` | Its labels and annotations are the `labels` and `annotations` properties. No top-level field must be written. A generator named as the source of one key of `data` is refused. A `target.manifest` whose `apiVersion` is no API version is refused. A `target.manifest` of a kind the environment policy checks (a workload, a claim, a PersistentVolume, a HorizontalPodAutoscaler) is refused, and a core Secret there under a policy that forbids explicit secrets. No capability is required. The `external-secret` trait builds an ExternalSecret for a workload through the same constructor, from a hand-written parser. |
 | `externalsecrets.CreateSecretStore` | external-secrets.io/v1 SecretStore | kind | `secretstore` | strict decode of `SecretStoreSpec` | As `clustersecretstore`, in the build namespace. Its labels and annotations are the `labels` and `annotations` properties. |
 | `fluxcd.CreateAlert` | notification.toolkit.fluxcd.io/v1 Alert | kind | `fluxcd-alert` | strict decode of `AlertSpec` | `providerRef` with its `name` and `eventSources` must be written, and of a source its `kind` and `name`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. It lands in the Flux namespace when one is set. No environment policy applies. The type name carries a prefix: an alert, in this package, also reads as an alerting rule. |
-| `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | kind | `artifactgenerator` | strict decode of `ArtifactGeneratorSpec` | `sources` and `artifacts` must be written; of a source its `alias`, `kind` and `name`, of an artifact its `name` and `copy`, of a copy its `from` and `to`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. The API's expression rule, which holds an artifact's `name` to an object name where no `pathPattern` is set, is not checked. Five fields the v2.3 source-watcher API adds are refused whatever their value, until the kind models what they reach (go-kure/launcher#1073): `managedNamespaces` and `serviceAccountName`, an artifact's `namespace` and `inputsFrom`, and a copy's `optional`. It lands in the Flux namespace when one is set. No environment policy applies. |
+| `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | kind | `artifactgenerator` | strict decode of `ArtifactGeneratorSpec` | `sources` and `artifacts` must be written; of a source its `alias`, `kind` and `name`, of an artifact its `name` and `copy`, of a copy its `from` and `to`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. The API's expression rule, which holds an artifact's `name` to an object name where no `pathPattern` is set, is not checked. Of the five fields the v2.3 source-watcher API adds, an artifact's `inputsFrom` and a copy's `optional` are written as authored, and three are refused whatever their value, until the kind models what they reach (go-kure/launcher#1073): `managedNamespaces` and `serviceAccountName`, and an artifact's `namespace`. It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateBucket` | source.toolkit.fluxcd.io/v1 Bucket | kind | `bucket` | strict decode of `BucketSpec` | - |
 | `fluxcd.CreateExternalArtifact` | source.toolkit.fluxcd.io/v1 ExternalArtifact | not authorable | - | - | Written by the controller that produces the artifact. |
 | `fluxcd.CreateFluxInstance` | fluxcd.controlplane.io/v1 FluxInstance | held | - | - | A FluxInstance is the installation of Flux itself, not an application's object: its spec lists "the controllers to install", and the API accepts one name for it, `flux`. A component type would let an application author the cluster's Flux (go-kure/launcher#790). |
@@ -2581,8 +2581,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     it.
   - `artifactgenerator` (`ArtifactGeneratorSpec`): `commonMetadata`,
     `sources`, `pathPattern` and `artifacts` (each a `name`, `revision`,
-    `originRevision` and `copy`; a copy a `from`, `to`, `exclude` and
-    `strategy`). **`commonMetadata` is not the object's own metadata:** its
+    `originRevision`, `inputsFrom` and `copy`; a copy a `from`, `to`,
+    `exclude`, `strategy` and `optional`). A copy's `optional` lets a copy
+    that matches no file pass, where the API's default, `false`, fails the
+    reconcile; an authored `false` is not written. An artifact's
+    `inputsFrom` names a YAML file, `@<alias>/<path>`, of one of the
+    generator's own sources or of the artifact itself, whose content the
+    generated ExternalArtifact exports in its status: whatever reads that
+    status reads content of the sources, which the generator republishes in
+    any case. **`commonMetadata` is not the object's own metadata:** its
     `labels` and `annotations` are written into the spec, where the API says
     they are "applied to all resources", the ExternalArtifacts it generates;
     the ArtifactGenerator's own labels and annotations are the `labels` and
@@ -2595,9 +2602,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the value, until the kind models what they reach
     (go-kure/launcher#1073):** `managedNamespaces`, which has the controller
     create, label and prune Namespaces; `serviceAccountName`, the account the
-    controller acts as; an artifact's `namespace`, which writes it into
-    another namespace, and its `inputsFrom`; and a copy's `optional`, which
-    lets a copy that matches nothing pass.
+    controller acts as; and an artifact's `namespace`, which writes it into
+    another namespace.
   - `resourcesetinputprovider` (`ResourceSetInputProviderSpec`): `type`,
     `url`, `serviceAccountName`, `secretRef`, `certSecretRef` (each a
     `name`), `insecure`, `defaultValues`, `filter` (`includeBranch`,

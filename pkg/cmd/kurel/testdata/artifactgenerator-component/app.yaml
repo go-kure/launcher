@@ -36,6 +36,7 @@ spec:
         artifacts:
           - name: "{app}"
             originRevision: "@apps"
+            inputsFrom: "@apps/apps/{app}/inputs.yaml"
             copy:
               - from: "@base/**"
                 to: "@artifact/"
@@ -44,3 +45,4 @@ spec:
               - from: "@apps/apps/{app}/values.yaml"
                 to: "@artifact/values.yaml"
                 strategy: Merge
+                optional: true
