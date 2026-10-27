@@ -107,7 +107,7 @@ var requiredWrittenUnauthorable = map[string]string{
 	"cilium-networkpolicy spec.nodeSelector":                                 "a node selector belongs to a CiliumClusterwideNetworkPolicy",
 	"cilium-networkpolicy specs[].nodeSelector":                              "a node selector belongs to a CiliumClusterwideNetworkPolicy",
 	"cnpg-pooler template.spec.ephemeralContainers":                          "ephemeral containers cannot be declared on a pod template",
-	"artifactgenerator managedNamespaces":                                    "refused until the kind models the Namespaces it makes the controller manage (go-kure/launcher#1073)",
+	"artifactgenerator managedNamespaces":                                    "refused: it hands the controller the lifecycle of cluster-scoped Namespaces",
 	"externalsecret data[].sourceRef.generatorRef":                           "the object always carries a storeRef there, and the API takes exactly one",
 	"clusterexternalsecret externalSecretSpec.data[].sourceRef.generatorRef": "the object always carries a storeRef there, and the API takes exactly one",
 	"thanosruler remoteWrite[].azureAd.workloadIdentity":                     "the operator passes it to Thanos at no version, and the kind refuses it at every version it can parse",

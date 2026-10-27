@@ -159,7 +159,7 @@ var policyFreeKinds = []policyFreeKind{
 		minimal: artifactGeneratorMinimal(),
 		full:    artifactGeneratorFull(),
 		unfixtured: map[string]string{
-			"managedNamespaces": "refused (go-kure/launcher#1073)",
+			"managedNamespaces": "refused: it hands the controller the lifecycle of cluster-scoped Namespaces",
 		},
 	},
 	{
@@ -2186,11 +2186,11 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"source without an alias", artifactGeneratorWith(map[string]any{"kind": "GitRepository", "name": "app"}), "sources[0].alias: required"},
 			{"source without a kind", artifactGeneratorWith(map[string]any{"alias": "app", "name": "app"}), "sources[0].kind: required"},
 			{"second source without a name", artifactGeneratorWith(artifactGeneratorSource(), map[string]any{"alias": "base", "kind": "OCIRepository"}), "sources[1].name: required"},
-			// managedNamespaces is refused, whatever its value
-			// (go-kure/launcher#1073).
-			{"managedNamespaces", withProperty(artifactGeneratorMinimal(), "managedNamespaces", map[string]any{"prune": true, "allowedNames": []any{"shop"}}), "managedNamespaces: not supported by this component yet (go-kure/launcher#1073)"},
-			{"managedNamespaces null", withProperty(artifactGeneratorMinimal(), "managedNamespaces", nil), "managedNamespaces: not supported"},
-			{"managedNamespaces folded", withProperty(artifactGeneratorMinimal(), "ManagedNamespaces", map[string]any{}), "managedNamespaces: not supported"},
+			// managedNamespaces is refused, whatever its value, with the
+			// reason the README gives.
+			{"managedNamespaces", withProperty(artifactGeneratorMinimal(), "managedNamespaces", map[string]any{"prune": true, "allowedNames": []any{"shop"}}), "managedNamespaces: refused: it hands the controller the lifecycle of cluster-scoped Namespaces, which it creates, adopts and, with prune, deletes with everything in them"},
+			{"managedNamespaces null", withProperty(artifactGeneratorMinimal(), "managedNamespaces", nil), "managedNamespaces: refused"},
+			{"managedNamespaces folded", withProperty(artifactGeneratorMinimal(), "ManagedNamespaces", map[string]any{}), "managedNamespaces: refused"},
 			// The managedNamespaces pass reads only the authored keys, so a
 			// number a float64 cannot hold reaches the decode, which refuses it
 			// as the string the field is.

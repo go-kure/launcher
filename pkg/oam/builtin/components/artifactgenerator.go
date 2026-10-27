@@ -123,18 +123,35 @@ func (h *ArtifactGeneratorHandler) ToApplicationConfig(component *oam.Component,
 }
 
 // `managedNamespaces`, which source-watcher v2.3 adds to the
-// source.extensions.fluxcd.io/v1beta1 ArtifactGenerator, has the controller
-// create, label and prune Namespaces; the kind refuses it until it models
-// what that reaches (go-kure/launcher#1073). An authored one is refused
-// whatever its value: a null the typed spec cannot tell from an unauthored
-// field is still not the kind's to write. The other fields v2.3 adds are
-// written as authored: `serviceAccountName`, an artifact's `namespace` and
-// `inputsFrom`, and a copy's `optional`.
+// source.extensions.fluxcd.io/v1beta1 ArtifactGenerator, hands the controller
+// the lifecycle of cluster-scoped Namespaces: it creates them, adopts one no
+// generator owns, takes over another generator's, labels them and, with
+// `prune`, deletes them with everything in them, adopted ones included. An
+// application's components make namespaced objects, and no environment policy
+// could refuse the field short of dropping the kind, so the kind refuses it.
+// An authored one is refused whatever its value: a null the typed spec cannot
+// tell from an unauthored field is still not the kind's to write. The other
+// fields v2.3 adds are written as authored: `serviceAccountName`, an
+// artifact's `namespace` and `inputsFrom`, and a copy's `optional`.
 const artifactGeneratorManagedNamespaces = "managedNamespaces"
+
+// managedNamespacesReason is why the kind refuses `managedNamespaces`.
+const managedNamespacesReason = "it hands the controller the lifecycle of cluster-scoped Namespaces, which it creates, adopts and, with prune, deletes with everything in them"
 
 // managedNamespacesRefusal is the refusal of an authored `managedNamespaces`.
 func managedNamespacesRefusal() error {
-	return errors.Errorf("%s: not supported by this component yet (go-kure/launcher#1073)", artifactGeneratorManagedNamespaces)
+	return errors.Errorf("%s: refused: %s", artifactGeneratorManagedNamespaces, managedNamespacesReason)
+}
+
+// UnsupportedFieldHint returns the reason `managedNamespaces` is refused, for
+// the key in any case, and "" for any other key. pkg/oam appends it to the
+// unsupported-field error of an authored artifactgenerator component, which
+// kurel build raises before the handler sees the properties.
+func (h *ArtifactGeneratorHandler) UnsupportedFieldHint(key string) string {
+	if !strings.EqualFold(key, artifactGeneratorManagedNamespaces) {
+		return ""
+	}
+	return artifactGeneratorManagedNamespaces + " is refused: " + managedNamespacesReason
 }
 
 // refuseManagedNamespaces refuses a spec that sets `managedNamespaces`, for a

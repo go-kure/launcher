@@ -442,7 +442,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `externalsecrets.CreateExternalSecret` | external-secrets.io/v1 ExternalSecret | kind | `externalsecret` | strict decode of `ExternalSecretSpec` | Its labels and annotations are the `labels` and `annotations` properties. No top-level field must be written. A generator named as the source of one key of `data` is refused. A `target.manifest` whose `apiVersion` is no API version is refused. A `target.manifest` of a kind the environment policy checks (a workload, a claim, a PersistentVolume, a HorizontalPodAutoscaler) is refused, and a core Secret there under a policy that forbids explicit secrets. No capability is required. Its target Secret (`target.name`, else the object's name), under a `creationPolicy` that creates it and with no `target.manifest`, is the one the late-maker check sees it make (go-kure/launcher#1086). The `external-secret` trait builds an ExternalSecret for a workload through the same constructor, from a hand-written parser. |
 | `externalsecrets.CreateSecretStore` | external-secrets.io/v1 SecretStore | kind | `secretstore` | strict decode of `SecretStoreSpec` | As `clustersecretstore`, in the build namespace. Its labels and annotations are the `labels` and `annotations` properties. |
 | `fluxcd.CreateAlert` | notification.toolkit.fluxcd.io/v1 Alert | kind | `fluxcd-alert` | strict decode of `AlertSpec` | `providerRef` with its `name` and `eventSources` must be written, and of a source its `kind` and `name`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. It lands in the Flux namespace when one is set. No environment policy applies. The type name carries a prefix: an alert, in this package, also reads as an alerting rule. |
-| `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | kind | `artifactgenerator` | strict decode of `ArtifactGeneratorSpec` | `sources` and `artifacts` must be written; of a source its `alias`, `kind` and `name`, of an artifact its `name` and `copy`, of a copy its `from` and `to`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace`, an artifact's `namespace` and `serviceAccountName` are written as authored. The API's expression rules, which hold an artifact's `name` to an object name and its `namespace` to a namespace name where no `pathPattern` is set, are not checked. Of the five fields the v2.3 source-watcher API adds, four are written as authored, and `managedNamespaces` is refused whatever its value, until the kind models what it reaches (go-kure/launcher#1073). It lands in the Flux namespace when one is set. No environment policy applies. |
+| `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | kind | `artifactgenerator` | strict decode of `ArtifactGeneratorSpec` | `sources` and `artifacts` must be written; of a source its `alias`, `kind` and `name`, of an artifact its `name` and `copy`, of a copy its `from` and `to`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace`, an artifact's `namespace` and `serviceAccountName` are written as authored. The API's expression rules, which hold an artifact's `name` to an object name and its `namespace` to a namespace name where no `pathPattern` is set, are not checked. Of the five fields the v2.3 source-watcher API adds, four are written as authored, and `managedNamespaces` is refused whatever its value: it hands the controller the lifecycle of cluster-scoped Namespaces, which it creates, adopts and, with `prune`, deletes with everything in them (below). It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateBucket` | source.toolkit.fluxcd.io/v1 Bucket | kind | `bucket` | strict decode of `BucketSpec` | - |
 | `fluxcd.CreateExternalArtifact` | source.toolkit.fluxcd.io/v1 ExternalArtifact | not authorable | - | - | Written by the controller that produces the artifact. |
 | `fluxcd.CreateFluxInstance` | fluxcd.controlplane.io/v1 FluxInstance | held | - | - | A FluxInstance is the installation of Flux itself, not an application's object: its spec lists "the controllers to install", and the API accepts one name for it, `flux`. A component type would let an application author the cluster's Flux (go-kure/launcher#790). |
@@ -2620,9 +2620,22 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     written as authored: launcher resolves none of them. `serviceAccountName`
     and an artifact's `namespace` are written as authored too, and what they
     reach is under "Nothing gates what a Flux object reaches" above.
-    **Refused, whatever the value, until the kind models what it reaches
-    (go-kure/launcher#1073):** `managedNamespaces`, which has the controller
-    create, label and prune Namespaces.
+    **`managedNamespaces` is refused, whatever its value** (`managedNamespaces:
+    refused: it hands the controller the lifecycle of cluster-scoped
+    Namespaces, …`). It makes the controller create the Namespaces the
+    artifacts name, adopt an existing one no generator owns, take over one
+    another generator owns, label them, and, with `prune`, delete them once
+    no artifact names them or the generator goes, adopted ones included,
+    with everything in them, the objects of other applications too, unless
+    the Namespace itself opts out with Flux's prune annotations. Only
+    `default`, `kube-system`, `kube-public`, `flux-system` and the
+    generator's own namespace are out of its reach; everything else is
+    bounded only by the cluster-wide namespace rights of the account it
+    checks. An application's components make namespaced objects, and the
+    Namespaces here are the controller's, not objects the build emits, so
+    no environment policy and no object-kind rule of a consumer could refuse
+    them short of dropping the `artifactgenerator` type. A Namespace an
+    application needs is the `namespace` component's.
   - `resourcesetinputprovider` (`ResourceSetInputProviderSpec`): `type`,
     `url`, `serviceAccountName`, `secretRef`, `certSecretRef` (each a
     `name`), `insecure`, `defaultValues`, `filter` (`includeBranch`,
