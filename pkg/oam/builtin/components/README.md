@@ -135,7 +135,7 @@ reads it.
 |--------|----------|---------|
 | `alertmanager` | Alertmanager | Kind-named Prometheus operator Alertmanager: the whole `AlertmanagerSpec`, strictly decoded; no top-level field is required. The operator runs the pods: what the spec says of them (`image`, `replicas`, `resources`, storage, `containers`, `initContainers`, `volumes`, `securityContext`, `hostNetwork`) is held to the environment policy as a workload's is, and the deprecated `baseImage`, `tag` and `sha` are not in the schema, and are refused when not empty (an empty one writes nothing where the properties are not first validated against the schema, which refuses all three). The replica count and memory request the operator fills where they are unset are held, not written. An image the operator chooses, for `alertmanager` or one of its two reloaders, is refused under a policy with allowed registries. No capability is required — see below. |
 | `apiservice` | APIService | Kind-named APIService: the whole `APIServiceSpec`, strictly decoded; `group`, `version`, `groupPriorityMinimum` and `versionPriority` are required, and a `service` names its `namespace` and `name`. The object must be named `<version>.<group>`, by the component's name or `objectName`. It hands a group and version of the API to the Service it names, which is not resolved at build. Cluster-scoped; only the environment policy's object kind rules apply — see below. |
-| `artifactgenerator` | ArtifactGenerator | Kind-named Flux ArtifactGenerator: the whole `ArtifactGeneratorSpec`, strictly decoded; `sources`, each with its `alias`, `kind` and `name`, and `artifacts`, each with its `name` and a `copy` of `from` and `to`, are required. A source may be one of another namespace, whose content the generator copies into its artifacts, and nothing gates it. The API's expression rule is not checked. No environment policy applies — see below. |
+| `artifactgenerator` | ArtifactGenerator | Kind-named Flux ArtifactGenerator: the whole `ArtifactGeneratorSpec`, strictly decoded; `sources`, each with its `alias`, `kind` and `name`, and `artifacts`, each with its `name` and a `copy` of `from` and `to`, are required. A source may be one of another namespace, whose content the generator copies into its artifacts, and an artifact may be written into another namespace, checked only against the RBAC of the account `serviceAccountName` names; launcher gates neither. The API's expression rules are not checked, and `managedNamespaces` is refused. No environment policy applies — see below. |
 | `backendtlspolicy` | BackendTLSPolicy | Kind-named Gateway API BackendTLSPolicy: the whole `BackendTLSPolicySpec`, strictly decoded; at least one of `targetRefs`, and `validation` with its `hostname`, are required. No capability is required and no environment policy applies — see below. |
 | `bucket` | Bucket | Kind-named: the full Flux `BucketSpec`. |
 | `certificate` | Certificate | Kind-named cert-manager Certificate: the whole `CertificateSpec`, strictly decoded; `secretName` and `issuerRef` with its `name` are required. A keystore password written into the object is refused under an environment policy that forbids explicit secrets. The issuer is the author's, and no capability is required. Shares its name with the `certificate` trait — see below. |
@@ -442,7 +442,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `externalsecrets.CreateExternalSecret` | external-secrets.io/v1 ExternalSecret | kind | `externalsecret` | strict decode of `ExternalSecretSpec` | Its labels and annotations are the `labels` and `annotations` properties. No top-level field must be written. A generator named as the source of one key of `data` is refused. A `target.manifest` whose `apiVersion` is no API version is refused. A `target.manifest` of a kind the environment policy checks (a workload, a claim, a PersistentVolume, a HorizontalPodAutoscaler) is refused, and a core Secret there under a policy that forbids explicit secrets. No capability is required. The `external-secret` trait builds an ExternalSecret for a workload through the same constructor, from a hand-written parser. |
 | `externalsecrets.CreateSecretStore` | external-secrets.io/v1 SecretStore | kind | `secretstore` | strict decode of `SecretStoreSpec` | As `clustersecretstore`, in the build namespace. Its labels and annotations are the `labels` and `annotations` properties. |
 | `fluxcd.CreateAlert` | notification.toolkit.fluxcd.io/v1 Alert | kind | `fluxcd-alert` | strict decode of `AlertSpec` | `providerRef` with its `name` and `eventSources` must be written, and of a source its `kind` and `name`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. It lands in the Flux namespace when one is set. No environment policy applies. The type name carries a prefix: an alert, in this package, also reads as an alerting rule. |
-| `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | kind | `artifactgenerator` | strict decode of `ArtifactGeneratorSpec` | `sources` and `artifacts` must be written; of a source its `alias`, `kind` and `name`, of an artifact its `name` and `copy`, of a copy its `from` and `to`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace` is written as authored. The API's expression rule, which holds an artifact's `name` to an object name where no `pathPattern` is set, is not checked. Of the five fields the v2.3 source-watcher API adds, an artifact's `inputsFrom` and a copy's `optional` are written as authored, and three are refused whatever their value, until the kind models what they reach (go-kure/launcher#1073): `managedNamespaces` and `serviceAccountName`, and an artifact's `namespace`. It lands in the Flux namespace when one is set. No environment policy applies. |
+| `fluxcd.CreateArtifactGenerator` | source.extensions.fluxcd.io/v1beta1 ArtifactGenerator | kind | `artifactgenerator` | strict decode of `ArtifactGeneratorSpec` | `sources` and `artifacts` must be written; of a source its `alias`, `kind` and `name`, of an artifact its `name` and `copy`, of a copy its `from` and `to`: the fields the linked Go source marks required, not held to a CRD. A source's `namespace`, an artifact's `namespace` and `serviceAccountName` are written as authored. The API's expression rules, which hold an artifact's `name` to an object name and its `namespace` to a namespace name where no `pathPattern` is set, are not checked. Of the five fields the v2.3 source-watcher API adds, four are written as authored, and `managedNamespaces` is refused whatever its value, until the kind models what it reaches (go-kure/launcher#1073). It lands in the Flux namespace when one is set. No environment policy applies. |
 | `fluxcd.CreateBucket` | source.toolkit.fluxcd.io/v1 Bucket | kind | `bucket` | strict decode of `BucketSpec` | - |
 | `fluxcd.CreateExternalArtifact` | source.toolkit.fluxcd.io/v1 ExternalArtifact | not authorable | - | - | Written by the controller that produces the artifact. |
 | `fluxcd.CreateFluxInstance` | fluxcd.controlplane.io/v1 FluxInstance | held | - | - | A FluxInstance is the installation of Flux itself, not an application's object: its spec lists "the controllers to install", and the API accepts one name for it, `flux`. A component type would let an application author the cluster's Flux (go-kure/launcher#790). |
@@ -2509,7 +2509,25 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     sources it names into the artifacts it generates**, which the API
     describes as ExternalArtifacts, so one that names another namespace's
     source republishes that source's content as an artifact its author
-    named. It names no account.
+    named. `artifacts[].namespace` names the namespace an ExternalArtifact
+    is written into; left out, the generator's own. **There the controller
+    creates it, adopts an ExternalArtifact of that name no generator owns,
+    takes over one another generator owns, and deletes it once no artifact
+    names it.** Where `pathPattern` is set the namespace may be a
+    `{capture}` placeholder, which the controller fills in from the content
+    of the source when it reconciles: the source then chooses the
+    namespace, and no build sees it. **`serviceAccountName` names the
+    account, of the namespace the generator lands in, that the controller
+    checks every ExternalArtifact against**, in every namespace an artifact
+    names, its own included, with a SubjectAccessReview before each write;
+    the account's RBAC decides where the generator may write, while the
+    writes themselves use the controller's own credentials. Left out, an
+    artifact in the generator's own namespace is not checked, and one in
+    another namespace is checked against the account a cluster may
+    configure with `--default-service-account`; without that setting it is
+    not checked either. In the Flux namespace
+    the account named is one of the shared namespace, as on `helmrelease`
+    and `fluxcd-kustomization`.
   - `resourcesetinputprovider`: the object makes the Flux Operator ask the
     provider its `type` names for input sets, which, in the API's words,
     "populate the inputs" of a ResourceSet; **the answer decides what that
@@ -2580,8 +2598,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     controller renders; launcher writes it as authored and does not parse
     it.
   - `artifactgenerator` (`ArtifactGeneratorSpec`): `commonMetadata`,
-    `sources`, `pathPattern` and `artifacts` (each a `name`, `revision`,
-    `originRevision`, `inputsFrom` and `copy`; a copy a `from`, `to`,
+    `sources`, `pathPattern`, `serviceAccountName` and `artifacts` (each a
+    `name`, `namespace`, `revision`, `originRevision`, `inputsFrom` and
+    `copy`; a copy a `from`, `to`,
     `exclude`, `strategy` and `optional`). A copy's `optional` lets a copy
     that matches no file pass, where the API's default, `false`, fails the
     reconcile; an authored `false` is not written. An artifact's
@@ -2598,12 +2617,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the component label's value: an ExternalArtifact is no pod. Launcher
     writes nothing there. The
     aliases, the `@<alias>/…` paths and the `{capture}` placeholders are
-    written as authored: launcher resolves none of them. **Refused, whatever
-    the value, until the kind models what they reach
+    written as authored: launcher resolves none of them. `serviceAccountName`
+    and an artifact's `namespace` are written as authored too, and what they
+    reach is under "Nothing gates what a Flux object reaches" above.
+    **Refused, whatever the value, until the kind models what it reaches
     (go-kure/launcher#1073):** `managedNamespaces`, which has the controller
-    create, label and prune Namespaces; `serviceAccountName`, the account the
-    controller acts as; and an artifact's `namespace`, which writes it into
-    another namespace.
+    create, label and prune Namespaces.
   - `resourcesetinputprovider` (`ResourceSetInputProviderSpec`): `type`,
     `url`, `serviceAccountName`, `secretRef`, `certSecretRef` (each a
     `name`), `insecure`, `defaultValues`, `filter` (`includeBranch`,
@@ -2806,8 +2825,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     is refused at apply.
   - An `artifactgenerator`: where no `pathPattern` is set, every artifact's
     `name` must be a Kubernetes object name (lower case letters, digits,
-    `-` and `.`). One that is not, `App_Manifests` for one, builds and is
-    refused at apply.
+    `-` and `.`), and its `namespace`, if written, a namespace name (lower
+    case letters, digits and `-`, at most 63). One that is not,
+    `App_Manifests` for one, builds and is refused at apply.
   - A `resourcesetinputprovider`: seventeen rules, sixteen of them on the
     spec and one on a selector. `url` must be left out under `Static` and
     `ExternalArtifact` and written under every other type, with the scheme
@@ -2981,10 +3001,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `secretRef`, a ResourceSetInputProvider reads the Secrets of `secretRef`
   and `certSecretRef`, and an ImageUpdateAutomation reads
   the Secret of `git.commit.signingKey.secretRef`. The ServiceAccount of a
-  Provider's, an ImageRepository's or a ResourceSetInputProvider's
-  `serviceAccountName` is not reported: the report holds ConfigMaps and
-  Secrets only. *Required reads*: what of that a kind's object cannot become
-  Ready without (`FluxRequiredReads`), which a delivery whose groups wait for
+  Provider's, an ImageRepository's, a ResourceSetInputProvider's or an
+  ArtifactGenerator's `serviceAccountName` is not reported: the report holds
+  ConfigMaps and Secrets only. *Required reads*: what of that a kind's object
+  cannot become Ready without (`FluxRequiredReads`), which a delivery whose groups wait for
   their Flux objects refuses a trait to make in a later group
   (go-kure/launcher#1079), is every Secret a Receiver, an ImageRepository
   and an ImageUpdateAutomation read, none under `suspend: true`. An Alert, a
@@ -2997,7 +3017,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Not covered.** Whether what is referred to exists (the Provider, the
   objects of a source, the ImageRepository, the GitRepository, the signing
-  key's Secret, the sources of an ArtifactGenerator, the Secrets and the
+  key's Secret, the sources and the ServiceAccount of an ArtifactGenerator
+  and the namespaces its artifacts name, the Secrets and the
   ServiceAccount of a Provider and of an ImageRepository, the resources and
   the Secret of a Receiver, the Secrets, the ServiceAccount and the
   ExternalArtifacts of a ResourceSetInputProvider), whether the registry of
