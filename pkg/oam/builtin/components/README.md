@@ -9770,6 +9770,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Prefer an `ocirepository` component and a `chartRef` when several releases share the
   source or it is authored on its own.
 
+  **Generated HelmChart** (go-kure/launcher#1074). With a chart template of kind HelmChart,
+  helm-controller generates the HelmChart `<namespace>-<name>`, named after the HelmRelease,
+  in the namespace `chart.spec.sourceRef` names, else in the HelmRelease's, takes over an
+  object of that name and deletes it with the HelmRelease, when the kind, name or namespace
+  of the chart source it generates changes, or when the release switches to `chartRef`. So a
+  `helmchart` component, or any other HelmChart the build generates, of that identity is
+  refused as a collision naming helm-controller's claim, as for kind OCIRepository. A
+  `chartRef` claims nothing.
+
   **Release name** (go-kure/launcher#785). A component that authors no `releaseName` gets
   `spec.releaseName` set to the component name, so every HelmRelease in the output names its
   release. A name over 53 characters, Helm's limit, is shortened as Flux helm-controller

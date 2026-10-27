@@ -9,23 +9,24 @@ import (
 )
 
 // fluxSourceGroup is the API group of Flux's source kinds, helmReleaseKind the
-// kind (in helmGroup) that makes a claim, and ociRepositoryKind the kind of the
-// source helm-controller generates for a HelmRelease's chart template of that
-// kind.
+// kind (in helmGroup) that makes a claim, and helmChartKind and
+// ociRepositoryKind the kinds of the source helm-controller generates for a
+// HelmRelease's chart template of that kind.
 const (
 	fluxSourceGroup   = "source.toolkit.fluxcd.io"
 	helmReleaseKind   = "HelmRelease"
+	helmChartKind     = "HelmChart"
 	ociRepositoryKind = "OCIRepository"
 )
 
 // controllerClaim is an object a controller generates in the cluster for a
 // generated object: no application emits it, yet it is applied under its name
-// (go-kure/launcher#1072). helm-controller server-side-applies the
-// OCIRepository of a HelmRelease's chart template of kind OCIRepository with
-// force ownership, and deletes whatever holds that name when the HelmRelease is
-// deleted, when the kind, name or namespace of the chart source it generates
-// changes, or when it switches to chartRef, without asking who owns it
-// (helm-controller v1.7.1 internal/reconcile/helmchart_template.go:78-99,
+// (go-kure/launcher#1072, go-kure/launcher#1074). helm-controller
+// server-side-applies the HelmChart or OCIRepository of a HelmRelease's chart
+// template with force ownership, and deletes whatever holds that name when the
+// HelmRelease is deleted, when the kind, name or namespace of the chart source
+// it generates changes, or when it switches to chartRef, without asking who
+// owns it (helm-controller v1.7.1 internal/reconcile/helmchart_template.go:78-99,
 // 142-152,183-210). So an object of that identity that an application
 // generates is taken over, then deleted: the collision checks hold a claim as
 // a generated object.
@@ -36,16 +37,20 @@ type controllerClaim struct {
 }
 
 func (c controllerClaim) String() string {
-	return fmt.Sprintf("helm-controller for %s (chart.kind OCIRepository)", c.by)
+	return fmt.Sprintf("helm-controller for %s (chart.kind %s)", c.by, c.id.kind)
 }
 
 // controllerClaims returns the claims obj makes, read as keyedObjects keys it:
-// for a HelmRelease whose spec.chart.kind is OCIRepository, the OCIRepository
-// helm-controller names `<namespace>-<name>` in the HelmRelease's namespace
-// (HelmRelease.GetHelmChartTemplateReference, helm-controller api v1.7.1
-// v2/helmrelease_types.go:1633-1647). A typed object is read converted, as the
-// cluster would be sent it. A chart that is no object makes no claim: the
-// HelmRelease's own admission refuses it.
+// for a HelmRelease with a chart template, the object helm-controller generates
+// from it (HelmRelease.GetHelmChartTemplateReference, helm-controller api
+// v1.7.1 v2/helmrelease_types.go:1633-1647). It is named
+// `<namespace>-<name>` after the HelmRelease and is of the template's kind,
+// HelmChart when it names none. An OCIRepository is in the HelmRelease's
+// namespace; a HelmChart is in chart.spec.sourceRef.namespace when that is set,
+// else in the HelmRelease's. A typed object is read converted, as the cluster
+// would be sent it. A chartRef, a chart that is no object, or a kind the API
+// does not take makes no claim: the HelmRelease's own admission refuses the
+// last two.
 func controllerClaims(obj client.Object) ([]controllerClaim, error) {
 	gvk := obj.GetObjectKind().GroupVersionKind()
 	if gvk.Group != helmGroup || gvk.Kind != helmReleaseKind {
@@ -56,13 +61,27 @@ func controllerClaims(obj client.Object) ([]controllerClaim, error) {
 		return nil, err
 	}
 	spec, _ := content["spec"].(map[string]any)
-	chart, _ := spec["chart"].(map[string]any)
-	if kind, _ := chart["kind"].(string); kind != ociRepositoryKind {
+	chart, ok := spec["chart"].(map[string]any)
+	if !ok {
 		return nil, nil
 	}
 	ns, name := obj.GetNamespace(), obj.GetName()
+	claimNS := ns
+	kind, _ := chart["kind"].(string)
+	switch kind {
+	case "", helmChartKind:
+		kind = helmChartKind
+		chartSpec, _ := chart["spec"].(map[string]any)
+		sourceRef, _ := chartSpec["sourceRef"].(map[string]any)
+		if sourceNS, _ := sourceRef["namespace"].(string); sourceNS != "" {
+			claimNS = sourceNS
+		}
+	case ociRepositoryKind:
+	default:
+		return nil, nil
+	}
 	return []controllerClaim{{
-		id: objectIdentity{group: fluxSourceGroup, kind: ociRepositoryKind, namespace: ns, name: ns + "-" + name},
+		id: objectIdentity{group: fluxSourceGroup, kind: kind, namespace: claimNS, name: ns + "-" + name},
 		by: objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: ns, name: name},
 	}}, nil
 }
