@@ -31,8 +31,10 @@ spec:
       from: '@base/**'
       to: '@artifact/'
     - from: '@apps/apps/{app}/values.yaml'
+      optional: true
       strategy: Merge
       to: '@artifact/values.yaml'
+    inputsFrom: '@apps/apps/{app}/inputs.yaml'
     name: '{app}'
     originRevision: '@apps'
   commonMetadata:
