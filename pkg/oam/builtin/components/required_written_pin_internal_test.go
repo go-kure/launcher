@@ -107,7 +107,7 @@ var requiredWrittenUnauthorable = map[string]string{
 	"cilium-networkpolicy spec.nodeSelector":                                 "a node selector belongs to a CiliumClusterwideNetworkPolicy",
 	"cilium-networkpolicy specs[].nodeSelector":                              "a node selector belongs to a CiliumClusterwideNetworkPolicy",
 	"cnpg-pooler template.spec.ephemeralContainers":                          "ephemeral containers cannot be declared on a pod template",
-	"artifactgenerator managedNamespaces":                                    "refused until the kind models the Namespaces it makes the controller manage (go-kure/launcher#1073)",
+	"artifactgenerator managedNamespaces":                                    "refused: it hands the controller the lifecycle of cluster-scoped Namespaces",
 	"externalsecret data[].sourceRef.generatorRef":                           "the object always carries a storeRef there, and the API takes exactly one",
 	"helmrelease chart.spec.secretRef":                                       "a field of the OCIRepository a chart template inlines, which a template of kind HelmChart does not read",
 	"helmrelease chart.spec.certSecretRef":                                   "a field of the OCIRepository a chart template inlines, which a template of kind HelmChart does not read",

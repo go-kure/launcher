@@ -327,18 +327,18 @@ var labelReachNotRead = []labelReachUnread{
 
 	// The metadata an ArtifactGenerator's managedNamespaces hands on to the
 	// Namespaces the controller manages: the artifactgenerator kind refuses
-	// managedNamespaces (go-kure/launcher#1073), so none of it is built.
+	// managedNamespaces, so none of it is built.
 	{
 		field:  "github.com/fluxcd/source-watcher/api/v2/v1beta1.ManagedNamespacesMetadata.From",
-		reason: "refused with managedNamespaces (go-kure/launcher#1073)",
+		reason: "refused with managedNamespaces",
 	},
 	{
 		field:  "github.com/fluxcd/source-watcher/api/v2/v1beta1.NamespaceMetadataFromSource.AllowedAnnotations",
-		reason: "refused with managedNamespaces (go-kure/launcher#1073)",
+		reason: "refused with managedNamespaces",
 	},
 	{
 		field:  "github.com/fluxcd/source-watcher/api/v2/v1beta1.NamespaceMetadataFromSource.AllowedLabels",
-		reason: "refused with managedNamespaces (go-kure/launcher#1073)",
+		reason: "refused with managedNamespaces",
 	},
 }
 
