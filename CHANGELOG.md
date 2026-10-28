@@ -1,6 +1,135 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.2] - 2026-10-28
+
+### Added
+
+- The oci component's source takes registry access
+- Export ValidateTrafficSources for routing-trait trafficSources
+
+### Build
+
+- Update dependency hugo to v0.168.0
+- Move Go to 1.26.10 to clear GO-2026-6809
+- Move Go to 1.27.3
+- Update module github.com/go-kure/kure to v0.2.0-beta.17
+- Update dependency flux-schema-plugin to v0.17.0
+- Update toolchain
+- Update dependency flux2 to v2.10.0
+- Update dependency hugo to v0.169.0
+- Update module github.com/prometheus/common to v0.72.1
+- Move to kure v0.2.0-beta.21 and mirror its replace pins
+
+### Document Format
+
+- App.yaml takes the two admission policy kinds and their bindings
+- A mutating admission policy takes CONNECT, and the registry README states the served versions
+- Accept app.yaml security-context readOnlyRootFilesystem: false under psaLevel restricted
+- App.yaml fluxcd-receiver refuses a resource without apiVersion whose kind has no Flux default
+- App.yaml's oci component source takes serviceAccountName
+- App.yaml prometheus refuses a field its version does not read
+- App.yaml thanosruler refuses a field its Thanos version does not read
+- App.yaml prometheus version refusals name what the operator does
+- App.yaml prometheus panic and web TLS refusals say what follows
+- App.yaml prometheus panic and web TLS refusal texts scope their consequence
+- App.yaml prometheus logFormat and version texts say what the operator does
+- App.yaml prometheus logFormat refusal claims nothing of the other containers
+- Accept a leading digit in app.yaml Service-derived names
+- State that a pagerduty Provider's channel is an identifier
+- App.yaml trait Secrets a sibling group's Flux member reads move with the group
+- App.yaml postgresql backup writes to a Barman Cloud ObjectStore on a schedule; the former backup keys and the top-level objectStore are refused
+- App.yaml thanosruler refuses the remote write fields no Thanos version reads
+- App.yaml prometheus refuses a remote write azureAd with no authentication method
+- Refuse a monitoring patch that renames a probed web port
+- Admit a renamed web port where a port of portName's name remains
+- Judge the alertmanager enableFeatures elements no reference touches
+- App.yaml prometheus refuses a relabeling targetLabel outside the label-name scheme of its version
+- App.yaml postgresql recovery bootstraps a Cluster from a Barman Cloud ObjectStore, to a point in time; bootstrap.recovery and an external cluster's barmanObjectStore are refused
+- App.yaml postgresql recovery checks archiving into its source past a sibling store's labels, and never by a name a naming hook may change
+- App.yaml postgresql recovery store waits for what the document makes the component wait for
+- App.yaml postgresql recovery store does not wait for itself where the document makes the component wait for it
+- App.yaml postgresql recovery writes the timeline in decimal and checks archiving past a trailing slash
+- Leave a dropped prometheus log file to its version gate
+- Move an app.yaml oci shared source's trait Secret to the Flux namespace
+- Name the maker's group in the app.yaml late-maker refusal
+- Admit an app.yaml oci late Secret maker again, documenting the limit
+- App.yaml prometheus, alertmanager and thanosruler name every field below its version
+- Refuse a late Secret maker for a shared generated source when the consumer's delivery waits
+- App.yaml prometheus suggests a version that reads every field authored for a single field outside its versions
+- App.yaml prometheus refuses a labelmap replacement outside the label-name scheme of its version
+- App.yaml prometheus bounds a relabel label-name refusal's version by the fields authored
+- App.yaml prometheus suggests no version below 3.0.0 for a field beside a non-legacy label name
+- Make an app.yaml postgresql recovery store wait for every rule's prerequisites
+- Refuse an app.yaml postgresql archive into a sibling's inline recovery store
+- App.yaml postgresql refuses a backup schedule the operator finds no time for
+- App.yaml prometheus judges a log file against every read-only mount the pod gets
+- State that app.yaml prometheus joins a scrapeFailureLogFile at a version that does not parse
+- Leave an app.yaml prometheus relative log file unjudged again
+- App.yaml prometheus admits a log file under a read-only mount whose volume it does not see
+- App.yaml prometheus, alertmanager and thanosruler refuse only mount paths the API refuses
+- App.yaml prometheus admits a log file no mount covers, whatever the image
+- Refuse a log file at an operator directory mount's path (go-kure/launcher#1051 repair)
+- State every refusal of the log-file check in its summaries (go-kure/launcher#1051 repair)
+- Refuse a log file no mount covers again, as on main (go-kure/launcher#1055 revert)
+- Refuse a log file path that ends in a slash (go-kure/launcher#1051 repair)
+- App.yaml helm takes source.digest to pin an inline OCI chart
+- App.yaml prometheus refuses a log file at the path of an author's directory mount
+- App.yaml prometheus refuses a log file at a mount point's ancestor and no longer judges the root filesystem
+- App.yaml prometheus refuses a log file at a sourceless volume's mount and names a writable place under a read-only one
+- App.yaml prometheus states when a file mount refuses a bare queryLogFile
+- App.yaml fluxcd-alert and fluxcd-provider emit notification v1, and helmrelease refuses chart template fields Flux 2.10 does not read
+- App.yaml imageupdateautomation takes policyChangeDelay, and artifactgenerator refuses the source-watcher v2.3 fields it does not model
+- App.yaml helmrelease and artifactgenerator keep authored numbers exact in their refused-field pass
+- App.yaml helmrelease admits chart.kind OCIRepository
+- App.yaml helmrelease refuses a user or password in an OCI chart url
+- The generated OCI chart source's layer selector and deletion, as helm-controller does them
+- App.yaml refuses an object helm-controller's generated HelmChart would take over
+- App.yaml raw Flux sources refuse a credential in url
+- App.yaml refuses a helmrelease name too long for its generated chart source
+- GeneratedChartSource recognizes a typed HelmRelease that states no kind
+- Order a trait-made ConfigMap or Secret before every Flux object that requires it
+
+### Documentation
+
+- An oci shared source needs equal registry access, and only Secret-making traits stay with the Kustomization
+- Name the secret trait among the Secret-making ones, and the version in the kurel identity sentence
+- State the prometheus log-file merge and /dev subdirectories in delivery scope
+- Keep /dev and /proc themselves exempt in the delivery-scope log-file rule
+- State that topology sharding below Prometheus 2.37.0 loses the node zone
+- Add a postgresql backup and point-in-time recovery guide, checked on a live cluster
+- Say that the postgresql archive check matches a sibling's inline recovery store
+- Kube-openapi is a direct require for production code too
+- Install kurel from a release or a checkout; consumers mirror the replace lines
+- Bind the cosign check to go-kure/launcher and the release tag
+
+### Fixed
+
+- Match Go 1.27 JSON field and map-key rules
+- Cap lint job memory with GOMEMLIMIT to stop runner OOM kills
+- The fluxcd-receiver missing-apiVersion refusal names the kind's own version
+- Read an alertmanager reference to the first closing parenthesis
+- Refuse duplicate operator-kind mounts and unwritable log paths
+- Judge prometheus log-file directories by the closest mount
+- Refuse a prometheus log directory only where known read-only
+- Admit a prometheus log directory any mount there may make writable
+- Admit a prometheus log file at a writable mount of the file
+- Admit a prometheus log path the kind cannot resolve
+- Clone the dependency map in waitingDeps without a size computation
+- Read a typed generated object with its numbers kept exact
+- Size the selector's labelled set without arithmetic
+
+### Testing
+
+- Pin the monitoring kinds' patch resource and web port merges
+- The version-gate walker fails on method-expression and range comparisons
+- Place the prometheus log-file test comments at their rows
+- The operator version-gate walker reports a shadowing local alias and a package-level method value
+- The operator version-gate walker reports a shadowing local alias in a function literal outside a function
+- Declare the extra volume in the thanosruler admit row (go-kure/launcher#1050 repair)
+- Make the late-maker tests exercise what they claim
+- The conditional kinds require nothing while not suspended
+
 ## [0.2.0-beta.1] - 2026-10-11
 
 ### Added
