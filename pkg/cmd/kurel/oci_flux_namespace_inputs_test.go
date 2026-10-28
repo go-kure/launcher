@@ -344,8 +344,9 @@ func TestFluxNamespace_OCISharedSourceLateMaker(t *testing.T) {
 // namespace and lands where the waiter does. Under the default delivery the
 // same document is admitted, the waiter and the Secret in the same namespace.
 // An optional valuesFrom is admitted. A trait on the waiter does not hide what
-// it requires, here a chart template's verification Secret, which depends on
-// the Flux namespace. Each row runs under no Flux namespace, under one, and
+// it requires, here a chart template's verification Secret, required only once
+// its sourceRef names the namespace the release lands in, so under a Flux
+// namespace only once the release has moved there. Each row runs under no Flux namespace, under one, and
 // under the application namespace as one.
 func TestFluxNamespace_FluxObjectLateMaker(t *testing.T) {
 	values := func(optional bool) map[string]any {
@@ -357,26 +358,26 @@ func TestFluxNamespace_FluxObjectLateMaker(t *testing.T) {
 	decorate := oam.Trait{Type: "security-context", Properties: map[string]any{"psaLevel": "baseline"}}
 	for _, tc := range []struct {
 		name    string
-		waiter  func() oam.Component
+		waiter  func(string) oam.Component
 		kind    string // the waiter's object
 		refused bool
 	}{
-		{"an ocirepository's secretRef", func() oam.Component {
+		{"an ocirepository's secretRef", func(string) oam.Component {
 			return fluxNSComponent(t, "w", "ocirepository", map[string]any{"secretRef": secretRef("pull")})
 		}, "OCIRepository", true},
-		{"a helmrelease's valuesFrom", func() oam.Component { return fluxNSComponent(t, "w", "helmrelease", values(false)) }, "HelmRelease", true},
-		{"a helmrelease's optional valuesFrom", func() oam.Component { return fluxNSComponent(t, "w", "helmrelease", values(true)) }, "HelmRelease", false},
-		{"a helmrelease's OCI chart template", func() oam.Component {
+		{"a helmrelease's valuesFrom", func(string) oam.Component { return fluxNSComponent(t, "w", "helmrelease", values(false)) }, "HelmRelease", true},
+		{"a helmrelease's optional valuesFrom", func(string) oam.Component { return fluxNSComponent(t, "w", "helmrelease", values(true)) }, "HelmRelease", false},
+		{"a helmrelease's OCI chart template", func(string) oam.Component {
 			return fluxNSComponent(t, "w", "helmrelease", map[string]any{"chart": map[string]any{"kind": "OCIRepository", "spec": map[string]any{
 				"url": "oci://registry.example.com/charts/app", "ref": map[string]any{"tag": "1.0.0"}, "secretRef": secretRef("pull"),
 			}}})
 		}, "HelmRelease", true},
-		{"a fluxcd-kustomization's decryption", func() oam.Component {
+		{"a fluxcd-kustomization's decryption", func(string) oam.Component {
 			return fluxNSComponent(t, "w", "fluxcd-kustomization", map[string]any{"decryption": map[string]any{"provider": "sops", "secretRef": secretRef("pull")}})
 		}, "Kustomization", true},
-		{"a decorated helmrelease's HelmChart template verification", func() oam.Component {
+		{"a decorated helmrelease's HelmChart template verification", func(ns string) oam.Component {
 			return fluxNSComponent(t, "w", "helmrelease", map[string]any{"chart": map[string]any{"spec": map[string]any{
-				"chart": "app", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "example"},
+				"chart": "app", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "example", "namespace": ns},
 				"verify": map[string]any{"provider": "cosign", "secretRef": secretRef("pull")},
 			}}}, decorate)
 		}, "HelmRelease", true},
@@ -384,7 +385,11 @@ func TestFluxNamespace_FluxObjectLateMaker(t *testing.T) {
 		for _, fluxNS := range []string{"", fluxNSTarget, "default"} {
 			t.Run(tc.name+"/fluxNamespace="+fluxNS, func(t *testing.T) {
 				policies := dependsOn("m", "w")
-				_, err := ociBuildWaiting(t, fluxNS, true, policies, maker(), tc.waiter())
+				ns := "default"
+				if fluxNS != "" {
+					ns = fluxNS
+				}
+				_, err := ociBuildWaiting(t, fluxNS, true, policies, maker(), tc.waiter(ns))
 				switch {
 				case !tc.refused && err != nil:
 					t.Fatalf("build: %v", err)
@@ -397,13 +402,9 @@ func TestFluxNamespace_FluxObjectLateMaker(t *testing.T) {
 						}
 					}
 				}
-				got, err := ociBuildWaiting(t, fluxNS, false, policies, maker(), tc.waiter())
+				got, err := ociBuildWaiting(t, fluxNS, false, policies, maker(), tc.waiter(ns))
 				if err != nil {
 					t.Fatalf("default delivery: build: %v", err)
-				}
-				ns := "default"
-				if fluxNS != "" {
-					ns = fluxNS
 				}
 				requireOCIObjects(t, got, tc.kind+" "+ns+"/w", "ExternalSecret "+ns+"/pull")
 			})
