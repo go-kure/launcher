@@ -1,6 +1,7 @@
 package components
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -173,14 +174,16 @@ func refuseDeferredArtifactGeneratorSpec(s *swv1beta1.ArtifactGeneratorSpec) err
 // refuseAuthoredDeferredArtifactGeneratorFields refuses a deferred field an
 // author wrote, whatever its value. Keys match case-insensitively, as the
 // decode's do; the properties are read in their JSON form, as the decode
-// reads them. A shape the decode refuses is left to it.
+// reads them (numbers kept exact). A shape the decode refuses is left to it.
 func refuseAuthoredDeferredArtifactGeneratorFields(authored map[string]any) error {
 	raw, err := json.Marshal(authored)
 	if err != nil {
 		return errors.Wrap(err, "artifactgenerator: properties do not encode as JSON")
 	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
 	var props map[string]any
-	if err := json.Unmarshal(raw, &props); err != nil {
+	if err := dec.Decode(&props); err != nil {
 		return errors.Wrap(err, "artifactgenerator: properties do not read as a JSON object")
 	}
 	if err := refuseDeferredKeys(props, "", artifactGeneratorDeferredFields); err != nil {

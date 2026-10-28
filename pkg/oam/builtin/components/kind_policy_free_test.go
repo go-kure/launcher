@@ -2196,6 +2196,10 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 			{"an artifact's namespace", artifactGeneratorWithArtifact(withProperty(artifactGeneratorArtifact(), "namespace", "other")), "artifacts[0].namespace: not supported"},
 			{"an artifact's inputsFrom", artifactGeneratorWithArtifact(withProperty(artifactGeneratorArtifact(), "inputsFrom", "@app/inputs.yaml")), "artifacts[0].inputsFrom: not supported"},
 			{"a copy's optional false", artifactGeneratorWithArtifact(map[string]any{"name": "app", "copy": []any{artifactGeneratorCopy(), withProperty(artifactGeneratorCopy(), "optional", false)}}), "artifacts[0].copy[1].optional: not supported"},
+			// The deferred-field pass reads numbers exact, so a number a float64
+			// cannot hold reaches the decode, which refuses it as the string the
+			// field is.
+			{"a number a float64 cannot hold", artifactGeneratorWithArtifact(withProperty(artifactGeneratorArtifact(), "revision", json.Number("1e400"))), "revision of type string"},
 			{"no artifacts", map[string]any{"sources": []any{artifactGeneratorSource()}}, "artifacts: required"},
 			{"artifact without a name", withProperty(artifactGeneratorMinimal(), "artifacts", []any{map[string]any{"copy": []any{artifactGeneratorCopy()}}}), "artifacts[0].name: required"},
 			{"artifact without a copy", withProperty(artifactGeneratorMinimal(), "artifacts", []any{map[string]any{"name": "app"}}), "artifacts[0].copy: required"},
