@@ -628,7 +628,11 @@ and the Flux Operator on every object a ResourceSet generates, pods among them. 
 them and writes nothing there: such pods carry the component label only where the document or
 a kind puts it. A typed object of a `monitoring.coreos.com`, `volsync.backube`,
 `cert-manager.io` or `gateway.networking.k8s.io` kind is recognized when it states its kind; a
-typed Flux `Kustomization` or `HelmRelease` by its Go type as well. A `ResourceSet` has no
+typed Flux `Kustomization` or `HelmRelease` by its Go type as well. The component label and
+reserved-key checks read a typed object in its JSON form with numbers kept exact, so a
+`HelmRelease` whose `values` hold a number no float64 holds is not refused for it
+(go-kure/launcher#1085); so does the claim a chart template makes, for a typed object other
+than the Flux `HelmRelease` type, whose `spec.chart` alone it reads. A `ResourceSet` has no
 component type: the row holds one that a `manifests` or `passthrough` document carries, as
 every row does. A refusal names the labels by their path, with the index of the solver where
 they are in the list (`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.labels`). Not
@@ -752,7 +756,8 @@ Go can hold in such a place, reads as a null. A label that is not a string is
 refused, with the object named, whether or not the key is there already: generation fails
 rather than drop a label an author wrote. So does a workload's own selector that the check
 cannot read: one that is no object, a label selector that does not decode as one (a
-`matchLabels` that is no map of strings, an expression whose `values` is no list), or a
+`matchLabels` that is no map of strings, a number among them on a typed object as on an
+unstructured one, an expression whose `values` is no list), or a
 `ReplicationController` label map whose entry for the key is no string. A check that read
 nothing from it would pass a workload it never held to the label. A null selector is an
 absent one. The kinds refuse such a selector at their strict decode, and a `passthrough`

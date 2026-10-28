@@ -1,6 +1,8 @@
 package oam
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -15,7 +17,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -438,13 +439,29 @@ func (e *ReservedMetadataKeyError) Error() string {
 func (e *ReservedMetadataKeyError) Unwrap() error { return ErrReservedMetadataKey }
 
 // objectContent returns obj as the object the cluster would be sent: an
-// unstructured object's own content, a typed object's converted. The check only
-// reads it.
+// unstructured object's own content, a typed object's JSON form. A typed
+// object is read through its JSON encoding with numbers kept exact
+// (json.Number), not converted field by field: a free-form field, such as a
+// HelmRelease's values, may hold a number no float64 holds, which a float64
+// decode refuses (go-kure/launcher#1085). The checks only read it. A string
+// field holds a string, so a json.Number there is refused as no string; a part
+// a check decodes into a typed field, a workload's label selector, is decoded
+// from its JSON form as the API server decodes it (decodeLabelSelector).
 func objectContent(obj client.Object) (map[string]any, error) {
 	if u, ok := obj.(*unstructured.Unstructured); ok {
 		return u.Object, nil
 	}
-	return runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	raw, err := json.Marshal(obj)
+	if err != nil {
+		return nil, errors.Wrap(err, "the object does not encode as JSON")
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var content map[string]any
+	if err := dec.Decode(&content); err != nil {
+		return nil, errors.Wrap(err, "the object does not read as a JSON object")
+	}
+	return content, nil
 }
 
 // nestedObject returns the object at path below m, each step read as
