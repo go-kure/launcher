@@ -112,6 +112,11 @@ func (c *SecretConfig) FluxNamespaceInput() (kind, name string) { return "Secret
 // Satisfies pkg/oam.fluxNamespaceProducer.
 func (c *SecretConfig) ProducesFluxNamespaceInput() bool { return true }
 
+// IsFluxNamespaceInputObject is true: the Secret is the trait's own object,
+// with the content the author gave it, not one a controller makes.
+// Satisfies pkg/oam.fluxNamespaceInputObject.
+func (c *SecretConfig) IsFluxNamespaceInputObject() bool { return true }
+
 // ApplyPolicy refuses the Secret under a policy that forbids explicit secrets
 // (oam.ExplicitSecretPolicy). A policy that does not implement that interface
 // allows it. The transform reports the refusal as a violation naming the

@@ -50,8 +50,27 @@ var externalSecretKind = &policyHeldKind[esv1.ExternalSecretSpec]{
 			spec.DeepCopyInto(&secret.Spec)
 			return secret
 		},
+		made: externalSecretMadeObject,
 	},
 	enforce: enforceExternalSecretPolicy,
+}
+
+// externalSecretMadeObject reports the Secret the External Secrets Operator
+// creates for an ExternalSecret named objectName: target.name, else the
+// ExternalSecret's own name, under every creationPolicy that creates it
+// (Owner, the default, Orphan and CreateOrMerge), as the external-secret
+// trait's rule. Under Merge and None it writes into a Secret that exists apart
+// from it, and a target.manifest makes another kind of object, so it makes
+// none the check can prove.
+func externalSecretMadeObject(objectName string, spec *esv1.ExternalSecretSpec) (kind, name string, ok bool) {
+	target := spec.Target
+	if target.Manifest != nil || target.CreationPolicy == esv1.CreatePolicyMerge || target.CreationPolicy == esv1.CreatePolicyNone {
+		return "", "", false
+	}
+	if target.Name != "" {
+		return "Secret", target.Name, true
+	}
+	return "Secret", objectName, true
 }
 
 // ToApplicationConfig decodes an OAM externalsecret component into its config.
