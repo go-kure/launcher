@@ -96,6 +96,24 @@ func TestFluxRequiredReads(t *testing.T) {
 			if !slices.Equal(configMaps, tc.configMaps) || !slices.Equal(secrets, tc.secrets) {
 				t.Errorf("FluxRequiredReads = %v, %v, want %v, %v", configMaps, secrets, tc.configMaps, tc.secrets)
 			}
+			// What the object requires is a subset of what it reads.
+			r, ok := tc.cfg.(interface {
+				FluxNamespaceReads() (configMaps, secrets []string)
+			})
+			if !ok {
+				t.Fatalf("%T does not report FluxNamespaceReads", tc.cfg)
+			}
+			readCMs, readSecrets := r.FluxNamespaceReads()
+			for _, name := range configMaps {
+				if !slices.Contains(readCMs, name) {
+					t.Errorf("requires ConfigMap %q it does not read (%v)", name, readCMs)
+				}
+			}
+			for _, name := range secrets {
+				if !slices.Contains(readSecrets, name) {
+					t.Errorf("requires Secret %q it does not read (%v)", name, readSecrets)
+				}
+			}
 		})
 	}
 }
