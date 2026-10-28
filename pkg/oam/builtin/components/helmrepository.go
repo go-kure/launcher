@@ -35,7 +35,7 @@ func (h *HelmRepositoryHandler) CanHandle(componentType string) bool {
 // test ties this key set to the struct.
 func (h *HelmRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"url":             fluxSourceRequiredString("HelmRepository spec.url: an http://, https:// or oci:// URL, and oci:// when type is oci. Its host must be in the policy's allowed registries when that list is non-empty; an oci:// URL must then also name its registry explicitly, as localhost or a host containing . or : (Flux reads any other first segment as a Docker Hub namespace)."),
+		"url":             fluxSourceRequiredString("HelmRepository spec.url: an http://, https:// or oci:// URL, and oci:// when type is oci. Its host must be in the policy's allowed registries when that list is non-empty; an oci:// URL must then also name its registry explicitly, as localhost or a host containing . or : (Flux reads any other first segment as a Docker Hub namespace). A user or password in it is refused: put the credential in a Secret named by secretRef."),
 		"secretRef":       fluxSourceObject("HelmRepository spec.secretRef: the Secret holding the repository credentials, in the namespace the HelmRepository lands in."),
 		"certSecretRef":   fluxSourceObject("HelmRepository spec.certSecretRef: the Secret holding a client certificate and/or CA certificate."),
 		"passCredentials": fluxSourceBool("HelmRepository spec.passCredentials: pass the secretRef credentials to chart hosts other than the url's."),
@@ -104,10 +104,14 @@ func (c *HelmRepositoryConfig) validate() error {
 	if err := checkFluxDurations("helmrepository", &c.Spec, helmRepositoryDurations); err != nil {
 		return err
 	}
+	schemes := []string{"http://", "https://", "oci://"}
 	if c.isOCI() {
-		return checkFluxSourceURL("helmrepository", "url", c.Spec.URL, "oci://")
+		schemes = []string{"oci://"}
 	}
-	return checkFluxSourceURL("helmrepository", "url", c.Spec.URL, "http://", "https://", "oci://")
+	if err := checkFluxSourceURL("helmrepository", "url", c.Spec.URL, schemes...); err != nil {
+		return err
+	}
+	return refuseHostedFieldUserinfo("helmrepository", "url", c.Spec.URL, fluxSourceURLUserinfoRemedy("HelmRepository"))
 }
 
 // ApplyPolicy rejects a url whose host is not in the policy's allowed

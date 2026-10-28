@@ -222,6 +222,26 @@ func refuseHostedFieldUserinfo(owner, field, rawURL, remedy string) error {
 	return nil
 }
 
+// refuseSSHFieldPassword is refuseHostedFieldUserinfo for an ssh:// URL, whose
+// user is the SSH login and no credential: Flux's Git client takes that login
+// from the URL alone (fluxcd/pkg/git NewAuthOptions reads no Secret username
+// over SSH, and falls back to `git`), so a bare user is admitted and only a
+// password is refused. A value with no host that holds an `@` is refused as
+// refuseHostedFieldUserinfo refuses it. The refusal does not name the value.
+func refuseSSHFieldPassword(owner, field, rawURL, remedy string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return errors.Errorf("%s: %s is not a valid URL", owner, field)
+	}
+	if _, set := u.User.Password(); set {
+		return errors.Errorf("%s: %s must not carry a password%s", owner, field, remedy)
+	}
+	if u.Host == "" && strings.Contains(rawURL, "@") {
+		return errors.Errorf("%s: %s holds an @ and is no URL with a host, so a password in it cannot be ruled out%s", owner, field, remedy)
+	}
+	return nil
+}
+
 // chartRender is a chart's client-side render, cached and split by Helm hook
 // phase and weight. HelmTemplateConfig embeds it and declares its own
 // AugmentLayout; chartRender must never gain one, since kure's layout walker

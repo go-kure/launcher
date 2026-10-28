@@ -2,6 +2,7 @@ package components_test
 
 import (
 	"encoding/json"
+	"net/url"
 	"reflect"
 	"slices"
 	"sort"
@@ -176,6 +177,52 @@ func fluxSrcConfig(t *testing.T, k fluxSourceKind, props map[string]any) stack.A
 		t.Fatalf("%s: ToApplicationConfig: %v", k.typ, err)
 	}
 	return cfg
+}
+
+// fluxSrcDirectConfig builds the config of the repository kind typ from rawURL
+// (and a helmrepository's type) as a library caller does, without the parse
+// path. That path refuses a user or password in url before any policy runs, so
+// a test of ApplyPolicy's own refusal of such a url builds the config this way.
+func fluxSrcDirectConfig(t *testing.T, typ, rawURL, helmType string) oam.Enforceable {
+	t.Helper()
+	switch typ {
+	case "helmrepository":
+		return &components.HelmRepositoryConfig{Spec: sourcev1.HelmRepositorySpec{URL: rawURL, Type: helmType}}
+	case "ocirepository":
+		return &components.OCIRepositoryConfig{Spec: sourcev1.OCIRepositorySpec{URL: rawURL}}
+	case "gitrepository":
+		return &components.GitRepositoryConfig{Spec: sourcev1.GitRepositorySpec{URL: rawURL}}
+	}
+	t.Fatalf("fluxSrcDirectConfig: no repository kind %q", typ)
+	return nil
+}
+
+// fluxSrcPolicyConfig returns k's config for props through the parse path, or,
+// when url carries a credential (a user, or the password of an ssh:// URL, whose
+// user is the SSH login), the config a library caller builds directly
+// (fluxSrcDirectConfig), whose ApplyPolicy still checks that url, after
+// asserting that the parse path refuses it. Any other url must pass the parse
+// path.
+func fluxSrcPolicyConfig(t *testing.T, k fluxSourceKind, props map[string]any) oam.Enforceable {
+	t.Helper()
+	rawURL, _ := props["url"].(string)
+	cfg, err := k.handler.ToApplicationConfig(&oam.Component{Name: "src", Type: k.typ, Properties: props}, "demo")
+	u, perr := url.Parse(rawURL)
+	credential := perr == nil && u.User != nil
+	if credential && u.Scheme == "ssh" {
+		_, credential = u.User.Password()
+	}
+	if !credential {
+		if err != nil {
+			t.Fatalf("%s: ToApplicationConfig: %v", k.typ, err)
+		}
+		return cfg.(oam.Enforceable)
+	}
+	if err == nil || !strings.Contains(err.Error(), k.typ+": url must not carry a") {
+		t.Fatalf("%s: url %q carries a credential: ToApplicationConfig error = %v, want its refusal", k.typ, rawURL, err)
+	}
+	helmType, _ := props["type"].(string)
+	return fluxSrcDirectConfig(t, k.typ, rawURL, helmType)
 }
 
 // fluxSrcRender renders cfg, under fluxNS when non-empty, and returns the one
@@ -417,15 +464,25 @@ func TestFluxSourceHandlers_Refuses(t *testing.T) {
 			{name: "ftp url", props: "url: ftp://charts.example.com", want: `must start with http:// or https:// or oci://`},
 			{name: "upper-case scheme", props: "url: HTTPS://charts.example.com", want: "must start with"},
 			{name: "type oci over https", props: "type: oci", want: `helmrepository: url must start with oci://`},
+			{name: "user and password in an https url", props: "url: https://deploy:pw@charts.example.com/stable", want: "helmrepository: url must not carry a user or password, which would be written in plain text into the HelmRepository; put the credential in a Secret and name it with secretRef"},
+			{name: "user in an oci url", props: "url: oci://deploy@ghcr.io/charts", want: "helmrepository: url must not carry a user or password"},
+			{name: "an @ and no host", props: "url: https:///deploy:pw@charts.example.com", want: "helmrepository: url holds an @ and is no URL with a host"},
 		},
 		"ocirepository": {
 			{name: "no url", drop: "url", want: "ocirepository: url is required"},
 			{name: "https url", props: "url: https://ghcr.io/org/manifests", want: "must start with oci://"},
+			{name: "user and password in the url", props: "url: oci://deploy:pw@ghcr.io/org/manifests", want: "ocirepository: url must not carry a user or password, which would be written in plain text into the OCIRepository; put the credential in a Secret and name it with secretRef"},
+			{name: "user in the url", props: "url: oci://deploy@ghcr.io/org/manifests", want: "ocirepository: url must not carry a user or password"},
 		},
 		"gitrepository": {
 			{name: "no url", drop: "url", want: "gitrepository: url is required"},
 			{name: "scp-like url", props: "url: git@github.com:org/repo", want: "must start with http:// or https:// or ssh://"},
 			{name: "git scheme", props: "url: git://github.com/org/repo", want: "must start with"},
+			{name: "user and password in an https url", props: "url: https://deploy:pw@github.com/org/repo", want: "gitrepository: url must not carry a user or password, which would be written in plain text into the GitRepository; put the credential in a Secret and name it with secretRef"},
+			{name: "user in an https url", props: "url: https://deploy@github.com/org/repo", want: "gitrepository: url must not carry a user or password"},
+			{name: "password in an ssh url", props: "url: ssh://git:pw@host/repo", want: "gitrepository: url must not carry a password, which would be written in plain text into the GitRepository; put the credential in a Secret and name it with secretRef"},
+			{name: "empty password in an ssh url", props: "url: ssh://git:@host/repo", want: "gitrepository: url must not carry a password"},
+			{name: "an @ and no host in an ssh url", props: "url: ssh:///git:pw@host/repo", want: "gitrepository: url holds an @ and is no URL with a host, so a password in it cannot be ruled out"},
 			{name: "unknown key in include item", props: "include: [{repository: {name: a}, path: x}]", want: `unknown field "path"`},
 		},
 		"bucket": {
@@ -460,6 +517,39 @@ func TestFluxSourceHandlers_Refuses(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestFluxSourceHandlers_URLWithoutCredentialAdmitted: the refusal of a
+// credential in url (TestFluxSourceHandlers_Refuses) admits a url without one,
+// on the parse path and in Generate, which repeats the check. The user of an
+// ssh:// URL is no credential but the SSH login, which Flux's Git client reads
+// from the URL alone (a Secret's username is not read over SSH), so it is
+// admitted, `git` or any other.
+func TestFluxSourceHandlers_URLWithoutCredentialAdmitted(t *testing.T) {
+	cases := []struct{ typ, url string }{
+		{"helmrepository", "https://charts.example.com/stable"},
+		{"helmrepository", "oci://ghcr.io/org/charts"},
+		{"ocirepository", "oci://ghcr.io/org/manifests"},
+		{"gitrepository", "https://github.com/org/repo"},
+		{"gitrepository", "ssh://github.com/org/repo"},
+		{"gitrepository", "ssh://git@github.com/org/repo"},
+		{"gitrepository", "ssh://alice@gerrit:29418/repo"},
+	}
+	kinds := map[string]fluxSourceKind{}
+	for _, k := range fluxSourceKinds() {
+		kinds[k.typ] = k
+	}
+	for _, tc := range cases {
+		t.Run(tc.typ+"/"+tc.url, func(t *testing.T) {
+			k := kinds[tc.typ]
+			props := fluxSrcProps(t, k.minimal)
+			props["url"] = tc.url
+			obj := fluxSrcRender(t, fluxSrcConfig(t, k, props), "")
+			if got := fluxSrcSpec(t, obj)["url"]; got != tc.url {
+				t.Errorf("emitted spec.url = %v, want %q", got, tc.url)
+			}
+		})
 	}
 }
 
@@ -501,7 +591,7 @@ func TestFluxSourceHandlers_ApplyPolicy(t *testing.T) {
 		k := kinds[tc.typ]
 		props := fluxSrcProps(t, k.minimal)
 		props[k.host] = tc.value
-		cfg := fluxSrcConfig(t, k, props).(oam.Enforceable)
+		cfg := fluxSrcPolicyConfig(t, k, props)
 		err := cfg.ApplyPolicy(fakeOCIPolicy{allowed: tc.allowed})
 		if (err == nil) != tc.ok {
 			t.Errorf("%s %s %q, allowed %v: error = %v, want allowed=%v", tc.typ, k.host, tc.value, tc.allowed, err, tc.ok)
@@ -644,7 +734,7 @@ func TestFluxSourceHandlers_ApplyPolicyOCIRegistry(t *testing.T) {
 				if helmType != "" {
 					props["type"] = helmType
 				}
-				cfg := fluxSrcConfig(t, k, props).(oam.Enforceable)
+				cfg := fluxSrcPolicyConfig(t, k, props)
 				err := cfg.ApplyPolicy(fakeOCIPolicy{allowed: tc.allowed})
 				switch {
 				case tc.want == "" && err != nil:
@@ -795,6 +885,16 @@ func TestFluxSourceConfigs_GenerateValidatesDirectConfig(t *testing.T) {
 		}},
 		"ocirepository over https":  &components.OCIRepositoryConfig{Name: "src", Spec: sourcev1.OCIRepositorySpec{URL: "https://ghcr.io/x"}},
 		"gitrepository without url": &components.GitRepositoryConfig{Name: "src"},
+		"helmrepository with a user in url": &components.HelmRepositoryConfig{Name: "src", Spec: sourcev1.HelmRepositorySpec{
+			URL: "https://deploy:pw@charts.example.com",
+		}},
+		"ocirepository with a user in url": &components.OCIRepositoryConfig{Name: "src", Spec: sourcev1.OCIRepositorySpec{URL: "oci://deploy@ghcr.io/x"}},
+		"gitrepository with a user in an https url": &components.GitRepositoryConfig{Name: "src", Spec: sourcev1.GitRepositorySpec{
+			URL: "https://deploy:pw@github.com/org/repo",
+		}},
+		"gitrepository with a password in an ssh url": &components.GitRepositoryConfig{Name: "src", Spec: sourcev1.GitRepositorySpec{
+			URL: "ssh://git:pw@github.com/org/repo",
+		}},
 		"bucket without endpoint":   &components.BucketConfig{Name: "src", Spec: sourcev1.BucketSpec{BucketName: "b"}},
 		"bucket without bucketName": &components.BucketConfig{Name: "src", Spec: sourcev1.BucketSpec{Endpoint: "s3.amazonaws.com"}},
 		"helmchart without chart": &components.HelmChartConfig{Name: "src", Spec: sourcev1.HelmChartSpec{

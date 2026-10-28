@@ -10600,7 +10600,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   segment as part of a Docker Hub repository: `oci://ghcr.io` and
   `oci://registry/my-artifact` are pulled from Docker Hub, so they are refused
   even when `ghcr.io` or `registry` is listed. No policy, or an empty
-  allowlist, accepts every `oci://` url.
+  allowlist, accepts every `oci://` url this rule would refuse; a user or
+  password in `source.url` is refused whatever the policy, by its
+  `ocirepository` terminal (see **helmrepository / ocirepository /
+  gitrepository / bucket / helmchart**).
   `interval` (default `60m`) must be a duration Flux accepts, checked exactly as
   for `helmrelease` (go-kure/launcher#590): see its Defaults paragraph.
 - **fluxcd-kustomization** — the kind-named terminal for Flux's `Kustomization`
@@ -10681,6 +10684,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `oci://` under `type: oci`; `oci://` for `ocirepository`; `http://`, `https://` or `ssh://` for
   `gitrepository`, so an scp-style `git@host:org/repo` is refused — write
   `ssh://git@host/org/repo`. The CRD has no pattern for `endpoint`, so it is only required.
+  A `url` must not carry a credential (go-kure/launcher#1078), since the source would hold it in
+  plain text (put the credential in a Secret named by `secretRef`). On `helmrepository`,
+  `ocirepository` and an `http://` or `https://` `gitrepository`, a user or password is refused,
+  and so is a value with no host that holds an `@`. On an `ssh://` `gitrepository` only a password
+  is refused, and a value with no host that holds an `@`. Its user is kept (`ssh://git@host/…`,
+  `ssh://alice@gerrit:29418/…`): it is the SSH login, which Flux's Git client reads from the URL
+  alone. Over SSH it reads no `username` from the Secret, and falls back to `git` when the URL
+  names none. The refusal does not quote the value. These are build refusals that documents built
+  before the change did not get. The `oci` component lowers onto an `ocirepository`, so its
+  `source.url` is refused the same way, in that kind's words (`ocirepository: url must not carry a
+  user or password…`). A config built directly is refused by `Generate`. Only its `ApplyPolicy`
+  still checks the host of such a url, without quoting the credential.
   `interval` defaults to `60m` when unset (a zero duration counts as unset), matching the
   `helmrelease` default; a `helmrepository` with `type: oci` gets no default, since Flux
   does not poll it, and its emitted `interval` reads `0s`, the value the Go type always writes.
@@ -10719,7 +10734,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   A port is part of the host, so `registry.local:5000` matches only an entry with that port. The
   user of an `ssh://` URL is dropped (`ssh://git@github.com/org/repo` checks `github.com`);
   userinfo on an `http://`, `https://` or `oci://` URL is not, so such a URL matches no entry and
-  is refused. An empty allowlist permits every host, and none of the rules below applies. A
+  is refused (a component reaches no policy with one: its parse refuses it first, see above). An empty allowlist permits every host, and none of the rules below applies. A
   `helmchart` checks nothing: it fetches from the source its `sourceRef` names, whose host is
   checked where that source is authored, as for a `helmrelease`.
 
