@@ -9748,7 +9748,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `chart.kind: OCIRepository`, helm-controller generates an OCIRepository for the chart
   artifact `chart.spec.url` names. The component holds the template to the Flux API's rules
   for that kind (helm-controller API v1.7.1): `chart.spec.url` is required and starts with
-  `oci://`; `chart`, `sourceRef`, `valuesFiles` and `ignoreMissingValuesFiles` are refused;
+  `oci://`, and carries no user or password, which it would write in plain text into the
+  HelmRelease (put the registry credential in a Secret named by `chart.spec.secretRef`);
+  `chart`, `sourceRef`, `valuesFiles` and `ignoreMissingValuesFiles` are refused;
   `version` takes only `*` and `reconcileStrategy` only `ChartVersion`, since the chart's
   version is the tag or digest `chart.spec.ref` names. The OCIRepository fields the template
   inlines, refused under kind HelmChart (above), are taken and written as authored. Under a
