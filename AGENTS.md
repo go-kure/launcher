@@ -339,6 +339,10 @@ lines as the kure release it imports (`k8s.io/kube-openapi`, `sigs.k8s.io/kustom
 `kyaml`), and a kure bump adds, moves or drops them as that release's `go.mod` does. Without
 them launcher builds against a different kube-openapi (which does not compile) or kustomize than
 kure and Flux. The dep-sync guard does not read `replace` lines; check them by hand on the bump.
+Any `replace` also makes Go refuse `go install github.com/go-kure/launcher/cmd/kurel@<version>`,
+and a module that imports launcher must carry the same lines itself. The install guide
+(`site/content/getting-started/install.md`) says both: release binaries first, then a build from a
+checkout, and the lines a library consumer copies.
 
 **Commit pins.** While kure and launcher are being worked on together, `go.mod` requires a
 commit of kure's `main` as a pseudo-version. At the end kure is released, `go.mod` pins that
