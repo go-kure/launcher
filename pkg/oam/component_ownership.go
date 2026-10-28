@@ -626,7 +626,7 @@ func selectorRulesOut(selector *metav1.LabelSelector, podLabels map[string]strin
 	if err != nil || !sel.Matches(labels.Set(podLabels)) {
 		return false
 	}
-	labelled := make(labels.Set, len(podLabels)+1)
+	labelled := make(labels.Set, len(podLabels))
 	for k, v := range podLabels {
 		labelled[k] = v
 	}
