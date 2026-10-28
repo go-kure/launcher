@@ -276,9 +276,11 @@ guard's shared-direct set.
 
 `k8s.io/kube-openapi` is not proposed either, by a rule of its own: it is not
 shared-direct, but it has no releases, so a lone digest bump can run ahead of
-`k8s.io/apimachinery` and break the build. It moves by MVS when the modules that
-require it move, in practice the `k8s.io/*` modules. A vulnerability alert still
-proposes it: the shared preset's `vulnerabilityAlerts` overrides the rule.
+`k8s.io/apimachinery` and break the build. Its build version is held by a
+`replace` in `go.mod`, mirrored from kure's (see `AGENTS.md` § Replace directives
+mirrored from kure), so its require line moves by MVS without changing what
+builds. A vulnerability alert still proposes it: the shared preset's
+`vulnerabilityAlerts` overrides the rule.
 
 ## Makefile Targets Reference
 

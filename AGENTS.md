@@ -333,6 +333,13 @@ direct dep (a missing entry is still caught by the CI guard, just as a red PR).
 kure bump → cut a kure release → bump launcher's `go-kure/kure` require to it and take the
 shared-dep bump together (yields no lead → guard passes).
 
+**Replace directives mirrored from kure.** Go applies `replace` only in the main module, so a
+pin in kure's `go.mod` does not reach launcher. Launcher's `go.mod` carries the same `replace`
+lines as the kure release it imports (`k8s.io/kube-openapi`, `sigs.k8s.io/kustomize/api` and
+`kyaml`), and a kure bump adds, moves or drops them as that release's `go.mod` does. Without
+them launcher builds against a different kube-openapi (which does not compile) or kustomize than
+kure and Flux. The dep-sync guard does not read `replace` lines; check them by hand on the bump.
+
 **Commit pins.** While kure and launcher are being worked on together, `go.mod` requires a
 commit of kure's `main` as a pseudo-version. At the end kure is released, `go.mod` pins that
 release, and launcher is released.
