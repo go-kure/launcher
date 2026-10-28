@@ -10,12 +10,14 @@ weight: 2
 Each [release](https://github.com/go-kure/launcher/releases) carries `kurel`
 for Linux on amd64 and arm64 as `kurel_<version>_linux_<arch>.tar.gz`, with
 `checksums.txt`, a Sigstore bundle signing it (`checksums.txt.sigstore.json`)
-and an SBOM per archive. `<version>` is the tag without its `v`:
+and an SBOM per archive. `<version>` is the tag without its `v`.
 
-The steps below download a release, check that the go-kure release workflow
-signed its checksums, check the archive against them, and only then install
-`kurel` (into `~/.local/bin`; use any directory on your `PATH`). Each step runs
-only if the one before it succeeded:
+The steps below download a release and check that the go-kure release workflow
+signed its checksums for launcher at that release's tag. The workflow is shared
+by every go-kure repository, so the certificate must also name
+`go-kure/launcher` and the tag. They then check the archive against the
+checksums and only then install `kurel` (into `~/.local/bin`; use any directory
+on your `PATH`). Each step runs only if the one before it succeeded:
 
 ```bash
 VERSION=0.2.0-beta.1   # a release tag without the leading v
@@ -25,7 +27,9 @@ gh release download "v${VERSION}" -R go-kure/launcher \
   cosign verify-blob checksums.txt \
     --bundle checksums.txt.sigstore.json \
     --certificate-identity https://github.com/go-kure/.github/.github/workflows/release-publish.yml@refs/heads/main \
-    --certificate-oidc-issuer https://token.actions.githubusercontent.com &&
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-github-workflow-repository go-kure/launcher \
+    --certificate-github-workflow-ref "refs/tags/v${VERSION}" &&
   sha256sum --ignore-missing -c checksums.txt &&
   tar xzf "kurel_${VERSION}_linux_${ARCH}.tar.gz" kurel &&
   install -D -m 0755 kurel "$HOME/.local/bin/kurel"
