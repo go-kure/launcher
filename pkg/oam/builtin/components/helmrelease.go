@@ -16,7 +16,9 @@ import (
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/api/validate/content"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -640,6 +642,42 @@ func (c *HelmReleaseConfig) Generate(_ *stack.Application) ([]*client.Object, er
 			hr.Spec.StorageNamespace = hr.Spec.TargetNamespace
 		}
 	}
+	if err := validateChartSourceNames(hr, c.Name); err != nil {
+		return nil, err
+	}
 
 	return kindObject(hr, c.Metadata)
+}
+
+// validateChartSourceNames refuses a HelmRelease whose chart template
+// helm-controller could not generate its source for (go-kure/launcher#1080).
+// It labels that HelmChart or OCIRepository with the HelmRelease's name as the
+// helm.toolkit.fluxcd.io/name owner label (helm-controller v1.7.1
+// internal/reconcile/helmchart_template.go:147), a label value held to 63
+// characters, and names it after the HelmRelease (oam.GeneratedChartSource), a
+// name held to 253. A refused apply leaves the HelmRelease never reconciled.
+// hr is the HelmRelease as generated, in its final namespace; componentName is
+// the name it takes when no objectName is set. A chartRef generates no source
+// and is not held.
+func validateChartSourceNames(hr *helmv2.HelmRelease, componentName string) error {
+	src, ok, err := oam.GeneratedChartSource(hr)
+	if err != nil || !ok {
+		return err
+	}
+	const remedy = "use a shorter name, or a chartRef to an authored source"
+	if name := hr.Name; len(name) > content.LabelValueMaxLength {
+		// A helm component's helmReleaseName reaches this member as its
+		// object name, so objectNameField alone would misdirect its author.
+		from := "the component name"
+		if name != componentName {
+			from = "the object name: objectName, a helm component's helmReleaseName, or the Naming hook's answer"
+		}
+		return errors.Errorf("helmrelease %q: under chart, helm-controller labels the %s it generates with the HelmRelease's name (%s), which as a label value must be at most %d characters: it has %d, from %s; %s",
+			name, src.Kind, "helm.toolkit.fluxcd.io/name", content.LabelValueMaxLength, len(name), from, remedy)
+	}
+	if len(src.Name) > validation.DNS1123SubdomainMaxLength {
+		return errors.Errorf("helmrelease %q: under chart, helm-controller names the %s it generates %q (<namespace>-<name>), which must be at most %d characters: it has %d; %s",
+			hr.Name, src.Kind, src.Name, validation.DNS1123SubdomainMaxLength, len(src.Name), remedy)
+	}
+	return nil
 }

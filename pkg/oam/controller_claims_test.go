@@ -390,3 +390,36 @@ func TestCheckCrossDocumentCollisions_ControllerClaims(t *testing.T) {
 		})
 	}
 }
+
+// TestGeneratedChartSource: the source helm-controller generates for a
+// HelmRelease's chart template is named `<namespace>-<name>` after the
+// HelmRelease's own namespace and name, whatever namespace a HelmChart's
+// sourceRef moves it to (helm-controller api v1.7.1
+// v2/helmrelease_types.go:1633-1649, go-kure/launcher#1080). A chartRef, an
+// unknown kind and an object that is no HelmRelease generate none.
+func TestGeneratedChartSource(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		obj  *client.Object
+		want ChartSource
+		ok   bool
+	}{
+		{"HelmChart, sourceRef namespace unset", claimHelmRelease(helmGroup, "apps", "web", helmChartTemplate("")),
+			ChartSource{Kind: "HelmChart", Namespace: "apps", Name: "apps-web"}, true},
+		{"HelmChart, sourceRef namespace set", claimHelmRelease(helmGroup, "apps", "web", helmChartTemplate("flux-sources")),
+			ChartSource{Kind: "HelmChart", Namespace: "flux-sources", Name: "apps-web"}, true},
+		{"OCIRepository", claimHelmRelease(helmGroup, "apps", "web", ociChart()),
+			ChartSource{Kind: "OCIRepository", Namespace: "apps", Name: "apps-web"}, true},
+		{"chartRef", claimHelmReleaseChartRef("apps", "web"), ChartSource{}, false},
+		{"unknown kind", claimHelmRelease(helmGroup, "apps", "web", map[string]any{"kind": "GitRepository"}), ChartSource{}, false},
+		{"another group", claimHelmRelease("example.com", "apps", "web", ociChart()), ChartSource{}, false},
+		{"no HelmRelease", claimOCIRepository("apps", "web"), ChartSource{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok, err := GeneratedChartSource(*tc.obj)
+			if err != nil || ok != tc.ok || got != tc.want {
+				t.Errorf("GeneratedChartSource = %+v, %v, %v; want %+v, %v, nil", got, ok, err, tc.want, tc.ok)
+			}
+		})
+	}
+}
