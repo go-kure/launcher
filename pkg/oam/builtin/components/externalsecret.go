@@ -59,9 +59,9 @@ var externalSecretKind = &policyHeldKind[esv1.ExternalSecretSpec]{
 // creates for an ExternalSecret named objectName: target.name, else the
 // ExternalSecret's own name, under every creationPolicy that creates it
 // (Owner, the default, Orphan and CreateOrMerge), as the external-secret
-// trait's rule. Under Merge and None it writes into a Secret that exists apart
-// from it, and a target.manifest makes another kind of object, so it makes
-// none the check can prove.
+// trait's rule. Under Merge it only updates a Secret that exists apart from
+// it, under None it writes no Secret at all, and a target.manifest makes
+// another kind of object, so it makes none the check can prove.
 func externalSecretMadeObject(objectName string, spec *esv1.ExternalSecretSpec) (kind, name string, ok bool) {
 	target := spec.Target
 	if target.Manifest != nil || target.CreationPolicy == esv1.CreatePolicyMerge || target.CreationPolicy == esv1.CreatePolicyNone {
