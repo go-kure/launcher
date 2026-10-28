@@ -1,14 +1,15 @@
 package oam
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	utiljson "k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -664,11 +665,18 @@ func (o *ownedConfig) selectorRulesOutLabel(spec map[string]any, selector *metav
 }
 
 // decodeLabelSelector reads a workload's label selector as the API server
-// decodes it. One that does not decode is an error, not a selector that
-// requires or rules out nothing.
+// decodes it: from its JSON form, case-sensitively, where a number never fills
+// a string field. The selector of a typed object's content holds its numbers
+// as json.Number (objectContent), which a conversion field by field would take
+// for a label value (go-kure/launcher#1085). One that does not decode is an
+// error, not a selector that requires or rules out nothing.
 func decodeLabelSelector(selector map[string]any) (*metav1.LabelSelector, error) {
+	raw, err := json.Marshal(selector)
+	if err != nil {
+		return nil, errors.Errorf("the selector cannot be read: %w", err)
+	}
 	decoded := &metav1.LabelSelector{}
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(selector, decoded); err != nil {
+	if err := utiljson.Unmarshal(raw, decoded); err != nil {
 		return nil, errors.Errorf("the selector cannot be read: %w", err)
 	}
 	return decoded, nil

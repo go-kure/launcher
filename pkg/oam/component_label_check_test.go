@@ -730,6 +730,23 @@ func TestOwnedConfig_UnreadableSelector(t *testing.T) {
 			withSelector(unstructuredWorkload("batch/v1", "CronJob"), map[string]any{"matchLabels": "oops"}, "spec", "jobTemplate", "spec"),
 			`CronJob "w": spec.jobTemplate.spec.selector: the selector cannot be read`,
 		},
+		"a selector whose label value is a number": {
+			withSelector(unstructuredWorkload("apps/v1", "Deployment"), map[string]any{"matchLabels": map[string]any{"tier": int64(123)}}, "spec"),
+			`Deployment "w": spec.selector: the selector cannot be read`,
+		},
+		// A typed object is read through its JSON form with numbers kept exact
+		// (go-kure/launcher#1085); a number there is still no label value.
+		"a typed workload's selector whose label value is a number": {
+			&typedWorkload{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
+				ObjectMeta: metav1.ObjectMeta{Name: "w"},
+				Spec: map[string]any{
+					"selector": map[string]any{"matchLabels": map[string]any{"tier": int64(123)}},
+					"template": map[string]any{"spec": map[string]any{"containers": []any{}}},
+				},
+			},
+			`Deployment "w": spec.selector: the selector cannot be read`,
+		},
 		"a ReplicationController entry for the key that is no string": {
 			withSelector(unstructuredWorkload("v1", "ReplicationController"), map[string]any{ownershipKey: int64(1)}, "spec"),
 			`ReplicationController "w": spec.selector: the selector's entry "` + ownershipKey + `" is a int64, not a string`,
@@ -761,6 +778,21 @@ func TestOwnedConfig_UnreadableSelector(t *testing.T) {
 			}
 		})
 	}
+}
+
+// typedWorkload is a typed client.Object of a consumer's own Go type that
+// states a workload kind, with a free-form spec.
+type typedWorkload struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              map[string]any `json:"spec,omitempty"`
+}
+
+func (w *typedWorkload) DeepCopyObject() runtime.Object {
+	c := *w
+	c.ObjectMeta = *w.ObjectMeta.DeepCopy()
+	c.Spec = runtime.DeepCopyJSON(w.Spec)
+	return &c
 }
 
 // TestOwnedConfig_ComponentLabelSelectorRulesOut: a workload whose own selector
