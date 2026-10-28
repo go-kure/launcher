@@ -11,7 +11,10 @@ See [docs/design.md](docs/design.md) for the full design and vision.
 
 ## Installation
 
-Binary releases are not yet available. Check back after the first tagged release.
+Each [release](https://github.com/go-kure/launcher/releases) carries signed `kurel` binaries for
+Linux (amd64, arm64). The [install guide](site/content/getting-started/install.md) shows how to
+verify and install one, how to build from a checkout, and what a module that imports launcher as a
+library must copy into its `go.mod`.
 
 ## Development
 

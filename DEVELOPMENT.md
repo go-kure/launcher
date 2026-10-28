@@ -280,7 +280,9 @@ shared-direct, but it has no releases, so a lone digest bump can run ahead of
 `replace` in `go.mod`, mirrored from kure's (see `AGENTS.md` § Replace directives
 mirrored from kure), so its require line moves by MVS without changing what
 builds. A vulnerability alert still proposes it: the shared preset's
-`vulnerabilityAlerts` overrides the rule.
+`vulnerabilityAlerts` overrides the rule. If such a PR moves only the require
+line, the `replace` still selects the build version and it fixes nothing: check
+the `replace` target, and move it, in step with kure's, to take the fix.
 
 ## Makefile Targets Reference
 
