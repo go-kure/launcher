@@ -23,10 +23,12 @@ const (
 // (go-kure/launcher#1072). helm-controller server-side-applies the
 // OCIRepository of a HelmRelease's chart template of kind OCIRepository with
 // force ownership, and deletes whatever holds that name when the HelmRelease is
-// deleted or its chart changes, without asking who owns it (helm-controller
-// v1.7.1 internal/reconcile/helmchart_template.go:142-152,183-210). So an
-// object of that identity that an application generates is taken over, then
-// deleted: the collision checks hold a claim as a generated object.
+// deleted, when the kind, name or namespace of the chart source it generates
+// changes, or when it switches to chartRef, without asking who owns it
+// (helm-controller v1.7.1 internal/reconcile/helmchart_template.go:78-99,
+// 142-152,183-210). So an object of that identity that an application
+// generates is taken over, then deleted: the collision checks hold a claim as
+// a generated object.
 type controllerClaim struct {
 	id objectIdentity
 	// by is the object the controller generates it for.
