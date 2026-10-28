@@ -2799,9 +2799,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     "technically optional, but in practice mandatory" and no marker
     requires; the pattern of `git.push.refspec` and the enumerations
     (`sourceRef.kind`, `update.strategy`, a signing key's `type`);
-  - of an `artifactgenerator`, the patterns (a source's `alias`, `name` and
-    `namespace`, `pathPattern`, an artifact's `revision` and
-    `originRevision`, a copy's `from` and `to`), the lengths and the
+  - of an `artifactgenerator`, the patterns (`serviceAccountName`, a
+    source's `alias`, `name` and `namespace`, `pathPattern`, an artifact's
+    `inputsFrom`, `revision` and `originRevision`, a copy's `from` and
+    `to`), the lengths and the
     enumerations (a source's `kind`, a copy's `strategy`); that an alias is
     unique and that a path, a `revision` or an `originRevision` names an
     alias that is declared, which the type documents and no marker states;
