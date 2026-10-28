@@ -365,14 +365,17 @@ func checkHelmReleaseChartTemplate(ch *helmv2.HelmChartTemplate) error {
 // author wrote, whatever its value: a false, a "" or a null the typed spec
 // cannot tell from an unauthored field is still not the component's to read.
 // Keys match case-insensitively, as the decode's do. The properties are read
-// in their JSON form, as the decode reads them.
+// in their JSON form, as the decode reads them (numbers kept exact, so a value
+// float64 cannot hold is not refused here).
 func refuseAuthoredInertChartFields(authored map[string]any) error {
 	raw, err := json.Marshal(authored)
 	if err != nil {
 		return errors.Wrap(err, "helmrelease: properties do not encode as JSON")
 	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
 	var props map[string]any
-	if err := json.Unmarshal(raw, &props); err != nil {
+	if err := dec.Decode(&props); err != nil {
 		return errors.Wrap(err, "helmrelease: properties do not read as a JSON object")
 	}
 	node := props

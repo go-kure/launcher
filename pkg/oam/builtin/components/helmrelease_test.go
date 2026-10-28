@@ -311,6 +311,25 @@ func TestHelmReleaseHandler_ChartRef(t *testing.T) {
 	}
 }
 
+// TestHelmReleaseHandler_ValuesNumbersStayExact: the pass over the authored
+// chart keys reads numbers as the decode does, exact, so a Helm value a float64
+// cannot hold is neither refused nor rounded, with chart or chartRef.
+func TestHelmReleaseHandler_ValuesNumbersStayExact(t *testing.T) {
+	for name, source := range map[string]map[string]any{
+		"chart":    {"chart": hrChart()},
+		"chartRef": {"chartRef": map[string]any{"kind": "OCIRepository", "name": "podinfo"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			props := maps.Clone(source)
+			props["values"] = map[string]any{"n": json.Number("1e400")}
+			hr := hrGenerate(t, hrConfig(t, "web", props), "")
+			if got := string(hr.Spec.Values.Raw); got != `{"n":1e400}` {
+				t.Errorf("values = %s, want {\"n\":1e400}", got)
+			}
+		})
+	}
+}
+
 func TestHelmReleaseHandler_Refuses(t *testing.T) {
 	ref := map[string]any{"kind": "OCIRepository", "name": "podinfo"}
 	cases := []struct {
