@@ -941,6 +941,11 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 		return nil, nil, err
 	}
 	ctx.generatedSourceReaders = generatedSourceReaders(order)
+	// Before any trait wraps a Flux object's config.
+	var waiters []fluxWaiter
+	if ctx.GroupsWaitForFluxObjects {
+		waiters = fluxWaiters(order, ctx.generatedSourceReaders)
+	}
 
 	cluster, err := t.buildCluster(app, order, ctx)
 	if err != nil {
@@ -980,7 +985,7 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	// Where the trait objects landed, before a decorator hides what the check
 	// reads on them.
 	if ctx.GroupsWaitForFluxObjects {
-		if err := checkGeneratedSourceMakerOrder(order, ctx.generatedSourceReaders, *ctx.traitSubApps, ctx.FluxNamespace); err != nil {
+		if err := checkFluxObjectMakerOrder(order, waiters, *ctx.traitSubApps, ctx.FluxNamespace); err != nil {
 			return nil, nil, err
 		}
 	}

@@ -276,7 +276,7 @@ choice over the launcher library default (`gokure.dev`); other embedders set the
 domain through `TransformContext.Domain`. See the
 [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) for the derivation
 and precedence rules. kurel leaves `TransformContext.GroupsWaitForFluxObjects` unset: its
-delivery is the default, so a late Secret maker for a shared generated source is admitted.
+delivery is the default, so a late maker of anything a Flux object requires is admitted.
 
 | Flag | Description |
 |------|-------------|

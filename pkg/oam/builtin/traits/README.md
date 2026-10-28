@@ -884,8 +884,9 @@ configs name their object through `FluxNamespaceInput() (kind, name string)`, an
 `certificate` and `configmap` traits, and for `external-secret` except under creationPolicy `Merge`
 or `None`. A test holds every built-in `FluxNamespaceInput` to having both. The component configs
 report what they read through `FluxNamespaceReads()`, which every decorator forwards. See the
-`pkg/oam` README for the full rule, and for the late-maker refusal the producer answer feeds
-(go-kure/launcher#1039).
+`pkg/oam` README for the full rule, and for the late-maker refusal the producer answer feeds,
+which holds for every Flux object that requires the trait's object (go-kure/launcher#1039,
+go-kure/launcher#1079).
 
 The `helm` component's `valuesMode: configMap` relies on this: its rule appends a synthesized
 `configmap` trait holding the values to the `helmrelease` it lowers to, and names that ConfigMap

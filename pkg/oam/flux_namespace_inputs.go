@@ -31,21 +31,34 @@ type fluxNamespaceInput interface {
 // ProducesFluxNamespaceInput is true only when applying this trait creates the
 // named object; a reference to an object that exists apart from the trait
 // returns false: an external-secret trait under creationPolicy Merge or None.
-// checkGeneratedSourceMakerOrder refuses only a producer, so a config without
-// it is never refused (go-kure/launcher#1039).
+// checkFluxObjectMakerOrder refuses only a producer, so a config without it is
+// never refused (go-kure/launcher#1039).
 type fluxNamespaceProducer interface {
 	ProducesFluxNamespaceInput() bool
 }
 
 // fluxSourceRequiredReader is implemented by a Flux source config that reports
-// the Secrets the source cannot become Ready without, in its own namespace: an
-// OCIRepository's secretRef, and its verify.trustedRootSecretRef only under the
-// cosign provider. It is narrower than its fluxNamespaceReader reads, which
-// move a trait object the source may read. checkGeneratedSourceMakerOrder
-// refuses only a Secret a source requires, so a source without it is never
+// the Secrets a consumer of the source waits for, in the source's namespace:
+// an OCIRepository's secretRef, and its verify.trustedRootSecretRef only under
+// the cosign provider. It is narrower than its fluxNamespaceReader reads, which
+// move a trait object the source may read. checkFluxObjectMakerOrder refuses
+// only a Secret a generated source requires, so a source without it is never
 // refused (go-kure/launcher#1039).
 type fluxSourceRequiredReader interface {
 	FluxSourceRequiredSecrets() []string
+}
+
+// fluxRequiredReader is implemented by a Flux config that reports the
+// ConfigMaps and Secrets its object itself cannot become Ready without, in the
+// namespace it lands in: a subset of its fluxNamespaceReader reads, empty when
+// the object is suspended or reads nothing it requires. It differs from
+// fluxSourceRequiredReader, what a consumer of a generated source waits for,
+// for a suspended source and for a HelmRepository of type oci, which never
+// sets Ready but whose Secrets an OCI chart pulled through it reads. Every built-in fluxNamespaceSettable
+// config implements it. checkFluxObjectMakerOrder refuses only what an object
+// requires, so a config without it is never refused (go-kure/launcher#1079).
+type fluxRequiredReader interface {
+	FluxRequiredReads() (configMaps, secrets []string)
 }
 
 // traitSubApps is the application a trait ran on and the sub-applications it
@@ -215,91 +228,141 @@ func generatedSourceReaders(order *componentOrder) map[*stack.Application][]*sta
 	return out
 }
 
-// checkGeneratedSourceMakerOrder refuses a Secret a generated source requires
-// (fluxSourceRequiredReader) that a trait makes (fluxNamespaceProducer) on a
-// component in a later group than a consumer of that source, for a delivery
-// that makes a group Ready only once its Flux objects are
-// (TransformContext.GroupsWaitForFluxObjects; go-kure/launcher#1039). Each
-// group depends on the one before it (buildCluster), so the earlier consumer's
-// group waits for the consumer, the consumer for the source, the source for the
-// Secret, and the Secret's group for the earlier group: the delivery never
-// converges. Under the default delivery a group is Ready once applied, and it
-// does.
-//
-// A consumer is a Flux object a lowering rule ordered after the source (sources,
-// generatedSourceReaders), by its own component's order: in a sibling group the
-// member's, not the group's, since a workload member's order says nothing of a
-// Flux member waiting on the source. A workload does not wait on it. The makers
-// are the trait objects a source moves with (traitSubApps.readers), so a trait
-// on a workload is not looked at. Anything the check cannot prove is admitted:
-// a trait object that is no producer or does not say, a source that does not
-// report what it requires, a Secret outside the source's namespace (ns, or the
-// source's own without one).
-func checkGeneratedSourceMakerOrder(order *componentOrder, sources map[*stack.Application][]*stack.Application, owned []traitSubApps, ns string) error {
-	if len(order.sources) == 0 || len(sources) == 0 {
-		return nil
-	}
+// fluxWaiter is a Flux object a group waits for under a delivery whose groups
+// wait for their Flux objects (TransformContext.GroupsWaitForFluxObjects), and
+// what it cannot become Ready without: a Flux object of a group entry or of a
+// sibling group's member, waiting in its own group, or a generated source,
+// waiting in the group of its earliest Flux consumer (consumer).
+type fluxWaiter struct {
+	app *stack.Application
+	// reads reports, when the check runs, the ConfigMaps and Secrets the
+	// object cannot become Ready without, in the namespace it lands in. It is
+	// asked of the config as orderComponents left it, before a trait wrapped
+	// it; SetFluxNamespace still reaches that config through a decorator, so
+	// it knows its Flux namespace by then.
+	reads func() (configMaps, secrets []string)
+	group int
+	// component and typ name the waiter in a refusal: the group entry's
+	// component (a sibling group's, for a member) and the object's type.
+	component, typ string
+	// consumer is a generated source's earliest Flux consumer; empty for an
+	// object of a group.
+	consumer string
+}
+
+// fluxWaiters returns the Flux objects of order that report what they cannot
+// become Ready without, in the order a refusal is looked for: the generated
+// sources first, then the groups in order, each entry's object, or its sibling
+// group's Flux members, in document order. A generated source requires what
+// it reports as a source (fluxSourceRequiredReader), Secrets only, and waits
+// in the group of its earliest consumer: the first Flux object, by group, a
+// lowering rule ordered after it (sources, generatedSourceReaders), by that
+// object's own component's order, so in a sibling group the member's, not the
+// group's. A source no Flux object consumes waits in no group. A Flux object
+// of a group requires what it reports as one (fluxRequiredReader). Configs are
+// asserted here, before any trait runs: a trait decorator forwards neither
+// interface (groupFluxMembers).
+func fluxWaiters(order *componentOrder, sources map[*stack.Application][]*stack.Application) []fluxWaiter {
 	source := make(map[string]componentEntry, len(order.sources))
-	byApp := make(map[*stack.Application]componentEntry, len(order.sources))
 	for _, s := range order.sources {
 		source[s.component.Name] = s
-		byApp[s.app] = s
 	}
 	type consumer struct {
 		group int
 		name  string
 	}
-	// Every application of a group entry, a sibling group's members included,
-	// under the group and the component it is part of.
-	at := make(map[*stack.Application]consumer)
-	// The earliest consumer of each source: groups are walked in order, so the
-	// first one seen.
 	earliest := make(map[*stack.Application]consumer)
+	var grouped []fluxWaiter
 	for i, group := range order.groups {
 		for _, e := range group {
-			c := consumer{group: i, name: e.component.Name}
-			at[e.app] = c
 			objects := []componentEntry{e}
 			if len(e.members) > 0 {
 				objects = e.members
 			}
-			for _, m := range e.members {
-				at[m.app] = c
-			}
 			for _, o := range objects {
+				if req, ok := o.app.Config.(fluxRequiredReader); ok {
+					grouped = append(grouped, fluxWaiter{app: o.app, reads: req.FluxRequiredReads, group: i, component: e.component.Name, typ: o.component.Type})
+				}
 				if _, ok := sources[o.app]; !ok {
 					continue
 				}
 				for _, name := range o.component.orderAfter {
-					s, ok := source[name]
-					if !ok {
-						continue
-					}
-					if _, seen := earliest[s.app]; !seen {
-						earliest[s.app] = c
+					if s, ok := source[name]; ok {
+						if _, seen := earliest[s.app]; !seen {
+							earliest[s.app] = consumer{group: i, name: e.component.Name}
+						}
 					}
 				}
 			}
 		}
 	}
-	for _, o := range owned {
-		maker, ok := at[o.owner]
+	var out []fluxWaiter
+	for _, s := range order.sources {
+		first, ok := earliest[s.app]
 		if !ok {
 			continue
 		}
-		for _, r := range o.readers {
-			first, ok := earliest[r]
-			if !ok || maker.group <= first.group {
-				continue
+		req, ok := s.app.Config.(fluxSourceRequiredReader)
+		if !ok {
+			continue
+		}
+		reads := func() (configMaps, secrets []string) { return nil, req.FluxSourceRequiredSecrets() }
+		out = append(out, fluxWaiter{app: s.app, reads: reads, group: first.group, component: s.component.Name, typ: s.component.Type, consumer: first.name})
+	}
+	return append(out, grouped...)
+}
+
+// checkFluxObjectMakerOrder refuses a ConfigMap or Secret a waiter
+// (fluxWaiters) cannot become Ready without that a trait makes
+// (fluxNamespaceProducer) on a component in a later group than the waiter's,
+// in the namespace the waiter lands in, for a delivery that makes a group
+// Ready only once its Flux objects are (TransformContext.GroupsWaitForFluxObjects;
+// go-kure/launcher#1039, go-kure/launcher#1079). Each group depends on the one
+// before it (buildCluster), so the waiter's group waits for the waiter, the
+// waiter for the object, and the object's group for the waiter's: the
+// delivery never converges. Under the default delivery a group is Ready once
+// applied, and it does.
+//
+// Any trait of a later group is looked at, a workload's too: its object lands
+// in the application namespace, where without a Flux namespace (ns) every
+// Flux object lands as well. A trait of the waiter's own group, or an earlier
+// one, is applied before the group's wait. Anything the check cannot prove is
+// admitted: a trait object that is no producer or does not say, a waiter that
+// does not report what it requires, an object outside the waiter's namespace
+// (ns, or the waiter's own without one), a maker that is no trait.
+func checkFluxObjectMakerOrder(order *componentOrder, waiters []fluxWaiter, owned []traitSubApps, ns string) error {
+	if len(waiters) == 0 {
+		return nil
+	}
+	type maker struct {
+		group int
+		name  string
+	}
+	// Every application of a group entry, a sibling group's members included,
+	// under the group and the component it is part of.
+	at := make(map[*stack.Application]maker)
+	for i, group := range order.groups {
+		for _, e := range group {
+			m := maker{group: i, name: e.component.Name}
+			at[e.app] = m
+			for _, member := range e.members {
+				at[member.app] = m
 			}
-			req, ok := r.Config.(fluxSourceRequiredReader)
-			if !ok {
+		}
+	}
+	for _, w := range waiters {
+		configMaps, secrets := w.reads()
+		if len(configMaps) == 0 && len(secrets) == 0 {
+			continue
+		}
+		where := w.app.Namespace
+		if ns != "" {
+			where = ns
+		}
+		for _, o := range owned {
+			by, ok := at[o.owner]
+			if !ok || by.group <= w.group {
 				continue
-			}
-			required := req.FluxSourceRequiredSecrets()
-			where := r.Namespace
-			if ns != "" {
-				where = ns
 			}
 			for _, sub := range o.subApps {
 				in, ok := sub.Config.(fluxNamespaceInput)
@@ -307,23 +370,40 @@ func checkGeneratedSourceMakerOrder(order *componentOrder, sources map[*stack.Ap
 					continue
 				}
 				kind, name := in.FluxNamespaceInput()
-				if kind != "Secret" || !slices.Contains(required, name) || sub.Namespace != where {
+				required := secrets
+				if kind == "ConfigMap" {
+					required = configMaps
+				} else if kind != "Secret" {
+					continue
+				}
+				if !slices.Contains(required, name) || sub.Namespace != where {
 					continue
 				}
 				if p, ok := sub.Config.(fluxNamespaceProducer); !ok || !p.ProducesFluxNamespaceInput() {
 					continue
 				}
-				s := byApp[r]
-				provide := "provide the Secret apart from the document"
-				if ns != "" {
-					provide += fmt.Sprintf(" in the Flux namespace %q", ns)
-				}
-				return &TransformError{Message: fmt.Sprintf(
-					"%s %q requires Secret %q, which a trait of component %q makes in group %q, later than component %q in group %q, a consumer of %q; with each group waiting for its Flux objects, %q's group waits for %q, %q for the source, the source for the Secret, and the group of %q, which makes it, for %q's, so the delivery never converges: put the trait on a consumer in the earliest group, or %s",
-					s.component.Type, s.component.Name, name, maker.name, order.suffixes[maker.group], first.name, order.suffixes[first.group], s.component.Name,
-					first.name, first.name, first.name, maker.name, first.name, provide)}
+				return lateMakerError(order, w, kind, name, by.name, by.group, ns)
 			}
 		}
 	}
 	return nil
+}
+
+// lateMakerError is checkFluxObjectMakerOrder's refusal of the object kind
+// name of waiter w that a trait of component maker makes in group g.
+func lateMakerError(order *componentOrder, w fluxWaiter, kind, name, maker string, g int, ns string) error {
+	provide := fmt.Sprintf("provide the %s apart from the document", kind)
+	if ns != "" {
+		provide += fmt.Sprintf(" in the Flux namespace %q", ns)
+	}
+	if w.consumer != "" {
+		return &TransformError{Message: fmt.Sprintf(
+			"%s %q requires Secret %q, which a trait of component %q makes in group %q, later than component %q in group %q, a consumer of %q; with each group waiting for its Flux objects, %q's group waits for %q, %q for the source, the source for the Secret, and the group of %q, which makes it, for %q's, so the delivery never converges: put the trait on a consumer in the earliest group, or %s",
+			w.typ, w.component, name, maker, order.suffixes[g], w.consumer, order.suffixes[w.group], w.component,
+			w.consumer, w.consumer, w.consumer, maker, w.consumer, provide)}
+	}
+	return &TransformError{Message: fmt.Sprintf(
+		"%s %q requires %s %q, which a trait of component %q makes in group %q, later than %q's group %q; with each group waiting for its Flux objects, %q's group waits for %q, %q for the %s, and the group of %q, which makes it, for %q's, so the delivery never converges: put the trait on a component in group %q or earlier, or %s",
+		w.typ, w.component, kind, name, maker, order.suffixes[g], w.component, order.suffixes[w.group],
+		w.component, w.component, w.component, kind, maker, w.component, order.suffixes[w.group], provide)}
 }

@@ -151,6 +151,10 @@ var resourceSetInputProviderKind = &fluxKind[fluxoperatorv1.ResourceSetInputProv
 		r.secretRef(spec.SecretRef)
 		r.secretRef(spec.CertSecretRef)
 	},
+	// No requiredReads: under the reconcile-disabled annotation flux-operator marks
+	// the provider Ready at creation, and outside its schedule window a new one
+	// is marked Ready before either Secret is fetched; neither is settled when
+	// the document is built.
 	durations: []fluxDurationField[fluxoperatorv1.ResourceSetInputProviderSpec]{
 		{path: []string{"schedule[]", "window"}, form: fluxduration.Interval},
 	},

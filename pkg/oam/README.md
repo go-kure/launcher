@@ -363,9 +363,9 @@ trait sub-applications with its workloads, whatever a Flux member reads. A Flux 
 rule orders after a generated source (`Component.OrderAfter`) reads through that source as well: a
 trait sub-application of the component follows when the source reads it (the `oci` rule's shared
 source reads the Secret one consumer's trait makes, go-kure/launcher#1016). A workload ordered after
-a source gains nothing from it. A consumer whose trait makes that Secret in a later group than
-another Flux consumer of the source is admitted under the default delivery, which converges, and
-refused under `TransformContext.GroupsWaitForFluxObjects` (below). The config reports what it reads (`FluxNamespaceReads`: a
+a source gains nothing from it. A trait that makes, in a later group, a Secret a generated source
+or a ConfigMap or Secret a Flux object requires is admitted under the default delivery, which
+converges, and refused under `TransformContext.GroupsWaitForFluxObjects` (below). The config reports what it reads (`FluxNamespaceReads`: a
 HelmRelease's `valuesFrom`, `kubeConfig` and chart-template `verify` Secret, a source's
 `secretRef`, `certSecretRef`, `proxySecretRef` and the Secrets under `verify` and `sts`); a
 sub-application config names the ConfigMap or Secret it produces (`FluxNamespaceInput`: the
@@ -382,27 +382,47 @@ groups forward them.
 
 `TransformContext.GroupsWaitForFluxObjects` is the consumer's statement that its delivery makes a
 group Ready only once the group's Flux objects are Ready: kure's `UmbrellasDoNotWait`, for example,
-or `wait: true` on the group bundles. Each group depends on the one before it, so a Secret a
-generated source requires, made by a trait in a later group than a Flux consumer of the source,
-then never converges: the earlier consumer's group waits for the consumer, the consumer for the
-source, the source for the Secret, and the Secret's group for the earlier group. Under the field
-the transform refuses it, naming the source, the Secret, the maker and the earlier consumer: put
-the trait on a consumer in the earliest group, or provide the Secret apart from the document. Unset,
-launcher assumes the default delivery, under which a group is Ready once applied and the document
-converges, and it refuses nothing (go-kure/launcher#1039). The refusal needs every link proven:
-- the consumer is a Flux object its own lowering rule ordered after the source (in a sibling
-  group the member's own order, not another member's); a workload does not wait on the source;
-- the source reports the Secret as one it cannot become Ready without
-  (`FluxSourceRequiredSecrets`: an `ocirepository`'s `secretRef`, `certSecretRef` and
-  `proxySecretRef`, its `verify.secretRef`, and its `verify.trustedRootSecretRef` only under the
-  `cosign` provider, the default; a `helmrepository`'s `secretRef` and `certSecretRef`);
-- the trait object says its trait makes the Secret (`ProducesFluxNamespaceInput`: true for the
-  `secret`, `certificate` and `configmap` traits, and for `external-secret` except under
-  `target.creationPolicy: Merge` or `None`, where the Secret exists apart from it);
-- the Secret lands in the source's namespace.
+or `wait: true` on the group bundles. Each group depends on the one before it, so a ConfigMap or
+Secret a group's Flux object requires, made by a trait in a later group, then never converges: the
+Flux object's group waits for it, it for the ConfigMap or Secret, and the maker's group for the
+Flux object's. Under the field the transform refuses it, naming the Flux object, the ConfigMap or
+Secret, the maker and the groups: put the trait on a component in the Flux object's group or an
+earlier one, or provide the object apart from the document. Unset, launcher assumes the default
+delivery, under which a group is Ready once applied and the document converges, and it refuses
+nothing (go-kure/launcher#1039, go-kure/launcher#1079). Two kinds of Flux object wait:
+- a Flux object of a group, a sibling group's Flux member included (named by the group), in its
+  own group;
+- a generated source, in the group of its earliest Flux consumer, a Flux object its own lowering
+  rule ordered after the source (in a sibling group the member's own order, not another member's);
+  a workload does not wait on the source, and a source no Flux object consumes waits in no group.
 
-A config that does not report either is admitted, as is a Secret-naming trait that is no
-`FluxNamespaceInput` (the managed TLS Secret of `ingress`/`expose`, a `volsync` repository).
+The refusal needs every link proven:
+- the Flux object reports the ConfigMap or Secret as one it cannot become Ready without. A Flux
+  object of a group reports it as `FluxRequiredReads`, a subset of its `FluxNamespaceReads`:
+  a `helmrelease`'s `valuesFrom` not marked `optional`, its `kubeConfig`, and what its chart
+  template's generated object requires where it lands in the release's namespace; a
+  `fluxcd-kustomization`'s `decryption.secretRef` and `kubeConfig`, never its
+  `postBuild.substituteFrom`, which kustomize-controller skips for a rendered resource that
+  disables substitution; every Secret a `gitrepository`, `bucket` or `helmchart` reads; a
+  `helmrepository`'s `secretRef` and `certSecretRef`, none for `type: oci`, a static object that
+  never sets Ready; what an `ocirepository` requires as a source; a `fluxcd-receiver`'s,
+  `imagerepository`'s and `imageupdateautomation`'s Secrets. A `suspend: true` object requires
+  nothing, and a `resourcesetinputprovider`, `fluxcd-alert`, `fluxcd-provider`, `imagepolicy` and
+  `artifactgenerator` require nothing. A generated source reports only Secrets, as
+  `FluxSourceRequiredSecrets`: an `ocirepository`'s `secretRef`, `certSecretRef` and
+  `proxySecretRef`, its `verify.secretRef`, and its `verify.trustedRootSecretRef` only under the
+  `cosign` provider, the default; a `helmrepository`'s `secretRef` and `certSecretRef`, of type
+  `oci` too, since an OCI chart pulled through it reads them;
+- the trait object says its trait makes the ConfigMap or Secret (`ProducesFluxNamespaceInput`:
+  true for the `secret`, `certificate` and `configmap` traits, and for `external-secret` except
+  under `target.creationPolicy: Merge` or `None`, where the Secret exists apart from it);
+- the ConfigMap or Secret lands in the Flux object's namespace: the Flux namespace, or without
+  one the application namespace, where a workload's trait objects land too, so a trait on any
+  component counts.
+
+A config that does not report what it requires is admitted, as is a Secret-naming trait that is
+no `FluxNamespaceInput` (the managed TLS Secret of `ingress`/`expose`, a `volsync` repository) and
+a ConfigMap or Secret a component, not a trait, makes (go-kure/launcher#1086).
 
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
 each a **separate** additive resource (the authored `networkpolicy` /
