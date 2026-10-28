@@ -1,6 +1,8 @@
 package components
 
 import (
+	"strings"
+
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"github.com/go-kure/kure/pkg/kubernetes/fluxcd"
 	"github.com/go-kure/kure/pkg/stack"
@@ -33,7 +35,7 @@ func (h *GitRepositoryHandler) CanHandle(componentType string) bool {
 // test ties this key set to the struct.
 func (h *GitRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"url":                fluxSourceRequiredString("GitRepository spec.url: an http://, https:// or ssh:// URL. Its host (the user of an ssh:// URL dropped) must be in the policy's allowed registries when that list is non-empty."),
+		"url":                fluxSourceRequiredString("GitRepository spec.url: an http://, https:// or ssh:// URL. Its host (the user of an ssh:// URL dropped) must be in the policy's allowed registries when that list is non-empty. A user or password in an http(s):// URL, and a password in an ssh:// URL, is refused: put the credential in a Secret named by secretRef. The user of an ssh:// URL is the SSH login, which Flux reads from the URL alone, so it is kept."),
 		"secretRef":          fluxSourceObject("GitRepository spec.secretRef: the Secret holding the credentials, in the namespace the GitRepository lands in."),
 		"provider":           fluxSourceString("GitRepository spec.provider for authentication: generic, aws, azure or github."),
 		"serviceAccountName": fluxSourceString("GitRepository spec.serviceAccountName that authenticates the clone (azure and aws providers)."),
@@ -107,7 +109,15 @@ func (c *GitRepositoryConfig) validate() error {
 	if err := checkFluxDurations("gitrepository", &c.Spec, gitRepositoryDurations); err != nil {
 		return err
 	}
-	return checkFluxSourceURL("gitrepository", "url", c.Spec.URL, "http://", "https://", "ssh://")
+	if err := checkFluxSourceURL("gitrepository", "url", c.Spec.URL, "http://", "https://", "ssh://"); err != nil {
+		return err
+	}
+	remedy := fluxSourceURLUserinfoRemedy("GitRepository")
+	if strings.HasPrefix(c.Spec.URL, "ssh://") {
+		// The user of an ssh:// URL is the SSH login, which only the URL carries.
+		return refuseSSHFieldPassword("gitrepository", "url", c.Spec.URL, remedy)
+	}
+	return refuseHostedFieldUserinfo("gitrepository", "url", c.Spec.URL, remedy)
 }
 
 // ApplyPolicy rejects a url whose host is not in the policy's allowed

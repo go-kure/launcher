@@ -18,9 +18,12 @@ import (
 // type (builtin.DecodeStrictJSON, no owned keys), so an unknown or wrongly
 // typed key at any depth is a build error, and checks what the CRD would
 // otherwise reject only at apply time: its required fields, and the url scheme
-// where the CRD has a pattern for it. Generate emits exactly one CR, named after
-// the component, carrying a deep copy of that spec plus the interval default.
-// Every other constraint is left to the CRD's own admission.
+// where the CRD has a pattern for it. It also refuses a credential in the url of
+// the three repositories, which the CR would carry in plain text
+// (go-kure/launcher#1078; an ssh:// user is the SSH login and is kept).
+// Generate emits exactly one CR, named after the component, carrying a deep copy
+// of that spec plus the interval default. Every other constraint is left to the
+// CRD's own admission.
 //
 // This file holds what the five share; each kind has its own file.
 
@@ -60,6 +63,13 @@ func checkFluxSourceURL(typ, field, value string, schemes ...string) error {
 	// The value is not quoted: it can carry a credential (userinfo, a query),
 	// and without an accepted scheme it cannot be reduced to a host safely.
 	return errors.Errorf("%s: %s must start with %s", typ, field, strings.Join(schemes, " or "))
+}
+
+// fluxSourceURLUserinfoRemedy completes the refusal of a credential in the
+// url of a source of kind: the source would carry it in plain text, and its
+// secretRef is where Flux reads credentials from.
+func fluxSourceURLUserinfoRemedy(kind string) string {
+	return ", which would be written in plain text into the " + kind + "; put the credential in a Secret and name it with secretRef"
 }
 
 // enforceFluxSourceHost checks the host a source is fetched from against the

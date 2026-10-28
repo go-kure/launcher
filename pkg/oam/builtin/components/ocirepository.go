@@ -34,7 +34,7 @@ func (h *OCIRepositoryHandler) CanHandle(componentType string) bool {
 // test ties this key set to the struct.
 func (h *OCIRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
-		"url":                fluxSourceRequiredString("OCIRepository spec.url: an oci:// artifact repository URL. When the policy's allowed registries are non-empty, it must be oci://<registry>/<repository> with a registry that is localhost or contains . or : (Flux reads any other first segment as a Docker Hub namespace), and that registry must be in the list."),
+		"url":                fluxSourceRequiredString("OCIRepository spec.url: an oci:// artifact repository URL. When the policy's allowed registries are non-empty, it must be oci://<registry>/<repository> with a registry that is localhost or contains . or : (Flux reads any other first segment as a Docker Hub namespace), and that registry must be in the list. A user or password in it is refused: put the credential in a Secret named by secretRef."),
 		"ref":                fluxSourceObject("OCIRepository spec.ref: the tag, semver range or digest to pull (Flux defaults to the latest tag)."),
 		"layerSelector":      fluxSourceObject("OCIRepository spec.layerSelector: which artifact layer to extract or copy."),
 		"provider":           fluxSourceString("OCIRepository spec.provider for authentication: generic, aws, azure or gcp."),
@@ -103,7 +103,10 @@ func (c *OCIRepositoryConfig) validate() error {
 	if err := checkFluxDurations("ocirepository", &c.Spec, ociRepositoryDurations); err != nil {
 		return err
 	}
-	return checkFluxSourceURL("ocirepository", "url", c.Spec.URL, "oci://")
+	if err := checkFluxSourceURL("ocirepository", "url", c.Spec.URL, "oci://"); err != nil {
+		return err
+	}
+	return refuseHostedFieldUserinfo("ocirepository", "url", c.Spec.URL, fluxSourceURLUserinfoRemedy("OCIRepository"))
 }
 
 // ApplyPolicy rejects a url whose registry host is not in the policy's allowed
