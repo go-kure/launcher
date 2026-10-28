@@ -72,6 +72,12 @@ spec:
           kind: ClusterSecretStore
 `
 
+// chartSourceNameRefusal is the refusal of a HelmRelease with a chart template
+// named over 63 characters, the owner label helm-controller gives the source it
+// generates (go-kure/launcher#1080); `helm` delivers through such a
+// HelmRelease too.
+const chartSourceNameRefusal = "which as a label value must be at most 63 characters"
+
 // longLabelComponentName is a valid component name (a DNS-1123 subdomain) of
 // 200 characters, dotted, far over the 63-character label-value limit.
 func longLabelComponentName(t *testing.T) string {
@@ -468,7 +474,8 @@ spec:
 	// through a configmap trait, the one labelled object.
 	"helm": {props: map[string]any{"chart": "app",
 		"source":     map[string]any{"url": "https://charts.example.com"},
-		"valuesMode": "configMap", "values": map[string]any{"replicaCount": 2}}, labelled: true},
+		"valuesMode": "configMap", "values": map[string]any{"replicaCount": 2}}, labelled: true,
+		longRefusal: chartSourceNameRefusal},
 	"helmchart": {
 		props: map[string]any{"chart": "podinfo", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "podinfo"}},
 	},
@@ -476,7 +483,7 @@ spec:
 	"helmrelease": {props: map[string]any{
 		"chart": map[string]any{"spec": map[string]any{"chart": "app",
 			"sourceRef": map[string]any{"kind": "HelmRepository", "name": "example"}}},
-		"values": map[string]any{"replicaCount": 2}}},
+		"values": map[string]any{"replicaCount": 2}}, longRefusal: chartSourceNameRefusal},
 	"helmrepository": {
 		props: map[string]any{"url": "https://charts.example.com"},
 	},

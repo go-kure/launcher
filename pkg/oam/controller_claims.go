@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -41,49 +43,86 @@ func (c controllerClaim) String() string {
 }
 
 // controllerClaims returns the claims obj makes, read as keyedObjects keys it:
-// for a HelmRelease with a chart template, the object helm-controller generates
-// from it (HelmRelease.GetHelmChartTemplateReference, helm-controller api
-// v1.7.1 v2/helmrelease_types.go:1633-1647). It is named
-// `<namespace>-<name>` after the HelmRelease and is of the template's kind,
-// HelmChart when it names none. An OCIRepository is in the HelmRelease's
-// namespace; a HelmChart is in chart.spec.sourceRef.namespace when that is set,
-// else in the HelmRelease's. A typed object is read converted, as the cluster
-// would be sent it. A chartRef, a chart that is no object, or a kind the API
-// does not take makes no claim: the HelmRelease's own admission refuses the
-// last two.
+// for a HelmRelease with a chart template, the source helm-controller generates
+// from it (GeneratedChartSource).
 func controllerClaims(obj client.Object) ([]controllerClaim, error) {
-	gvk := obj.GetObjectKind().GroupVersionKind()
-	if gvk.Group != helmGroup || gvk.Kind != helmReleaseKind {
-		return nil, nil
-	}
-	content, err := objectContent(obj)
-	if err != nil {
+	src, ok, err := GeneratedChartSource(obj)
+	if err != nil || !ok {
 		return nil, err
 	}
-	spec, _ := content["spec"].(map[string]any)
-	chart, ok := spec["chart"].(map[string]any)
-	if !ok {
-		return nil, nil
+	gvk := obj.GetObjectKind().GroupVersionKind()
+	return []controllerClaim{{
+		id: objectIdentity{group: fluxSourceGroup, kind: src.Kind, namespace: src.Namespace, name: src.Name},
+		by: objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: obj.GetNamespace(), name: obj.GetName()},
+	}}, nil
+}
+
+// ChartSource is the source object, in source.toolkit.fluxcd.io, that
+// helm-controller generates from a HelmRelease's chart template (spec.chart).
+type ChartSource struct {
+	// Kind is the template's kind: HelmChart, its default, or OCIRepository.
+	Kind string
+	// Namespace is chart.spec.sourceRef.namespace for a HelmChart when that is
+	// set, else the HelmRelease's.
+	Namespace string
+	// Name is `<namespace>-<name>` after the HelmRelease's own namespace and
+	// name, whatever namespace the source is in.
+	Name string
+}
+
+// GeneratedChartSource returns the source helm-controller generates for obj, a
+// HelmRelease with a chart template (HelmRelease.GetHelmChartTemplateReference,
+// helm-controller api v1.7.1 v2/helmrelease_types.go:1633-1649). ok is false
+// for an object that is no HelmRelease, and for a chartRef, a chart that is no
+// object, or a kind the API does not take: none generates a source, and the
+// HelmRelease's own admission refuses the last two.
+func GeneratedChartSource(obj client.Object) (src ChartSource, ok bool, err error) {
+	gvk := obj.GetObjectKind().GroupVersionKind()
+	if gvk.Group != helmGroup || gvk.Kind != helmReleaseKind {
+		return ChartSource{}, false, nil
 	}
-	ns, name := obj.GetNamespace(), obj.GetName()
-	claimNS := ns
-	kind, _ := chart["kind"].(string)
-	switch kind {
+	chart, ok, err := chartTemplateContent(obj)
+	if err != nil || !ok {
+		return ChartSource{}, false, err
+	}
+	ns := obj.GetNamespace()
+	src = ChartSource{Namespace: ns, Name: ns + "-" + obj.GetName()}
+	src.Kind, _ = chart["kind"].(string)
+	switch src.Kind {
 	case "", helmChartKind:
-		kind = helmChartKind
+		src.Kind = helmChartKind
 		chartSpec, _ := chart["spec"].(map[string]any)
 		sourceRef, _ := chartSpec["sourceRef"].(map[string]any)
 		if sourceNS, _ := sourceRef["namespace"].(string); sourceNS != "" {
-			claimNS = sourceNS
+			src.Namespace = sourceNS
 		}
 	case ociRepositoryKind:
 	default:
-		return nil, nil
+		return ChartSource{}, false, nil
 	}
-	return []controllerClaim{{
-		id: objectIdentity{group: fluxSourceGroup, kind: kind, namespace: claimNS, name: ns + "-" + name},
-		by: objectIdentity{group: gvk.Group, kind: gvk.Kind, namespace: ns, name: name},
-	}}, nil
+	return src, true, nil
+}
+
+// chartTemplateContent returns the spec.chart of obj, a HelmRelease, as the
+// cluster would be sent it, and whether it is an object. A typed HelmRelease
+// has only its chart template converted: the converter decodes values into
+// float64, so a whole conversion would refuse a Helm value one cannot hold
+// (1e400), which the HelmRelease carries exactly and this does not read.
+func chartTemplateContent(obj client.Object) (map[string]any, bool, error) {
+	if hr, ok := obj.(*helmv2.HelmRelease); ok {
+		if hr.Spec.Chart == nil {
+			return nil, false, nil
+		}
+		chart, err := runtime.DefaultUnstructuredConverter.ToUnstructured(hr.Spec.Chart)
+		return chart, err == nil, err
+	}
+	content, err := objectContent(obj)
+	if err != nil {
+		return nil, false, err
+	}
+	spec, _ := content["spec"].(map[string]any)
+	chart, ok := spec["chart"].(map[string]any)
+	return chart, ok, nil
 }
 
 // claimAt is a claim and the index of the application or document that

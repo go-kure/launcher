@@ -9341,7 +9341,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     so a document that does not set it and a hook that declines give the same
     output as before. A name that is not the default is used as written: a
     DNS-1123 subdomain of at most 253 characters, refused otherwise and never
-    shortened. **`helmReleaseName` is the name of the HelmRelease object in the
+    shortened. With a HelmRepository, GitRepository or Bucket source the
+    HelmRelease carries a chart template, so its name, the default included, is
+    also held to 63 characters, the owner label helm-controller gives the
+    HelmChart it generates (go-kure/launcher#1080, see `helmrelease`); a longer
+    component name needs a shorter `helmReleaseName`. An OCI source is reached
+    through a `chartRef` and is not held. **`helmReleaseName` is the name of the HelmRelease object in the
     cluster (`metadata.name`); `releaseName` is the name Helm gives the release
     (`spec.releaseName`, the chart's `.Release.Name`).** Renaming the object
     moves nothing else: `spec.releaseName` stays the authored `releaseName` or
@@ -9778,6 +9783,23 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `helmchart` component, or any other HelmChart the build generates, of that identity is
   refused as a collision naming helm-controller's claim, as for kind OCIRepository. A
   `chartRef` claims nothing.
+
+  **Name of the generated chart source** (go-kure/launcher#1080). With a chart template of
+  either kind, helm-controller labels the source it generates with the HelmRelease's name as
+  the `helm.toolkit.fluxcd.io/name` owner label (helm-controller v1.7.1
+  `internal/reconcile/helmchart_template.go:147`), and names it `<namespace>-<name>` after the
+  HelmRelease's own namespace and name: a `chart.spec.sourceRef.namespace` moves the
+  HelmChart, never its name (`oam.GeneratedChartSource`). A label value is at most 63
+  characters and a name at most 253, and a source helm-controller cannot apply leaves the
+  HelmRelease never reconciled. So `Generate` refuses a HelmRelease name over 63 characters,
+  whether from the component name or from `objectName`, and a `<namespace>-<name>` over 253,
+  the namespace being the HelmRelease's after the move to the Flux namespace. The remedy is a
+  shorter name, or a `chartRef` to an authored source, which is not held. A component's
+  namespace is a DNS label, so with the name held to 63 only a `HelmReleaseConfig` built
+  directly with a longer `Namespace` reaches the 253 limit. This is a new build refusal for a
+  document of kind HelmChart, the default, whose component or object name is over 63
+  characters, and for a `helm` component with a HelmRepository, GitRepository or Bucket
+  source whose HelmRelease name is: such a HelmRelease never reconciled.
 
   **Release name** (go-kure/launcher#785). A component that authors no `releaseName` gets
   `spec.releaseName` set to the component name, so every HelmRelease in the output names its

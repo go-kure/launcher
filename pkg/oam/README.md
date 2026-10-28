@@ -2329,6 +2329,13 @@ sourceRef namespace is set, follow the Flux namespace. The HelmChart claim is a 
 that a document building before go-kure/launcher#1074 may now meet: a `helmchart` component
 named `<namespace>-<name>` after a `helmrelease` beside it, in the same namespace.
 
+`GeneratedChartSource(obj)` returns that source as a `ChartSource` (kind, namespace and name)
+and whether obj makes one; the checks read their claim from it, and so does the `helmrelease`
+component, which refuses a HelmRelease whose source helm-controller could not apply
+(go-kure/launcher#1080). The name is always `<namespace>-<name>` after the HelmRelease's own
+namespace (helm-controller API v1.7.1 `v2/helmrelease_types.go:1633-1649`); a sourceRef
+namespace moves only the HelmChart.
+
 A PersistentVolume or PersistentVolumeClaim that is force-applied, or covered by the
 `ForceReplace` delivery intent, is warned about, not refused (go-kure/launcher#720): when an
 update changes an immutable field of a force-applied object, Flux deletes and recreates it
