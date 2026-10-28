@@ -3,6 +3,7 @@ package oam
 import (
 	"testing"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -414,6 +415,8 @@ func TestGeneratedChartSource(t *testing.T) {
 		{"unknown kind", claimHelmRelease(helmGroup, "apps", "web", map[string]any{"kind": "GitRepository"}), ChartSource{}, false},
 		{"another group", claimHelmRelease("example.com", "apps", "web", ociChart()), ChartSource{}, false},
 		{"no HelmRelease", claimOCIRepository("apps", "web"), ChartSource{}, false},
+		{"typed HelmRelease stating no kind", typedHelmRelease("apps", "web"),
+			ChartSource{Kind: "OCIRepository", Namespace: "apps", Name: "apps-web"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok, err := GeneratedChartSource(*tc.obj)
@@ -422,4 +425,15 @@ func TestGeneratedChartSource(t *testing.T) {
 			}
 		})
 	}
+}
+
+// typedHelmRelease is a typed HelmRelease namespace/name with a chart template
+// of kind OCIRepository, built without TypeMeta, so it states no kind.
+func typedHelmRelease(namespace, name string) *client.Object {
+	hr := &helmv2.HelmRelease{}
+	hr.Namespace, hr.Name = namespace, name
+	hr.Spec.Chart = &helmv2.HelmChartTemplate{Kind: "OCIRepository"}
+	hr.Spec.Chart.Spec.URL = "oci://registry.example.com/charts/app"
+	var obj client.Object = hr
+	return &obj
 }

@@ -44,7 +44,8 @@ func (c controllerClaim) String() string {
 
 // controllerClaims returns the claims obj makes, read as keyedObjects keys it:
 // for a HelmRelease with a chart template, the source helm-controller generates
-// from it (GeneratedChartSource).
+// from it (GeneratedChartSource). Both callers refuse an object that states no
+// kind before they ask, so obj's stated kind names the claimant.
 func controllerClaims(obj client.Object) ([]controllerClaim, error) {
 	src, ok, err := GeneratedChartSource(obj)
 	if err != nil || !ok {
@@ -72,13 +73,13 @@ type ChartSource struct {
 
 // GeneratedChartSource returns the source helm-controller generates for obj, a
 // HelmRelease with a chart template (HelmRelease.GetHelmChartTemplateReference,
-// helm-controller api v1.7.1 v2/helmrelease_types.go:1633-1649). ok is false
-// for an object that is no HelmRelease, and for a chartRef, a chart that is no
-// object, or a kind the API does not take: none generates a source, and the
-// HelmRelease's own admission refuses the last two.
+// helm-controller api v1.7.1 v2/helmrelease_types.go:1633-1649). A typed
+// HelmRelease is one whether or not it states its kind (statedOrTypedKind). ok
+// is false for an object that is no HelmRelease, and for a chartRef, a chart
+// that is no object, or a kind the API does not take: none generates a source,
+// and the HelmRelease's own admission refuses the last two.
 func GeneratedChartSource(obj client.Object) (src ChartSource, ok bool, err error) {
-	gvk := obj.GetObjectKind().GroupVersionKind()
-	if gvk.Group != helmGroup || gvk.Kind != helmReleaseKind {
+	if group, kind := statedOrTypedKind(obj); group != helmGroup || kind != helmReleaseKind {
 		return ChartSource{}, false, nil
 	}
 	chart, ok, err := chartTemplateContent(obj)

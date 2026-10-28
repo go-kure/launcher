@@ -2330,7 +2330,8 @@ that a document building before go-kure/launcher#1074 may now meet: a `helmchart
 named `<namespace>-<name>` after a `helmrelease` beside it, in the same namespace.
 
 `GeneratedChartSource(obj)` returns that source as a `ChartSource` (kind, namespace and name)
-and whether obj makes one; the checks read their claim from it, and so does the `helmrelease`
+and whether obj makes one, a typed HelmRelease counting as one whether or not it states its
+kind; the checks read their claim from it, and so does the `helmrelease`
 component, which refuses a HelmRelease whose source helm-controller could not apply
 (go-kure/launcher#1080). The name is always `<namespace>-<name>` after the HelmRelease's own
 namespace (helm-controller API v1.7.1 `v2/helmrelease_types.go:1633-1649`); a sourceRef
