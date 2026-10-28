@@ -119,22 +119,37 @@ func TestFluxRequiredReads(t *testing.T) {
 }
 
 // TestFluxRequiredReads_NoneForConditionalKinds: a resourcesetinputprovider,
-// an Alert and a Provider require nothing, whatever they read: their reads
-// are conditional, or a wait cannot hold on them (go-kure/launcher#1079).
+// an Alert and a Provider require nothing, not suspended and whatever they
+// read: their reads are conditional, or a wait cannot hold on them
+// (go-kure/launcher#1079). The resourcesetinputprovider and the Provider read
+// Secrets, so their none is the kind's, not the fixture's; an Alert reads
+// nothing.
 func TestFluxRequiredReads_NoneForConditionalKinds(t *testing.T) {
 	for _, tc := range []struct {
-		typ   string
-		h     oam.ComponentHandler
-		props map[string]any
+		typ          string
+		h            oam.ComponentHandler
+		props        map[string]any
+		readsNothing bool
 	}{
-		{"resourcesetinputprovider", &components.ResourceSetInputProviderHandler{}, resourceSetInputProviderFull()},
-		{"fluxcd-alert", &components.FluxcdAlertHandler{}, fluxAlertFull()},
-		{"fluxcd-provider", &components.FluxcdProviderHandler{}, fluxProviderFull()},
+		{"resourcesetinputprovider", &components.ResourceSetInputProviderHandler{}, resourceSetInputProviderFull(), false},
+		{"fluxcd-alert", &components.FluxcdAlertHandler{}, withProperty(fluxAlertFull(), "suspend", false), true},
+		{"fluxcd-provider", &components.FluxcdProviderHandler{}, withProperty(fluxProviderFull(), "suspend", false), false},
 	} {
 		t.Run(tc.typ, func(t *testing.T) {
-			configMaps, secrets := requiredReadsConfig(t, tc.h, tc.typ, tc.props).FluxRequiredReads()
+			cfg := requiredReadsConfig(t, tc.h, tc.typ, tc.props)
+			configMaps, secrets := cfg.FluxRequiredReads()
 			if len(configMaps) != 0 || len(secrets) != 0 {
 				t.Errorf("FluxRequiredReads = %v, %v, want none", configMaps, secrets)
+			}
+			r, ok := cfg.(interface {
+				FluxNamespaceReads() (configMaps, secrets []string)
+			})
+			if !ok {
+				t.Fatalf("%T does not report FluxNamespaceReads", cfg)
+			}
+			readCMs, readSecrets := r.FluxNamespaceReads()
+			if reads := len(readCMs) + len(readSecrets); (reads == 0) != tc.readsNothing {
+				t.Errorf("FluxNamespaceReads = %v, %v, want reads %t", readCMs, readSecrets, !tc.readsNothing)
 			}
 		})
 	}
