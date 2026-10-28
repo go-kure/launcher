@@ -276,6 +276,24 @@ func TestGeneratedSource_LateMaker(t *testing.T) {
 	}
 }
 
+// TestGeneratedSource_LateWorkloadMaker: a trait of a workload in a later
+// group makes its Secret in the application namespace, so it is refused for a
+// generated source that lands there too, without a Flux namespace, and
+// admitted under one, where the source reads another Secret
+// (go-kure/launcher#1079).
+func TestGeneratedSource_LateWorkloadMaker(t *testing.T) {
+	early := Component{Name: "early", Type: "flux-consumer"}
+	maker := Component{Name: "maker", Type: "workload-consumer", Traits: []Trait{{Type: "make", Properties: map[string]any{}}}}
+	deps := map[string][]string{"maker": {"early"}}
+	if _, err := sourceInputTransform(t, sourceInput{fluxNS: "flux", wait: true, deps: deps, required: []string{"x"}}, maker, early); err != nil {
+		t.Errorf("under a Flux namespace: TransformWithPolicy: %v", err)
+	}
+	_, err := sourceInputTransform(t, sourceInput{wait: true, deps: deps, required: []string{"x"}}, maker, early)
+	if err == nil || !strings.Contains(err.Error(), `ocirepository "app-source" requires Secret "x", which a trait of component "maker"`) {
+		t.Errorf("without a Flux namespace: error = %v, want the late workload maker refused", err)
+	}
+}
+
 // TestGeneratedSource_LateMakerMessage holds the refusal's whole message.
 func TestGeneratedSource_LateMakerMessage(t *testing.T) {
 	early := Component{Name: "early", Type: "flux-consumer"}

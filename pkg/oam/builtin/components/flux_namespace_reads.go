@@ -165,19 +165,158 @@ func (c *HelmRepositoryConfig) FluxSourceRequiredSecrets() []string {
 // the one the source is generated with (effectiveFluxVerifyProvider). Unlike
 // FluxNamespaceReads, which moves a trait Secret the source may read, this is
 // what a delivery that waits on the source waits for (go-kure/launcher#1039).
-// Satisfies pkg/oam.fluxSourceRequiredReader.
+// It is what a consumer of a generated source waits for; FluxRequiredReads is
+// what the OCIRepository itself waits for, and differs from it under
+// suspend. Satisfies pkg/oam.fluxSourceRequiredReader.
 func (c *OCIRepositoryConfig) FluxSourceRequiredSecrets() []string {
 	var r fluxReads
-	r.secretRef(c.Spec.SecretRef)
-	r.secretRef(c.Spec.CertSecretRef)
-	r.secretRef(c.Spec.ProxySecretRef)
-	if v := c.Spec.Verify; v != nil {
+	ociRequiredSecrets(&c.Spec, &r)
+	return r.secrets
+}
+
+// ociRequiredSecrets adds the Secrets an OCIRepository of spec cannot become
+// Ready without (FluxSourceRequiredSecrets): the one rule for the
+// ocirepository component and a HelmRelease's chart template of kind
+// OCIRepository, which helm-controller generates from that spec.
+func ociRequiredSecrets(spec *sourcev1.OCIRepositorySpec, r *fluxReads) {
+	r.secretRef(spec.SecretRef)
+	r.secretRef(spec.CertSecretRef)
+	r.secretRef(spec.ProxySecretRef)
+	if v := spec.Verify; v != nil {
 		r.secretRef(v.SecretRef)
 		if effectiveFluxVerifyProvider(v.Provider) == "cosign" {
 			r.secretRef(v.TrustedRootSecretRef)
 		}
 	}
-	return r.secrets
+}
+
+// Every Flux config also reports what its object itself cannot become Ready
+// without (FluxRequiredReads, pkg/oam.fluxRequiredReader): the ConfigMaps and
+// Secrets, in the namespace it lands in, whose absence keeps it not Ready. A
+// delivery whose groups wait for their Flux objects
+// (TransformContext.GroupsWaitForFluxObjects) refuses such an object a trait
+// makes in a later group, which would never converge (go-kure/launcher#1079).
+// It is a subset of FluxNamespaceReads. What a reference is read only under a
+// condition launcher cannot settle is left out, so the check admits it:
+//   - a suspended object (spec.suspend) is never reconciled, so it carries no
+//     condition and a wait reads it Current at once: it requires nothing;
+//   - a valuesFrom or substituteFrom reference marked optional;
+//   - postBuild.substituteFrom at all: kustomize-controller loads it per
+//     rendered resource and skips one that disables substitution
+//     (kustomize.toolkit.fluxcd.io/substitute: disabled), which only the
+//     artifact says;
+//   - a HelmRepository of type oci, which source-controller makes a static
+//     object that never sets Ready;
+//   - a ResourceSetInputProvider (kind_flux.go), Alert and Provider.
+
+// FluxRequiredReads reports the HelmRelease's valuesFrom ConfigMaps and
+// Secrets not marked optional, its kubeConfig ConfigMap or Secret, and what
+// the object generated from its chart template requires where it lands in the
+// HelmRelease's namespace: for kind OCIRepository what the ocirepository
+// component requires (ociRequiredSecrets), for kind HelmChart its verification
+// Secret. None when suspended.
+func (c *HelmReleaseConfig) FluxRequiredReads() (configMaps, secrets []string) {
+	if c.Spec.Suspend {
+		return nil, nil
+	}
+	var r fluxReads
+	for _, v := range c.Spec.ValuesFrom {
+		if v.Optional {
+			continue
+		}
+		switch v.Kind {
+		case "ConfigMap":
+			r.configMap(v.Name)
+		case "Secret":
+			r.secret(v.Name)
+		}
+	}
+	if k := c.Spec.KubeConfig; k != nil {
+		if k.ConfigMapRef != nil {
+			r.configMap(k.ConfigMapRef.Name)
+		}
+		if k.SecretRef != nil {
+			r.secret(k.SecretRef.Name)
+		}
+	}
+	switch ch := c.Spec.Chart; {
+	case ch == nil:
+	case ch.Kind == sourcev1.OCIRepositoryKind:
+		ociRequiredSecrets(&ch.Spec.OCIRepositorySpec, &r)
+	case helmChartTemplateNamespace(ch, c.fluxNamespace()) == c.fluxNamespace() && ch.Spec.Verify != nil:
+		r.secretRef(ch.Spec.Verify.SecretRef)
+	}
+	return r.configMaps, r.secrets
+}
+
+// FluxRequiredReads reports the Kustomization's decryption Secret and its
+// kubeConfig ConfigMap or Secret. Not its postBuild.substituteFrom, read only
+// for a rendered resource that does not disable substitution. None when
+// suspended.
+func (c *FluxcdKustomizationConfig) FluxRequiredReads() (configMaps, secrets []string) {
+	if c.Spec.Suspend {
+		return nil, nil
+	}
+	var r fluxReads
+	if d := c.Spec.Decryption; d != nil {
+		r.secretRef(d.SecretRef)
+	}
+	if k := c.Spec.KubeConfig; k != nil {
+		if k.ConfigMapRef != nil {
+			r.configMap(k.ConfigMapRef.Name)
+		}
+		if k.SecretRef != nil {
+			r.secret(k.SecretRef.Name)
+		}
+	}
+	return r.configMaps, r.secrets
+}
+
+// FluxRequiredReads reports the HelmRepository's secretRef and certSecretRef.
+// None for type oci, which source-controller makes a static object that never
+// sets Ready, so a wait never holds on it; an OCI chart pulled through it
+// still reads them (FluxSourceRequiredSecrets). None when suspended.
+func (c *HelmRepositoryConfig) FluxRequiredReads() (configMaps, secrets []string) {
+	if c.Spec.Suspend || c.Spec.Type == sourcev1.HelmRepositoryTypeOCI {
+		return nil, nil
+	}
+	return nil, c.FluxSourceRequiredSecrets()
+}
+
+// FluxRequiredReads reports what FluxSourceRequiredSecrets does, and none when
+// suspended.
+func (c *OCIRepositoryConfig) FluxRequiredReads() (configMaps, secrets []string) {
+	if c.Spec.Suspend {
+		return nil, nil
+	}
+	return nil, c.FluxSourceRequiredSecrets()
+}
+
+// FluxRequiredReads reports every Secret the GitRepository reads
+// (FluxNamespaceReads), and none when suspended.
+func (c *GitRepositoryConfig) FluxRequiredReads() (configMaps, secrets []string) {
+	if c.Spec.Suspend {
+		return nil, nil
+	}
+	return c.FluxNamespaceReads()
+}
+
+// FluxRequiredReads reports every Secret the Bucket reads
+// (FluxNamespaceReads), and none when suspended.
+func (c *BucketConfig) FluxRequiredReads() (configMaps, secrets []string) {
+	if c.Spec.Suspend {
+		return nil, nil
+	}
+	return c.FluxNamespaceReads()
+}
+
+// FluxRequiredReads reports the HelmChart's verification Secret
+// (FluxNamespaceReads), and none when suspended.
+func (c *HelmChartConfig) FluxRequiredReads() (configMaps, secrets []string) {
+	if c.Spec.Suspend {
+		return nil, nil
+	}
+	return c.FluxNamespaceReads()
 }
 
 // FluxNamespaceReads reports the GitRepository's secretRef, proxySecretRef and

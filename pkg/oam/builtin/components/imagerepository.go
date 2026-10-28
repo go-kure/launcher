@@ -114,6 +114,13 @@ var imageRepositoryKind = &fluxKind[imagev1.ImageRepositorySpec]{
 		r.secretRef(spec.ProxySecretRef)
 		r.secretRef(spec.CertSecretRef)
 	},
+	requiredReads: func(spec *imagev1.ImageRepositorySpec, r *fluxReads) {
+		if !spec.Suspend {
+			r.secretRef(spec.SecretRef)
+			r.secretRef(spec.ProxySecretRef)
+			r.secretRef(spec.CertSecretRef)
+		}
+	},
 	durations: []fluxDurationField[imagev1.ImageRepositorySpec]{
 		{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *imagev1.ImageRepositorySpec) *metav1.Duration { return &s.Interval }},
 		{path: []string{"timeout"}, form: fluxduration.SourceTimeout, get: func(s *imagev1.ImageRepositorySpec) *metav1.Duration { return s.Timeout }},

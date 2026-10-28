@@ -27,6 +27,12 @@ type fluxKind[T any] struct {
 	// reads lists the ConfigMaps and Secrets decoded names in the object's own
 	// namespace. Nil for a kind that names none.
 	reads func(decoded *T, r *fluxReads)
+	// requiredReads lists what of reads the object cannot become Ready
+	// without (FluxRequiredReads, flux_namespace_reads.go), none when decoded
+	// is suspended. Nil for a kind that requires none: one that names none,
+	// one with no status a wait could hold on, one whose reads are
+	// conditional.
+	requiredReads func(decoded *T, r *fluxReads)
 	// durations lists the duration fields of T, each with the form its CRD
 	// pattern takes: an authored value outside it, or one emitted outside it,
 	// is refused, as on the Flux kinds written before this file
@@ -66,7 +72,7 @@ func (k *fluxKind[T]) config(component *oam.Component) (stack.ApplicationConfig,
 	if !ok {
 		return nil, errors.Errorf("internal: a policy-free kind's config is a %T", cfg)
 	}
-	return &fluxKindConfig[T]{policyFreeKindConfig: free, component: component.Type, reads: k.reads, durations: k.durations, enforce: k.enforce}, nil
+	return &fluxKindConfig[T]{policyFreeKindConfig: free, component: component.Type, reads: k.reads, requiredReads: k.requiredReads, durations: k.durations, enforce: k.enforce}, nil
 }
 
 // fluxKindConfig implements stack.ApplicationConfig for a fluxKind: a
@@ -76,10 +82,11 @@ func (k *fluxKind[T]) config(component *oam.Component) (stack.ApplicationConfig,
 type fluxKindConfig[T any] struct {
 	*policyFreeKindConfig[T]
 	// component is the component's type, for an error of Generate.
-	component string
-	reads     func(decoded *T, r *fluxReads)
-	durations []fluxDurationField[T]
-	enforce   func(decoded *T, p oam.Policy) error
+	component     string
+	reads         func(decoded *T, r *fluxReads)
+	requiredReads func(decoded *T, r *fluxReads)
+	durations     []fluxDurationField[T]
+	enforce       func(decoded *T, p oam.Policy) error
 
 	// fluxNS overrides the object's namespace. Set by postProcessFluxNamespace
 	// via TransformContext.FluxNamespace. Empty means the application's.
@@ -96,6 +103,16 @@ func (c *fluxKindConfig[T]) FluxNamespaceReads() (configMaps, secrets []string) 
 	var r fluxReads
 	if c.reads != nil {
 		c.reads(c.decoded, &r)
+	}
+	return r.configMaps, r.secrets
+}
+
+// FluxRequiredReads reports the ConfigMaps and Secrets the object cannot
+// become Ready without, in the namespace it lands in.
+func (c *fluxKindConfig[T]) FluxRequiredReads() (configMaps, secrets []string) {
+	var r fluxReads
+	if c.requiredReads != nil {
+		c.requiredReads(c.decoded, &r)
 	}
 	return r.configMaps, r.secrets
 }

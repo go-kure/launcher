@@ -336,6 +336,81 @@ func TestFluxNamespace_OCISharedSourceLateMaker(t *testing.T) {
 	}
 }
 
+// TestFluxNamespace_FluxObjectLateMaker: with groups waiting for their Flux
+// objects, a Flux component requiring a Secret that a trait of a later
+// component makes is refused: its group waits for it, it for the Secret, and
+// the Secret's group for its own (go-kure/launcher#1079). The maker is a
+// helmrelease reading the Secret, so the Secret moves with it under a Flux
+// namespace and lands where the waiter does. Under the default delivery the
+// same document is admitted, the waiter and the Secret in the same namespace.
+// An optional valuesFrom is admitted. A trait on the waiter does not hide what
+// it requires, here a chart template's verification Secret, which depends on
+// the Flux namespace. Each row runs under no Flux namespace, under one, and
+// under the application namespace as one.
+func TestFluxNamespace_FluxObjectLateMaker(t *testing.T) {
+	values := func(optional bool) map[string]any {
+		return map[string]any{"valuesFrom": []any{map[string]any{"kind": "Secret", "name": "pull", "optional": optional}}}
+	}
+	maker := func() oam.Component {
+		return fluxNSComponent(t, "m", "helmrelease", values(false), externalSecretTrait("pull"))
+	}
+	decorate := oam.Trait{Type: "security-context", Properties: map[string]any{"psaLevel": "baseline"}}
+	for _, tc := range []struct {
+		name    string
+		waiter  func() oam.Component
+		kind    string // the waiter's object
+		refused bool
+	}{
+		{"an ocirepository's secretRef", func() oam.Component {
+			return fluxNSComponent(t, "w", "ocirepository", map[string]any{"secretRef": secretRef("pull")})
+		}, "OCIRepository", true},
+		{"a helmrelease's valuesFrom", func() oam.Component { return fluxNSComponent(t, "w", "helmrelease", values(false)) }, "HelmRelease", true},
+		{"a helmrelease's optional valuesFrom", func() oam.Component { return fluxNSComponent(t, "w", "helmrelease", values(true)) }, "HelmRelease", false},
+		{"a helmrelease's OCI chart template", func() oam.Component {
+			return fluxNSComponent(t, "w", "helmrelease", map[string]any{"chart": map[string]any{"kind": "OCIRepository", "spec": map[string]any{
+				"url": "oci://registry.example.com/charts/app", "ref": map[string]any{"tag": "1.0.0"}, "secretRef": secretRef("pull"),
+			}}})
+		}, "HelmRelease", true},
+		{"a fluxcd-kustomization's decryption", func() oam.Component {
+			return fluxNSComponent(t, "w", "fluxcd-kustomization", map[string]any{"decryption": map[string]any{"provider": "sops", "secretRef": secretRef("pull")}})
+		}, "Kustomization", true},
+		{"a decorated helmrelease's HelmChart template verification", func() oam.Component {
+			return fluxNSComponent(t, "w", "helmrelease", map[string]any{"chart": map[string]any{"spec": map[string]any{
+				"chart": "app", "sourceRef": map[string]any{"kind": "HelmRepository", "name": "example"},
+				"verify": map[string]any{"provider": "cosign", "secretRef": secretRef("pull")},
+			}}}, decorate)
+		}, "HelmRelease", true},
+	} {
+		for _, fluxNS := range []string{"", fluxNSTarget, "default"} {
+			t.Run(tc.name+"/fluxNamespace="+fluxNS, func(t *testing.T) {
+				policies := dependsOn("m", "w")
+				_, err := ociBuildWaiting(t, fluxNS, true, policies, maker(), tc.waiter())
+				switch {
+				case !tc.refused && err != nil:
+					t.Fatalf("build: %v", err)
+				case tc.refused && err == nil:
+					t.Fatal("build admitted it, want the late maker refused")
+				case tc.refused:
+					for _, want := range []string{`"w" requires Secret "pull", which a trait of component "m"`, "never converges"} {
+						if !strings.Contains(err.Error(), want) {
+							t.Errorf("build error = %v, want it to contain %s", err, want)
+						}
+					}
+				}
+				got, err := ociBuildWaiting(t, fluxNS, false, policies, maker(), tc.waiter())
+				if err != nil {
+					t.Fatalf("default delivery: build: %v", err)
+				}
+				ns := "default"
+				if fluxNS != "" {
+					ns = fluxNS
+				}
+				requireOCIObjects(t, got, tc.kind+" "+ns+"/w", "ExternalSecret "+ns+"/pull")
+			})
+		}
+	}
+}
+
 // fluxPairRule lowers a "flux-pair" component to a same-name sibling group of
 // an ocirepository member carrying the component's traits and a
 // fluxcd-kustomization member whose decryption reads Secret "shared": the

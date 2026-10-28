@@ -324,12 +324,18 @@ func TestFluxNamespace_ReadsSurviveDecoration(t *testing.T) {
 
 // TestFluxNamespace_SettableConfigsReportReads: every registered component
 // config that moves to the Flux namespace also reports what its Flux object
-// reads there, so a new Flux kind cannot skip the contract silently. The known
-// moving kinds must be seen, so the walk is not vacuous.
+// reads there, and what of that its object requires to become Ready, which a
+// group waiting for its Flux objects waits for (go-kure/launcher#1079), so a
+// new Flux kind cannot skip either contract silently. What a config requires
+// is a subset of what it reads. The known moving kinds must be seen, so the
+// walk is not vacuous.
 func TestFluxNamespace_SettableConfigsReportReads(t *testing.T) {
 	type settable interface{ SetFluxNamespace(string) }
 	type reader interface {
 		FluxNamespaceReads() (configMaps, secrets []string)
+	}
+	type requirer interface {
+		FluxRequiredReads() (configMaps, secrets []string)
 	}
 	var moving []string
 	for _, typ := range slices.Sorted(maps.Keys(builtinComponentHandlers())) {
@@ -343,8 +349,28 @@ func TestFluxNamespace_SettableConfigsReportReads(t *testing.T) {
 			continue
 		}
 		moving = append(moving, typ)
-		if _, ok := cfg.(reader); !ok {
+		r, ok := cfg.(reader)
+		if !ok {
 			t.Errorf("%s: %T moves to the Flux namespace but does not report FluxNamespaceReads", typ, cfg)
+		}
+		req, ok := cfg.(requirer)
+		if !ok {
+			t.Errorf("%s: %T moves to the Flux namespace but does not report FluxRequiredReads", typ, cfg)
+		}
+		if r == nil || req == nil {
+			continue
+		}
+		readCMs, readSecrets := r.FluxNamespaceReads()
+		reqCMs, reqSecrets := req.FluxRequiredReads()
+		for _, name := range reqCMs {
+			if !slices.Contains(readCMs, name) {
+				t.Errorf("%s: requires ConfigMap %q it does not read (%v)", typ, name, readCMs)
+			}
+		}
+		for _, name := range reqSecrets {
+			if !slices.Contains(readSecrets, name) {
+				t.Errorf("%s: requires Secret %q it does not read (%v)", typ, name, readSecrets)
+			}
 		}
 	}
 	want := []string{

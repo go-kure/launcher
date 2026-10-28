@@ -213,6 +213,13 @@ var fluxcdReceiverKind = &fluxKind[notificationv1.ReceiverSpec]{
 	reads: func(spec *notificationv1.ReceiverSpec, r *fluxReads) {
 		r.secretRef(spec.SecretRef)
 	},
+	// A Receiver has status conditions, and its token Secret is what a request
+	// is validated with.
+	requiredReads: func(spec *notificationv1.ReceiverSpec, r *fluxReads) {
+		if !spec.Suspend {
+			r.secretRef(spec.SecretRef)
+		}
+	},
 	durations: []fluxDurationField[notificationv1.ReceiverSpec]{
 		{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *notificationv1.ReceiverSpec) *metav1.Duration { return s.Interval }},
 	},
