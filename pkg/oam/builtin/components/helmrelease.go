@@ -376,9 +376,15 @@ func checkHelmReleaseChartTemplate(ch *helmv2.HelmChartTemplate) error {
 // the component writes.
 const helmReleaseChartOCIMaxTimeout = time.Hour
 
+// helmReleaseChartURLUserinfoRemedy completes refuseHostedFieldUserinfo's
+// message for chart.spec.url, which the HelmRelease and the OCIRepository
+// helm-controller generates from it carry verbatim.
+const helmReleaseChartURLUserinfoRemedy = ", which would be written in plain text into the HelmRelease; put the registry credential in a Secret and name it with chart.spec.secretRef"
+
 // checkOCIRepositoryChartTemplate holds a chart template of kind OCIRepository
 // to the API's rules for that kind (api/v2/helmrelease_types.go:372-380): a url,
-// starting with oci://, and no chart, sourceRef, valuesFiles or
+// starting with oci:// and carrying no user or password (refuseHostedFieldUserinfo),
+// and no chart, sourceRef, valuesFiles or
 // ignoreMissingValuesFiles, a version only of "*" and a reconcileStrategy only
 // of ChartVersion. The rules are read on the decoded spec, so a value the type
 // leaves out of the object, an ignoreMissingValuesFiles: false or an empty
@@ -387,6 +393,9 @@ const helmReleaseChartOCIMaxTimeout = time.Hour
 func checkOCIRepositoryChartTemplate(s *helmv2.HelmChartTemplateSpec) error {
 	if err := checkFluxSourceURL("helmrelease", "chart.spec.url", s.URL, "oci://"); err != nil {
 		return errors.Errorf("%w under chart.kind OCIRepository", err)
+	}
+	if err := refuseHostedFieldUserinfo("helmrelease", "chart.spec.url", s.URL, helmReleaseChartURLUserinfoRemedy); err != nil {
+		return err
 	}
 	refused := func(field string) error {
 		return errors.Errorf("chart.spec.%s: not taken under chart.kind OCIRepository, which generates an OCIRepository for the chart artifact chart.spec.url names (the Flux API refuses it)", field)
