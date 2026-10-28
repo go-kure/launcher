@@ -62,6 +62,22 @@ type fluxRequiredReader interface {
 	FluxRequiredReads() (configMaps, secrets []string)
 }
 
+// fluxRequiredSourceReader is implemented by a Flux config whose object names
+// the source it cannot become Ready without: a HelmRelease's chartRef, or the
+// source of the HelmChart helm-controller generates from its chart template; a
+// Kustomization's, HelmChart's or ImageUpdateAutomation's sourceRef.
+// FluxRequiredSource reports the field that names it ("chartRef",
+// "chart.spec.sourceRef", "sourceRef"), the source's kind in
+// source.toolkit.fluxcd.io, its name, and the namespace the reference writes
+// ("" for the one the object resolves it in, the object's own). kind is "" for
+// none: a suspended object, a chart template of kind OCIRepository, which names
+// no source. checkFluxObjectMakerOrder refuses only a source a component of a
+// later group makes, so a config without it is never refused
+// (go-kure/launcher#1088).
+type fluxRequiredSourceReader interface {
+	FluxRequiredSource() (field, kind, name, namespace string)
+}
+
 // componentObjectMaker is implemented by a component config whose object has
 // a controller make one more object by name, in the object's own namespace:
 // the Secret a Certificate's secretName names, an ExternalSecret's target.
@@ -262,9 +278,14 @@ type fluxWaiter struct {
 	// object cannot become Ready without, in the namespace it lands in. It is
 	// asked of the config as orderComponents left it, before a trait wrapped
 	// it; SetFluxNamespace still reaches that config through a decorator, so
-	// it knows its Flux namespace by then.
+	// it knows its Flux namespace by then. Nil for an object that does not
+	// report them (fluxRequiredReader).
 	reads func() (configMaps, secrets []string)
-	group int
+	// source reports the source the object cannot become Ready without
+	// (fluxRequiredSourceReader), asked of the same config. Nil for an object
+	// that does not report one, and for a generated source, which names none.
+	source func() (field, kind, name, namespace string)
+	group  int
 	// component and typ name the waiter in a refusal: the group entry's
 	// component (a sibling group's, for a member) and the object's type.
 	component, typ string
@@ -282,7 +303,8 @@ type fluxWaiter struct {
 // lowering rule ordered after it (sources, generatedSourceReaders), by that
 // object's own component's order, so in a sibling group the member's, not the
 // group's. A source no Flux object consumes waits in no group. A Flux object
-// of a group requires what it reports as one (fluxRequiredReader). Configs are
+// of a group requires what it reports as one (fluxRequiredReader), and the
+// source it reports (fluxRequiredSourceReader). Configs are
 // asserted here, before any trait runs: a trait decorator forwards neither
 // interface (groupFluxMembers).
 func fluxWaiters(order *componentOrder, sources map[*stack.Application][]*stack.Application) []fluxWaiter {
@@ -303,8 +325,15 @@ func fluxWaiters(order *componentOrder, sources map[*stack.Application][]*stack.
 				objects = e.members
 			}
 			for _, o := range objects {
+				w := fluxWaiter{app: o.app, group: i, component: e.component.Name, typ: o.component.Type}
 				if req, ok := o.app.Config.(fluxRequiredReader); ok {
-					grouped = append(grouped, fluxWaiter{app: o.app, reads: req.FluxRequiredReads, group: i, component: e.component.Name, typ: o.component.Type})
+					w.reads = req.FluxRequiredReads
+				}
+				if req, ok := o.app.Config.(fluxRequiredSourceReader); ok {
+					w.source = req.FluxRequiredSource
+				}
+				if w.reads != nil || w.source != nil {
+					grouped = append(grouped, w)
 				}
 				if _, ok := sources[o.app]; !ok {
 					continue
@@ -416,7 +445,12 @@ func (t *Transformer) componentMakers(order *componentOrder, namespace, ns strin
 // group depends on the one before it (buildCluster), so the waiter's group
 // waits for the waiter, the waiter for the object, and the object's group for
 // the waiter's: the delivery never converges. Under the default delivery a
-// group is Ready once applied, and it does.
+// group is Ready once applied, and it does. It refuses as well the source a
+// waiter reports (fluxRequiredSourceReader) when a component of a later group
+// makes it as its own object, of that kind in source.toolkit.fluxcd.io, with
+// that name, in the namespace the reference writes, else the one the waiter
+// lands in (go-kure/launcher#1088): the same cycle, whatever the waiter
+// reports of the ConfigMaps and Secrets it requires.
 //
 // Any trait of a later group is looked at, a workload's too: its object lands
 // in the application namespace, where without a Flux namespace (ns) every
@@ -451,9 +485,9 @@ func checkFluxObjectMakerOrder(order *componentOrder, waiters []fluxWaiter, owne
 		}
 	}
 	for _, w := range waiters {
-		configMaps, secrets := w.reads()
-		if len(configMaps) == 0 && len(secrets) == 0 {
-			continue
+		var configMaps, secrets []string
+		if w.reads != nil {
+			configMaps, secrets = w.reads()
 		}
 		where := w.app.Namespace
 		if ns != "" {
@@ -532,8 +566,34 @@ func checkFluxObjectMakerOrder(order *componentOrder, waiters []fluxWaiter, owne
 			}
 			return lateMakerError(order, w, m.kind.Kind, m.name, by, ns)
 		}
+		if w.source == nil {
+			continue
+		}
+		field, kind, name, namespace := w.source()
+		if kind == "" {
+			continue
+		}
+		if namespace == "" {
+			namespace = where
+		}
+		source := schema.GroupKind{Group: fluxSourceGroup, Kind: kind}
+		for _, m := range makers {
+			if !m.derived && m.group > w.group && m.kind == source && m.name == name && m.namespace == namespace {
+				return lateSourceError(order, w, field, kind, name, m)
+			}
+		}
 	}
 	return nil
+}
+
+// lateSourceError is checkFluxObjectMakerOrder's refusal of the source kind
+// name, named by field, of waiter w, that component maker m makes as its own
+// object.
+func lateSourceError(order *componentOrder, w fluxWaiter, field, kind, name string, m componentMaker) error {
+	return &TransformError{Message: fmt.Sprintf(
+		"%s %q requires %s %q (%s), the object of component %q in group %q, later than %q's group %q; with each group waiting for its Flux objects, %q's group waits for %q, %q for the %s, and the group of %q for %q's, so the delivery never converges: place component %q in group %q or earlier",
+		w.typ, w.component, kind, name, field, m.component, order.suffixes[m.group], w.component, order.suffixes[w.group],
+		w.component, w.component, w.component, kind, m.component, w.component, m.component, order.suffixes[w.group])}
 }
 
 // lateMaker is the maker of an object checkFluxObjectMakerOrder refuses: a

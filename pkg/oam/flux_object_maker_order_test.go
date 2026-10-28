@@ -74,6 +74,29 @@ func (m *madeStub) MadeObject(objectName string) (kind, name string, ok bool) {
 	return "Secret", m.name, m.ok
 }
 
+// sourcingStub is a readerStub whose object cannot become Ready without the
+// GitRepository "x" in namespace (fluxRequiredSourceReader), named by its
+// sourceRef, and says nothing of what else it requires.
+type sourcingStub struct {
+	readerStub
+	namespace string
+}
+
+func (s *sourcingStub) FluxRequiredSource() (field, kind, name, namespace string) {
+	return "sourceRef", "GitRepository", "x", s.namespace
+}
+
+// requiringSourcingStub is a requiringStub, requiring nothing, that names the
+// source sourcingStub does.
+type requiringSourcingStub struct {
+	requiringStub
+	namespace string
+}
+
+func (s *requiringSourcingStub) FluxRequiredSource() (field, kind, name, namespace string) {
+	return "sourceRef", "GitRepository", "x", s.namespace
+}
+
 // fluxObjectInput is how fluxObjectTransform transforms: under fluxNS ("" for
 // none, "ns" for the application namespace), with groups waiting for their
 // Flux objects when wait is set, with deps as the dependency policy.
@@ -96,7 +119,12 @@ type fluxObjectInput struct {
 // Component makers: "sec" a Namespaced Secret kind, "cm" a Namespaced ConfigMap
 // kind, "cluster-sec" a cluster-scoped Secret kind, "derived" a Namespaced kind
 // whose controller makes Secret "x", "derived-own" one making the Secret named
-// after its object, "derived-none" one making none.
+// after its object, "derived-none" one making none. Sources: "src" a Flux-scope
+// GitRepository kind, "src-oci" an OCIRepository one; "src-rq" a Flux object
+// requiring the GitRepository "x" (sourcingStub) and nothing else, "src-rq-ns"
+// the same in namespace "ns", "src-rq-flux" in namespace "flux", "src-only"
+// one naming the source and not saying what else it requires; "group-src-rq"
+// lowers into a same-name sibling group of a "src-rq" and a "w".
 func fluxObjectTransform(t *testing.T, in fluxObjectInput, comps ...Component) (*stack.Cluster, error) {
 	t.Helper()
 	both := readerStub{configMaps: []string{"c"}, secrets: []string{"x"}}
@@ -109,6 +137,16 @@ func fluxObjectTransform(t *testing.T, in fluxObjectInput, comps ...Component) (
 	made := func(name string, ok bool) func() stack.ApplicationConfig {
 		return func() stack.ApplicationConfig { return &madeStub{name: name, ok: ok} }
 	}
+	sourceHandler := func(typ, kind string) *objectStubHandler {
+		h := kindHandler(typ, kind, ObjectScopeFlux, nil)
+		h.kind.Group = fluxSourceGroup
+		return h
+	}
+	sourcing := func(typ, namespace string) *siblingStubHandler {
+		return &siblingStubHandler{typ: typ, build: func() stack.ApplicationConfig {
+			return &requiringSourcingStub{requiringStub: requiringStub{readerStub: both}, namespace: namespace}
+		}}
+	}
 	tr := NewTransformer(map[string]ComponentHandler{
 		"sec":          kindHandler("sec", "Secret", ObjectScopeNamespaced, nil),
 		"cm":           kindHandler("cm", "ConfigMap", ObjectScopeNamespaced, nil),
@@ -119,11 +157,17 @@ func fluxObjectTransform(t *testing.T, in fluxObjectInput, comps ...Component) (
 		"rq": &siblingStubHandler{typ: "rq", build: func() stack.ApplicationConfig {
 			return &requiringStub{readerStub: both, requiredConfigMaps: []string{"c"}, requiredSecrets: []string{"x"}}
 		}},
-		"rq-none": &siblingStubHandler{typ: "rq-none", build: func() stack.ApplicationConfig { return &requiringStub{readerStub: both} }},
-		"rd":      &siblingStubHandler{typ: "rd", build: func() stack.ApplicationConfig { r := both; return &r }},
-		"fx":      &siblingStubHandler{typ: "fx", build: func() stack.ApplicationConfig { return &readerStub{secrets: []string{"x"}} }},
-		"fc":      &siblingStubHandler{typ: "fc", build: func() stack.ApplicationConfig { return &readerStub{configMaps: []string{"c"}} }},
-		"w":       &siblingStubHandler{typ: "w", build: func() stack.ApplicationConfig { return &workloadStub{} }},
+		"rq-none":     &siblingStubHandler{typ: "rq-none", build: func() stack.ApplicationConfig { return &requiringStub{readerStub: both} }},
+		"rd":          &siblingStubHandler{typ: "rd", build: func() stack.ApplicationConfig { r := both; return &r }},
+		"fx":          &siblingStubHandler{typ: "fx", build: func() stack.ApplicationConfig { return &readerStub{secrets: []string{"x"}} }},
+		"fc":          &siblingStubHandler{typ: "fc", build: func() stack.ApplicationConfig { return &readerStub{configMaps: []string{"c"}} }},
+		"w":           &siblingStubHandler{typ: "w", build: func() stack.ApplicationConfig { return &workloadStub{} }},
+		"src":         sourceHandler("src", "GitRepository"),
+		"src-oci":     sourceHandler("src-oci", "OCIRepository"),
+		"src-rq":      sourcing("src-rq", ""),
+		"src-rq-ns":   sourcing("src-rq-ns", "ns"),
+		"src-rq-flux": sourcing("src-rq-flux", "flux"),
+		"src-only":    &siblingStubHandler{typ: "src-only", build: func() stack.ApplicationConfig { return &sourcingStub{readerStub: both} }},
 	}, map[string]TraitHandler{
 		"make":          makingTrait{kind: "Secret", name: "x", produces: true},
 		"make-cm":       makingTrait{kind: "ConfigMap", name: "c", produces: true},
@@ -134,6 +178,7 @@ func fluxObjectTransform(t *testing.T, in fluxObjectInput, comps ...Component) (
 	})
 	tr.RegisterComponentLowering(emitRule{typ: "group-rq", fn: pair("rq", "w")})
 	tr.RegisterComponentLowering(emitRule{typ: "group-sec", fn: pair("sec", "w")})
+	tr.RegisterComponentLowering(emitRule{typ: "group-src-rq", fn: pair("src-rq", "w")})
 	tr.RegisterPolicy("dependency", &depsPolicyHandler{deps: in.deps})
 	doc := siblingDoc(comps...)
 	doc.Metadata.Namespace = "ns"
