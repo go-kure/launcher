@@ -9762,8 +9762,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   was authored in. For a longer timeout, use an `ocirepository` component and a `chartRef`
   to it. helm-controller names the OCIRepository `<namespace>-<name>` after the HelmRelease,
   in the HelmRelease's namespace, gives it the template's interval (else the HelmRelease's)
-  and the chart layer as its layer selector, takes over an object of that name and deletes
-  it with the HelmRelease or when the chart changes. So an object of that identity the build
+  and, when the template sets no `chart.spec.layerSelector`, the chart layer as its layer
+  selector (an authored one is kept), takes over an object of that name and deletes
+  it with the HelmRelease, when the kind, name or namespace of the chart source it generates changes, or
+  when the release switches to `chartRef`. So an object of that identity the build
   generates is refused as a collision (see the collision contract in `pkg/oam`'s README).
   Prefer an `ocirepository` component and a `chartRef` when several releases share the
   source or it is authored on its own.
