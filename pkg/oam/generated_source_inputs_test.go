@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // sourceConsumerRule lowers a component of type typ into the one
@@ -106,7 +107,8 @@ type sourceInput struct {
 // "fx" one reading "x", "w" and "w2" workloads. A "claim" trait makes Secret
 // "x" (claimed where it lands) and does not say whether it makes it; "make"
 // makes Secret "x", "refer" refers to one it does not make, "make-y" makes
-// Secret "y"; "decorate" decorates its application.
+// Secret "y"; "decorate" decorates its application. "sec" is a Namespaced
+// Secret kind.
 func sourceInputTransform(t *testing.T, in sourceInput, comps ...Component) (*stack.Cluster, error) {
 	t.Helper()
 	source := func() stack.ApplicationConfig {
@@ -121,6 +123,8 @@ func sourceInputTransform(t *testing.T, in sourceInput, comps ...Component) (*st
 		"fx":            &siblingStubHandler{typ: "fx", build: func() stack.ApplicationConfig { return &readerStub{secrets: []string{"x"}} }},
 		"w":             &siblingStubHandler{typ: "w", build: func() stack.ApplicationConfig { return &workloadStub{} }},
 		"w2":            &siblingStubHandler{typ: "w2", build: func() stack.ApplicationConfig { return &workloadStub{} }},
+		"sec": &objectStubHandler{siblingStubHandler: siblingStubHandler{typ: "sec", build: func() stack.ApplicationConfig { return &workloadStub{} }},
+			kind: schema.GroupKind{Kind: "Secret"}, scope: ObjectScopeNamespaced},
 	}, map[string]TraitHandler{
 		"claim":    claimingSecretTrait{},
 		"make":     makingSecretTrait{name: "x", produces: true},
@@ -301,6 +305,44 @@ func TestGeneratedSource_LateMakerMessage(t *testing.T) {
 	in := sourceInput{fluxNS: "flux", wait: true, deps: map[string][]string{"maker": {"early"}}, required: []string{"x"}}
 	_, err := sourceInputTransform(t, in, maker, early)
 	want := `ocirepository "app-source" requires Secret "x", which a trait of component "maker" makes in group "01", later than component "early" in group "00", a consumer of "app-source"; with each group waiting for its Flux objects, "early"'s group waits for "early", "early" for the source, the source for the Secret, and the group of "maker", which makes it, for "early"'s, so the delivery never converges: put the trait on a consumer in the earliest group, or provide the Secret apart from the document in the Flux namespace "flux"`
+	if err == nil || err.Error() != want {
+		t.Errorf("error = %v\nwant     %s", err, want)
+	}
+}
+
+// TestGeneratedSource_LateComponentMaker: a Secret component of a later group
+// than a generated source's earliest consumer, named as the Secret the source
+// requires, is refused where the source lands with it: without a Flux
+// namespace, or under one equal to the application namespace "ns"; under
+// "flux" the source reads another Secret (go-kure/launcher#1086).
+func TestGeneratedSource_LateComponentMaker(t *testing.T) {
+	early := Component{Name: "early", Type: "flux-consumer"}
+	maker := Component{Name: "x", Type: "sec"}
+	deps := map[string][]string{"x": {"early"}}
+	if _, err := sourceInputTransform(t, sourceInput{fluxNS: "flux", wait: true, deps: deps, required: []string{"x"}}, maker, early); err != nil {
+		t.Errorf("under a Flux namespace: TransformWithPolicy: %v", err)
+	}
+	if _, err := sourceInputTransform(t, sourceInput{deps: deps, required: []string{"x"}}, maker, early); err != nil {
+		t.Errorf("under the default delivery: TransformWithPolicy: %v", err)
+	}
+	if _, err := sourceInputTransform(t, sourceInput{fluxNS: "ns", wait: true, deps: map[string][]string{"early": {"x"}}, required: []string{"x"}}, maker, early); err != nil {
+		t.Errorf("with the maker earlier: TransformWithPolicy: %v", err)
+	}
+	for _, ns := range []string{"", "ns"} {
+		_, err := sourceInputTransform(t, sourceInput{fluxNS: ns, wait: true, deps: deps, required: []string{"x"}}, maker, early)
+		if err == nil || !strings.Contains(err.Error(), `ocirepository "app-source" requires Secret "x", which component "x" (sec) makes`) {
+			t.Errorf("fluxNamespace=%q: error = %v, want the late component maker refused", ns, err)
+		}
+	}
+}
+
+// TestGeneratedSource_LateComponentMakerMessage holds the component maker's
+// refusal of a generated source whole.
+func TestGeneratedSource_LateComponentMakerMessage(t *testing.T) {
+	early := Component{Name: "early", Type: "flux-consumer"}
+	in := sourceInput{wait: true, deps: map[string][]string{"x": {"early"}}, required: []string{"x"}}
+	_, err := sourceInputTransform(t, in, Component{Name: "x", Type: "sec"}, early)
+	want := `ocirepository "app-source" requires Secret "x", which component "x" (sec) makes in group "01", later than component "early" in group "00", a consumer of "app-source"; with each group waiting for its Flux objects, "early"'s group waits for "early", "early" for the source, the source for the Secret, and the group of "x", which makes it, for "early"'s, so the delivery never converges: place component "x" in the group of "early" or earlier, or provide the Secret apart from the document`
 	if err == nil || err.Error() != want {
 		t.Errorf("error = %v\nwant     %s", err, want)
 	}

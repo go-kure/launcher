@@ -67,6 +67,12 @@ type policyFreeKind[T any] struct {
 	// component's, else the application's (kindObjectName). It is called once
 	// per Generate, and must not hand out decoded itself.
 	build func(name, namespace string, decoded *T) client.Object
+	// made, when set, reports the one object the kind's controller makes by
+	// name in the object's own namespace, for an object named objectName: the
+	// Secret a Certificate's secretName names. ok is false when it makes none
+	// that decoded proves. Nil for a kind whose controller makes none
+	// (policyFreeKindConfig.MadeObject).
+	made func(objectName string, decoded *T) (kind, name string, ok bool)
 }
 
 // config decodes a component into the kind's config, under the package's null
@@ -154,6 +160,18 @@ type policyFreeKindConfig[T any] struct {
 // ApplyPolicy is a no-op, for any policy: see the top of this file.
 func (c *policyFreeKindConfig[T]) ApplyPolicy(oam.Policy) error {
 	return nil
+}
+
+// MadeObject reports the object the kind's controller makes for this one,
+// named objectName (oam.Component.ObjectName), when the kind says
+// (policyFreeKind.made); none otherwise. The engine refuses such an object
+// made in a later group than a Flux object that requires it
+// (go-kure/launcher#1086).
+func (c *policyFreeKindConfig[T]) MadeObject(objectName string) (kind, name string, ok bool) {
+	if c.kind.made == nil {
+		return "", "", false
+	}
+	return c.kind.made(objectName, c.decoded)
 }
 
 // Generate emits the kind's one object, under the object name the config

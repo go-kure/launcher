@@ -886,7 +886,12 @@ or `None`. A test holds every built-in `FluxNamespaceInput` to having both. The 
 report what they read through `FluxNamespaceReads()`, which every decorator forwards. See the
 `pkg/oam` README for the full rule, and for the late-maker refusal the producer answer feeds,
 which holds for every Flux object that requires the trait's object (go-kure/launcher#1039,
-go-kure/launcher#1079).
+go-kure/launcher#1079). The `secret` and `configmap` configs also say through
+`IsFluxNamespaceInputObject() bool` that their object is the ConfigMap or Secret itself, with the
+content the author gave it; the `certificate` and `external-secret` configs, whose object's
+controller makes it, do not. Such a trait object in the group of the Flux object that requires it,
+or an earlier one, admits a Certificate or ExternalSecret component of a later group that writes
+into that Secret: it is already there (go-kure/launcher#1086).
 
 The `helm` component's `valuesMode: configMap` relies on this: its rule appends a synthesized
 `configmap` trait holding the values to the `helmrelease` it lowers to, and names that ConfigMap

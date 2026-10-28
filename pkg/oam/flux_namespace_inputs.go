@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/go-kure/kure/pkg/stack"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // fluxNamespaceReader is implemented by a config that moves to the Flux
@@ -59,6 +60,28 @@ type fluxSourceRequiredReader interface {
 // requires, so a config without it is never refused (go-kure/launcher#1079).
 type fluxRequiredReader interface {
 	FluxRequiredReads() (configMaps, secrets []string)
+}
+
+// componentObjectMaker is implemented by a component config whose object has
+// a controller make one more object by name, in the object's own namespace:
+// the Secret a Certificate's secretName names, an ExternalSecret's target.
+// objectName is the name the component's own object takes
+// (Component.ObjectName). ok is false when it makes none the transform can
+// prove. checkFluxObjectMakerOrder refuses such an object made in a later
+// group than a Flux object that requires it (go-kure/launcher#1086).
+type componentObjectMaker interface {
+	MadeObject(objectName string) (kind, name string, ok bool)
+}
+
+// fluxNamespaceInputObject is implemented by a fluxNamespaceInput config whose
+// own object is the ConfigMap or Secret it names, with the content the author
+// gave it: the secret and configmap traits'. One whose object's controller
+// makes it (an external-secret or certificate trait) does not implement it,
+// or returns false. Such an object, in the group of a Flux object that
+// requires it or an earlier one, is in place before a later component's
+// controller writes to it (checkFluxObjectMakerOrder).
+type fluxNamespaceInputObject interface {
+	IsFluxNamespaceInputObject() bool
 }
 
 // traitSubApps is the application a trait ran on and the sub-applications it
@@ -312,25 +335,102 @@ func fluxWaiters(order *componentOrder, sources map[*stack.Application][]*stack.
 	return append(out, grouped...)
 }
 
+// componentMaker is an object a component of a group makes: its own object
+// (ComponentObjectProvider), or one its object's controller makes
+// (componentObjectMaker, derived).
+type componentMaker struct {
+	group int
+	// component is the group entry's component (a sibling group's, for a
+	// member) and typ the type of the component that makes the object.
+	component, typ string
+	kind           schema.GroupKind
+	name           string
+	// namespace is where the object lands: the application namespace for a
+	// Namespaced kind and what its controller makes, the Flux namespace when
+	// there is one for a Flux-scope kind.
+	namespace string
+	// derived marks an object the component's object's controller makes;
+	// via names that object's kind ("ExternalSecret"), or the component's type
+	// when its handler declares no kind.
+	derived bool
+	via     string
+}
+
+// componentMakers returns the objects the components of order make, in group
+// and document order, a sibling group's members in member order: each
+// component's own object, when its handler declares one of Namespaced or Flux
+// scope, then the one its object's controller makes (componentObjectMaker),
+// asked of the config before any trait wraps it. A component whose object is
+// cluster-scoped is skipped whole: where its controller would write is not
+// known here. namespace is the application's, ns the Flux namespace ("" for
+// none). Kinds are static, names resolved before the configs are built
+// (withObjectName), and namespaces follow from scope alone, so nothing a trait
+// does later changes the record (go-kure/launcher#1086).
+func (t *Transformer) componentMakers(order *componentOrder, namespace, ns string) []componentMaker {
+	var out []componentMaker
+	for i, group := range order.groups {
+		for _, e := range group {
+			objects := []componentEntry{e}
+			if len(e.members) > 0 {
+				objects = e.members
+			}
+			for _, o := range objects {
+				at := namespace
+				via := o.component.Type
+				if provider, ok := t.findComponentHandler(o.component.Type).(ComponentObjectProvider); ok {
+					kind, scope := provider.ComponentObject()
+					switch scope {
+					case ObjectScopeCluster:
+						continue
+					case ObjectScopeNamespaced:
+					case ObjectScopeFlux:
+						if ns != "" {
+							at = ns
+						}
+					}
+					via = kind.Kind
+					out = append(out, componentMaker{group: i, component: e.component.Name, typ: o.component.Type, kind: kind, name: o.component.ObjectName(), namespace: at})
+				}
+				maker, ok := o.app.Config.(componentObjectMaker)
+				if !ok {
+					continue
+				}
+				kind, name, ok := maker.MadeObject(o.component.ObjectName())
+				if !ok {
+					continue
+				}
+				out = append(out, componentMaker{group: i, component: e.component.Name, typ: o.component.Type, kind: schema.GroupKind{Kind: kind}, name: name, namespace: at, derived: true, via: via})
+			}
+		}
+	}
+	return out
+}
+
 // checkFluxObjectMakerOrder refuses a ConfigMap or Secret a waiter
 // (fluxWaiters) cannot become Ready without that a trait makes
 // (fluxNamespaceProducer) on a component in a later group than the waiter's,
 // in the namespace the waiter lands in, for a delivery that makes a group
 // Ready only once its Flux objects are (TransformContext.GroupsWaitForFluxObjects;
-// go-kure/launcher#1039, go-kure/launcher#1079). Each group depends on the one
-// before it (buildCluster), so the waiter's group waits for the waiter, the
-// waiter for the object, and the object's group for the waiter's: the
-// delivery never converges. Under the default delivery a group is Ready once
-// applied, and it does.
+// go-kure/launcher#1039, go-kure/launcher#1079), or that a component of a
+// later group makes (makers, componentMakers; go-kure/launcher#1086). Each
+// group depends on the one before it (buildCluster), so the waiter's group
+// waits for the waiter, the waiter for the object, and the object's group for
+// the waiter's: the delivery never converges. Under the default delivery a
+// group is Ready once applied, and it does.
 //
 // Any trait of a later group is looked at, a workload's too: its object lands
 // in the application namespace, where without a Flux namespace (ns) every
 // Flux object lands as well. A trait of the waiter's own group, or an earlier
-// one, is applied before the group's wait. Anything the check cannot prove is
-// admitted: a trait object that is no producer or does not say, a waiter that
-// does not report what it requires, an object outside the waiter's namespace
-// (ns, or the waiter's own without one), a maker that is no trait.
-func checkFluxObjectMakerOrder(order *componentOrder, waiters []fluxWaiter, owned []traitSubApps, ns string) error {
+// one, is applied before the group's wait. The traits are looked at first,
+// then the component makers. A maker that is its object's controller (derived)
+// is admitted when the document holds the object itself in the waiter's group
+// or an earlier one: a component's own object, or a trait's whose own object
+// it is (fluxNamespaceInputObject); the controller then writes into an object
+// already there. Anything the check cannot prove is admitted: a trait object
+// that is no producer or does not say, a waiter that does not report what it
+// requires, an object outside the waiter's namespace (ns, or the waiter's own
+// without one).
+func checkFluxObjectMakerOrder(order *componentOrder, waiters []fluxWaiter, owned []traitSubApps, makers []componentMaker, ns string) error {
 	if len(waiters) == 0 {
 		return nil
 	}
@@ -382,28 +482,99 @@ func checkFluxObjectMakerOrder(order *componentOrder, waiters []fluxWaiter, owne
 				if p, ok := sub.Config.(fluxNamespaceProducer); !ok || !p.ProducesFluxNamespaceInput() {
 					continue
 				}
-				return lateMakerError(order, w, kind, name, by.name, by.group, ns)
+				return lateMakerError(order, w, kind, name, lateMaker{component: by.name, group: by.group}, ns)
 			}
+		}
+		// Whether the document holds the object kind name itself, in where, by
+		// the waiter's group.
+		concrete := func(kind, name string) bool {
+			for _, m := range makers {
+				if !m.derived && m.group <= w.group && m.kind == (schema.GroupKind{Kind: kind}) && m.name == name && m.namespace == where {
+					return true
+				}
+			}
+			for _, o := range owned {
+				if by, ok := at[o.owner]; !ok || by.group > w.group {
+					continue
+				}
+				for _, sub := range o.subApps {
+					obj, ok := sub.Config.(fluxNamespaceInputObject)
+					if !ok || !obj.IsFluxNamespaceInputObject() || sub.Namespace != where {
+						continue
+					}
+					in, ok := sub.Config.(fluxNamespaceInput)
+					if !ok {
+						continue
+					}
+					if k, n := in.FluxNamespaceInput(); k == kind && n == name {
+						return true
+					}
+				}
+			}
+			return false
+		}
+		for _, m := range makers {
+			if m.group <= w.group || m.kind.Group != "" || m.namespace != where {
+				continue
+			}
+			required := secrets
+			if m.kind.Kind == "ConfigMap" {
+				required = configMaps
+			} else if m.kind.Kind != "Secret" {
+				continue
+			}
+			if !slices.Contains(required, m.name) || (m.derived && concrete(m.kind.Kind, m.name)) {
+				continue
+			}
+			by := lateMaker{component: m.component, group: m.group, typ: m.typ}
+			if m.derived {
+				by.via = m.via
+			}
+			return lateMakerError(order, w, m.kind.Kind, m.name, by, ns)
 		}
 	}
 	return nil
 }
 
+// lateMaker is the maker of an object checkFluxObjectMakerOrder refuses: a
+// trait of component (typ empty), or component itself, of type typ, through
+// its object of kind via when that object's controller makes it.
+type lateMaker struct {
+	component string
+	group     int
+	typ, via  string
+}
+
 // lateMakerError is checkFluxObjectMakerOrder's refusal of the object kind
-// name of waiter w that a trait of component maker makes in group g.
-func lateMakerError(order *componentOrder, w fluxWaiter, kind, name, maker string, g int, ns string) error {
+// name of waiter w that by makes.
+func lateMakerError(order *componentOrder, w fluxWaiter, kind, name string, by lateMaker, ns string) error {
 	provide := fmt.Sprintf("provide the %s apart from the document", kind)
 	if ns != "" {
 		provide += fmt.Sprintf(" in the Flux namespace %q", ns)
 	}
+	which := fmt.Sprintf("a trait of component %q makes", by.component)
+	switch {
+	case by.via != "":
+		which = fmt.Sprintf("component %q (%s), whose %s makes it, makes", by.component, by.typ, by.via)
+	case by.typ != "":
+		which = fmt.Sprintf("component %q (%s) makes", by.component, by.typ)
+	}
 	if w.consumer != "" {
+		fix := "put the trait on a consumer in the earliest group"
+		if by.typ != "" {
+			fix = fmt.Sprintf("place component %q in the group of %q or earlier", by.component, w.consumer)
+		}
 		return &TransformError{Message: fmt.Sprintf(
-			"%s %q requires Secret %q, which a trait of component %q makes in group %q, later than component %q in group %q, a consumer of %q; with each group waiting for its Flux objects, %q's group waits for %q, %q for the source, the source for the Secret, and the group of %q, which makes it, for %q's, so the delivery never converges: put the trait on a consumer in the earliest group, or %s",
-			w.typ, w.component, name, maker, order.suffixes[g], w.consumer, order.suffixes[w.group], w.component,
-			w.consumer, w.consumer, w.consumer, maker, w.consumer, provide)}
+			"%s %q requires Secret %q, which %s in group %q, later than component %q in group %q, a consumer of %q; with each group waiting for its Flux objects, %q's group waits for %q, %q for the source, the source for the Secret, and the group of %q, which makes it, for %q's, so the delivery never converges: %s, or %s",
+			w.typ, w.component, name, which, order.suffixes[by.group], w.consumer, order.suffixes[w.group], w.component,
+			w.consumer, w.consumer, w.consumer, by.component, w.consumer, fix, provide)}
+	}
+	fix := fmt.Sprintf("put the trait on a component in group %q or earlier", order.suffixes[w.group])
+	if by.typ != "" {
+		fix = fmt.Sprintf("place component %q in group %q or earlier", by.component, order.suffixes[w.group])
 	}
 	return &TransformError{Message: fmt.Sprintf(
-		"%s %q requires %s %q, which a trait of component %q makes in group %q, later than %q's group %q; with each group waiting for its Flux objects, %q's group waits for %q, %q for the %s, and the group of %q, which makes it, for %q's, so the delivery never converges: put the trait on a component in group %q or earlier, or %s",
-		w.typ, w.component, kind, name, maker, order.suffixes[g], w.component, order.suffixes[w.group],
-		w.component, w.component, w.component, kind, maker, w.component, order.suffixes[w.group], provide)}
+		"%s %q requires %s %q, which %s in group %q, later than %q's group %q; with each group waiting for its Flux objects, %q's group waits for %q, %q for the %s, and the group of %q, which makes it, for %q's, so the delivery never converges: %s, or %s",
+		w.typ, w.component, kind, name, which, order.suffixes[by.group], w.component, order.suffixes[w.group],
+		w.component, w.component, w.component, kind, by.component, w.component, fix, provide)}
 }

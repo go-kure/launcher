@@ -383,13 +383,14 @@ groups forward them.
 `TransformContext.GroupsWaitForFluxObjects` is the consumer's statement that its delivery makes a
 group Ready only once the group's Flux objects are Ready: kure's `UmbrellasDoNotWait`, for example,
 or `wait: true` on the group bundles. Each group depends on the one before it, so a ConfigMap or
-Secret a group's Flux object requires, made by a trait in a later group, then never converges: the
-Flux object's group waits for it, it for the ConfigMap or Secret, and the maker's group for the
-Flux object's. Under the field the transform refuses it, naming the Flux object, the ConfigMap or
-Secret, the maker and the groups: put the trait on a component in the Flux object's group or an
-earlier one, or provide the object apart from the document. Unset, launcher assumes the default
-delivery, under which a group is Ready once applied and the document converges, and it refuses
-nothing (go-kure/launcher#1039, go-kure/launcher#1079). Two kinds of Flux object wait:
+Secret a group's Flux object requires, made by a trait or a component in a later group, then never
+converges: the Flux object's group waits for it, it for the ConfigMap or Secret, and the maker's
+group for the Flux object's. Under the field the transform refuses it, naming the Flux object, the
+ConfigMap or Secret, the maker and the groups: put the trait on a component in the Flux object's
+group or an earlier one, or place the component there, or provide the object apart from the
+document. Unset, launcher assumes the default delivery, under which a group is Ready once applied
+and the document converges, and it refuses nothing (go-kure/launcher#1039,
+go-kure/launcher#1079, go-kure/launcher#1086). Two kinds of Flux object wait:
 - a Flux object of a group, a sibling group's Flux member included (named by the group), in its
   own group;
 - a generated source, in the group of its earliest Flux consumer, a Flux object its own lowering
@@ -413,16 +414,31 @@ The refusal needs every link proven:
   `proxySecretRef`, its `verify.secretRef`, and its `verify.trustedRootSecretRef` only under the
   `cosign` provider, the default; a `helmrepository`'s `secretRef` and `certSecretRef`, of type
   `oci` too, since an OCI chart pulled through it reads them;
-- the trait object says its trait makes the ConfigMap or Secret (`ProducesFluxNamespaceInput`:
+- the maker makes the ConfigMap or Secret. A trait object says so (`ProducesFluxNamespaceInput`:
   true for the `secret`, `certificate` and `configmap` traits, and for `external-secret` except
-  under `target.creationPolicy: Merge` or `None`, where the Secret exists apart from it);
+  under `target.creationPolicy: Merge` or `None`, where the Secret exists apart from it). A
+  component makes its own object when its type declares one (`ComponentObjectProvider`) of
+  Namespaced or Flux scope, named by `Component.ObjectName`: a `secret` or `configmap` component.
+  It also makes the object its object's controller makes by name, which its config reports as
+  `MadeObject`: a `certificate`'s `secretName`, an `externalsecret`'s target (`target.name`,
+  else the object's own name) except under `creationPolicy: Merge` or `None` or with a
+  `target.manifest`;
 - the ConfigMap or Secret lands in the Flux object's namespace: the Flux namespace, or without
   one the application namespace, where a workload's trait objects land too, so a trait on any
-  component counts.
+  component counts. A Namespaced component's object, and what its controller makes, land in the
+  application namespace, so a component maker counts without a Flux namespace or under one equal
+  to the application namespace;
+- for an object a controller makes (`MadeObject`), the document does not itself hold that
+  ConfigMap or Secret in the Flux object's group or an earlier one: a component's own object, or a
+  `secret` or `configmap` trait's (`IsFluxNamespaceInputObject`). The controller then writes into
+  an object already in place, as an `externalsecret` under `CreateOrMerge` does. An earlier
+  ExternalSecret or Certificate does not count: what it writes is not the document's.
 
-A config that does not report what it requires is admitted, as is a Secret-naming trait that is
-no `FluxNamespaceInput` (the managed TLS Secret of `ingress`/`expose`, a `volsync` repository) and
-a ConfigMap or Secret a component, not a trait, makes (go-kure/launcher#1086).
+The traits are looked at first, then the components, each in group and document order, and the
+first maker found is refused. A config that does not report what it requires is admitted, as is a
+Secret-naming trait that is no `FluxNamespaceInput` (the managed TLS Secret of `ingress`/`expose`, a
+`volsync` repository), a cluster-scoped component's object, and a source a Flux object's reference
+names that a later component makes (go-kure/launcher#1088).
 
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
 each a **separate** additive resource (the authored `networkpolicy` /

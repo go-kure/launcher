@@ -113,6 +113,11 @@ func (c *ConfigMapConfig) FluxNamespaceInput() (kind, name string) { return "Con
 // names. Satisfies pkg/oam.fluxNamespaceProducer.
 func (c *ConfigMapConfig) ProducesFluxNamespaceInput() bool { return true }
 
+// IsFluxNamespaceInputObject is true: the ConfigMap is the trait's own object,
+// with the content the author gave it, not one a controller makes.
+// Satisfies pkg/oam.fluxNamespaceInputObject.
+func (c *ConfigMapConfig) IsFluxNamespaceInputObject() bool { return true }
+
 // Generate builds the ConfigMap through the kind's GenerateConfigMap, under
 // the trait's name and with the owning component's labels. The name is Name,
 // not the sub-application's: a consumer may name the sub-application apart

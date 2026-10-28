@@ -183,6 +183,11 @@ var certificateKind = &policyHeldKind[certv1.CertificateSpec]{
 			spec.DeepCopyInto(&cert.Spec)
 			return cert
 		},
+		// cert-manager writes the issued certificate to the Secret secretName
+		// names, in the Certificate's namespace.
+		made: func(_ string, spec *certv1.CertificateSpec) (kind, name string, ok bool) {
+			return "Secret", spec.SecretName, spec.SecretName != ""
+		},
 	},
 	enforce: enforceCertificatePolicy,
 }

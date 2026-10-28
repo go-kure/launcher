@@ -412,6 +412,91 @@ func TestFluxNamespace_FluxObjectLateMaker(t *testing.T) {
 	}
 }
 
+// TestFluxNamespace_FluxObjectLateComponentMaker: with groups waiting for
+// their Flux objects, a Flux component requiring a ConfigMap or Secret that a
+// component of a later group makes, as its own object or through its
+// object's controller, is refused where both land in one namespace
+// (go-kure/launcher#1086): without a Flux namespace, or under one equal to the
+// application namespace. Under another Flux namespace the maker's object stays
+// in the application namespace and the waiter reads its own, so it is
+// admitted. An optional valuesFrom and an ExternalSecret under creationPolicy
+// Merge are admitted. Under the default delivery every document is admitted,
+// with the waiter in its namespace and the maker's object in the application
+// namespace.
+func TestFluxNamespace_FluxObjectLateComponentMaker(t *testing.T) {
+	values := func(optional bool) map[string]any {
+		return map[string]any{"valuesFrom": []any{map[string]any{"kind": "ConfigMap", "name": "vals", "optional": optional}}}
+	}
+	externalSecret := func(policy string) oam.Component {
+		c := fluxNSComponent(t, "pull", "externalsecret", nil)
+		if policy != "" {
+			c.Properties["target"] = map[string]any{"creationPolicy": policy}
+		}
+		return c
+	}
+	for _, tc := range []struct {
+		name          string
+		waiter, maker oam.Component
+		waiterKind    string // the waiter's object
+		madeKey       string // the maker's object, "Kind name"
+		refused       string // the maker phrase of the refusal; "" when admitted
+	}{
+		{"a secret named by a gitrepository's secretRef",
+			fluxNSComponent(t, "w", "gitrepository", map[string]any{"secretRef": secretRef("pull")}),
+			fluxNSComponent(t, "pull", "secret", nil),
+			"GitRepository", "Secret pull", `"w" requires Secret "pull", which component "pull" (secret) makes`},
+		{"a configmap named by a helmrelease's valuesFrom",
+			fluxNSComponent(t, "w", "helmrelease", values(false)),
+			fluxNSComponent(t, "vals", "configmap", nil),
+			"HelmRelease", "ConfigMap vals", `"w" requires ConfigMap "vals", which component "vals" (configmap) makes`},
+		{"a configmap named by a helmrelease's optional valuesFrom",
+			fluxNSComponent(t, "w", "helmrelease", values(true)),
+			fluxNSComponent(t, "vals", "configmap", nil),
+			"HelmRelease", "ConfigMap vals", ""},
+		{"a certificate's secretName named by an ocirepository's certSecretRef",
+			fluxNSComponent(t, "w", "ocirepository", map[string]any{"certSecretRef": secretRef("pull")}),
+			fluxNSComponent(t, "cert", "certificate", map[string]any{"secretName": "pull"}),
+			"OCIRepository", "Certificate cert", `"w" requires Secret "pull", which component "cert" (certificate), whose Certificate makes it, makes`},
+		{"an externalsecret's target named by a fluxcd-kustomization's decryption",
+			fluxNSComponent(t, "w", "fluxcd-kustomization", map[string]any{"decryption": map[string]any{"provider": "sops", "secretRef": secretRef("pull")}}),
+			externalSecret("Owner"),
+			"Kustomization", "ExternalSecret pull", `"w" requires Secret "pull", which component "pull" (externalsecret), whose ExternalSecret makes it, makes`},
+		{"an externalsecret under creationPolicy Merge",
+			fluxNSComponent(t, "w", "fluxcd-kustomization", map[string]any{"decryption": map[string]any{"provider": "sops", "secretRef": secretRef("pull")}}),
+			externalSecret("Merge"),
+			"Kustomization", "ExternalSecret pull", ""},
+	} {
+		for _, fluxNS := range []string{"", fluxNSTarget, "default"} {
+			t.Run(tc.name+"/fluxNamespace="+fluxNS, func(t *testing.T) {
+				policies := dependsOn(tc.maker.Name, "w")
+				ns := "default"
+				if fluxNS != "" {
+					ns = fluxNS
+				}
+				_, err := ociBuildWaiting(t, fluxNS, true, policies, tc.maker, tc.waiter)
+				switch refused := tc.refused != "" && ns == "default"; {
+				case !refused && err != nil:
+					t.Fatalf("build: %v", err)
+				case refused && err == nil:
+					t.Fatal("build admitted it, want the late component maker refused")
+				case refused:
+					for _, want := range []string{tc.refused, "never converges", "place component"} {
+						if !strings.Contains(err.Error(), want) {
+							t.Errorf("build error = %v, want it to contain %s", err, want)
+						}
+					}
+				}
+				got, err := ociBuildWaiting(t, fluxNS, false, policies, tc.maker, tc.waiter)
+				if err != nil {
+					t.Fatalf("default delivery: build: %v", err)
+				}
+				kind, name, _ := strings.Cut(tc.madeKey, " ")
+				requireOCIObjects(t, got, tc.waiterKind+" "+ns+"/w", kind+" default/"+name)
+			})
+		}
+	}
+}
+
 // fluxPairRule lowers a "flux-pair" component to a same-name sibling group of
 // an ocirepository member carrying the component's traits and a
 // fluxcd-kustomization member whose decryption reads Secret "shared": the

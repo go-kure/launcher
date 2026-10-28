@@ -103,3 +103,37 @@ func TestFluxNamespaceInput_Produces(t *testing.T) {
 		t.Errorf("the secret trait's sub-application %T does not report that it makes its Secret", app.Config)
 	}
 }
+
+// TestFluxNamespaceInput_IsObject: the secret and configmap traits' object is
+// the Secret or ConfigMap they name (pkg/oam.fluxNamespaceInputObject), with
+// the content the author gave it; the certificate and external-secret traits'
+// is a Certificate or an ExternalSecret whose controller makes the Secret, so
+// they do not say it is. The late-maker check counts only such an object as
+// already in place for a later component's controller
+// (go-kure/launcher#1086).
+func TestFluxNamespaceInput_IsObject(t *testing.T) {
+	type object interface{ IsFluxNamespaceInputObject() bool }
+	for _, tc := range []struct {
+		name string
+		cfg  any
+		want bool
+	}{
+		{"secret", &traits.SecretConfig{}, true},
+		{"configmap", &traits.ConfigMapConfig{}, true},
+		{"certificate", &traits.CertificateConfig{}, false},
+		{"external-secret", &traits.ExternalSecretConfig{}, false},
+	} {
+		o, ok := tc.cfg.(object)
+		if got := ok && o.IsFluxNamespaceInputObject(); got != tc.want {
+			t.Errorf("%s: IsFluxNamespaceInputObject = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	// The secret trait's sub-application answers as its config does.
+	app, err := applySecret(t, nil)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if o, ok := app.Config.(object); !ok || !o.IsFluxNamespaceInputObject() {
+		t.Errorf("the secret trait's sub-application %T does not report that its Secret is its own object", app.Config)
+	}
+}
