@@ -277,7 +277,7 @@ domain through `TransformContext.Domain`. See the
 [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) for the derivation
 and precedence rules. kurel leaves `TransformContext.GroupsWaitForFluxObjects` unset: its
 delivery is the default, so a late maker of anything a Flux object requires, a trait or a
-component, is admitted.
+component, and a late component making the source a Flux object names, are admitted.
 
 | Flag | Description |
 |------|-------------|

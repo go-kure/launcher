@@ -33,6 +33,10 @@ type fluxKind[T any] struct {
 	// one with no status a wait could hold on, one whose reads are
 	// conditional.
 	requiredReads func(decoded *T, r *fluxReads)
+	// requiredSource reports the source the object cannot become Ready
+	// without (FluxRequiredSource, flux_namespace_reads.go), none (kind "")
+	// when decoded is suspended. Nil for a kind that names none.
+	requiredSource func(decoded *T) (field, kind, name, namespace string)
 	// durations lists the duration fields of T, each with the form its CRD
 	// pattern takes: an authored value outside it, or one emitted outside it,
 	// is refused, as on the Flux kinds written before this file
@@ -72,7 +76,7 @@ func (k *fluxKind[T]) config(component *oam.Component) (stack.ApplicationConfig,
 	if !ok {
 		return nil, errors.Errorf("internal: a policy-free kind's config is a %T", cfg)
 	}
-	return &fluxKindConfig[T]{policyFreeKindConfig: free, component: component.Type, reads: k.reads, requiredReads: k.requiredReads, durations: k.durations, enforce: k.enforce}, nil
+	return &fluxKindConfig[T]{policyFreeKindConfig: free, component: component.Type, reads: k.reads, requiredReads: k.requiredReads, requiredSource: k.requiredSource, durations: k.durations, enforce: k.enforce}, nil
 }
 
 // fluxKindConfig implements stack.ApplicationConfig for a fluxKind: a
@@ -82,11 +86,12 @@ func (k *fluxKind[T]) config(component *oam.Component) (stack.ApplicationConfig,
 type fluxKindConfig[T any] struct {
 	*policyFreeKindConfig[T]
 	// component is the component's type, for an error of Generate.
-	component     string
-	reads         func(decoded *T, r *fluxReads)
-	requiredReads func(decoded *T, r *fluxReads)
-	durations     []fluxDurationField[T]
-	enforce       func(decoded *T, p oam.Policy) error
+	component      string
+	reads          func(decoded *T, r *fluxReads)
+	requiredReads  func(decoded *T, r *fluxReads)
+	requiredSource func(decoded *T) (field, kind, name, namespace string)
+	durations      []fluxDurationField[T]
+	enforce        func(decoded *T, p oam.Policy) error
 
 	// fluxNS overrides the object's namespace. Set by postProcessFluxNamespace
 	// via TransformContext.FluxNamespace. Empty means the application's.
@@ -115,6 +120,15 @@ func (c *fluxKindConfig[T]) FluxRequiredReads() (configMaps, secrets []string) {
 		c.requiredReads(c.decoded, &r)
 	}
 	return r.configMaps, r.secrets
+}
+
+// FluxRequiredSource reports the source the object cannot become Ready
+// without, none (kind "") for a kind that names none.
+func (c *fluxKindConfig[T]) FluxRequiredSource() (field, kind, name, namespace string) {
+	if c.requiredSource == nil {
+		return "", "", "", ""
+	}
+	return c.requiredSource(c.decoded)
 }
 
 // ApplyPolicy holds the decoded value to the policy, for a kind with an

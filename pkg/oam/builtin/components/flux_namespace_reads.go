@@ -319,6 +319,52 @@ func (c *HelmChartConfig) FluxRequiredReads() (configMaps, secrets []string) {
 	return c.FluxNamespaceReads()
 }
 
+// A Flux config whose object names the source it cannot become Ready without
+// also reports it (FluxRequiredSource, pkg/oam.fluxRequiredSourceReader): the
+// field that names it, its kind in source.toolkit.fluxcd.io, its name, and the
+// namespace the reference writes, "" for the object's own. A delivery whose
+// groups wait for their Flux objects refuses such a source a component makes
+// in a later group, which would never converge (go-kure/launcher#1088). None
+// when the object is suspended, as for FluxRequiredReads. The imageupdateautomation
+// kind reports its sourceRef through fluxKind.requiredSource.
+
+// FluxRequiredSource reports the HelmRelease's chartRef, or the sourceRef of
+// its chart template of kind HelmChart: helm-controller generates the HelmChart
+// in that reference's namespace, else the HelmRelease's, and the HelmChart
+// reads its source from its own. None for a chart template of kind
+// OCIRepository, which names no source, and when suspended.
+func (c *HelmReleaseConfig) FluxRequiredSource() (field, kind, name, namespace string) {
+	switch ch := c.Spec.Chart; {
+	case c.Spec.Suspend:
+	case c.Spec.ChartRef != nil:
+		ref := c.Spec.ChartRef
+		return "chartRef", ref.Kind, ref.Name, ref.Namespace
+	case ch != nil && (ch.Kind == "" || ch.Kind == sourcev1.HelmChartKind) && ch.Spec.SourceRef != nil:
+		ref := ch.Spec.SourceRef
+		return "chart.spec.sourceRef", ref.Kind, ref.Name, ref.Namespace
+	}
+	return "", "", "", ""
+}
+
+// FluxRequiredSource reports the Kustomization's sourceRef, and none when
+// suspended.
+func (c *FluxcdKustomizationConfig) FluxRequiredSource() (field, kind, name, namespace string) {
+	if c.Spec.Suspend {
+		return "", "", "", ""
+	}
+	ref := c.Spec.SourceRef
+	return "sourceRef", ref.Kind, ref.Name, ref.Namespace
+}
+
+// FluxRequiredSource reports the HelmChart's sourceRef, which names a source
+// in the HelmChart's own namespace, and none when suspended.
+func (c *HelmChartConfig) FluxRequiredSource() (field, kind, name, namespace string) {
+	if c.Spec.Suspend {
+		return "", "", "", ""
+	}
+	return "sourceRef", c.Spec.SourceRef.Kind, c.Spec.SourceRef.Name, ""
+}
+
 // FluxNamespaceReads reports the GitRepository's secretRef, proxySecretRef and
 // verification secretRef.
 func (c *GitRepositoryConfig) FluxNamespaceReads() (configMaps, secrets []string) {

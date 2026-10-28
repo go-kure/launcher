@@ -117,6 +117,12 @@ var imageUpdateAutomationKind = &fluxKind[autov1.ImageUpdateAutomationSpec]{
 			r.secretRef(&spec.GitSpec.Commit.SigningKey.SecretRef)
 		}
 	},
+	requiredSource: func(spec *autov1.ImageUpdateAutomationSpec) (field, kind, name, namespace string) {
+		if spec.Suspend {
+			return "", "", "", ""
+		}
+		return "sourceRef", spec.SourceRef.Kind, spec.SourceRef.Name, spec.SourceRef.Namespace
+	},
 	durations: []fluxDurationField[autov1.ImageUpdateAutomationSpec]{
 		{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *autov1.ImageUpdateAutomationSpec) *metav1.Duration { return &s.Interval }},
 		{path: []string{"policyChangeDelay"}, form: fluxduration.Interval, get: func(s *autov1.ImageUpdateAutomationSpec) *metav1.Duration { return s.PolicyChangeDelay }},

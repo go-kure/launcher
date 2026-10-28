@@ -437,8 +437,19 @@ The refusal needs every link proven:
 The traits are looked at first, then the components, each in group and document order, and the
 first maker found is refused. A config that does not report what it requires is admitted, as is a
 Secret-naming trait that is no `FluxNamespaceInput` (the managed TLS Secret of `ingress`/`expose`, a
-`volsync` repository), a cluster-scoped component's object, and a source a Flux object's reference
-names that a later component makes (go-kure/launcher#1088).
+`volsync` repository), and a cluster-scoped component's object.
+
+The same delivery refuses the source a Flux object of a group cannot become Ready without
+(`FluxRequiredSource`) when a component of a later group makes it as its own object: a
+`helmrelease`'s `chartRef` (an `ocirepository` or a `helmchart`), or the `chart.spec.sourceRef` of
+its chart template of kind `HelmChart`, none for kind `OCIRepository`; a `fluxcd-kustomization`'s,
+`helmchart`'s or `imageupdateautomation`'s `sourceRef`. A `helm` component naming an existing
+source (`source.name`) lowers to such a HelmRelease and leaves the source's order to the author.
+Kind, name and namespace must match: the reference's `namespace`, else the one the Flux object
+lands in, where a source component lands too. A `suspend: true` object requires none; otherwise
+the source counts whatever the object reports as `FluxRequiredReads`. The refusal names the
+reference's field; place the source's component in the Flux object's group or an earlier one
+(go-kure/launcher#1088).
 
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
 each a **separate** additive resource (the authored `networkpolicy` /

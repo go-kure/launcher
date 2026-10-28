@@ -1095,6 +1095,7 @@ var configContracts = map[string]configContract{
 	"fluxSourceRequiredReader":      {notForwarded: "a generated source's contract the late-maker check reads before the wrap"},
 	"fluxRequiredReader":            {notForwarded: "a Flux object's contract the late-maker check asserts before any trait or the wrap (fluxWaiters)"},
 	"componentObjectMaker":          {notForwarded: "a component's contract the late-maker check asserts before any trait or the wrap (componentMakers)"},
+	"fluxRequiredSourceReader":      {notForwarded: "a Flux object's contract the late-maker check asserts before any trait or the wrap (fluxWaiters)"},
 	"fluxNamespaceInputObject":      {notForwarded: "a trait sub-application contract the late-maker check reads before the wrap"},
 	"synthesizedPolicy":             {notForwarded: "the NetworkPolicy synthesis's own configs, which the transform names before the wrap"},
 	"*siblingGroupConfig":           {notForwarded: "the engine's own type, asserted while it builds the group"},
