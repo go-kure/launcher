@@ -43,15 +43,20 @@ func (h *CiliumNodeConfigHandler) PropertySchema() map[string]oam.PropertySchema
 	}
 }
 
+// ciliumNodeConfigRequiredText is what the generated required paths of the
+// cilium-nodeconfig kind (kind_required.go) say of themselves (requiredText):
+// the sentences of its hand-kept list, kept byte for byte.
+var ciliumNodeConfigRequiredText = requiredFields(map[string]string{
+	"defaults":     "the Cilium configuration keys the selected nodes take, with their values",
+	"nodeSelector": "the label query over the nodes the configuration applies to; an empty one selects every node",
+}, labelSelectorRequired("nodeSelector"))
+
 // ciliumNodeConfigKind is the cilium-nodeconfig kind: see policyFreeKind. The
 // CRD has no expression rule. What a key of `defaults` means to Cilium, and
 // whether it is one Cilium knows, is not read.
 var ciliumNodeConfigKind = &policyFreeKind[ciliumv2.CiliumNodeConfigSpec]{
 	upstream: "cilium.io/v2 CiliumNodeConfigSpec",
-	required: requiredFields(map[string]string{
-		"defaults":     "the Cilium configuration keys the selected nodes take, with their values",
-		"nodeSelector": "the label query over the nodes the configuration applies to; an empty one selects every node",
-	}, labelSelectorRequired("nodeSelector")),
+	required: generatedKindRequired("cilium-nodeconfig"),
 	build: func(name, namespace string, spec *ciliumv2.CiliumNodeConfigSpec) client.Object {
 		config := kurecilium.CreateCiliumNodeConfig(name, namespace)
 		spec.DeepCopyInto(&config.Spec)

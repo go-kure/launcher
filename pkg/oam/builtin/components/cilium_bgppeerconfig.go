@@ -64,17 +64,22 @@ func (h *CiliumBGPPeerConfigHandler) PropertySchema() map[string]oam.PropertySch
 	}
 }
 
+// ciliumBGPPeerConfigRequiredText is what the generated required paths of the
+// cilium-bgppeerconfig kind (kind_required.go) say of themselves
+// (requiredText): the sentences of its hand-kept list, kept byte for byte.
+var ciliumBGPPeerConfigRequiredText = requiredFields(map[string]string{
+	"families[].afi":          "the address family identifier: ipv4, ipv6, l2vpn, ls or opaque",
+	"families[].safi":         "the subsequent address family identifier, unicast for one",
+	"gracefulRestart.enabled": "whether graceful restart is negotiated with the peer; no default is filled",
+}, labelSelectorRequired("families[].advertisements"))
+
 // ciliumBGPPeerConfigKind is the cilium-bgppeerconfig kind: see
 // policyFreeKind. validate holds the CRD's one expression rule, on the two
 // fields as authored or as the CRD defaults them. The API's other value rules
 // are left to the API server.
 var ciliumBGPPeerConfigKind = &policyFreeKind[ciliumv2.CiliumBGPPeerConfigSpec]{
 	upstream: "cilium.io/v2 CiliumBGPPeerConfigSpec",
-	required: requiredFields(map[string]string{
-		"families[].afi":          "the address family identifier: ipv4, ipv6, l2vpn, ls or opaque",
-		"families[].safi":         "the subsequent address family identifier, unicast for one",
-		"gracefulRestart.enabled": "whether graceful restart is negotiated with the peer; no default is filled",
-	}, labelSelectorRequired("families[].advertisements")),
+	required: generatedKindRequired("cilium-bgppeerconfig"),
 	validate: validateCiliumBGPPeerConfig,
 	build: func(name, _ string, spec *ciliumv2.CiliumBGPPeerConfigSpec) client.Object {
 		config := kurecilium.CreateCiliumBGPPeerConfig(name)

@@ -100,6 +100,17 @@ var cnpgDatabaseRoleDefaultedZeroFields = map[string]string{
 	"ensure":                    `"present"`,
 }
 
+// cnpgDatabaseRoleRequiredText is what the generated required paths of the
+// cnpg-databaserole kind (kind_required.go) say of themselves (requiredText):
+// the sentences of its hand-kept list, kept byte for byte.
+var cnpgDatabaseRoleRequiredText = requiredFields(
+	map[string]string{
+		"name":    "the name of the role inside PostgreSQL",
+		"cluster": "the CloudNativePG Cluster the role is managed in",
+	},
+	refNamesRequired("Secret", "passwordSecret"),
+)
+
 // cnpgDatabaseRoleKind is the cnpg-databaserole kind: see policyFreeKind. A
 // DatabaseRole runs no pod and names no image, and its password is a
 // reference to a Secret, never a value. The CRD's two expression rules that
@@ -107,14 +118,8 @@ var cnpgDatabaseRoleDefaultedZeroFields = map[string]string{
 // one; they and the API's value rules are left to the API server. Its other
 // eight are validate's.
 var cnpgDatabaseRoleKind = &policyFreeKind[cnpgv1.DatabaseRoleSpec]{
-	upstream: "postgresql.cnpg.io/v1 DatabaseRoleSpec",
-	required: requiredFields(
-		map[string]string{
-			"name":    "the name of the role inside PostgreSQL",
-			"cluster": "the CloudNativePG Cluster the role is managed in",
-		},
-		refNamesRequired("Secret", "passwordSecret"),
-	),
+	upstream:       "postgresql.cnpg.io/v1 DatabaseRoleSpec",
+	required:       generatedKindRequired("cnpg-databaserole"),
 	defaultedZeros: cnpgDefaultedZeros(cnpgDatabaseRoleDefaultedZeroFields),
 	validate:       validateCnpgDatabaseRole,
 	build: func(name, namespace string, spec *cnpgv1.DatabaseRoleSpec) client.Object {

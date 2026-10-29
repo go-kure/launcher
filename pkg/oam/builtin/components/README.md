@@ -3164,9 +3164,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - a `cnpg-subscription`'s `name`, `dbname`, `publicationName` and
     `externalClusterName`.
 
-  `TestCnpgFurtherKinds_RequiredMatchCRD` holds these lists to the fields the
-  linked module's CRD requires and the type writes unauthored, so a
-  dependency bump that adds, drops or moves one fails there. An authored
+  These lists are generated from the fields the linked module's CRDs require
+  and the types write unauthored (go-kure/launcher#883; see "Required fields
+  a kind writes unauthored and does not refuse"), so a dependency bump that
+  adds, drops or moves one fails until they are regenerated;
+  `TestCnpgFurtherKinds_RequiredMatchCRD` holds them to those CRDs as well.
+  They are read where the hand-kept lists were, before the kinds' own
+  checks, so every refusal reads as it did. An authored
   empty value satisfies the rule and is the API server's to refuse
   (`schedule: ""`), with three exceptions the build refuses itself: a
   `cluster.name` must be a name CloudNativePG admits for a Cluster (a DNS-1035
@@ -3460,9 +3464,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Required**: the `key` and the `operator` of a match expression, in every
   selector of `ipAddressPoolSelectors`, `nodeSelectors` and
-  `serviceSelectors`. The API requires nothing else of the spec.
-  `TestMetalLBKinds_RequiredMatchCRD` holds the list to the linked module's
-  `v1beta1` CRD.
+  `serviceSelectors`. The API requires nothing else of the spec. The list is
+  generated from the linked module's `v1beta1` CRD (go-kure/launcher#883; see
+  "Required fields a kind writes unauthored and does not refuse"), and
+  `TestMetalLBKinds_RequiredMatchCRD` holds it to that CRD as well.
 
   **The CRD's expression rule is checked.** The CRD declares one, on the
   spec: a service selector is taken only with one route per address. A
@@ -3577,8 +3582,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **Required**: `myASN`, and the `key` and the `operator` of a match
   expression in every selector of `nodeSelectors`. The API requires nothing
-  else of the spec. `TestMetalLBKinds_RequiredMatchCRD` holds the list to the
-  linked module's `v1beta2` CRD.
+  else of the spec. The list is generated from the linked module's `v1beta2`
+  CRD (go-kure/launcher#883; see "Required fields a kind writes unauthored and
+  does not refuse"), and `TestMetalLBKinds_RequiredMatchCRD` holds it to that
+  CRD as well.
 
   **Two of the CRD's three expression rules are checked.** Both are on
   `connectTime`: it is from 1 to 65535 seconds, and it is a whole number of
@@ -3772,10 +3779,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `serviceAllocation.serviceSelectors`.
 
   An authored empty value satisfies the rule: `addresses: []` is a pool with
-  no address, which the CRD's schema takes. `TestMetalLBKinds_RequiredMatchCRD`
-  holds the list to the fields the linked module's `v1beta1` CRD requires and
-  the type writes unauthored, so a dependency bump that adds, drops or moves
-  one fails there.
+  no address, which the CRD's schema takes. The list is generated from the
+  fields the linked module's `v1beta1` CRD requires and the type writes
+  unauthored (go-kure/launcher#883; see "Required fields a kind writes
+  unauthored and does not refuse"), so a dependency bump that adds, drops or
+  moves one fails until it is regenerated; `TestMetalLBKinds_RequiredMatchCRD`
+  holds it to that CRD as well.
 
   **The CRD's expression rules.** The CRD declares none;
   `TestMetalLBKinds_ExpressionRules` fails on one that is added.
@@ -3859,9 +3868,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **Required**: the `key` and the `operator` of a match expression, in every
   selector of `ipAddressPoolSelectors`, `nodeSelectors` and
   `serviceSelectors` (`nodeSelectors[1].matchExpressions[0].key: required
-  (…)`). The API requires nothing else of the spec.
-  `TestMetalLBKinds_RequiredMatchCRD` holds the list to the linked module's
-  `v1beta1` CRD.
+  (…)`). The API requires nothing else of the spec. The list is generated
+  from the linked module's `v1beta1` CRD (go-kure/launcher#883; see "Required
+  fields a kind writes unauthored and does not refuse"), and
+  `TestMetalLBKinds_RequiredMatchCRD` holds it to that CRD as well.
 
   **The CRD's expression rules.** The CRD declares none;
   `TestMetalLBKinds_ExpressionRules` fails on one that is added.
@@ -6962,6 +6972,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (`CiliumRule`), since the `cilium-networkpolicy` trait reads it too, cut to
   the three fields of a rule it publishes.
 
+  **The list is kept by hand, not generated** (go-kure/launcher#883), as the
+  `cilium-clusterwidenetworkpolicy` kind's is, while the other Cilium kinds'
+  lists are generated: it is one rule's list, shared with the trait; it is
+  read under two prefixes, `spec` and `specs`, which the generated lists' API
+  server harness does not take; two of its fields (`labels[].key`,
+  `icmps[].fields[].type`) the decode refuses first, which that harness's
+  both-ways rows do not handle, though the derivation lists both; and it holds
+  fields no generated list has a place for (the listener's `priority` and
+  Envoy configuration `kind`, which the API does not require). It refuses
+  every field the derivation finds all the same: neither kind has a field in
+  the pin (see "Required fields a kind writes unauthored and does not
+  refuse").
+
   **An unknown key inside a selector is refused**, by its path
   (`spec.ingress[0].fromEndpoints[1].matchLabel: unknown field`). Cilium's
   endpoint selector unmarshals itself and drops a key it does not know, which
@@ -7790,9 +7813,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the CRD, so these are derived with the rest; on the Prometheus operator's
     kinds, whose selector is the Kubernetes one, they are not.
 
-  `TestCiliumBGPKinds_RequiredMatchCRD` holds these lists to the fields the
-  linked module's `v2` CRD requires and the type writes unauthored, so a
-  dependency bump that adds, drops or moves one fails there.
+  These lists are generated from the fields the linked module's `v2` CRDs
+  require and the types write unauthored (go-kure/launcher#883; see "Required
+  fields a kind writes unauthored and does not refuse"), so a dependency bump
+  that adds, drops or moves one fails until they are regenerated;
+  `TestCiliumBGPKinds_RequiredMatchCRD` holds them to those CRDs as well.
 
   **Two required fields the type leaves out when they are empty are refused
   too,** on an advertisement: the `name` of an `interface`
@@ -7954,9 +7979,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   An authored empty value satisfies the rule: `externalCIDRs: []` is a group
   that selects no peer, `nodeSelector: {}` every node and `defaults: {}` no
-  key. `TestCiliumPlainKinds_RequiredMatchCRD` holds these lists to the
-  fields the linked module's `v2` CRD requires and the type writes
-  unauthored, so a dependency bump that adds, drops or moves one fails there.
+  key. These lists are generated from the fields the linked module's `v2`
+  CRDs require and the types write unauthored (go-kure/launcher#883; see
+  "Required fields a kind writes unauthored and does not refuse"), so a
+  dependency bump that adds, drops or moves one fails until they are
+  regenerated; `TestCiliumPlainKinds_RequiredMatchCRD` holds them to those
+  CRDs as well.
 
   **A redirect frontend takes exactly one matcher.** The CRD's schema of
   `redirectFrontend` is a choice between `addressMatcher` and
@@ -8082,7 +8110,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   under `specs`, so a dependency bump that adds, drops or moves one fails
   there. An `icmps` field without its `type` and a rule label without its
   `key` are refused earlier, by Cilium's own decoding, with the decode error
-  (for the `type`, one that names a panic and not the field's position).
+  (for the `type`, one that names a panic and not the field's position). The
+  list is kept by hand, not generated, for the reasons the
+  `cilium-networkpolicy` kind gives.
 
   **Not checked.** These are the API server's to refuse, or Cilium's:
   - the choices the schema makes deeper in a rule: a CIDR entry (`toCIDRSet`,
@@ -8798,9 +8828,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     CRDs to that, and a dependency bump that adds a default fails there with
     the field named.
 
-  **Required** follows the rule of the Prometheus operator's kinds: a
+  **The kinds' required lists are generated** (go-kure/launcher#883; see
+  "Required fields a kind writes unauthored and does not refuse"): every
   field the API requires that the Go type writes whether or not it was
-  authored must be authored. Neither kind has one at the top level.
+  authored is refused when unauthored, each where its parent is authored,
+  the fields of the Kubernetes types the specs embed included. Neither kind
+  has one at the top level. Among them are the fields the kinds refused
+  before, each with its text:
   - Of a volume mounted into a mover (`moverVolumes`, on `rsyncTLS`,
     `rclone`, `restic` and `syncthing`): `mountPath` and `volumeSource`
     (`restic.moverVolumes[0].volumeSource: required (…)`).
@@ -8819,17 +8853,31 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - A required field under a parent the author left out is not asked for: the
     list follows what was authored.
 
-  `TestVolsyncKinds_RequiredMatchCRD` holds the lists (75 paths for a source,
-  54 for a destination) to the CRDs the linked module ships: every field of
-  VolSync's own types that a CRD requires and the type writes unauthored is
-  listed, and so is the `key` and `operator` of a match expression, and
-  nothing else is. A dependency bump that adds, drops or moves one fails
-  there. **Not refused:**
+  And, refused since go-kure/launcher#883 (**breaking** for a document that
+  leaves one out under an authored parent): the required fields of the
+  Kubernetes types the specs embed, on every mover that holds them (`rsync`
+  included, for its `moverResources`):
+  - in a mover's affinity: the `key` and `operator` of a node selector
+    requirement and of a node field selector, a preferred term's `weight`
+    and its `preference` or `podAffinityTerm`, and a pod affinity term's
+    `topologyKey`;
+  - in `moverSecurityContext`: a seccomp or AppArmor profile's `type`, a
+    sysctl's `name` and `value`;
+  - in `moverResources`: a resource claim's `name`;
+  - in a mounted volume source: an NFS volume's `server` and `path`, a
+    claim's `claimName`, and the `key` and `path` of a mounted Secret's item.
+
+  The lists (192 paths for a source, 142 for a destination) are derived from
+  the CRDs the linked module ships, by `TestKindComponents_RequiredIsGenerated`;
+  a dependency bump that adds, drops or moves one fails there until the list
+  is regenerated. `TestKindComponents_GeneratedRequiredBothWays` shows the API
+  server's answer to the omission of a field of each type that holds one (15
+  rows for a source, 14 for a destination). No parent is refused here that
+  the API does not require. `TestVolsyncKinds_WrittenEmptyAccepted` holds that
+  every other field of VolSync's own types the type writes empty is one the
+  CRDs take empty. **Not refused:**
   - a required field the type omits when it is not authored: the object shows
     the omission, and the API server refuses it;
-  - a required field of a Kubernetes type these specs embed, other than those
-    terms and a match expression's two fields (the `key` of a node selector
-    requirement in an affinity, for one). An omitted one is emitted empty;
   - every other value rule of the CRDs (enumerations, patterns, minima).
 
   **Two fields the linked Kubernetes type holds and the CRDs do not are
@@ -8855,7 +8903,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **What the type writes unauthored.** `customCA: {}` on an authored `rclone`
   or `restic` mover, which holds it by value. The CRDs accept it empty, and
-  `TestVolsyncKinds_RequiredMatchCRD` holds every such field to its schema.
+  `TestVolsyncKinds_WrittenEmptyAccepted` holds every such field to its schema.
 
   **Policy.**
   - **An authored capacity is held to the storage maximum.** A mover's
@@ -13054,9 +13102,17 @@ are not refused, as they are at this pin.
 fourteen Flux kinds (`helmrelease`, `fluxcd-kustomization`, `bucket`, `ocirepository`,
 `gitrepository`, `helmchart`, `helmrepository`, `artifactgenerator`, `fluxcd-alert`,
 `fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`, `imagerepository`,
-`imageupdateautomation`), `resourcesetinputprovider` and the ten Gateway API kinds
+`imageupdateautomation`), `resourcesetinputprovider`, the ten Gateway API kinds
 (`gatewayclass`, `gateway`, `listenerset`, `referencegrant`, `backendtlspolicy`, `httproute`,
-`grpcroute`, `tcproute`, `udproute`, `tlsroute`) is generated:
+`grpcroute`, `tcproute`, `udproute`, `tlsroute`), `replicationsource`,
+`replicationdestination`, the four MetalLB kinds that require a field (`metallb-ipaddresspool`,
+`metallb-l2advertisement`, `metallb-bgpadvertisement`, `metallb-bgppeer`), the seven further
+cnpg kinds (`cnpg-imagecatalog`, `cnpg-clusterimagecatalog`, `cnpg-backup`,
+`cnpg-scheduledbackup`, `cnpg-databaserole`, `cnpg-publication`, `cnpg-subscription`) and the
+nine Cilium kinds other than the two network policies (`cilium-bgpadvertisement`,
+`cilium-bgpclusterconfig`, `cilium-bgpnodeconfigoverride`, `cilium-bgppeerconfig`,
+`cilium-cidrgroup`, `cilium-egressgatewaypolicy`, `cilium-loadbalancerippool`,
+`cilium-localredirectpolicy`, `cilium-nodeconfig`) is generated:
 every field the kind's API requires and its Go type writes unauthored is refused where the
 author leaves it out under an authored parent, whatever type declares it. The paths are in
 `zz_generated_kind_required.go` (`kindRequiredPaths`), read through the same derivation as the
@@ -13109,6 +13165,27 @@ test runs a row of each Gateway kind and of `resourcesetinputprovider` through t
 The Flux controllers' modules ship none, so their kinds are held by the kind only, and the rows
 that run them through the controllers' CRDs follow in a follow-up.
 
+The VolSync, MetalLB, further cnpg and Cilium kinds are derived from the CRDs their linked
+modules ship, and the test runs a row of each of their types that holds a generated field
+through the API server, on those CRDs. `replicationsource` and `replicationdestination` run the
+generated refusal after their own checks, as the Flux kinds do; their generated list adds the
+required fields of the Kubernetes types their movers embed to what their hand-kept lists held.
+The MetalLB, further cnpg and Cilium kinds' generated lists hold exactly what their hand-kept
+lists held, and are read where those were, before the kinds' own checks, so no document is
+refused that was not and every refusal reads as it did. None of these needs a recorded answer
+for a parent left out.
+
+**Kept by hand.** The `cilium-networkpolicy` and `cilium-clusterwidenetworkpolicy` kinds keep
+their hand-kept list: it is one rule's list (`requiredfields.CiliumRule`), shared with the
+`cilium-networkpolicy` trait in another package; it is read under the `spec` and `specs`
+prefixes, which the generated lists' API server harness does not take; two of its fields
+(`labels[].key`, `icmps[].fields[].type`) the decode refuses first, which that harness's
+both-ways rows do not handle, though the derivation lists both; and it holds fields no
+generated list has a place for (a listener's `priority` and Envoy configuration `kind`, which
+the API does not require and refuses written). Both refuse
+every field the derivation finds, and `TestCiliumNetworkPolicy_RequiredMatchCRD` and
+`TestCiliumClusterwideNetworkPolicy_RequiredMatchCRD` hold the list to their CRDs.
+
 **Families.** The test names each field by the type that holds it:
 
 | Family | Owner type | Typical fields |
@@ -13126,21 +13203,16 @@ match expression), has no member: those are refused on every kind
 
 | Kind | Not refused | AFF | SEC | POD | KIND |
 |---|---|---|---|---|---|
-| `replicationsource` | 113 | 72 | 16 | 25 | |
-| `replicationdestination` | 85 | 54 | 12 | 19 | |
 | `cnpg-pooler` | 1 | | | 1 | |
 | `prometheus`, `alertmanager`, `thanosruler` | 8 each | | | | 8 |
 
-None is left on the kinds whose list is generated (`issuer`, `clusterissuer`, `certificate`,
-the four External Secrets kinds, `cnpg-cluster`, `cnpg-objectstore`, `cnpg-database`,
-`servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, the fourteen Flux kinds,
-`resourcesetinputprovider` and the ten Gateway API kinds; `cnpg-pooler` keeps its exception,
-and `prometheus`, `alertmanager` and `thanosruler` their undecided owner reference fields),
-the eleven Cilium kinds, `metallb-ipaddresspool`,
-`metallb-l2advertisement`, `metallb-bgpadvertisement`, `metallb-bgppeer`, `cnpg-imagecatalog`,
-`cnpg-clusterimagecatalog`, `cnpg-backup`, `cnpg-scheduledbackup`, `cnpg-databaserole`,
-`cnpg-publication` and `cnpg-subscription`. `metallb-bfdprofile` and
-`metallb-community` are not measured: their CRDs require no field.
+Every remaining member is an exception or undecided. None is left on the other kinds whose list
+is generated (`cnpg-pooler` keeps its exception, and `prometheus`, `alertmanager` and
+`thanosruler` their undecided owner reference fields), nor on the two Cilium network policy
+kinds, whose list is kept by hand. `metallb-bfdprofile` and `metallb-community` are not
+measured: their CRDs require no field, and `TestMetalLBKinds_RequiredMatchCRD` holds each kind's
+empty list to its CRD. Nor is `apiservice`: no CRD serves it, the API server's aggregation layer
+does.
 `TestRequiredWrittenKinds_CoverEveryCRDKind` holds the measured kinds to the kind inventory:
 every `kind` row whose API group client-go's scheme does not register, so a CRD serves it, is
 measured or named as not measured with its reason, so a new kind component of such an API
@@ -13194,7 +13266,9 @@ value). The test fails on any difference, a new member or one that is gone, so a
 bump or a kind change that moves the set fails CI; `UPDATE_REQUIRED_WRITTEN_PIN=1` rewrites
 the file, and is refused where `CI` is set.
 
-go-kure/launcher#883 (deferred) tracks a mechanism for this class.
+What remains of go-kure/launcher#883 is the follow-up that vendors the Prometheus operator's and
+the Flux controllers' CRDs: it shows the API server's answers for those kinds and settles the
+undecided owner reference fields.
 
 ### Every spec field is this package's to write
 

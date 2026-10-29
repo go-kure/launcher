@@ -47,20 +47,25 @@ func (h *CiliumBGPClusterConfigHandler) PropertySchema() map[string]oam.Property
 	}
 }
 
+// ciliumBGPClusterConfigRequiredText is what the generated required paths of
+// the cilium-bgpclusterconfig kind (kind_required.go) say of themselves
+// (requiredText): the sentences of its hand-kept list, kept byte for byte.
+var ciliumBGPClusterConfigRequiredText = requiredFields(map[string]string{
+	"bgpInstances":                              "the BGP instances the selected nodes run, at least one",
+	"bgpInstances[].name":                       "the name of the BGP instance",
+	"bgpInstances[].peers[].name":               "the name of the peer",
+	"bgpInstances[].peers[].autoDiscovery.mode": "how the peer is discovered: DefaultGateway",
+	"bgpInstances[].peers[].autoDiscovery.defaultGateway.addressFamily": "the address family of the default gateway the peer is discovered by: ipv4 or ipv6",
+	"bgpInstances[].peers[].peerConfigRef.name":                         "the name of the CiliumBGPPeerConfig the peer is configured by",
+}, labelSelectorRequired("nodeSelector"))
+
 // ciliumBGPClusterConfigKind is the cilium-bgpclusterconfig kind: see
 // policyFreeKind. The CRD has no expression rule; its value rules (one to
 // sixteen instances, a name unique in its list, the ranges of an ASN and a
 // port, the form of an address) are left to the API server.
 var ciliumBGPClusterConfigKind = &policyFreeKind[ciliumv2.CiliumBGPClusterConfigSpec]{
 	upstream: "cilium.io/v2 CiliumBGPClusterConfigSpec",
-	required: requiredFields(map[string]string{
-		"bgpInstances":                              "the BGP instances the selected nodes run, at least one",
-		"bgpInstances[].name":                       "the name of the BGP instance",
-		"bgpInstances[].peers[].name":               "the name of the peer",
-		"bgpInstances[].peers[].autoDiscovery.mode": "how the peer is discovered: DefaultGateway",
-		"bgpInstances[].peers[].autoDiscovery.defaultGateway.addressFamily": "the address family of the default gateway the peer is discovered by: ipv4 or ipv6",
-		"bgpInstances[].peers[].peerConfigRef.name":                         "the name of the CiliumBGPPeerConfig the peer is configured by",
-	}, labelSelectorRequired("nodeSelector")),
+	required: generatedKindRequired("cilium-bgpclusterconfig"),
 	build: func(name, _ string, spec *ciliumv2.CiliumBGPClusterConfigSpec) client.Object {
 		config := kurecilium.CreateCiliumBGPClusterConfig(name)
 		spec.DeepCopyInto(&config.Spec)

@@ -75,6 +75,19 @@ func (h *CiliumNetworkPolicyHandler) PropertySchema() map[string]oam.PropertySch
 // the type's empty value where the document left the field out, and would not
 // show the omission. TestCiliumNetworkPolicy_RequiredMatchCRD holds it to the
 // CiliumNetworkPolicy CRD of the linked module.
+//
+// Unlike the other Cilium kinds' lists, this one is not generated
+// (kind_required.go), nor is the cilium-clusterwidenetworkpolicy kind's: it is
+// one rule's list, shared with the cilium network policy trait in another
+// package (requiredfields.CiliumTraitRule), it is read under two prefixes,
+// which the generated lists' API server harness does not take; two of its
+// fields the decode refuses before the list is read, a refusal that harness's
+// both-ways rows do not handle, though the derivation lists both; and it holds
+// two fields the API does not require whose written value it refuses (a
+// listener's priority and Envoy configuration kind), which no held class of a
+// generated list names. It
+// refuses every field the derivation finds all the same: neither kind has a
+// member in the required-written pin.
 var ciliumNetworkPolicyRequired = requiredFields(requiredfields.CiliumRule("spec"), requiredfields.CiliumRule("specs[]"))
 
 // ToApplicationConfig decodes an OAM cilium-networkpolicy component into a

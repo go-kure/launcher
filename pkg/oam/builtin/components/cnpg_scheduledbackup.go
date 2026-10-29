@@ -68,6 +68,18 @@ var cnpgScheduledBackupDefaultedZeroFields = map[string]string{
 	"method":               `"barmanObjectStore"`,
 }
 
+// cnpgScheduledBackupRequiredText is what the generated required paths of the
+// cnpg-scheduledbackup kind (kind_required.go) say of themselves
+// (requiredText): the sentences of its hand-kept list, kept byte for byte.
+var cnpgScheduledBackupRequiredText = requiredFields(
+	map[string]string{
+		"schedule":     "when a backup is taken, as a cron expression",
+		"cluster":      "the CloudNativePG Cluster the backups are taken of",
+		"cluster.name": "the name of that Cluster",
+	},
+	cnpgBackupPluginRequired,
+)
+
 // cnpgScheduledBackupKind is the cnpg-scheduledbackup kind: see
 // policyFreeKind. A ScheduledBackup runs no pod of its own and names no image.
 // validate holds the Cluster reference to a name a Cluster can have. The CRD's
@@ -77,15 +89,8 @@ var cnpgScheduledBackupDefaultedZeroFields = map[string]string{
 // six fields, and that the online settings do not come with the
 // barmanObjectStore method) are left to them.
 var cnpgScheduledBackupKind = &policyFreeKind[cnpgv1.ScheduledBackupSpec]{
-	upstream: "postgresql.cnpg.io/v1 ScheduledBackupSpec",
-	required: requiredFields(
-		map[string]string{
-			"schedule":     "when a backup is taken, as a cron expression",
-			"cluster":      "the CloudNativePG Cluster the backups are taken of",
-			"cluster.name": "the name of that Cluster",
-		},
-		cnpgBackupPluginRequired,
-	),
+	upstream:       "postgresql.cnpg.io/v1 ScheduledBackupSpec",
+	required:       generatedKindRequired("cnpg-scheduledbackup"),
 	defaultedZeros: cnpgDefaultedZeros(cnpgScheduledBackupDefaultedZeroFields),
 	validate: func(spec *cnpgv1.ScheduledBackupSpec) error {
 		return requireCnpgClusterRef(spec.Cluster.Name)

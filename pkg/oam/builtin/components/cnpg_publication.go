@@ -69,6 +69,17 @@ var cnpgPublicationDefaultedZeroFields = map[string]string{
 	"publicationReclaimPolicy": `"retain"`,
 }
 
+// cnpgPublicationRequiredText is what the generated required paths of the
+// cnpg-publication kind (kind_required.go) say of themselves (requiredText):
+// the sentences of its hand-kept list, kept byte for byte.
+var cnpgPublicationRequiredText = map[string]string{
+	"cluster":                     "the CloudNativePG Cluster that publishes",
+	"name":                        "the name of the publication inside PostgreSQL",
+	"dbname":                      "the database the publication is created in",
+	"target":                      "what is published",
+	"target.objects[].table.name": "the name of the table",
+}
+
 // cnpgPublicationKind is the cnpg-publication kind: see policyFreeKind. A
 // Publication runs no pod and names no image. validate holds the Cluster
 // reference and the three expression rules of the CRD that read one document
@@ -76,14 +87,8 @@ var cnpgPublicationDefaultedZeroFields = map[string]string{
 // the stored object and say nothing of a new one; they and the API's value
 // rules are left to the API server.
 var cnpgPublicationKind = &policyFreeKind[cnpgv1.PublicationSpec]{
-	upstream: "postgresql.cnpg.io/v1 PublicationSpec",
-	required: requiredFields(map[string]string{
-		"cluster":                     "the CloudNativePG Cluster that publishes",
-		"name":                        "the name of the publication inside PostgreSQL",
-		"dbname":                      "the database the publication is created in",
-		"target":                      "what is published",
-		"target.objects[].table.name": "the name of the table",
-	}),
+	upstream:       "postgresql.cnpg.io/v1 PublicationSpec",
+	required:       generatedKindRequired("cnpg-publication"),
 	defaultedZeros: cnpgDefaultedZeros(cnpgPublicationDefaultedZeroFields),
 	validate:       validateCnpgPublication,
 	build: func(name, namespace string, spec *cnpgv1.PublicationSpec) client.Object {

@@ -57,13 +57,18 @@ func (h *CiliumLoadBalancerIPPoolHandler) PropertySchema() map[string]oam.Proper
 	}
 }
 
+// ciliumLoadBalancerIPPoolRequiredText is what the generated required paths of
+// the cilium-loadbalancerippool kind (kind_required.go) say of themselves
+// (requiredText): the sentences of its hand-kept list, kept byte for byte.
+var ciliumLoadBalancerIPPoolRequiredText = labelSelectorRequired("serviceSelector")
+
 // ciliumLoadBalancerIPPoolKind is the cilium-loadbalancerippool kind: see
 // policyFreeKind. The CRD has no expression rule; its value rules (the two
 // values of allowFirstLastIPs, the form of a block) are left to the API
 // server.
 var ciliumLoadBalancerIPPoolKind = &policyFreeKind[ciliumv2.CiliumLoadBalancerIPPoolSpec]{
 	upstream: "cilium.io/v2 CiliumLoadBalancerIPPoolSpec",
-	required: labelSelectorRequired("serviceSelector"),
+	required: generatedKindRequired("cilium-loadbalancerippool"),
 	build: func(name, _ string, spec *ciliumv2.CiliumLoadBalancerIPPoolSpec) client.Object {
 		pool := kurecilium.CreateCiliumLoadBalancerIPPool(name)
 		spec.DeepCopyInto(&pool.Spec)

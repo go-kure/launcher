@@ -108,6 +108,14 @@ var metallbBGPPeerDefaultedZeros = defaultedZeroFields{
 	fields:    map[string]string{"peerPort": "179"},
 }
 
+// metallbBGPPeerRequiredText is what the generated required paths of the
+// metallb-bgppeer kind (kind_required.go) say of themselves (requiredText):
+// the sentences of its hand-kept list, kept byte for byte.
+var metallbBGPPeerRequiredText = requiredFields(
+	map[string]string{"myASN": "the API requires it: the AS number of the local end of the session"},
+	metallbSelectorsRequired("nodeSelectors"),
+)
+
 // metallbBGPPeerKind is the metallb-bgppeer kind: see policyHeldKind. The API
 // requires `myASN`, which the type would write as 0, and the key and the
 // operator of a node selector's match expression. validate holds the CRD's two
@@ -119,11 +127,8 @@ var metallbBGPPeerDefaultedZeros = defaultedZeroFields{
 // (enforceMetalLBBGPPeerPolicy).
 var metallbBGPPeerKind = &policyHeldKind[metallbv1beta2.BGPPeerSpec]{
 	policyFreeKind: policyFreeKind[metallbv1beta2.BGPPeerSpec]{
-		upstream: "metallb.io/v1beta2 BGPPeerSpec",
-		required: requiredFields(
-			map[string]string{"myASN": "the API requires it: the AS number of the local end of the session"},
-			metallbSelectorsRequired("nodeSelectors"),
-		),
+		upstream:       "metallb.io/v1beta2 BGPPeerSpec",
+		required:       generatedKindRequired("metallb-bgppeer"),
 		defaultedZeros: metallbBGPPeerDefaultedZeros,
 		validate:       validateMetalLBBGPPeer,
 		build: func(name, namespace string, spec *metallbv1beta2.BGPPeerSpec) client.Object {

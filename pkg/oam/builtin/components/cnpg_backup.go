@@ -55,7 +55,7 @@ var cnpgBackupDefaultedZeroFields = map[string]string{
 // them.
 var cnpgBackupKind = &policyFreeKind[cnpgv1.BackupSpec]{
 	upstream:       "postgresql.cnpg.io/v1 BackupSpec",
-	required:       cnpgBackupRequired,
+	required:       generatedKindRequired("cnpg-backup"),
 	defaultedZeros: cnpgDefaultedZeros(cnpgBackupDefaultedZeroFields),
 	validate: func(spec *cnpgv1.BackupSpec) error {
 		return requireCnpgClusterRef(spec.Cluster.Name)
@@ -109,10 +109,10 @@ func cnpgBackupSchema(kind, cluster string) map[string]oam.PropertySchema {
 	}
 }
 
-// cnpgBackupRequired is the required list of the cnpg-backup kind: the fields
-// the Backup CRD requires that the Go types write whether or not they were
-// authored. TestCnpgFurtherKinds_RequiredMatchCRD holds the list to the CRD.
-var cnpgBackupRequired = requiredFields(
+// cnpgBackupRequiredText is what the generated required paths of the
+// cnpg-backup kind (kind_required.go) say of themselves (requiredText): the
+// sentences of its hand-kept list, kept byte for byte.
+var cnpgBackupRequiredText = requiredFields(
 	map[string]string{
 		"cluster":      "the CloudNativePG Cluster the backup is taken of",
 		"cluster.name": "the name of that Cluster",
@@ -120,9 +120,11 @@ var cnpgBackupRequired = requiredFields(
 	cnpgBackupPluginRequired,
 )
 
-// cnpgBackupPluginRequired is the required list of a backup's plugin
-// configuration, which is optional itself: of one that is authored, the API
-// requires the name, which the Go type would write empty.
+// cnpgBackupPluginRequired is what the generated required path of a backup's
+// plugin configuration says of itself, on the cnpg-backup and
+// cnpg-scheduledbackup kinds. The configuration is optional itself: of one
+// that is authored, the API requires the name, which the Go type would write
+// empty.
 var cnpgBackupPluginRequired = map[string]string{
 	"pluginConfiguration.name": "the name of the plugin that takes the backup",
 }

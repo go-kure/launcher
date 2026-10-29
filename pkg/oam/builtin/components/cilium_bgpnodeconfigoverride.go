@@ -45,17 +45,23 @@ func (h *CiliumBGPNodeConfigOverrideHandler) PropertySchema() map[string]oam.Pro
 	}
 }
 
+// ciliumBGPNodeConfigOverrideRequiredText is what the generated required paths
+// of the cilium-bgpnodeconfigoverride kind (kind_required.go) say of
+// themselves (requiredText): the sentences of its hand-kept list, kept byte
+// for byte.
+var ciliumBGPNodeConfigOverrideRequiredText = map[string]string{
+	"bgpInstances":                "the BGP instances overridden, at least one",
+	"bgpInstances[].name":         "the name of the BGP instance, as its CiliumBGPClusterConfig gives it",
+	"bgpInstances[].peers[].name": "the name of the peer, as its CiliumBGPClusterConfig gives it",
+}
+
 // ciliumBGPNodeConfigOverrideKind is the cilium-bgpnodeconfigoverride kind:
 // see policyFreeKind. The CRD has no expression rule; its value rules (at
 // least one instance, a name unique in its list, the form of an address) are
 // left to the API server.
 var ciliumBGPNodeConfigOverrideKind = &policyFreeKind[ciliumv2.CiliumBGPNodeConfigOverrideSpec]{
 	upstream: "cilium.io/v2 CiliumBGPNodeConfigOverrideSpec",
-	required: map[string]string{
-		"bgpInstances":                "the BGP instances overridden, at least one",
-		"bgpInstances[].name":         "the name of the BGP instance, as its CiliumBGPClusterConfig gives it",
-		"bgpInstances[].peers[].name": "the name of the peer, as its CiliumBGPClusterConfig gives it",
-	},
+	required: generatedKindRequired("cilium-bgpnodeconfigoverride"),
 	build: func(name, _ string, spec *ciliumv2.CiliumBGPNodeConfigOverrideSpec) client.Object {
 		override := kurecilium.CreateCiliumBGPNodeConfigOverride(name)
 		spec.DeepCopyInto(&override.Spec)

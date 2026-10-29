@@ -64,7 +64,7 @@ func (h *MetalLBL2AdvertisementHandler) PropertySchema() map[string]oam.Property
 // default and no expression rule.
 var metallbL2AdvertisementKind = &policyFreeKind[metallbv1beta1.L2AdvertisementSpec]{
 	upstream: "metallb.io/v1beta1 L2AdvertisementSpec",
-	required: metallbSelectorsRequired("ipAddressPoolSelectors", "nodeSelectors", "serviceSelectors"),
+	required: generatedKindRequired("metallb-l2advertisement"),
 	build: func(name, namespace string, spec *metallbv1beta1.L2AdvertisementSpec) client.Object {
 		advertisement := kuremetallb.CreateL2Advertisement(name, namespace)
 		spec.DeepCopyInto(&advertisement.Spec)
