@@ -6251,8 +6251,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     same tag. Its `SOURCE` file names the tag and the git blob id of each
     file and of `LICENSE`; the tests check each against its file, the tag
     against the linked `k8s.io/api`, and fail when `LICENSE` is missing. `mise run
-    vendor-k8s-defaulters vX.Y.Z` re-fetches it when that module moves. CI
-    never runs it, and the tests need no network.
+    vendor-k8s-defaulters vX.Y.Z` re-fetches it when that module moves; it
+    takes the Kubernetes tag, not the module version: `k8s.io/api` v0.X.Y
+    pairs with Kubernetes v1.X.Y. CI never runs it, and the tests need no
+    network.
   - A match expression without its `key` or `operator`, with an operator that
     is none of the four, or with `values` that do not go with the operator, in
     every label selector of the spec: a pod affinity or anti-affinity term's
