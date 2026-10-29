@@ -63,6 +63,26 @@ func ciliumPortRequired(at string) map[string]string {
 	}
 }
 
+// ciliumLocalRedirectPolicyRequiredText is what the generated required paths
+// of the cilium-localredirectpolicy kind (kind_required.go) say of themselves
+// (requiredText): the sentences of its hand-kept list, kept byte for byte.
+var ciliumLocalRedirectPolicyRequiredText = requiredFields(
+	map[string]string{
+		"redirectFrontend":                            "the traffic to redirect",
+		"redirectFrontend.addressMatcher.ip":          "the destination address of the traffic to redirect",
+		"redirectFrontend.addressMatcher.toPorts":     "the destination ports of the traffic to redirect",
+		"redirectFrontend.serviceMatcher.serviceName": "the name of the Service whose traffic is redirected",
+		"redirectFrontend.serviceMatcher.namespace":   "the namespace of that Service",
+		"redirectBackend":                             "where the traffic is redirected to",
+		"redirectBackend.localEndpointSelector":       "the label query over the pods of the node the traffic is redirected to",
+		"redirectBackend.toPorts":                     "the ports of those pods the traffic is redirected to",
+	},
+	ciliumPortRequired("redirectFrontend.addressMatcher.toPorts"),
+	ciliumPortRequired("redirectFrontend.serviceMatcher.toPorts"),
+	ciliumPortRequired("redirectBackend.toPorts"),
+	labelSelectorRequired("redirectBackend.localEndpointSelector"),
+)
+
 // ciliumLocalRedirectPolicyKind is the cilium-localredirectpolicy kind: see
 // policyFreeKind. validate holds the one-of the CRD's schema declares on
 // `redirectFrontend`. The CRD's three expression rules compare a field with
@@ -70,22 +90,7 @@ func ciliumPortRequired(at string) map[string]string {
 // API's value rules are left to the API server.
 var ciliumLocalRedirectPolicyKind = &policyFreeKind[ciliumv2.CiliumLocalRedirectPolicySpec]{
 	upstream: "cilium.io/v2 CiliumLocalRedirectPolicySpec",
-	required: requiredFields(
-		map[string]string{
-			"redirectFrontend":                            "the traffic to redirect",
-			"redirectFrontend.addressMatcher.ip":          "the destination address of the traffic to redirect",
-			"redirectFrontend.addressMatcher.toPorts":     "the destination ports of the traffic to redirect",
-			"redirectFrontend.serviceMatcher.serviceName": "the name of the Service whose traffic is redirected",
-			"redirectFrontend.serviceMatcher.namespace":   "the namespace of that Service",
-			"redirectBackend":                             "where the traffic is redirected to",
-			"redirectBackend.localEndpointSelector":       "the label query over the pods of the node the traffic is redirected to",
-			"redirectBackend.toPorts":                     "the ports of those pods the traffic is redirected to",
-		},
-		ciliumPortRequired("redirectFrontend.addressMatcher.toPorts"),
-		ciliumPortRequired("redirectFrontend.serviceMatcher.toPorts"),
-		ciliumPortRequired("redirectBackend.toPorts"),
-		labelSelectorRequired("redirectBackend.localEndpointSelector"),
-	),
+	required: generatedKindRequired("cilium-localredirectpolicy"),
 	validate: validateCiliumLocalRedirectPolicy,
 	build: func(name, namespace string, spec *ciliumv2.CiliumLocalRedirectPolicySpec) client.Object {
 		policy := kurecilium.CreateCiliumLocalRedirectPolicy(name, namespace)

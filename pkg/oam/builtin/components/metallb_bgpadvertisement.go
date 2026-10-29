@@ -79,7 +79,7 @@ func (h *MetalLBBGPAdvertisementHandler) PropertySchema() map[string]oam.Propert
 // aggregationLength) are left to the API server.
 var metallbBGPAdvertisementKind = &policyFreeKind[metallbv1beta1.BGPAdvertisementSpec]{
 	upstream: "metallb.io/v1beta1 BGPAdvertisementSpec",
-	required: metallbSelectorsRequired("ipAddressPoolSelectors", "nodeSelectors", "serviceSelectors"),
+	required: generatedKindRequired("metallb-bgpadvertisement"),
 	validate: validateMetalLBBGPAdvertisement,
 	build: func(name, namespace string, spec *metallbv1beta1.BGPAdvertisementSpec) client.Object {
 		advertisement := kuremetallb.CreateBGPAdvertisement(name, namespace)

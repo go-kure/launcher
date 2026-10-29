@@ -62,7 +62,8 @@ func (h *CiliumClusterwideNetworkPolicyHandler) PropertySchema() map[string]oam.
 // (requiredfields.CiliumRule, which the cilium-networkpolicy kind and trait
 // read too), under `spec` and under every entry of `specs`.
 // TestCiliumClusterwideNetworkPolicy_RequiredMatchCRD holds it to the CRD of
-// the linked module and to the Cilium rule type.
+// the linked module and to the Cilium rule type. It is kept by hand, not
+// generated, for the reasons ciliumNetworkPolicyRequired gives.
 var ciliumClusterwideNetworkPolicyRequired = requiredFields(requiredfields.CiliumRule("spec"), requiredfields.CiliumRule("specs[]"))
 
 // ToApplicationConfig decodes an OAM cilium-clusterwidenetworkpolicy component

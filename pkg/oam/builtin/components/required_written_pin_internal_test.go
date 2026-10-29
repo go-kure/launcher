@@ -53,7 +53,10 @@ import (
 // not the kind's answer. The kinds whose required list is generated from the
 // same derivation (kind_required.go, go-kure/launcher#883) refuse each such
 // field, but for those requiredWrittenExceptions and requiredWrittenUndecided
-// list; the others do not yet. This test pins which fields are not refused: the set is checked in,
+// list. Every kind measured here is generated but the two Cilium network
+// policies, whose hand-kept list (requiredfields.CiliumRule) refuses each
+// such field as well, so the set holds only those two lists' fields. This
+// test pins which fields are not refused: the set is checked in,
 // one line per field, and a field that joins it (a new gap) or leaves it (a
 // new refusal) fails the test until the file is regenerated with
 // UPDATE_REQUIRED_WRITTEN_PIN=1.
@@ -1265,27 +1268,24 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 	if t.Failed() {
 		return
 	}
-	// Vacuity guards: the measurement finds a member of each family that has
-	// one (AFF, SEC, POD on two of VolSync's kinds, whose lists are not
-	// generated yet, and KIND on the Prometheus operator's, an entry
-	// requiredWrittenUndecided lists), a refusal of an omission (two of the KIND family, one of
-	// the AFF family on a kind whose list is generated, of the CloudNativePG
-	// and the Prometheus operator's kinds whose lists are generated one of each
-	// family their members were in, a map's list entry among them, and of the
-	// Flux and Gateway route kinds whose lists are generated one of each kind
-	// that had members, a path under helmrelease's alternative base among
-	// them), each valid default it leaves out, and each unauthorable path it
-	// skips, each in its own class.
+	// Vacuity guards: the measurement finds a member in each list that keeps
+	// one (KIND on the Prometheus operator's kinds, an entry
+	// requiredWrittenUndecided lists, and POD on cnpg-pooler, the one
+	// requiredWrittenExceptions lists), a refusal of an omission (two of the
+	// KIND family, one of the AFF family on a kind whose list is generated, of
+	// the CloudNativePG, the Prometheus operator's and VolSync's kinds whose
+	// lists are generated one of each family their members were in, a map's
+	// list entry among them, and of the Flux and Gateway route kinds whose
+	// lists are generated one of each kind that had members, a path under
+	// helmrelease's alternative base among them), each valid default it leaves
+	// out, and each unauthorable path it skips, each in its own class.
 	have := map[string]bool{}
 	for _, m := range all {
 		have[m.component+" "+m.path] = true
 	}
 	for _, guard := range []string{
-		"replicationsource rsyncTLS.moverAffinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[].topologyKey",
-		"replicationsource rsyncTLS.moverSecurityContext.seccompProfile.type",
-		"replicationsource rsyncTLS.moverResources.claims[].name",
-		"replicationdestination rsyncTLS.moverResources.claims[].name",
 		"prometheus volumes[].ephemeral.volumeClaimTemplate.metadata.ownerReferences[].name",
+		"cnpg-pooler template.spec.containers",
 	} {
 		if !have[guard] {
 			t.Errorf("the measurement does not find %s, a member", guard)
@@ -1325,22 +1325,27 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 		{"ocirepository", "verify.secretRef.name"},
 		{"helmchart", "verify.matchOIDCIdentity[].issuer"},
 		{"helmrepository", "accessFrom.namespaceSelectors"},
+		{"replicationsource", "rsyncTLS.moverAffinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[].topologyKey"},
+		{"replicationsource", "rsyncTLS.moverSecurityContext.seccompProfile.type"},
+		{"replicationsource", "rsyncTLS.moverResources.claims[].name"},
+		{"replicationsource", "syncthing.moverVolumes[].volumeSource.nfs.server"},
+		{"replicationdestination", "rsyncTLS.moverResources.claims[].name"},
+		{"replicationdestination", "restic.moverAffinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution[].preference"},
 	} {
 		if !refused[guard.component+" "+guard.path] {
 			t.Errorf("the measurement does not find the %s's refusal of %s without it", guard.component, guard.path)
 		}
 	}
-	// A kind whose required list is generated refuses every field the
-	// measurement visits, but for those requiredWrittenExceptions or
-	// requiredWrittenUndecided lists, and each of those stays a member.
+	// Every kind refuses every field the measurement visits, but for those
+	// requiredWrittenExceptions or requiredWrittenUndecided lists, and each of
+	// those stays a member: every member of the set is one of them
+	// (go-kure/launcher#883).
 	for _, m := range all {
-		if _, generated := kindRequiredAPI[m.component]; generated {
-			key := m.component + " " + m.path
-			_, excepted := requiredWrittenExceptions[key]
-			_, undecided := requiredWrittenUndecided[key]
-			if !excepted && !undecided {
-				t.Errorf("%s: its required list is generated, and it does not refuse the omission of %s, which neither requiredWrittenExceptions nor requiredWrittenUndecided lists", m.component, m.path)
-			}
+		key := m.component + " " + m.path
+		_, excepted := requiredWrittenExceptions[key]
+		_, undecided := requiredWrittenUndecided[key]
+		if !excepted && !undecided {
+			t.Errorf("%s does not refuse the omission of %s, which neither requiredWrittenExceptions nor requiredWrittenUndecided lists", m.component, m.path)
 		}
 	}
 	for name, list := range map[string]map[string]string{"requiredWrittenExceptions": requiredWrittenExceptions, "requiredWrittenUndecided": requiredWrittenUndecided} {

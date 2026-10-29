@@ -80,6 +80,17 @@ var cnpgSubscriptionDefaultedZeroFields = map[string]string{
 	"subscriptionReclaimPolicy": `"retain"`,
 }
 
+// cnpgSubscriptionRequiredText is what the generated required paths of the
+// cnpg-subscription kind (kind_required.go) say of themselves (requiredText):
+// the sentences of its hand-kept list, kept byte for byte.
+var cnpgSubscriptionRequiredText = map[string]string{
+	"cluster":             "the CloudNativePG Cluster that subscribes",
+	"name":                "the name of the subscription inside PostgreSQL",
+	"dbname":              "the database the subscription is created in",
+	"publicationName":     "the name of the publication inside the publisher's database",
+	"externalClusterName": "the name of the external cluster that publishes",
+}
+
 // cnpgSubscriptionKind is the cnpg-subscription kind: see policyFreeKind. A
 // Subscription runs no pod and names no image; the publisher's address and
 // credentials are the external cluster's, in the Cluster. validate holds the
@@ -87,14 +98,8 @@ var cnpgSubscriptionDefaultedZeroFields = map[string]string{
 // rules compare a field with its value on the stored object and say nothing
 // of a new one; they and the API's value rules are left to the API server.
 var cnpgSubscriptionKind = &policyFreeKind[cnpgv1.SubscriptionSpec]{
-	upstream: "postgresql.cnpg.io/v1 SubscriptionSpec",
-	required: requiredFields(map[string]string{
-		"cluster":             "the CloudNativePG Cluster that subscribes",
-		"name":                "the name of the subscription inside PostgreSQL",
-		"dbname":              "the database the subscription is created in",
-		"publicationName":     "the name of the publication inside the publisher's database",
-		"externalClusterName": "the name of the external cluster that publishes",
-	}),
+	upstream:       "postgresql.cnpg.io/v1 SubscriptionSpec",
+	required:       generatedKindRequired("cnpg-subscription"),
 	defaultedZeros: cnpgDefaultedZeros(cnpgSubscriptionDefaultedZeroFields),
 	validate: func(spec *cnpgv1.SubscriptionSpec) error {
 		return requireCnpgClusterRef(spec.ClusterRef.Name)

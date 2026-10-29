@@ -54,8 +54,10 @@ import (
 // And that the container runs as root is said here, not held: the policy has
 // no dimension for it.
 //
-// The module ships its CRDs. TestVolsyncKinds_RequiredMatchCRD holds each
-// kind's required list to them, TestVolsyncKinds_NoDefaults the claim that
+// The module ships its CRDs. Each kind's required list is generated from them
+// (kind_required.go, TestKindComponents_RequiredIsGenerated), and
+// TestVolsyncKinds_WrittenEmptyAccepted holds that no other field the types
+// write empty is one the CRD refuses empty; TestVolsyncKinds_NoDefaults the claim that
 // they default nothing under spec, so that no CRD default turns an authored 0
 // or false into another value, and TestVolsyncKinds_NoExpressionRules the claim that they
 // declare no expression rule for a kind to check.
@@ -196,29 +198,41 @@ func replicationDestinationMovers(spec *volsyncv1alpha1.ReplicationDestinationSp
 	return movers
 }
 
-// volsyncMoverRequired is the required list of the movers named, each of
-// which shares MoverConfig: of a volume mounted into the mover that is
-// authored, the API requires where it is mounted and what is mounted, and the
-// Go type writes both whether or not they were authored. So it does the key
-// and the operator of a match expression in the label selectors of the mover's
-// pod affinity and anti-affinity (labelSelectorRequired), which
-// TestLabelSelectorKinds_CoverEverySelector holds to the CRDs, path by path.
-func volsyncMoverRequired(movers ...string) map[string]string {
-	out := make(map[string]string, 2*len(movers))
+// volsyncMoverRequiredText is what the generated required paths of the movers
+// named say of themselves (requiredText), each of which shares MoverConfig:
+// the sentences the kinds' hand-kept lists said before the lists were
+// generated, kept byte for byte. Of a volume mounted into the mover, where it
+// is mounted and what is mounted; the key and the operator of a match
+// expression in the label selectors of the mover's pod affinity and
+// anti-affinity (labelSelectorRequired), which
+// TestLabelSelectorKinds_CoverEverySelector holds to the CRDs, path by path;
+// and the terms of a required node affinity, which
+// refuseVolsyncNullNodeSelectorTerms refuses first, in the same words.
+func volsyncMoverRequiredText(movers ...string) map[string]string {
+	out := make(map[string]string, 3*len(movers))
 	for _, mover := range movers {
 		out[mover+".moverVolumes[].mountPath"] = "the path under /mnt the volume is mounted at in the mover pod"
 		out[mover+".moverVolumes[].volumeSource"] = "what is mounted: a secret, an nfs export or a persistentVolumeClaim"
+		out[mover+".moverAffinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms"] = nodeSelectorTermsText
 		maps.Copy(out, labelSelectorRequired(affinityLabelSelectors(mover+".moverAffinity")...))
 	}
 	return out
 }
 
 // replicationSourceRequired is the required list of the replicationsource
-// kind: the fields the ReplicationSource CRD requires that the Go types write
-// whether or not they were authored. None is at the top level.
-// TestVolsyncKinds_RequiredMatchCRD holds the list to the CRD.
-var replicationSourceRequired = requiredFields(
-	volsyncMoverRequired("rclone", "restic", "rsyncTLS", "syncthing"),
+// kind, generated (kind_required.go): every field the ReplicationSource CRD
+// requires that the Go type writes whether or not it was authored, those of
+// the Kubernetes types a mover embeds (its security context, resource
+// requirements, affinity and volume sources) included. None is at the top
+// level. Each is refused where its parent is authored and it is not, after
+// validateVolsyncMovers.
+var replicationSourceRequired = generatedKindRequired("replicationsource")
+
+// replicationSourceRequiredText is what the generated required paths of the
+// replicationsource kind say of themselves (requiredText): the movers' and a
+// Syncthing peer's sentences, kept byte for byte.
+var replicationSourceRequiredText = requiredFields(
+	volsyncMoverRequiredText("rclone", "restic", "rsyncTLS", "syncthing"),
 	map[string]string{
 		"syncthing.peers[].address":    "the address the Syncthing node connects to the peer at",
 		"syncthing.peers[].ID":         "the peer's Syncthing device ID",
@@ -227,9 +241,14 @@ var replicationSourceRequired = requiredFields(
 )
 
 // replicationDestinationRequired is the required list of the
-// replicationdestination kind, as replicationSourceRequired is the source's.
-// A destination has no Syncthing mover.
-var replicationDestinationRequired = volsyncMoverRequired("rclone", "restic", "rsyncTLS")
+// replicationdestination kind, generated as replicationSourceRequired is.
+var replicationDestinationRequired = generatedKindRequired("replicationdestination")
+
+// replicationDestinationRequiredText is what the generated required paths of
+// the replicationdestination kind say of themselves, as
+// replicationSourceRequiredText is the source's. A destination has no
+// Syncthing mover.
+var replicationDestinationRequiredText = volsyncMoverRequiredText("rclone", "restic", "rsyncTLS")
 
 // refuseVolsyncNullNodeSelectorTerms refuses a mover whose affinity authors a
 // required node affinity without its terms: corev1.NodeSelector writes

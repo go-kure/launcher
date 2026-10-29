@@ -46,6 +46,14 @@ func (h *CiliumBGPAdvertisementHandler) PropertySchema() map[string]oam.Property
 	}
 }
 
+// ciliumBGPAdvertisementRequiredText is what the generated required paths of
+// the cilium-bgpadvertisement kind (kind_required.go) say of themselves
+// (requiredText): the sentences of its hand-kept list, kept byte for byte.
+var ciliumBGPAdvertisementRequiredText = requiredFields(map[string]string{
+	"advertisements":                     "the list of what is advertised",
+	"advertisements[].advertisementType": "what the entry advertises: PodCIDR, CiliumPodIPPool, Service or Interface",
+}, labelSelectorRequired("advertisements[].selector"))
+
 // ciliumBGPAdvertisementKind is the cilium-bgpadvertisement kind: see
 // policyFreeKind. validate holds the five expression rules of the CRD, each
 // one comparison of an entry's advertisementType with the presence of one
@@ -54,10 +62,7 @@ func (h *CiliumBGPAdvertisementHandler) PropertySchema() map[string]oam.Property
 // `service`. The API's other value rules are left to the API server.
 var ciliumBGPAdvertisementKind = &policyFreeKind[ciliumv2.CiliumBGPAdvertisementSpec]{
 	upstream: "cilium.io/v2 CiliumBGPAdvertisementSpec",
-	required: requiredFields(map[string]string{
-		"advertisements":                     "the list of what is advertised",
-		"advertisements[].advertisementType": "what the entry advertises: PodCIDR, CiliumPodIPPool, Service or Interface",
-	}, labelSelectorRequired("advertisements[].selector")),
+	required: generatedKindRequired("cilium-bgpadvertisement"),
 	validate: validateCiliumBGPAdvertisements,
 	build: func(name, _ string, spec *ciliumv2.CiliumBGPAdvertisementSpec) client.Object {
 		advertisement := kurecilium.CreateCiliumBGPAdvertisement(name)

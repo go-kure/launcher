@@ -48,13 +48,14 @@ func (h *ReplicationSourceHandler) PropertySchema() map[string]oam.PropertySchem
 
 // replicationSourceKind is the replicationsource kind: see policyHeldKind.
 // The API requires no field at the top level of the spec; of a mover that is
-// authored it requires the fields replicationSourceRequired lists, each of
-// which the type would write empty. The policy reaches what sizes the mover
-// and its volumes (enforceVolsyncMovers).
+// authored it requires the fields its generated required list holds
+// (replicationSourceRequired), each of which the type would write empty,
+// refused after validate. The policy reaches what sizes the mover and its
+// volumes (enforceVolsyncMovers).
 var replicationSourceKind = &policyHeldKind[volsyncv1alpha1.ReplicationSourceSpec]{
 	policyFreeKind: policyFreeKind[volsyncv1alpha1.ReplicationSourceSpec]{
-		upstream: "volsync.backube/v1alpha1 ReplicationSourceSpec",
-		required: replicationSourceRequired,
+		upstream:          "volsync.backube/v1alpha1 ReplicationSourceSpec",
+		generatedRequired: replicationSourceRequired,
 		validate: func(spec *volsyncv1alpha1.ReplicationSourceSpec) error {
 			return validateVolsyncMovers(replicationSourceMovers(spec))
 		},

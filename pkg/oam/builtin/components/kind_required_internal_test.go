@@ -145,49 +145,71 @@ func webKeyFileInstead(at string) kindForcedParent {
 // generatedKindRequiredLists are the required lists of the generated kinds,
 // by component, as the kinds hold them.
 var generatedKindRequiredLists = map[string]map[string]string{
-	"certificate":              certificateKind.required,
-	"clusterissuer":            clusterIssuerKind.required,
-	"issuer":                   issuerKind.required,
-	"cnpg-cluster":             cnpgClusterRequired,
-	"cnpg-database":            cnpgDatabaseRequired,
-	"cnpg-objectstore":         cnpgObjectStoreRequired,
-	"cnpg-pooler":              cnpgPoolerRequired,
-	"clusterexternalsecret":    clusterExternalSecretKind.required,
-	"clustersecretstore":       clusterSecretStoreKind.required,
-	"externalsecret":           externalSecretKind.required,
-	"secretstore":              secretStoreKind.required,
-	"alertmanager":             alertmanagerKind.generatedRequired,
-	"podmonitor":               podMonitorKind.generatedRequired,
-	"prometheus":               prometheusKind.generatedRequired,
-	"prometheus-probe":         prometheusProbeKind.generatedRequired,
-	"prometheusrule":           prometheusRuleKind.generatedRequired,
-	"servicemonitor":           serviceMonitorKind.generatedRequired,
-	"thanosruler":              thanosRulerKind.generatedRequired,
-	"artifactgenerator":        artifactGeneratorKind.required,
-	"bucket":                   bucketRequired,
-	"fluxcd-alert":             fluxcdAlertKind.required,
-	"fluxcd-kustomization":     fluxcdKustomizationRequired,
-	"fluxcd-provider":          fluxcdProviderKind.required,
-	"fluxcd-receiver":          fluxcdReceiverKind.required,
-	"gitrepository":            gitRepositoryRequired,
-	"helmchart":                helmChartRequired,
-	"helmrelease":              helmReleaseRequired,
-	"helmrepository":           helmRepositoryRequired,
-	"imagepolicy":              imagePolicyKind.required,
-	"imagerepository":          imageRepositoryKind.required,
-	"imageupdateautomation":    imageUpdateAutomationKind.required,
-	"ocirepository":            ociRepositoryRequired,
-	"resourcesetinputprovider": resourceSetInputProviderKind.required,
-	"backendtlspolicy":         backendTLSPolicyKind.required,
-	"gateway":                  gatewayKind.required,
-	"gatewayclass":             gatewayClassKind.required,
-	"grpcroute":                grpcRouteRequired,
-	"httproute":                httpRouteRequired,
-	"listenerset":              listenerSetKind.required,
-	"referencegrant":           referenceGrantKind.required,
-	"tcproute":                 tcpRouteKind.required,
-	"tlsroute":                 tlsRouteKind.required,
-	"udproute":                 udpRouteKind.required,
+	"certificate":                  certificateKind.required,
+	"clusterissuer":                clusterIssuerKind.required,
+	"issuer":                       issuerKind.required,
+	"cnpg-cluster":                 cnpgClusterRequired,
+	"cnpg-database":                cnpgDatabaseRequired,
+	"cnpg-objectstore":             cnpgObjectStoreRequired,
+	"cnpg-pooler":                  cnpgPoolerRequired,
+	"clusterexternalsecret":        clusterExternalSecretKind.required,
+	"clustersecretstore":           clusterSecretStoreKind.required,
+	"externalsecret":               externalSecretKind.required,
+	"secretstore":                  secretStoreKind.required,
+	"alertmanager":                 alertmanagerKind.generatedRequired,
+	"podmonitor":                   podMonitorKind.generatedRequired,
+	"prometheus":                   prometheusKind.generatedRequired,
+	"prometheus-probe":             prometheusProbeKind.generatedRequired,
+	"prometheusrule":               prometheusRuleKind.generatedRequired,
+	"servicemonitor":               serviceMonitorKind.generatedRequired,
+	"thanosruler":                  thanosRulerKind.generatedRequired,
+	"artifactgenerator":            artifactGeneratorKind.required,
+	"bucket":                       bucketRequired,
+	"fluxcd-alert":                 fluxcdAlertKind.required,
+	"fluxcd-kustomization":         fluxcdKustomizationRequired,
+	"fluxcd-provider":              fluxcdProviderKind.required,
+	"fluxcd-receiver":              fluxcdReceiverKind.required,
+	"gitrepository":                gitRepositoryRequired,
+	"helmchart":                    helmChartRequired,
+	"helmrelease":                  helmReleaseRequired,
+	"helmrepository":               helmRepositoryRequired,
+	"imagepolicy":                  imagePolicyKind.required,
+	"imagerepository":              imageRepositoryKind.required,
+	"imageupdateautomation":        imageUpdateAutomationKind.required,
+	"ocirepository":                ociRepositoryRequired,
+	"resourcesetinputprovider":     resourceSetInputProviderKind.required,
+	"backendtlspolicy":             backendTLSPolicyKind.required,
+	"gateway":                      gatewayKind.required,
+	"gatewayclass":                 gatewayClassKind.required,
+	"grpcroute":                    grpcRouteRequired,
+	"httproute":                    httpRouteRequired,
+	"listenerset":                  listenerSetKind.required,
+	"referencegrant":               referenceGrantKind.required,
+	"tcproute":                     tcpRouteKind.required,
+	"tlsroute":                     tlsRouteKind.required,
+	"udproute":                     udpRouteKind.required,
+	"replicationdestination":       replicationDestinationKind.generatedRequired,
+	"replicationsource":            replicationSourceKind.generatedRequired,
+	"metallb-bgpadvertisement":     metallbBGPAdvertisementKind.required,
+	"metallb-bgppeer":              metallbBGPPeerKind.required,
+	"metallb-ipaddresspool":        metallbIPAddressPoolKind.required,
+	"metallb-l2advertisement":      metallbL2AdvertisementKind.required,
+	"cnpg-backup":                  cnpgBackupKind.required,
+	"cnpg-clusterimagecatalog":     cnpgClusterImageCatalogKind.required,
+	"cnpg-databaserole":            cnpgDatabaseRoleKind.required,
+	"cnpg-imagecatalog":            cnpgImageCatalogKind.required,
+	"cnpg-publication":             cnpgPublicationKind.required,
+	"cnpg-scheduledbackup":         cnpgScheduledBackupKind.required,
+	"cnpg-subscription":            cnpgSubscriptionKind.required,
+	"cilium-bgpadvertisement":      ciliumBGPAdvertisementKind.required,
+	"cilium-bgpclusterconfig":      ciliumBGPClusterConfigKind.required,
+	"cilium-bgpnodeconfigoverride": ciliumBGPNodeConfigOverrideKind.required,
+	"cilium-bgppeerconfig":         ciliumBGPPeerConfigKind.required,
+	"cilium-cidrgroup":             ciliumCIDRGroupKind.required,
+	"cilium-egressgatewaypolicy":   ciliumEgressGatewayPolicyKind.required,
+	"cilium-loadbalancerippool":    ciliumLoadBalancerIPPoolKind.required,
+	"cilium-localredirectpolicy":   ciliumLocalRedirectPolicyKind.required,
+	"cilium-nodeconfig":            ciliumNodeConfigKind.required,
 }
 
 // requiredWrittenKind returns the measured kind of a component.
@@ -613,10 +635,17 @@ func TestKindComponents_GeneratedRequiredHeld(t *testing.T) {
 // ships one and that certManagerKinds does not name, by component: the module
 // and the file under its directory.
 var generatedKindCRDFiles = map[string]struct{ modulePath, file string }{
-	"cnpg-cluster":     {cnpgModulePath, cnpgCRDs + "clusters.yaml"},
-	"cnpg-database":    {cnpgModulePath, cnpgCRDs + "databases.yaml"},
-	"cnpg-objectstore": {barmanCloudModulePath, "config/crd/bases/barmancloud.cnpg.io_objectstores.yaml"},
-	"cnpg-pooler":      {cnpgModulePath, cnpgCRDs + "poolers.yaml"},
+	"cnpg-cluster":             {cnpgModulePath, cnpgCRDs + "clusters.yaml"},
+	"cnpg-database":            {cnpgModulePath, cnpgCRDs + "databases.yaml"},
+	"cnpg-objectstore":         {barmanCloudModulePath, "config/crd/bases/barmancloud.cnpg.io_objectstores.yaml"},
+	"cnpg-pooler":              {cnpgModulePath, cnpgCRDs + "poolers.yaml"},
+	"cnpg-backup":              {cnpgModulePath, cnpgCRDs + "backups.yaml"},
+	"cnpg-clusterimagecatalog": {cnpgModulePath, cnpgCRDs + "clusterimagecatalogs.yaml"},
+	"cnpg-databaserole":        {cnpgModulePath, cnpgCRDs + "databaseroles.yaml"},
+	"cnpg-imagecatalog":        {cnpgModulePath, cnpgCRDs + "imagecatalogs.yaml"},
+	"cnpg-publication":         {cnpgModulePath, cnpgCRDs + "publications.yaml"},
+	"cnpg-scheduledbackup":     {cnpgModulePath, cnpgCRDs + "scheduledbackups.yaml"},
+	"cnpg-subscription":        {cnpgModulePath, cnpgCRDs + "subscriptions.yaml"},
 	// The Gateway API's module ships the CRDs of both channels; the
 	// experimental one holds every field the Go types do.
 	"backendtlspolicy": {gatewayAPIModulePath, gatewayAPICRDFile("experimental", "backendtlspolicies")},
@@ -632,6 +661,52 @@ var generatedKindCRDFiles = map[string]struct{ modulePath, file string }{
 	// The Flux Operator's module ships its CRDs; the Flux controllers'
 	// modules ship none.
 	"resourcesetinputprovider": {"github.com/controlplaneio-fluxcd/flux-operator", fluxOperatorCRDs[resourceSetInputProviderType]},
+	// VolSync's module ships the CRDs its chart installs.
+	"replicationdestination": {volsyncModulePath, volsyncCRDs + "replicationdestinations.yaml"},
+	"replicationsource":      {volsyncModulePath, volsyncCRDs + "replicationsources.yaml"},
+	// So does MetalLB's.
+	"metallb-bgpadvertisement": {metallbModulePath, metallbCRDDir + "/metallb.io_bgpadvertisements.yaml"},
+	"metallb-bgppeer":          {metallbModulePath, metallbCRDDir + "/metallb.io_bgppeers.yaml"},
+	"metallb-ipaddresspool":    {metallbModulePath, metallbCRDDir + "/metallb.io_ipaddresspools.yaml"},
+	"metallb-l2advertisement":  {metallbModulePath, metallbCRDDir + "/metallb.io_l2advertisements.yaml"},
+	// So does Cilium's.
+	"cilium-bgpadvertisement":      {ciliumBGPModulePath, ciliumCRDs + "ciliumbgpadvertisements.yaml"},
+	"cilium-bgpclusterconfig":      {ciliumBGPModulePath, ciliumCRDs + "ciliumbgpclusterconfigs.yaml"},
+	"cilium-bgpnodeconfigoverride": {ciliumBGPModulePath, ciliumCRDs + "ciliumbgpnodeconfigoverrides.yaml"},
+	"cilium-bgppeerconfig":         {ciliumBGPModulePath, ciliumCRDs + "ciliumbgppeerconfigs.yaml"},
+	"cilium-cidrgroup":             {ciliumBGPModulePath, ciliumCRDs + "ciliumcidrgroups.yaml"},
+	"cilium-egressgatewaypolicy":   {ciliumBGPModulePath, ciliumCRDs + "ciliumegressgatewaypolicies.yaml"},
+	"cilium-loadbalancerippool":    {ciliumBGPModulePath, ciliumCRDs + "ciliumloadbalancerippools.yaml"},
+	"cilium-localredirectpolicy":   {ciliumBGPModulePath, ciliumCRDs + "ciliumlocalredirectpolicies.yaml"},
+	"cilium-nodeconfig":            {ciliumBGPModulePath, ciliumCRDs + "ciliumnodeconfigs.yaml"},
+}
+
+// generatedKindCRDVersions are the versions the kinds emit of the CRDs
+// generatedKindCRDFiles names, where that version is not v1.
+var generatedKindCRDVersions = map[string]string{
+	"replicationdestination":       "v1alpha1",
+	"replicationsource":            "v1alpha1",
+	"metallb-bgpadvertisement":     metallbVersion,
+	"metallb-bgppeer":              metallbPeerVersion,
+	"metallb-ipaddresspool":        metallbVersion,
+	"metallb-l2advertisement":      metallbVersion,
+	"cilium-bgpadvertisement":      ciliumBGPVersion,
+	"cilium-bgpclusterconfig":      ciliumBGPVersion,
+	"cilium-bgpnodeconfigoverride": ciliumBGPVersion,
+	"cilium-bgppeerconfig":         ciliumBGPVersion,
+	"cilium-cidrgroup":             ciliumBGPVersion,
+	"cilium-egressgatewaypolicy":   ciliumBGPVersion,
+	"cilium-loadbalancerippool":    ciliumBGPVersion,
+	"cilium-localredirectpolicy":   ciliumBGPVersion,
+	"cilium-nodeconfig":            ciliumBGPVersion,
+}
+
+// generatedKindCRDVersion is the version of its CRD a generated kind emits.
+func generatedKindCRDVersion(component string) string {
+	if version, ok := generatedKindCRDVersions[component]; ok {
+		return version
+	}
+	return "v1"
 }
 
 // generatedKindsWithoutCRD are the generated kinds whose linked module ships no
@@ -806,7 +881,7 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 			base := bases[0]
 			var create *crdCreate
 			if crd := generatedKindCRDOf(t, component); crd != nil {
-				create = crdCreateOf(t, crd, "v1")
+				create = crdCreateOf(t, crd, generatedKindCRDVersion(component))
 			}
 			list := generatedKindRequiredLists[component]
 			generated := generatedRequiredPaths(t, k)

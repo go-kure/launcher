@@ -39,13 +39,18 @@ func (h *CiliumCIDRGroupHandler) PropertySchema() map[string]oam.PropertySchema 
 	}
 }
 
+// ciliumCIDRGroupRequiredText is what the generated required paths of the
+// cilium-cidrgroup kind (kind_required.go) say of themselves (requiredText):
+// the sentences of its hand-kept list, kept byte for byte.
+var ciliumCIDRGroupRequiredText = map[string]string{
+	"externalCIDRs": "the CIDRs of the group; an empty list is a group that selects no peer",
+}
+
 // ciliumCIDRGroupKind is the cilium-cidrgroup kind: see policyFreeKind. The
 // CRD has no expression rule; the form of a CIDR is left to the API server.
 var ciliumCIDRGroupKind = &policyFreeKind[ciliumv2.CiliumCIDRGroupSpec]{
 	upstream: "cilium.io/v2 CiliumCIDRGroupSpec",
-	required: map[string]string{
-		"externalCIDRs": "the CIDRs of the group; an empty list is a group that selects no peer",
-	},
+	required: generatedKindRequired("cilium-cidrgroup"),
 	build: func(name, _ string, spec *ciliumv2.CiliumCIDRGroupSpec) client.Object {
 		group := kurecilium.CreateCiliumCIDRGroup(name)
 		spec.DeepCopyInto(&group.Spec)

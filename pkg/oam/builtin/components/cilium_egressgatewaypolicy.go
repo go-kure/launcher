@@ -68,26 +68,31 @@ func (h *CiliumEgressGatewayPolicyHandler) PropertySchema() map[string]oam.Prope
 	}
 }
 
+// ciliumEgressGatewayPolicyRequiredText is what the generated required paths
+// of the cilium-egressgatewaypolicy kind (kind_required.go) say of themselves
+// (requiredText): the sentences of its hand-kept list, kept byte for byte.
+var ciliumEgressGatewayPolicyRequiredText = requiredFields(
+	map[string]string{
+		"selectors":                     "the source pods the policy applies to",
+		"destinationCIDRs":              "the destination CIDRs the policy applies to",
+		"egressGateway":                 "the gateway node; the API requires it also where egressGateways names the gateways",
+		"egressGateway.nodeSelector":    "the label query over the nodes the gateway is chosen from",
+		"egressGateways[].nodeSelector": "the label query over the nodes the gateway is chosen from",
+	},
+	labelSelectorRequired("egressGateway.nodeSelector"),
+	labelSelectorRequired("egressGateways[].nodeSelector"),
+	labelSelectorRequired("selectors[].namespaceSelector"),
+	labelSelectorRequired("selectors[].podSelector"),
+	labelSelectorRequired("selectors[].nodeSelector"),
+)
+
 // ciliumEgressGatewayPolicyKind is the cilium-egressgatewaypolicy kind: see
 // policyFreeKind. The CRD's one expression rule, declared on the egressIP of
 // each gateway, holds a single field to the form of an IP address and is left
 // to the API server with the API's other value rules.
 var ciliumEgressGatewayPolicyKind = &policyFreeKind[ciliumv2.CiliumEgressGatewayPolicySpec]{
 	upstream: "cilium.io/v2 CiliumEgressGatewayPolicySpec",
-	required: requiredFields(
-		map[string]string{
-			"selectors":                     "the source pods the policy applies to",
-			"destinationCIDRs":              "the destination CIDRs the policy applies to",
-			"egressGateway":                 "the gateway node; the API requires it also where egressGateways names the gateways",
-			"egressGateway.nodeSelector":    "the label query over the nodes the gateway is chosen from",
-			"egressGateways[].nodeSelector": "the label query over the nodes the gateway is chosen from",
-		},
-		labelSelectorRequired("egressGateway.nodeSelector"),
-		labelSelectorRequired("egressGateways[].nodeSelector"),
-		labelSelectorRequired("selectors[].namespaceSelector"),
-		labelSelectorRequired("selectors[].podSelector"),
-		labelSelectorRequired("selectors[].nodeSelector"),
-	),
+	required: generatedKindRequired("cilium-egressgatewaypolicy"),
 	build: func(name, _ string, spec *ciliumv2.CiliumEgressGatewayPolicySpec) client.Object {
 		policy := kurecilium.CreateCiliumEgressGatewayPolicy(name)
 		spec.DeepCopyInto(&policy.Spec)

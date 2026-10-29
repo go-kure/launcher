@@ -40,7 +40,7 @@ func (h *CnpgClusterImageCatalogHandler) PropertySchema() map[string]oam.Propert
 var cnpgClusterImageCatalogKind = &policyHeldKind[cnpgv1.ImageCatalogSpec]{
 	policyFreeKind: policyFreeKind[cnpgv1.ImageCatalogSpec]{
 		upstream: "postgresql.cnpg.io/v1 ImageCatalogSpec",
-		required: cnpgImageCatalogRequired,
+		required: generatedKindRequired("cnpg-clusterimagecatalog"),
 		validate: validateCnpgImageCatalog,
 		build: func(name, _ string, spec *cnpgv1.ImageCatalogSpec) client.Object {
 			catalog := kurecnpg.CreateClusterImageCatalog(name)

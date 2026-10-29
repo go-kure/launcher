@@ -17,8 +17,11 @@ import (
 //
 // A Go type does not say which of its fields the API requires, defaults or
 // holds to an expression rule. The module ships the CRDs, so that is read from
-// those, in tests: TestMetalLBKinds_RequiredMatchCRD holds each kind's
-// required list to the fields the CRD requires and the type writes unauthored,
+// those, in tests. The required lists of the pool, the two advertisements and
+// the peer are generated from the CRDs (kind_required.go), and
+// TestMetalLBKinds_RequiredMatchCRD holds each kind's required list, the BFD
+// profile's and the community's empty, to the fields the CRD requires and the
+// type writes unauthored,
 // TestMetalLBKinds_NoDefaultIsLost the claim that no CRD default turns an
 // authored 0 or false into another value unless the kind refuses that value,
 // and TestMetalLBKinds_ExpressionRules each expression rule a CRD declares to
@@ -39,11 +42,12 @@ func metallbKind(kind string) schema.GroupKind {
 	return schema.GroupKind{Group: metallbv1beta1.GroupVersion.Group, Kind: kind}
 }
 
-// metallbSelectorsRequired is the required list of the label selectors under
-// each path of lists ("nodeSelectors", "serviceAllocation.serviceSelectors"),
-// every one a list of Kubernetes label selectors: the two fields the API
-// requires of a match expression, each of which the Go type would write empty
-// (labelSelectorRequired).
+// metallbSelectorsRequired is what the generated required paths of the label
+// selectors under each path of lists ("nodeSelectors",
+// "serviceAllocation.serviceSelectors"), every one a list of Kubernetes label
+// selectors, say of themselves (requiredText): the two fields the API requires
+// of a match expression, each of which the Go type would write empty
+// (labelSelectorRequired), in the words the kinds' hand-kept lists said them.
 func metallbSelectorsRequired(lists ...string) map[string]string {
 	required := map[string]string{}
 	for _, at := range lists {
@@ -51,3 +55,8 @@ func metallbSelectorsRequired(lists ...string) map[string]string {
 	}
 	return required
 }
+
+// metallbAdvertisementRequiredText is what the generated required paths of
+// the metallb-l2advertisement and metallb-bgpadvertisement kinds say of
+// themselves: those of their three lists of selectors.
+var metallbAdvertisementRequiredText = metallbSelectorsRequired("ipAddressPoolSelectors", "nodeSelectors", "serviceSelectors")

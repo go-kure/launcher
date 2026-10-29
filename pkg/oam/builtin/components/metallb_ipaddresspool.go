@@ -53,14 +53,19 @@ func (h *MetalLBIPAddressPoolHandler) PropertySchema() map[string]oam.PropertySc
 	}
 }
 
+// metallbIPAddressPoolRequiredText is what the generated required paths of the
+// metallb-ipaddresspool kind (kind_required.go) say of themselves
+// (requiredText): the sentences of its hand-kept list, kept byte for byte.
+var metallbIPAddressPoolRequiredText = requiredFields(map[string]string{
+	"addresses": "the address ranges MetalLB may hand to Services; an empty list is a pool with no address",
+}, metallbSelectorsRequired("serviceAllocation.namespaceSelectors", "serviceAllocation.serviceSelectors"))
+
 // metallbIPAddressPoolKind is the metallb-ipaddresspool kind: see
 // policyFreeKind. The CRD has no expression rule, and an address range is not
 // read: its form is MetalLB's to refuse.
 var metallbIPAddressPoolKind = &policyFreeKind[metallbv1beta1.IPAddressPoolSpec]{
 	upstream: "metallb.io/v1beta1 IPAddressPoolSpec",
-	required: requiredFields(map[string]string{
-		"addresses": "the address ranges MetalLB may hand to Services; an empty list is a pool with no address",
-	}, metallbSelectorsRequired("serviceAllocation.namespaceSelectors", "serviceAllocation.serviceSelectors")),
+	required: generatedKindRequired("metallb-ipaddresspool"),
 	build: func(name, namespace string, spec *metallbv1beta1.IPAddressPoolSpec) client.Object {
 		pool := kuremetallb.CreateIPAddressPool(name, namespace)
 		spec.DeepCopyInto(&pool.Spec)

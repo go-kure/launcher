@@ -1105,7 +1105,10 @@ and by scope, whatever component or trait emits it.
   `postgresql`, onto `cnpg-scheduledbackup` (go-kure/launcher#1001, §6.3).
   - **No capability is required and nothing gates them.**
   - The required lists are read from the CRDs of the linked module and held to them by
-    a test. The five kinds that refer to a Cluster hold `cluster.name` to a name a
+    a test. Since go-kure/launcher#883 they are generated from those CRDs, with the same
+    paths and messages as the lists kept by hand before, read in the same place, and the
+    API server answers a row of each type that holds a generated field. The five kinds
+    that refer to a Cluster hold `cluster.name` to a name a
     Cluster can have, as `cnpg-pooler` and `cnpg-database` do.
   - The CRDs carry 26 expression rules. The 15 that read one document are checked: a
     catalog's one image per major version and one component image per key; a role's
@@ -1219,13 +1222,17 @@ and by scope, whatever component or trait emits it.
   cert-manager kinds, the four External Secrets kinds, `cnpg-cluster`,
   `cnpg-objectstore` and `cnpg-database`, the Prometheus operator's `servicemonitor`,
   `podmonitor`, `prometheus-probe` and `prometheusrule`, the fourteen Flux kinds,
-  `resourcesetinputprovider` and the ten Gateway API kinds; `cnpg-pooler` keeps one
-  named exception, the `containers: []` it writes into its template, which the Pooler
-  CRD accepts, and `prometheus`, `alertmanager` and `thanosruler` keep eight each
-  pinned, the owner reference fields of an ephemeral claim template's metadata, which a
-  follow-up settles on the operator's CRDs together with the monitoring kinds' API
-  server rows; the API server rows of the Flux controllers' kinds, on their CRDs, follow
-  in a follow-up too); the pin holds 223 fields, all of VolSync's two kinds but those.
+  `resourcesetinputprovider`, the ten Gateway API kinds, VolSync's `replicationsource`
+  and `replicationdestination`, the four MetalLB kinds that require a field, the seven
+  further CloudNativePG kinds and the nine Cilium kinds other than the two network
+  policies, whose one rule's list is kept by hand and refuses every derived field;
+  `cnpg-pooler` keeps one named exception, the `containers: []` it writes into its
+  template, which the Pooler CRD accepts, and `prometheus`, `alertmanager` and
+  `thanosruler` keep eight each pinned, the owner reference fields of an ephemeral claim
+  template's metadata, which a follow-up settles on the operator's CRDs together with
+  the monitoring kinds' API server rows; the API server rows of the Flux controllers'
+  kinds, on their CRDs, follow in that follow-up too); the pin holds those 25 fields
+  only, each an exception or undecided.
 - **Shipped: three kinds of cert-manager's `cert-manager.io/v1` API,** `issuer`,
   `clusterissuer` and `certificate` (`issuer.go`, `clusterissuer.go`, `certificate.go`,
   with what they share in `certmanager_common.go`), each the strict projection of its
@@ -1286,7 +1293,8 @@ and by scope, whatever component or trait emits it.
   - The required lists follow the rule of the Prometheus operator's kinds, read from the
     CRDs of the linked module: a
     test holds each list to the CRD's `required` entries the Go type would write
-    unauthored.
+    unauthored. Since go-kure/launcher#883 the lists are generated from those CRDs, with
+    the same paths and messages as the lists kept by hand before.
   - The CRDs carry six expression rules. The five on an advertisement entry (`service`
     with type `Service` and only with it, `interface` with type `Interface` and only
     with it, no `selector` with type `PodCIDR`) are checked: each compares authored
@@ -1315,7 +1323,9 @@ and by scope, whatever component or trait emits it.
   cluster-scoped; the redirect policy and the node configuration are namespaced.
   - **No capability is required and none gates them,** as for the BGP kinds.
   - The required lists are read from the CRDs of the linked module and held to them by
-    a test, with the helper the BGP kinds use for a selector's match expressions.
+    a test, with the helper the BGP kinds use for a selector's match expressions. Since
+    go-kure/launcher#883 they are generated from those CRDs, with the same paths and
+    messages as the lists kept by hand before.
   - A redirect frontend takes exactly one of `addressMatcher` and `serviceMatcher`: the
     CRD's schema says so, it is one comparison of authored fields, and the kind refuses
     neither and both.
@@ -1350,7 +1360,9 @@ and by scope, whatever component or trait emits it.
     fields the Cilium type writes whether or not they were authored. Two optional
     fields are required as well, a listener's `priority` and the `kind` of its Envoy
     configuration, because the type writes an unauthored one as `0` and as the empty
-    string, and the API refuses both.
+    string, and the API refuses both. The list is kept by hand, not generated
+    (go-kure/launcher#883): it is one rule's list, shared with the trait and read under
+    `spec` and `specs`, and it refuses every field the derivation finds.
   - **Hosts are not checked:** the names a rule holds (`toFQDNs`, DNS rules, an HTTP
     `host`, server names) and its CIDRs are not artifact sources and are not held to
     the allowed registries. **No literal secret is checked:** an HTTP header match's
@@ -1604,7 +1616,9 @@ and by scope, whatever component or trait emits it.
   - **No capability is required and none gates them.**
   - The required lists are read from the CRDs of the linked module and held to them by
     a test: a pool's `addresses`, and the key and the operator of a selector's match
-    expression in the three kinds that hold selectors.
+    expression in the three kinds that hold selectors. Since go-kure/launcher#883 these
+    four lists are generated from those CRDs, with the same paths and messages as before;
+    a BFD profile's and a community's CRDs require no field.
   - The defaults the CRDs declare are carried: a pool's `autoAssign` and a BGP
     advertisement's two aggregation lengths sit on pointers, and `avoidBuggyIPs`
     defaults to the `false` the Go type omits; a test holds the defaults to that. The
@@ -2139,9 +2153,16 @@ and by scope, whatever component or trait emits it.
     the linked module. A cluster that runs another version of the operator may add
     others, which the kind does not know, and that the container runs as root is not
     held: the policy has no dimension for it.
-  - Required fields follow the rule of the Prometheus operator's kinds. A test holds
-    each list to the CRDs the linked module ships (75 paths for a source, 54 for a
-    destination): of a volume mounted into a mover its `mountPath` and `volumeSource`,
+  - Required fields follow the rule of the Prometheus operator's kinds. Since
+    go-kure/launcher#883 each list is generated from the CRDs the linked module ships
+    (192 paths for a source, 142 for a destination, 75 and 54 before) and refused after
+    the kinds' own checks: an omitted required field of a Kubernetes type a mover embeds
+    (an affinity term's `topologyKey` or `weight`, a node selector requirement's `key`
+    and `operator`, a resource claim's `name`, a seccomp profile's `type`, a sysctl, the
+    required fields of an NFS, claim or Secret volume source) is refused as well, where
+    it was written empty before. The API server answers a row of each such type on those
+    CRDs. The paths include, of a volume mounted into a mover its `mountPath` and
+    `volumeSource`,
     of a Syncthing peer its `address`, `ID` and `introducer`, and the `key` and
     `operator` of a match expression in the label selectors of a mover's pod affinity
     and anti-affinity, presence only (go-kure/launcher#790); the test of the label
@@ -2509,7 +2530,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Shipped | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` | §7 | Shipped | — |
 | [go-kure/launcher#849](https://github.com/go-kure/launcher/issues/849) | Policy refusals carry a class | §5.3 | Shipped | — |
-| [go-kure/launcher#883](https://github.com/go-kure/launcher/issues/883) | Refuse every required field a kind writes unauthored, from one generated list | §6.2 | Partly: the generator and its rule; the cert-manager, External Secrets, CloudNativePG (`cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-database`), Prometheus operator, Flux, Flux Operator and Gateway API kinds. VolSync's two kinds follow | — |
+| [go-kure/launcher#883](https://github.com/go-kure/launcher/issues/883) | Refuse every required field a kind writes unauthored, from one generated list | §6.2 | Partly: the generator and its rule; the cert-manager, External Secrets, CloudNativePG (`cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-database`), Prometheus operator, Flux, Flux Operator, Gateway API and VolSync kinds; the MetalLB, further CloudNativePG and Cilium kinds but the two network policies. In progress: the follow-up that vendors the Prometheus operator's and Flux controllers' CRDs remains | — |
 | [go-kure/launcher#934](https://github.com/go-kure/launcher/issues/934) | Object kind policy (the decision of [go-kure/launcher#922](https://github.com/go-kure/launcher/issues/922)) | §5.4 | Shipped | go-kure/launcher#849 |
 | [go-kure/launcher#959](https://github.com/go-kure/launcher/issues/959) | One rule for every Service-derived name, with its cluster-version limit | §3.5 | Shipped | — |
 | [go-kure/launcher#1001](https://github.com/go-kure/launcher/issues/1001) | Complete CNPG backup and recovery to S3 through OAM lowering | §6.3 | Shipped | — |

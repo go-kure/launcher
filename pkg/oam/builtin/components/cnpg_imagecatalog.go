@@ -38,13 +38,13 @@ func (h *CnpgImageCatalogHandler) PropertySchema() map[string]oam.PropertySchema
 }
 
 // cnpgImageCatalogKind is the cnpg-imagecatalog kind: see policyHeldKind and
-// cnpgImageCatalogRequired, validateCnpgImageCatalog (the CRD's expression
+// cnpgImageCatalogRequiredText, validateCnpgImageCatalog (the CRD's expression
 // rules and the tag rule) and enforceCnpgImageCatalogPolicy, which it shares
 // with cnpg-clusterimagecatalog.
 var cnpgImageCatalogKind = &policyHeldKind[cnpgv1.ImageCatalogSpec]{
 	policyFreeKind: policyFreeKind[cnpgv1.ImageCatalogSpec]{
 		upstream: "postgresql.cnpg.io/v1 ImageCatalogSpec",
-		required: cnpgImageCatalogRequired,
+		required: generatedKindRequired("cnpg-imagecatalog"),
 		validate: validateCnpgImageCatalog,
 		build: func(name, namespace string, spec *cnpgv1.ImageCatalogSpec) client.Object {
 			catalog := kurecnpg.CreateImageCatalog(name, namespace)
@@ -88,12 +88,11 @@ func cnpgImageCatalogSchema(kind string) map[string]oam.PropertySchema {
 	}
 }
 
-// cnpgImageCatalogRequired is the required list of the cnpg-imagecatalog and
-// cnpg-clusterimagecatalog kinds: the fields the ImageCatalog and
-// ClusterImageCatalog CRDs require that the Go types write whether or not they
-// were authored. TestCnpgFurtherKinds_RequiredMatchCRD holds the list to the
-// CRDs.
-var cnpgImageCatalogRequired = requiredFields(map[string]string{
+// cnpgImageCatalogRequiredText is what the generated required paths of the
+// cnpg-imagecatalog and cnpg-clusterimagecatalog kinds (kind_required.go) say
+// of themselves (requiredText): the sentences of their hand-kept list, kept
+// byte for byte.
+var cnpgImageCatalogRequiredText = requiredFields(map[string]string{
 	"images":                            "the PostgreSQL images of the catalog",
 	"images[].image":                    "the image reference",
 	"images[].major":                    "the PostgreSQL major version of the image",

@@ -12,7 +12,6 @@ import (
 
 	volsyncv1alpha1 "github.com/backube/volsync/api/v1alpha1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -28,23 +27,22 @@ const volsyncModulePath = "github.com/backube/volsync"
 const volsyncNodeSelectorTerms = ".moverAffinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms"
 
 // volsyncKinds lists the kind components of VolSync's API with the CRD of the
-// object each emits, the spec type it decodes into, its required list and the
-// movers of the type that hold an affinity (MoverConfig).
+// object each emits, the spec type it decodes into and the movers of the type
+// that hold an affinity (MoverConfig).
 var volsyncKinds = []struct {
 	component string
 	handler   oam.ComponentHandler
 	crd       string
 	typ       reflect.Type
-	required  map[string]string
 	movers    []string
 }{
 	{
 		"replicationsource", &ReplicationSourceHandler{}, "replicationsources.yaml", reflect.TypeFor[volsyncv1alpha1.ReplicationSourceSpec](),
-		replicationSourceKind.required, []string{"rclone", "restic", "rsyncTLS", "syncthing"},
+		[]string{"rclone", "restic", "rsyncTLS", "syncthing"},
 	},
 	{
 		"replicationdestination", &ReplicationDestinationHandler{}, "replicationdestinations.yaml", reflect.TypeFor[volsyncv1alpha1.ReplicationDestinationSpec](),
-		replicationDestinationKind.required, []string{"rclone", "restic", "rsyncTLS"},
+		[]string{"rclone", "restic", "rsyncTLS"},
 	},
 }
 
@@ -54,42 +52,25 @@ func volsyncCRD(t *testing.T, file string) string {
 	return filepath.Join(linkedModuleDir(t, volsyncModulePath), filepath.FromSlash(volsyncCRDs+file))
 }
 
-// TestVolsyncKinds_RequiredMatchCRD holds the kinds of VolSync's API. From the
-// CRDs of the linked module it derives
-// the fields of VolSync's own types that the API requires and the type would
-// write unauthored, and holds each kind's required list to them, both ways: a
-// dependency bump that adds, drops or moves one fails here, naming it. Every
-// other field of those types that is written unauthored is held to its schema:
-// none may be refused empty.
-//
-// Of the Kubernetes types these specs embed (a pod security context, resource
-// requirements, an affinity, three volume sources), only a field the CRD
-// refuses as the type writes it unauthored is derived, and the kinds answer
-// those outside their required lists: the terms of a required node affinity,
-// which refuseVolsyncNullNodeSelectorTerms refuses and
-// TestKindComponents_NullRequired shows with the CRDs' validator. The set
-// derived must be exactly those, one per mover that holds an affinity. One
-// pair more is derived, as a field of VolSync's own types is: the key and the
-// operator of a label selector's match expression, which the CRDs require and
-// the type writes empty. TestLabelSelectorKinds_CoverEverySelector shows, path
-// by path, what the API server answers for them.
-func TestVolsyncKinds_RequiredMatchCRD(t *testing.T) {
-	expression := reflect.TypeFor[metav1.LabelSelectorRequirement]()
+// TestVolsyncKinds_WrittenEmptyAccepted holds, on the CRDs of the linked
+// module, the fields of VolSync's own types that reach the API server empty
+// with nobody having authored them. The kinds' required lists are generated
+// from the same CRDs (TestKindComponents_RequiredIsGenerated), the fields of
+// the Kubernetes types the movers embed included, and follow what was
+// authored: a required field under a struct the author left out is not asked
+// for. Where the type writes that struct anyway, the field reaches the API
+// server as its zero value, and so does every field the type writes that the
+// API does not require. The test holds each of those to its schema: none may
+// be refused empty, or the kind would emit an object the API server refuses
+// for a field the author never wrote.
+func TestVolsyncKinds_WrittenEmptyAccepted(t *testing.T) {
 	for _, kind := range volsyncKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			props, required := crdSpecProperties(t, volsyncCRD(t, kind.crd), "v1alpha1")
-			listed, empty, embedded := map[string]bool{}, map[string]bool{}, map[string]bool{}
+			var empty []string
 			fields := 0
 			walkKindFields(kind.typ, func(f kindField) bool { return required[f.path] }, func(f kindField) {
 				if !strings.HasPrefix(f.owner.PkgPath(), volsyncModulePath+"/") {
-					prop, ok := props[f.path]
-					switch {
-					case !ok || !required[f.path] || !f.writtenUnauthored():
-					case f.owner == expression:
-						listed[f.path] = true
-					case f.encodesNull() || crdRefusesZero(prop, f.field.Type) != "":
-						embedded[f.path] = true
-					}
 					return
 				}
 				fields++
@@ -98,19 +79,10 @@ func TestVolsyncKinds_RequiredMatchCRD(t *testing.T) {
 					t.Errorf("%s (%s.%s) is no property of the CRD; the paths are keyed wrongly", f.path, f.owner, f.field.Name)
 					return
 				}
-				if !f.writtenUnauthored() {
+				if !f.writtenUnauthored() || required[f.path] && !f.forced {
 					return
 				}
-				if required[f.path] {
-					if strings.Contains(f.path, "{}") {
-						t.Errorf("%s is required under a map value, which a required list cannot name", f.path)
-					}
-					listed[f.path] = true
-					if !f.forced {
-						return
-					}
-				}
-				empty[f.path] = true
+				empty = append(empty, f.path)
 				if why := crdRefusesZero(prop, f.field.Type); why != "" {
 					t.Errorf("%s is written empty where the author wrote nothing, and the API refuses that: %s; the kind must refuse the omission or fill the field", f.path, why)
 				}
@@ -118,24 +90,11 @@ func TestVolsyncKinds_RequiredMatchCRD(t *testing.T) {
 			if fields == 0 {
 				t.Fatalf("the walk found no field of %s", kind.typ)
 			}
-			t.Logf("walked %d fields of VolSync's types; required and written unauthored: %v; of an embedded type, refused as written: %v; written empty unauthored: %v",
-				fields, slices.Sorted(maps.Keys(listed)), slices.Sorted(maps.Keys(embedded)), slices.Sorted(maps.Keys(empty)))
-			if got, want := slices.Sorted(maps.Keys(kind.required)), slices.Sorted(maps.Keys(listed)); !slices.Equal(got, want) {
-				t.Errorf("required list = %v\nthe CRD requires %v", got, want)
+			if len(empty) == 0 {
+				t.Fatalf("the walk found no field of %s written empty unauthored", kind.typ)
 			}
-			for path, says := range kind.required {
-				if strings.TrimSpace(says) == "" {
-					t.Errorf("required field %s says nothing of itself", path)
-				}
-			}
-			var terms []string
-			for _, mover := range kind.movers {
-				terms = append(terms, mover+volsyncNodeSelectorTerms)
-			}
-			slices.Sort(terms)
-			if got := slices.Sorted(maps.Keys(embedded)); !slices.Equal(got, terms) {
-				t.Errorf("of the embedded types, the CRD refuses as written unauthored %v\nthe kind's validate answers %v", got, terms)
-			}
+			slices.Sort(empty)
+			t.Logf("walked %d fields of VolSync's types; written empty unauthored: %v", fields, empty)
 		})
 	}
 }

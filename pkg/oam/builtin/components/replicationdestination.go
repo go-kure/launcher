@@ -37,14 +37,14 @@ func (h *ReplicationDestinationHandler) PropertySchema() map[string]oam.Property
 
 // replicationDestinationKind is the replicationdestination kind: see
 // policyHeldKind. The API requires no field at the top level of the spec; of
-// a mover that is authored it requires the fields
-// replicationDestinationRequired lists, each of which the type would write
-// empty. The policy reaches what sizes the mover and its volumes
-// (enforceVolsyncMovers).
+// a mover that is authored it requires the fields its generated required list
+// holds (replicationDestinationRequired), each of which the type would write
+// empty, refused after validate. The policy reaches what sizes the mover and
+// its volumes (enforceVolsyncMovers).
 var replicationDestinationKind = &policyHeldKind[volsyncv1alpha1.ReplicationDestinationSpec]{
 	policyFreeKind: policyFreeKind[volsyncv1alpha1.ReplicationDestinationSpec]{
-		upstream: "volsync.backube/v1alpha1 ReplicationDestinationSpec",
-		required: replicationDestinationRequired,
+		upstream:          "volsync.backube/v1alpha1 ReplicationDestinationSpec",
+		generatedRequired: replicationDestinationRequired,
 		validate: func(spec *volsyncv1alpha1.ReplicationDestinationSpec) error {
 			return validateVolsyncMovers(replicationDestinationMovers(spec))
 		},
