@@ -2451,8 +2451,8 @@ list and the disposition of every item:
 Item 5 was decided as "document" and needed no text: tiers are declared, never
 derived, since go-kure/launcher#783 (§2.2).
 
-`kurel`'s global `-f/--output-file`, which `build` ignores, is filed separately as
-go-kure/launcher#795 and deferred with the rest of the `kurel` CLI work.
+`kurel`'s global `-f/--output-file`, which `build` ignored, was filed separately as
+go-kure/launcher#795; `build` now writes its stream to that file (`pkg/cmd/kurel/README.md`).
 
 ---
 
@@ -2477,7 +2477,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#792](https://github.com/go-kure/launcher/issues/792) | Hook-group child names unique across applications | §3.3 | Shipped | go-kure/launcher#793, go-kure/launcher#787 |
 | [go-kure/launcher#793](https://github.com/go-kure/launcher/issues/793) | One shortening rule | §3.3 | Shipped | — |
 | [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Shipped | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
-| [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` (deferred) | §7 | Open | — |
+| [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` | §7 | Shipped | — |
 | [go-kure/launcher#849](https://github.com/go-kure/launcher/issues/849) | Policy refusals carry a class | §5.3 | Shipped | — |
 | [go-kure/launcher#934](https://github.com/go-kure/launcher/issues/934) | Object kind policy (the decision of [go-kure/launcher#922](https://github.com/go-kure/launcher/issues/922)) | §5.4 | Shipped | go-kure/launcher#849 |
 | [go-kure/launcher#959](https://github.com/go-kure/launcher/issues/959) | One rule for every Service-derived name, with its cluster-version limit | §3.5 | Shipped | — |
