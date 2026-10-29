@@ -235,7 +235,125 @@ func TestBuildCommand_OutputFile(t *testing.T) {
 			if !bytes.Equal(got, want.Bytes()) {
 				t.Errorf("build %s file differs from the stdout stream:\n got: %s\nwant: %s", flag, got, want.String())
 			}
+			info, err := os.Stat(outFile)
+			if err != nil {
+				t.Fatalf("stat %s: %v", outFile, err)
+			}
+			if mode := info.Mode().Perm(); mode != 0600 {
+				t.Errorf("new output file mode = %o, want 600", mode)
+			}
 		})
+	}
+
+	// An existing file is replaced in full and keeps the mode its owner set.
+	t.Run("existing file", func(t *testing.T) {
+		outFile := writeTempFile(t, t.TempDir(), "out.yaml", "stale: earlier build\n"+strings.Repeat("x", 4096))
+		// Set the mode explicitly: writeTempFile's 0644 is subject to the umask.
+		if err := os.Chmod(outFile, 0644); err != nil {
+			t.Fatalf("chmod %s: %v", outFile, err)
+		}
+		cmd := NewKurelCommand()
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SetArgs([]string{"build", appPath, "--profile", profilePath, "-f", outFile})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("build -f failed: %v", err)
+		}
+		got, err := os.ReadFile(outFile)
+		if err != nil {
+			t.Fatalf("reading %s: %v", outFile, err)
+		}
+		if !bytes.Equal(got, want.Bytes()) {
+			t.Errorf("existing file not replaced by the stream:\n got: %s\nwant: %s", got, want.String())
+		}
+		info, err := os.Stat(outFile)
+		if err != nil {
+			t.Fatalf("stat %s: %v", outFile, err)
+		}
+		if mode := info.Mode().Perm(); mode != 0644 {
+			t.Errorf("existing output file mode = %o, want its own 644", mode)
+		}
+	})
+}
+
+// TestBuildCommand_OutputFileRefused: an explicitly empty -f, and -f with
+// --dry-run, are refused before anything is written or printed.
+func TestBuildCommand_OutputFileRefused(t *testing.T) {
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", testAppYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+	outFile := filepath.Join(dir, "out.yaml")
+
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"empty -f":             {[]string{"-f", ""}, "needs a file path"},
+		"empty --output-file=": {[]string{"--output-file="}, "needs a file path"},
+		"-f --dry-run":         {[]string{"-f", outFile, "--dry-run"}, "cannot be used together"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cmd := NewKurelCommand()
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(append([]string{"build", appPath, "--profile", profilePath}, tc.args...))
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want a refusal containing %q, got: %v", tc.want, err)
+			}
+			if out.Len() != 0 {
+				t.Errorf("refused build wrote to stdout:\n%s", out.String())
+			}
+			if _, statErr := os.Stat(outFile); !os.IsNotExist(statErr) {
+				t.Errorf("refused build left %s behind", outFile)
+			}
+		})
+	}
+}
+
+// TestBuildCommand_OutputFileEmptyBuild: a build that renders no objects (a
+// helmtemplate chart holding only a Helm test hook, which helmtemplate drops)
+// writes the empty stream to -f, so the file never keeps an earlier build's
+// manifests.
+func TestBuildCommand_OutputFileEmptyBuild(t *testing.T) {
+	chart := buildMinimalChartTar(t, "testchart", "0.1.0", map[string]string{
+		"testchart/templates/test.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ .Release.Name }}-test\n  annotations:\n    helm.sh/hook: test\n",
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.yaml":
+			fmt.Fprint(w, helmIndexYAML("testchart", "0.1.0", "http://"+r.Host+"/testchart-0.1.0.tgz"))
+		case "/testchart-0.1.0.tgz":
+			_, _ = w.Write(chart)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", hookApp("tests-only", hookComponent("db", "helmtemplate", srv.URL, ""), ""))
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+	outFile := writeTempFile(t, dir, "out.yaml", "stale: earlier build\n")
+
+	cmd := NewKurelCommand()
+	var stderr bytes.Buffer
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath, "-f", outFile})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("build -f failed: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "no resources generated") {
+		t.Fatalf("want the empty-build warning, got stderr:\n%s", stderr.String())
+	}
+	got, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("reading %s: %v", outFile, err)
+	}
+	if len(got) != 0 {
+		t.Errorf("want an empty file, got:\n%s", got)
 	}
 }
 

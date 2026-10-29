@@ -286,7 +286,7 @@ component, and a late component making the source a Flux object names, are admit
 | `--environment` | Named environment whose profile and values stand in for `--profile`/`--values` (see [Named environments](#named-environments)). Mutually exclusive with `--profile` and `--values`. |
 | `--environments` | `EnvironmentSet` file declaring the `--environment` names (default: `environments.yaml` next to `app.yaml`). Requires `--environment`. |
 | `-o, --output` | Output directory (default: stdout). Refused together with `-f/--output-file`. |
-| `-f, --output-file` | The global flag: write the whole stream to this file instead of stdout. The file's directory must exist. Refused together with `--output`. |
+| `-f, --output-file` | The global flag: write the whole stream to this file instead of stdout. The file's directory must exist. A new file is created owner-only (`0600`), since the stream can carry Secret values; an existing file is replaced and keeps its mode. Refused when empty, and together with `--output` or `--dry-run`. |
 | `-n, --namespace` | Namespace override; must be a DNS-1123 label (at most 63 characters, no dots), like `metadata.namespace`. |
 | `--cluster-id` | Cluster identifier (default `local`). |
 | `--values` | Path to a values YAML file (requires a `kurel.yaml` package). The only flag that can supply an `array` or `object` parameter. |
@@ -373,7 +373,8 @@ so a build's output is as sensitive as the `secretValues` it was given.
 ### Warnings
 
 A build that renders no objects warns `no resources generated` on stderr and writes no
-`<app>.yaml` (one an earlier build wrote stays). A build also warns, on stderr and with
+`<app>.yaml` (one an earlier build wrote stays). With `-f` it writes the empty stream, so
+the file never keeps an earlier build's manifests. A build also warns, on stderr and with
 unchanged output, once per PersistentVolume or PersistentVolumeClaim that carries the Flux
 force annotation itself or that the `force-replace` trait covers. One that carries the
 annotation is force-applied: Flux deletes and recreates it on an immutable-field change, and
