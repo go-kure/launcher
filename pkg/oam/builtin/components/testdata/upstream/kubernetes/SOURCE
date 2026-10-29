@@ -2,8 +2,8 @@
 # Licensed under the Apache License, Version 2.0 (each file carries its header);
 # LICENSE is kubernetes/kubernetes's copy of the licence, at the same tag.
 # The components tests check each file against its git blob id below.
-tag v1.37.1
-tag-object d2b770f4c94636a992534a8d3156b6b2d8e82ac3
+tag v1.37.2
+tag-object 1755f07c19a1d4a25955616aabdfdd66e0fbe224
 licence LICENSE d645695673349e3947e8e5ae42332d0ac3164cd7
 file pkg/apis/core/v1/defaults.go bad6446682c6819cf522fff31dac4e7e958d60c9
 file pkg/apis/core/v1/zz_generated.defaults.go e8e2b7181e2c10f22eabd0dbab02cc21354bf253

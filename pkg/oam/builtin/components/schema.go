@@ -152,7 +152,7 @@ func schemaEnvFrom(reserved bool) oam.PropertySchema {
 // ResourceRequirements.Requests/Limits (no separate "extra" bucket).
 //
 // `claims` (corev1.ResourceRequirements.Claims, Dynamic Resource Allocation) is
-// deliberately not projected: the pinned k8s.io/api@v0.37.1 type carries
+// deliberately not projected: the k8s.io/api@v0.37.2 type carries
 // `+featureGate=DynamicResourceAllocation` on that field (unlike procMount, whose
 // alpha rationale proved false — see parseSecurityContext), and a Claims entry
 // only means anything paired with a PodSpec.ResourceClaims entry. The pod-level
