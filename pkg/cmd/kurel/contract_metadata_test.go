@@ -58,7 +58,37 @@ func TestBuiltins_EveryOneDescribesItsContract(t *testing.T) {
 			if !slices.Equal(meta.RequiredCapabilityKeys, wantKeys) {
 				t.Errorf("%s %q: RequiredCapabilityKeys = %v, want %v", position, name, meta.RequiredCapabilityKeys, wantKeys)
 			}
+			if position == "component" && name == "postgresql" {
+				continue // TestNewBuiltinTransformer_PublishesPostgresqlPrerequisites
+			}
+			if meta.Prerequisites != nil {
+				t.Errorf("%s %q declares prerequisites %+v; only postgresql does", position, name, meta.Prerequisites)
+			}
 		}
+	}
+}
+
+// TestNewBuiltinTransformer_PublishesPostgresqlPrerequisites: HandlerContracts
+// publishes postgresql's backup and recovery prerequisites
+// (go-kure/launcher#1027), exactly these, in this order: each names what it
+// is, when it applies, and the operator and plugin carry the versions
+// docs/postgresql-backup-recovery.md gives them.
+func TestNewBuiltinTransformer_PublishesPostgresqlPrerequisites(t *testing.T) {
+	got := newBuiltinTransformer().HandlerContracts().Components["postgresql"].Prerequisites
+	const backup = "backup or recovery set"
+	want := []oam.ContractPrerequisite{
+		{Name: "CloudNativePG operator", Version: "1.26 or later; the objects follow the 1.30.1 API", When: backup},
+		{Name: "Barman Cloud plugin barman-cloud.cloudnative-pg.io", Version: "v0.15.x", When: backup},
+		{Name: "CustomResourceDefinition objectstores.barmancloud.cnpg.io", Version: "v1", When: backup},
+		{Name: "the bucket, and the Secrets s3Credentials and endpointCA name", When: backup},
+		{Name: "the ObjectStore recovery.source.objectStoreName names", When: "recovery.source.objectStoreName set"},
+		{Name: "the Secret recovery.secret.name names, with the owner's credentials", When: "recovery.secret.name set"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf(`HandlerContracts().Components["postgresql"].Prerequisites =
+%+v
+want
+%+v`, got, want)
 	}
 }
 

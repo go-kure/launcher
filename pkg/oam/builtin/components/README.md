@@ -41,6 +41,8 @@ with kustomize-controller's `KustomizationSpec`.
 Every built-in component handler and component lowering rule implements
 `oam.ContractDescriber` (go-kure/launcher#789): family is the component type, version is
 `builtin.ContractVersion` (`v1alpha1`), no capability key is required and none is deprecated.
+Only `postgresql` declares `Prerequisites`: what its `backup` and `recovery` need in the
+cluster (see its entry under "Per-type highlights").
 The four rules (`webservice`, `worker`, `helm`, `postgresql`) also implement
 `oam.LoweringTargetDeclarer`, naming every type they lower into:
 
@@ -11187,7 +11189,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   field it does not know without an error. Check the installed versions, and
   read the applied object back. The backup and recovery guide
   (`docs/postgresql-backup-recovery.md`) walks through both, with the checks
-  that show a backup and a recovery working.
+  that show a backup and a recovery working. The rule's contract metadata
+  carries the same list for a tool to read (`ContractMetadata.Prerequisites`,
+  go-kure/launcher#1027; the oam package README, "Contract metadata"), each
+  entry with the use that needs it, plus the ObjectStore a recovery's
+  `source.objectStoreName` names and the Secret its `secret.name` names, with
+  the owner's credentials. cert-manager is not an entry: what launcher writes
+  does not depend on it, as the plugin's TLS certificates can come from
+  elsewhere.
   **Behavior-changing**: the former `backup` keys `destinationPath`,
   `endpointURL` and `secretName`, which built the Cluster's in-tree
   `barmanObjectStore`, and the top-level `objectStore` and

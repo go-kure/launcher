@@ -110,7 +110,8 @@ func exclusiveProperties(handler any) []ExclusiveGroup {
 
 // ContractMetadata is optional registration metadata describing the contract a
 // handler or lowering rule implements: its family, version, the ClusterProfile
-// capability keys it requires, and deprecation status. It is primarily a discovery/
+// capability keys it requires, what it needs in the cluster beside the build's
+// output, and deprecation status. It is primarily a discovery/
 // documentation surface — the engine does not enforce any of these fields
 // (CapabilityAware.CapabilityRequired is what the engine actually enforces;
 // RequiredCapabilityKeys here is declarative, for a consumer to introspect). Two
@@ -129,6 +130,14 @@ type ContractMetadata struct {
 	// "<type>.<scope>", see buildCapabilityKey) an entity of this contract needs in
 	// the profile to produce correct output.
 	RequiredCapabilityKeys []string
+	// Prerequisites lists what must be in place in the target cluster, or beside
+	// it, for the output to work once applied: an operator, a CRD, an object the
+	// output names and does not create. The build runs offline and checks none
+	// of them; a consumer can read them, for example to check a cluster before
+	// the first apply. nil when the contract declares none, which does not mean
+	// it needs none: a contract whose output is a CRD's object needs that CRD
+	// and its controller whether it lists them or not.
+	Prerequisites []ContractPrerequisite
 	// Deprecated marks the contract as deprecated.
 	Deprecated bool
 	// DeprecationMessage is guidance shown when Deprecated is true (e.g. pointing at
@@ -136,9 +145,22 @@ type ContractMetadata struct {
 	DeprecationMessage string
 }
 
+// ContractPrerequisite is one entry of ContractMetadata.Prerequisites. Every
+// field is text for a reader; none is parsed.
+type ContractPrerequisite struct {
+	// Name says what must be in place, e.g. "CloudNativePG operator".
+	Name string
+	// Version is the version it must be at, e.g. "1.26 or later"; "" when any
+	// version will do or the prerequisite has none.
+	Version string
+	// When says which use of the entity needs it, e.g. "backup or recovery
+	// set"; "" when every use does.
+	When string
+}
+
 // ContractDescriber is an optional interface implemented by component, trait and
 // policy handlers and lowering rules that declare contract metadata: family,
-// version, required capability keys, and deprecation info. Queryable at
+// version, required capability keys, prerequisites, and deprecation info. Queryable at
 // registration time alongside PropertySchema(), through
 // Transformer.HandlerContracts() — the HandlerSchemas-shaped accessor covering all
 // six registries a component, trait or policy type can be claimed by (the three

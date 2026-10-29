@@ -14,6 +14,12 @@ to them.
 ## Prerequisites
 
 launcher builds offline and cannot see the cluster, so it checks none of these.
+A tool can read the same list from the `postgresql` rule's contract metadata
+(`ContractMetadata.Prerequisites`, published through
+`Transformer.HandlerContracts()`; see the oam package README, "Contract
+metadata"), with two more entries a recovery may add: the ObjectStore its
+`source.objectStoreName` names, and the Secret with the owner's credentials its
+`secret.name` names.
 
 | What | Requirement |
 |---|---|

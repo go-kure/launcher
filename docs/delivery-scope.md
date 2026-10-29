@@ -2305,9 +2305,10 @@ and by scope, whatever component or trait emits it.
 - **What happens at apply.** The build does not see the cluster. A missing CRD fails the
   apply; an older CRD can prune a field it does not know without an error. Check the
   installed versions and read the applied object back.
-- **Limits:** the prerequisites are documented, not declared: `oam.ContractMetadata` has no
-  field for an operator or CRD requirement (go-kure/launcher#1027). The user guide and
-  evidence from a live recovery are the ticket's last slice.
+- **Declared, not checked.** The `postgresql` rule declares these in
+  `oam.ContractMetadata.Prerequisites` (go-kure/launcher#1027), each with the use that needs
+  it, for a tool to read; the build checks none of them.
+- **Limits:** the user guide and evidence from a live recovery are the ticket's last slice.
 
 ---
 

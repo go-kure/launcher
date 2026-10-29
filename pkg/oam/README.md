@@ -2177,7 +2177,7 @@ Extend the system by implementing:
 | `ComponentCapabilityDefaults` | `CapabilityDefaults() (key string, properties []string)` — on a `ComponentHandler` whose properties take defaults from a `ClusterProfile` capability. Before `ToApplicationConfig`, the engine fills each listed property the component leaves unauthored (absent or `null`) from that binding's rendering; an authored value, `""` included, wins. It reads only the listed keys, never the rest of the rendering, and records the key in `ConsumedCapabilities` when the profile binds it. A component a lowering rule synthesized is skipped, as a sealed trait is. Each filled value is validated against the component's own `PropertySchema`, which must declare every listed key (go-kure/launcher#751): the trait side's schema may differ. A handler that declares no schema relies on `EvaluateProfile`, which validates the binding only through the trait handler or trait lowering rule of the key's type. Its fill is refused unless that handler or rule validates the rendering: it implements `ValidateAndApplyDefaults`, or the type is not built in and has a `CapabilityDefinition`, whose schema `EvaluateProfile` applies (go-kure/launcher#772). Implemented by `persistentvolumeclaim` (`pvc`, `storageClassName`; go-kure/launcher#742). |
 | `ComponentCapabilityFiller` | `FillCapabilityDefaults(props map[string]any, lctx LoweringContext) (map[string]any, error)` — on a `ComponentHandler` whose capability defaults land below the top level of its properties, where `ComponentCapabilityDefaults` cannot reach. The engine calls it right after `ComponentCapabilityDefaults`, on a component no lowering rule synthesized, and passes the result to `ToApplicationConfig`; an error fails the component. On a kind component `props` no longer holds `objectName`, which the engine took out. It must not mutate `props`, and reads a binding only through `lctx.Capability`, which records the key in `ConsumedCapabilities`; `lctx` carries nothing else. The handler validates the values it fills; the engine's schema check covers only `ComponentCapabilityDefaults` keys. Implemented by `statefulset` (`pvc`'s `storageClassName` into each `volumeClaimTemplates` entry that leaves `storageClass` unauthored; go-kure/launcher#761). |
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
-| `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, deprecation info (see below). Every built-in handler and lowering rule implements it. |
+| `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, prerequisites, deprecation info (see below). Every built-in handler and lowering rule implements it. |
 | `LoweringTargetDeclarer` | `LoweringTargets() LoweringTargets` — on a lowering rule of any kind: the component, trait and policy types it lowers into. `Transformer.Seal` refuses a registry in which one of them is not registered (see Contract metadata). Every built-in lowering rule implements it. |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. |
 | `ApplicationNameSetter` | `SetApplicationName(name string)` — on a component config that builds a name out of the OAM application it belongs to, so the name differs when two differently named applications each have a component of the same name (the application's namespace is not part of it). The transform calls it once, right after `ToApplicationConfig` and before policy and traits, with the name of the document it transforms (the name the application's bundle carries). A config built directly, outside a transform, is never told one. Implemented by `helmtemplate`, whose hook-group child layouts are named `<application>-<component>-NN-<phase-slug>` (go-kure/launcher#792). |
@@ -3151,8 +3151,8 @@ fixed, so the note is historical rather than a live caveat:
 Handlers and lowering rules may implement `ContractDescriber` (`ContractMetadata()
 ContractMetadata`) to declare registration metadata about the contract they
 implement: `Family`, `Version`, `RequiredCapabilityKeys` (the `ClusterProfile`
-capability keys an entity of this contract needs), `Deprecated`, and
-`DeprecationMessage`. It is primarily a discovery/documentation surface — the engine
+capability keys an entity of this contract needs), `Prerequisites` (see below),
+`Deprecated`, and `DeprecationMessage`. It is primarily a discovery/documentation surface — the engine
 does not enforce any of these fields (`CapabilityAware.CapabilityRequired` is what the
 engine actually enforces). Two fields are read. A lowering rule's `Version` composes
 the `"@<version>"` suffix on `Origin.Rule` (see below). `Deprecated` turns every
@@ -3189,6 +3189,27 @@ registered under (`webservice`, `expose`, `placement`), `Version` is
 empty otherwise. No built-in is deprecated. A built-in rule's identity therefore
 reads `component/webservice@v1alpha1`, on `Origin.Rule`, on `LoweringStep.Rule` and
 in a `LoweringError` chain, where it read `component/webservice`.
+
+`Prerequisites` (go-kure/launcher#1027) lists what must be in place in the target
+cluster, or beside it, for the output to work once applied: an operator, a CRD, an
+object the output names and does not create. Each `ContractPrerequisite{ Name,
+Version, When }` is text for a reader: `Version` is `""` when any version will do,
+`When` is the use of the entity that needs it, `""` when every use does. The build
+runs offline and checks none of them, and the engine never reads the field; a
+consumer can, for example to check a cluster before the first apply. Unlike
+`CapabilityAware.CapabilityRequired` it never fails a build. A nil list means none is
+declared, not that none is needed: a contract whose output is a CRD's object needs
+that CRD and its controller whether it lists them or not. Of the built-ins only the
+`postgresql` rule sets it, with the prerequisites of its `backup` and `recovery`
+(When `backup or recovery set`): the CloudNativePG operator, the Barman Cloud
+plugin, its `objectstores.barmancloud.cnpg.io` CRD, and the bucket and Secrets the
+objects name; and, each When its property is set, the ObjectStore
+`recovery.source.objectStoreName` names and the owner's Secret `recovery.secret.name`
+names. `docs/postgresql-backup-recovery.md` has the same list with the
+reasons. cert-manager
+is not on it: the plugin's install recommends it for its own TLS, which can be
+supplied otherwise. **Breaking library change**: `ContractMetadata` gained the
+field, so an unkeyed composite literal of it no longer compiles.
 
 ### Lowering targets and `Seal`
 
