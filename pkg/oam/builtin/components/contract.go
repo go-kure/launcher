@@ -435,8 +435,36 @@ func (OCIRule) LoweringTargets() oam.LoweringTargets {
 	}
 }
 
-// ContractMetadata implements oam.ContractDescriber.
-func (PostgresqlRule) ContractMetadata() oam.ContractMetadata { return contract("postgresql") }
+// ContractMetadata implements oam.ContractDescriber. Its Prerequisites are those
+// of backup and recovery, as docs/postgresql-backup-recovery.md lists them
+// (go-kure/launcher#1027). cert-manager is left out: the plugin's install
+// recommends it for its own TLS, and those certificates can be supplied by
+// other means, so nothing launcher writes depends on it.
+func (PostgresqlRule) ContractMetadata() oam.ContractMetadata {
+	meta := contract("postgresql")
+	meta.Prerequisites = postgresqlBackupPrerequisites()
+	return meta
+}
+
+// postgresqlBackupWhen is the When of every prerequisite of postgresql's
+// backup and recovery.
+const postgresqlBackupWhen = "backup or recovery set" //nolint:gosec // G101: a condition for a reader, not a credential
+
+// postgresqlBackupPrerequisites is what postgresql's backup and recovery need
+// in the cluster: the CloudNativePG operator at the Barman Cloud plugin's
+// minimum, the plugin, its ObjectStore CRD, and the objects the output names
+// and never creates (the bucket and the object store's Secrets; the
+// ObjectStore and the owner's Secret a recovery may name).
+func postgresqlBackupPrerequisites() []oam.ContractPrerequisite {
+	return []oam.ContractPrerequisite{
+		{Name: "CloudNativePG operator", Version: "1.26 or later; the objects follow the 1.30.1 API", When: postgresqlBackupWhen},
+		{Name: "Barman Cloud plugin barman-cloud.cloudnative-pg.io", Version: "v0.15.x", When: postgresqlBackupWhen},
+		{Name: "CustomResourceDefinition objectstores.barmancloud.cnpg.io", Version: "v1", When: postgresqlBackupWhen},
+		{Name: "the bucket, and the Secrets s3Credentials and endpointCA name", When: postgresqlBackupWhen},
+		{Name: "the ObjectStore recovery.source.objectStoreName names", When: "recovery.source.objectStoreName set"},
+		{Name: "the Secret recovery.secret.name names, with the owner's credentials", When: "recovery.secret.name set"},
+	}
+}
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the CloudNativePG kinds,
 // and the policies that order and place what the rule split the component into.
