@@ -39,7 +39,7 @@ func (h *SecretStoreHandler) PropertySchema() map[string]oam.PropertySchema {
 var secretStoreKind = &policyHeldKind[esv1.SecretStoreSpec]{
 	policyFreeKind: policyFreeKind[esv1.SecretStoreSpec]{
 		upstream:       "external-secrets.io/v1 SecretStoreSpec",
-		required:       secretStoreRequired,
+		required:       secretStoreRequired("secretstore"),
 		defaultedZeros: secretStoreDefaultedZeros,
 		validate:       validateSecretStore,
 		build: func(name, namespace string, spec *esv1.SecretStoreSpec) client.Object {

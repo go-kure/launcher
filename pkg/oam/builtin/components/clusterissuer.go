@@ -40,7 +40,7 @@ func (h *ClusterIssuerHandler) PropertySchema() map[string]oam.PropertySchema {
 var clusterIssuerKind = &policyHeldKind[certv1.IssuerSpec]{
 	policyFreeKind: policyFreeKind[certv1.IssuerSpec]{
 		upstream: "cert-manager.io/v1 IssuerSpec",
-		required: issuerRequired,
+		required: generatedKindRequired("clusterissuer"),
 		build: func(name, _ string, spec *certv1.IssuerSpec) client.Object {
 			issuer := certmanager.CreateClusterIssuer(name)
 			spec.DeepCopyInto(&issuer.Spec)

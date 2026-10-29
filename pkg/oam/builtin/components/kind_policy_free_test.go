@@ -1976,7 +1976,14 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 		}
 	}
 	issuerCases := []refusal{
-		{"acme without a server", map[string]any{"acme": map[string]any{"privateKeySecretRef": map[string]any{"name": "acme-account"}}}, "acme.server: required"},
+		{"acme without a server", map[string]any{"acme": map[string]any{"privateKeySecretRef": map[string]any{"name": "acme-account"}}}, "acme.server: required (the URL of the ACME server's directory endpoint)"},
+		// A field the generated list holds with no text of its own reads the
+		// generic sentence.
+		{"pod affinity term without a topology key", acmeIssuer(map[string]any{"http01": map[string]any{"ingress": map[string]any{
+			"podTemplate": map[string]any{"spec": map[string]any{"affinity": map[string]any{"podAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{}},
+			}}}},
+		}}}), "acme.solvers[0].http01.ingress.podTemplate.spec.affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].topologyKey: required (the cert-manager API requires this field)"},
 		{"acme without an account key", map[string]any{"acme": map[string]any{"server": "https://acme.example.com/directory"}}, "acme.privateKeySecretRef: required"},
 		{"account key without a name", map[string]any{"acme": acmeWith("privateKeySecretRef", map[string]any{"key": "tls.key"})}, "acme.privateKeySecretRef.name: required"},
 		{"account binding without a key ID", map[string]any{"acme": acmeWith("externalAccountBinding", map[string]any{"keySecretRef": secretKey("acme-eab", "hmac")})}, "acme.externalAccountBinding.keyID: required"},
@@ -3183,7 +3190,10 @@ func TestPolicyFreeKinds_Refusals(t *testing.T) {
 		}
 	}
 	cases["clusterexternalsecret"] = append(cases["clusterexternalsecret"],
-		refusal{"no properties", nil, "externalSecretSpec: required"},
+		refusal{"no properties", nil, "externalSecretSpec: required (the spec of the ExternalSecrets created in the selected namespaces)"},
+		refusal{"namespace selector expression without an operator", withProperty(clusterExternalSecretOf(map[string]any{}), "namespaceSelectors", []any{
+			map[string]any{"matchExpressions": []any{map[string]any{"key": "tenant"}}},
+		}), "namespaceSelectors[0].matchExpressions[0].operator: required (the operator of the expression: In, NotIn, Exists or DoesNotExist)"},
 		refusal{"null spec", map[string]any{"externalSecretSpec": nil}, "externalSecretSpec: required"},
 		refusal{"a name alone", map[string]any{"externalSecretName": "web-credentials"}, "externalSecretSpec: required"},
 		refusal{"refresh time a number", withProperty(clusterExternalSecretOf(map[string]any{}), "refreshTime", 60), notA},

@@ -13,7 +13,6 @@ import (
 
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
 
@@ -23,16 +22,15 @@ import (
 const certManagerModulePath = "github.com/cert-manager/cert-manager"
 
 // certManagerKinds lists the kind components of that API with the CRD of the
-// object each emits, the spec type it decodes into and its required list.
+// object each emits and the spec type it decodes into.
 var certManagerKinds = []struct {
 	component string
 	crd       string
 	typ       reflect.Type
-	required  map[string]string
 }{
-	{"issuer", "cert-manager.io_issuers.yaml", reflect.TypeFor[certv1.IssuerSpec](), issuerKind.required},
-	{"clusterissuer", "cert-manager.io_clusterissuers.yaml", reflect.TypeFor[certv1.IssuerSpec](), clusterIssuerKind.required},
-	{"certificate", "cert-manager.io_certificates.yaml", reflect.TypeFor[certv1.CertificateSpec](), certificateKind.required},
+	{"issuer", "cert-manager.io_issuers.yaml", reflect.TypeFor[certv1.IssuerSpec]()},
+	{"clusterissuer", "cert-manager.io_clusterissuers.yaml", reflect.TypeFor[certv1.IssuerSpec]()},
+	{"certificate", "cert-manager.io_certificates.yaml", reflect.TypeFor[certv1.CertificateSpec]()},
 }
 
 // certManagerCRD is the path of one CRD of the linked module.
@@ -131,48 +129,26 @@ func crdRefusesZero(s apiextensionsv1.JSONSchemaProps, typ reflect.Type) string 
 	return "its enumeration does not hold " + zero
 }
 
-// TestCertManagerKinds_RequiredMatchCRD derives, from the CRDs of the linked
-// module, the fields of each kind that the API requires and the type would
-// write unauthored, and holds the kind's required list to them. Such a field
-// is in the `required` list of its parent's schema and is encoded when nothing
-// was decoded into it: a struct that is no pointer, or any field without
-// omitempty. A dependency bump that adds, drops or moves one fails here,
-// naming it.
-//
-// The list follows what was authored, so a required field under a struct the
-// author left out is not asked for. Where the type writes that struct anyway,
-// the field reaches the API server as its zero value with nobody having
-// authored it, and so does every field the type writes that the API does not
-// require. The test holds each of those to its schema: none may be refused
-// empty, or the kind would emit an object the API server refuses for a field
-// the author never wrote.
-//
-// Every such field of cert-manager's own types is derived. Of a Kubernetes or
-// Gateway API type these specs embed, only a field the CRD refuses as the type
-// writes it unauthored is: one written null, which the API server drops before
-// it validates (the terms of a required node affinity), and one whose empty
-// value the schema's own rules refuse (the name of a parent reference).
-// TestKindComponents_NullRequired shows those refusals with the CRDs'
-// validator. One pair more is derived, as a field of cert-manager's own types
-// is: the key and the operator of a label selector's match expression, which
-// the CRDs require and the type writes empty.
-// TestLabelSelectorKinds_CoverEverySelector shows, path by path, what the API
-// server answers for them. The other required fields of an embedded type are
-// written empty, and no kind refuses their omission (the key and operator of a
-// node selector requirement, the topology key of an affinity term).
-func TestCertManagerKinds_RequiredMatchCRD(t *testing.T) {
-	expression := reflect.TypeFor[metav1.LabelSelectorRequirement]()
+// TestCertManagerKinds_WrittenEmptyAccepted holds, on the CRDs of the linked
+// module, the fields of cert-manager's own types that reach the API server
+// empty with nobody having authored them. The kinds' required lists are
+// generated from the same CRDs (TestKindComponents_RequiredIsGenerated), and
+// follow what was authored: a required field under a struct the author left
+// out is not asked for. Where the type writes that struct anyway, the field
+// reaches the API server as its zero value, and so does every field the type
+// writes that the API does not require. The test holds each of those to its
+// schema: none may be refused empty, or the kind would emit an object the API
+// server refuses for a field the author never wrote.
+// TestKindComponents_GeneratedRequiredBothWays shows, for each required field
+// under such a struct, the API server accepting the object without it.
+func TestCertManagerKinds_WrittenEmptyAccepted(t *testing.T) {
 	for _, kind := range certManagerKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			props, required := crdSpecProperties(t, certManagerCRD(t, kind.crd), "v1")
-			listed, empty, embedded := map[string]bool{}, map[string]bool{}, map[string]bool{}
+			var empty []string
 			fields := 0
 			walkKindFields(kind.typ, func(f kindField) bool { return required[f.path] }, func(f kindField) {
 				if !strings.HasPrefix(f.owner.PkgPath(), certManagerModulePath+"/") {
-					prop, ok := props[f.path]
-					if ok && required[f.path] && f.writtenUnauthored() && (f.owner == expression || f.encodesNull() || crdRefusesZero(prop, f.field.Type) != "") {
-						listed[f.path], embedded[f.path] = true, true
-					}
 					return
 				}
 				fields++
@@ -181,19 +157,10 @@ func TestCertManagerKinds_RequiredMatchCRD(t *testing.T) {
 					t.Errorf("%s (%s.%s) is no property of the CRD; the paths are keyed wrongly", f.path, f.owner, f.field.Name)
 					return
 				}
-				if !f.writtenUnauthored() {
+				if !f.writtenUnauthored() || required[f.path] && !f.forced {
 					return
 				}
-				if required[f.path] {
-					if strings.Contains(f.path, "{}") {
-						t.Errorf("%s is required under a map value, which a required list cannot name", f.path)
-					}
-					listed[f.path] = true
-					if !f.forced {
-						return
-					}
-				}
-				empty[f.path] = true
+				empty = append(empty, f.path)
 				if why := crdRefusesZero(prop, f.field.Type); why != "" {
 					t.Errorf("%s is written empty where the author wrote nothing, and the API refuses that: %s; the kind must refuse the omission or fill the field", f.path, why)
 				}
@@ -201,16 +168,11 @@ func TestCertManagerKinds_RequiredMatchCRD(t *testing.T) {
 			if fields == 0 {
 				t.Fatalf("the walk found no field of %s", kind.typ)
 			}
-			t.Logf("walked %d fields of cert-manager's types; required and written unauthored: %v; of them, of an embedded type: %v; written empty unauthored: %v",
-				fields, slices.Sorted(maps.Keys(listed)), slices.Sorted(maps.Keys(embedded)), slices.Sorted(maps.Keys(empty)))
-			if got, want := slices.Sorted(maps.Keys(kind.required)), slices.Sorted(maps.Keys(listed)); !slices.Equal(got, want) {
-				t.Errorf("required list = %v\nthe CRD requires %v", got, want)
+			if len(empty) == 0 {
+				t.Fatalf("the walk found no field of %s written empty unauthored", kind.typ)
 			}
-			for path, says := range kind.required {
-				if strings.TrimSpace(says) == "" {
-					t.Errorf("required field %s says nothing of itself", path)
-				}
-			}
+			slices.Sort(empty)
+			t.Logf("walked %d fields of cert-manager's types; written empty unauthored: %v", fields, empty)
 		})
 	}
 }

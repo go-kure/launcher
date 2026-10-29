@@ -75,6 +75,9 @@ type apiSource struct {
 	// known says the source describes the field. A field the source does not
 	// describe is neither required nor defaulted.
 	known func(kindField) bool
+	// nullable says the schema takes a null for the field; nil where the
+	// source does not say.
+	nullable func(kindField) bool
 }
 
 // crdAPISource is the schema of the named version of the CRD in file, a path
@@ -210,8 +213,9 @@ func markerAPISource(t *testing.T) apiSource {
 			opts := f.jsonOptions()
 			return m.required || ok && !m.optional && !slices.Contains(opts, "omitempty") && !slices.Contains(opts, "omitzero")
 		},
-		def:   func(f kindField) (string, bool) { m, _ := of(f); return m.def, m.hasDefault },
-		known: func(f kindField) bool { _, ok := of(f); return ok },
+		def:      func(f kindField) (string, bool) { m, _ := of(f); return m.def, m.hasDefault },
+		known:    func(f kindField) bool { _, ok := of(f); return ok },
+		nullable: func(f kindField) bool { m, _ := of(f); return m.nullable },
 	}
 }
 

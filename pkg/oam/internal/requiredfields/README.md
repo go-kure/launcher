@@ -18,14 +18,20 @@ what was authored.
   maps, lists and scalars in which a field authored as null is absent, along each
   path of `required`, and returns `<path>: required (<what the field is>)` for
   the first field left out where its parent is authored. A path is a json path
-  with `[]` for a list element (`ingress[].authentication.mode`); the error names
-  the element by its index (`ingress[0].authentication.mode`). Under a parent the
-  author left out nothing is required. Keys match case-insensitively, as the
-  decode's do. Where a document writes one field in two spellings
+  with `[]` for a list element (`ingress[].authentication.mode`) and `{}` for
+  every value of a map (`tablespaceStorage{}.kind`), the steps applied left to
+  right where a field has several (`proxyConnectHeader{}[].key`, every element
+  of every list the map holds). The error names a list element by its index
+  (`ingress[0].authentication.mode`) and a map value by its key
+  (`proxyConnectHeader[Accept][0].key`), the key quoted where it holds a dot.
+  Under a parent the author left out nothing is required. A struct field's key
+  matches case-insensitively, as the decode's does; a map's keys are entries,
+  descended as written. Where a document writes one field in two spellings
   (`fromEndpoints` and `FromEndpoints`) the decode keeps one or merges both, so
   each spelling is held to the list and the error names the one that leaves the
-  field out. Paths are read in sorted order, the spellings of a field in theirs
-  and a list in its own, so the field reported is the same on every build.
+  field out. Paths are read in sorted order, the spellings of a field in theirs,
+  a list in its own and a map's keys in theirs, so the field reported is the
+  same on every build.
 - `LabelSelector(at)` is the required list of one label selector under `at`:
   the `key` and `operator` of each match expression. The Kubernetes type and
   Cilium's copy of it declare the two fields alike, so the kinds of both read

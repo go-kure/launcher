@@ -59,6 +59,9 @@ type fieldMarkers struct {
 	// def is the field's default, unquoted; hasDefault says there is one.
 	def        string
 	hasDefault bool
+	// nullable says the field is marked +nullable: the schema takes a null
+	// for it, which the API server keeps.
+	nullable bool
 }
 
 // fieldDefaultMarker is a default marker, as the CRD generator spells it
@@ -156,6 +159,8 @@ func markersOf(doc *ast.CommentGroup) fieldMarkers {
 			m.required = true
 		case line == "+optional", line == "+kubebuilder:validation:Optional", line == "+k8s:optional":
 			m.optional = true
+		case line == "+nullable":
+			m.nullable = true
 		default:
 			if def := fieldDefaultMarker.FindStringSubmatch(line); def != nil {
 				m.def, m.hasDefault = strings.Trim(strings.TrimSpace(def[1]), `"`), true

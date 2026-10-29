@@ -7510,23 +7510,34 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     and under `gatewayHTTPRoute`), on an issuer and a clusterissuer: its `key`
     and `operator`. Presence only: the operator's value and its `values` are
     left to the API server (see "A label selector's match expressions").
+  - Of every other type these specs embed, Kubernetes or Gateway API, each
+    field the CRD requires and the type writes unauthored, as of
+    cert-manager's own: under an HTTP01 solver's pod template, the `key` and
+    `operator` of a node selector requirement, the `topologyKey` of a pod
+    affinity term, the `weight` and the term of a preferred or weighted one,
+    a sysctl's `name` and `value` and a seccomp profile's `type`
+    (`…podAffinity.requiredDuringSchedulingIgnoredDuringExecution[0].topologyKey:
+    required (the cert-manager API requires this field)`).
   - A required field under a parent the author left out is not asked for: the
-    list follows what was authored.
+    list follows what was authored. Where that parent is one the type writes
+    unauthored and the CRD does not require (a keystore's
+    `passwordSecretRef`, a Route 53 solver's `secretAccessKeySecretRef`, an
+    RFC 2136 solver's `tsigSecretSecretRef`, a Vault Kubernetes auth's
+    `secretRef`), its `name` is asked for only where the parent is authored;
+    the API server accepts the object with the parent left out.
 
-  `TestCertManagerKinds_RequiredMatchCRD` holds the lists (96 paths for an
-  issuer, 8 for a certificate) to the CRDs the linked module ships, which are
-  the ones cert-manager's chart installs: every field of cert-manager's own
-  types that a CRD requires and the type writes unauthored is listed, with the
-  fields of an embedded type above (the three, and the `key` and `operator` of
-  an expression at each of the 16 selectors), and nothing else is. A
-  dependency bump that adds, drops or moves one fails there.
-  `TestLabelSelectorKinds_CoverEverySelector` shows, at each of those
-  selectors, what the API server answers for an expression without its `key`
-  or its `operator`. **Not refused:**
-  - every other required field of a Kubernetes or Gateway API type these
-    specs embed (the `key` and `operator` of a node selector requirement, the
-    `topologyKey` of an affinity term): the type writes it empty, and the
-    CRDs accept it so;
+  The lists are generated from the CRDs the linked module ships, which are
+  the ones cert-manager's chart installs (see "Required fields a kind writes
+  unauthored and does not refuse"): every field a CRD requires and the type
+  writes unauthored is listed, whatever type declares it, and nothing else
+  is; a field the kind gives no text of its own reads the generic one. A
+  dependency bump that adds, drops or moves one fails
+  `TestKindComponents_RequiredIsGenerated` until the list is regenerated.
+  `TestKindComponents_GeneratedRequiredBothWays` builds each field authored
+  and refuses its omission, and runs one per type through the CRD's own
+  validation, which refuses it too. `TestLabelSelectorKinds_CoverEverySelector`
+  shows, at each of the 16 label selectors, what the API server answers for
+  an expression without its `key` or its `operator`. **Not refused:**
   - every other value rule of the CRDs (enumerations, lengths, minima, and
     the one rule the CRDs write as an expression: that a `venafi` issuer
     names exactly one of `tpp`, `cloud` and `ngts`);
@@ -8431,8 +8442,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - **A store's `provider`, and inside the provider that is authored
     everything the API requires of it.** The list is not written by hand: it
     is generated from the types of the linked module
-    (`zz_generated_externalsecrets_required.go`), 263 paths at this pin, over
-    every provider the API has. `provider.vault.server`,
+    (`zz_generated_kind_required.go`), 265 paths at this pin, over every
+    provider the API has, with the two of a condition's `namespaceSelector`
+    below. `provider.vault.server`,
     `provider.aws.region`, `provider.aws.service`, `provider.webhook.url` and
     `provider.kubernetes.auth.serviceAccount.name` are five of them. The
     refusal names the path and says which of two things it is: `provider.vault.server:
@@ -8454,7 +8466,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - Of a match expression authored in a condition's `namespaceSelector`: its
     `key` and `operator`. Presence only: the operator's value and its
     `values` are left to the API server (see "A label selector's match
-    expressions"). 2 paths, beside the generated ones.
+    expressions").
   - An `externalsecret` has no required top-level field. Of what is authored:
     a `data` entry's `secretKey`, `remoteRef` and its `key`; the `key` of an
     `extract`; the `source` and `target` of a `rewrite`'s `regexp` and the
@@ -8463,34 +8475,36 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `duration`; of a `target.manifest` its `apiVersion` and `kind`; of a
     ConfigMap or Secret a template is read from
     (`target.template.templateFrom[]`) its `name`, its `items` and an item's
-    `key`. 23 paths.
+    `key`. 23 paths: 21 generated, and the `kind` and `name` of a `data`
+    entry's `generatorRef`, which the generator does not reach (the kind
+    refuses that `generatorRef` wherever it is authored) and the kind holds
+    beside them.
   - A `clusterexternalsecret`: `externalSecretSpec`, and under it everything
     an `externalsecret` requires; and the `key` and `operator` of a match
     expression authored in `namespaceSelector` or in an entry of
-    `namespaceSelectors`, presence only. 28 paths.
+    `namespaceSelectors`, presence only. 28 paths, 26 of them generated.
   - The published schema marks the two top-level ones as required
     (go-kure/launcher#790): `provider` of a `secretstore` and of a
     `clustersecretstore`, and `externalSecretSpec` of a
     `clusterexternalsecret`. That refuses no component that built before,
     since the kind refused each without it already.
 
-  `TestExternalSecretsKinds_RequiredMatchSource` holds the three lists to the
-  source of the linked module, which ships no CRD: the markers its CRDs are
-  generated from are read from the Go files. A field counts as required where
-  its json tag has no `omitempty` and it carries no optional marker, and as
-  written unauthored where the Go type encodes it when it is unset. Of the
-  Kubernetes types the specs embed, only a match expression's `key` and
-  `operator` are derived, by the same rule on the source of the linked
-  `metav1.LabelSelectorRequirement`; every other required field of such a
-  type is not refused, and an omitted one is emitted empty.
-  `TestExternalSecretsKinds_StoreRequiredIsGenerated` fails where the
-  generated file and that derivation differ, in either direction and for
-  either list, and names the path; a dependency bump that adds, drops or moves
-  one fails there. Regenerate with `UPDATE_EXTERNALSECRETS_REQUIRED=1 go test
-  ./pkg/oam/builtin/components/ -run
-  TestExternalSecretsKinds_StoreRequiredIsGenerated`. No field of the four
-  specs is required and omitted by the type when unauthored at this pin; the
-  same test fails on the first one a bump brings.
+  The lists are derived from the source of the linked module, which ships no
+  CRD: the markers its CRDs are generated from are read from the Go files. A
+  field counts as required where its json tag has no `omitempty` and it
+  carries no optional marker, and as written unauthored where the Go type
+  encodes it when it is unset; a Kubernetes type the specs embed is read by
+  the same rule on the linked source, whatever type declares the field (see
+  "Required fields a kind writes unauthored and does not refuse").
+  `TestKindComponents_RequiredIsGenerated` fails where the generated file and
+  that derivation differ, in either direction and for either list, and names
+  the path; a dependency bump that adds, drops or moves one fails there.
+  Regenerate with `UPDATE_KIND_REQUIRED=1 go test ./pkg/oam/builtin/components/
+  -run TestKindComponents_RequiredIsGenerated`. The texts are the ones the
+  kinds held by hand before the lists were generated, byte for byte.
+  `TestExternalSecretsKinds_RequiredMatchSource` shows that no field of the
+  four specs is required and omitted by the type when unauthored at this pin,
+  and fails on the first one a bump brings.
 
   **The API's count and expression rules.** Every rule the source declares on
   a type these specs reach is classified in `TestExternalSecretsKinds_Rules`,
@@ -12889,7 +12903,34 @@ did not write and does not show the omission. A kind refuses the omission of suc
 where its required list or its own validation names it (`helmrelease` checks a `valuesFrom`
 entry's `kind` and `name` by hand); every other one is written and left to the API server and to
 the operator. The section above and each kind's entry list the ones that are refused. This
-section states the ones that are not, as they are at this pin.
+section states the rule that refuses them where a kind's list is generated, and the ones that
+are not refused, as they are at this pin.
+
+**Generated lists.** The required list of `issuer`, `clusterissuer`, `certificate`,
+`secretstore`, `clustersecretstore`, `externalsecret` and `clusterexternalsecret` is generated:
+every field the kind's API requires and its Go type writes unauthored is refused where the
+author leaves it out under an authored parent, whatever type declares it. The paths are in
+`zz_generated_kind_required.go` (`kindRequiredPaths`), read through the same derivation as the
+measurement below (`deriveRequiredWritten`), so the two cannot drift.
+`TestKindComponents_RequiredIsGenerated` fails where the file differs from the derivation, a
+path added or gone, so a dependency bump that moves a field fails CI until the file is
+regenerated with `UPDATE_KIND_REQUIRED=1` (refused where `CI` is set). Left out, each by a named
+rule and never by the type that declares it:
+
+- a field whose written value the API takes as authored (the valid values below);
+- a field the schema gives a default, that is not nullable and that the type writes `null`:
+  the API server drops that null and fills the default (`cnpg-cluster`'s
+  `replicationSlots.synchronizeReplicas.enabled`);
+- a field under a path the kind refuses whatever is authored there (see Method);
+- an entry of `requiredWrittenExceptions`, the test's named exceptions (none at this pin).
+
+A refusal reads the kind's own text for the field where it has one, else `the <API> API
+requires this field` (or `requires the name of what this refers to`, for a reference's
+`name`). A field under a parent the type writes unauthored and the API does not require is
+asked for only where that parent is authored; the generated file names each such field with
+what the API server answers for the object with the parent left out, and the test holds every
+one to an answer. Of the stores, the fields whose API default never applies because the type
+writes them (`secretStoreUnappliedDefaults`) are generated by the same test.
 
 **Families.** The test names each field by the type that holds it:
 
@@ -12908,10 +12949,9 @@ match expression), has no member: those are refused on every kind
 
 | Kind | Not refused | AFF | SEC | POD | KIND |
 |---|---|---|---|---|---|
-| `issuer`, `clusterissuer` | 42 each | 36 | 6 | | |
 | `replicationsource` | 113 | 72 | 16 | 25 | |
 | `replicationdestination` | 85 | 54 | 12 | 19 | |
-| `cnpg-cluster` | 157 | 18 | 7 | 52 | 80 |
+| `cnpg-cluster` | 156 | 18 | 7 | 52 | 79 |
 | `cnpg-pooler` | 178 | 18 | 8 | 147 | 5 |
 | `cnpg-database` | 11 | | | | 11 |
 | `cnpg-objectstore` | 29 | | | 9 | 20 |
@@ -12925,15 +12965,15 @@ match expression), has no member: those are refused on every kind
 | `gitrepository` | 6 | | | | 6 |
 | `helmchart`, `helmrepository` | 3 each | | | | 3 |
 
-None is left on `certificate`, the eleven Cilium kinds, `gatewayclass`, `gateway`,
+None is left on the seven kinds whose list is generated (`issuer`, `clusterissuer`,
+`certificate` and the four External Secrets kinds), the eleven Cilium kinds, `gatewayclass`, `gateway`,
 `listenerset`, `referencegrant`, `backendtlspolicy`, `tcproute`, `udproute`, `tlsroute`,
 `metallb-ipaddresspool`,
 `metallb-l2advertisement`, `metallb-bgpadvertisement`, `metallb-bgppeer`, `cnpg-imagecatalog`,
 `cnpg-clusterimagecatalog`, `cnpg-backup`, `cnpg-scheduledbackup`, `cnpg-databaserole`,
 `cnpg-publication`, `cnpg-subscription`, `prometheusrule`,
 `artifactgenerator`, `fluxcd-alert`, `fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`,
-`imagerepository`, `imageupdateautomation`, `resourcesetinputprovider`, `secretstore`,
-`clustersecretstore`, `externalsecret` and `clusterexternalsecret`. `metallb-bfdprofile` and
+`imagerepository`, `imageupdateautomation` and `resourcesetinputprovider`. `metallb-bfdprofile` and
 `metallb-community` are not measured: their CRDs require no field.
 `TestRequiredWrittenKinds_CoverEveryCRDKind` holds the measured kinds to the kind inventory:
 every `kind` row whose API group client-go's scheme does not register, so a CRD serves it, is
@@ -12952,12 +12992,15 @@ the operator.
 listed: `cnpg-cluster`'s `instances` (`1`, the CRD's default) and
 `postgresql.syncReplicaElectionConstraint.enabled` (`false`, which the CRD requires and gives
 no default; the Go type's zero value is a valid one); of the Flux kinds, `interval` of
-`bucket`, `fluxcd-kustomization`, `gitrepository`, `helmchart`, `helmrelease` and
-`ocirepository` (`"1h0m0s"`, the kind's own default), a verification's `provider` on
-`helmchart`, `helmrelease` (`chart.spec.verify.provider`) and `ocirepository` (`"cosign"`, the
-API's default, which the kind writes), and `fluxcd-kustomization`'s `prune` (`false`, a valid
-zero value). The test names the twelve and checks that their omission builds and writes
-exactly that value.
+`bucket`, `fluxcd-kustomization`, `gitrepository`, `helmchart` and `helmrelease`
+(`"1h0m0s"`, the kind's own default), a verification's `provider` on `helmchart`,
+`helmrelease` (`chart.spec.verify.provider`) and `ocirepository` (`"cosign"`, the API's
+default, which the kind writes), and `fluxcd-kustomization`'s `prune` (`false`, a valid zero
+value). The test names the eleven (`requiredWrittenValidDefaults`) and checks that their
+omission builds and writes exactly that value. Nor is a field the schema gives a default, that
+is not nullable and that the type writes `null` (`cnpg-cluster`'s
+`replicationSlots.synchronizeReplicas.enabled`): the API server drops the null and fills the
+default.
 
 **Method.** For each field the kind's API requires and its Go type writes unauthored,
 `TestKindComponents_RequiredWrittenNotRefused` builds the kind with the field authored, with

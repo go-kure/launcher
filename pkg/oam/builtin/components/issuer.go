@@ -33,15 +33,16 @@ func (h *IssuerHandler) PropertySchema() map[string]oam.PropertySchema {
 }
 
 // issuerKind is the issuer kind: see policyHeldKind. The API requires no field
-// of the spec; of an issuer type that is authored it requires the fields
-// issuerRequired lists, each of which the type would write empty. The API's
+// of the spec; of an issuer type that is authored it requires the fields its
+// generated required list holds (kind_required.go, issuerRequiredText), each of
+// which the type would write empty. The API's
 // value rules and cert-manager's webhook are left to them
 // (certmanager_common.go). The policy reaches the pod template of an ACME
 // HTTP01 solver (enforceIssuerPolicy).
 var issuerKind = &policyHeldKind[certv1.IssuerSpec]{
 	policyFreeKind: policyFreeKind[certv1.IssuerSpec]{
 		upstream: "cert-manager.io/v1 IssuerSpec",
-		required: issuerRequired,
+		required: generatedKindRequired("issuer"),
 		build: func(name, namespace string, spec *certv1.IssuerSpec) client.Object {
 			issuer := certmanager.CreateIssuer(name, namespace)
 			spec.DeepCopyInto(&issuer.Spec)

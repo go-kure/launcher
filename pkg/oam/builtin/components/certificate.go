@@ -153,7 +153,8 @@ func (h *CertificateHandler) PropertySchema() map[string]oam.PropertySchema {
 
 // certificateKind is the certificate kind: see policyHeldKind. The API requires
 // `secretName` and `issuerRef` with its `name`, and of what is authored below
-// them the fields certificateRequired lists; the type would write each one
+// them the fields its generated required list holds (kind_required.go,
+// certificateRequiredText); the type would write each one
 // empty. Of a renewal window it requires `cron` and `windowDuration`, which
 // the type leaves out when they are empty, so that the object would show the
 // omission: validate refuses a window without either. The API's value rules
@@ -163,7 +164,7 @@ func (h *CertificateHandler) PropertySchema() map[string]oam.PropertySchema {
 var certificateKind = &policyHeldKind[certv1.CertificateSpec]{
 	policyFreeKind: policyFreeKind[certv1.CertificateSpec]{
 		upstream: "cert-manager.io/v1 CertificateSpec",
-		required: certificateRequired,
+		required: generatedKindRequired("certificate"),
 		validate: func(spec *certv1.CertificateSpec) error {
 			if spec.Renewal == nil {
 				return nil

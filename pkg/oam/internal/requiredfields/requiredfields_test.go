@@ -65,6 +65,59 @@ func TestRefuse(t *testing.T) {
 	}
 }
 
+// TestRefuse_MapValues: a {} step descends every value of a map, in the
+// order of its keys and with no case folding, and names the value by its key.
+func TestRefuse_MapValues(t *testing.T) {
+	required := map[string]string{
+		"storage{}.kind":    "the kind",
+		"headers{}[].key":   "the header",
+		"headers{}[].value": "the value",
+	}
+	header := func(fields ...string) map[string]any {
+		out := map[string]any{}
+		for _, field := range fields {
+			out[field] = "x"
+		}
+		return out
+	}
+	for name, tc := range map[string]struct {
+		authored map[string]any
+		want     string
+	}{
+		"field present":  {map[string]any{"storage": map[string]any{"data": map[string]any{"kind": "x"}}}, ""},
+		"field absent":   {map[string]any{"storage": map[string]any{"data": map[string]any{}}}, "storage[data].kind: required (the kind)"},
+		"empty map":      {map[string]any{"storage": map[string]any{}}, ""},
+		"map left out":   {map[string]any{}, ""},
+		"non-map value":  {map[string]any{"storage": []any{map[string]any{}}}, ""},
+		"value no map":   {map[string]any{"storage": map[string]any{"data": "x"}}, ""},
+		"first key only": {map[string]any{"storage": map[string]any{"b": map[string]any{}, "a": map[string]any{}}}, "storage[a].kind: required (the kind)"},
+		// A map key is an entry, never a spelling of a field: one spelled
+		// like the field is descended as any other, and not case-folded.
+		"key spelled like a field": {map[string]any{"storage": map[string]any{"kind": map[string]any{"name": "a"}}}, "storage[kind].kind: required (the kind)"},
+		"keys differ in case":      {map[string]any{"storage": map[string]any{"Data": map[string]any{"kind": "x"}, "data": map[string]any{}}}, "storage[data].kind: required (the kind)"},
+		"dotted key quoted":        {map[string]any{"storage": map[string]any{"a.b": map[string]any{}}}, `storage["a.b"].kind: required (the kind)`},
+		// {}[]: every element of every list the map holds.
+		"lists complete":         {map[string]any{"headers": map[string]any{"a": []any{header("key", "value")}, "b": []any{header("key", "value"), header("key", "value")}}}, ""},
+		"later key, later entry": {map[string]any{"headers": map[string]any{"a": []any{header("key", "value")}, "b": []any{header("key", "value"), header("value")}}}, "headers[b][1].key: required (the header)"},
+		"first key in order":     {map[string]any{"headers": map[string]any{"b": []any{header("value")}, "a": []any{header("value")}}}, "headers[a][0].key: required (the header)"},
+		// Paths first, then keys: `key` is read under every key before `value`.
+		"first path in order": {map[string]any{"headers": map[string]any{"b": []any{header("value")}, "a": []any{header("key")}}}, "headers[b][0].key: required (the header)"},
+		"empty list":          {map[string]any{"headers": map[string]any{"a": []any{}}}, ""},
+		"non-list value":      {map[string]any{"headers": map[string]any{"a": header()}}, ""},
+		"entry is no object":  {map[string]any{"headers": map[string]any{"a": []any{"x"}}}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := requiredfields.Refuse(tc.authored, required)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("err = %v, want none", err)
+			case tc.want != "" && (err == nil || err.Error() != tc.want):
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // TestCiliumRule_SamePathsAtEveryPosition: the list is the same rule wherever
 // it stands, with the position as a prefix and none for the rule itself.
 func TestCiliumRule_SamePathsAtEveryPosition(t *testing.T) {

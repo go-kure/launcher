@@ -245,14 +245,16 @@ func externalSecretRefusals(notA, upstream, at string) []struct {
 		props map[string]any
 		want  string
 	}{
-		{"key without a secretKey", data(map[string]any{"remoteRef": map[string]any{"key": "apps/web"}}), at + "data[0].secretKey: required"},
+		// The texts are the generated list's, byte for byte the ones the kinds
+		// held by hand before it.
+		{"key without a secretKey", data(map[string]any{"remoteRef": map[string]any{"key": "apps/web"}}), at + "data[0].secretKey: required (the key of the Secret the value is written to)"},
 		{"key without a remoteRef", data(username, map[string]any{"secretKey": "password"}), at + "data[1].remoteRef: required"},
 		{"remoteRef without a key", data(map[string]any{"secretKey": "username", "remoteRef": map[string]any{"property": "username"}}), at + "data[0].remoteRef.key: required"},
 		{"extract without a key", dataFrom(map[string]any{"extract": map[string]any{"property": "tls"}}), at + "dataFrom[0].extract.key: required"},
 		{"rewrite without a target", dataFrom(map[string]any{
 			"find": map[string]any{"name": map[string]any{"regexp": "^web-"}}, "rewrite": []any{map[string]any{"regexp": map[string]any{"source": "^web-"}}},
 		}), at + "dataFrom[0].rewrite[0].regexp.target: required"},
-		{"generator without a name", dataFrom(map[string]any{"sourceRef": map[string]any{"generatorRef": map[string]any{"kind": "Password"}}}), at + "dataFrom[0].sourceRef.generatorRef.name: required"},
+		{"generator without a name", dataFrom(map[string]any{"sourceRef": map[string]any{"generatorRef": map[string]any{"kind": "Password"}}}), at + "dataFrom[0].sourceRef.generatorRef.name: required (the name of the generator)"},
 		{"sync windows without a kind", in(map[string]any{"syncWindows": map[string]any{
 			"windows": []any{map[string]any{"schedule": "@daily", "duration": "1h"}},
 		}}), at + "syncWindows.kind: required"},
@@ -263,7 +265,7 @@ func externalSecretRefusals(notA, upstream, at string) []struct {
 		{"manifest without a kind", in(map[string]any{"target": map[string]any{"manifest": map[string]any{"apiVersion": "v1"}}}), at + "target.manifest.kind: required"},
 		{"template source without items", in(map[string]any{"target": map[string]any{"template": map[string]any{
 			"templateFrom": []any{map[string]any{"configMap": map[string]any{"name": "web-templates"}}},
-		}}}), at + "target.template.templateFrom[0].configMap.items: required"},
+		}}}), at + "target.template.templateFrom[0].configMap.items: required (the keys of the ConfigMap that are read as templates)"},
 		// The API's property-count rule on a key's source: the object always
 		// carries its storeRef.
 		{"a generator as the source of a key", data(username, map[string]any{

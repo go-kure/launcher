@@ -18,9 +18,11 @@ import (
 // challenge, and a Certificate's keystore can hold its password in the clear.
 //
 // The API's types publish no field descriptions; the module ships the CRDs its
-// chart installs. TestCertManagerKinds_RequiredMatchCRD holds each kind's
-// required list to them, and TestCertManagerKinds_NoDefaultedZeros the claim
-// that no CRD default turns an authored 0, false or "" into another value.
+// chart installs. Each kind's required list is generated from them
+// (kind_required.go), TestCertManagerKinds_WrittenEmptyAccepted holds the
+// fields the types write empty under a parent the author left out to them, and
+// TestCertManagerKinds_NoDefaultedZeros the claim that no CRD default turns an
+// authored 0, false or "" into another value.
 //
 // cert-manager's validating webhook refuses more than the CRDs do: an Issuer
 // that configures no issuer type or more than one, a keystore with a password
@@ -62,26 +64,26 @@ func issuerSchema(kind string) map[string]oam.PropertySchema {
 	}
 }
 
-// issuerRequired is the required list of the issuer and clusterissuer kinds:
-// the fields the Issuer and ClusterIssuer CRDs require that the Go types write
-// whether or not they were authored. None is at the top level: an issuer type
-// the author left out holds nothing to refuse, and of one that is authored the
-// API requires these. TestCertManagerKinds_RequiredMatchCRD holds the list to
-// the CRDs.
+// issuerRequiredText is what the generated required paths of the issuer and
+// clusterissuer kinds say of themselves where they say more than "the
+// cert-manager API requires this field" (requiredText): the sentences of the
+// list the two kinds kept by hand before it was generated. The generated list
+// holds every field the Issuer and ClusterIssuer CRDs require that the Go types
+// write whether or not they were authored, those of the Kubernetes types an
+// ACME HTTP01 solver's pod template embeds included (the topology key of an
+// affinity term, a sysctl, a seccomp profile). None is at the top level: an
+// issuer type the author left out holds nothing to refuse.
 //
-// Three of them are fields of a Kubernetes or Gateway API type that an ACME
-// HTTP01 solver embeds, each of which the CRDs refuse as the type writes it
-// unauthored: the terms of a required node affinity of a solver pod, written
-// null, which the API server drops before it validates, and the name of a
-// parent reference, written empty, which is below its minimum length.
-// TestKindComponents_NullRequired shows each refusal on the linked CRDs.
-//
-// The others of such a type are the key and the operator of a match
-// expression, in the label selectors a solver's pod template holds: those of
-// its pod affinity and anti-affinity (labelSelectorRequired).
-// TestLabelSelectorKinds_CoverEverySelector holds them to the CRDs, path by
-// path.
-var issuerRequired = func() map[string]string {
+// Of the fields below, three are of a Kubernetes or Gateway API type, each of
+// which the CRDs refuse as the type writes it unauthored: the terms of a
+// required node affinity of a solver pod, written null, which the API server
+// drops before it validates, and the name of a parent reference, written
+// empty, which is below its minimum length. TestKindComponents_NullRequired
+// shows each refusal on the linked CRDs. The key and the operator of a match
+// expression, in the label selectors a solver's pod template holds
+// (labelSelectorRequired), are held to the CRDs path by path by
+// TestLabelSelectorKinds_CoverEverySelector.
+var issuerRequiredText = func() map[string]string {
 	const (
 		dns01  = "acme.solvers[].dns01."
 		http01 = "acme.solvers[].http01."
@@ -155,11 +157,12 @@ var issuerRequired = func() map[string]string {
 	)
 }()
 
-// certificateRequired is the required list of the certificate kind: the fields
-// the Certificate CRD requires that the Go types write whether or not they
-// were authored. TestCertManagerKinds_RequiredMatchCRD holds the list to the
-// CRD.
-var certificateRequired = requiredFields(
+// certificateRequiredText is what the generated required paths of the
+// certificate kind say of themselves (requiredText): the sentences of the list
+// the kind kept by hand before it was generated, which held every field the
+// Certificate CRD requires that the Go types write whether or not they were
+// authored.
+var certificateRequiredText = requiredFields(
 	map[string]string{
 		"secretName":                     "the name of the Secret cert-manager keeps the private key and the certificate in",
 		"issuerRef":                      "the issuer that signs the certificate; no default issuer is filled",
