@@ -379,6 +379,10 @@ map and run `bash site/scripts/gen-docs-tables.sh`.
 
 - Validate all user-provided paths before use
 - Reject paths that escape the working directory
+  - Exception: an output destination the operator names on their own command line (`kurel build`'s
+    `--output <dir>` and the global `-f/--output-file`) is not contained. It is the same trust
+    boundary as invoking the process or a shell `>` redirect, not input crossing a privilege
+    boundary; the code's `gosec` exclusions state this where it applies
 - Use `gosec` exclusions only where explicitly safe (see `.golangci.yml`)
 
 ## Troubleshooting
