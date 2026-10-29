@@ -67,21 +67,44 @@ func refuseNullPodSpecFields(path string, spec *corev1.PodSpec) error {
 	}
 	for i := range spec.EvictionResponders {
 		if spec.EvictionResponders[i].Priority == nil {
-			return errors.Errorf("%s.evictionResponders[%d].priority: required (the responder's priority, from 0 to 100000; no default is filled)", path, i)
+			return errors.Errorf("%s.evictionResponders[%d].priority: required (%s)", path, i, evictionPriorityText)
 		}
 	}
 	for i := range spec.Volumes {
 		volume := &spec.Volumes[i]
 		switch {
 		case volume.RBD != nil && volume.RBD.CephMonitors == nil:
-			return errors.Errorf("%s.volumes[%d].rbd.monitors: required (the addresses of the Ceph monitors)", path, i)
+			return errors.Errorf("%s.volumes[%d].rbd.monitors: required (%s)", path, i, cephMonitorsText)
 		case volume.CephFS != nil && volume.CephFS.Monitors == nil:
-			return errors.Errorf("%s.volumes[%d].cephfs.monitors: required (the addresses of the Ceph monitors)", path, i)
+			return errors.Errorf("%s.volumes[%d].cephfs.monitors: required (%s)", path, i, cephMonitorsText)
 		case volume.ScaleIO != nil && volume.ScaleIO.SecretRef == nil:
-			return errors.Errorf("%s.volumes[%d].scaleIO.secretRef: required (the Secret that holds the ScaleIO credentials)", path, i)
+			return errors.Errorf("%s.volumes[%d].scaleIO.secretRef: required (%s)", path, i, scaleIOSecretText)
 		}
 	}
 	return nil
+}
+
+// What refuseNullPodSpecFields and refuseNullNodeSelectorTerms say of each
+// field they refuse.
+const (
+	nodeSelectorTermsText = "the node selector terms, of which a node must match one"
+	evictionPriorityText  = "the responder's priority, from 0 to 100000; no default is filled"
+	cephMonitorsText      = "the addresses of the Ceph monitors"
+	scaleIOSecretText     = "the Secret that holds the ScaleIO credentials"
+)
+
+// nullPodSpecFieldsText is what refuseNullPodSpecFields says of each field it
+// refuses, by required-list path under prefix, the pod spec's ("template.spec."):
+// the sentences a generated required list that holds them says of them
+// (requiredText), so that the two refusals of one omission read alike.
+func nullPodSpecFieldsText(prefix string) map[string]string {
+	return map[string]string{
+		prefix + "affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms": nodeSelectorTermsText,
+		prefix + "evictionResponders[].priority":                                                          evictionPriorityText,
+		prefix + "volumes[].cephfs.monitors":                                                              cephMonitorsText,
+		prefix + "volumes[].rbd.monitors":                                                                 cephMonitorsText,
+		prefix + "volumes[].scaleIO.secretRef":                                                            scaleIOSecretText,
+	}
 }
 
 // refuseNullNodeSelectorTerms refuses the node affinity at path whose required
@@ -93,7 +116,7 @@ func refuseNullNodeSelectorTerms(path string, affinity *corev1.NodeAffinity) err
 		return nil
 	}
 	if required := affinity.RequiredDuringSchedulingIgnoredDuringExecution; required != nil && required.NodeSelectorTerms == nil {
-		return errors.Errorf("%s.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms: required (the node selector terms, of which a node must match one)", path)
+		return errors.Errorf("%s.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms: required (%s)", path, nodeSelectorTermsText)
 	}
 	return nil
 }

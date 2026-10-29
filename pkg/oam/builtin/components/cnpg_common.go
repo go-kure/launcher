@@ -32,6 +32,12 @@ func refuseCnpgOperatorImage(path string, allowed []string) error {
 	return oam.NewPolicyRefusal(oam.RefusalRegistry, fmt.Sprintf("%s: unset, so the CloudNativePG operator chooses the image the pods run, which the allowed registries %v cannot hold; name an image from one of them", path, allowed))
 }
 
+// cnpgClusterRefText is what the refusal of a cluster reference with no name
+// says of it, on every kind that refers to a Cluster (requireCnpgClusterRef),
+// and what the generated required list of such a kind says of cluster.name
+// (requiredText).
+const cnpgClusterRefText = "the name of the CloudNativePG Cluster this object belongs to"
+
 // requireCnpgClusterRef refuses a spec.cluster reference with no name, on every
 // kind that refers to a Cluster. The Pooler, Backup and ScheduledBackup CRDs
 // require the name, and their Go type writes an unauthored one as
@@ -43,7 +49,7 @@ func refuseCnpgOperatorImage(path string, allowed []string) error {
 // the reference could never resolve.
 func requireCnpgClusterRef(name string) error {
 	if name == "" {
-		return errors.New("cluster.name: required (the name of the CloudNativePG Cluster this object belongs to)")
+		return errors.New("cluster.name: required (" + cnpgClusterRefText + ")")
 	}
 	if len(validation.IsDNS1035Label(name)) > 0 || len(name) > cnpgClusterNameMaxLength {
 		return errors.Errorf("cluster.name %q: must be a DNS-1035 label of at most %d characters, as a CloudNativePG Cluster name is", name, cnpgClusterNameMaxLength)

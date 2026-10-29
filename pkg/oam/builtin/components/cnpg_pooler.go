@@ -130,10 +130,10 @@ var cnpgPoolerDefaultedZeroFields = map[string]string{
 // CnpgPoolerConfig, under the same null contract and strict decode as
 // cnpg-cluster. The fields the Pooler CRD requires must be authored:
 // cluster.name, and pgbouncer, which the Go type would otherwise encode as
-// null; and of a match expression in a label selector of the pod template, the
-// key and the operator (podTemplateLabelSelectorRequired), which the type
-// writes empty. Nothing else of an expression is read: the template's value
-// rules are the API server's by the CRD, and the operator's.
+// null; and under an authored parent, every field of cnpgPoolerRequired, those
+// of the template's pod spec included, which the type writes unauthored.
+// Nothing else of the template is read: its value rules are the API server's
+// by the CRD, and the operator's.
 func (h *CnpgPoolerHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	name := component.ObjectName()
 	if err := validateCnpgPoolerName(name); err != nil {
@@ -146,9 +146,6 @@ func (h *CnpgPoolerHandler) ToApplicationConfig(component *oam.Component, namesp
 	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgPoolerDefaultedZeroFields)); err != nil {
 		return nil, err
 	}
-	if err := refuseUnauthoredRequired(props, podTemplateLabelSelectorRequired()); err != nil {
-		return nil, err
-	}
 	cfg := &CnpgPoolerConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
 	if err := cfg.validate(name); err != nil {
 		return nil, err
@@ -159,13 +156,33 @@ func (h *CnpgPoolerHandler) ToApplicationConfig(component *oam.Component, namesp
 	return cfg, nil
 }
 
-// cnpgPoolerRequired is cnpgClusterRequired for the Pooler CRD: the one string
-// it requires and bounds, with a pattern, that the Go type writes as "" when
-// it is unauthored. It is refused where its parent is authored and it is not;
-// an authored empty one is a value, and the API server's to refuse.
-var cnpgPoolerRequired = map[string]string{
-	"pgbouncer.imageCatalogRef.key": "the key of the image in the catalog",
-}
+// cnpgPoolerRequired is the required list of the cnpg-pooler kind, generated
+// (kind_required.go) as cnpgClusterRequired is: every field the Pooler CRD
+// requires that the Go type writes whether or not it was authored, those of
+// the pod spec its template embeds included. Each is refused where its parent
+// is authored and it is not; an authored empty one is a value, and the API
+// server's to refuse. The template's container list is not: the kind writes it
+// itself (requiredWrittenExceptions).
+var cnpgPoolerRequired = generatedKindRequired("cnpg-pooler")
+
+// cnpgPoolerRequiredText is what the generated required paths of the
+// cnpg-pooler kind say of themselves (requiredText): the sentences of what the
+// kind refused before its list was generated, each kept byte for byte. The
+// cluster reference's name and the pgbouncer block, which validate refuses as
+// well; the one string the CRD requires and bounds, with a pattern, that the
+// Go type writes as ""; the key and the operator of a match expression in a
+// label selector of the template's pod spec (podTemplateLabelSelectorRequired);
+// and the fields of that pod spec the type writes as null, which
+// refuseNullPodSpecFields refuses as well.
+var cnpgPoolerRequiredText = requiredFields(
+	map[string]string{
+		"cluster.name":                  cnpgClusterRefText,
+		"pgbouncer":                     "an empty object selects PgBouncer's defaults",
+		"pgbouncer.imageCatalogRef.key": "the key of the image in the catalog",
+	},
+	podTemplateLabelSelectorRequired(),
+	nullPodSpecFieldsText("template.spec."),
+)
 
 // CnpgPoolerConfig implements stack.ApplicationConfig for cnpg-pooler
 // components. Spec is the decoded PoolerSpec exactly as authored.

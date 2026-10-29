@@ -11619,10 +11619,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the API server puts the default (`true`) in the place of the null.
   `TestKindComponents_NullRequired` derives the three from the CRD and shows
   each answer by running the CRD's schema validator on the object.
-  Eleven strings the CRD requires and bounds, with a minimum length or an
-  enumeration, which the Go type writes as `""` when they are unauthored, are
-  refused when unauthored, each where its parent is authored
-  (`replica.source: required (…)`):
+  **The kind's required list is generated** (go-kure/launcher#883; see
+  "Required fields a kind writes unauthored and does not refuse"): every
+  field the Cluster CRD requires that the Go type writes whether or not it
+  was authored (`""`, `0`, `{}` or `null`) is refused when unauthored, each
+  where its parent is authored (`replica.source: required (…)`), the fields
+  of the Kubernetes types the spec embeds included. Among them are the eleven
+  strings the kind refused by hand before, which the CRD bounds with a
+  minimum length or an enumeration:
   `backup.barmanObjectStore.destinationPath`,
   `bootstrap.initdb.import.type` (`microservice` or `monolith`),
   `bootstrap.pg_basebackup.source`,
@@ -11630,10 +11634,22 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `managed.services.additional[].selectorType` (`rw`, `r` or `ro`),
   `podSelectorRefs[].name`, the `name` of a `postgresql.extensions[]` entry
   and the `name` and the `value` of its `env[]` entries,
-  `postgresql.synchronous.method` (`any` or `first`) and `replica.source`.
-  The Cluster would carry an empty value the author did not write, and the
-  API server refuse it. An authored empty one is a value: it is written, and
-  refusing it is left to the API server. The refusal reads the authored
+  `postgresql.synchronous.method` (`any` or `first`) and `replica.source`;
+  and, refused since go-kure/launcher#883 (**breaking** for a document that
+  leaves one out under an authored parent), the `name` and `key` of a Secret
+  or ConfigMap reference, an `imageCatalogRef`'s `kind`, `name` and `major`,
+  `postgresql.synchronous.number`, an external cluster's `name`, a plugin's
+  `name`, a tablespace's `name` and `storage`, a `podSelectorRefs` entry's
+  `selector`, the `topologyKey` of a pod affinity term and the `weight` of a
+  weighted one, the
+  `maxSkew`, `topologyKey` and `whenUnsatisfiable` of a topology spread
+  constraint and the `type` of a seccomp or AppArmor profile. A field the
+  kind refused by hand keeps its text byte for byte; any other reads `the
+  CloudNativePG API requires this field` (or `requires the name of what this
+  refers to`, for a reference's `name`). Most such objects the API server
+  refused; an `imageCatalogRef` written with `name: ""` or `major: 0` it
+  accepted, and it reached the operator. An authored empty one is a value: it is
+  written, and refusing it is left to the API server. The refusal reads the authored
   properties, so `Generate` does not repeat it: a `CnpgClusterConfig` built
   in Go is not held to it. Nor is the component a `postgresql` component is
   lowered to, whose properties are written from a typed spec, so that a
@@ -11665,7 +11681,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   A match expression authored in one of the spec's label selectors without
   its `key` or its `operator` is refused by path
   (`podSelectorRefs[0].selector.matchExpressions[0].operator: required (…)`):
-  the CRD requires both, and the type would write them empty. Presence only;
+  the CRD requires both, and the type would write them empty; the generated
+  list holds them with the sentences of every kind's selectors. Presence only;
   "A label selector's match expressions" lists the selectors and says what is
   left to the API server and to the operator's webhook.
   `ApplyPolicy` enforces the policy `postgresql` enforces (postgresql lowers
@@ -11782,12 +11799,30 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `cluster`, `name` and `owner` of a `cnpg-database`; `configuration` of a
   `cnpg-objectstore`. That refuses no component that built before, since the
   kind refused each without it already.
+  **The required lists of the three kinds are generated**
+  (go-kure/launcher#883), as `cnpg-cluster`'s is: every field each CRD
+  requires that the Go type writes whether or not it was authored is refused
+  when unauthored under an authored parent, with the text the kind gave it by
+  hand where it had one. **Breaking** for a document that leaves one out
+  under an authored parent: on the Pooler, among others, the `name` of a
+  `pgbouncer` Secret reference, `pgbouncer.imageCatalogRef`'s `kind` and
+  `name`, a service port's `port`, and under `template.spec` a container's
+  `name`, the `topologyKey` of a pod affinity term, a topology spread
+  constraint's `maxSkew`, `topologyKey` and `whenUnsatisfiable` and a seccomp
+  profile's `type`; on the Database, the `name` of a `schemas`, `extensions`,
+  `fdws` or `servers` entry, the `name` and `value` of an option, the `name`
+  of a usage and a server's `fdw`; on the ObjectStore, the `name` and `key`
+  of a credential's or `endpointCA`'s Secret reference and the fields of the
+  sidecar's `env` the pod kinds require. The texts the kinds refused with
+  before (`cluster.name: required (…)`, `pgbouncer: required (…)`) are kept
+  byte for byte. `template.spec.containers` is not refused: the kind writes
+  `containers: []` itself, which the CRD accepts (below).
   A `cluster.name` must be a name CloudNativePG admits for a Cluster (a DNS-1035
   label of at most 50 characters).
   On the Pooler, a match expression authored in a label selector of
   `template.spec` without its `key` or its `operator` is refused too, by
-  path; an authored empty one is not (presence only; see "A label selector's
-  match expressions").
+  path, by the generated list; an authored empty one is not (presence only;
+  see "A label selector's match expressions").
   `cnpg-pooler` writes no type or instance count of its own, so the operator's
   defaults (`rw`, `1`) apply. Its component name is the Pooler's name and its
   Service's, so it must be a DNS-1123 label of at most 63 characters (a
@@ -12907,7 +12942,8 @@ section states the rule that refuses them where a kind's list is generated, and 
 are not refused, as they are at this pin.
 
 **Generated lists.** The required list of `issuer`, `clusterissuer`, `certificate`,
-`secretstore`, `clustersecretstore`, `externalsecret` and `clusterexternalsecret` is generated:
+`secretstore`, `clustersecretstore`, `externalsecret`, `clusterexternalsecret`, `cnpg-cluster`,
+`cnpg-pooler`, `cnpg-objectstore` and `cnpg-database` is generated:
 every field the kind's API requires and its Go type writes unauthored is refused where the
 author leaves it out under an authored parent, whatever type declares it. The paths are in
 `zz_generated_kind_required.go` (`kindRequiredPaths`), read through the same derivation as the
@@ -12922,7 +12958,10 @@ rule and never by the type that declares it:
   the API server drops that null and fills the default (`cnpg-cluster`'s
   `replicationSlots.synchronizeReplicas.enabled`);
 - a field under a path the kind refuses whatever is authored there (see Method);
-- an entry of `requiredWrittenExceptions`, the test's named exceptions (none at this pin).
+- an entry of `requiredWrittenExceptions`, the test's named exceptions, each with the API
+  server's answer for the object without it. One at this pin: `cnpg-pooler`'s
+  `template.spec.containers`, which the kind writes `[]` and the Pooler CRD accepts, the
+  template's `spec` authored or left out; the operator adds its `pgbouncer` container.
 
 A refusal reads the kind's own text for the field where it has one, else `the <API> API
 requires this field` (or `requires the name of what this refers to`, for a reference's
@@ -12938,8 +12977,8 @@ writes them (`secretStoreUnappliedDefaults`) are generated by the same test.
 |---|---|---|
 | `AFF` | the `core/v1` affinity terms: `NodeSelectorRequirement`, `PodAffinityTerm`, `PreferredSchedulingTerm`, `WeightedPodAffinityTerm` | a node selector requirement's `key` and `operator`; a pod affinity term's `topologyKey`; a weighted or preferred term's `weight`, `podAffinityTerm` and `preference` |
 | `SEC` | `SeccompProfile`, `AppArmorProfile`, `Sysctl` | a profile's `type`; a sysctl's `name` and `value` |
-| `POD` | any other `core/v1` type | the `key` of a secret or config map key reference; a container's `name`; an `imageCatalogRef`'s `kind` and `name` |
-| `KIND` | a type of the kind's own API, or of `metav1` other than a label selector's match expression | an alertmanager's ephemeral claim template's `ownerReferences[]` fields; an HTTPRoute's `parentRefs[].name` and header match `name`/`value`; a CloudNativePG secret reference's `name` and `key`; a Database's `schemas[].name` |
+| `POD` | any other `core/v1` type | the `key` of a secret or config map key reference; a container's `name`; a pooler template's `containers` |
+| `KIND` | a type of the kind's own API, or of `metav1` other than a label selector's match expression | an alertmanager's ephemeral claim template's `ownerReferences[]` fields; an HTTPRoute's `parentRefs[].name` and header match `name`/`value`; a Flux source or Secret reference's `name` |
 
 A fifth family of the test, `SEL` (the `key` and `operator` of a `metav1` label selector's
 match expression), has no member: those are refused on every kind
@@ -12951,10 +12990,7 @@ match expression), has no member: those are refused on every kind
 |---|---|---|---|---|---|
 | `replicationsource` | 113 | 72 | 16 | 25 | |
 | `replicationdestination` | 85 | 54 | 12 | 19 | |
-| `cnpg-cluster` | 156 | 18 | 7 | 52 | 79 |
-| `cnpg-pooler` | 178 | 18 | 8 | 147 | 5 |
-| `cnpg-database` | 11 | | | | 11 |
-| `cnpg-objectstore` | 29 | | | 9 | 20 |
+| `cnpg-pooler` | 1 | | | 1 | |
 | `httproute` | 44 | | | | 44 |
 | `grpcroute` | 34 | | | | 34 |
 | `servicemonitor`, `podmonitor`, `prometheus-probe` | 19 each | | | 19 | |
@@ -12965,8 +13001,9 @@ match expression), has no member: those are refused on every kind
 | `gitrepository` | 6 | | | | 6 |
 | `helmchart`, `helmrepository` | 3 each | | | | 3 |
 
-None is left on the seven kinds whose list is generated (`issuer`, `clusterissuer`,
-`certificate` and the four External Secrets kinds), the eleven Cilium kinds, `gatewayclass`, `gateway`,
+None is left on the kinds whose list is generated (`issuer`, `clusterissuer`, `certificate`,
+the four External Secrets kinds, `cnpg-cluster`, `cnpg-objectstore` and `cnpg-database`;
+`cnpg-pooler` keeps its one exception), the eleven Cilium kinds, `gatewayclass`, `gateway`,
 `listenerset`, `referencegrant`, `backendtlspolicy`, `tcproute`, `udproute`, `tlsroute`,
 `metallb-ipaddresspool`,
 `metallb-l2advertisement`, `metallb-bgpadvertisement`, `metallb-bgppeer`, `cnpg-imagecatalog`,
@@ -12982,11 +13019,13 @@ fails there until it is one or the other. Most members are written
 `""`; the rest are `0` (mostly a preferred term's `weight` or a `port`), `{}`, `[]`, `null` or
 an object of such values.
 
-**What the API server makes of them** is a value rule of each field, not read here. One case is
-shown: `imageCatalogRef` of `cnpg-cluster` and `pgbouncer.imageCatalogRef` of `cnpg-pooler`.
-Its `kind` written `""` is refused by the CRD's own rule on the reference. Its `name` written
-`""`, and on `cnpg-cluster` its `major` written `0`, are accepted by the API server and reach
-the operator.
+**What the API server makes of them** is a value rule of each field, not read here. The one
+exception is shown: `TestKindComponents_GeneratedRequiredBothWays` creates the Pooler without
+`template.spec.containers`, and without the template's `spec`, and the API server accepts both.
+Before go-kure/launcher#883 generated their lists, the same was shown of `imageCatalogRef` on
+`cnpg-cluster` and `pgbouncer.imageCatalogRef` on `cnpg-pooler`: a `kind` written `""` refused
+by the CRD's own rule on the reference, a `name` written `""` and a `major` written `0` accepted.
+All three are refused now.
 
 **Excluded as valid values.** A member whose written value the API takes as authored is not
 listed: `cnpg-cluster`'s `instances` (`1`, the CRD's default) and
