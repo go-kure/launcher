@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -46,6 +47,13 @@ var kindRequiredAPI = map[string]string{
 	"clustersecretstore":    "external-secrets",
 	"externalsecret":        "external-secrets",
 	"secretstore":           "external-secrets",
+	"alertmanager":          "Prometheus operator",
+	"podmonitor":            "Prometheus operator",
+	"prometheus":            "Prometheus operator",
+	"prometheus-probe":      "Prometheus operator",
+	"prometheusrule":        "Prometheus operator",
+	"servicemonitor":        "Prometheus operator",
+	"thanosruler":           "Prometheus operator",
 }
 
 // requiredText holds, by kind component, what a generated path says of itself
@@ -64,15 +72,54 @@ var requiredText = map[string]map[string]string{
 	"clustersecretstore":    secretStoreRequiredText,
 	"externalsecret":        externalSecretRequiredText,
 	"secretstore":           secretStoreRequiredText,
+	"alertmanager":          alertmanagerRequiredText,
+	"podmonitor":            podMonitorRequiredText,
+	"prometheus":            prometheusRequiredText,
+	"prometheus-probe":      prometheusProbeRequiredText,
+	"prometheusrule":        prometheusRuleRequiredText,
+	"servicemonitor":        serviceMonitorRequiredText,
+	"thanosruler":           thanosRulerRequiredText,
+}
+
+// kindRequiredParents lists, by kind component, the parents a kind refuses
+// left out though the API does not require them: a struct the Go type writes
+// whether or not it was authored, under which the API requires a field, and
+// whose zero value the API server accepts and the operator refuses. Each says
+// what the parent holds and why it is asked for. Filling the parent would
+// write a value the author did not choose, so the author must author it.
+// TestKindComponents_RequiredIsGenerated holds each to the API server's answer
+// for its omission (kindRequiredForced).
+var kindRequiredParents = map[string]map[string]string{
+	"alertmanager":     basicAuthRequired("alertmanagerConfiguration.global.httpConfig.basicAuth"),
+	"podmonitor":       basicAuthRequired("podMetricsEndpoints[].basicAuth"),
+	"prometheus":       basicAuthRequired("alerting.alertmanagers[].basicAuth", "apiserverConfig.basicAuth", "remoteRead[].basicAuth", "remoteWrite[].basicAuth"),
+	"prometheus-probe": basicAuthRequired("basicAuth"),
+	"servicemonitor":   basicAuthRequired("endpoints[].basicAuth"),
+	"thanosruler":      basicAuthRequired("remoteWrite[].basicAuth"),
+}
+
+// basicAuthRequired lists the username and the password of each basic auth
+// block at the given paths. The Prometheus operator's BasicAuth writes both
+// as a Secret key reference whether or not they were authored, and the API
+// server accepts the block with either empty; the operator reads both keys
+// and refuses the block where it cannot (pkg/assets in its source).
+func basicAuthRequired(paths ...string) map[string]string {
+	out := map[string]string{}
+	for _, path := range paths {
+		out[path+".username"] = "the Secret key that holds the username; the Prometheus operator reads both keys of a basic auth and refuses one without either"
+		out[path+".password"] = "the Secret key that holds the password; the Prometheus operator reads both keys of a basic auth and refuses one without either"
+	}
+	return out
 }
 
 // generatedKindRequired is the required list of the generated paths of a kind
 // component (kindRequiredPaths), each saying what requiredText holds for it or
-// what its class says.
+// what its class says, and of the parents kindRequiredParents lists for it.
 func generatedKindRequired(component string) map[string]string {
 	api := kindRequiredAPI[component]
 	paths := kindRequiredPaths[component]
-	out := make(map[string]string, len(paths))
+	out := make(map[string]string, len(paths)+len(kindRequiredParents[component]))
+	maps.Copy(out, kindRequiredParents[component])
 	for _, path := range paths {
 		says, ok := requiredText[component][path]
 		switch {

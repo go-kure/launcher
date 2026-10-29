@@ -72,25 +72,36 @@ func (h *PodMonitorHandler) PropertySchema() map[string]oam.PropertySchema {
 }
 
 // podMonitorKind is the podmonitor kind: see policyFreeKind. The API requires
-// `selector`, and of an endpoint's `oauth2` its three fields; the type would
-// write each one empty, and an empty selector selects every Pod.
+// `selector`, and below what is authored the fields of podMonitorRequired; the
+// type would write each one empty, and an empty selector selects every Pod.
 // `podMetricsEndpoints` is optional to the API, which the type writes as null
-// when it is not authored. Of a match expression of the selector the API
-// requires the key and the operator (labelSelectorRequired;
-// monitoring_common.go states the ground). The API's value rules, and the
-// operator's own checks of an object it has admitted, are left to them.
+// when it is not authored. The API's value rules, and the operator's own
+// checks of an object it has admitted, are left to them.
 var podMonitorKind = &policyFreeKind[monitoringv1.PodMonitorSpec]{
-	upstream: "monitoring.coreos.com/v1 PodMonitorSpec",
-	required: requiredFields(map[string]string{
-		"selector": "the label query over the Pods to scrape; no default selector is filled, use {} to select every Pod of the selected namespaces",
-	}, oauth2Required("podMetricsEndpoints[].oauth2"), labelSelectorRequired("selector")),
-	defaultedZeros: monitoringDefaultedZeros([]string{"podMetricsEndpoints[].metricRelabelings", "podMetricsEndpoints[].relabelings"}, nil),
+	upstream:          "monitoring.coreos.com/v1 PodMonitorSpec",
+	generatedRequired: podMonitorRequired,
+	defaultedZeros:    monitoringDefaultedZeros([]string{"podMetricsEndpoints[].metricRelabelings", "podMetricsEndpoints[].relabelings"}, nil),
 	build: func(name, namespace string, spec *monitoringv1.PodMonitorSpec) client.Object {
 		monitor := prometheus.CreatePodMonitor(name, namespace)
 		spec.DeepCopyInto(&monitor.Spec)
 		return monitor
 	},
 }
+
+// podMonitorRequired is the required list of the podmonitor kind, generated
+// (kind_required.go) as alertmanagerRequired is, with the username and the
+// password of each endpoint's basic auth (kindRequiredParents).
+var podMonitorRequired = generatedKindRequired("podmonitor")
+
+// podMonitorRequiredText is what the generated required paths of the
+// podmonitor kind say of themselves (requiredText): the sentences of the list
+// the kind kept by hand before its list was generated, each kept byte for
+// byte: the selector, an endpoint's OAuth2 fields, and the key and the
+// operator of a match expression of the selector (labelSelectorRequired;
+// monitoring_common.go states the ground).
+var podMonitorRequiredText = requiredFields(map[string]string{
+	"selector": "the label query over the Pods to scrape; no default selector is filled, use {} to select every Pod of the selected namespaces",
+}, oauth2Required("podMetricsEndpoints[].oauth2"), labelSelectorRequired("selector"))
 
 // ToApplicationConfig decodes an OAM podmonitor component into its config. The
 // object takes the namespace of the application it is generated in.

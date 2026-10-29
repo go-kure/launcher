@@ -17,7 +17,6 @@ import (
 	"testing"
 
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 )
@@ -28,14 +27,10 @@ import (
 const monitoringModulePath = "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring"
 
 // monitoringKindRow is one kind component of that API with the spec type it
-// decodes into and its required list. validated names the required fields the
-// list cannot hold, because a parent of theirs is written whether or not it
-// was authored; the kind's validate refuses those.
+// decodes into. Its required list is generated (kind_required.go).
 type monitoringKindRow struct {
 	component string
 	typ       reflect.Type
-	required  map[string]string
-	validated []string
 	// defaulted is the kind's defaulted-zero list (policyFreeKind.defaultedZeros).
 	defaulted map[string]string
 }
@@ -46,10 +41,10 @@ type monitoringKindRow struct {
 // TestMonitoringKinds_DefaultedZeros does not read
 // (TestMonitoringWorkloadKinds_DefaultedZeros does).
 var monitoringKinds = []monitoringKindRow{
-	{"podmonitor", reflect.TypeFor[monitoringv1.PodMonitorSpec](), podMonitorKind.required, nil, podMonitorKind.defaultedZeros.fields},
-	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), prometheusProbeKind.required, []string{"prober.url"}, prometheusProbeKind.defaultedZeros.fields},
-	{"prometheusrule", reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), prometheusRuleKind.required, nil, prometheusRuleKind.defaultedZeros.fields},
-	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), serviceMonitorKind.required, nil, serviceMonitorKind.defaultedZeros.fields},
+	{"podmonitor", reflect.TypeFor[monitoringv1.PodMonitorSpec](), podMonitorKind.defaultedZeros.fields},
+	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), prometheusProbeKind.defaultedZeros.fields},
+	{"prometheusrule", reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), prometheusRuleKind.defaultedZeros.fields},
+	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), serviceMonitorKind.defaultedZeros.fields},
 }
 
 // fieldMarkers is what the comment of one struct field says of it to the CRD
@@ -445,47 +440,23 @@ func compareDefaultedZeros(t *testing.T, component string, derived, listed map[s
 	}
 }
 
-// monitoringEmbeddedNotRefused names the fields of a Kubernetes type the
-// monitoring specs embed that the generator's rule requires, that the type
-// writes unauthored, and whose omission no kind refuses, each with the reason.
-// The key is the declaring type and the Go field.
-var monitoringEmbeddedNotRefused = map[string]string{
-	"v1.SecretKeySelector.Key":    "the key of a Secret key reference: no kind refuses the omission of a key reference's key (README, \"Not refused\")",
-	"v1.ConfigMapKeySelector.Key": "the key of a ConfigMap key reference: as a Secret key reference's",
-}
-
-// TestMonitoringKinds_RequiredMatchMarkers derives, from the source of the
-// linked modules (markerAPISource), the fields of each kind that the API
-// requires and the type would write unauthored, and holds the kind's required
-// list to them. One under a parent that is itself written unauthored and not
-// required cannot be in the list, which follows what was authored; the kind's
-// validate refuses it, and the row names it. A dependency bump that adds,
-// drops or moves one fails here, naming it.
-//
-// A field of the monitoring package is required where it is marked +required,
-// and every one the type writes unauthored must carry that marker or
-// +optional. A field of a Kubernetes type these specs embed is required by the
-// rule the schema generators apply to that type's source: no optional marker,
-// and a json tag that does not omit it when empty. Of those, the key and the
-// operator of a label selector's match expression are in the lists; every
-// other is named in monitoringEmbeddedNotRefused with its reason, and one that
-// is neither fails. A workload kind is held to the match expressions only of
-// the Kubernetes types it embeds, as the pod kinds are.
-func TestMonitoringKinds_RequiredMatchMarkers(t *testing.T) {
+// TestMonitoringKinds_MarkersClassified holds the source the kinds' required
+// lists are generated from (kind_required.go, from markerAPISource) to being
+// read whole: every field the walk of a kind reaches has its field in the
+// source of the linked modules, and every field of the monitoring package the
+// type writes unauthored is marked +required or +optional, so that the
+// derivation does not take an unmarked one for optional. A dependency bump
+// that adds an unmarked one fails here, naming it.
+func TestMonitoringKinds_MarkersClassified(t *testing.T) {
 	all := monitoringFieldMarkers(t)
 	src := markerAPISource(t)
-	expression := reflect.TypeFor[metav1.LabelSelectorRequirement]()
-	notRefused := map[string]bool{}
 	kinds := slices.Clone(monitoringKinds)
-	workload := map[string]bool{}
 	for _, kind := range monitoringWorkloadKinds {
 		kinds = append(kinds, kind.monitoringKindRow)
-		workload[kind.component] = true
 	}
 	for _, kind := range kinds {
 		t.Run(kind.component, func(t *testing.T) {
-			listed, validated := map[string]bool{}, map[string]bool{}
-			fields := 0
+			fields, required := 0, 0
 			walkKindFields(kind.typ, src.required, func(f kindField) {
 				own := declaredAs(f.owner).PkgPath() == kind.typ.PkgPath()
 				if own {
@@ -495,70 +466,24 @@ func TestMonitoringKinds_RequiredMatchMarkers(t *testing.T) {
 					t.Errorf("%s (%s.%s) has no field in the source of the linked modules; the markers are keyed wrongly, or the module is not read", f.path, f.owner, f.field.Name)
 					return
 				}
-				if !f.writtenUnauthored() {
+				if !own || !f.writtenUnauthored() {
 					return
 				}
-				if m, _ := f.markers(all); own && !m.required && !m.optional {
+				m, _ := f.markers(all)
+				if !m.required && !m.optional {
 					t.Errorf("%s (%s.%s) is written unauthored and is marked neither required nor optional; classify it", f.path, f.owner, f.field.Name)
 				}
-				if !src.required(f) {
-					return
-				}
-				if !own && f.owner != expression {
-					// A workload kind's spec embeds the pod spec's Kubernetes
-					// types (containers, volumes, affinity, probes). Of those it
-					// is held to the key and the operator of a match expression
-					// only: the convention the package applies where a kind
-					// embeds Kubernetes types. The pod kind's required list is
-					// labelSelectorRequired(podSpecLabelSelectors("")) and no
-					// other field of them (PodHandler.ToApplicationConfig,
-					// pod.go), and TestExternalSecretsKinds_RequiredMatchSource
-					// derives only the two for the External Secrets kinds. Every
-					// other required field of those types is not refused and is
-					// emitted empty, as the kind's README entry says. A type the
-					// monitoring package declares as one of them is one of them
-					// (declaredAs).
-					if workload[kind.component] && strings.HasPrefix(declaredAs(f.owner).PkgPath(), "k8s.io/") {
-						return
-					}
-					name := f.owner.String() + "." + f.field.Name
-					if strings.TrimSpace(monitoringEmbeddedNotRefused[name]) == "" {
-						t.Errorf("%s (%s) is required by the generator's rule and written unauthored; the kind refuses its omission, or monitoringEmbeddedNotRefused says why not", f.path, name)
-					}
-					notRefused[name] = true
-					return
-				}
-				switch {
-				case strings.Contains(f.path, "{}"):
-					t.Errorf("%s is required under a map value, which a required list cannot name", f.path)
-				case f.forced:
-					validated[f.path] = true
-				default:
-					listed[f.path] = true
+				if m.required {
+					required++
 				}
 			})
-			if fields == 0 {
-				t.Fatalf("the walk found no field of %s", kind.typ)
+			// Vacuity guards: the walk reaches the package's fields, and its
+			// markers are read.
+			if fields == 0 || required == 0 {
+				t.Fatalf("the walk found %d fields of %s, %d of them marked required and written unauthored", fields, kind.typ, required)
 			}
-			t.Logf("walked %d fields of the monitoring package; required and written unauthored: %v; of those under a parent written unauthored: %v",
-				fields, slices.Sorted(maps.Keys(listed)), slices.Sorted(maps.Keys(validated)))
-			if got, want := slices.Sorted(maps.Keys(kind.required)), slices.Sorted(maps.Keys(listed)); !slices.Equal(got, want) {
-				t.Errorf("required list = %v\nthe source marks %v", got, want)
-			}
-			for path, says := range kind.required {
-				if strings.TrimSpace(says) == "" {
-					t.Errorf("required field %s says nothing of itself", path)
-				}
-			}
-			if got, want := slices.Sorted(slices.Values(kind.validated)), slices.Sorted(maps.Keys(validated)); !slices.Equal(got, want) {
-				t.Errorf("fields left to validate = %v\nthe source marks %v", got, want)
-			}
+			t.Logf("walked %d fields of the monitoring package; %d marked required and written unauthored", fields, required)
 		})
-	}
-	for name := range monitoringEmbeddedNotRefused {
-		if !notRefused[name] {
-			t.Errorf("monitoringEmbeddedNotRefused names %s, which no kind's walk reaches as required and written unauthored", name)
-		}
 	}
 }
 

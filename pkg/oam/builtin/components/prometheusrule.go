@@ -48,18 +48,28 @@ func (h *PrometheusRuleHandler) PropertySchema() map[string]oam.PropertySchema {
 // rule; the type would write an unauthored name empty and an unauthored
 // expression as 0, which is an expression. The API's value rules, the one that
 // a rule is a recording or an alerting rule included, are left to it, and
-// whether an expression is valid PromQL is not checked here.
+// whether an expression is valid PromQL is not checked here. The list is
+// generated (prometheusRuleRequired).
 var prometheusRuleKind = &policyFreeKind[monitoringv1.PrometheusRuleSpec]{
-	upstream: "monitoring.coreos.com/v1 PrometheusRuleSpec",
-	required: map[string]string{
-		"groups[].name":         "the name of the rule group",
-		"groups[].rules[].expr": "the PromQL expression the rule evaluates; no default expression is filled",
-	},
+	upstream:          "monitoring.coreos.com/v1 PrometheusRuleSpec",
+	generatedRequired: prometheusRuleRequired,
 	build: func(name, namespace string, spec *monitoringv1.PrometheusRuleSpec) client.Object {
 		rule := prometheus.CreatePrometheusRule(name, namespace)
 		spec.DeepCopyInto(&rule.Spec)
 		return rule
 	},
+}
+
+// prometheusRuleRequired is the required list of the prometheusrule kind,
+// generated (kind_required.go) as alertmanagerRequired is.
+var prometheusRuleRequired = generatedKindRequired("prometheusrule")
+
+// prometheusRuleRequiredText is what the generated required paths of the
+// prometheusrule kind say of themselves (requiredText): the sentences of the
+// list the kind kept by hand before its list was generated, byte for byte.
+var prometheusRuleRequiredText = map[string]string{
+	"groups[].name":         "the name of the rule group",
+	"groups[].rules[].expr": "the PromQL expression the rule evaluates; no default expression is filled",
 }
 
 // ToApplicationConfig decodes an OAM prometheusrule component into its config.

@@ -52,8 +52,8 @@ import (
 // written empty, and what the API server or the operator then says of it is
 // not the kind's answer. The kinds whose required list is generated from the
 // same derivation (kind_required.go, go-kure/launcher#883) refuse each such
-// field, but for those requiredWrittenExceptions lists; the others do not
-// yet. This test pins which fields are not refused: the set is checked in,
+// field, but for those requiredWrittenExceptions and requiredWrittenUndecided
+// list; the others do not yet. This test pins which fields are not refused: the set is checked in,
 // one line per field, and a field that joins it (a new gap) or leaves it (a
 // new refusal) fails the test until the file is regenerated with
 // UPDATE_REQUIRED_WRITTEN_PIN=1.
@@ -1268,9 +1268,10 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 	// Vacuity guards: the measurement finds a member of each family that has
 	// one (AFF, SEC, POD on two kinds, KIND), a refusal of an omission (two of
 	// the KIND family, one of the AFF family on a kind whose list is generated,
-	// and of the CloudNativePG kinds whose lists are generated one of each
-	// family their members were in), each valid default it leaves out, and
-	// each unauthorable path it skips, each in its own class.
+	// and of the CloudNativePG and the Prometheus operator's kinds whose lists
+	// are generated one of each family their members were in, a map's list
+	// entry among them), each valid default it leaves out, and each
+	// unauthorable path it skips, each in its own class.
 	have := map[string]bool{}
 	for _, m := range all {
 		have[m.component+" "+m.path] = true
@@ -1297,24 +1298,42 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 		{"cnpg-cluster", "imageCatalogRef.name"},
 		{"cnpg-objectstore", "configuration.s3Credentials.accessKeyId.key"},
 		{"cnpg-database", "schemas[].name"},
+		{"alertmanager", "affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[].topologyKey"},
+		{"alertmanager", "securityContext.sysctls[].name"},
+		{"alertmanager", "containers[].name"},
+		{"prometheus", "topologySpreadConstraints[].topologyKey"},
+		{"prometheus", "affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[].topologyKey"},
+		{"prometheus", "securityContext.seccompProfile.type"},
+		{"prometheus", "volumes[].name"},
+		{"thanosruler", "affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[].matchExpressions[].key"},
+		{"thanosruler", "securityContext.sysctls[].value"},
+		{"thanosruler", "initContainers[].name"},
+		{"podmonitor", "podMetricsEndpoints[].proxyConnectHeader{}[].key"},
+		{"servicemonitor", "endpoints[].tlsConfig.ca.secret.key"},
+		{"prometheus-probe", "prober.proxyConnectHeader{}[].key"},
 	} {
 		if !refused[guard.component+" "+guard.path] {
 			t.Errorf("the measurement does not find the %s's refusal of %s without it", guard.component, guard.path)
 		}
 	}
 	// A kind whose required list is generated refuses every field the
-	// measurement visits, but for those requiredWrittenExceptions lists, and
-	// each of those stays a member.
+	// measurement visits, but for those requiredWrittenExceptions or
+	// requiredWrittenUndecided lists, and each of those stays a member.
 	for _, m := range all {
 		if _, generated := kindRequiredAPI[m.component]; generated {
-			if _, excepted := requiredWrittenExceptions[m.component+" "+m.path]; !excepted {
-				t.Errorf("%s: its required list is generated, and it does not refuse the omission of %s, which requiredWrittenExceptions does not list", m.component, m.path)
+			key := m.component + " " + m.path
+			_, excepted := requiredWrittenExceptions[key]
+			_, undecided := requiredWrittenUndecided[key]
+			if !excepted && !undecided {
+				t.Errorf("%s: its required list is generated, and it does not refuse the omission of %s, which neither requiredWrittenExceptions nor requiredWrittenUndecided lists", m.component, m.path)
 			}
 		}
 	}
-	for _, key := range slices.Sorted(maps.Keys(requiredWrittenExceptions)) {
-		if !have[key] {
-			t.Errorf("%s: requiredWrittenExceptions lists it, and it is no member; drop it", key)
+	for name, list := range map[string]map[string]string{"requiredWrittenExceptions": requiredWrittenExceptions, "requiredWrittenUndecided": requiredWrittenUndecided} {
+		for _, key := range slices.Sorted(maps.Keys(list)) {
+			if !have[key] {
+				t.Errorf("%s: %s lists it, and it is no member; drop it", key, name)
+			}
 		}
 	}
 	// The omission of each valid default builds and writes its value; one

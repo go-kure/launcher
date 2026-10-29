@@ -1213,9 +1213,13 @@ and by scope, whatever component or trait emits it.
   kinds' (README "Required fields a kind writes unauthored and does not refuse"). A
   kind whose required list is generated from the same derivation has none left
   (go-kure/launcher#883: so far the three cert-manager kinds, the four External
-  Secrets kinds and `cnpg-cluster`, `cnpg-objectstore` and `cnpg-database`;
-  `cnpg-pooler` keeps one named exception, the `containers: []` it writes into its
-  template, which the Pooler CRD accepts); the pin holds 1,141 fields.
+  Secrets kinds, `cnpg-cluster`, `cnpg-objectstore` and `cnpg-database`, and the
+  Prometheus operator's `servicemonitor`, `podmonitor`, `prometheus-probe` and
+  `prometheusrule`; `cnpg-pooler` keeps one named exception, the `containers: []` it
+  writes into its template, which the Pooler CRD accepts, and `prometheus`,
+  `alertmanager` and `thanosruler` keep eight each pinned, the owner reference fields of
+  an ephemeral claim template's metadata, which a follow-up settles on the operator's
+  CRDs together with the monitoring kinds' API server rows); the pin holds 363 fields.
 - **Shipped: three kinds of cert-manager's `cert-manager.io/v1` API,** `issuer`,
   `clusterissuer` and `certificate` (`issuer.go`, `clusterissuer.go`, `certificate.go`,
   with what they share in `certmanager_common.go`), each the strict projection of its
@@ -1752,8 +1756,15 @@ and by scope, whatever component or trait emits it.
     markers of the linked module's source. Of the Kubernetes types these specs embed, the
     `key` and `operator` of a selector's match expression must be authored too, presence
     only (go-kure/launcher#790): the module ships no CRD, so the same test derives them
-    from the source of the linked type by the schema generators' rule. Another required field
-    of such a type (the `key` of a Secret key reference) is not checked.
+    from the source of the linked type by the schema generators' rule. Since
+    go-kure/launcher#883 every such list is generated from that derivation, for these
+    four kinds and for `alertmanager`, `thanosruler` and `prometheus`: each required
+    field of an embedded Kubernetes type (the `key` of a Secret key reference, a
+    container's `name`) is refused unauthored under an authored parent, and so are the
+    `username` and the `password` of a `basicAuth`, which the API server accepts left
+    out and the operator refuses (**breaking** for a document that leaves one out). The
+    harness rows that run these fields through the operator's CRDs follow in a
+    follow-up.
   - A Probe needs `prober.url` here because the object always carries a prober: a limit
     of the Go type, which writes one whether or not it was authored, not a rule of the
     API, which does not require `prober` and refuses one without a `url`.

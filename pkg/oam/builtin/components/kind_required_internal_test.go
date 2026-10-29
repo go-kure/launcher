@@ -42,35 +42,104 @@ var requiredWrittenExceptions = map[string]string{
 	"cnpg-pooler template.spec.containers": "accepted: the kind writes the list as [], which the Pooler CRD accepts and to which the operator adds its pgbouncer container, with the template's spec authored or left out",
 }
 
+// requiredWrittenUndecided are the fields, by kind and path, that the
+// derivation lists and a generated kind neither refuses unauthored nor keeps
+// as an exception, because what the API server makes of them is not shown
+// here: the fields of an owner reference in the metadata of an ephemeral
+// volume's claim template, on the Prometheus operator's workload kinds. The Go
+// source declares the whole ObjectMeta there; the operator's module ships no
+// CRD to read, so whether the API server requires them or prunes them is not
+// measured. The generated list leaves them out, the pin keeps them, and a
+// follow-up of go-kure/launcher#883 that reads the operator's CRDs settles
+// each. An entry the derivation no longer lists fails the test.
+var requiredWrittenUndecided = promOpClaimOwnerReferences()
+
+// promOpClaimOwnerReferences are the fields of an owner reference in the
+// metadata of an ephemeral volume's claim template, on the Prometheus
+// operator's workload kinds, each with why it is undecided.
+func promOpClaimOwnerReferences() map[string]string {
+	out := map[string]string{}
+	for _, component := range []string{"alertmanager", "prometheus", "thanosruler"} {
+		for _, at := range []string{"storage.ephemeral", "volumes[].ephemeral"} {
+			for _, field := range []string{"apiVersion", "kind", "name", "uid"} {
+				out[component+" "+at+".volumeClaimTemplate.metadata.ownerReferences[]."+field] = "the Go source requires it of an owner reference, and no CRD of the operator is read to show whether the API server requires it there or prunes the owner reference"
+			}
+		}
+	}
+	return out
+}
+
 // kindForcedParent is what the API server answers for a generated path under
 // a parent the Go type writes whether or not it was authored and the API does
 // not require: the object with that parent left out. The kind asks for the
 // path only where the parent is authored; the object without it carries the
-// parent empty.
+// parent as the type writes its zero value.
 type kindForcedParent struct {
 	// parent is the path of that parent.
 	parent string
-	// answer is the API server's answer for the object without it, and why
-	// the kind does not refuse that object.
+	// answer is the API server's answer for the object without it, "accepted:"
+	// or "refused:", and why the kind refuses that object or does not.
 	answer string
+	// instead is what the properties without the parent author in its place,
+	// by path: the alternative the API takes for it. Nil for none.
+	instead map[string]any
+	// refused says the kind refuses the properties without the parent:
+	// through kindRequiredParents, or through a check of its own. An answer
+	// the API server refuses must be refused by the kind.
+	refused bool
 }
 
 // kindRequiredForced holds, by kind and path, the answer for every generated
 // path under such a parent; TestKindComponents_RequiredIsGenerated fails on
 // one without an answer and on an answer for no such path, and
-// TestKindComponents_GeneratedRequiredBothWays shows each answer on the CRD.
-// The API server accepts every one, and in each the object without the parent
-// is one cert-manager handles: refusing it would refuse a working document.
-// Each is kept as it was, asked for only under an authored parent.
+// TestKindComponents_GeneratedRequiredBothWays shows what the kind does with
+// each, and the answer on the kind's CRD where one is read. The Prometheus
+// operator's module ships no CRD, so its kinds' answers are recorded from the
+// operator's CRDs by hand (generatedKindsWithoutCRD), and a follow-up of
+// go-kure/launcher#883 shows them on those CRDs.
+//
+// The cert-manager entries and the monitoring keySecret ones are optional
+// alternatives: the API server accepts the object without the parent, which
+// the operator handles, so refusing it would refuse a working document. Each
+// is asked for only under an authored parent. A monitoring basic auth's
+// username and password are accepted by the API server left out, and the
+// operator refuses the basic auth without either; the kind refuses the parent
+// left out (kindRequiredParents). A Probe's prober is refused by the API
+// server without a url, and by the kind's own check.
 var kindRequiredForced = map[string]kindForcedParent{
-	"certificate keystores.jks.passwordSecretRef.name":                         {"keystores.jks.passwordSecretRef", "accepted: the keystore's password is written in `password` instead"},
-	"certificate keystores.pkcs12.passwordSecretRef.name":                      {"keystores.pkcs12.passwordSecretRef", "accepted: the keystore's password is written in `password` instead"},
-	"clusterissuer acme.solvers[].dns01.route53.secretAccessKeySecretRef.name": {"acme.solvers[].dns01.route53.secretAccessKeySecretRef", "accepted: Route 53 takes ambient credentials or `accessKeyID`"},
-	"clusterissuer acme.solvers[].dns01.rfc2136.tsigSecretSecretRef.name":      {"acme.solvers[].dns01.rfc2136.tsigSecretSecretRef", "accepted: an RFC 2136 server is updated without TSIG"},
-	"clusterissuer vault.auth.kubernetes.secretRef.name":                       {"vault.auth.kubernetes.secretRef", "accepted: Kubernetes auth takes `serviceAccountRef` instead"},
-	"issuer acme.solvers[].dns01.route53.secretAccessKeySecretRef.name":        {"acme.solvers[].dns01.route53.secretAccessKeySecretRef", "accepted: Route 53 takes ambient credentials or `accessKeyID`"},
-	"issuer acme.solvers[].dns01.rfc2136.tsigSecretSecretRef.name":             {"acme.solvers[].dns01.rfc2136.tsigSecretSecretRef", "accepted: an RFC 2136 server is updated without TSIG"},
-	"issuer vault.auth.kubernetes.secretRef.name":                              {"vault.auth.kubernetes.secretRef", "accepted: Kubernetes auth takes `serviceAccountRef` instead"},
+	"certificate keystores.jks.passwordSecretRef.name":                         {"keystores.jks.passwordSecretRef", "accepted: the keystore's password is written in `password` instead", nil, false},
+	"certificate keystores.pkcs12.passwordSecretRef.name":                      {"keystores.pkcs12.passwordSecretRef", "accepted: the keystore's password is written in `password` instead", nil, false},
+	"clusterissuer acme.solvers[].dns01.route53.secretAccessKeySecretRef.name": {"acme.solvers[].dns01.route53.secretAccessKeySecretRef", "accepted: Route 53 takes ambient credentials or `accessKeyID`", nil, false},
+	"clusterissuer acme.solvers[].dns01.rfc2136.tsigSecretSecretRef.name":      {"acme.solvers[].dns01.rfc2136.tsigSecretSecretRef", "accepted: an RFC 2136 server is updated without TSIG", nil, false},
+	"clusterissuer vault.auth.kubernetes.secretRef.name":                       {"vault.auth.kubernetes.secretRef", "accepted: Kubernetes auth takes `serviceAccountRef` instead", nil, false},
+	"issuer acme.solvers[].dns01.route53.secretAccessKeySecretRef.name":        {"acme.solvers[].dns01.route53.secretAccessKeySecretRef", "accepted: Route 53 takes ambient credentials or `accessKeyID`", nil, false},
+	"issuer acme.solvers[].dns01.rfc2136.tsigSecretSecretRef.name":             {"acme.solvers[].dns01.rfc2136.tsigSecretSecretRef", "accepted: an RFC 2136 server is updated without TSIG", nil, false},
+	"issuer vault.auth.kubernetes.secretRef.name":                              {"vault.auth.kubernetes.secretRef", "accepted: Kubernetes auth takes `serviceAccountRef` instead", nil, false},
+	"alertmanager clusterTLS.server.keySecret.key":                             webKeyFileInstead("clusterTLS.server"),
+	"alertmanager web.tlsConfig.keySecret.key":                                 webKeyFileInstead("web.tlsConfig"),
+	"prometheus web.tlsConfig.keySecret.key":                                   webKeyFileInstead("web.tlsConfig"),
+	"thanosruler web.tlsConfig.keySecret.key":                                  webKeyFileInstead("web.tlsConfig"),
+	"prometheus-probe prober.url":                                              {"prober", "refused: the API server refuses a prober without a url (minLength 1), and the type writes the prober whether or not it was authored; the kind's validate refuses a probe without one", nil, true},
+}
+
+// The basic auth blocks of the monitoring kinds: each one's username and
+// password are answered for as basicAuthForced says.
+func init() {
+	for component, parents := range kindRequiredParents {
+		for parent := range parents {
+			kindRequiredForced[component+" "+parent+".key"] = kindForcedParent{parent, basicAuthForced, nil, true}
+		}
+	}
+}
+
+// basicAuthForced is the answer for a monitoring basic auth's username or
+// password left out.
+const basicAuthForced = "accepted: the API server takes the Secret key reference empty, and the Prometheus operator reads it and refuses the basic auth; the kind refuses it left out (kindRequiredParents)"
+
+// webKeyFileInstead is the answer for the keySecret of the web server TLS
+// configuration at at: an optional alternative to keyFile.
+func webKeyFileInstead(at string) kindForcedParent {
+	return kindForcedParent{at + ".keySecret", "accepted: the private key is read from `keyFile` instead", map[string]any{at + ".keyFile": "/etc/tls/tls.key"}, false}
 }
 
 // generatedKindRequiredLists are the required lists of the generated kinds,
@@ -87,6 +156,13 @@ var generatedKindRequiredLists = map[string]map[string]string{
 	"clustersecretstore":    clusterSecretStoreKind.required,
 	"externalsecret":        externalSecretKind.required,
 	"secretstore":           secretStoreKind.required,
+	"alertmanager":          alertmanagerKind.generatedRequired,
+	"podmonitor":            podMonitorKind.generatedRequired,
+	"prometheus":            prometheusKind.generatedRequired,
+	"prometheus-probe":      prometheusProbeKind.generatedRequired,
+	"prometheusrule":        prometheusRuleKind.generatedRequired,
+	"servicemonitor":        serviceMonitorKind.generatedRequired,
+	"thanosruler":           thanosRulerKind.generatedRequired,
 }
 
 // requiredWrittenKind returns the measured kind of a component.
@@ -120,7 +196,8 @@ func unauthorableAncestor(component, path string) (string, bool) {
 // generatedRequiredPaths returns, sorted by path, the fields of a kind that its
 // generated required list holds: what deriveRequiredWritten lists, but for a
 // value requiredWrittenValidDefaults holds, a field requiredWrittenExceptions
-// holds, and a field under a path requiredWrittenUnauthorable lists.
+// or requiredWrittenUndecided holds, and a field under a path
+// requiredWrittenUnauthorable lists.
 func generatedRequiredPaths(t *testing.T, k pinKind) []requiredWrittenField {
 	t.Helper()
 	var out []requiredWrittenField
@@ -130,6 +207,9 @@ func generatedRequiredPaths(t *testing.T, k pinKind) []requiredWrittenField {
 			continue
 		}
 		if _, ok := requiredWrittenExceptions[key]; ok {
+			continue
+		}
+		if _, ok := requiredWrittenUndecided[key]; ok {
 			continue
 		}
 		if _, ok := unauthorableAncestor(k.component, d.path); ok {
@@ -257,15 +337,41 @@ func TestKindComponents_RequiredIsGenerated(t *testing.T) {
 		if !forced[key] {
 			t.Errorf("kindRequiredForced answers for %s, which is no generated path under a parent the type writes unauthored; drop it", key)
 		}
-		if parent := kindRequiredForced[key].parent; parent == path || !underPath(path, parent) {
-			t.Errorf("kindRequiredForced gives %s of %s the parent %s, which is not above it", path, component, parent)
+		f := kindRequiredForced[key]
+		if f.parent == path || !underPath(path, f.parent) {
+			t.Errorf("kindRequiredForced gives %s of %s the parent %s, which is not above it", path, component, f.parent)
+		}
+		switch {
+		case strings.HasPrefix(f.answer, "refused: "):
+			if !f.refused {
+				t.Errorf("kindRequiredForced says the API server refuses %s of %s without %s, and the kind does not refuse it: the kind must", path, component, f.parent)
+			}
+		case !strings.HasPrefix(f.answer, "accepted: "):
+			t.Errorf("kindRequiredForced answers %q for %s of %s; an answer starts with \"accepted: \" or \"refused: \"", f.answer, path, component)
 		}
 	}
-	for _, key := range slices.Sorted(maps.Keys(requiredWrittenExceptions)) {
-		component, path, _ := strings.Cut(key, " ")
-		k, ok := requiredWrittenKind(component)
-		if !ok || !slices.ContainsFunc(deriveRequiredWritten(t, k, k.schema(t)), func(d requiredWrittenField) bool { return d.path == path }) {
-			t.Errorf("requiredWrittenExceptions lists %s, which the derivation no longer lists; drop it", key)
+	// A parent the kind refuses left out is one of those parents, and the
+	// derivation does not list it.
+	for _, component := range slices.Sorted(maps.Keys(kindRequiredParents)) {
+		for _, parent := range slices.Sorted(maps.Keys(kindRequiredParents[component])) {
+			if slices.Contains(derived[component], parent) {
+				t.Errorf("kindRequiredParents lists %s of %s, which the derivation lists; drop it", parent, component)
+			}
+			if !slices.ContainsFunc(slices.Collect(maps.Keys(kindRequiredForced)), func(key string) bool {
+				c, _, _ := strings.Cut(key, " ")
+				return c == component && kindRequiredForced[key].parent == parent && kindRequiredForced[key].refused
+			}) {
+				t.Errorf("kindRequiredParents lists %s of %s, which no answer of kindRequiredForced refuses", parent, component)
+			}
+		}
+	}
+	for name, list := range map[string]map[string]string{"requiredWrittenExceptions": requiredWrittenExceptions, "requiredWrittenUndecided": requiredWrittenUndecided} {
+		for _, key := range slices.Sorted(maps.Keys(list)) {
+			component, path, _ := strings.Cut(key, " ")
+			k, ok := requiredWrittenKind(component)
+			if !ok || !slices.ContainsFunc(deriveRequiredWritten(t, k, k.schema(t)), func(d requiredWrittenField) bool { return d.path == path }) {
+				t.Errorf("%s lists %s, which the derivation no longer lists; drop it", name, key)
+			}
 		}
 	}
 	if t.Failed() {
@@ -402,9 +508,10 @@ func TestKindComponents_GeneratedComparisonBites(t *testing.T) {
 // not produce. Each generated path is in the list, saying what requiredText
 // holds for it or, without an entry there, its class's sentence. Every other
 // entry of the list is in a held class: an unapplied default of a store
-// (secretStoreUnappliedDefaults), saying its sentence, or a field under a path
-// the kind refuses whatever is authored there (requiredWrittenUnauthorable),
-// which the kind asks for first. An entry in neither fails, and so does a text
+// (secretStoreUnappliedDefaults), saying its sentence, a parent the kind
+// refuses left out (kindRequiredParents), saying its sentence, or a field
+// under a path the kind refuses whatever is authored there
+// (requiredWrittenUnauthorable). An entry in none fails, and so does a text
 // of requiredText for a path that is not generated.
 //
 // The class sentences of the external-secrets API are the ones its kinds said
@@ -453,13 +560,19 @@ func TestKindComponents_GeneratedRequiredHeld(t *testing.T) {
 					}
 					continue
 				}
+				if want, ok := kindRequiredParents[component][path]; ok {
+					if says != want {
+						t.Errorf("%s is a parent the kind refuses left out, and the list says %q of it, want %q", path, says, want)
+					}
+					continue
+				}
 				if _, ok := unauthorableAncestor(component, path); ok {
 					if strings.TrimSpace(says) == "" {
 						t.Errorf("%s says nothing of itself", path)
 					}
 					continue
 				}
-				t.Errorf("%s is in the required list, and it is neither generated nor in a held class (an unapplied default, a field under a path requiredWrittenUnauthorable lists)", path)
+				t.Errorf("%s is in the required list, and it is neither generated nor in a held class (an unapplied default, a parent kindRequiredParents lists, a field under a path requiredWrittenUnauthorable lists)", path)
 			}
 			for _, path := range slices.Sorted(maps.Keys(requiredText[component])) {
 				if !slices.Contains(generated, path) {
@@ -479,6 +592,20 @@ var generatedKindCRDFiles = map[string]struct{ modulePath, file string }{
 	"cnpg-database":    {cnpgModulePath, cnpgCRDs + "databases.yaml"},
 	"cnpg-objectstore": {barmanCloudModulePath, "config/crd/bases/barmancloud.cnpg.io_objectstores.yaml"},
 	"cnpg-pooler":      {cnpgModulePath, cnpgCRDs + "poolers.yaml"},
+}
+
+// generatedKindsWithoutCRD are the generated kinds whose linked module ships no
+// CRD and whose kindRequiredForced answers are recorded by hand from the
+// operator's CRDs: the Prometheus operator's. A follow-up of
+// go-kure/launcher#883 reads those CRDs and shows the answers on them.
+var generatedKindsWithoutCRD = map[string]bool{
+	"alertmanager":     true,
+	"podmonitor":       true,
+	"prometheus":       true,
+	"prometheus-probe": true,
+	"prometheusrule":   true,
+	"servicemonitor":   true,
+	"thanosruler":      true,
 }
 
 // generatedKindCRDOf reads the CRD of a generated kind whose linked module
@@ -540,10 +667,11 @@ func cnpgCatalogRefSample(at string) map[string]any {
 // Where the linked module ships the kind's CRD, the API server answers too,
 // on one path of each type that declares one: the control's object is
 // accepted, and the same object without the field is refused as missing a
-// required one. The External Secrets Operator's module ships no CRD, and its
-// kinds are answered by the kind only. Each answer kindRequiredForced records
-// is shown on the CRD as well: the control without the parent builds, and the
-// API server accepts the object.
+// required one. The External Secrets Operator's module and the Prometheus
+// operator's ship no CRD, and their kinds are answered by the kind only. Each
+// answer kindRequiredForced records is shown by the kind (showForcedAnswer),
+// and on the CRD where one is read: the control without the parent builds, and
+// the API server accepts the object.
 func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 	for _, component := range slices.Sorted(maps.Keys(kindRequiredAPI)) {
 		t.Run(component, func(t *testing.T) {
@@ -592,9 +720,11 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 					t.Errorf("%s: the omission builds", path)
 				case strings.Contains(err.Error(), want):
 				// A struct the type writes whether or not it was authored is
-				// refused by the kind's own check of its value, through the field
-				// of it that check requires (a cluster reference's name).
-				case pinWrittenStruct(k, path) && strings.HasPrefix(err.Error(), at+".") && strings.Contains(err.Error(), ": required ("):
+				// refused by the kind's own check of its value, which runs before
+				// the generated refusal and names the struct or the field of it
+				// that check requires (a cluster reference's name, a TLS
+				// configuration's certificate).
+				case pinWrittenStruct(k, path) && pinRefusalNames(at, err):
 				default:
 					t.Errorf("%s: the omission is refused with %q, want one saying %q", path, err, want)
 				}
@@ -624,28 +754,7 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 				if c != component {
 					continue
 				}
-				f := kindRequiredForced[key]
-				with, err := pinControl(k, base, path, schema)
-				if err != nil {
-					t.Errorf("%s: no control builds with the field authored: %v", path, err)
-					continue
-				}
-				holder, name, ok := pinParent(with, f.parent, false)
-				if !ok {
-					t.Errorf("%s: the control does not author %s", path, f.parent)
-					continue
-				}
-				delete(holder, name)
-				obj, err := pinBuild(k, with)
-				if err != nil {
-					t.Errorf("%s: the control without %s is refused: %v; kindRequiredForced says the API server accepts it", path, f.parent, err)
-					continue
-				}
-				if create == nil {
-					t.Errorf("%s: kindRequiredForced answers for a kind no CRD is read for", key)
-					continue
-				}
-				create.create(t, obj).accepted(t, fmt.Sprintf("%s %s, %s left out", component, path, f.parent))
+				showForcedAnswer(t, k, base, schema, create, path, kindRequiredForced[key])
 			}
 			for _, key := range slices.Sorted(maps.Keys(requiredWrittenExceptions)) {
 				c, path, _ := strings.Cut(key, " ")
@@ -659,6 +768,66 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 			}
 			t.Logf("%d API server rows", rows)
 		})
+	}
+}
+
+// showForcedAnswer shows the answer kindRequiredForced records for path, under
+// the parent f names. The control that authors path builds; the same
+// properties without the parent, and with what f authors instead, are refused
+// by the kind naming the parent or a field under it where f says the kind
+// refuses them, and build otherwise. Where the kind builds the object without
+// the parent and its CRD is read, the API server accepts that object. A kind
+// of generatedKindsWithoutCRD has its answers recorded by hand, and the kinds
+// that refuse a parent are all of it, so no API server answer is shown for an
+// object the kind refuses.
+func showForcedAnswer(t *testing.T, k pinKind, base map[string]any, schema pinSchema, create *crdCreate, path string, f kindForcedParent) {
+	t.Helper()
+	what := fmt.Sprintf("%s %s, %s left out", k.component, path, f.parent)
+	with, err := pinControl(k, base, path, schema)
+	if err != nil {
+		t.Errorf("%s: no control builds with the field authored: %v", path, err)
+		return
+	}
+	if _, err := pinBuild(k, with); err != nil {
+		t.Errorf("%s: the control is refused: %v", path, err)
+		return
+	}
+	without := pinCopy(with)
+	holder, name, ok := pinParent(without, f.parent, false)
+	if !ok {
+		t.Errorf("%s: the control does not author %s", path, f.parent)
+		return
+	}
+	delete(holder, name)
+	for _, at := range slices.Sorted(maps.Keys(f.instead)) {
+		p, n, ok := pinParent(without, at, true)
+		if !ok {
+			t.Errorf("%s: %s cannot be placed in the properties", what, at)
+			return
+		}
+		p[n] = f.instead[at]
+	}
+	obj, err := pinBuild(k, without)
+	switch {
+	case f.refused && err == nil:
+		t.Errorf("%s: builds, and kindRequiredForced says the kind refuses it", what)
+		return
+	case f.refused && !pinRefusalNames(f.parent, err):
+		t.Errorf("%s: refused with %q, want a refusal naming %s or a field under it", what, err, f.parent)
+		return
+	case !f.refused && err != nil:
+		t.Errorf("%s: refused: %v; kindRequiredForced says the kind does not refuse it", what, err)
+		return
+	}
+	switch {
+	case generatedKindsWithoutCRD[k.component]:
+		t.Logf("%s: the kind's answer is shown; the API server's, %q, is recorded by hand", what, f.answer)
+	case create == nil:
+		t.Errorf("%s %s: kindRequiredForced answers for a kind no CRD is read for", k.component, path)
+	case f.refused:
+		t.Errorf("%s: kindRequiredForced says the kind refuses it, and no API server answer is shown for a refused object of a kind whose CRD is read", what)
+	default:
+		create.create(t, obj).accepted(t, what)
 	}
 }
 

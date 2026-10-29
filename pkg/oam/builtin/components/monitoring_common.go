@@ -17,15 +17,17 @@ import (
 // TestMonitoringKinds_DefaultedZeros holds the claim that a CRD default, read
 // from its marker, turns an authored 0, false or "" into another value only on
 // the fields of a kind's defaultedZeros (monitoringDefaultedZeros), where the
-// kind refuses one, and TestMonitoringKinds_RequiredMatchMarkers
-// holds each kind's required list to the fields the source marks required.
+// kind refuses one. Each kind's required list is generated (kind_required.go)
+// from the fields the source marks required and the type writes unauthored,
+// and TestMonitoringKinds_MarkersClassified holds every such field of the
+// monitoring package to a +required or +optional marker.
 //
-// One pair of required fields is of a Kubernetes type, which carries no
-// +required marker: the key and the operator of a match expression, in the
-// label selector of the three scrape kinds (labelSelectorRequired). No CRD is
-// linked to read them from, so the same test derives them from the source of
-// metav1.LabelSelectorRequirement by the schema generators' rule: a field with
-// no optional marker whose json tag keeps it when empty is required.
+// The fields of a Kubernetes type, which carries no +required marker (the key
+// and the operator of a match expression, a container's name), are derived
+// from its source by the schema generators' rule: a field with no optional
+// marker whose json tag keeps it when empty is required. No CRD answers for the
+// derived lists here; a follow-up of go-kure/launcher#883 reads the operator's
+// CRDs for that.
 //
 // A host these objects name is one Prometheus reaches, not an artifact source:
 // a prober, a proxy, an OAuth2 token endpoint, a static probe target. None is

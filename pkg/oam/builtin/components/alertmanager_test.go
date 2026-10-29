@@ -203,8 +203,10 @@ func alertmanagerRefusals(notA string) []struct {
 		{"sha", map[string]any{"sha": "0123456789abcdef"}, "sha" + deprecated},
 
 		{"argument without a name", map[string]any{"additionalArgs": []any{map[string]any{"value": "debug"}}}, "additionalArgs[0].name: required"},
-		{"cluster TLS without a server", map[string]any{"clusterTLS": map[string]any{"client": map[string]any{}}}, "clusterTLS.server: required"},
-		{"cluster TLS without a client", map[string]any{"clusterTLS": map[string]any{"server": map[string]any{}}}, "clusterTLS.client: required"},
+		// A server or a client left out is written empty, and the operator's
+		// check of the TLS blocks refuses it before the required list does.
+		{"cluster TLS without a server", map[string]any{"clusterTLS": map[string]any{"client": amTLS}}, "clusterTLS.server: TLS private key must be defined"},
+		{"cluster TLS without a client", map[string]any{"clusterTLS": map[string]any{"server": amTLS}}, "clusterTLS.client.cert: required"},
 		{"DNS option without a name", map[string]any{"dnsConfig": map[string]any{"options": []any{map[string]any{"value": "2"}}}}, "dnsConfig.options[0].name: required"},
 		{"host alias without an address", map[string]any{"hostAliases": []any{map[string]any{"hostnames": []any{"smtp.internal"}}}}, "hostAliases[0].ip: required"},
 		{"a later host alias without host names", map[string]any{"hostAliases": []any{

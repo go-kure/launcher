@@ -2,6 +2,7 @@ package components
 
 import (
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -118,7 +119,7 @@ const (
 // the tests below name every field of its spec type that has no answer.
 var monitoringWorkloadKinds = []monitoringWorkloadKind{
 	{
-		monitoringKindRow: monitoringKindRow{"alertmanager", reflect.TypeFor[monitoringv1.AlertmanagerSpec](), alertmanagerKind.required, nil, alertmanagerKind.defaultedZerosFor(&monitoringv1.AlertmanagerSpec{}).fields},
+		monitoringKindRow: monitoringKindRow{"alertmanager", reflect.TypeFor[monitoringv1.AlertmanagerSpec](), alertmanagerKind.defaultedZerosFor(&monitoringv1.AlertmanagerSpec{}).fields},
 		handler:           &AlertmanagerHandler{},
 		rulesLeft:         alertmanagerRulesLeft,
 		podCopies:         map[string]string{"schedulerName": "schedulerName", "imagePullPolicy": "containers[].imagePullPolicy"},
@@ -228,7 +229,7 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 		},
 	},
 	{
-		monitoringKindRow: monitoringKindRow{"thanosruler", reflect.TypeFor[monitoringv1.ThanosRulerSpec](), thanosRulerKind.required, nil, thanosRulerKind.defaultedZeros.fields},
+		monitoringKindRow: monitoringKindRow{"thanosruler", reflect.TypeFor[monitoringv1.ThanosRulerSpec](), thanosRulerKind.defaultedZeros.fields},
 		handler:           &ThanosRulerHandler{},
 		rulesLeft:         thanosRulerRulesLeft,
 		podCopies:         map[string]string{"schedulerName": "schedulerName", "imagePullPolicy": "containers[].imagePullPolicy"},
@@ -322,7 +323,7 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 		},
 	},
 	{
-		monitoringKindRow: monitoringKindRow{"prometheus", reflect.TypeFor[monitoringv1.PrometheusSpec](), prometheusKind.required, nil, prometheusKind.defaultedZerosFor(&monitoringv1.PrometheusSpec{}).fields},
+		monitoringKindRow: monitoringKindRow{"prometheus", reflect.TypeFor[monitoringv1.PrometheusSpec](), prometheusKind.defaultedZerosFor(&monitoringv1.PrometheusSpec{}).fields},
 		handler:           &PrometheusHandler{},
 		rulesLeft:         prometheusRulesLeft,
 		podCopies:         map[string]string{"schedulerName": "schedulerName", "imagePullPolicy": "containers[].imagePullPolicy"},
@@ -806,6 +807,11 @@ func TestMonitoringWorkloadKinds_DefaultedZeros(t *testing.T) {
 			if !maps.Equal(derived, kind.defaulted) {
 				t.Errorf("fields on which an authored zero is replaced:\n  derived %v\n  listed  %v", derived, kind.defaulted)
 			}
+			pk, ok := requiredWrittenKind(kind.component)
+			if !ok {
+				t.Fatalf("requiredWrittenKinds does not measure %s", kind.component)
+			}
+			schema := pk.schema(t)
 			for path, def := range derived {
 				build := func(value any) error {
 					props := authoredAt(path, value)
@@ -821,7 +827,26 @@ func TestMonitoringWorkloadKinds_DefaultedZeros(t *testing.T) {
 							maps.Copy(firstEntryAt(props, list), fields)
 						}
 					}
-					_, err := kind.handler.ToApplicationConfig(&oam.Component{Name: "fast", Type: kind.component, Properties: props}, "data")
+					// The fields the kind requires around the one authored (a
+					// container's name, a handler's port) are filled as the pin's
+					// controls fill them (pinControl).
+					var err error
+					for range 6 {
+						_, err = kind.handler.ToApplicationConfig(&oam.Component{Name: "fast", Type: kind.component, Properties: props}, "data")
+						m := pinRequiredError.FindStringSubmatch(fmt.Sprint(err))
+						if err == nil || m == nil {
+							break
+						}
+						named := regexp.MustCompile(`\[[0-9]+\]`).ReplaceAllString(m[1], "[]")
+						parent, name, ok := pinParent(props, named, true)
+						if named == path || !ok {
+							break
+						}
+						if _, held := parent[name]; held {
+							break
+						}
+						parent[name] = pinSample(named, schema.props[named])
+					}
 					return err
 				}
 				var zero, other any = 0, 2

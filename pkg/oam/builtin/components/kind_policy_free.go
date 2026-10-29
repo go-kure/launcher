@@ -50,6 +50,12 @@ type policyFreeKind[T any] struct {
 	// they were authored, so that the decoded value does not show the omission
 	// (refuseUnauthoredRequired). Nil for a kind with none.
 	required map[string]string
+	// generatedRequired is the generated required list of a kind whose list
+	// moved from a hand-kept one (generatedKindRequired), refused as required
+	// is, after the kind's own checks (validate, validateName): a document
+	// those refuse is refused with the words it was refused with before. Nil
+	// for a kind with none.
+	generatedRequired map[string]string
 	// defaultedZeros lists the fields of T on which an authored 0, false or ""
 	// cannot be carried (refuseUncarriedSpecValues). The zero value lists
 	// none: it is the value of every kind whose type has no such field, which
@@ -79,7 +85,8 @@ type policyFreeKind[T any] struct {
 // contract and the strict decode every spec-projecting kind uses
 // (decodeKindSpec), and refuses two spellings of one field
 // (refuseUncarriedSpecValues) and a required field the type would write
-// unauthored (refuseUnauthoredRequired). A field on which an authored 0, false
+// unauthored (refuseUnauthoredRequired: required before the kind's own
+// checks, generatedRequired after them). A field on which an authored 0, false
 // or "" cannot be carried must be in the kind's defaultedZeros, or in the list
 // defaultedZerosFor gives for the decoded value, which refuses that value:
 // TestPolicyFreeKinds_NoDefaultedZeros holds each decoded type's
@@ -117,6 +124,9 @@ func (k *policyFreeKind[T]) config(component *oam.Component) (stack.ApplicationC
 		if err := k.validateName(component.ObjectName(), component.Name, decoded); err != nil {
 			return nil, err
 		}
+	}
+	if err := refuseUnauthoredRequired(authored, k.generatedRequired); err != nil {
+		return nil, err
 	}
 	return &policyFreeKindConfig[T]{kind: k, objectName: componentObjectName(component), metadata: component.ObjectMetadata(), decoded: decoded}, nil
 }

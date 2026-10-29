@@ -274,8 +274,8 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 // (monitoringWorkloadDefaultedZeros).
 var prometheusKind = &policyHeldKind[monitoringv1.PrometheusSpec]{
 	policyFreeKind: policyFreeKind[monitoringv1.PrometheusSpec]{
-		upstream: "monitoring.coreos.com/v1 PrometheusSpec",
-		required: prometheusRequired,
+		upstream:          "monitoring.coreos.com/v1 PrometheusSpec",
+		generatedRequired: prometheusRequired,
 		defaultedZerosFor: func(spec *monitoringv1.PrometheusSpec) defaultedZeroFields {
 			return monitoringWorkloadDefaultedZeros(&corev1.PodSpec{HostNetwork: spec.HostNetwork}, prometheusDefaultedZeroFields)
 		},
@@ -320,16 +320,20 @@ var prometheusDefaultedZeroFields = func() map[string]string {
 	return fields
 }()
 
-// prometheusRequired lists the fields the API requires below an authored
-// parent that the type would write unauthored, the key and the operator of
-// each label selector's match expression included: those of the pod spec's
-// fields, of the storage's claim templates and of the ten selectors of the
-// objects Prometheus reads, the ServiceMonitors, PodMonitors, Probes,
-// ScrapeConfigs and PrometheusRules and their namespaces
-// (labelSelectorRequired).
-// TestMonitoringKinds_RequiredMatchMarkers derives it from the markers of the
-// linked module's source.
-var prometheusRequired = requiredFields(map[string]string{ //nolint:gosec // G101: the keys are field paths (clientSecret is a field's name) and the values their descriptions
+// prometheusRequired is the required list of the prometheus kind, generated
+// (kind_required.go) as alertmanagerRequired is, with the username and the
+// password of each basic auth block (kindRequiredParents).
+var prometheusRequired = generatedKindRequired("prometheus")
+
+// prometheusRequiredText is what the generated required paths of the
+// prometheus kind say of themselves (requiredText): the sentences of the list
+// the kind kept by hand before its list was generated, each kept byte for
+// byte, the key and the operator of each label selector's match expression
+// included: those of the pod spec's fields, of the storage's claim templates
+// and of the ten selectors of the objects Prometheus reads, the
+// ServiceMonitors, PodMonitors, Probes, ScrapeConfigs and PrometheusRules and
+// their namespaces (labelSelectorRequired).
+var prometheusRequiredText = requiredFields(map[string]string{ //nolint:gosec // G101: the keys are field paths (clientSecret is a field's name) and the values their descriptions
 	"additionalArgs[].name":                              "the name of the command-line argument",
 	"alerting.alertmanagers":                             "the Alertmanager endpoints alerts are sent to",
 	"alerting.alertmanagers[].name":                      "the name of the Alertmanager endpoint's Service",

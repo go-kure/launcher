@@ -181,8 +181,8 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 // anywhere, and the operator's value stays.
 var alertmanagerKind = &policyHeldKind[monitoringv1.AlertmanagerSpec]{
 	policyFreeKind: policyFreeKind[monitoringv1.AlertmanagerSpec]{
-		upstream: "monitoring.coreos.com/v1 AlertmanagerSpec",
-		required: alertmanagerRequired,
+		upstream:          "monitoring.coreos.com/v1 AlertmanagerSpec",
+		generatedRequired: alertmanagerRequired,
 		defaultedZerosFor: func(spec *monitoringv1.AlertmanagerSpec) defaultedZeroFields {
 			return monitoringWorkloadDefaultedZeros(&corev1.PodSpec{HostNetwork: spec.HostNetwork}, alertmanagerDefaultedZeroFields)
 		},
@@ -214,14 +214,23 @@ var alertmanagerDefaultedZeroFields = map[string]string{
 	"imagePullPolicy":                        imagePullPolicyDefault,
 }
 
-// alertmanagerRequired lists the fields the API requires below an authored
-// parent that the type would write unauthored, the key and the operator of
-// each label selector's match expression included: those of the pod spec's
-// fields, of the storage's claim templates and of the two selectors of
-// AlertmanagerConfig objects (labelSelectorRequired).
-// TestMonitoringKinds_RequiredMatchMarkers derives it from the markers of the
-// linked module's source.
-var alertmanagerRequired = requiredFields(map[string]string{ //nolint:gosec // G101: the keys are field paths (clientSecret is a field's name) and the values their descriptions
+// alertmanagerRequired is the required list of the alertmanager kind,
+// generated (kind_required.go) from the markers of the linked module's source:
+// every field the API requires and the type writes unauthored, whatever type
+// declares it (a field of the pod spec's Kubernetes types, a Secret key
+// reference's key), refused where its parent is authored and it is not, after
+// the kind's own checks; and the username and the password of the global
+// basic auth (kindRequiredParents).
+var alertmanagerRequired = generatedKindRequired("alertmanager")
+
+// alertmanagerRequiredText is what the generated required paths of the
+// alertmanager kind say of themselves (requiredText): the sentences of the
+// list the kind kept by hand before its list was generated, each kept byte for
+// byte, the key and the operator of each label selector's match expression
+// included: those of the pod spec's fields, of the storage's claim templates
+// and of the two selectors of AlertmanagerConfig objects
+// (labelSelectorRequired).
+var alertmanagerRequiredText = requiredFields(map[string]string{ //nolint:gosec // G101: the keys are field paths (clientSecret is a field's name) and the values their descriptions
 	"additionalArgs[].name":    "the name of the command-line argument",
 	"clusterTLS.server":        "the TLS configuration of the gossip protocol's server side",
 	"clusterTLS.client":        "the TLS configuration of the gossip protocol's client side",

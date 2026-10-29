@@ -189,11 +189,11 @@ func (h *ThanosRulerHandler) PropertySchema() map[string]oam.PropertySchema {
 // derives the list (monitoringWorkloadDefaultedZeros).
 var thanosRulerKind = &policyHeldKind[monitoringv1.ThanosRulerSpec]{
 	policyFreeKind: policyFreeKind[monitoringv1.ThanosRulerSpec]{
-		upstream:       "monitoring.coreos.com/v1 ThanosRulerSpec",
-		required:       thanosRulerRequired,
-		defaultedZeros: monitoringWorkloadDefaultedZeros(nil, thanosRulerDefaultedZeroFields),
-		validate:       validateThanosRuler,
-		validateName:   validateThanosRulerName,
+		upstream:          "monitoring.coreos.com/v1 ThanosRulerSpec",
+		generatedRequired: thanosRulerRequired,
+		defaultedZeros:    monitoringWorkloadDefaultedZeros(nil, thanosRulerDefaultedZeroFields),
+		validate:          validateThanosRuler,
+		validateName:      validateThanosRulerName,
 		build: func(name, namespace string, spec *monitoringv1.ThanosRulerSpec) client.Object {
 			ruler := prometheus.CreateThanosRuler(name, namespace)
 			spec.DeepCopyInto(&ruler.Spec)
@@ -222,14 +222,25 @@ var thanosRulerDefaultedZeroFields = map[string]string{
 	"imagePullPolicy": imagePullPolicyDefault,
 }
 
-// thanosRulerRequired lists the fields the API requires below an authored
-// parent that the type would write unauthored, the key and the operator of
-// each label selector's match expression included: those of the pod spec's
-// fields, of the storage's claim templates and of the two selectors of
-// PrometheusRule objects (labelSelectorRequired).
-// TestMonitoringKinds_RequiredMatchMarkers derives it from the markers of the
-// linked module's source.
-var thanosRulerRequired = requiredFields(map[string]string{ //nolint:gosec // G101: the keys are field paths (clientSecret is a field's name) and the values their descriptions
+// thanosRulerRequired is the required list of the thanosruler kind, generated
+// (kind_required.go) as alertmanagerRequired is, with the username and the
+// password of each remote write's basic auth (kindRequiredParents). The
+// fields of a remote write's Azure workload identity are not generated: the
+// kind refuses one whatever it holds at every version the operator can parse
+// (requiredWrittenUnauthorable). Under a version it cannot parse, which is
+// left to the operator, they are held as the hand-kept list held them.
+var thanosRulerRequired = requiredFields(generatedKindRequired("thanosruler"), map[string]string{
+	"remoteWrite[].azureAd.workloadIdentity.clientId": "the client id of the Azure workload identity",
+	"remoteWrite[].azureAd.workloadIdentity.tenantId": "the tenant id of the Azure workload identity",
+})
+
+// thanosRulerRequiredText is what the generated required paths of the
+// thanosruler kind say of themselves (requiredText): the sentences of the list
+// the kind kept by hand before its list was generated, each kept byte for
+// byte, the key and the operator of each label selector's match expression
+// included: those of the pod spec's fields, of the storage's claim templates
+// and of the two selectors of PrometheusRule objects (labelSelectorRequired).
+var thanosRulerRequiredText = requiredFields(map[string]string{ //nolint:gosec // G101: the keys are field paths (clientSecret is a field's name) and the values their descriptions
 	"additionalArgs[].name":                              "the name of the command-line argument",
 	"dnsConfig.options[].name":                           "the name of the DNS resolver option",
 	"excludedFromEnforcement[].namespace":                "the namespace of the excluded object",
@@ -242,8 +253,6 @@ var thanosRulerRequired = requiredFields(map[string]string{ //nolint:gosec // G1
 	"remoteWrite[].azureAd.oauth.clientId":               "the client id of the Azure OAuth application",
 	"remoteWrite[].azureAd.oauth.clientSecret":           "the Secret key that holds the Azure OAuth client secret",
 	"remoteWrite[].azureAd.oauth.tenantId":               "the tenant id of the Azure OAuth application",
-	"remoteWrite[].azureAd.workloadIdentity.clientId":    "the client id of the Azure workload identity",
-	"remoteWrite[].azureAd.workloadIdentity.tenantId":    "the tenant id of the Azure workload identity",
 	"remoteWrite[].oauth2.clientId":                      "the Secret or ConfigMap key that holds the OAuth2 client id",
 	"remoteWrite[].oauth2.clientSecret":                  "the Secret key that holds the OAuth2 client secret",
 	"remoteWrite[].oauth2.tokenUrl":                      "the URL tokens are fetched from",
