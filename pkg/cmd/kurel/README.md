@@ -286,7 +286,7 @@ component, and a late component making the source a Flux object names, are admit
 | `--environment` | Named environment whose profile and values stand in for `--profile`/`--values` (see [Named environments](#named-environments)). Mutually exclusive with `--profile` and `--values`. |
 | `--environments` | `EnvironmentSet` file declaring the `--environment` names (default: `environments.yaml` next to `app.yaml`). Requires `--environment`. |
 | `-o, --output` | Output directory (default: stdout). Refused together with `-f/--output-file`. |
-| `-f, --output-file` | The global flag: write the whole stream to this file instead of stdout. The file's directory must exist. A new file is created owner-only (`0600`), since the stream can carry Secret values; an existing file is replaced and keeps its mode. Refused when empty, and together with `--output` or `--dry-run`. |
+| `-f, --output-file` | The global flag: write the whole stream to this file instead of stdout. The file's directory must exist. A new file is created owner-only (`0600`), since the stream can carry Secret values; an existing file is replaced and keeps its mode. The path is opened like a shell `>` redirect, following a symlink, so name one only you can write to. Refused when empty, and together with `--output` or `--dry-run`. |
 | `-n, --namespace` | Namespace override; must be a DNS-1123 label (at most 63 characters, no dots), like `metadata.namespace`. |
 | `--cluster-id` | Cluster identifier (default `local`). |
 | `--values` | Path to a values YAML file (requires a `kurel.yaml` package). The only flag that can supply an `array` or `object` parameter. |
