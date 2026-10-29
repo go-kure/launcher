@@ -66,9 +66,8 @@ func (h *ImagePolicyHandler) PropertySchema() map[string]oam.PropertySchema {
 
 // imagePolicyKind is the imagepolicy kind: see fluxKind. The API requires
 // `imageRepositoryRef` with its `name` and `policy`, and of a `semver` policy
-// its `range`; the type would write each one empty.
-// TestFluxKinds_RequiredMatchMarkers holds the list to the markers of the
-// upstream source. `interval` is held to the form its pattern takes; the two
+// its `range`; the type would write each one empty. The list is generated
+// (imagePolicyRequired) from the markers of the upstream source. `interval` is held to the form its pattern takes; the two
 // expression rules that tie it to `digestReflectionPolicy` are left to the API
 // server (fluxRulesLeft). An ImagePolicy reads no ConfigMap or Secret: the
 // ImageRepository it names holds the credentials.
@@ -80,12 +79,7 @@ var imagePolicyKind = &fluxKind[imagev1.ImagePolicySpec]{
 			"policy.alphabetical.order": `"asc"`,
 			"policy.numerical.order":    `"asc"`,
 		}),
-		required: map[string]string{
-			"imageRepositoryRef":      "the ImageRepository whose tags the policy selects from",
-			"imageRepositoryRef.name": "the name of the ImageRepository",
-			"policy":                  "how the latest image is selected: `semver`, `alphabetical` or `numerical`",
-			"policy.semver.range":     "the semantic version range the selected tag is the highest of",
-		},
+		required: imagePolicyRequired,
 		build: func(name, namespace string, spec *imagev1.ImagePolicySpec) client.Object {
 			policy := fluxcd.CreateImagePolicy(name, namespace)
 			spec.DeepCopyInto(&policy.Spec)
@@ -95,6 +89,20 @@ var imagePolicyKind = &fluxKind[imagev1.ImagePolicySpec]{
 	durations: []fluxDurationField[imagev1.ImagePolicySpec]{
 		{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *imagev1.ImagePolicySpec) *metav1.Duration { return s.Interval }},
 	},
+}
+
+// imagePolicyRequired is the required list of the imagepolicy kind, generated
+// (kind_required.go) as fluxcdAlertRequired is.
+var imagePolicyRequired = generatedKindRequired(imagePolicyType)
+
+// imagePolicyRequiredText is what the generated required paths of the
+// imagepolicy kind say of themselves (requiredText): the sentences of the list
+// the kind kept by hand before its list was generated, byte for byte.
+var imagePolicyRequiredText = map[string]string{
+	"imageRepositoryRef":      "the ImageRepository whose tags the policy selects from",
+	"imageRepositoryRef.name": "the name of the ImageRepository",
+	"policy":                  "how the latest image is selected: `semver`, `alphabetical` or `numerical`",
+	"policy.semver.range":     "the semantic version range the selected tag is the highest of",
 }
 
 // ToApplicationConfig decodes an OAM imagepolicy component into its config.

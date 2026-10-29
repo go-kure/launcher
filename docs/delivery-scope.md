@@ -1079,8 +1079,10 @@ and by scope, whatever component or trait emits it.
   - Required fields follow the rule of the Prometheus operator's kinds, and are derived
     as theirs are, from the `+required` markers of the linked modules' Go source: the
     API modules of the Flux controllers ship no CRD, so no list is held to the API
-    server's validator. The Flux Operator's module ships its CRDs; its list is read
-    from the markers too.
+    server's validator yet; a follow-up adds those rows. The Flux Operator's module
+    ships its CRDs; the list of a resourcesetinputprovider is read from its CRD
+    instead, and held to that CRD by the API server. Since go-kure/launcher#883 the lists are generated from that
+    derivation, with the same paths and messages as the lists kept by hand before.
   - **The APIs' expression rules are not checked,** for the same reason: a check is
     held to the API server's validator (go-kure/launcher#874), which answers from a
     CRD. An ImagePolicy with `interval` and no `digestReflectionPolicy: Always`, or the
@@ -1148,8 +1150,9 @@ and by scope, whatever component or trait emits it.
     object is refused at apply. The `gateway` kind is not the Gateway a capability names
     for the `httproute` trait.
   - Required fields follow the rule of the Prometheus operator's kinds: a field the API
-    requires that the Go type writes whether or not it was authored must be authored. A
-    test holds each list to the CRDs the linked module ships (4 paths for a gatewayclass,
+    requires that the Go type writes whether or not it was authored must be authored.
+    Since go-kure/launcher#883 each list is generated from the CRDs the linked module
+    ships, with the same paths and messages as the list kept by hand before (4 paths for a gatewayclass,
     26 for a gateway, 6 for a listenerset, 7 for a referencegrant, 9 for a
     backendtlspolicy), read in the experimental channel's CRDs, which hold every field
     the Go types do, and held to agree with the standard channel's. A `gateway` and a
@@ -1208,18 +1211,21 @@ and by scope, whatever component or trait emits it.
   the GRPCRoute API, like HTTPRoute's, requires no rule, backend or host name, so the
   kind requires and fills none. No environment policy applies, no capability is
   required, parents and backends of another namespace are written as authored, and the
-  NetworkPolicy synthesis allows nothing for its backends — all as for `httproute`. The
-  required fields it writes unauthored and does not refuse are pinned with the other
-  kinds' (README "Required fields a kind writes unauthored and does not refuse"). A
-  kind whose required list is generated from the same derivation has none left
-  (go-kure/launcher#883: so far the three cert-manager kinds, the four External
-  Secrets kinds, `cnpg-cluster`, `cnpg-objectstore` and `cnpg-database`, and the
-  Prometheus operator's `servicemonitor`, `podmonitor`, `prometheus-probe` and
-  `prometheusrule`; `cnpg-pooler` keeps one named exception, the `containers: []` it
-  writes into its template, which the Pooler CRD accepts, and `prometheus`,
-  `alertmanager` and `thanosruler` keep eight each pinned, the owner reference fields of
-  an ephemeral claim template's metadata, which a follow-up settles on the operator's
-  CRDs together with the monitoring kinds' API server rows); the pin holds 363 fields.
+  NetworkPolicy synthesis allows nothing for its backends — all as for `httproute`. A
+  required field it writes unauthored is refused under an authored parent, from a list
+  generated from the GRPCRoute CRD (README "Required fields a kind writes unauthored
+  and does not refuse"). A kind whose required list is generated from the same
+  derivation has none left of the pinned fields (go-kure/launcher#883: the three
+  cert-manager kinds, the four External Secrets kinds, `cnpg-cluster`,
+  `cnpg-objectstore` and `cnpg-database`, the Prometheus operator's `servicemonitor`,
+  `podmonitor`, `prometheus-probe` and `prometheusrule`, the fourteen Flux kinds,
+  `resourcesetinputprovider` and the ten Gateway API kinds; `cnpg-pooler` keeps one
+  named exception, the `containers: []` it writes into its template, which the Pooler
+  CRD accepts, and `prometheus`, `alertmanager` and `thanosruler` keep eight each
+  pinned, the owner reference fields of an ephemeral claim template's metadata, which a
+  follow-up settles on the operator's CRDs together with the monitoring kinds' API
+  server rows; the API server rows of the Flux controllers' kinds, on their CRDs, follow
+  in a follow-up too); the pin holds 223 fields, all of VolSync's two kinds but those.
 - **Shipped: three kinds of cert-manager's `cert-manager.io/v1` API,** `issuer`,
   `clusterissuer` and `certificate` (`issuer.go`, `clusterissuer.go`, `certificate.go`,
   with what they share in `certmanager_common.go`), each the strict projection of its
@@ -1528,9 +1534,11 @@ and by scope, whatever component or trait emits it.
     name given to both in one namespace is a name collision.
 - **Shipped: the routing kinds** `ingress` and `httproute` (`ingress.go`,
   `httproute.go`), on the recipe of the four core kinds.
-  - `ingress` projects `IngressSpec`, `httproute` projects `HTTPRouteSpec`. No field is
-    required by the decode and none is filled; the API's value rules are left to the API
-    server.
+  - `ingress` projects `IngressSpec`, `httproute` projects `HTTPRouteSpec`. No top-level
+    field is required and none is filled; the API's value rules are left to the API
+    server. Since go-kure/launcher#883 an `httproute` refuses a field the HTTPRoute CRD
+    requires that the type writes unauthored, under an authored parent (a parent's or a
+    backend's `name`, a filter's `type`), from a list generated from that CRD.
   - Each is an authored object, not the trait of the same type name. The NetworkPolicy
     synthesis reads a routing trait's traffic sources and target component, which a
     kind does not report, so no allow rule is synthesized for it. The trait's other
@@ -2501,7 +2509,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Shipped | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` | §7 | Shipped | — |
 | [go-kure/launcher#849](https://github.com/go-kure/launcher/issues/849) | Policy refusals carry a class | §5.3 | Shipped | — |
-| [go-kure/launcher#883](https://github.com/go-kure/launcher/issues/883) | Refuse every required field a kind writes unauthored, from one generated list | §6.2 | Partly: the generator and its rule; the cert-manager, External Secrets and CloudNativePG (`cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-database`) kinds. The other kinds of the pin follow | — |
+| [go-kure/launcher#883](https://github.com/go-kure/launcher/issues/883) | Refuse every required field a kind writes unauthored, from one generated list | §6.2 | Partly: the generator and its rule; the cert-manager, External Secrets, CloudNativePG (`cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-database`), Prometheus operator, Flux, Flux Operator and Gateway API kinds. VolSync's two kinds follow | — |
 | [go-kure/launcher#934](https://github.com/go-kure/launcher/issues/934) | Object kind policy (the decision of [go-kure/launcher#922](https://github.com/go-kure/launcher/issues/922)) | §5.4 | Shipped | go-kure/launcher#849 |
 | [go-kure/launcher#959](https://github.com/go-kure/launcher/issues/959) | One rule for every Service-derived name, with its cluster-version limit | §3.5 | Shipped | — |
 | [go-kure/launcher#1001](https://github.com/go-kure/launcher/issues/1001) | Complete CNPG backup and recovery to S3 through OAM lowering | §6.3 | Shipped | — |

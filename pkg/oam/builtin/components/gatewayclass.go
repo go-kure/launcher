@@ -49,20 +49,25 @@ func (h *GatewayClassHandler) PropertySchema() map[string]oam.PropertySchema {
 // gatewayClassKind is the gatewayclass kind: see policyFreeKind. The API
 // requires `controllerName`, and of a `parametersRef` that is authored its
 // group, kind and name; the type would write each one empty. The API's value
-// rules are left to the API server. TestGatewayKinds_RequiredMatchCRD holds
-// the list to the CRD.
+// rules are left to the API server. The list is generated (kind_required.go)
+// from the CRD the linked module ships.
 var gatewayClassKind = &policyFreeKind[gatewayv1.GatewayClassSpec]{
 	upstream: "gateway.networking.k8s.io/v1 GatewayClassSpec",
-	required: requiredFields(
-		map[string]string{"controllerName": "the controller that manages Gateways of this class, as a domain-prefixed path"},
-		gatewayReferenceRequired("the object that holds the class's parameters", "parametersRef"),
-	),
+	required: generatedKindRequired("gatewayclass"),
 	build: func(name, _ string, spec *gatewayv1.GatewayClassSpec) client.Object {
 		class := kubernetes.CreateGatewayClass(name)
 		spec.DeepCopyInto(&class.Spec)
 		return class
 	},
 }
+
+// gatewayClassRequiredText is what the generated required paths of the
+// gatewayclass kind say of themselves (requiredText): the sentences of the
+// list the kind kept by hand before its list was generated, byte for byte.
+var gatewayClassRequiredText = requiredFields(
+	map[string]string{"controllerName": "the controller that manages Gateways of this class, as a domain-prefixed path"},
+	gatewayReferenceRequired("the object that holds the class's parameters", "parametersRef"),
+)
 
 // ToApplicationConfig decodes an OAM gatewayclass component into its config.
 // The build namespace is not used: a GatewayClass is cluster-scoped.

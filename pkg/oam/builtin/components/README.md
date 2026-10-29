@@ -2757,19 +2757,25 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   Receiver API's `kind` enum admits. A kind outside the enum gets the
   HelmRelease version as an example (go-kure/launcher#1010).
 
-  **The lists are read from the markers of the Go source, not from a CRD.**
-  The API modules of the Flux controllers hold the Go types and ship no CRD;
-  the Flux Operator's module ships its CRDs, and its list is read the same
-  way. `TestFluxKinds_RequiredMatchMarkers` derives each list from the
-  `+required` markers of the linked modules' source, as the kinds of the
-  Prometheus operator's API are derived: every field so marked that the type
-  writes unauthored is listed, and nothing else is. The `key` and `operator`
-  of a match expression belong to a Kubernetes type with no such marker, and
-  are read from its source by the schema generators' rule, as there: a field
-  with no optional marker whose json tag keeps it when empty is required. A
-  dependency bump that
-  adds, drops or moves one fails there. Nothing here is held to the API
-  server's own validator, which answers from a CRD. **Not refused:**
+  **These lists are generated from the markers of the Go source, not from a
+  CRD** (go-kure/launcher#883; see "Required fields a kind writes unauthored
+  and does not refuse"). The API modules of the Flux controllers hold the Go
+  types and ship no CRD; `TestKindComponents_RequiredIsGenerated` derives
+  each list from the markers of the linked modules' source, as the kinds of
+  the Prometheus operator's API are derived: every field the source requires
+  that the type writes unauthored is listed, and nothing else is. A field
+  with no marker whose json tag keeps it when empty is required by the
+  schema generators' rule (a match expression's `key` and `operator`, a
+  verification's `provider`); `TestFluxKinds_MarkersClassified` fails on a
+  field the type writes unauthored that neither a marker nor that rule
+  classifies. A dependency bump that adds, drops or moves one fails there.
+  The Flux Operator's module ships its CRDs: the list of a
+  `resourcesetinputprovider` is derived from its CRD instead, and held to that
+  CRD by the API server (`TestKindComponents_GeneratedRequiredBothWays`); the other kinds here are
+  not held to the API server's own validator, which answers from a CRD, until
+  a follow-up reads the controllers' CRDs. Of an `artifactgenerator`, the
+  fields of `managedNamespaces` stay in its list by hand, under a path the
+  kind refuses whatever is authored there. **Not refused:**
   - a list the API wants an item of that is authored empty
     (the `sources`, `artifacts` and `copy` of an `artifactgenerator`), and
     one longer than the API allows;
@@ -6759,11 +6765,23 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `hostnames`, `rules`), decoded strictly into that type. No type under
   `HTTPRouteSpec` unmarshals itself, so an unknown key is refused at every
   depth. It emits one HTTPRoute named after the component in the build
-  namespace, with the authored spec and nothing else. No field is required by
-  the decode and none is filled; the API's value rules (a filter's `type`
+  namespace, with the authored spec and nothing else. No top-level field is
+  required and none is filled; the API's value rules (a filter's `type`
   matching the member set, a rule's `matches` and `backendRefs` limits) are
   left to the API server. A null list element (`rules: [null]`, a null parent
-  or backendRef) is refused by its path. `useDefaultGateways` is a field of the
+  or backendRef) is refused by its path.
+
+  **Required** is a field the HTTPRoute CRD requires that the Go type writes
+  whether or not it was authored, under a parent that is authored, by the
+  rule of the Gateway API's other kinds (go-kure/launcher#883): the `name` of
+  a parent and of a backend (`parentRefs[0].name: required (the Gateway API
+  requires the name of what this refers to)`), a filter's `type`, the `name`
+  and `value` of a header or query parameter match and of a header modifier,
+  a mirror's `backendRef`, 44 paths at v1.6.3.
+  The list is generated from the CRD (see "Required fields a kind writes
+  unauthored and does not refuse"), and the refusal runs after the decode's
+  own checks. Each says the generic sentence of its class: the kind kept no
+  list by hand before. `useDefaultGateways` is a field of the
   Gateway API's experimental channel: the standard channel's HTTPRoute CRD
   does not hold it, so a cluster on that channel does not keep it.
 
@@ -6806,9 +6824,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   element is refused by its path. Parent and backend references are carried
   as written, their `namespace` included. As for `httproute`, no NetworkPolicy
   allow rule is synthesized for its backends, no parent comes from a
-  capability, and `ApplyPolicy` is a no-op. Its required fields written
-  unauthored and not refused are listed under [Required fields a kind writes
-  unauthored and does not refuse](#required-fields-a-kind-writes-unauthored-and-does-not-refuse).
+  capability, and `ApplyPolicy` is a no-op. A field the GRPCRoute CRD
+  requires that the type writes unauthored is refused under an authored
+  parent, as on an `httproute` (`rules[0].backendRefs[0].name: required (the
+  Gateway API requires the name of what this refers to)`), 34 paths at
+  v1.6.3; the
+  list is generated (go-kure/launcher#883; see [Required fields a kind writes
+  unauthored and does not refuse](#required-fields-a-kind-writes-unauthored-and-does-not-refuse)).
 
   **Labels and annotations** are the `labels` and `annotations` properties.
   **Not covered:** its `status`, which the Gateway controller writes.
@@ -8137,7 +8159,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     **`defaultScope` is an experimental-channel field:** the Go type holds it
     and the standard channel's Gateway CRD does not, so a cluster on that
     channel does not keep it. It is the only such field of these five specs
-    at v1.6.3, and `TestGatewayKinds_RequiredMatchCRD` holds that.
+    at v1.6.3, and `TestGatewayKinds_WrittenEmptyAccepted` holds that.
   - `listenerset` (`ListenerSetSpec`): `parentRef` and `listeners`, whose
     entries take the fields of a Gateway's listener.
   - `referencegrant` (`ReferenceGrantSpec`): `from` and `to`.
@@ -8214,24 +8236,28 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     same three, by the list above: the two listener types carry different
     json tags, and the answer is the same on both kinds.
 
-  `TestGatewayKinds_RequiredMatchCRD` derives that set from the CRDs as it
-  derives the lists, at every depth of the five specs, and holds each member to
+  `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives that set
+  from the CRDs, at every depth of the five specs, and holds each member to
   one of two answers: the kind's refusal, which it runs, or a stated reason
   the decoded value cannot show the omission. None has the second answer.
   `TestGatewayKinds_RefusedOmissions` holds each refused field to being
   required in both channels.
 
-  `TestGatewayKinds_RequiredMatchCRD` holds the lists (4 paths for a
-  gatewayclass, 26 for a gateway, 6 for a listenerset, 7 for a referencegrant,
-  9 for a backendtlspolicy) to the CRDs the linked module ships. The module
+  **The lists are generated** (go-kure/launcher#883; see "Required fields a
+  kind writes unauthored and does not refuse") from the CRDs the linked
+  module ships: 4 paths for a gatewayclass, 26 for a gateway, 6 for a
+  listenerset, 7 for a referencegrant, 9 for a backendtlspolicy. The module
   ships two sets, one per channel of the API. The experimental one holds every
-  field the Go types do and is the one each path is read in; the standard one
-  must require the same wherever it holds the property. Every field of the
-  Gateway API's own types that the CRDs require and the type writes
-  unauthored is listed, with the `key` and `operator` of a namespace
-  selector's expressions, and nothing else is; no field is written empty
-  unauthored beside those. A dependency bump that adds, drops or moves one
-  fails there. **Not refused:**
+  field the Go types do and is the one each path is read in;
+  `TestGatewayKinds_WrittenEmptyAccepted` holds the standard one to require
+  the same wherever it holds the property, and every field the type writes
+  empty unauthored that is not listed to a schema that accepts it. Every
+  field the CRDs require and the type writes unauthored is listed, the `key`
+  and `operator` of a namespace selector's expressions included, and nothing
+  else is. A dependency bump that adds, drops or moves one fails
+  `TestKindComponents_RequiredIsGenerated`;
+  `TestKindComponents_GeneratedRequiredBothWays` runs a field of each type
+  that declares one through the API server. **Not refused:**
   - a list the API wants at least one item of that is authored empty, where
     the type writes it (`listeners: []` on a `gateway`, `from: []`): an
     authored empty value is a value;
@@ -8326,7 +8352,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - **`useDefaultGateways` is an experimental-channel field:** the Go types
     hold it and the standard channel's CRDs do not, so a cluster on that
     channel does not keep it. It is the only such field of these specs at
-    v1.6.3, and `TestGatewayKinds_RequiredMatchCRD` holds that.
+    v1.6.3, and `TestGatewayKinds_WrittenEmptyAccepted` holds that.
   - **No default is filled.** The defaults are the CRDs', and the API server
     applies them to what the object leaves out: the `group` and `kind` of a
     parent (a Gateway), and the `group`, `kind` and `weight` of a backend (a
@@ -8355,9 +8381,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   hold, since it asks for a field that was left out, and the rule reads the
   same in both channels and on the three kinds.
 
-  `TestGatewayKinds_RequiredMatchCRD` holds each required list (2 paths) and
-  the refused omissions to the CRDs the linked module ships, as it does for
-  the infrastructure kinds. `TestGatewayRouteKinds_OmissionsAreTheAPIServers`
+  Each required list (2 paths) is generated from the CRDs the linked module
+  ships, and the refused omissions are held to them, as for the
+  infrastructure kinds. `TestGatewayRouteKinds_OmissionsAreTheAPIServers`
   and `TestGatewayRouteKinds_ExpressionRules` go one step further: they run
   the CRD of each channel through the API server's own creation path
   (defaulting, the schema, the expression rules), and hold each refusal of a
@@ -9858,7 +9884,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   most 250 characters and matches the CRD's pattern (dot-path characters, `\`, `/`, and
   `[n]` indexes of up to five digits) (go-kure/launcher#762). Lengths count characters, as
   the CRD's `maxLength` does, not bytes. Like the other checks these run again in
-  `Generate`, and they cover the `valuesFrom` a `helm` component passes through. Nothing
+  `Generate`, and they cover the `valuesFrom` a `helm` component passes through.
+  **Every other required field the type writes unauthored is refused too**
+  (go-kure/launcher#883), where it is left out under a parent that is authored: the `name`
+  of a `dependsOn` entry, of `chartRef` (with its `kind`), of a Secret or ConfigMap reference
+  (`kubeConfig`, the chart template's `secretRef`, `certSecretRef`, `proxySecretRef` and its
+  `verify` references), of an install, upgrade or wait `strategy` and of a test filter; a
+  `verify.matchOIDCIdentity` entry's `issuer` and `subject`; a drift ignore rule's `paths`; a
+  post-renderer's patch and image `name`; a health check expression's `apiVersion` and
+  `current` (`dependsOn[0].name: required (the Flux API requires the name of what this refers
+  to)`). The list is generated from the markers of the linked helm-controller module (see
+  "Required fields a kind writes unauthored and does not refuse") and runs after the checks
+  above, so `chart.spec` and a `valuesFrom` entry's `kind` and `name` keep their words. Nothing
   else is checked here: the enum checks on `driftDetection.mode`, `install.crds` and
   `upgrade.crds` are left to the HelmRelease CRD's own admission, and so are the limits of
   an authored `releaseName`.
@@ -10789,7 +10826,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   enum; `sourceRef.name` is required. `prune` is a required field of the
   spec with no default here: unset, `false` is emitted (`oci` passes `true`
   unless told otherwise). `targetNamespace` is never defaulted, with or
-  without a Flux namespace, for the reason given under **oci**. Nothing else
+  without a Flux namespace, for the reason given under **oci**. **Every other
+  required field the type writes unauthored is refused too**
+  (go-kure/launcher#883), where it is left out under a parent that is
+  authored: the `name` of a `dependsOn` entry, of a `healthChecks` entry
+  (with its `kind`), of a `postBuild.substituteFrom` entry (with its `kind`),
+  of an image override and of the `decryption` and `kubeConfig` references;
+  `decryption.provider`; a patch's `patch`; an ignore rule's `paths`; a
+  health check expression's `apiVersion` and `current`
+  (`dependsOn[0].name: required (the Flux API requires the name of what
+  this refers to)`). The list is generated from the markers of the linked
+  kustomize-controller module (see "Required fields a kind writes
+  unauthored and does not refuse") and runs after the checks above, so
+  `sourceRef` keeps its words. Nothing else
   is checked: the enums and the cross-field rules are left to the
   Kustomization CRD's own admission, and `wait: true` beside `healthChecks`,
   which `oci` refuses, is emitted as authored (kustomize-controller then
@@ -10880,6 +10929,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the type leaves out when it is empty, and a default the type writes over unauthored. The
   seven have four such fields: `chart.spec.sourceRef.kind` on `helmrelease`, refused, and
   `verify.provider` on that kind's chart, on `ocirepository` and on `helmchart`, filled.
+  **Every other required field the type writes unauthored is refused too**
+  (go-kure/launcher#883), where it is left out under a parent that is authored: the `name` of
+  an authored `secretRef`, `certSecretRef` or `proxySecretRef`, and of the Secret references
+  under `verify` and `sts`; a `verify.matchOIDCIdentity` entry's `issuer` and `subject`; a
+  Bucket's `sts.endpoint` and `sts.provider`; a GitRepository `include` entry's `repository`
+  with its `name`; a HelmRepository's `accessFrom.namespaceSelectors`
+  (`verify.secretRef.name: required (the Flux API requires the name of what this refers to)`).
+  The list is generated from the markers of the linked source-controller module (see "Required
+  fields a kind writes unauthored and does not refuse") and runs after the checks above, so a
+  field they require keeps its words.
   Nothing else is checked or defaulted: enums (`type`, `provider`, `layerSelector.operation`,
   `verify.mode`, a HelmChart's `sourceRef.kind` and `reconcileStrategy`) and cross-field rules
   (a Bucket's `sts` against its `provider`, `serviceAccountName` against `secretRef`, a
@@ -12943,10 +13002,10 @@ module ship no CRD to read, so the ground of their kinds is the source of the li
 held to both, to its CRD and, as the other Flux kinds are, to that source: the schema generators
 require a field that carries no optional marker and whose json tag keeps it when empty, and
 `key` and `operator` are such fields
-where `values` is not. `TestExternalSecretsKinds_RequiredMatchSource` and
-`TestFluxKinds_RequiredMatchMarkers` derive the two from that source by that rule, beside the
-fields the operator's own types mark required, and hold each kind's list to them. The
-monitoring kinds' lists are generated from the same source by the same rule
+where `values` is not. `TestExternalSecretsKinds_RequiredMatchSource` derives the two from
+that source by that rule, beside the fields the operator's own types mark required, and holds
+each kind's list to them. The monitoring and Flux kinds' lists are generated from the same
+source by the same rule
 ([Required fields a kind writes unauthored and does not refuse](#required-fields-a-kind-writes-unauthored-and-does-not-refuse)),
 which also requires every other field of an embedded Kubernetes type the rule requires (a
 container's `name`, a Secret key reference's `key`). CloudNativePG's admission
@@ -12991,8 +13050,13 @@ are not refused, as they are at this pin.
 **Generated lists.** The required list of `issuer`, `clusterissuer`, `certificate`,
 `secretstore`, `clustersecretstore`, `externalsecret`, `clusterexternalsecret`, `cnpg-cluster`,
 `cnpg-pooler`, `cnpg-objectstore`, `cnpg-database`, `prometheus`, `alertmanager`,
-`thanosruler`, `servicemonitor`, `podmonitor`, `prometheus-probe` and `prometheusrule` is
-generated:
+`thanosruler`, `servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, the
+fourteen Flux kinds (`helmrelease`, `fluxcd-kustomization`, `bucket`, `ocirepository`,
+`gitrepository`, `helmchart`, `helmrepository`, `artifactgenerator`, `fluxcd-alert`,
+`fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`, `imagerepository`,
+`imageupdateautomation`), `resourcesetinputprovider` and the ten Gateway API kinds
+(`gatewayclass`, `gateway`, `listenerset`, `referencegrant`, `backendtlspolicy`, `httproute`,
+`grpcroute`, `tcproute`, `udproute`, `tlsroute`) is generated:
 every field the kind's API requires and its Go type writes unauthored is refused where the
 author leaves it out under an authored parent, whatever type declares it. The paths are in
 `zz_generated_kind_required.go` (`kindRequiredPaths`), read through the same derivation as the
@@ -13033,6 +13097,18 @@ module ships no CRD, so these answers are recorded by hand; the test shows what 
 with each, and the API server rows on the operator's CRDs follow in a follow-up. Of the stores, the fields whose API default never applies because the type
 writes them (`secretStoreUnappliedDefaults`) are generated by the same test.
 
+The Flux kinds that decode their properties themselves (`helmrelease`, `fluxcd-kustomization`,
+`bucket`, `ocirepository`, `gitrepository`, `helmchart`, `helmrepository`) run the generated
+refusal after their own checks, so a field one of those checks requires (a `bucket`'s
+`bucketName`, a `helmrelease`'s `valuesFrom[].kind`) is refused in the words it always was;
+the test names those fields (`generatedRefusedFirst`). An `httproute` and a `grpcroute` run it
+after their decode checks too. A refusal of these kinds that their list did not name before
+says its class's sentence. No path of a Flux or Gateway kind needs a recorded answer for a
+parent left out. The Gateway API's module ships its CRDs, and so does the Flux Operator's: the
+test runs a row of each Gateway kind and of `resourcesetinputprovider` through the API server.
+The Flux controllers' modules ship none, so their kinds are held by the kind only, and the rows
+that run them through the controllers' CRDs follow in a follow-up.
+
 **Families.** The test names each field by the type that holds it:
 
 | Family | Owner type | Typical fields |
@@ -13040,7 +13116,7 @@ writes them (`secretStoreUnappliedDefaults`) are generated by the same test.
 | `AFF` | the `core/v1` affinity terms: `NodeSelectorRequirement`, `PodAffinityTerm`, `PreferredSchedulingTerm`, `WeightedPodAffinityTerm` | a node selector requirement's `key` and `operator`; a pod affinity term's `topologyKey`; a weighted or preferred term's `weight`, `podAffinityTerm` and `preference` |
 | `SEC` | `SeccompProfile`, `AppArmorProfile`, `Sysctl` | a profile's `type`; a sysctl's `name` and `value` |
 | `POD` | any other `core/v1` type | the `key` of a secret or config map key reference; a container's `name`; a pooler template's `containers` |
-| `KIND` | a type of the kind's own API, or of `metav1` other than a label selector's match expression | the `ownerReferences[]` fields of a Prometheus operator workload kind's ephemeral claim template; an HTTPRoute's `parentRefs[].name` and header match `name`/`value`; a Flux source or Secret reference's `name` |
+| `KIND` | a type of the kind's own API, or of `metav1` other than a label selector's match expression | the `ownerReferences[]` fields of a Prometheus operator workload kind's ephemeral claim template |
 
 A fifth family of the test, `SEL` (the `key` and `operator` of a `metav1` label selector's
 match expression), has no member: those are refused on every kind
@@ -13053,27 +13129,17 @@ match expression), has no member: those are refused on every kind
 | `replicationsource` | 113 | 72 | 16 | 25 | |
 | `replicationdestination` | 85 | 54 | 12 | 19 | |
 | `cnpg-pooler` | 1 | | | 1 | |
-| `httproute` | 44 | | | | 44 |
-| `grpcroute` | 34 | | | | 34 |
 | `prometheus`, `alertmanager`, `thanosruler` | 8 each | | | | 8 |
-| `helmrelease` | 22 | | | | 22 |
-| `fluxcd-kustomization` | 14 | | | | 14 |
-| `bucket`, `ocirepository` | 7 each | | | | 7 |
-| `gitrepository` | 6 | | | | 6 |
-| `helmchart`, `helmrepository` | 3 each | | | | 3 |
 
 None is left on the kinds whose list is generated (`issuer`, `clusterissuer`, `certificate`,
 the four External Secrets kinds, `cnpg-cluster`, `cnpg-objectstore`, `cnpg-database`,
-`servicemonitor`, `podmonitor`, `prometheus-probe` and `prometheusrule`; `cnpg-pooler` keeps
-its exception, and `prometheus`, `alertmanager` and `thanosruler` their undecided owner
-reference fields), the eleven Cilium kinds, `gatewayclass`, `gateway`,
-`listenerset`, `referencegrant`, `backendtlspolicy`, `tcproute`, `udproute`, `tlsroute`,
-`metallb-ipaddresspool`,
+`servicemonitor`, `podmonitor`, `prometheus-probe`, `prometheusrule`, the fourteen Flux kinds,
+`resourcesetinputprovider` and the ten Gateway API kinds; `cnpg-pooler` keeps its exception,
+and `prometheus`, `alertmanager` and `thanosruler` their undecided owner reference fields),
+the eleven Cilium kinds, `metallb-ipaddresspool`,
 `metallb-l2advertisement`, `metallb-bgpadvertisement`, `metallb-bgppeer`, `cnpg-imagecatalog`,
 `cnpg-clusterimagecatalog`, `cnpg-backup`, `cnpg-scheduledbackup`, `cnpg-databaserole`,
-`cnpg-publication`, `cnpg-subscription`,
-`artifactgenerator`, `fluxcd-alert`, `fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`,
-`imagerepository`, `imageupdateautomation` and `resourcesetinputprovider`. `metallb-bfdprofile` and
+`cnpg-publication` and `cnpg-subscription`. `metallb-bfdprofile` and
 `metallb-community` are not measured: their CRDs require no field.
 `TestRequiredWrittenKinds_CoverEveryCRDKind` holds the measured kinds to the kind inventory:
 every `kind` row whose API group client-go's scheme does not register, so a CRD serves it, is

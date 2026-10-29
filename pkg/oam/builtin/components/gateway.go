@@ -75,8 +75,13 @@ func (h *GatewayHandler) PropertySchema() map[string]oam.PropertySchema {
 
 // gatewayRequired is the required list of the gateway kind: the fields the
 // Gateway CRD requires that the Go types write whether or not they were
-// authored. TestGatewayKinds_RequiredMatchCRD holds the list to the CRD.
-var gatewayRequired = func() map[string]string {
+// authored, generated (kind_required.go) from the CRD the linked module ships.
+var gatewayRequired = generatedKindRequired("gateway")
+
+// gatewayRequiredText is what the generated required paths of the gateway kind
+// say of themselves (requiredText): the sentences of the list the kind kept by
+// hand before its list was generated, byte for byte.
+var gatewayRequiredText = func() map[string]string {
 	const (
 		frontend   = "tls.frontend."
 		validation = ".validation.caCertificateRefs"

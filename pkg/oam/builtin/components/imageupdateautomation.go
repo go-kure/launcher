@@ -79,9 +79,9 @@ func (h *ImageUpdateAutomationHandler) PropertySchema() map[string]oam.PropertyS
 // empty, which is a value and not the default. Of a match expression of
 // `policySelector` it requires the key and the operator
 // (labelSelectorRequired), fields of a Kubernetes type with no +required
-// marker. TestFluxKinds_RequiredMatchMarkers holds the list to the markers of
-// the upstream source, and the two of an expression to the source of
-// metav1.LabelSelectorRequirement by the schema generators' rule.
+// marker. The list is generated (imageUpdateAutomationRequired) from the
+// markers of the upstream source, and the two of an expression from the source
+// of metav1.LabelSelectorRequirement by the schema generators' rule.
 // `interval` and `policyChangeDelay` are held to the form their pattern
 // takes. The object reads one
 // Secret from its own namespace, the signing key's.
@@ -89,18 +89,7 @@ var imageUpdateAutomationKind = &fluxKind[autov1.ImageUpdateAutomationSpec]{
 	policyFreeKind: policyFreeKind[autov1.ImageUpdateAutomationSpec]{
 		upstream:       "image.toolkit.fluxcd.io/v1 ImageUpdateAutomationSpec",
 		defaultedZeros: fluxDefaultedZeros(map[string]string{"update.strategy": `"Setters"`}),
-		required: requiredFields(map[string]string{
-			"sourceRef":                            "the GitRepository that gives access to the repository the automation commits to",
-			"sourceRef.kind":                       "the kind of the source: `GitRepository`, the API's default, which the object would otherwise write empty",
-			"sourceRef.name":                       "the name of the GitRepository",
-			"interval":                             "the least time between two runs of the automation, such as `30m`",
-			"git.checkout.ref":                     "the branch, tag or commit to clone",
-			"git.commit":                           "how the automation commits",
-			"git.commit.author":                    "the author of the commits",
-			"git.commit.author.email":              "the email address of the author of the commits",
-			"git.commit.signingKey.secretRef":      "the Secret that holds the signing key",
-			"git.commit.signingKey.secretRef.name": "the name of the Secret that holds the signing key, in the namespace the object lands in",
-		}, labelSelectorRequired("policySelector")),
+		required:       imageUpdateAutomationRequired,
 		build: func(name, namespace string, spec *autov1.ImageUpdateAutomationSpec) client.Object {
 			automation := fluxcd.CreateImageUpdateAutomation(name, namespace)
 			spec.DeepCopyInto(&automation.Spec)
@@ -128,6 +117,29 @@ var imageUpdateAutomationKind = &fluxKind[autov1.ImageUpdateAutomationSpec]{
 		{path: []string{"policyChangeDelay"}, form: fluxduration.Interval, get: func(s *autov1.ImageUpdateAutomationSpec) *metav1.Duration { return s.PolicyChangeDelay }},
 	},
 }
+
+// imageUpdateAutomationRequired is the required list of the
+// imageupdateautomation kind, generated (kind_required.go) as
+// fluxcdAlertRequired is.
+var imageUpdateAutomationRequired = generatedKindRequired(imageUpdateAutomationType)
+
+// imageUpdateAutomationRequiredText is what the generated required paths of
+// the imageupdateautomation kind say of themselves (requiredText): the
+// sentences of the list the kind kept by hand before its list was generated,
+// byte for byte, and what labelSelectorRequired says of the key and the
+// operator of a match expression of `policySelector`.
+var imageUpdateAutomationRequiredText = requiredFields(map[string]string{
+	"sourceRef":                            "the GitRepository that gives access to the repository the automation commits to",
+	"sourceRef.kind":                       "the kind of the source: `GitRepository`, the API's default, which the object would otherwise write empty",
+	"sourceRef.name":                       "the name of the GitRepository",
+	"interval":                             "the least time between two runs of the automation, such as `30m`",
+	"git.checkout.ref":                     "the branch, tag or commit to clone",
+	"git.commit":                           "how the automation commits",
+	"git.commit.author":                    "the author of the commits",
+	"git.commit.author.email":              "the email address of the author of the commits",
+	"git.commit.signingKey.secretRef":      "the Secret that holds the signing key",
+	"git.commit.signingKey.secretRef.name": "the name of the Secret that holds the signing key, in the namespace the object lands in",
+}, labelSelectorRequired("policySelector"))
 
 // ToApplicationConfig decodes an OAM imageupdateautomation component into its
 // config.

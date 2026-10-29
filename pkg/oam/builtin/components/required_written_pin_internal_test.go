@@ -1266,12 +1266,16 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 		return
 	}
 	// Vacuity guards: the measurement finds a member of each family that has
-	// one (AFF, SEC, POD on two kinds, KIND), a refusal of an omission (two of
-	// the KIND family, one of the AFF family on a kind whose list is generated,
-	// and of the CloudNativePG and the Prometheus operator's kinds whose lists
-	// are generated one of each family their members were in, a map's list
-	// entry among them), each valid default it leaves out, and each
-	// unauthorable path it skips, each in its own class.
+	// one (AFF, SEC, POD on two of VolSync's kinds, whose lists are not
+	// generated yet, and KIND on the Prometheus operator's, an entry
+	// requiredWrittenUndecided lists), a refusal of an omission (two of the KIND family, one of
+	// the AFF family on a kind whose list is generated, of the CloudNativePG
+	// and the Prometheus operator's kinds whose lists are generated one of each
+	// family their members were in, a map's list entry among them, and of the
+	// Flux and Gateway route kinds whose lists are generated one of each kind
+	// that had members, a path under helmrelease's alternative base among
+	// them), each valid default it leaves out, and each unauthorable path it
+	// skips, each in its own class.
 	have := map[string]bool{}
 	for _, m := range all {
 		have[m.component+" "+m.path] = true
@@ -1281,7 +1285,7 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 		"replicationsource rsyncTLS.moverSecurityContext.seccompProfile.type",
 		"replicationsource rsyncTLS.moverResources.claims[].name",
 		"replicationdestination rsyncTLS.moverResources.claims[].name",
-		"httproute parentRefs[].name",
+		"prometheus volumes[].ephemeral.volumeClaimTemplate.metadata.ownerReferences[].name",
 	} {
 		if !have[guard] {
 			t.Errorf("the measurement does not find %s, a member", guard)
@@ -1311,6 +1315,16 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 		{"podmonitor", "podMetricsEndpoints[].proxyConnectHeader{}[].key"},
 		{"servicemonitor", "endpoints[].tlsConfig.ca.secret.key"},
 		{"prometheus-probe", "prober.proxyConnectHeader{}[].key"},
+		{"httproute", "parentRefs[].name"},
+		{"grpcroute", "rules[].backendRefs[].name"},
+		{"helmrelease", "chart.spec.secretRef.name"},
+		{"helmrelease", "dependsOn[].name"},
+		{"fluxcd-kustomization", "dependsOn[].name"},
+		{"bucket", "sts.endpoint"},
+		{"gitrepository", "include[].repository.name"},
+		{"ocirepository", "verify.secretRef.name"},
+		{"helmchart", "verify.matchOIDCIdentity[].issuer"},
+		{"helmrepository", "accessFrom.namespaceSelectors"},
 	} {
 		if !refused[guard.component+" "+guard.path] {
 			t.Errorf("the measurement does not find the %s's refusal of %s without it", guard.component, guard.path)

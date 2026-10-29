@@ -49,10 +49,12 @@ func gatewayRouteUseDefaultGateways(spec, kind string) oam.PropertySchema {
 	}
 }
 
-// gatewayRouteRequired is the required list the routes share: of a parent and
-// of a backend that are authored, the name, which the API requires and the type
-// would write empty.
-func gatewayRouteRequired() map[string]string {
+// gatewayRouteRequiredText is what the generated required paths the TCP, UDP
+// and TLS routes share say of themselves (requiredText): of a parent and of a
+// backend that are authored, the name, which the API requires and the type
+// would write empty. They are the sentences of the list the routes kept by
+// hand before their lists were generated, byte for byte.
+func gatewayRouteRequiredText() map[string]string {
 	return map[string]string{
 		"parentRefs[].name":          "the name of the Gateway, or of the other parent, the route attaches to",
 		"rules[].backendRefs[].name": "the name of the backend, a Service unless its group and kind say otherwise",

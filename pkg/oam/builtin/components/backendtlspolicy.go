@@ -61,19 +61,11 @@ func (h *BackendTLSPolicyHandler) PropertySchema() map[string]oam.PropertySchema
 // alternative name that are authored, it requires the fields the list names.
 // The API's value rules, those it writes as expressions included (one of
 // caCertificateRefs and wellKnownCACertificates, a subject alternative name
-// against its type), are left to the API server.
-// TestGatewayKinds_RequiredMatchCRD holds the list to the CRD.
+// against its type), are left to the API server. The list is generated
+// (kind_required.go) from the CRD the linked module ships.
 var backendTLSPolicyKind = &policyFreeKind[gatewayv1.BackendTLSPolicySpec]{
 	upstream: "gateway.networking.k8s.io/v1 BackendTLSPolicySpec",
-	required: requiredFields(
-		map[string]string{
-			"validation":                        "how the Gateway validates the certificate a backend presents",
-			"validation.hostname":               "the name the Gateway sends as SNI and, where no subjectAltNames is given, matches the backend's certificate against",
-			"validation.subjectAltNames[].type": "the type of the subject alternative name: Hostname or URI",
-		},
-		gatewayReferenceRequired("the backend the policy applies to", "targetRefs[]"),
-		gatewayReferenceRequired("the object that holds the CA certificates", "validation.caCertificateRefs[]"),
-	),
+	required: generatedKindRequired("backendtlspolicy"),
 	validate: func(spec *gatewayv1.BackendTLSPolicySpec) error {
 		if len(spec.TargetRefs) == 0 {
 			return errors.New("targetRefs: required (at least one backend the policy applies to)")
@@ -86,6 +78,19 @@ var backendTLSPolicyKind = &policyFreeKind[gatewayv1.BackendTLSPolicySpec]{
 		return policy
 	},
 }
+
+// backendTLSPolicyRequiredText is what the generated required paths of the
+// backendtlspolicy kind say of themselves (requiredText): the sentences of the
+// list the kind kept by hand before its list was generated, byte for byte.
+var backendTLSPolicyRequiredText = requiredFields(
+	map[string]string{
+		"validation":                        "how the Gateway validates the certificate a backend presents",
+		"validation.hostname":               "the name the Gateway sends as SNI and, where no subjectAltNames is given, matches the backend's certificate against",
+		"validation.subjectAltNames[].type": "the type of the subject alternative name: Hostname or URI",
+	},
+	gatewayReferenceRequired("the backend the policy applies to", "targetRefs[]"),
+	gatewayReferenceRequired("the object that holds the CA certificates", "validation.caCertificateRefs[]"),
+)
 
 // ToApplicationConfig decodes an OAM backendtlspolicy component into its
 // config. The object takes the namespace of the application it is generated

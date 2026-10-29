@@ -162,8 +162,8 @@ func enforceProviderPolicy(spec *notificationv1.ProviderSpec, p oam.Policy) erro
 
 // fluxcdProviderKind is the fluxcd-provider kind: see fluxKind. The API
 // requires `type`, which the type would write empty, and of an authored Secret
-// reference its `name`; TestFluxKinds_RequiredMatchMarkers holds the list to
-// the markers of the upstream source. `timeout` is held to the form its
+// reference its `name`; the list is generated (fluxcdProviderRequired) from the
+// markers of the upstream source. `timeout` is held to the form its
 // pattern takes: it takes no h, and one of an hour or more is written in
 // minutes (emitFluxKind). The host of `address` is held to no policy; a user
 // or a password in it is refused (refuseProviderUserinfo), and an `address` that is a credential is refused
@@ -173,12 +173,7 @@ var fluxcdProviderKind = &fluxKind[notificationv1.ProviderSpec]{
 	policyFreeKind: policyFreeKind[notificationv1.ProviderSpec]{
 		upstream: "notification.toolkit.fluxcd.io/v1 ProviderSpec",
 		validate: refuseProviderUserinfo,
-		required: map[string]string{
-			"type":                "the implementation that sends the events, such as `slack` or `generic`",
-			"secretRef.name":      "the name of the Secret that holds the credentials of the provider",
-			"proxySecretRef.name": "the name of the Secret that holds the configuration of the proxy",
-			"certSecretRef.name":  "the name of the Secret that holds the certificates the provider is connected to with",
-		},
+		required: fluxcdProviderRequired,
 		build: func(name, namespace string, spec *notificationv1.ProviderSpec) client.Object {
 			provider := fluxcd.CreateProvider(name, namespace)
 			spec.DeepCopyInto(&provider.Spec)
@@ -194,6 +189,20 @@ var fluxcdProviderKind = &fluxKind[notificationv1.ProviderSpec]{
 	durations: []fluxDurationField[notificationv1.ProviderSpec]{
 		{path: []string{"timeout"}, form: fluxduration.SourceTimeout, get: func(s *notificationv1.ProviderSpec) *metav1.Duration { return s.Timeout }},
 	},
+}
+
+// fluxcdProviderRequired is the required list of the fluxcd-provider kind,
+// generated (kind_required.go) as fluxcdAlertRequired is.
+var fluxcdProviderRequired = generatedKindRequired(fluxcdProviderType)
+
+// fluxcdProviderRequiredText is what the generated required paths of the
+// fluxcd-provider kind say of themselves (requiredText): the sentences of the
+// list the kind kept by hand before its list was generated, byte for byte.
+var fluxcdProviderRequiredText = map[string]string{
+	"type":                "the implementation that sends the events, such as `slack` or `generic`",
+	"secretRef.name":      "the name of the Secret that holds the credentials of the provider",
+	"proxySecretRef.name": "the name of the Secret that holds the configuration of the proxy",
+	"certSecretRef.name":  "the name of the Secret that holds the certificates the provider is connected to with",
 }
 
 // ToApplicationConfig decodes an OAM fluxcd-provider component into its config.

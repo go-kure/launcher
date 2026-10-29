@@ -240,6 +240,68 @@ func refuseUnauthoredRequired(authored map[string]any, required map[string]strin
 	return requiredfields.Refuse(authored, required)
 }
 
+// refuseUnauthoredProperties is refuseUnauthoredRequired for a kind that
+// decodes its properties itself (builtin.DecodeStrictJSON) and not through
+// decodeKindSpec, so has no stripped property tree: it reads the properties
+// as their JSON serialization, a key authored as null dropped at any depth, as
+// decodeKindSpec's tree has it. A null list element is left where it is: those
+// kinds decode it as an empty element and refuse what they refused before, and
+// nothing is asked for under it.
+func refuseUnauthoredProperties(props map[string]any, required map[string]string) error {
+	data, err := json.Marshal(props)
+	if err != nil {
+		return errors.Wrap(err, "properties do not serialize to JSON")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var tree any
+	if err := dec.Decode(&tree); err != nil {
+		return errors.Wrap(err, "internal: decode the properties' own JSON")
+	}
+	authored, _ := withoutNullKeys(tree).(map[string]any)
+	return refuseUnauthoredRequired(authored, required)
+}
+
+// withoutNullKeys returns value with every map key whose value is null
+// dropped, at any depth, and every list element kept. A null key another key
+// of its map matches case-insensitively is kept, as null: the decode reads both
+// spellings into one field, and may take the null one last, so the walk holds
+// it to the list as a field left out (requiredfields.Refuse).
+func withoutNullKeys(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, e := range v {
+			switch {
+			case e != nil:
+				out[k] = withoutNullKeys(e)
+			case hasFoldedSibling(v, k):
+				out[k] = nil
+			}
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, e := range v {
+			out[i] = withoutNullKeys(e)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+// hasFoldedSibling reports whether m holds a key other than key that matches it
+// case-insensitively.
+func hasFoldedSibling(m map[string]any, key string) bool {
+	for k := range m {
+		if k != key && strings.EqualFold(k, key) {
+			return true
+		}
+	}
+	return false
+}
+
 // lookupFolded returns the value of m's key that matches field
 // case-insensitively: the parent segments of field are json names from the
 // encoding, but its leaf is the authored key, with nothing in the encoding to

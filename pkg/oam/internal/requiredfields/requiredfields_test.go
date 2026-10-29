@@ -52,6 +52,14 @@ func TestRefuse(t *testing.T) {
 		"two spellings of a list, first in order":  {map[string]any{"selector": map[string]any{"EXPRESSIONS": []any{expression("operator")}, "expressions": []any{expression("key")}}}, "selector.EXPRESSIONS[0].key: required (the key)"},
 		"two spellings, both complete":             {map[string]any{"tls": map[string]any{"SECRET": map[string]any{"name": "s"}, "secret": map[string]any{"NAME": "s"}}}, ""},
 		"two spellings of the last field, one set": {map[string]any{"tls": map[string]any{"secret": map[string]any{"NAME": "s", "name": "t"}}}, ""},
+		// A last field null in one spelling: the decode may take the null one
+		// last, so it is the field left out, in either order.
+		"two spellings of the last field, the later null":   {map[string]any{"tls": map[string]any{"secret": map[string]any{"NAME": "s", "name": nil}}}, "tls.secret.name: required (the Secret's name)"},
+		"two spellings of the last field, the earlier null": {map[string]any{"tls": map[string]any{"secret": map[string]any{"NAME": nil, "name": "s"}}}, "tls.secret.NAME: required (the Secret's name)"},
+		// A parent null in one spelling holds nothing to refuse; the other
+		// spelling is still held to the list.
+		"two spellings of a parent, one null, the other complete":   {map[string]any{"selector": map[string]any{"EXPRESSIONS": []any{expression("key", "operator")}, "expressions": nil}}, ""},
+		"two spellings of a parent, one null, the other incomplete": {map[string]any{"selector": map[string]any{"EXPRESSIONS": []any{expression("key")}, "expressions": nil}}, "selector.EXPRESSIONS[0].operator: required (the operator)"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := requiredfields.Refuse(tc.authored, required)

@@ -29,7 +29,9 @@ what was authored.
   descended as written. Where a document writes one field in two spellings
   (`fromEndpoints` and `FromEndpoints`) the decode keeps one or merges both, so
   each spelling is held to the list and the error names the one that leaves the
-  field out. Paths are read in sorted order, the spellings of a field in theirs,
+  field out. A last field authored null in one spelling and set in another is
+  left out by the null one, which the decode may take last and so write the field
+  empty; a caller that drops null keys keeps such a key, as null. Paths are read in sorted order, the spellings of a field in theirs,
   a list in its own and a map's keys in theirs, so the field reported is the
   same on every build.
 - `LabelSelector(at)` is the required list of one label selector under `at`:

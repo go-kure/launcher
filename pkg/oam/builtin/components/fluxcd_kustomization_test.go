@@ -301,6 +301,11 @@ func TestFluxcdKustomizationHandler_Refuses(t *testing.T) {
 		{"signed interval", map[string]any{"sourceRef": kzSourceRef(), "interval": "-5m"}, `fluxcd-kustomization: interval "-5m" is invalid`},
 		{"sub-millisecond retryInterval", map[string]any{"sourceRef": kzSourceRef(), "retryInterval": "1us"}, `fluxcd-kustomization: retryInterval "1us" is invalid`},
 		{"signed timeout", map[string]any{"sourceRef": kzSourceRef(), "timeout": "-1s"}, `fluxcd-kustomization: timeout "-1s" is invalid`},
+		// A required field set in one spelling and null in another: the decode
+		// may take the null one last and write the field empty, so the null
+		// spelling is a field left out, whichever is read first.
+		{"required field null in its later spelling", map[string]any{"sourceRef": kzSourceRef(), "ignore": []any{map[string]any{"Paths": []any{"/spec/replicas"}, "paths": nil}}}, "ignore[0].paths: required"},
+		{"required field null in its earlier spelling", map[string]any{"sourceRef": kzSourceRef(), "ignore": []any{map[string]any{"Paths": nil, "paths": []any{"/spec/replicas"}}}}, "ignore[0].Paths: required"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -53,10 +53,11 @@ func (h *TCPRouteHandler) PropertySchema() map[string]oam.PropertySchema {
 // without them. Of a parent and of a backend that are authored it requires the
 // name, which the list holds. The API's other value rules, the single rule a
 // TCPRoute may hold among them, are left to the API server.
-// TestGatewayKinds_RequiredMatchCRD holds the list to the CRD.
+// The list is generated (kind_required.go) from the CRD the linked module
+// ships.
 var tcpRouteKind = &policyFreeKind[gatewayv1.TCPRouteSpec]{
 	upstream: "gateway.networking.k8s.io/v1 TCPRouteSpec",
-	required: gatewayRouteRequired(),
+	required: generatedKindRequired("tcproute"),
 	validate: func(spec *gatewayv1.TCPRouteSpec) error {
 		if len(spec.Rules) == 0 {
 			return errors.New("rules: required (the rule of the route, which names the backends connections are sent to)")
