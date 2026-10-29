@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -49,12 +50,13 @@ import (
 // null). A kind refuses the omission of such a field only where its required
 // list or its own validation names it; any other one reaches the API server
 // written empty, and what the API server or the operator then says of it is
-// not the kind's answer. This test does not hold those fields to be refused
-// (the mechanism that would is tracked by go-kure/launcher#883). It pins
-// which ones are not: the set is
-// checked in, one line per field, and a field that joins it (a new gap) or
-// leaves it (a new refusal) fails the test until the file is regenerated
-// with UPDATE_REQUIRED_WRITTEN_PIN=1.
+// not the kind's answer. The kinds whose required list is generated from the
+// same derivation (kind_required.go, go-kure/launcher#883) refuse each such
+// field, but for those requiredWrittenExceptions lists; the others do not
+// yet. This test pins which fields are not refused: the set is checked in,
+// one line per field, and a field that joins it (a new gap) or leaves it (a
+// new refusal) fails the test until the file is regenerated with
+// UPDATE_REQUIRED_WRITTEN_PIN=1.
 //
 // Each member is measured, not read off a list: for every field the source
 // says is required and that the type writes unauthored, the kind builds a
@@ -241,11 +243,33 @@ func pinMarkerSchema(typ reflect.Type, externalSecrets bool) func(*testing.T) pi
 					}
 					return k8s.known(f)
 				},
+				def: func(f kindField) (string, bool) {
+					if strings.HasPrefix(f.owner.PkgPath(), externalSecretsModulePath+"/") {
+						m, _ := es.markers(f)
+						return m.def, m.hasDefault
+					}
+					return k8s.def(f)
+				},
+				nullable: func(f kindField) bool {
+					if strings.HasPrefix(f.owner.PkgPath(), externalSecretsModulePath+"/") {
+						m, _ := es.markers(f)
+						return m.nullable
+					}
+					return k8s.nullable(f)
+				},
 			}
 		}
 		schema := pinSchema{props: map[string]apiextensionsv1.JSONSchemaProps{}, required: map[string]bool{}}
 		walkKindFields(typ, src.required, func(f kindField) {
-			schema.props[f.path] = goTypeProps(f.field.Type)
+			props := goTypeProps(f.field.Type)
+			// The default and the nullable marker, as the CRD generator writes
+			// them into the schema (+kubebuilder:default, +nullable): what
+			// deriveRequiredWritten reads of a field written null.
+			if def, ok := src.def(f); ok {
+				props.Default = &apiextensionsv1.JSON{Raw: []byte(strconv.Quote(def))}
+			}
+			props.Nullable = src.nullable(f)
+			schema.props[f.path] = props
 			if src.known(f) && src.required(f) {
 				schema.required[f.path] = true
 			}
@@ -702,10 +726,6 @@ type pinMeasure struct {
 func measureRequiredWritten(t *testing.T, k pinKind) (m pinMeasure) {
 	t.Helper()
 	schema := k.schema(t)
-	prefixes := k.prefixes
-	if prefixes == nil {
-		prefixes = []string{""}
-	}
 	var bases [2]map[string]any
 	for i, b := range []map[string]any{k.base, k.altBase} {
 		if i == 1 && b == nil {
@@ -718,70 +738,116 @@ func measureRequiredWritten(t *testing.T, k pinKind) (m pinMeasure) {
 			t.Fatalf("the base properties do not build: %v; properties %s", err, pinJSON(bases[i]))
 		}
 	}
-	measured := 0
+	derived := deriveRequiredWritten(t, k, schema)
+	if len(derived) == 0 {
+		t.Fatalf("the walk measured no field of %s", k.typ)
+	}
+	for _, d := range derived {
+		path, f := d.path, d.field
+		with, err := pinControl(k, k.baseFor(path, bases), path, schema)
+		if err != nil {
+			if ancestor, ok := pinRefusedAncestor(path, err); ok {
+				if _, listed := requiredWrittenUnauthorable[k.component+" "+ancestor]; listed {
+					m.unauthorable = append(m.unauthorable, k.component+" "+ancestor)
+					continue
+				}
+				t.Errorf("%s: the control is refused at %s, which requiredWrittenUnauthorable does not list: %v", path, ancestor, err)
+				continue
+			}
+			t.Errorf("%s: no control builds with the field authored: %v", path, err)
+			continue
+		}
+		without := pinCopy(with)
+		parent, name, _ := pinParent(without, path, false)
+		delete(parent, name)
+		obj, err := pinBuild(k, without)
+		if err != nil {
+			if !pinRefusalNames(path, err) {
+				if _, listed := requiredWrittenDecodeRefused[k.component+" "+path]; listed && strings.Contains(err.Error(), "do not decode into") {
+					m.decodeRefused = append(m.decodeRefused, k.component+" "+path)
+					continue
+				}
+				t.Errorf("%s: the omission is refused for another reason: %v", path, err)
+				continue
+			}
+			m.refused = append(m.refused, k.component+" "+path)
+			continue
+		}
+		objPath := "spec." + path
+		if k.prefixes != nil {
+			objPath = path
+		}
+		parent, name, ok := pinParent(obj, objPath, false)
+		value, held := parent[name]
+		if !ok || !held {
+			t.Errorf("%s: the omission builds, and the object does not show the field", path)
+			continue
+		}
+		written := pinJSON(value)
+		if requiredWrittenValidDefaults[k.component+" "+path] == written {
+			m.defaulted = append(m.defaulted, k.component+" "+path)
+			continue
+		}
+		m.members = append(m.members, pinMember{k.component, path, pinFamily(f), written})
+	}
+	return m
+}
+
+// requiredWrittenField is one field deriveRequiredWritten lists: its path,
+// under the kind's prefix where it has one, and the field.
+type requiredWrittenField struct {
+	path  string
+	field kindField
+}
+
+// deriveRequiredWritten lists, in the order the walk reaches them, the fields
+// of a kind that its schema requires and its Go type writes when nothing was
+// decoded into them: the one enumeration TestKindComponents_RequiredWrittenNotRefused
+// measures and TestKindComponents_RequiredIsGenerated generates the kinds'
+// required lists from (generatedRequiredPaths), so the two cannot drift. No
+// field is left out for the type that declares it: a Kubernetes type a spec
+// embeds is walked as the kind's own.
+//
+// One rule leaves a field out, by its schema: one the schema gives a default,
+// that is not nullable and that the type writes as null. The API server drops
+// such a null before it fills the defaults, so the default reaches the object
+// (structuraldefaulting.PruneNonNullableNullsWithoutDefaults leaves a field
+// with a default alone, and Default fills it: k8s.io/apiextensions-apiserver
+// pkg/apiserver/schema/defaulting/algorithm.go). A nullable one keeps its
+// null, and is listed.
+func deriveRequiredWritten(t *testing.T, k pinKind, schema pinSchema) []requiredWrittenField {
+	t.Helper()
+	prefixes := k.prefixes
+	if prefixes == nil {
+		prefixes = []string{""}
+	}
+	var out []requiredWrittenField
 	// A promoted field can share its JSON name with a shallower one (the
 	// Probe's own authorization and the one in its embedded HTTPConfig); the
-	// walk reaches the shallower first, and the path is measured once.
+	// walk reaches the shallower first, and the path is listed once.
 	seen := map[string]bool{}
 	for _, prefix := range prefixes {
 		walkKindFields(k.typ, func(f kindField) bool { return schema.required[prefix+f.path] }, func(f kindField) {
 			path := prefix + f.path
-			if _, known := schema.props[path]; !known || !schema.required[path] || !f.writtenUnauthored() || seen[path] {
+			prop, known := schema.props[path]
+			if !known || !schema.required[path] || !f.writtenUnauthored() || seen[path] {
 				return
 			}
 			seen[path] = true
-			measured++
-			with, err := pinControl(k, k.baseFor(path, bases), path, schema)
-			if err != nil {
-				if ancestor, ok := pinRefusedAncestor(path, err); ok {
-					if _, listed := requiredWrittenUnauthorable[k.component+" "+ancestor]; listed {
-						m.unauthorable = append(m.unauthorable, k.component+" "+ancestor)
-						return
-					}
-					t.Errorf("%s: the control is refused at %s, which requiredWrittenUnauthorable does not list: %v", path, ancestor, err)
-					return
-				}
-				t.Errorf("%s: no control builds with the field authored: %v", path, err)
+			if nullDefaulted(prop, f) {
 				return
 			}
-			without := pinCopy(with)
-			parent, name, _ := pinParent(without, path, false)
-			delete(parent, name)
-			obj, err := pinBuild(k, without)
-			if err != nil {
-				if !pinRefusalNames(path, err) {
-					if _, listed := requiredWrittenDecodeRefused[k.component+" "+path]; listed && strings.Contains(err.Error(), "do not decode into") {
-						m.decodeRefused = append(m.decodeRefused, k.component+" "+path)
-						return
-					}
-					t.Errorf("%s: the omission is refused for another reason: %v", path, err)
-					return
-				}
-				m.refused = append(m.refused, k.component+" "+path)
-				return
-			}
-			objPath := "spec." + path
-			if k.prefixes != nil {
-				objPath = path
-			}
-			parent, name, ok := pinParent(obj, objPath, false)
-			value, held := parent[name]
-			if !ok || !held {
-				t.Errorf("%s: the omission builds, and the object does not show the field", path)
-				return
-			}
-			written := pinJSON(value)
-			if requiredWrittenValidDefaults[k.component+" "+path] == written {
-				m.defaulted = append(m.defaulted, k.component+" "+path)
-				return
-			}
-			m.members = append(m.members, pinMember{k.component, path, pinFamily(f), written})
+			out = append(out, requiredWrittenField{path, f})
 		})
 	}
-	if measured == 0 {
-		t.Fatalf("the walk measured no field of %s", k.typ)
-	}
-	return m
+	return out
+}
+
+// nullDefaulted says the API server fills the default of the field into an
+// object that carries it as the type writes it unauthored: the schema gives it
+// a default, it is not nullable, and the type writes null for it.
+func nullDefaulted(prop apiextensionsv1.JSONSchemaProps, f kindField) bool {
+	return prop.Default != nil && !prop.Nullable && f.encodesNull()
 }
 
 // pinRefusedAncestor returns the ancestor of path that err is the kind's
@@ -1201,14 +1267,15 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 	}
 	// Vacuity guards: the measurement finds a member of each family that has
 	// one (AFF, SEC, POD twice, KIND), a refusal of an omission (two of the KIND
-	// family), each valid default it
-	// leaves out, and each unauthorable path it skips, each in its own class.
+	// family, one of the AFF family on a kind whose list is generated), each
+	// valid default it leaves out, and each unauthorable path it skips, each in
+	// its own class.
 	have := map[string]bool{}
 	for _, m := range all {
 		have[m.component+" "+m.path] = true
 	}
 	for _, guard := range []string{
-		"issuer acme.solvers[].http01.ingress.podTemplate.spec.affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[].topologyKey",
+		"cnpg-pooler template.spec.affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[].topologyKey",
 		"replicationsource rsyncTLS.moverSecurityContext.seccompProfile.type",
 		"cnpg-pooler template.spec.containers[].name",
 		"cnpg-cluster imageCatalogRef.name",
@@ -1221,9 +1288,25 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 	for _, guard := range []struct{ component, path string }{
 		{"certificate", "secretName"},
 		{"gatewayclass", "controllerName"},
+		{"issuer", "acme.solvers[].http01.ingress.podTemplate.spec.affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[].topologyKey"},
 	} {
 		if !refused[guard.component+" "+guard.path] {
 			t.Errorf("the measurement does not find the %s's refusal of %s without it", guard.component, guard.path)
+		}
+	}
+	// A kind whose required list is generated refuses every field the
+	// measurement visits, but for those requiredWrittenExceptions lists, and
+	// each of those stays a member.
+	for _, m := range all {
+		if _, generated := kindRequiredAPI[m.component]; generated {
+			if _, excepted := requiredWrittenExceptions[m.component+" "+m.path]; !excepted {
+				t.Errorf("%s: its required list is generated, and it does not refuse the omission of %s, which requiredWrittenExceptions does not list", m.component, m.path)
+			}
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(requiredWrittenExceptions)) {
+		if !have[key] {
+			t.Errorf("%s: requiredWrittenExceptions lists it, and it is no member; drop it", key)
 		}
 	}
 	// The omission of each valid default builds and writes its value; one

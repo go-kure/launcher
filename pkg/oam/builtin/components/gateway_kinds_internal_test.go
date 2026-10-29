@@ -127,9 +127,9 @@ func gatewayAPICRDSpec(t *testing.T, channel, name string) apiextensionsv1.JSONS
 	return spec
 }
 
-// TestGatewayKinds_RequiredMatchCRD is TestCertManagerKinds_RequiredMatchCRD
-// for the kinds of the Gateway API's infrastructure objects: it derives, from
-// the CRDs of the linked module, the fields of each kind that the API requires
+// TestGatewayKinds_RequiredMatchCRD holds the kinds of the Gateway API's
+// infrastructure objects: it derives, from the CRDs of the linked module, the
+// fields of each kind that the API requires
 // and the type would write unauthored, holds the kind's required list to them,
 // and holds every other field the type writes empty unauthored to a schema
 // that accepts it. The fields the API requires that the type omits when they

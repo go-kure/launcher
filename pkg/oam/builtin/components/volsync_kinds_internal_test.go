@@ -54,8 +54,8 @@ func volsyncCRD(t *testing.T, file string) string {
 	return filepath.Join(linkedModuleDir(t, volsyncModulePath), filepath.FromSlash(volsyncCRDs+file))
 }
 
-// TestVolsyncKinds_RequiredMatchCRD is TestCertManagerKinds_RequiredMatchCRD
-// for the kinds of VolSync's API. From the CRDs of the linked module it derives
+// TestVolsyncKinds_RequiredMatchCRD holds the kinds of VolSync's API. From the
+// CRDs of the linked module it derives
 // the fields of VolSync's own types that the API requires and the type would
 // write unauthored, and holds each kind's required list to them, both ways: a
 // dependency bump that adds, drops or moves one fails here, naming it. Every

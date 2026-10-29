@@ -1210,7 +1210,10 @@ and by scope, whatever component or trait emits it.
   required, parents and backends of another namespace are written as authored, and the
   NetworkPolicy synthesis allows nothing for its backends — all as for `httproute`. The
   required fields it writes unauthored and does not refuse are pinned with the other
-  kinds' (README "Required fields a kind writes unauthored and does not refuse").
+  kinds' (README "Required fields a kind writes unauthored and does not refuse"). A
+  kind whose required list is generated from the same derivation has none left
+  (go-kure/launcher#883: so far the three cert-manager kinds and the four External
+  Secrets kinds); the pin holds 1,514 fields.
 - **Shipped: three kinds of cert-manager's `cert-manager.io/v1` API,** `issuer`,
   `clusterissuer` and `certificate` (`issuer.go`, `clusterissuer.go`, `certificate.go`,
   with what they share in `certmanager_common.go`), each the strict projection of its
@@ -1229,9 +1232,14 @@ and by scope, whatever component or trait emits it.
     object is refused under a policy that forbids explicit secrets. No default is filled
     and no `Policy` method is added.
   - Required fields follow the rule of the Prometheus operator's kinds: a field the API
-    requires that the Go type writes whether or not it was authored must be authored. A
-    test holds each list to the CRDs the linked module ships (96 paths for an issuer, 8
-    for a certificate). An issuer has none at the top level; a required field under a
+    requires that the Go type writes whether or not it was authored must be authored.
+    The lists are generated from the CRDs the linked module ships (138 paths for an
+    issuer, 8 for a certificate), whatever type declares the field: since
+    go-kure/launcher#883 an omitted required field of an embedded Kubernetes type under
+    an HTTP01 solver's pod template (an affinity term's `topologyKey` or `weight`, a
+    node selector requirement's `key` and `operator`, a sysctl, a seccomp profile's
+    `type`) is refused as well, 42 fields of each issuer kind that were written empty
+    before. An issuer has none at the top level; a required field under a
     parent the author left out is not asked for. Three of an issuer's paths are fields
     of a Kubernetes or Gateway API type an ACME HTTP01 solver embeds (the terms of a
     required node affinity, the name of a parent reference): the CRDs refuse each as the
@@ -1371,9 +1379,10 @@ and by scope, whatever component or trait emits it.
     and an `externalsecret` names its own store.
   - The required lists follow the rule of the Prometheus operator's kinds, read from the
     Go source of the linked
-    module, which ships no CRD. **A store's list is generated** (263 paths over every
-    provider at this pin, in `zz_generated_externalsecrets_required.go`), and a test
-    fails where the file and the derivation differ. Four more fields of a store are
+    module, which ships no CRD. **The lists are generated** (a store's 265 paths over
+    every provider at this pin, in `zz_generated_kind_required.go`, with those of the
+    cert-manager kinds, go-kure/launcher#883), and a test fails where the file and the
+    derivation differ. Four more fields of a store are
     ones the API would default and the type always writes, so the default never
     applies and the value must be written: **a Vault store writes its `version`.** The
     `key` and `operator` of a match expression must be authored too, presence only
@@ -2479,6 +2488,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Shipped | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` | §7 | Shipped | — |
 | [go-kure/launcher#849](https://github.com/go-kure/launcher/issues/849) | Policy refusals carry a class | §5.3 | Shipped | — |
+| [go-kure/launcher#883](https://github.com/go-kure/launcher/issues/883) | Refuse every required field a kind writes unauthored, from one generated list | §6.2 | Partly: the generator and its rule; the cert-manager and External Secrets kinds. The other kinds of the pin follow | — |
 | [go-kure/launcher#934](https://github.com/go-kure/launcher/issues/934) | Object kind policy (the decision of [go-kure/launcher#922](https://github.com/go-kure/launcher/issues/922)) | §5.4 | Shipped | go-kure/launcher#849 |
 | [go-kure/launcher#959](https://github.com/go-kure/launcher/issues/959) | One rule for every Service-derived name, with its cluster-version limit | §3.5 | Shipped | — |
 | [go-kure/launcher#1001](https://github.com/go-kure/launcher/issues/1001) | Complete CNPG backup and recovery to S3 through OAM lowering | §6.3 | Shipped | — |

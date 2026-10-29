@@ -884,7 +884,9 @@ const hpaMetricSelectorReason = "the API server validates nothing of a metric se
 
 // withValueAt returns a copy of props with value written at the json path
 // path, in which [] names the first element of a list, creating what the path
-// crosses.
+// crosses. A pod affinity term it creates gets a topology key, and a weighted
+// term a weight: the API requires both, and a kind whose required list is
+// generated refuses either unauthored.
 func withValueAt(props map[string]any, path string, value any) map[string]any {
 	var clone func(v any) any
 	clone = func(v any) any {
@@ -918,20 +920,41 @@ func withValueAt(props map[string]any, path string, value any) map[string]any {
 		case list:
 			items, _ := node[name].([]any)
 			if len(items) == 0 {
-				items = []any{map[string]any{}}
+				items = []any{affinityTermFields(segments[:i+1])}
 				node[name] = items
 			}
 			node = items[0].(map[string]any)
 		default:
 			child, ok := node[name].(map[string]any)
 			if !ok {
-				child = map[string]any{}
+				child = affinityTermFields(segments[:i+1])
 				node[name] = child
 			}
 			node = child
 		}
 	}
 	return out
+}
+
+// affinityTermFields returns the object withValueAt creates at the path that
+// segments name: a pod affinity term with its topology key, a weighted term
+// with its weight, else an empty one.
+func affinityTermFields(segments []string) map[string]any {
+	n := len(segments)
+	if n < 2 {
+		return map[string]any{}
+	}
+	at, parent := segments[n-1], segments[n-2]
+	pod := parent == "podAffinity" || parent == "podAntiAffinity"
+	switch {
+	case at == "requiredDuringSchedulingIgnoredDuringExecution[]" && pod:
+		return map[string]any{"topologyKey": "kubernetes.io/hostname"}
+	case at == "preferredDuringSchedulingIgnoredDuringExecution[]" && (pod || parent == "nodeAffinity"):
+		return map[string]any{"weight": 1}
+	case at == "podAffinityTerm" && parent == "preferredDuringSchedulingIgnoredDuringExecution[]":
+		return map[string]any{"topologyKey": "kubernetes.io/hostname"}
+	}
+	return map[string]any{}
 }
 
 // TestLabelSelectorKinds_CoverEverySelector walks the type of every strict

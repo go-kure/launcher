@@ -41,7 +41,7 @@ func (h *ClusterSecretStoreHandler) PropertySchema() map[string]oam.PropertySche
 var clusterSecretStoreKind = &policyHeldKind[esv1.SecretStoreSpec]{
 	policyFreeKind: policyFreeKind[esv1.SecretStoreSpec]{
 		upstream:       "external-secrets.io/v1 SecretStoreSpec",
-		required:       secretStoreRequired,
+		required:       secretStoreRequired("clustersecretstore"),
 		defaultedZeros: secretStoreDefaultedZeros,
 		validate:       validateSecretStore,
 		build: func(name, _ string, spec *esv1.SecretStoreSpec) client.Object {

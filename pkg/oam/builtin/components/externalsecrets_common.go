@@ -39,8 +39,9 @@ import (
 //
 // The API's types publish no field descriptions and the module ships no CRD,
 // so the markers its CRDs are generated from are the source, as for the
-// Prometheus operator's kinds. TestExternalSecretsKinds_RequiredMatchSource
-// holds each kind's required list to them, TestExternalSecretsKinds_Rules
+// Prometheus operator's kinds. Each kind's required list is generated from
+// them (kind_required.go), TestExternalSecretsKinds_RequiredMatchSource holds
+// the list to this API's own reader of them, TestExternalSecretsKinds_Rules
 // every expression and property-count rule to what the kinds do about it, and
 // TestExternalSecretsKinds_DefaultedZeros the claim that a CRD default, read
 // from its marker, can turn an authored 0, false or "" into another value only
@@ -51,43 +52,40 @@ import (
 // source: a provider's API, a Vault, a webhook. None is held to the
 // environment policy's allowed registries.
 
-// What a required field of these kinds says of itself where the list is
-// generated: a field the API requires, the name of what a reference refers
-// to, or a field the API would default (the verb takes that default). See
-// secretStoreRequired.
-const (
-	externalSecretsRequiresField    = "the external-secrets API requires this field"
-	externalSecretsRequiresName     = "the external-secrets API requires the name of what this refers to"
-	externalSecretsUnappliedDefault = "the object always carries this field, so the external-secrets API's default %s never applies: write the value"
-)
+// What a required field of these kinds says of itself where the API would
+// default it (the verb takes that default): see secretStoreRequired.
+const externalSecretsUnappliedDefault = "the object always carries this field, so the external-secrets API's default %s never applies: write the value"
 
-// secretStoreRequired is the required list of the secretstore and
-// clustersecretstore kinds: the fields the Go types write whether or not they
-// were authored and that an author must therefore write. They are of two
-// classes. The API requires the first (secretStoreRequiredPaths). The second
-// it would default (secretStoreUnappliedDefaults), but a default is applied to
-// an absent field only, and the object carries an empty one: the API's enum
-// refuses the empty `version` of a Vault provider, and an empty mount path or
-// a cache lifetime of zero is not what the default would have been. Beside
-// `provider` itself, each is a field of one provider, asked for only where
-// that provider (and every block above the field) is authored.
+// secretStoreRequired is the required list of the secretstore or
+// clustersecretstore kind, as component names it: the fields the Go types
+// write whether or not they were authored and that an author must therefore
+// write. They are of two classes. The API requires the first, the kind's
+// generated list (generatedKindRequired). The second it would default
+// (secretStoreUnappliedDefaults), but a default is applied to an absent field
+// only, and the object carries an empty one: the API's enum refuses the empty
+// `version` of a Vault provider, and an empty mount path or a cache lifetime
+// of zero is not what the default would have been. Beside `provider` itself,
+// each is a field of one provider, asked for only where that provider (and
+// every block above the field) is authored.
 //
 // Both classes are generated from the linked module's types
-// (zz_generated_externalsecrets_required.go) and not phrased one by one: a
-// required path that ends in `name` names what a reference refers to, every
-// other one is a field, and a defaulted one names its default.
-// TestExternalSecretsKinds_StoreRequiredIsGenerated holds the generated file
-// to the derivation, each class in both directions.
-//
-// Beside the two, the list holds the key and the operator of a match
-// expression in a condition's namespace selector (labelSelectorRequired),
-// which the API requires and the Kubernetes type writes empty; the same
-// derivation finds them, from the source of the linked type.
-var secretStoreRequired = requiredFields(
-	generatedRequired(secretStoreRequiredPaths),
-	unappliedDefaults(secretStoreUnappliedDefaults),
-	labelSelectorRequired(secretStoreLabelSelectors...),
-)
+// (zz_generated_kind_required.go) and not phrased one by one: a required path
+// that ends in `name` names what a reference refers to, every other one is a
+// field, and a defaulted one names its default. The first class holds the key
+// and the operator of a match expression in a condition's namespace selector
+// too, which the API requires and the Kubernetes type writes empty; those say
+// what labelSelectorRequired says (secretStoreRequiredText).
+func secretStoreRequired(component string) map[string]string {
+	return requiredFields(
+		generatedKindRequired(component),
+		unappliedDefaults(secretStoreUnappliedDefaults),
+	)
+}
+
+// secretStoreRequiredText is what the generated required paths of the two
+// store kinds say of themselves where they say more than their class
+// (requiredText): the key and the operator of a match expression.
+var secretStoreRequiredText = labelSelectorRequired(secretStoreLabelSelectors...)
 
 // secretStoreLabelSelectors are the label selectors of esv1.SecretStoreSpec.
 var secretStoreLabelSelectors = []string{"conditions[].namespaceSelector"}
@@ -98,19 +96,6 @@ func unappliedDefaults(defaults map[string]string) map[string]string {
 	out := make(map[string]string, len(defaults))
 	for path, def := range defaults {
 		out[path] = fmt.Sprintf(externalSecretsUnappliedDefault, def)
-	}
-	return out
-}
-
-// generatedRequired is the required list of the given generated paths, each
-// saying what its class of path says.
-func generatedRequired(paths []string) map[string]string {
-	out := make(map[string]string, len(paths))
-	for _, path := range paths {
-		out[path] = externalSecretsRequiresField
-		if path == "name" || strings.HasSuffix(path, ".name") {
-			out[path] = externalSecretsRequiresName
-		}
 	}
 	return out
 }
@@ -376,10 +361,21 @@ func externalSecretSchema() map[string]oam.PropertySchema {
 
 // externalSecretRequired is the required list of the externalsecret kind: the
 // fields the API requires that the Go types write whether or not they were
-// authored. None is at the top level: an ExternalSecret that authors nothing
-// is one the API takes. TestExternalSecretsKinds_RequiredMatchSource holds the
-// list to the source's markers.
+// authored, generated (generatedKindRequired). None is at the top level: an
+// ExternalSecret that authors nothing is one the API takes. Beside them it
+// holds the kind and the name of a `data` entry's generator reference, under a
+// path the kind refuses whatever is authored there (refuseDataGeneratorRef):
+// the generated list leaves them out, and the kind asks for them first, as it
+// did before the list was generated.
 var externalSecretRequired = requiredFields(
+	generatedKindRequired("externalsecret"),
+	generatorRefRequired("data[].sourceRef.generatorRef"),
+)
+
+// externalSecretRequiredText is what the generated required paths of the
+// externalsecret kind say of themselves (requiredText): the sentences of the
+// list the kind kept by hand before it was generated.
+var externalSecretRequiredText = requiredFields(
 	map[string]string{ //nolint:gosec // G101: the keys are field paths (secretKey is a field's name) and the values their descriptions
 		"data[].secretKey":                        "the key of the Secret the value is written to",
 		"data[].remoteRef":                        "the provider entry the value is read from",
@@ -395,7 +391,6 @@ var externalSecretRequired = requiredFields(
 		"target.manifest.apiVersion":              "the apiVersion of the resource written instead of a Secret",
 		"target.manifest.kind":                    "the kind of the resource written instead of a Secret",
 	},
-	generatorRefRequired("data[].sourceRef.generatorRef"),
 	generatorRefRequired("dataFrom[].sourceRef.generatorRef"),
 	templateRefRequired("target.template.templateFrom[].configMap", "ConfigMap"),
 	templateRefRequired("target.template.templateFrom[].secret", "Secret"),
@@ -421,15 +416,25 @@ func templateRefRequired(at, kind string) map[string]string {
 }
 
 // clusterExternalSecretRequired is the required list of the
-// clusterexternalsecret kind: the spec of the ExternalSecrets it creates, and
-// under it everything externalSecretRequired lists; and the key and the
-// operator of a match expression in a selector of the namespaces
-// (labelSelectorRequired).
-var clusterExternalSecretRequired = func() map[string]string {
+// clusterexternalsecret kind: the generated one (generatedKindRequired), which
+// holds the spec of the ExternalSecrets it creates and under it what an
+// ExternalSecret's list holds, and the key and the operator of a match
+// expression in a selector of the namespaces; and, as externalSecretRequired
+// does, the kind and the name of a `data` entry's generator reference.
+var clusterExternalSecretRequired = requiredFields(
+	generatedKindRequired("clusterexternalsecret"),
+	generatorRefRequired("externalSecretSpec.data[].sourceRef.generatorRef"),
+)
+
+// clusterExternalSecretRequiredText is what the generated required paths of
+// the clusterexternalsecret kind say of themselves (requiredText): those of
+// an ExternalSecret under externalSecretSpec, the spec itself, and the
+// expressions of the namespace selectors (labelSelectorRequired).
+var clusterExternalSecretRequiredText = func() map[string]string {
 	const at = "externalSecretSpec"
 	out := labelSelectorRequired("namespaceSelector", "namespaceSelectors[]")
 	out[at] = "the spec of the ExternalSecrets created in the selected namespaces"
-	for path, says := range externalSecretRequired {
+	for path, says := range externalSecretRequiredText {
 		out[at+"."+path] = says
 	}
 	return out

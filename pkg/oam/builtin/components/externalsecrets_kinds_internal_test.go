@@ -5,18 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
-	"go/format"
 	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -136,38 +133,27 @@ func (s externalSecretsSource) required(f kindField) bool {
 	return m.required || (!slices.Contains(f.jsonOptions(), "omitempty") && !m.optional)
 }
 
-// derive returns the fields of typ an author must write, by json path. Of
-// those the API requires: written, the ones the type encodes whether or not
-// they were authored, which a required list holds; and omitted, the ones it
-// drops when unauthored, which the decoded value shows and a kind's validate
-// holds. And defaulted, the optional ones the type encodes whether or not they
-// were authored and to which the CRD gives a default, each with that default:
-// the default is applied to an absent field only, so the empty value the
-// object carries stands, and a required list holds these too
-// (unappliedDefault). It fails the test on a field it cannot place: one whose
-// source was not read, one marked both required and optional, one required
-// under a map value, and one required or defaulted under a parent that is
-// written unauthored without being required itself.
+// derive returns the fields of the module's own types under typ an author must
+// write, by json path. Of those the API requires: written, the ones the type
+// encodes whether or not they were authored, which a required list holds; and
+// omitted, the ones it drops when unauthored, which the decoded value shows
+// and a kind's validate holds. And defaulted, the optional ones the type
+// encodes whether or not they were authored and to which the CRD gives a
+// default, each with that default: the default is applied to an absent field
+// only, so the empty value the object carries stands, and a required list
+// holds these too (unappliedDefault). It fails the test on a field it cannot
+// place: one whose source was not read, one marked both required and
+// optional, one required under a map value, and one required or defaulted
+// under a parent that is written unauthored without being required itself.
 //
-// Of the Kubernetes types these specs embed it derives the key and the
-// operator of a label selector's match expression, apart (expressions): the
-// schema generators' rule on the source of the linked
-// metav1.LabelSelectorRequirement requires both, and the type writes them
-// whether or not they were authored.
-func (s externalSecretsSource) derive(t *testing.T, typ reflect.Type) (written, omitted, expressions []string, defaulted map[string]string) {
+// The fields of a Kubernetes type these specs embed are not this reader's:
+// the generated lists derive them as the kinds' own (deriveRequiredWritten).
+func (s externalSecretsSource) derive(t *testing.T, typ reflect.Type) (written, omitted []string, defaulted map[string]string) {
 	t.Helper()
 	fields := 0
 	defaulted = map[string]string{}
-	expression := reflect.TypeFor[metav1.LabelSelectorRequirement]()
 	walkKindFields(typ, s.required, func(f kindField) {
 		if !strings.HasPrefix(f.owner.PkgPath(), externalSecretsModulePath+"/") {
-			switch {
-			case f.owner != expression || !s.embedded.required(f) || !f.writtenUnauthored():
-			case f.forced || strings.Contains(f.path, "{}"):
-				t.Errorf("%s is the field of a match expression under a map value or a parent the type writes unauthored; a required list cannot hold it, and this test knows no such field", f.path)
-			default:
-				expressions = append(expressions, f.path)
-			}
 			return
 		}
 		fields++
@@ -204,8 +190,7 @@ func (s externalSecretsSource) derive(t *testing.T, typ reflect.Type) (written, 
 	}
 	slices.Sort(written)
 	slices.Sort(omitted)
-	slices.Sort(expressions)
-	return written, omitted, expressions, defaulted
+	return written, omitted, defaulted
 }
 
 // unappliedDefault returns the CRD default of an optional field that the API
@@ -279,17 +264,18 @@ func pathsDiffer(got, want []string) (missing, extra []string) {
 }
 
 // TestExternalSecretsKinds_RequiredMatchSource derives, from the linked
-// module's source, the fields of each kind that the API requires, and holds
-// the kind to them.
+// module's source, the fields of each kind's own types that the API requires,
+// and holds the kind to them, apart from the generated list
+// (TestKindComponents_RequiredIsGenerated), whose reader of the same source is
+// not this one.
 //
 // What is read as required is what the CRD generator makes required
 // (externalSecretsSource.required). A required field the type writes whether
-// or not it was authored must be in the kind's required list, and the list
-// may hold nothing else: a dependency bump that adds, drops or moves one fails
-// here, naming it. A required field the type omits when unauthored is not the
-// list's: the decoded value shows the omission, and the kind's validate must
-// refuse it. At this pin the API has none on these types, and the test fails
-// on the first, naming it.
+// or not it was authored must be in the kind's required list: a dependency
+// bump that adds or moves one fails here, naming it. A required field the type
+// omits when unauthored is not the list's: the decoded value shows the
+// omission, and the kind's validate must refuse it. At this pin the API has
+// none on these types, and the test fails on the first, naming it.
 //
 // The list holds one more class: an optional field the type writes whether or
 // not it was authored, to which the CRD gives a default
@@ -297,13 +283,11 @@ func pathsDiffer(got, want []string) (missing, extra []string) {
 // to an absent field only, so the empty value the object carries would stand
 // and be refused or misread; the kind refuses the field unauthored, with a
 // sentence that names the default. Each such field must be in the list with
-// that sentence, and the list may hold no other under it.
+// that sentence, and no other entry may name a default.
 //
-// Of a Kubernetes type these specs embed, only the key and the operator of a
-// label selector's match expression are derived, by the schema generators'
-// rule on the linked type's source, and must be in the list. The module ships
-// no CRD to show them with; TestLabelSelectorKinds_CoverEverySelector holds
-// each kind's refusal of them, path by path.
+// The fields of a Kubernetes type these specs embed are the generated list's,
+// held there; TestLabelSelectorKinds_CoverEverySelector holds each kind's
+// refusal of a match expression's key and operator, path by path.
 func TestExternalSecretsKinds_RequiredMatchSource(t *testing.T) {
 	src := readExternalSecretsSource(t)
 	// Vacuity guards: both spellings of a required field are read.
@@ -315,19 +299,16 @@ func TestExternalSecretsKinds_RequiredMatchSource(t *testing.T) {
 	}
 	for _, kind := range externalSecretsKinds {
 		t.Run(kind.component, func(t *testing.T) {
-			written, omitted, expressions, defaulted := src.derive(t, kind.typ)
+			written, omitted, defaulted := src.derive(t, kind.typ)
 			for _, path := range written {
 				if _, both := defaulted[path]; both {
 					t.Errorf("%s is derived both as required and as optional with a default", path)
 				}
 			}
 			listed := slices.Sorted(maps.Keys(kind.required))
-			missing, extra := pathsDiffer(listed, slices.Concat(written, expressions, slices.Sorted(maps.Keys(defaulted))))
+			missing, _ := pathsDiffer(listed, slices.Concat(written, slices.Sorted(maps.Keys(defaulted))))
 			for _, path := range missing {
 				t.Errorf("%s is written unauthored, and required by the API or given a default by it, and the required list does not hold it", path)
-			}
-			for _, path := range extra {
-				t.Errorf("%s is in the required list, and the source makes it neither a required field the type writes unauthored nor one it writes unauthored with a default", path)
 			}
 			for _, path := range omitted {
 				t.Errorf("%s is required by the API and omitted when unauthored; the kind's validate must refuse a decoded value without it", path)
@@ -343,191 +324,8 @@ func TestExternalSecretsKinds_RequiredMatchSource(t *testing.T) {
 					t.Errorf("%s has no default the source gives it, and the list says %q of it", path, says)
 				}
 			}
-			t.Logf("%d required fields written unauthored, %d omitted when unauthored, %d optional fields written unauthored with a default, %d of a match expression", len(written), len(omitted), len(defaulted), len(expressions))
+			t.Logf("%d required fields of the module's types written unauthored, %d omitted when unauthored, %d optional fields written unauthored with a default; %d listed", len(written), len(omitted), len(defaulted), len(listed))
 		})
-	}
-}
-
-// The generated file of the stores' required paths, and the switch under
-// which TestExternalSecretsKinds_StoreRequiredIsGenerated writes it.
-const (
-	secretStoreRequiredFile   = "zz_generated_externalsecrets_required.go"
-	secretStoreRequiredUpdate = "UPDATE_EXTERNALSECRETS_REQUIRED"
-)
-
-// renderSecretStoreRequired returns the generated file for the given paths of
-// the two classes: those the API requires, and those it gives a default.
-func renderSecretStoreRequired(t *testing.T, paths []string, defaults map[string]string) []byte {
-	t.Helper()
-	var b strings.Builder
-	b.WriteString("// Code generated by TestExternalSecretsKinds_StoreRequiredIsGenerated with " + secretStoreRequiredUpdate + "=1. DO NOT EDIT.\n\n")
-	b.WriteString("package components\n\n")
-	b.WriteString("// secretStoreRequiredPaths lists the fields of an external-secrets.io/v1\n")
-	b.WriteString("// SecretStoreSpec that the API requires and the Go type writes whether or not\n")
-	b.WriteString("// they were authored: see secretStoreRequired.\n")
-	b.WriteString("var secretStoreRequiredPaths = []string{\n")
-	for _, path := range paths {
-		b.WriteString("\t" + `"` + path + `"` + ",\n")
-	}
-	b.WriteString("}\n\n")
-	b.WriteString("// secretStoreUnappliedDefaults lists the optional fields of an\n")
-	b.WriteString("// external-secrets.io/v1 SecretStoreSpec that the Go type writes whether or\n")
-	b.WriteString("// not they were authored and to which the API gives a default, each with that\n")
-	b.WriteString("// default: see secretStoreRequired.\n")
-	b.WriteString("var secretStoreUnappliedDefaults = map[string]string{\n")
-	for _, path := range slices.Sorted(maps.Keys(defaults)) {
-		b.WriteString("\t" + strconv.Quote(path) + ": " + strconv.Quote(defaults[path]) + ",\n")
-	}
-	b.WriteString("}\n")
-	out, err := format.Source([]byte(b.String()))
-	if err != nil {
-		t.Fatalf("format the generated file: %v", err)
-	}
-	return out
-}
-
-// TestExternalSecretsKinds_StoreRequiredIsGenerated holds the two generated
-// lists of the stores' paths, those the API requires and those it gives a
-// default, each to its derivation from the linked module's source, in both
-// directions and path by path (the second with each default), and the
-// checked-in file to the bytes the derivation writes. After a bump of the
-// module that changes either list, run this test once with
-// UPDATE_EXTERNALSECRETS_REQUIRED=1: it writes the file and compares nothing.
-func TestExternalSecretsKinds_StoreRequiredIsGenerated(t *testing.T) {
-	derived, _, _, defaults := readExternalSecretsSource(t).derive(t, reflect.TypeFor[esv1.SecretStoreSpec]())
-	// Vacuity guards: the derivation reaches a provider's own fields, in each
-	// class.
-	for _, path := range []string{"provider", "provider.vault.server", "provider.aws.region", "provider.vault.auth.kubernetes.serviceAccountRef.name"} {
-		if !slices.Contains(derived, path) {
-			t.Fatalf("the derivation does not hold %s; it found %d paths", path, len(derived))
-		}
-	}
-	if def := defaults["provider.vault.version"]; def != "v2" {
-		t.Fatalf("the derivation gives provider.vault.version the default %q, want v2; it found %d defaults", def, len(defaults))
-	}
-	want := renderSecretStoreRequired(t, derived, defaults)
-	if os.Getenv(secretStoreRequiredUpdate) == "1" {
-		if err := os.WriteFile(secretStoreRequiredFile, want, 0o644); err != nil {
-			t.Fatalf("write %s: %v", secretStoreRequiredFile, err)
-		}
-		t.Logf("wrote %s: %d required paths, %d defaults", secretStoreRequiredFile, len(derived), len(defaults))
-		return
-	}
-	missing, extra := pathsDiffer(secretStoreRequiredPaths, derived)
-	for _, path := range missing {
-		t.Errorf("%s is required by the API and written unauthored, and %s does not list it; regenerate with %s=1", path, secretStoreRequiredFile, secretStoreRequiredUpdate)
-	}
-	for _, path := range extra {
-		t.Errorf("%s is listed in %s, and the source does not make it a required field the type writes unauthored; regenerate with %s=1", path, secretStoreRequiredFile, secretStoreRequiredUpdate)
-	}
-	for _, diff := range defaultsDiffer(secretStoreUnappliedDefaults, defaults) {
-		t.Errorf("%s; regenerate %s with %s=1", diff, secretStoreRequiredFile, secretStoreRequiredUpdate)
-	}
-	got, err := os.ReadFile(secretStoreRequiredFile)
-	if err != nil {
-		t.Fatalf("read %s: %v", secretStoreRequiredFile, err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Errorf("%s is not what the derivation writes (%d required paths, %d defaults); regenerate with %s=1", secretStoreRequiredFile, len(derived), len(defaults), secretStoreRequiredUpdate)
-	}
-	t.Logf("%d required paths, %d defaults", len(derived), len(defaults))
-}
-
-// defaultsDiffer says, path by path and sorted, how the generated defaults
-// differ from the derived ones: a path one side lacks, and a default that is
-// not the source's.
-func defaultsDiffer(got, want map[string]string) []string {
-	var out []string
-	for path, def := range want {
-		switch listed, ok := got[path]; {
-		case !ok:
-			out = append(out, path+" is written unauthored with the default "+def+", and the generated defaults do not list it")
-		case listed != def:
-			out = append(out, path+" is listed with the default "+listed+", and the source gives it "+def)
-		}
-	}
-	for path := range got {
-		if _, ok := want[path]; !ok {
-			out = append(out, path+" is listed in the generated defaults, and the source does not make it an optional field the type writes unauthored with a default")
-		}
-	}
-	slices.Sort(out)
-	return out
-}
-
-// TestExternalSecretsKinds_GeneratedComparisonBites: the comparison
-// TestExternalSecretsKinds_StoreRequiredIsGenerated makes finds a path taken
-// out of the list and one put into it, by name, and the file such a list
-// would be is not the checked-in one.
-func TestExternalSecretsKinds_GeneratedComparisonBites(t *testing.T) {
-	const dropped, added = "provider.vault.server", "provider.vault.nothing"
-	if !slices.Contains(secretStoreRequiredPaths, dropped) {
-		t.Fatalf("the generated list does not hold %s", dropped)
-	}
-	shorter := slices.DeleteFunc(slices.Clone(secretStoreRequiredPaths), func(path string) bool { return path == dropped })
-	if missing, extra := pathsDiffer(shorter, secretStoreRequiredPaths); !slices.Equal(missing, []string{dropped}) || extra != nil {
-		t.Errorf("a list without %s: missing %v, extra %v; want that one path missing", dropped, missing, extra)
-	}
-	longer := append(slices.Clone(secretStoreRequiredPaths), added)
-	if missing, extra := pathsDiffer(longer, secretStoreRequiredPaths); missing != nil || !slices.Equal(extra, []string{added}) {
-		t.Errorf("a list with %s: missing %v, extra %v; want that one path extra", added, missing, extra)
-	}
-	file, err := os.ReadFile(secretStoreRequiredFile)
-	if err != nil {
-		t.Fatalf("read %s: %v", secretStoreRequiredFile, err)
-	}
-	if bytes.Equal(renderSecretStoreRequired(t, shorter, secretStoreUnappliedDefaults), file) {
-		t.Errorf("the file of a list without %s equals the checked-in one", dropped)
-	}
-
-	// The same of the defaults: one taken out, one put in, one changed.
-	const undefaulted, defaultless = "provider.vault.version", "provider.vault.nothing"
-	if secretStoreUnappliedDefaults[undefaulted] != "v2" {
-		t.Fatalf("the generated defaults give %s %q, want v2", undefaulted, secretStoreUnappliedDefaults[undefaulted])
-	}
-	fewer := maps.Clone(secretStoreUnappliedDefaults)
-	delete(fewer, undefaulted)
-	more := maps.Clone(secretStoreUnappliedDefaults)
-	more[defaultless] = "none"
-	other := maps.Clone(secretStoreUnappliedDefaults)
-	other[undefaulted] = "v1"
-	for name, c := range map[string]struct {
-		defaults map[string]string
-		want     string
-	}{
-		"one taken out": {fewer, undefaulted + " is written unauthored with the default v2, and the generated defaults do not list it"},
-		"one put in":    {more, defaultless + " is listed in the generated defaults, and the source does not make it an optional field the type writes unauthored with a default"},
-		"one changed":   {other, undefaulted + " is listed with the default v1, and the source gives it v2"},
-	} {
-		if diff := defaultsDiffer(c.defaults, secretStoreUnappliedDefaults); !slices.Equal(diff, []string{c.want}) {
-			t.Errorf("defaults with %s: %q, want only %q", name, diff, c.want)
-		}
-		if bytes.Equal(renderSecretStoreRequired(t, secretStoreRequiredPaths, c.defaults), file) {
-			t.Errorf("the file of defaults with %s equals the checked-in one", name)
-		}
-	}
-
-	// What a refusal says of a generated path is one of three sentences, by
-	// the class of the path and not by the field. The fields of a match
-	// expression are not generated.
-	selectors := labelSelectorRequired(secretStoreLabelSelectors...)
-	for path, says := range secretStoreRequired {
-		if _, ok := selectors[path]; ok {
-			continue
-		}
-		want := externalSecretsRequiresField
-		if strings.HasSuffix(path, ".name") {
-			want = externalSecretsRequiresName
-		}
-		if def, ok := secretStoreUnappliedDefaults[path]; ok {
-			want = fmt.Sprintf(externalSecretsUnappliedDefault, def)
-		}
-		if says != want {
-			t.Errorf("%s says %q, want %q", path, says, want)
-		}
-	}
-	if len(secretStoreRequired) != len(secretStoreRequiredPaths)+len(secretStoreUnappliedDefaults)+len(selectors) {
-		t.Errorf("the required list holds %d paths, the generated ones %d and %d, the match expressions %d", len(secretStoreRequired), len(secretStoreRequiredPaths), len(secretStoreUnappliedDefaults), len(selectors))
 	}
 }
 
