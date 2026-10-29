@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -193,6 +194,72 @@ func TestBuildCommand_OutputDir(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "apiVersion") {
 		t.Errorf("expected output file to contain YAML, got:\n%s", data)
+	}
+}
+
+// TestBuildCommand_OutputFile: the global -f/--output-file writes the stream
+// that stdout would carry to that file and nothing to stdout
+// (go-kure/launcher#795).
+func TestBuildCommand_OutputFile(t *testing.T) {
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", testAppYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	stdoutCmd := NewKurelCommand()
+	var want bytes.Buffer
+	stdoutCmd.SetOut(&want)
+	stdoutCmd.SetErr(io.Discard)
+	stdoutCmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	if err := stdoutCmd.Execute(); err != nil {
+		t.Fatalf("stdout build failed: %v", err)
+	}
+
+	for _, flag := range []string{"-f", "--output-file"} {
+		t.Run(flag, func(t *testing.T) {
+			outFile := filepath.Join(t.TempDir(), "out.yaml")
+			cmd := NewKurelCommand()
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{"build", appPath, "--profile", profilePath, flag, outFile})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("build %s failed: %v", flag, err)
+			}
+			if out.Len() != 0 {
+				t.Errorf("build %s wrote to stdout:\n%s", flag, out.String())
+			}
+			got, err := os.ReadFile(outFile)
+			if err != nil {
+				t.Fatalf("reading %s: %v", outFile, err)
+			}
+			if !bytes.Equal(got, want.Bytes()) {
+				t.Errorf("build %s file differs from the stdout stream:\n got: %s\nwant: %s", flag, got, want.String())
+			}
+		})
+	}
+}
+
+// TestBuildCommand_OutputFileWithOutputDir: -f and --output each name where the
+// manifests go; given both, build refuses before writing anything.
+func TestBuildCommand_OutputFileWithOutputDir(t *testing.T) {
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", testAppYAML)
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+	outFile := filepath.Join(dir, "out.yaml")
+	outDir := filepath.Join(dir, "manifests")
+
+	cmd := NewKurelCommand()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath, "-f", outFile, "-o", outDir})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "cannot be used together") {
+		t.Fatalf("want a refusal naming both flags, got: %v", err)
+	}
+	for _, p := range []string{outFile, outDir} {
+		if _, statErr := os.Stat(p); !os.IsNotExist(statErr) {
+			t.Errorf("refused build left %s behind", p)
+		}
 	}
 }
 

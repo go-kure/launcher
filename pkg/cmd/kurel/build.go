@@ -73,6 +73,16 @@ kurel.yaml for parameterized packages). Output is written to stdout (default) or
 }
 
 func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
+	// The global -f/--output-file names one file for the whole stream; --output
+	// names a directory. Each says where the manifests go, so both is a conflict.
+	var outputFile string
+	if f := cmd.Flags().Lookup("output-file"); f != nil {
+		outputFile = f.Value.String()
+	}
+	if outputFile != "" && opts.outputDir != "" {
+		return errors.New("--output-file (-f) and --output (-o) cannot be used together: -f writes the manifests to one file, -o writes <app name>.yaml into a directory")
+	}
+
 	// Resolve positional arg: file path or directory containing app.yaml.
 	var appPath, appDir string
 	info, err := os.Stat(arg)
@@ -219,12 +229,15 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 		return errors.Wrap(err, "encoding YAML output")
 	}
 
-	if opts.outputDir == "" {
+	switch {
+	case outputFile != "":
+		return writeOutputFile(outputFile, yamlBytes)
+	case opts.outputDir != "":
+		return writeOutputDir(opts.outputDir, app.Metadata.Name, yamlBytes)
+	default:
 		_, err = cmd.OutOrStdout().Write(yamlBytes)
 		return errors.Wrap(err, "writing to stdout")
 	}
-
-	return writeOutputDir(opts.outputDir, app.Metadata.Name, yamlBytes)
 }
 
 // loadSuppliedValues merges --values file and --set flags into a single map.
@@ -409,6 +422,20 @@ func generatedObjects(apps []oam.GeneratedApplication) []*client.Object {
 		objects = append(objects, app.Objects...)
 	}
 	return objects
+}
+
+// writeOutputFile writes the stream to path, the -f/--output-file the invoking
+// operator passed on their own command line. The file's directory must exist.
+func writeOutputFile(path string, data []byte) error {
+	//nolint:gosec // G703: path is the -f/--output-file the invoking operator
+	// passed directly on their own command line (same trust boundary as the
+	// process itself, like writeOutputDir's dir and `go build -o`), not
+	// attacker-supplied input crossing a privilege boundary, so the CLI Safety
+	// standard's path-escape rule does not apply to it.
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return errors.Wrapf(err, "writing output file %q", path)
+	}
+	return nil
 }
 
 func writeOutputDir(dir, appName string, data []byte) error {
