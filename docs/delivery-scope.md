@@ -1212,8 +1212,10 @@ and by scope, whatever component or trait emits it.
   required fields it writes unauthored and does not refuse are pinned with the other
   kinds' (README "Required fields a kind writes unauthored and does not refuse"). A
   kind whose required list is generated from the same derivation has none left
-  (go-kure/launcher#883: so far the three cert-manager kinds and the four External
-  Secrets kinds); the pin holds 1,514 fields.
+  (go-kure/launcher#883: so far the three cert-manager kinds, the four External
+  Secrets kinds and `cnpg-cluster`, `cnpg-objectstore` and `cnpg-database`;
+  `cnpg-pooler` keeps one named exception, the `containers: []` it writes into its
+  template, which the Pooler CRD accepts); the pin holds 1,141 fields.
 - **Shipped: three kinds of cert-manager's `cert-manager.io/v1` API,** `issuer`,
   `clusterissuer` and `certificate` (`issuer.go`, `clusterissuer.go`, `certificate.go`,
   with what they share in `certmanager_common.go`), each the strict projection of its
@@ -1381,7 +1383,7 @@ and by scope, whatever component or trait emits it.
     Go source of the linked
     module, which ships no CRD. **The lists are generated** (a store's 265 paths over
     every provider at this pin, in `zz_generated_kind_required.go`, with those of the
-    cert-manager kinds, go-kure/launcher#883), and a test fails where the file and the
+    cert-manager and CloudNativePG kinds, go-kure/launcher#883), and a test fails where the file and the
     derivation differ. Four more fields of a store are
     ones the API would default and the type always writes, so the default never
     applies and the value must be written: **a Vault store writes its `version`.** The
@@ -2488,7 +2490,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Shipped | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` | §7 | Shipped | — |
 | [go-kure/launcher#849](https://github.com/go-kure/launcher/issues/849) | Policy refusals carry a class | §5.3 | Shipped | — |
-| [go-kure/launcher#883](https://github.com/go-kure/launcher/issues/883) | Refuse every required field a kind writes unauthored, from one generated list | §6.2 | Partly: the generator and its rule; the cert-manager and External Secrets kinds. The other kinds of the pin follow | — |
+| [go-kure/launcher#883](https://github.com/go-kure/launcher/issues/883) | Refuse every required field a kind writes unauthored, from one generated list | §6.2 | Partly: the generator and its rule; the cert-manager, External Secrets and CloudNativePG (`cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-database`) kinds. The other kinds of the pin follow | — |
 | [go-kure/launcher#934](https://github.com/go-kure/launcher/issues/934) | Object kind policy (the decision of [go-kure/launcher#922](https://github.com/go-kure/launcher/issues/922)) | §5.4 | Shipped | go-kure/launcher#849 |
 | [go-kure/launcher#959](https://github.com/go-kure/launcher/issues/959) | One rule for every Service-derived name, with its cluster-version limit | §3.5 | Shipped | — |
 | [go-kure/launcher#1001](https://github.com/go-kure/launcher/issues/1001) | Complete CNPG backup and recovery to S3 through OAM lowering | §6.3 | Shipped | — |

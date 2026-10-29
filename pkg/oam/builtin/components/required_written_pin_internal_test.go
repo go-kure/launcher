@@ -1266,19 +1266,20 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 		return
 	}
 	// Vacuity guards: the measurement finds a member of each family that has
-	// one (AFF, SEC, POD twice, KIND), a refusal of an omission (two of the KIND
-	// family, one of the AFF family on a kind whose list is generated), each
-	// valid default it leaves out, and each unauthorable path it skips, each in
-	// its own class.
+	// one (AFF, SEC, POD on two kinds, KIND), a refusal of an omission (two of
+	// the KIND family, one of the AFF family on a kind whose list is generated,
+	// and of the CloudNativePG kinds whose lists are generated one of each
+	// family their members were in), each valid default it leaves out, and
+	// each unauthorable path it skips, each in its own class.
 	have := map[string]bool{}
 	for _, m := range all {
 		have[m.component+" "+m.path] = true
 	}
 	for _, guard := range []string{
-		"cnpg-pooler template.spec.affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[].topologyKey",
+		"replicationsource rsyncTLS.moverAffinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[].topologyKey",
 		"replicationsource rsyncTLS.moverSecurityContext.seccompProfile.type",
-		"cnpg-pooler template.spec.containers[].name",
-		"cnpg-cluster imageCatalogRef.name",
+		"replicationsource rsyncTLS.moverResources.claims[].name",
+		"replicationdestination rsyncTLS.moverResources.claims[].name",
 		"httproute parentRefs[].name",
 	} {
 		if !have[guard] {
@@ -1289,6 +1290,13 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 		{"certificate", "secretName"},
 		{"gatewayclass", "controllerName"},
 		{"issuer", "acme.solvers[].http01.ingress.podTemplate.spec.affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[].topologyKey"},
+		{"cnpg-pooler", "template.spec.affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution[].topologyKey"},
+		{"cnpg-pooler", "template.spec.containers[].name"},
+		{"cnpg-pooler", "template.spec.securityContext.seccompProfile.type"},
+		{"cnpg-pooler", "pgbouncer.serverTLSSecret.name"},
+		{"cnpg-cluster", "imageCatalogRef.name"},
+		{"cnpg-objectstore", "configuration.s3Credentials.accessKeyId.key"},
+		{"cnpg-database", "schemas[].name"},
 	} {
 		if !refused[guard.component+" "+guard.path] {
 			t.Errorf("the measurement does not find the %s's refusal of %s without it", guard.component, guard.path)

@@ -28,10 +28,19 @@ const (
 // requiredWrittenExceptions are the fields, by kind and path, that the
 // derivation lists and a generated kind does not refuse unauthored, each with
 // the reason: a harness sample no rule of the API admits, so the omission
-// cannot be shown refused (go-kure/launcher#883). The generated list leaves
-// them out, and the pin keeps them. An entry the derivation no longer lists,
-// or the pin no longer holds, fails the test. None at this pin.
-var requiredWrittenExceptions = map[string]string{}
+// cannot be shown refused, or an omission the API server accepts as the kind
+// writes it and the operator handles, so refusing it would refuse a working
+// document (go-kure/launcher#883). The generated list leaves them out, and the
+// pin keeps them. An entry the derivation no longer lists, or the pin no
+// longer holds, fails the test, and TestKindComponents_GeneratedRequiredBothWays
+// shows each omission accepted on the kind's CRD where one is read.
+var requiredWrittenExceptions = map[string]string{
+	// The Go type writes the template's spec whether or not it was authored,
+	// and the kind writes an unset container list as [] (CnpgPoolerConfig.Generate):
+	// the Pooler CRD accepts both, and the operator adds its pgbouncer container
+	// to an empty list as to an omitted spec.
+	"cnpg-pooler template.spec.containers": "accepted: the kind writes the list as [], which the Pooler CRD accepts and to which the operator adds its pgbouncer container, with the template's spec authored or left out",
+}
 
 // kindForcedParent is what the API server answers for a generated path under
 // a parent the Go type writes whether or not it was authored and the API does
@@ -70,6 +79,10 @@ var generatedKindRequiredLists = map[string]map[string]string{
 	"certificate":           certificateKind.required,
 	"clusterissuer":         clusterIssuerKind.required,
 	"issuer":                issuerKind.required,
+	"cnpg-cluster":          cnpgClusterRequired,
+	"cnpg-database":         cnpgDatabaseRequired,
+	"cnpg-objectstore":      cnpgObjectStoreRequired,
+	"cnpg-pooler":           cnpgPoolerRequired,
 	"clusterexternalsecret": clusterExternalSecretKind.required,
 	"clustersecretstore":    clusterSecretStoreKind.required,
 	"externalsecret":        externalSecretKind.required,
@@ -458,20 +471,34 @@ func TestKindComponents_GeneratedRequiredHeld(t *testing.T) {
 	}
 }
 
-// certManagerCRDOf reads the CRD of a cert-manager kind, nil for another
-// component.
-func certManagerCRDOf(t *testing.T, component string) *apiextensionsv1.CustomResourceDefinition {
+// generatedKindCRDFiles are the CRDs of the generated kinds whose linked module
+// ships one and that certManagerKinds does not name, by component: the module
+// and the file under its directory.
+var generatedKindCRDFiles = map[string]struct{ modulePath, file string }{
+	"cnpg-cluster":     {cnpgModulePath, cnpgCRDs + "clusters.yaml"},
+	"cnpg-database":    {cnpgModulePath, cnpgCRDs + "databases.yaml"},
+	"cnpg-objectstore": {barmanCloudModulePath, "config/crd/bases/barmancloud.cnpg.io_objectstores.yaml"},
+	"cnpg-pooler":      {cnpgModulePath, cnpgCRDs + "poolers.yaml"},
+}
+
+// generatedKindCRDOf reads the CRD of a generated kind whose linked module
+// ships one, a cert-manager kind or one of generatedKindCRDFiles, nil for
+// another component.
+func generatedKindCRDOf(t *testing.T, component string) *apiextensionsv1.CustomResourceDefinition {
 	t.Helper()
 	var file string
 	for _, kind := range certManagerKinds {
 		if kind.component == component {
-			file = kind.crd
+			file = certManagerCRD(t, kind.crd)
 		}
+	}
+	if f, ok := generatedKindCRDFiles[component]; ok {
+		file = linkedModuleDir(t, f.modulePath) + "/" + f.file
 	}
 	if file == "" {
 		return nil
 	}
-	data, err := os.ReadFile(certManagerCRD(t, file))
+	data, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatalf("read the CRD of %s: %v", component, err)
 	}
@@ -489,6 +516,19 @@ var generatedHarnessSamples = map[string]map[string]any{
 	// A Venafi issuer configures exactly one of tpp, cloud and ngts.
 	"issuer venafi.zone":        {"venafi.cloud.apiTokenSecretRef.name": "venafi-token"},
 	"clusterissuer venafi.zone": {"venafi.cloud.apiTokenSecretRef.name": "venafi-token"},
+	// An image catalog reference names the postgresql.cnpg.io group and a
+	// catalog kind.
+	"cnpg-cluster imageCatalogRef.major":         cnpgCatalogRefSample("imageCatalogRef"),
+	"cnpg-cluster imageCatalogRef.name":          cnpgCatalogRefSample("imageCatalogRef"),
+	"cnpg-pooler pgbouncer.imageCatalogRef.key":  cnpgCatalogRefSample("pgbouncer.imageCatalogRef"),
+	"cnpg-pooler pgbouncer.imageCatalogRef.kind": cnpgCatalogRefSample("pgbouncer.imageCatalogRef"),
+	"cnpg-pooler pgbouncer.imageCatalogRef.name": cnpgCatalogRefSample("pgbouncer.imageCatalogRef"),
+}
+
+// cnpgCatalogRefSample is the group and the kind of an image catalog
+// reference at the path at, which the CRDs' rules on the reference require.
+func cnpgCatalogRefSample(at string) map[string]any {
+	return map[string]any{at + ".apiGroup": "postgresql.cnpg.io", at + ".kind": "ImageCatalog"}
 }
 
 // TestKindComponents_GeneratedRequiredBothWays holds every generated path of
@@ -518,7 +558,7 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 			base := pinCopy(k.base)
 			pinFill(base, schema, "")
 			var create *crdCreate
-			if crd := certManagerCRDOf(t, component); crd != nil {
+			if crd := generatedKindCRDOf(t, component); crd != nil {
 				create = crdCreateOf(t, crd, "v1")
 			}
 			list := generatedKindRequiredLists[component]
@@ -543,11 +583,19 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 				parent, name, _ := pinParent(without, path, false)
 				delete(parent, name)
 				_, err = pinBuild(k, without)
-				want := strings.ReplaceAll(path, "[]", "[0]") + ": required (" + list[path] + ")"
+				// The control's first list element is [0], and the value of a map
+				// it created is under the key pinParent gives it, k.
+				at := strings.ReplaceAll(strings.ReplaceAll(path, "[]", "[0]"), "{}", "[k]")
+				want := at + ": required (" + list[path] + ")"
 				switch {
 				case err == nil:
 					t.Errorf("%s: the omission builds", path)
-				case !strings.Contains(err.Error(), want):
+				case strings.Contains(err.Error(), want):
+				// A struct the type writes whether or not it was authored is
+				// refused by the kind's own check of its value, through the field
+				// of it that check requires (a cluster reference's name).
+				case pinWrittenStruct(k, path) && strings.HasPrefix(err.Error(), at+".") && strings.Contains(err.Error(), ": required ("):
+				default:
 					t.Errorf("%s: the omission is refused with %q, want one saying %q", path, err, want)
 				}
 				if create == nil || answered[d.field.owner] {
@@ -599,12 +647,84 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 				}
 				create.create(t, obj).accepted(t, fmt.Sprintf("%s %s, %s left out", component, path, f.parent))
 			}
+			for _, key := range slices.Sorted(maps.Keys(requiredWrittenExceptions)) {
+				c, path, _ := strings.Cut(key, " ")
+				if c != component || create == nil {
+					continue
+				}
+				showExceptionAccepted(t, k, base, schema, create, path)
+			}
 			if create != nil && rows == 0 {
 				t.Errorf("no path of %s was answered by the API server", component)
 			}
 			t.Logf("%d API server rows", rows)
 		})
 	}
+}
+
+// showExceptionAccepted shows an omission requiredWrittenExceptions keeps on
+// the kind's CRD: the control that authors the field builds and the API server
+// accepts its object; the same properties without the field build, and the
+// API server accepts that object too. Where an ancestor of the field is a
+// struct the type writes whether or not it was authored, the properties
+// without that ancestor are shown the same way, each ancestor in turn.
+func showExceptionAccepted(t *testing.T, k pinKind, base map[string]any, schema pinSchema, create *crdCreate, path string) {
+	t.Helper()
+	with, err := pinControl(k, base, path, schema)
+	if err != nil {
+		t.Errorf("%s: no control builds with the field authored: %v", path, err)
+		return
+	}
+	obj, err := pinBuild(k, with)
+	if err != nil {
+		t.Errorf("%s: the control is refused: %v", path, err)
+		return
+	}
+	create.create(t, obj).accepted(t, k.component+" "+path+", authored")
+	segments := strings.Split(path, ".")
+	for depth := len(segments); depth > 1; depth-- {
+		at := strings.Join(segments[:depth], ".")
+		if depth < len(segments) && !pinWrittenStruct(k, at) {
+			continue
+		}
+		without := pinCopy(with)
+		parent, name, ok := pinParent(without, at, false)
+		if !ok {
+			t.Errorf("%s: the control does not author %s", path, at)
+			continue
+		}
+		delete(parent, name)
+		obj, err := pinBuild(k, without)
+		if err != nil {
+			t.Errorf("%s: the properties without %s are refused: %v; requiredWrittenExceptions keeps the omission", path, at, err)
+			continue
+		}
+		answer := create.create(t, obj)
+		answer.accepted(t, k.component+" "+path+", "+at+" left out")
+		t.Logf("%s, %s left out: built %s; the API server accepts it", path, at, pinJSON(pinValueAt(obj, "spec."+path)))
+	}
+}
+
+// pinWrittenStruct says the field of the kind's type at path is a struct that
+// is no pointer: the type writes it whether or not it was authored.
+func pinWrittenStruct(k pinKind, path string) bool {
+	found := false
+	walkKindFields(k.typ, func(kindField) bool { return false }, func(f kindField) {
+		if f.path == path && f.field.Type.Kind() == reflect.Struct {
+			found = true
+		}
+	})
+	return found
+}
+
+// pinValueAt returns the value obj holds at path, through the first element
+// of a list and the first value of a map; nil where it holds none.
+func pinValueAt(obj map[string]any, path string) any {
+	parent, name, ok := pinParent(obj, path, false)
+	if !ok {
+		return nil
+	}
+	return parent[name]
 }
 
 // TestUnderPath: a path is under itself, a field of it, an element and a value

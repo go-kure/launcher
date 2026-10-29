@@ -39,11 +39,11 @@ import (
 // field the kind does not refuse is one the validator accepts, for the reason
 // its row gives.
 //
-// The cert-manager kinds' required list is generated from the CRDs
+// The required lists of the cert-manager kinds and of cnpg-cluster,
+// cnpg-pooler, cnpg-database and cnpg-objectstore are generated from the CRDs
 // (TestKindComponents_RequiredIsGenerated), which derives these fields among
 // the others from the schemas' required lists and runs no validator: here each
-// is shown refused by one. The CloudNativePG kinds have no derived required list,
-// and no other test holds them to this set. A new kind of either family joins
+// is shown refused by one. A new kind of either family joins
 // with one entry: its component, the type its properties decode into, its
 // handler and its CRD. The test then names every field of the set that has no
 // row.
@@ -281,12 +281,17 @@ func issuerNullRequiredRows() []nullRequiredRow {
 }
 
 // databaseWith returns a database's properties with the one list, of a single
-// object that is named and nothing else.
+// object that is named and nothing else but what the CRD requires of it: a
+// server names its foreign data wrapper.
 func databaseWith(list string) func() map[string]any {
 	return func() map[string]any {
+		object := map[string]any{"name": "one"}
+		if list == "servers" {
+			object["fdw"] = "postgres_fdw"
+		}
 		return map[string]any{
 			"cluster": map[string]any{"name": "db"}, "name": "app", "owner": "app",
-			list: []any{map[string]any{"name": "one"}},
+			list: []any{object},
 		}
 	}
 }
@@ -430,7 +435,7 @@ var nullRequiredKinds = []nullRequiredKind{
 				built:   "[]",
 				why:     "the kind writes the list itself: a template that lists no container is emitted with containers: [], which the CRD accepts and the operator reads as it reads an omitted spec, adding its own container",
 			},
-			// Refused by cnpgPoolerRequired.
+			// Refused by the kind's generated required list (cnpgPoolerRequired).
 			{
 				path: "pgbouncer.imageCatalogRef.key", at: "pgbouncer.imageCatalogRef.key",
 				omitted: func() map[string]any {
@@ -471,7 +476,8 @@ var nullRequiredKinds = []nullRequiredKind{
 				built:   "1",
 				why:     "the kind writes the value itself: an unauthored instances is emitted as 1, the CRD's default, which the API server cannot fill in the place of a 0",
 			},
-			// The rows below are refused by cnpgClusterRequired.
+			// The rows below are refused by the kind's generated required list
+			// (cnpgClusterRequired).
 			{
 				path: "backup.barmanObjectStore.destinationPath", at: "backup.barmanObjectStore.destinationPath",
 				omitted: clusterWith(map[string]any{"backup": map[string]any{"barmanObjectStore": map[string]any{}}}),

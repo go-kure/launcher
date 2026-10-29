@@ -66,8 +66,33 @@ func (h *CnpgObjectStoreHandler) ToApplicationConfig(component *oam.Component, n
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	if err := refuseUnauthoredRequired(props, cnpgObjectStoreRequired); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
+
+// cnpgObjectStoreRequired is the required list of the cnpg-objectstore kind,
+// generated (kind_required.go) as cnpgClusterRequired is: every field the
+// ObjectStore CRD requires that the Go type writes whether or not it was
+// authored, the name and the key of each Secret reference of the credentials
+// among them, and those of the Kubernetes types the sidecar's configuration
+// embeds (an environment variable's name, a resource claim's name). Each is
+// refused where its parent is authored and it is not.
+var cnpgObjectStoreRequired = generatedKindRequired("cnpg-objectstore")
+
+// cnpgObjectStoreRequiredText is what the generated required paths of the
+// cnpg-objectstore kind say of themselves (requiredText): the sentence
+// validate refuses an empty destination path with, kept byte for byte.
+// validate refuses an authored empty one as well, which the generated list
+// does not.
+var cnpgObjectStoreRequiredText = map[string]string{
+	"configuration.destinationPath": cnpgObjectStoreDestinationText,
+}
+
+// cnpgObjectStoreDestinationText is what validate's refusal of an empty
+// destination path says of it, and what the generated list says of it.
+const cnpgObjectStoreDestinationText = "the object store path backups and WAL are written to"
 
 // CnpgObjectStoreConfig implements stack.ApplicationConfig for
 // cnpg-objectstore components. Spec is the decoded ObjectStoreSpec exactly as
@@ -89,7 +114,7 @@ type CnpgObjectStoreConfig struct {
 // shared Barman type carries but the plugin's CRD forbids on an ObjectStore.
 func (c *CnpgObjectStoreConfig) validate() error {
 	if c.Spec.Configuration.DestinationPath == "" {
-		return errors.New("configuration.destinationPath: required (the object store path backups and WAL are written to)")
+		return errors.New("configuration.destinationPath: required (" + cnpgObjectStoreDestinationText + ")")
 	}
 	if c.Spec.Configuration.ServerName != "" {
 		return errors.New("configuration.serverName: not allowed on an ObjectStore (set the serverName plugin parameter in the Cluster that uses it)")

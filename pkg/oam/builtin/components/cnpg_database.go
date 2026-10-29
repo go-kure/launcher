@@ -183,8 +183,35 @@ func (h *CnpgDatabaseHandler) ToApplicationConfig(component *oam.Component, name
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	if err := refuseUnauthoredRequired(props, cnpgDatabaseRequired); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
+
+// cnpgDatabaseRequired is the required list of the cnpg-database kind,
+// generated (kind_required.go) as cnpgClusterRequired is: every field the
+// Database CRD requires that the Go type writes whether or not it was
+// authored, the name of each schema, extension, foreign data wrapper and
+// server it declares among them. Each is refused where its parent is authored
+// and it is not.
+var cnpgDatabaseRequired = generatedKindRequired("cnpg-database")
+
+// cnpgDatabaseRequiredText is what the generated required paths of the
+// cnpg-database kind say of themselves (requiredText): the sentences validate
+// refuses an empty name and owner with, kept byte for byte. validate refuses
+// an authored empty one as well, which the generated list does not.
+var cnpgDatabaseRequiredText = map[string]string{
+	"name":  cnpgDatabaseNameText,
+	"owner": cnpgDatabaseOwnerText,
+}
+
+// What validate's refusal of an empty name and owner says of each, and what
+// the generated list says of them.
+const (
+	cnpgDatabaseNameText  = "the name of the database inside PostgreSQL"
+	cnpgDatabaseOwnerText = "the role that owns the database"
+)
 
 // CnpgDatabaseConfig implements stack.ApplicationConfig for cnpg-database
 // components. Spec is the decoded DatabaseSpec exactly as authored.
@@ -207,13 +234,13 @@ func (c *CnpgDatabaseConfig) validate() error {
 		return err
 	}
 	if c.Spec.Name == "" {
-		return errors.New("name: required (the name of the database inside PostgreSQL)")
+		return errors.New("name: required (" + cnpgDatabaseNameText + ")")
 	}
 	if cnpgReservedDatabaseNames[c.Spec.Name] {
 		return errors.Errorf("name %q: reserved by PostgreSQL, the Database CRD refuses it", c.Spec.Name)
 	}
 	if c.Spec.Owner == "" {
-		return errors.New("owner: required (the role that owns the database)")
+		return errors.New("owner: required (" + cnpgDatabaseOwnerText + ")")
 	}
 	return nil
 }

@@ -258,9 +258,6 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	if err := refuseUnauthoredRequired(props, cnpgClusterRequired); err != nil {
 		return nil, err
 	}
-	if err := refuseUnauthoredRequired(props, labelSelectorRequired(cnpgClusterLabelSelectors...)); err != nil {
-		return nil, err
-	}
 	if err := validateCnpgClusterImageRefs(spec); err != nil {
 		return nil, err
 	}
@@ -289,7 +286,7 @@ func refuseOmittedClusterFields(spec *cnpgv1.ClusterSpec) error {
 		return err
 	}
 	if b := spec.Bootstrap; b != nil && b.InitDB != nil && b.InitDB.Import != nil && b.InitDB.Import.Databases == nil {
-		return errors.New("bootstrap.initdb.import.databases: required (the databases to import)")
+		return errors.New("bootstrap.initdb.import.databases: required (" + cnpgImportDatabasesText + ")")
 	}
 	if spec.ProjectedVolumeTemplate == nil {
 		return nil
@@ -297,35 +294,54 @@ func refuseOmittedClusterFields(spec *cnpgv1.ClusterSpec) error {
 	return refuseOmittedPodCertificateFields("projectedVolumeTemplate.sources", spec.ProjectedVolumeTemplate.Sources)
 }
 
-// cnpgClusterRequired lists the strings the Cluster CRD requires and bounds,
-// with a minimum length or an enumeration, that the Go type writes as "" when
-// they are unauthored: the Cluster would carry an empty value the author did
-// not write, and the API server refuse it. Each is refused where its parent is
-// authored and it is not (refuseUnauthoredRequired). An authored empty one is
-// a value, and the API server's to refuse. Each key is a json path with [] for
-// a list element; each value is what the refusal says of the field.
-// TestKindComponents_NullRequired derives the list from the linked module's
-// CRD and shows each refusal with the CRD's validator.
-var cnpgClusterRequired = map[string]string{
-	"backup.barmanObjectStore.destinationPath":             "the object store path backups and WAL are written to",
-	"bootstrap.initdb.import.type":                         "how the databases are imported: microservice or monolith",
-	"bootstrap.pg_basebackup.source":                       "the name of the external cluster the base backup is taken from",
-	"externalClusters[].barmanObjectStore.destinationPath": "the object store path the cluster's backups and WAL are read from",
-	"managed.services.additional[].selectorType":           "the instances the service selects: rw, r or ro",
-	"podSelectorRefs[].name":                               "the name pg_hba rules refer to the selector by",
-	"postgresql.extensions[].env[].name":                   "the name of the environment variable",
-	"postgresql.extensions[].env[].value":                  "the value of the environment variable",
-	"postgresql.extensions[].name":                         "the name of the extension",
-	"postgresql.synchronous.method":                        "how the synchronous standbys are chosen: any or first",
-	"replica.source":                                       "the name of the external cluster this one replicates",
-}
+// cnpgClusterRequired is the required list of the cnpg-cluster kind, generated
+// (kind_required.go): every field the Cluster CRD requires that the Go type
+// writes whether or not it was authored, those of the Kubernetes types the
+// spec embeds included (the topology key of an affinity term, the key of a
+// Secret reference, a sysctl's name and value). Each is refused where its
+// parent is authored and it is not (refuseUnauthoredRequired); an authored
+// empty one is a value, and the API server's to refuse.
+var cnpgClusterRequired = generatedKindRequired("cnpg-cluster")
+
+// cnpgClusterRequiredText is what the generated required paths of the
+// cnpg-cluster kind say of themselves where they say more than "the
+// CloudNativePG API requires this field" (requiredText): the sentences of the
+// lists the kind kept by hand before its list was generated. The strings the
+// Cluster CRD requires and bounds, with a minimum length or an enumeration,
+// that the Go type writes as "": TestKindComponents_NullRequired shows each
+// refusal with the CRD's validator. And the key and the operator of a match
+// expression in each label selector of the spec (cnpgClusterLabelSelectors).
+var cnpgClusterRequiredText = requiredFields(
+	map[string]string{
+		"backup.barmanObjectStore.destinationPath":             "the object store path backups and WAL are written to",
+		"bootstrap.initdb.import.type":                         "how the databases are imported: microservice or monolith",
+		"bootstrap.pg_basebackup.source":                       "the name of the external cluster the base backup is taken from",
+		"externalClusters[].barmanObjectStore.destinationPath": "the object store path the cluster's backups and WAL are read from",
+		"managed.services.additional[].selectorType":           "the instances the service selects: rw, r or ro",
+		"podSelectorRefs[].name":                               "the name pg_hba rules refer to the selector by",
+		"postgresql.extensions[].env[].name":                   "the name of the environment variable",
+		"postgresql.extensions[].env[].value":                  "the value of the environment variable",
+		"postgresql.extensions[].name":                         "the name of the extension",
+		"postgresql.synchronous.method":                        "how the synchronous standbys are chosen: any or first",
+		"replica.source":                                       "the name of the external cluster this one replicates",
+		// The two refuseOmittedClusterFields refuses as well, written null.
+		"affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms": nodeSelectorTermsText,
+		"bootstrap.initdb.import.databases": cnpgImportDatabasesText,
+	},
+	labelSelectorRequired(cnpgClusterLabelSelectors...),
+)
+
+// cnpgImportDatabasesText is what the refusal of an import without its
+// databases says of them (refuseOmittedClusterFields, cnpgClusterRequiredText).
+const cnpgImportDatabasesText = "the databases to import"
 
 // cnpgClusterLabelSelectors lists the Kubernetes label selectors of a
 // cnpgv1.ClusterSpec, as required-list paths. The Cluster CRD requires the key
 // and the operator of a match expression of each, and the Go type writes both
-// whether or not they were authored, so both must be authored
-// (labelSelectorRequired). TestLabelSelectorKinds_CoverEverySelector holds the
-// list to the type and to the CRD of the linked module.
+// whether or not they were authored, so both must be authored: the generated
+// list holds them, with the sentences labelSelectorRequired gives them.
+// TestLabelSelectorKinds_CoverEverySelector holds the list to the type and to
+// the CRD of the linked module.
 //
 // Nothing else of an expression is read here. CloudNativePG's admission
 // webhook checks the selector of a podSelectorRefs entry further; that check

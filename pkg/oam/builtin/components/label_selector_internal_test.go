@@ -769,9 +769,9 @@ var labelSelectorKinds = []labelSelectorKind{
 	},
 	{
 		component: "cnpg-cluster", typ: "cnpgv1.ClusterSpec", config: kindConfig(&CnpgClusterHandler{}),
-		// The entry carries the name the kind requires of it, so that a selector
-		// written into it is the only thing a case changes.
-		base: map[string]any{"podSelectorRefs": []any{map[string]any{"name": "apps"}}},
+		// The entry carries the name and the selector the kind requires of it,
+		// so that a selector written into it is the only thing a case changes.
+		base: map[string]any{"podSelectorRefs": []any{map[string]any{"name": "apps", "selector": map[string]any{}}}},
 		crds: crdFile(cnpgModulePath, cnpgCRDs+"clusters.yaml"),
 	},
 	{
@@ -937,15 +937,19 @@ func withValueAt(props map[string]any, path string, value any) map[string]any {
 }
 
 // affinityTermFields returns the object withValueAt creates at the path that
-// segments name: a pod affinity term with its topology key, a weighted term
-// with its weight, else an empty one.
+// segments name, with the fields a kind whose required list is generated
+// requires of it: a pod affinity term with its topology key, a weighted term
+// with its weight, a topology spread constraint with its skew, key and
+// policy, a volume with its name, a cluster trust bundle with its path, a
+// tablespace with its name, else an empty one.
 func affinityTermFields(segments []string) map[string]any {
 	n := len(segments)
-	if n < 2 {
-		return map[string]any{}
+	at, parent := segments[n-1], ""
+	if n > 1 {
+		parent = segments[n-2]
 	}
-	at, parent := segments[n-1], segments[n-2]
-	pod := parent == "podAffinity" || parent == "podAntiAffinity"
+	pod := parent == "podAffinity" || parent == "podAntiAffinity" ||
+		parent == "additionalPodAffinity" || parent == "additionalPodAntiAffinity"
 	switch {
 	case at == "requiredDuringSchedulingIgnoredDuringExecution[]" && pod:
 		return map[string]any{"topologyKey": "kubernetes.io/hostname"}
@@ -953,6 +957,14 @@ func affinityTermFields(segments []string) map[string]any {
 		return map[string]any{"weight": 1}
 	case at == "podAffinityTerm" && parent == "preferredDuringSchedulingIgnoredDuringExecution[]":
 		return map[string]any{"topologyKey": "kubernetes.io/hostname"}
+	case at == "topologySpreadConstraints[]":
+		return map[string]any{"maxSkew": 1, "topologyKey": "kubernetes.io/hostname", "whenUnsatisfiable": "DoNotSchedule"}
+	case at == "volumes[]":
+		return map[string]any{"name": "data"}
+	case at == "clusterTrustBundle":
+		return map[string]any{"path": "bundle.pem"}
+	case at == "tablespaces[]":
+		return map[string]any{"name": "archive"}
 	}
 	return map[string]any{}
 }
