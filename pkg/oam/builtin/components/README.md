@@ -3959,14 +3959,15 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   validation gets the text above, and there an authored empty string is the
   object an absent one is, and builds.
 
-  **Required** follows the rule of those four kinds: a field the API
-  requires that the Go type writes whether or not it was authored. No
-  top-level field is one. Of what is authored below them
-  (`clusterTLS.server: required (…)`, `hostAliases[1].hostnames: required
-  (…)`):
+  **The kind's required list is generated** (go-kure/launcher#883; see
+  "Required fields a kind writes unauthored and does not refuse"): every
+  field the API requires that the Go type writes whether or not it was
+  authored is refused when unauthored, each where its parent is authored
+  (`hostAliases[1].hostnames: required (…)`), the fields of the Kubernetes
+  types the spec embeds included. No top-level field is one. Among them are
+  the fields the kind refused before, each with its text:
   - an additional argument's `name`, a DNS option's `name`, a host alias's
     `ip` and `hostnames`;
-  - the `server` and the `client` of a `clusterTLS`;
   - the `type` of an `updateStrategy`;
   - under `alertmanagerConfiguration.global`: the `host` and the `port` of
     `smtp.smartHost`, and the `clientId`, `clientSecret` and `tokenUrl` of
@@ -3976,16 +3977,31 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     required (…)`; the selectors are listed under "A label selector's match
     expressions"). Presence only, as on the monitors.
 
-  `TestMonitoringKinds_RequiredMatchMarkers` holds the list to the markers of
-  the linked module's source. The module ships no CRD, so there is no schema
-  to hold it to, and what the API server requires beyond the markers is not
-  known here. **Not refused:** a required field of a Kubernetes type the spec
-  embeds (a container's `name`, the `key` of a Secret key reference), which is
-  emitted empty; and two fields of a listed container or init container and
-  two of a listed volume that upstream marks required and the type leaves out
-  when empty (the `action` of a container restart rule and the `operator` of
-  its exit codes, the `signerName` and `keyType` of a pod certificate
-  source), as on the **pod** kind.
+  And, refused since go-kure/launcher#883 (**breaking** for a document that
+  leaves one out under an authored parent): the required fields of the
+  Kubernetes types the spec embeds (a container's or a volume's `name`, the
+  `key` of a Secret or ConfigMap key reference, a pod affinity term's
+  `topologyKey`, a sysctl's `name` and `value`, a seccomp profile's `type`),
+  and the `username` and the `password` of
+  `alertmanagerConfiguration.global.httpConfig.basicAuth`, which the
+  operator refuses left out (the API server's acceptance is recorded by hand
+  until the follow-up shows it). A `clusterTLS` without
+  its `server` or its `client` stays refused, by the check of the TLS blocks
+  below, which comes first. The `keySecret` of `web.tlsConfig` and of
+  `clusterTLS.server` is asked for only where it is authored: the key may
+  be read from `keyFile` instead.
+
+  The list is derived from the markers of the linked module's source, which
+  ships no CRD, so no API server answers for it here; the harness rows on the
+  operator's CRDs follow in a follow-up. **Not refused:** the `apiVersion`,
+  `kind`, `name` and `uid` of an owner reference in an ephemeral claim
+  template's metadata (`storage.ephemeral`, `volumes[].ephemeral`), which stay
+  pinned until that follow-up shows what the API server makes of them; and
+  two fields of a listed
+  container or init container and two of a listed volume that upstream marks
+  required and the type leaves out when empty (the `action` of a container
+  restart rule and the `operator` of its exit codes, the `signerName` and
+  `keyType` of a pod certificate source), as on the **pod** kind.
 
   **An authored `0` or `""` the type cannot carry is refused.** As on the pod
   kinds, on a listed container, init container or volume: a
@@ -4605,18 +4621,28 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `image` is then not held and the entry's is.
   Nothing is refused as not authorable.
 
-  **Required.** No top-level field is one. Of what is authored below them:
-  an additional argument's `name`, a DNS option's `name`, a host alias's
-  `ip` and `hostnames`, the `type` of an `updateStrategy`; the `namespace`
-  and `resource` of an `excludedFromEnforcement` entry, the `ruleNamespace`
-  and `ruleName` of a `prometheusRulesExcludedFromEnforce` entry; and of a
+  **Required: the kind's required list is generated** (go-kure/launcher#883),
+  as on **alertmanager**. No top-level field is one. Among the fields it
+  refuses unauthored under an authored parent, as before: an additional
+  argument's `name`, a DNS option's `name`, a host alias's `ip` and
+  `hostnames`, the `type` of an `updateStrategy`; the `namespace` and
+  `resource` of an `excludedFromEnforcement` entry, the `ruleNamespace` and
+  `ruleName` of a `prometheusRulesExcludedFromEnforce` entry; and of a
   `remoteWrite` entry its `url`, the `clientId`, `clientSecret` and
   `tokenUrl` of its `oauth2`, and the `clientId`, `tenantId` (and, under
   `azureAd.oauth`, `clientSecret`) of its Azure AD settings; the `key` and
   `operator` of a match expression, in every label selector the spec holds,
-  presence only, as on **alertmanager**.
-  `TestMonitoringKinds_RequiredMatchMarkers` holds the list to the markers
-  of the linked module's source, which ships no CRD.
+  presence only. Refused since go-kure/launcher#883 (**breaking** for a
+  document that leaves one out under an authored parent): the required
+  fields of the Kubernetes types the spec embeds (a container's or a
+  volume's `name`, the `key` of a Secret key reference, a node selector
+  requirement's `key`, a sysctl's `name` and `value`), and the `username`
+  and the `password` of a `remoteWrite` entry's `basicAuth`, which the
+  operator refuses left out. The `keySecret` of `web.tlsConfig` is asked for
+  only where it is authored, as on **prometheus**. **Not refused:** the owner
+  reference fields of an ephemeral claim template's metadata, pinned until a
+  follow-up shows them on the operator's CRDs, and the restart rule and pod
+  certificate fields the type leaves out when empty, as on **alertmanager**.
 
   **What the operator builds from the spec is checked where the API would
   break it**, as on `alertmanager`, under any policy and none, at
@@ -4992,22 +5018,34 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   …`; `computeExternalURL`, `cmd/prometheus/main.go` of v3.14.0). Prometheus
   checks no scheme, so any scheme builds. Neither message names the value.
 
-  **Required.** No top-level field is one. Of what is authored below them:
-  the `name` of an additional argument (the spec's and the sidecar's), a DNS
-  option's `name`, a host alias's `ip` and `hostnames`, the `type` of an
-  `updateStrategy`; the `namespace` and `resource` of an
-  `excludedFromEnforcement` entry, the `ruleNamespace` and `ruleName` of a
-  `prometheusRulesExcludedFromEnforce` entry; `alerting.alertmanagers`, and an
-  endpoint's `name` and `port`; `apiserverConfig.host`; a scrape class's
-  `name`; `shardRetentionPolicy.retain.retentionPeriod`;
-  `tracingConfig.endpoint`; the `url` of a `remoteWrite` and a `remoteRead`
-  entry and the `clientId`, `clientSecret` and `tokenUrl` of its `oauth2`;
-  the `clientId`, `tenantId` (and, under `azureAd.oauth`, `clientSecret`) of
-  a remote write entry's Azure AD settings; and the `key` and `operator` of a
-  match expression, in every label selector the spec holds, presence only,
-  as on **alertmanager**.
-  `TestMonitoringKinds_RequiredMatchMarkers` holds the list to the markers
-  of the linked module's source.
+  **Required: the kind's required list is generated** (go-kure/launcher#883),
+  as on **alertmanager**. No top-level field is one. Among the fields it
+  refuses unauthored under an authored parent, as before: the `name` of an
+  additional argument (the spec's and the sidecar's), a DNS option's `name`,
+  a host alias's `ip` and `hostnames`, the `type` of an `updateStrategy`; the
+  `namespace` and `resource` of an `excludedFromEnforcement` entry, the
+  `ruleNamespace` and `ruleName` of a `prometheusRulesExcludedFromEnforce`
+  entry; `alerting.alertmanagers`, and an endpoint's `name` and `port`;
+  `apiserverConfig.host`; a scrape class's `name`;
+  `shardRetentionPolicy.retain.retentionPeriod`; `tracingConfig.endpoint`;
+  the `url` of a `remoteWrite` and a `remoteRead` entry and the `clientId`,
+  `clientSecret` and `tokenUrl` of its `oauth2`; the `clientId`, `tenantId`
+  (and, under `azureAd.oauth`, `clientSecret`) of a remote write entry's
+  Azure AD settings; and the `key` and `operator` of a match expression, in
+  every label selector the spec holds, presence only. Refused since
+  go-kure/launcher#883 (**breaking** for a document that leaves one out under
+  an authored parent): the required fields of the Kubernetes types the spec
+  embeds (a container's or a volume's `name`, the `key` of a Secret key
+  reference, a topology spread constraint's or a pod affinity term's
+  `topologyKey`, a seccomp profile's `type`), and the `username` and the
+  `password` of the `basicAuth` of `alerting.alertmanagers[]`,
+  `apiserverConfig`, and a `remoteRead` and a `remoteWrite` entry, which the
+  operator refuses left out. The `keySecret` of `web.tlsConfig` is asked for
+  only where it is authored, the key being readable from `keyFile` instead.
+  **Not refused:** the owner reference fields of an ephemeral claim
+  template's metadata, pinned until a follow-up shows them on the operator's
+  CRDs, and the restart rule and pod certificate fields the type leaves out
+  when empty, as on **alertmanager**.
 
   **The group of an excluded object is written.** An
   `excludedFromEnforcement` entry that leaves `group` out (or writes it
@@ -7320,11 +7358,18 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - the `key` and `operator` of a match expression, in a monitor's `selector`
     and in a Probe's `targets.ingress.selector`
     (`selector.matchExpressions[0].operator: required (…)`). The selector is
-    a Kubernetes type, which carries no `+required` marker: the same test
+    a Kubernetes type, which carries no `+required` marker: the generator
     derives the two fields from that type's source by the schema generators'
     rule, that a field with no optional marker whose json tag keeps it when
     empty is required. Presence only: the operator's value and its `values`
     are left to the API server (see "A label selector's match expressions").
+  - since go-kure/launcher#883 (**breaking** for a document that leaves one
+    out under an authored parent): the `key` of a Secret or ConfigMap key
+    reference (`endpoints[0].tlsConfig.ca.secret.key: required (…)`), the
+    `key` of a proxy connect header's Secret key reference, and the
+    `username` and the `password` of a `basicAuth`, on an endpoint of either
+    monitor and on a Probe, which the API server accepts left out and the
+    operator refuses.
 
   **A required field the type leaves out when it is empty is refused too:**
   the `name` of a Probe parameter (`params[1].name: required (…)`), unauthored
@@ -7352,12 +7397,14 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   without a prober cannot be emitted. An empty `url` is refused as an
   unauthored one is.
 
-  `TestMonitoringKinds_RequiredMatchMarkers` holds these lists to the fields
-  the source marks required and the type writes unauthored, the linked
-  module's and that of a match expression's type, so a dependency bump
-  that adds, drops or moves one fails there. **Not refused:**
-  - another required field of a Kubernetes type these specs embed: the `key`
-    of a Secret or ConfigMap key reference. An omitted one is emitted empty;
+  **These lists are generated** (go-kure/launcher#883; see "Required fields
+  a kind writes unauthored and does not refuse") from the fields the source
+  marks required and the type writes unauthored, the linked module's and
+  those of the Kubernetes types the specs embed, so a dependency bump that
+  adds, drops or moves one fails `TestKindComponents_RequiredIsGenerated`.
+  `TestKindComponents_GeneratedRequiredBothWays` holds each field both ways
+  on the kind; the module ships no CRD, and the rows that run the fields
+  through the operator's CRDs follow in a follow-up. **Not refused:**
   - an authored empty string in a required field (a group's `name: ""`),
     `prober.url` and a parameter's `name` excepted. It is a value, and the
     API server's to refuse;
@@ -12896,13 +12943,13 @@ module ship no CRD to read, so the ground of their kinds is the source of the li
 held to both, to its CRD and, as the other Flux kinds are, to that source: the schema generators
 require a field that carries no optional marker and whose json tag keeps it when empty, and
 `key` and `operator` are such fields
-where `values` is not. `TestMonitoringKinds_RequiredMatchMarkers`,
-`TestExternalSecretsKinds_RequiredMatchSource` and `TestFluxKinds_RequiredMatchMarkers` derive
-the two from that source by that rule, beside the fields the operator's own types mark
-required, and hold each kind's list to them; on the monitoring kinds another field of an
-embedded Kubernetes type that the rule requires fails there unless it is named with the reason
-it is not refused, except on `alertmanager`, `thanosruler` and `prometheus`, which embed the pod spec's types
-and are held to their match expressions only, as the `pod` kind is. CloudNativePG's admission
+where `values` is not. `TestExternalSecretsKinds_RequiredMatchSource` and
+`TestFluxKinds_RequiredMatchMarkers` derive the two from that source by that rule, beside the
+fields the operator's own types mark required, and hold each kind's list to them. The
+monitoring kinds' lists are generated from the same source by the same rule
+([Required fields a kind writes unauthored and does not refuse](#required-fields-a-kind-writes-unauthored-and-does-not-refuse)),
+which also requires every other field of an embedded Kubernetes type the rule requires (a
+container's `name`, a Secret key reference's `key`). CloudNativePG's admission
 webhook runs apimachinery's whole selector validation on `podSelectorRefs[].selector`; that
 fuller check is the operator's, not launcher's.
 
@@ -12943,7 +12990,9 @@ are not refused, as they are at this pin.
 
 **Generated lists.** The required list of `issuer`, `clusterissuer`, `certificate`,
 `secretstore`, `clustersecretstore`, `externalsecret`, `clusterexternalsecret`, `cnpg-cluster`,
-`cnpg-pooler`, `cnpg-objectstore` and `cnpg-database` is generated:
+`cnpg-pooler`, `cnpg-objectstore`, `cnpg-database`, `prometheus`, `alertmanager`,
+`thanosruler`, `servicemonitor`, `podmonitor`, `prometheus-probe` and `prometheusrule` is
+generated:
 every field the kind's API requires and its Go type writes unauthored is refused where the
 author leaves it out under an authored parent, whatever type declares it. The paths are in
 `zz_generated_kind_required.go` (`kindRequiredPaths`), read through the same derivation as the
@@ -12959,16 +13008,29 @@ rule and never by the type that declares it:
   `replicationSlots.synchronizeReplicas.enabled`);
 - a field under a path the kind refuses whatever is authored there (see Method);
 - an entry of `requiredWrittenExceptions`, the test's named exceptions, each with the API
-  server's answer for the object without it. One at this pin: `cnpg-pooler`'s
+  server's answer for the object without it. At this pin: `cnpg-pooler`'s
   `template.spec.containers`, which the kind writes `[]` and the Pooler CRD accepts, the
-  template's `spec` authored or left out; the operator adds its `pgbouncer` container.
+  template's `spec` authored or left out; the operator adds its `pgbouncer` container;
+- an entry of `requiredWrittenUndecided`, a field no answer of the API server is read for yet:
+  on `prometheus`, `alertmanager` and `thanosruler`, the `apiVersion`, `kind`, `name` and `uid`
+  of an owner reference in the metadata of an ephemeral volume's claim template
+  (`storage.ephemeral` and `volumes[].ephemeral`), 8 per kind. The Go source declares the whole
+  `ObjectMeta` there, and the operator's module ships no CRD to show whether the API server
+  requires them or prunes the owner reference. They stay pinned, not refused and not
+  excepted, until a follow-up reads the operator's CRDs.
 
 A refusal reads the kind's own text for the field where it has one, else `the <API> API
 requires this field` (or `requires the name of what this refers to`, for a reference's
 `name`). A field under a parent the type writes unauthored and the API does not require is
 asked for only where that parent is authored; the generated file names each such field with
 what the API server answers for the object with the parent left out, and the test holds every
-one to an answer. Of the stores, the fields whose API default never applies because the type
+one to an answer. A monitoring basic auth (`basicAuth`, wherever a kind holds one) is such a
+parent: the API server accepts it without a `username` or `password`, and the Prometheus
+operator reads both keys and refuses the basic auth without either, so the kind refuses an
+authored basic auth that leaves either out; a web or cluster TLS server's `keySecret` is asked
+for only where it is authored, `keyFile` being the alternative. The Prometheus operator's
+module ships no CRD, so these answers are recorded by hand; the test shows what the kind does
+with each, and the API server rows on the operator's CRDs follow in a follow-up. Of the stores, the fields whose API default never applies because the type
 writes them (`secretStoreUnappliedDefaults`) are generated by the same test.
 
 **Families.** The test names each field by the type that holds it:
@@ -12978,7 +13040,7 @@ writes them (`secretStoreUnappliedDefaults`) are generated by the same test.
 | `AFF` | the `core/v1` affinity terms: `NodeSelectorRequirement`, `PodAffinityTerm`, `PreferredSchedulingTerm`, `WeightedPodAffinityTerm` | a node selector requirement's `key` and `operator`; a pod affinity term's `topologyKey`; a weighted or preferred term's `weight`, `podAffinityTerm` and `preference` |
 | `SEC` | `SeccompProfile`, `AppArmorProfile`, `Sysctl` | a profile's `type`; a sysctl's `name` and `value` |
 | `POD` | any other `core/v1` type | the `key` of a secret or config map key reference; a container's `name`; a pooler template's `containers` |
-| `KIND` | a type of the kind's own API, or of `metav1` other than a label selector's match expression | an alertmanager's ephemeral claim template's `ownerReferences[]` fields; an HTTPRoute's `parentRefs[].name` and header match `name`/`value`; a Flux source or Secret reference's `name` |
+| `KIND` | a type of the kind's own API, or of `metav1` other than a label selector's match expression | the `ownerReferences[]` fields of a Prometheus operator workload kind's ephemeral claim template; an HTTPRoute's `parentRefs[].name` and header match `name`/`value`; a Flux source or Secret reference's `name` |
 
 A fifth family of the test, `SEL` (the `key` and `operator` of a `metav1` label selector's
 match expression), has no member: those are refused on every kind
@@ -12993,22 +13055,23 @@ match expression), has no member: those are refused on every kind
 | `cnpg-pooler` | 1 | | | 1 | |
 | `httproute` | 44 | | | | 44 |
 | `grpcroute` | 34 | | | | 34 |
-| `servicemonitor`, `podmonitor`, `prometheus-probe` | 19 each | | | 19 | |
-| `alertmanager` | 241 | 18 | 8 | 207 | 8 |
-| `helmrelease` | 23 | | | | 23 |
+| `prometheus`, `alertmanager`, `thanosruler` | 8 each | | | | 8 |
+| `helmrelease` | 22 | | | | 22 |
 | `fluxcd-kustomization` | 14 | | | | 14 |
 | `bucket`, `ocirepository` | 7 each | | | | 7 |
 | `gitrepository` | 6 | | | | 6 |
 | `helmchart`, `helmrepository` | 3 each | | | | 3 |
 
 None is left on the kinds whose list is generated (`issuer`, `clusterissuer`, `certificate`,
-the four External Secrets kinds, `cnpg-cluster`, `cnpg-objectstore` and `cnpg-database`;
-`cnpg-pooler` keeps its one exception), the eleven Cilium kinds, `gatewayclass`, `gateway`,
+the four External Secrets kinds, `cnpg-cluster`, `cnpg-objectstore`, `cnpg-database`,
+`servicemonitor`, `podmonitor`, `prometheus-probe` and `prometheusrule`; `cnpg-pooler` keeps
+its exception, and `prometheus`, `alertmanager` and `thanosruler` their undecided owner
+reference fields), the eleven Cilium kinds, `gatewayclass`, `gateway`,
 `listenerset`, `referencegrant`, `backendtlspolicy`, `tcproute`, `udproute`, `tlsroute`,
 `metallb-ipaddresspool`,
 `metallb-l2advertisement`, `metallb-bgpadvertisement`, `metallb-bgppeer`, `cnpg-imagecatalog`,
 `cnpg-clusterimagecatalog`, `cnpg-backup`, `cnpg-scheduledbackup`, `cnpg-databaserole`,
-`cnpg-publication`, `cnpg-subscription`, `prometheusrule`,
+`cnpg-publication`, `cnpg-subscription`,
 `artifactgenerator`, `fluxcd-alert`, `fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`,
 `imagerepository`, `imageupdateautomation` and `resourcesetinputprovider`. `metallb-bfdprofile` and
 `metallb-community` are not measured: their CRDs require no field.
@@ -13019,9 +13082,11 @@ fails there until it is one or the other. Most members are written
 `""`; the rest are `0` (mostly a preferred term's `weight` or a `port`), `{}`, `[]`, `null` or
 an object of such values.
 
-**What the API server makes of them** is a value rule of each field, not read here. The one
-exception is shown: `TestKindComponents_GeneratedRequiredBothWays` creates the Pooler without
+**What the API server makes of them** is a value rule of each field, not read here. The
+exceptions are shown: `TestKindComponents_GeneratedRequiredBothWays` creates the Pooler without
 `template.spec.containers`, and without the template's `spec`, and the API server accepts both.
+The Prometheus operator's module ships no CRD, so no API server answer is shown for its kinds
+here; those rows, and the undecided owner reference fields, follow in a follow-up.
 Before go-kure/launcher#883 generated their lists, the same was shown of `imageCatalogRef` on
 `cnpg-cluster` and `pgbouncer.imageCatalogRef` on `cnpg-pooler`: a `kind` written `""` refused
 by the CRD's own rule on the reference, a `name` written `""` and a `major` written `0` accepted.

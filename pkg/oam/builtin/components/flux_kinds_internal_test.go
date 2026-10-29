@@ -184,17 +184,17 @@ func fluxMarkersRead(t *testing.T, markers func(kindField) (fieldMarkers, bool))
 
 // TestFluxKinds_RequiredMatchMarkers derives, from the linked modules' source,
 // the fields of each kind that the API requires and the type would write
-// unauthored, and holds the kind's required list to them, as
-// TestMonitoringKinds_RequiredMatchMarkers does for the Prometheus operator's
-// kinds. A dependency bump that adds, drops or moves one fails here, naming
-// it.
+// unauthored, and holds the kind's required list to them, as the generated
+// lists of the Prometheus operator's kinds are derived from theirs
+// (kind_required.go). A dependency bump that adds, drops or moves one fails
+// here, naming it.
 //
 // The source read is the Flux modules' (fluxMarkerModules): a kind's own
 // package, the packages of its module it embeds, and the shared reference
 // types. The key and the operator of a match expression are fields of a
 // Kubernetes type, which carries no +required marker: they are read from the
 // source of metav1.LabelSelectorRequirement by the schema generators' rule
-// (markerAPISource), as TestMonitoringKinds_RequiredMatchMarkers reads them.
+// (markerAPISource), as the Prometheus operator's kinds' derivation reads them.
 // No other field of a Kubernetes type these specs embed is derived.
 func TestFluxKinds_RequiredMatchMarkers(t *testing.T) {
 	flux := linkedFieldMarkers(t, fluxMarkerModules)

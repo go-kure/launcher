@@ -112,19 +112,21 @@ func (h *PrometheusProbeHandler) PropertySchema() map[string]oam.PropertySchema 
 // type leaves out when it is empty, so that the object would show the
 // omission. Of a match expression of an ingress target's selector it requires
 // the key and the operator (labelSelectorRequired; monitoring_common.go states
-// the ground). The API's value rules, and the operator's own checks of an
-// object it has admitted (that it has targets, that its timeout is no longer
-// than its interval, that it authenticates one way), are left to them.
+// the ground). Below what is authored it requires the fields of
+// prometheusProbeRequired. The API's value rules, and the operator's own
+// checks of an object it has admitted (that it has targets, that its timeout
+// is no longer than its interval, that it authenticates one way), are left to
+// them.
 var prometheusProbeKind = &policyFreeKind[monitoringv1.ProbeSpec]{
-	upstream: "monitoring.coreos.com/v1 ProbeSpec",
-	required: requiredFields(oauth2Required("oauth2"), labelSelectorRequired("targets.ingress.selector")),
+	upstream:          "monitoring.coreos.com/v1 ProbeSpec",
+	generatedRequired: prometheusProbeRequired,
 	defaultedZeros: monitoringDefaultedZeros(
 		[]string{"metricRelabelings", "targets.ingress.relabelingConfigs", "targets.staticConfig.relabelingConfigs"},
 		map[string]string{"prober.path": `"/probe"`},
 	),
 	validate: func(spec *monitoringv1.ProbeSpec) error {
 		if spec.ProberSpec.URL == "" {
-			return errors.New("prober.url: required (the address of the prober, as address:port; the object always holds a prober, and the API server refuses one without a url)")
+			return errors.New("prober.url: required (" + proberURLRequired + ")")
 		}
 		for i, param := range spec.Params {
 			if param.Name == "" {
@@ -139,6 +141,25 @@ var prometheusProbeKind = &policyFreeKind[monitoringv1.ProbeSpec]{
 		return probe
 	},
 }
+
+// proberURLRequired is what the kind says of a prober without a url, which
+// its validate refuses whether or not the prober was authored: the type
+// writes the prober either way.
+const proberURLRequired = "the address of the prober, as address:port; the object always holds a prober, and the API server refuses one without a url"
+
+// prometheusProbeRequired is the required list of the prometheus-probe kind,
+// generated (kind_required.go) as alertmanagerRequired is, with the username
+// and the password of the basic auth (kindRequiredParents).
+var prometheusProbeRequired = generatedKindRequired("prometheus-probe")
+
+// prometheusProbeRequiredText is what the generated required paths of the
+// prometheus-probe kind say of themselves (requiredText): the sentences of the
+// list the kind kept by hand before its list was generated, each kept byte for
+// byte (the OAuth2 fields, and the key and the operator of a match expression
+// of an ingress target's selector), and the prober's url as validate says it.
+var prometheusProbeRequiredText = requiredFields(map[string]string{
+	"prober.url": proberURLRequired,
+}, oauth2Required("oauth2"), labelSelectorRequired("targets.ingress.selector"))
 
 // ToApplicationConfig decodes an OAM prometheus-probe component into its
 // config. The object takes the namespace of the application it is generated

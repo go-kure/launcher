@@ -869,7 +869,7 @@ var (
 
 // generatorRuleGround is the ground of a kind whose object a CRD defines that
 // the linked module does not ship: the Prometheus operator's.
-const generatorRuleGround = "the source of the linked metav1.LabelSelectorRequirement by the schema generators' rule, no optional marker and no omitempty, from which TestMonitoringKinds_RequiredMatchMarkers derives the kind's whole required list; the module ships no CRD to read"
+const generatorRuleGround = "the source of the linked metav1.LabelSelectorRequirement by the schema generators' rule, no optional marker and no omitempty, from which TestKindComponents_RequiredIsGenerated derives the kind's whole required list; the module ships no CRD to read"
 
 // externalSecretsRuleGround is generatorRuleGround for the External Secrets
 // Operator's kinds.

@@ -82,25 +82,36 @@ func (h *ServiceMonitorHandler) PropertySchema() map[string]oam.PropertySchema {
 }
 
 // serviceMonitorKind is the servicemonitor kind: see policyFreeKind. The API
-// requires `endpoints` and `selector`, and of an endpoint's `oauth2` its three
-// fields; the type would write each one empty, and an empty selector selects
-// every Service. Of a match expression of the selector it requires the key and
-// the operator (labelSelectorRequired; monitoring_common.go states the ground).
-// The API's value rules, and the operator's own checks of an object it has
-// admitted, are left to them.
+// requires `endpoints` and `selector`, and below what is authored the fields
+// of serviceMonitorRequired; the type would write each one empty, and an empty
+// selector selects every Service. The API's value rules, and the operator's
+// own checks of an object it has admitted, are left to them.
 var serviceMonitorKind = &policyFreeKind[monitoringv1.ServiceMonitorSpec]{
-	upstream: "monitoring.coreos.com/v1 ServiceMonitorSpec",
-	required: requiredFields(map[string]string{
-		"endpoints": "how the endpoints of the selected Services are scraped; [] is an authored empty list",
-		"selector":  "the label query over the Services to scrape; no default selector is filled, use {} to select every Service of the selected namespaces",
-	}, oauth2Required("endpoints[].oauth2"), labelSelectorRequired("selector")),
-	defaultedZeros: monitoringDefaultedZeros([]string{"endpoints[].metricRelabelings", "endpoints[].relabelings"}, nil),
+	upstream:          "monitoring.coreos.com/v1 ServiceMonitorSpec",
+	generatedRequired: serviceMonitorRequired,
+	defaultedZeros:    monitoringDefaultedZeros([]string{"endpoints[].metricRelabelings", "endpoints[].relabelings"}, nil),
 	build: func(name, namespace string, spec *monitoringv1.ServiceMonitorSpec) client.Object {
 		monitor := prometheus.CreateServiceMonitor(name, namespace)
 		spec.DeepCopyInto(&monitor.Spec)
 		return monitor
 	},
 }
+
+// serviceMonitorRequired is the required list of the servicemonitor kind,
+// generated (kind_required.go) as alertmanagerRequired is, with the username
+// and the password of each endpoint's basic auth (kindRequiredParents).
+var serviceMonitorRequired = generatedKindRequired("servicemonitor")
+
+// serviceMonitorRequiredText is what the generated required paths of the
+// servicemonitor kind say of themselves (requiredText): the sentences of the
+// list the kind kept by hand before its list was generated, each kept byte for
+// byte: the two top-level fields, an endpoint's OAuth2 fields, and the key and
+// the operator of a match expression of the selector (labelSelectorRequired;
+// monitoring_common.go states the ground).
+var serviceMonitorRequiredText = requiredFields(map[string]string{
+	"endpoints": "how the endpoints of the selected Services are scraped; [] is an authored empty list",
+	"selector":  "the label query over the Services to scrape; no default selector is filled, use {} to select every Service of the selected namespaces",
+}, oauth2Required("endpoints[].oauth2"), labelSelectorRequired("selector"))
 
 // ToApplicationConfig decodes an OAM servicemonitor component into its config.
 // The object takes the namespace of the application it is generated in.
