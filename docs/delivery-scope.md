@@ -919,7 +919,7 @@ and by scope, whatever component or trait emits it.
   targets is not checked, and the engine does not check that a rule emits only what it
   declares.
 
-### 6.2 Partly shipped (go-kure/launcher#790, open): full spec and the full set of kinds
+### 6.2 Partly shipped (go-kure/launcher#790, closed): full spec and the full set of kinds
 
 - **Shipped: reserved metadata keys.** A consumer names the label and annotation keys it
   keeps to itself in `TransformContext.ReservedMetadataKeys` (exact keys, or a prefix ending
@@ -2250,7 +2250,7 @@ and by scope, whatever component or trait emits it.
   The ticket adds the missing kinds group by group. A kind kure lacks is added to kure
   first.
 
-### 6.3 Partly shipped (go-kure/launcher#1001, open): `postgresql` backup and recovery through the Barman Cloud plugin
+### 6.3 Shipped (go-kure/launcher#1001): `postgresql` backup and recovery through the Barman Cloud plugin
 
 - **Before:** `postgresql`'s `backup` (`destinationPath`, `endpointURL`, `secretName`,
   `retentionPolicy`) built the Cluster's in-tree `barmanObjectStore`, which CloudNativePG
@@ -2308,7 +2308,11 @@ and by scope, whatever component or trait emits it.
 - **Declared, not checked.** The `postgresql` rule declares these in
   `oam.ContractMetadata.Prerequisites` (go-kure/launcher#1027), each with the use that needs
   it, for a tool to read; the build checks none of them.
-- **Limits:** the user guide and evidence from a live recovery are the ticket's last slice.
+- **Verified live.** A backup, and a point-in-time recovery into a new Cluster to a time and
+  to a restore point, passed against S3-compatible storage with CloudNativePG 1.30.1 and
+  the plugin v0.15.1 (the run is recorded on go-kure/launcher#1001). The user guide is
+  `docs/postgresql-backup-recovery.md`: prerequisites, failure behaviour and the checks
+  that show a backup and a recovery working.
 
 ---
 
@@ -2477,4 +2481,5 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#849](https://github.com/go-kure/launcher/issues/849) | Policy refusals carry a class | §5.3 | Shipped | — |
 | [go-kure/launcher#934](https://github.com/go-kure/launcher/issues/934) | Object kind policy (the decision of [go-kure/launcher#922](https://github.com/go-kure/launcher/issues/922)) | §5.4 | Shipped | go-kure/launcher#849 |
 | [go-kure/launcher#959](https://github.com/go-kure/launcher/issues/959) | One rule for every Service-derived name, with its cluster-version limit | §3.5 | Shipped | — |
-| [go-kure/launcher#1001](https://github.com/go-kure/launcher/issues/1001) | Complete CNPG backup and recovery to S3 through OAM lowering | §6.3 | Partly: `backup` (object store, WAL archiving, scheduled backups) | Recovery; go-kure/launcher#1027 |
+| [go-kure/launcher#1001](https://github.com/go-kure/launcher/issues/1001) | Complete CNPG backup and recovery to S3 through OAM lowering | §6.3 | Shipped | — |
+| [go-kure/launcher#1027](https://github.com/go-kure/launcher/issues/1027) | Declare the backup and recovery prerequisites in contract metadata | §6.3 | Shipped | go-kure/launcher#1001 |
