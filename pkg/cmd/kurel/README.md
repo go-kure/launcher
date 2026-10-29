@@ -27,7 +27,8 @@ kurel
 
 Builds static manifests from an Application (a path to `app.yaml`, or a directory
 containing `app.yaml` and optionally `kurel.yaml`) plus a platform `ClusterProfile`.
-Output goes to stdout by default, or to a directory with `--output`.
+Output goes to stdout by default, to one file with the global `-f/--output-file`, or to a
+directory with `--output`.
 
 All built-in component and trait handlers are registered automatically (via
 `builtinComponentHandlers()` / `builtinTraitHandlers()`, which return the library's
@@ -284,7 +285,8 @@ component, and a late component making the source a Flux object names, are admit
 | `--profile` | Path to the `ClusterProfile` YAML. Required unless `--environment` is set; the two are mutually exclusive. |
 | `--environment` | Named environment whose profile and values stand in for `--profile`/`--values` (see [Named environments](#named-environments)). Mutually exclusive with `--profile` and `--values`. |
 | `--environments` | `EnvironmentSet` file declaring the `--environment` names (default: `environments.yaml` next to `app.yaml`). Requires `--environment`. |
-| `-o, --output` | Output directory (default: stdout). |
+| `-o, --output` | Output directory (default: stdout). Refused together with `-f/--output-file`. |
+| `-f, --output-file` | The global flag: write the whole stream to this file instead of stdout. The file's directory must exist. Refused together with `--output`. |
 | `-n, --namespace` | Namespace override; must be a DNS-1123 label (at most 63 characters, no dots), like `metadata.namespace`. |
 | `--cluster-id` | Cluster identifier (default `local`). |
 | `--values` | Path to a values YAML file (requires a `kurel.yaml` package). The only flag that can supply an `array` or `object` parameter. |
@@ -405,7 +407,7 @@ Available on all commands (defined in [`pkg/cmd/shared/options`](https://pkg.go.
 | `--debug` | Debug output (implies verbose). |
 | `--strict` | Treat warnings as errors. |
 | `-o, --output` | Output format: `yaml`\|`json`\|`table`\|`wide`\|`name`. |
-| `-f, --output-file` | Write output to a file instead of stdout. |
+| `-f, --output-file` | Write output to a file instead of stdout (`build` honours it, go-kure/launcher#795). |
 | `--no-headers`, `--show-labels`, `--wide` | Table-output controls. |
 | `--dry-run` | Print generated resources without writing files. |
 | `-n, --namespace` | Target namespace. |
