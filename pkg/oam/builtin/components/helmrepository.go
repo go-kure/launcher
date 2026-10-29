@@ -65,8 +65,16 @@ func (h *HelmRepositoryHandler) ToApplicationConfig(component *oam.Component, na
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	if err := refuseUnauthoredProperties(component.Properties, helmRepositoryRequired); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
+
+// helmRepositoryRequired is the required list of the helmrepository kind,
+// generated as helmReleaseRequired is and read, as it is, after the kind's own
+// checks.
+var helmRepositoryRequired = generatedKindRequired("helmrepository")
 
 // HelmRepositoryConfig implements stack.ApplicationConfig for helmrepository
 // components.

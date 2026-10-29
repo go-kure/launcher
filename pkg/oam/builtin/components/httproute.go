@@ -63,15 +63,25 @@ func (h *HTTPRouteHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
+// httpRouteRequired is the required list of the httproute kind, generated
+// (kind_required.go) from the CRD the linked module ships: every field the
+// API requires and the type writes whether or not it was authored, refused
+// where its parent is authored and it is not.
+var httpRouteRequired = generatedKindRequired("httproute")
+
 // ToApplicationConfig decodes an OAM httproute component into an
 // HTTPRouteConfig, under the package's null contract and the strict decode
-// every spec-projecting kind uses.
+// every spec-projecting kind uses. A field of httpRouteRequired left out under
+// an authored parent is refused.
 func (h *HTTPRouteHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	spec, props, err := decodeKindSpec[gatewayv1.HTTPRouteSpec](component.Properties, "gateway.networking.k8s.io/v1 HTTPRouteSpec")
 	if err != nil {
 		return nil, err
 	}
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
+		return nil, err
+	}
+	if err := refuseUnauthoredRequired(props, httpRouteRequired); err != nil {
 		return nil, err
 	}
 	return &HTTPRouteConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}, nil

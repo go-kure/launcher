@@ -65,15 +65,23 @@ func (h *GRPCRouteHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 }
 
+// grpcRouteRequired is the required list of the grpcroute kind, generated as
+// httpRouteRequired is.
+var grpcRouteRequired = generatedKindRequired("grpcroute")
+
 // ToApplicationConfig decodes an OAM grpcroute component into a
 // GRPCRouteConfig, under the package's null contract and the strict decode
-// every spec-projecting kind uses.
+// every spec-projecting kind uses. A field of grpcRouteRequired left out under
+// an authored parent is refused.
 func (h *GRPCRouteHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	spec, props, err := decodeKindSpec[gatewayv1.GRPCRouteSpec](component.Properties, "gateway.networking.k8s.io/v1 GRPCRouteSpec")
 	if err != nil {
 		return nil, err
 	}
 	if err := refuseUncarriedSpecValues(props, spec, defaultedZeroFields{}); err != nil {
+		return nil, err
+	}
+	if err := refuseUnauthoredRequired(props, grpcRouteRequired); err != nil {
 		return nil, err
 	}
 	return &GRPCRouteConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}, nil

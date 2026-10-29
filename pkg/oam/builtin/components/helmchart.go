@@ -99,8 +99,15 @@ func (h *HelmChartHandler) ToApplicationConfig(component *oam.Component, namespa
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	if err := refuseUnauthoredProperties(component.Properties, helmChartRequired); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
+
+// helmChartRequired is the required list of the helmchart kind, generated as
+// helmReleaseRequired is and read, as it is, after the kind's own checks.
+var helmChartRequired = generatedKindRequired("helmchart")
 
 // decodeHint is UnsupportedFieldHint for a decode error, which names the
 // unknown key but not its depth: the hint is given when that key is a

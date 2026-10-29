@@ -20,6 +20,7 @@ import (
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
+	kustv1 "github.com/fluxcd/kustomize-controller/api/v1"
 	notificationv1 "github.com/fluxcd/notification-controller/api/v1"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
@@ -56,27 +57,25 @@ var fluxMarkerModules = []string{
 	"github.com/fluxcd/pkg/apis/acl",
 }
 
-// fluxKindRows lists the kind components of those APIs with the spec type each
-// decodes into, its required list and its duration fields. validated names the
-// required fields the list cannot hold, because a parent of theirs is written
-// whether or not it was authored; the kind's validate refuses those.
+// fluxKindRows lists the policy-free kind components of those APIs (fluxKind)
+// with the spec type each decodes into and its duration fields. Their required
+// lists are generated from the same source
+// (TestKindComponents_RequiredIsGenerated).
 var fluxKindRows = []struct {
 	component string
 	typ       reflect.Type
-	required  map[string]string
-	validated []string
 	durations map[string]fluxduration.Form
 	// defaulted is the kind's defaulted-zero list (policyFreeKind.defaultedZeros).
 	defaulted map[string]string
 }{
-	{fluxcdAlertType, reflect.TypeFor[notificationv1.AlertSpec](), fluxcdAlertKind.required, nil, durationForms(fluxcdAlertKind.durations), fluxcdAlertKind.defaultedZeros.fields},
-	{fluxcdProviderType, reflect.TypeFor[notificationv1.ProviderSpec](), fluxcdProviderKind.required, nil, durationForms(fluxcdProviderKind.durations), fluxcdProviderKind.defaultedZeros.fields},
-	{fluxcdReceiverType, reflect.TypeFor[notificationv1.ReceiverSpec](), fluxcdReceiverKind.required, nil, durationForms(fluxcdReceiverKind.durations), fluxcdReceiverKind.defaultedZeros.fields},
-	{imagePolicyType, reflect.TypeFor[imagev1.ImagePolicySpec](), imagePolicyKind.required, nil, durationForms(imagePolicyKind.durations), imagePolicyKind.defaultedZeros.fields},
-	{imageRepositoryType, reflect.TypeFor[imagev1.ImageRepositorySpec](), imageRepositoryKind.required, nil, durationForms(imageRepositoryKind.durations), imageRepositoryKind.defaultedZeros.fields},
-	{imageUpdateAutomationType, reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), imageUpdateAutomationKind.required, nil, durationForms(imageUpdateAutomationKind.durations), imageUpdateAutomationKind.defaultedZeros.fields},
-	{artifactGeneratorType, reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), artifactGeneratorKind.required, nil, durationForms(artifactGeneratorKind.durations), artifactGeneratorKind.defaultedZeros.fields},
-	{resourceSetInputProviderType, reflect.TypeFor[fluxoperatorv1.ResourceSetInputProviderSpec](), resourceSetInputProviderKind.required, nil, durationForms(resourceSetInputProviderKind.durations), resourceSetInputProviderKind.defaultedZeros.fields},
+	{fluxcdAlertType, reflect.TypeFor[notificationv1.AlertSpec](), durationForms(fluxcdAlertKind.durations), fluxcdAlertKind.defaultedZeros.fields},
+	{fluxcdProviderType, reflect.TypeFor[notificationv1.ProviderSpec](), durationForms(fluxcdProviderKind.durations), fluxcdProviderKind.defaultedZeros.fields},
+	{fluxcdReceiverType, reflect.TypeFor[notificationv1.ReceiverSpec](), durationForms(fluxcdReceiverKind.durations), fluxcdReceiverKind.defaultedZeros.fields},
+	{imagePolicyType, reflect.TypeFor[imagev1.ImagePolicySpec](), durationForms(imagePolicyKind.durations), imagePolicyKind.defaultedZeros.fields},
+	{imageRepositoryType, reflect.TypeFor[imagev1.ImageRepositorySpec](), durationForms(imageRepositoryKind.durations), imageRepositoryKind.defaultedZeros.fields},
+	{imageUpdateAutomationType, reflect.TypeFor[autov1.ImageUpdateAutomationSpec](), durationForms(imageUpdateAutomationKind.durations), imageUpdateAutomationKind.defaultedZeros.fields},
+	{artifactGeneratorType, reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), durationForms(artifactGeneratorKind.durations), artifactGeneratorKind.defaultedZeros.fields},
+	{resourceSetInputProviderType, reflect.TypeFor[fluxoperatorv1.ResourceSetInputProviderSpec](), durationForms(resourceSetInputProviderKind.durations), resourceSetInputProviderKind.defaultedZeros.fields},
 }
 
 // durationForms is a kind's duration fields by path, each with its form.
@@ -182,21 +181,46 @@ func fluxMarkersRead(t *testing.T, markers func(kindField) (fieldMarkers, bool))
 	}
 }
 
-// TestFluxKinds_RequiredMatchMarkers derives, from the linked modules' source,
-// the fields of each kind that the API requires and the type would write
-// unauthored, and holds the kind's required list to them, as the generated
-// lists of the Prometheus operator's kinds are derived from theirs
-// (kind_required.go). A dependency bump that adds, drops or moves one fails
-// here, naming it.
+// fluxGeneratedKindTypes are the spec types of the Flux kinds whose required
+// lists are generated (kind_required.go), by component: the rows of
+// fluxKindRows and the kinds that decode their properties themselves. Each
+// list is derived from the markers of the linked source but that of
+// resourcesetinputprovider, which is derived from the Flux Operator's CRD;
+// its markers are classified here all the same.
+func fluxGeneratedKindTypes() map[string]reflect.Type {
+	types := map[string]reflect.Type{
+		"bucket":               reflect.TypeFor[sourcev1.BucketSpec](),
+		"fluxcd-kustomization": reflect.TypeFor[kustv1.KustomizationSpec](),
+		"gitrepository":        reflect.TypeFor[sourcev1.GitRepositorySpec](),
+		"helmchart":            reflect.TypeFor[sourcev1.HelmChartSpec](),
+		"helmrelease":          reflect.TypeFor[helmv2.HelmReleaseSpec](),
+		"helmrepository":       reflect.TypeFor[sourcev1.HelmRepositorySpec](),
+		"ocirepository":        reflect.TypeFor[sourcev1.OCIRepositorySpec](),
+	}
+	for _, kind := range fluxKindRows {
+		types[kind.component] = kind.typ
+	}
+	return types
+}
+
+// TestFluxKinds_MarkersClassified holds the source the Flux kinds' required
+// lists are generated from (kind_required.go, from the markers of the linked
+// modules; resourcesetinputprovider's list comes from its CRD, and its
+// markers are held here independently of that) to being read whole, as TestMonitoringKinds_MarkersClassified does
+// for the Prometheus operator's: every field of the Flux modules the walk of a
+// kind reaches has its field in their source, and every one the type writes
+// unauthored is marked +required or +optional, or is required by the schema
+// generators' rule (no marker and not omitted when empty, as a verification's
+// `provider`), so that the derivation does not take an unmarked one for
+// optional. A dependency bump that adds an unmarked one fails here, naming it.
 //
 // The source read is the Flux modules' (fluxMarkerModules): a kind's own
 // package, the packages of its module it embeds, and the shared reference
 // types. The key and the operator of a match expression are fields of a
 // Kubernetes type, which carries no +required marker: they are read from the
 // source of metav1.LabelSelectorRequirement by the schema generators' rule
-// (markerAPISource), as the Prometheus operator's kinds' derivation reads them.
-// No other field of a Kubernetes type these specs embed is derived.
-func TestFluxKinds_RequiredMatchMarkers(t *testing.T) {
+// (markerAPISource), as the derivation reads them.
+func TestFluxKinds_MarkersClassified(t *testing.T) {
 	flux := linkedFieldMarkers(t, fluxMarkerModules)
 	fluxMarkersRead(t, flux)
 	src := markerAPISource(t)
@@ -208,14 +232,15 @@ func TestFluxKinds_RequiredMatchMarkers(t *testing.T) {
 		}
 		return flux(f)
 	}
-	for _, kind := range fluxKindRows {
-		t.Run(kind.component, func(t *testing.T) {
-			listed, validated := map[string]bool{}, map[string]bool{}
-			fields := 0
-			walkFluxFields(kind.typ, markers, func(f kindField) {
+	types := fluxGeneratedKindTypes()
+	for _, component := range slices.Sorted(maps.Keys(types)) {
+		typ := types[component]
+		t.Run(component, func(t *testing.T) {
+			fields, required := 0, 0
+			walkFluxFields(typ, markers, func(f kindField) {
 				m, read := markers(f)
 				if !read {
-					if f.owner.PkgPath() == kind.typ.PkgPath() {
+					if f.owner.PkgPath() == typ.PkgPath() {
 						t.Errorf("%s (%s.%s) has no field in the module's source; the markers are keyed wrongly", f.path, f.owner, f.field.Name)
 					}
 					return
@@ -224,38 +249,28 @@ func TestFluxKinds_RequiredMatchMarkers(t *testing.T) {
 				if !f.writtenUnauthored() {
 					return
 				}
-				if !m.required && !m.optional {
-					t.Errorf("%s (%s.%s) is written unauthored and is marked neither required nor optional; classify it", f.path, f.owner, f.field.Name)
+				opts := f.jsonOptions()
+				byRule := !m.optional && !slices.Contains(opts, "omitempty") && !slices.Contains(opts, "omitzero")
+				if !m.required && !m.optional && !byRule {
+					t.Errorf("%s (%s.%s) is written unauthored, is marked neither required nor optional and is omitted when empty; classify it", f.path, f.owner, f.field.Name)
 				}
-				if !m.required {
-					return
-				}
-				switch {
-				case strings.Contains(f.path, "{}"):
-					t.Errorf("%s is required under a map value, which a required list cannot name", f.path)
-				case f.forced:
-					validated[f.path] = true
-				default:
-					listed[f.path] = true
+				if m.required || byRule {
+					required++
 				}
 			})
-			if fields == 0 {
-				t.Fatalf("the walk found no field of %s", kind.typ)
+			// Vacuity guards: the walk reaches the source's fields, and its
+			// markers are read.
+			if fields == 0 || required == 0 {
+				t.Fatalf("the walk found %d fields of %s, %d of them marked required and written unauthored", fields, typ, required)
 			}
-			t.Logf("walked %d fields of the Flux modules; required and written unauthored: %v; of those under a parent written unauthored: %v",
-				fields, slices.Sorted(maps.Keys(listed)), slices.Sorted(maps.Keys(validated)))
-			if got, want := slices.Sorted(maps.Keys(kind.required)), slices.Sorted(maps.Keys(listed)); !slices.Equal(got, want) {
-				t.Errorf("required list = %v\nthe source marks %v", got, want)
-			}
-			for path, says := range kind.required {
-				if strings.TrimSpace(says) == "" {
-					t.Errorf("required field %s says nothing of itself", path)
-				}
-			}
-			if got, want := slices.Sorted(slices.Values(kind.validated)), slices.Sorted(maps.Keys(validated)); !slices.Equal(got, want) {
-				t.Errorf("fields left to validate = %v\nthe source marks %v", got, want)
-			}
+			t.Logf("walked %d fields of the Flux modules; %d marked required and written unauthored", fields, required)
 		})
+	}
+	// Every generated Flux and Flux Operator kind is walked here.
+	for component, api := range kindRequiredAPI {
+		if (api == "Flux" || api == "Flux Operator") && types[component] == nil {
+			t.Errorf("%s is a generated Flux kind that this test does not walk", component)
+		}
 	}
 }
 
@@ -571,8 +586,6 @@ func TestFluxKinds_ExpressionRules(t *testing.T) {
 		if !slices.ContainsFunc(fluxKindRows, func(row struct {
 			component string
 			typ       reflect.Type
-			required  map[string]string
-			validated []string
 			durations map[string]fluxduration.Form
 			defaulted map[string]string
 		}) bool {
@@ -675,8 +688,8 @@ func TestFluxKinds_DurationsMatchMarkers(t *testing.T) {
 	for _, kind := range fluxKindRows {
 		rows = append(rows, durationRow{kind.component, kind.typ, kind.durations})
 	}
-	// helmrelease is no row of fluxKindRows, which holds a kind's required list
-	// too; its durations are held here (go-kure/launcher#1072).
+	// helmrelease is no row of fluxKindRows, which holds the policy-free kinds;
+	// its durations are held here (go-kure/launcher#1072).
 	rows = append(rows, durationRow{"helmrelease", reflect.TypeFor[helmv2.HelmReleaseSpec](), durationForms(helmReleaseDurations)})
 	for _, kind := range rows {
 		t.Run(kind.component, func(t *testing.T) {

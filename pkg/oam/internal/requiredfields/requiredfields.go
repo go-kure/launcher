@@ -30,9 +30,12 @@ import (
 // keys of a map are its entries, each descended as written. Where the author
 // wrote one field in two spellings the decode keeps one or merges both, and
 // which is the type's affair, so each spelling is held to the list: the check
-// never reads another value than the object is built from. Paths are read in
-// sorted order, the spellings of a field in theirs, a list in its own and a
-// map's keys in theirs, so the field reported is the same on every build. The
+// never reads another value than the object is built from. A last field
+// authored null in one spelling and set in another is left out by the null
+// one, which the decode may take last and so write the field empty; a caller
+// that drops null keys keeps such a key, as null. Paths are read in sorted
+// order, the spellings of a field in theirs, a list in its own and a map's
+// keys in theirs, so the field reported is the same on every build. The
 // refusal names a list element by its index and a map value by its key in
 // brackets, the key quoted where it holds a dot.
 func Refuse(authored map[string]any, required map[string]string) error {
@@ -72,7 +75,14 @@ func unauthoredAt(node any, segments []string, at string) string {
 	switch {
 	case len(keys) == 0 && len(segments) == 1:
 		return at + name
-	case len(keys) == 0 || len(segments) == 1:
+	case len(keys) == 0:
+		return ""
+	case len(segments) == 1:
+		for _, key := range keys {
+			if fields[key] == nil {
+				return at + key
+			}
+		}
 		return ""
 	}
 	for _, key := range keys {

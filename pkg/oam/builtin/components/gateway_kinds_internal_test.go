@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/yaml"
 
@@ -27,10 +26,11 @@ var gatewayAPIChannels = []string{"experimental", "standard"}
 
 // gatewayAPIKinds lists the kind components of the Gateway API's
 // infrastructure objects, and of its routes that carry no HTTP
-// (gateway_route_common.go), with the CRD of the object each emits, the spec type
-// it decodes into and its required list. experimental names the properties
-// only the experimental channel's CRD holds, and omitted the numbers,
-// booleans and strings the type omits when zero.
+// (gateway_route_common.go), with the CRD of the object each emits and the
+// spec type it decodes into. experimental names the properties only the
+// experimental channel's CRD holds, and omitted the numbers, booleans and
+// strings the type omits when zero. Their required lists are generated from
+// the same CRDs (TestKindComponents_RequiredIsGenerated).
 //
 // The fields the CRD requires that the type omits when they are not authored,
 // which no required list can name, are answered in the kind's row of
@@ -39,38 +39,37 @@ var gatewayAPIKinds = []struct {
 	component    string
 	crd          string
 	typ          reflect.Type
-	required     map[string]string
 	experimental []string
 	omitted      []string
 	// defaulted is the kind's defaulted-zero list (policyFreeKind.defaultedZeros).
 	defaulted map[string]string
 }{
-	{component: "gatewayclass", crd: "gatewayclasses", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](), required: gatewayClassKind.required},
+	{component: "gatewayclass", crd: "gatewayclasses", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec]()},
 	{
-		component: "gateway", crd: "gateways", typ: reflect.TypeFor[gatewayv1.GatewaySpec](), required: gatewayKind.required,
+		component: "gateway", crd: "gateways", typ: reflect.TypeFor[gatewayv1.GatewaySpec](),
 		experimental: []string{"defaultScope"},
 		omitted:      []string{"addresses[].value", "defaultScope", "tls.frontend.default.validation.mode", "tls.frontend.perPort[].tls.validation.mode"},
 		defaulted:    gatewayKind.defaultedZeros.fields,
 	},
 	{
-		component: "listenerset", crd: "listenersets", typ: reflect.TypeFor[gatewayv1.ListenerSetSpec](), required: listenerSetKind.required,
+		component: "listenerset", crd: "listenersets", typ: reflect.TypeFor[gatewayv1.ListenerSetSpec](),
 		omitted: []string{"listeners[].name", "listeners[].port", "listeners[].protocol"},
 	},
-	{component: "referencegrant", crd: "referencegrants", typ: reflect.TypeFor[gatewayv1.ReferenceGrantSpec](), required: referenceGrantKind.required},
+	{component: "referencegrant", crd: "referencegrants", typ: reflect.TypeFor[gatewayv1.ReferenceGrantSpec]()},
 	{
-		component: "backendtlspolicy", crd: "backendtlspolicies", typ: reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](), required: backendTLSPolicyKind.required,
+		component: "backendtlspolicy", crd: "backendtlspolicies", typ: reflect.TypeFor[gatewayv1.BackendTLSPolicySpec](),
 		omitted: []string{"validation.subjectAltNames[].hostname", "validation.subjectAltNames[].uri"},
 	},
 	{
-		component: "tcproute", crd: "tcproutes", typ: reflect.TypeFor[gatewayv1.TCPRouteSpec](), required: tcpRouteKind.required,
+		component: "tcproute", crd: "tcproutes", typ: reflect.TypeFor[gatewayv1.TCPRouteSpec](),
 		experimental: gatewayRouteExperimental, omitted: gatewayRouteExperimental,
 	},
 	{
-		component: "udproute", crd: "udproutes", typ: reflect.TypeFor[gatewayv1.UDPRouteSpec](), required: udpRouteKind.required,
+		component: "udproute", crd: "udproutes", typ: reflect.TypeFor[gatewayv1.UDPRouteSpec](),
 		experimental: gatewayRouteExperimental, omitted: gatewayRouteExperimental,
 	},
 	{
-		component: "tlsroute", crd: "tlsroutes", typ: reflect.TypeFor[gatewayv1.TLSRouteSpec](), required: tlsRouteKind.required,
+		component: "tlsroute", crd: "tlsroutes", typ: reflect.TypeFor[gatewayv1.TLSRouteSpec](),
 		experimental: gatewayRouteExperimental, omitted: gatewayRouteExperimental,
 	},
 }
@@ -127,32 +126,26 @@ func gatewayAPICRDSpec(t *testing.T, channel, name string) apiextensionsv1.JSONS
 	return spec
 }
 
-// TestGatewayKinds_RequiredMatchCRD holds the kinds of the Gateway API's
-// infrastructure objects: it derives, from the CRDs of the linked module, the
-// fields of each kind that the API requires
-// and the type would write unauthored, holds the kind's required list to them,
-// and holds every other field the type writes empty unauthored to a schema
-// that accepts it. The fields the API requires that the type omits when they
-// are not authored are a second set, which
-// TestKindComponents_OmittedRequiredAndWrittenDefaults derives and holds to
-// the kind's answers; here each member is only held to a place a refusal can
-// name.
+// TestGatewayKinds_WrittenEmptyAccepted holds, on the CRDs of the linked
+// module, the fields of the Gateway API's own types that reach the API server
+// empty with nobody having authored them, as
+// TestCertManagerKinds_WrittenEmptyAccepted does for cert-manager. The kinds'
+// required lists are generated from the experimental channel's CRDs
+// (TestKindComponents_RequiredIsGenerated), and follow what was authored.
+// Where the type writes a struct the author left out, its fields reach the API
+// server as their zero values, and so does every field the type writes that
+// the API does not require: none may be refused empty in either channel. The
+// fields the API requires that the type omits when they are not authored are
+// a second set, which TestKindComponents_OmittedRequiredAndWrittenDefaults
+// derives and holds to the kind's answers; here each member is only held to a
+// place a refusal can name.
 //
 // The Go types hold the fields of both channels, so the experimental CRD is
 // the one every path is looked up in. The standard one must agree with it on
 // what it requires, wherever it holds the property, and the properties it does
 // not hold are the kind's stated experimental fields: a cluster on either
 // channel is then refused the same omissions.
-//
-// Only the fields of the Gateway API's own types are derived. A field of a
-// Kubernetes type these specs embed is not, but for one pair: the key and the
-// operator of a label selector's match expression, which the CRDs require and
-// the type writes empty. They are derived as a field of the Gateway API's own
-// types is, and TestLabelSelectorKinds_CoverEverySelector shows, path by path
-// and in both channels, what the API server answers for them. A label selector
-// is the one Kubernetes type these specs embed.
-func TestGatewayKinds_RequiredMatchCRD(t *testing.T) {
-	expression := reflect.TypeFor[metav1.LabelSelectorRequirement]()
+func TestGatewayKinds_WrittenEmptyAccepted(t *testing.T) {
 	for _, kind := range gatewayAPIKinds {
 		t.Run(kind.component, func(t *testing.T) {
 			props, required := schemaProperties(gatewayAPICRDSpec(t, "experimental", kind.crd))
@@ -178,13 +171,10 @@ func TestGatewayKinds_RequiredMatchCRD(t *testing.T) {
 				}
 			}
 
-			listed, empty, omitted, embedded := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
+			empty, omitted := map[string]bool{}, map[string]bool{}
 			fields := 0
 			walkKindFields(kind.typ, func(f kindField) bool { return required[f.path] }, func(f kindField) {
 				if !strings.HasPrefix(f.owner.PkgPath(), gatewayAPIModulePath+"/") {
-					if f.owner == expression && required[f.path] && f.writtenUnauthored() {
-						listed[f.path], embedded[f.path] = true, true
-					}
 					return
 				}
 				fields++
@@ -205,14 +195,8 @@ func TestGatewayKinds_RequiredMatchCRD(t *testing.T) {
 					}
 					return
 				}
-				if required[f.path] {
-					if strings.Contains(f.path, "{}") {
-						t.Errorf("%s is required under a map value, which a required list cannot name", f.path)
-					}
-					listed[f.path] = true
-					if !f.forced {
-						return
-					}
+				if required[f.path] && !f.forced {
+					return
 				}
 				empty[f.path] = true
 				for channel, schema := range map[string]map[string]apiextensionsv1.JSONSchemaProps{"experimental": props, "standard": standard} {
@@ -228,16 +212,8 @@ func TestGatewayKinds_RequiredMatchCRD(t *testing.T) {
 			if fields == 0 {
 				t.Fatalf("the walk found no field of %s", kind.typ)
 			}
-			t.Logf("walked %d fields of the Gateway API's types; required and written unauthored: %v; of them, of an embedded type: %v; required and omitted unauthored: %v; written empty unauthored: %v",
-				fields, slices.Sorted(maps.Keys(listed)), slices.Sorted(maps.Keys(embedded)), slices.Sorted(maps.Keys(omitted)), slices.Sorted(maps.Keys(empty)))
-			if got, want := slices.Sorted(maps.Keys(kind.required)), slices.Sorted(maps.Keys(listed)); !slices.Equal(got, want) {
-				t.Errorf("required list = %v\nthe CRD requires %v", got, want)
-			}
-			for path, says := range kind.required {
-				if strings.TrimSpace(says) == "" {
-					t.Errorf("required field %s says nothing of itself", path)
-				}
-			}
+			t.Logf("walked %d fields of the Gateway API's types; required and omitted unauthored: %v; written empty unauthored: %v",
+				fields, slices.Sorted(maps.Keys(omitted)), slices.Sorted(maps.Keys(empty)))
 		})
 	}
 }

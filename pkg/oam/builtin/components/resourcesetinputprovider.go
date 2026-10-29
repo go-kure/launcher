@@ -114,9 +114,10 @@ func enforceResourceSetInputProviderURL(spec *fluxoperatorv1.ResourceSetInputPro
 // `name` and of a schedule its `cron`; the type would write each one empty.
 // Of a match expression of a selector it requires the key and the operator
 // (labelSelectorRequired), fields of a Kubernetes type with no +required
-// marker. TestFluxKinds_RequiredMatchMarkers holds the list to the markers of
-// the upstream source, and the two of an expression to the source of
-// metav1.LabelSelectorRequirement by the schema generators' rule. `filter.limit` is omitted when 0, and the API server then
+// marker. The list is generated (resourceSetInputProviderRequired) from the
+// linked module's CRD, the two of an expression included, and the API server
+// holds it to that CRD path by path
+// (TestKindComponents_GeneratedRequiredBothWays). `filter.limit` is omitted when 0, and the API server then
 // defaults it to 100, so an authored 0 is refused (defaultedZeros); a
 // schedule's `timeZone` is omitted when empty and defaulted to UTC, so an
 // authored "" is refused the same way. A
@@ -131,12 +132,7 @@ var resourceSetInputProviderKind = &fluxKind[fluxoperatorv1.ResourceSetInputProv
 	policyFreeKind: policyFreeKind[fluxoperatorv1.ResourceSetInputProviderSpec]{
 		upstream: "fluxcd.controlplane.io/v1 ResourceSetInputProviderSpec",
 		validate: refuseResourceSetInputProviderUserinfo,
-		required: requiredFields(map[string]string{
-			"type":               "where the inputs come from, such as `Static`, `GitHubPullRequest` or `OCIArtifactTag`",
-			"secretRef.name":     "the name of the Secret that holds the credentials of the provider",
-			"certSecretRef.name": "the name of the Secret that holds the certificates the provider is connected to with",
-			"schedule[].cron":    "the cron expression of the schedule, such as `0 * * * *`",
-		}, labelSelectorRequired("selectors[]")),
+		required: resourceSetInputProviderRequired,
 		defaultedZeros: defaultedZeroFields{api: "Flux Operator", defaulter: "API server", fields: map[string]string{
 			"filter.limit":        "100",
 			"schedule[].timeZone": `"UTC"`,
@@ -160,6 +156,23 @@ var resourceSetInputProviderKind = &fluxKind[fluxoperatorv1.ResourceSetInputProv
 	},
 	enforce: enforceResourceSetInputProviderURL,
 }
+
+// resourceSetInputProviderRequired is the required list of the
+// resourcesetinputprovider kind, generated (kind_required.go) as
+// fluxcdAlertRequired is.
+var resourceSetInputProviderRequired = generatedKindRequired(resourceSetInputProviderType)
+
+// resourceSetInputProviderRequiredText is what the generated required paths of
+// the resourcesetinputprovider kind say of themselves (requiredText): the
+// sentences of the list the kind kept by hand before its list was generated,
+// byte for byte, and what labelSelectorRequired says of the key and the
+// operator of a match expression of a selector.
+var resourceSetInputProviderRequiredText = requiredFields(map[string]string{
+	"type":               "where the inputs come from, such as `Static`, `GitHubPullRequest` or `OCIArtifactTag`",
+	"secretRef.name":     "the name of the Secret that holds the credentials of the provider",
+	"certSecretRef.name": "the name of the Secret that holds the certificates the provider is connected to with",
+	"schedule[].cron":    "the cron expression of the schedule, such as `0 * * * *`",
+}, labelSelectorRequired("selectors[]"))
 
 // ToApplicationConfig decodes an OAM resourcesetinputprovider component into its config.
 func (h *ResourceSetInputProviderHandler) ToApplicationConfig(component *oam.Component, _ string) (stack.ApplicationConfig, error) {

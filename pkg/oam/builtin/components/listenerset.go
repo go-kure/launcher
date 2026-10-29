@@ -53,18 +53,13 @@ func (h *ListenerSetHandler) PropertySchema() map[string]oam.PropertySchema {
 // name, port and protocol are required too, and the type omits each one that
 // is not authored or is authored empty (a port of 0 included): validate
 // refuses those as well, naming the listener by its index. The API's value
-// rules are left to the API server. TestGatewayKinds_RequiredMatchCRD holds
-// the list to the CRD, and what validate refuses to the fields the CRD
-// requires that the type omits.
+// rules are left to the API server. The list is generated (kind_required.go)
+// from the CRD the linked module ships, and
+// TestKindComponents_OmittedRequiredAndWrittenDefaults holds what validate
+// refuses to the fields the CRD requires that the type omits.
 var listenerSetKind = &policyFreeKind[gatewayv1.ListenerSetSpec]{
 	upstream: "gateway.networking.k8s.io/v1 ListenerSetSpec",
-	required: requiredFields(
-		map[string]string{
-			"parentRef":      "the Gateway the listeners attach to",
-			"parentRef.name": "the name of the Gateway the listeners attach to",
-		},
-		gatewayListenerRequired("listeners[]"),
-	),
+	required: generatedKindRequired("listenerset"),
 	validate: func(spec *gatewayv1.ListenerSetSpec) error {
 		if len(spec.Listeners) == 0 {
 			return errors.New("listeners: required (at least one listener to add to the Gateway)")
@@ -87,6 +82,17 @@ var listenerSetKind = &policyFreeKind[gatewayv1.ListenerSetSpec]{
 		return set
 	},
 }
+
+// listenerSetRequiredText is what the generated required paths of the
+// listenerset kind say of themselves (requiredText): the sentences of the list
+// the kind kept by hand before its list was generated, byte for byte.
+var listenerSetRequiredText = requiredFields(
+	map[string]string{
+		"parentRef":      "the Gateway the listeners attach to",
+		"parentRef.name": "the name of the Gateway the listeners attach to",
+	},
+	gatewayListenerRequired("listeners[]"),
+)
 
 // ToApplicationConfig decodes an OAM listenerset component into its config.
 // The object takes the namespace of the application it is generated in.

@@ -53,10 +53,11 @@ func (h *UDPRouteHandler) PropertySchema() map[string]oam.PropertySchema {
 // without them. Of a parent and of a backend that are authored it requires the
 // name, which the list holds. The API's other value rules, the single rule a
 // UDPRoute may hold among them, are left to the API server.
-// TestGatewayKinds_RequiredMatchCRD holds the list to the CRD.
+// The list is generated (kind_required.go) from the CRD the linked module
+// ships.
 var udpRouteKind = &policyFreeKind[gatewayv1.UDPRouteSpec]{
 	upstream: "gateway.networking.k8s.io/v1 UDPRouteSpec",
-	required: gatewayRouteRequired(),
+	required: generatedKindRequired("udproute"),
 	validate: func(spec *gatewayv1.UDPRouteSpec) error {
 		if len(spec.Rules) == 0 {
 			return errors.New("rules: required (the rule of the route, which names the backends packets are sent to)")

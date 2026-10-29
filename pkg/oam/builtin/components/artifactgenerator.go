@@ -79,31 +79,15 @@ func (h *ArtifactGeneratorHandler) PropertySchema() map[string]oam.PropertySchem
 // `to`; the type would write each one empty. Of `managedNamespaces`, which the
 // kind refuses (refuseManagedNamespaces), it requires `prune`,
 // `allowedNames`, the `path` of `metadata.fromSource` and the `namespace` and
-// `strategy` of an entry of `metadata.from`.
-// TestFluxKinds_RequiredMatchMarkers holds the list to the markers of the
-// upstream source. The API's expression rules on the names and namespaces of
+// `strategy` of an entry of `metadata.from`. The list is generated
+// (artifactGeneratorRequired) from the markers of the upstream source. The API's expression rules on the names and namespaces of
 // the artifacts and on `managedNamespaces.metadata` are left to the API server
 // (fluxRulesLeft). An ArtifactGenerator has no duration and reads no ConfigMap
 // or Secret: the sources it names hold the addresses and the credentials.
 var artifactGeneratorKind = &fluxKind[swv1beta1.ArtifactGeneratorSpec]{
 	policyFreeKind: policyFreeKind[swv1beta1.ArtifactGeneratorSpec]{
 		upstream: "source.extensions.fluxcd.io/v1beta1 ArtifactGeneratorSpec",
-		required: map[string]string{
-			"sources":                                     "the Flux sources the artifacts are made from",
-			"sources[].alias":                             "the name the copies refer to the source by",
-			"sources[].kind":                              "the kind of the source, such as GitRepository or OCIRepository",
-			"sources[].name":                              "the name of the source",
-			"artifacts":                                   "the artifacts to generate",
-			"artifacts[].name":                            "the name of the generated artifact",
-			"artifacts[].copy":                            "what is copied into the artifact",
-			"artifacts[].copy[].from":                     "the source and the files to copy, as `@<alias>/<glob>`",
-			"artifacts[].copy[].to":                       "where in the artifact they are copied, as `@artifact/<path>`",
-			"managedNamespaces.prune":                     "whether the controller deletes a namespace it created once no artifact targets it",
-			"managedNamespaces.allowedNames":              "the namespaces the controller may create",
-			"managedNamespaces.metadata.fromSource.path":  "the file in the source the namespace metadata is read from",
-			"managedNamespaces.metadata.from[].namespace": "the namespace the metadata applies to, or `*`",
-			"managedNamespaces.metadata.from[].strategy":  "how the metadata is applied",
-		},
+		required: artifactGeneratorRequired,
 		validate: refuseManagedNamespaces,
 		build: func(name, namespace string, spec *swv1beta1.ArtifactGeneratorSpec) client.Object {
 			generator := fluxcd.CreateArtifactGenerator(name, namespace)
@@ -111,6 +95,35 @@ var artifactGeneratorKind = &fluxKind[swv1beta1.ArtifactGeneratorSpec]{
 			return generator
 		},
 	},
+}
+
+// artifactGeneratorRequired is the required list of the artifactgenerator
+// kind: the list generated (kind_required.go) as fluxcdAlertRequired is, and
+// the required fields of `managedNamespaces`. The kind refuses an authored
+// `managedNamespaces` before anything else, so the generator leaves the fields
+// under it out (requiredWrittenUnauthorable); they stay on the list, held, as
+// the list the kind kept by hand had them.
+var artifactGeneratorRequired = requiredFields(generatedKindRequired(artifactGeneratorType), map[string]string{
+	"managedNamespaces.prune":                     "whether the controller deletes a namespace it created once no artifact targets it",
+	"managedNamespaces.allowedNames":              "the namespaces the controller may create",
+	"managedNamespaces.metadata.fromSource.path":  "the file in the source the namespace metadata is read from",
+	"managedNamespaces.metadata.from[].namespace": "the namespace the metadata applies to, or `*`",
+	"managedNamespaces.metadata.from[].strategy":  "how the metadata is applied",
+})
+
+// artifactGeneratorRequiredText is what the generated required paths of the
+// artifactgenerator kind say of themselves (requiredText): the sentences of
+// the list the kind kept by hand before its list was generated, byte for byte.
+var artifactGeneratorRequiredText = map[string]string{
+	"sources":                 "the Flux sources the artifacts are made from",
+	"sources[].alias":         "the name the copies refer to the source by",
+	"sources[].kind":          "the kind of the source, such as GitRepository or OCIRepository",
+	"sources[].name":          "the name of the source",
+	"artifacts":               "the artifacts to generate",
+	"artifacts[].name":        "the name of the generated artifact",
+	"artifacts[].copy":        "what is copied into the artifact",
+	"artifacts[].copy[].from": "the source and the files to copy, as `@<alias>/<glob>`",
+	"artifacts[].copy[].to":   "where in the artifact they are copied, as `@artifact/<path>`",
 }
 
 // ToApplicationConfig decodes an OAM artifactgenerator component into its

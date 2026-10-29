@@ -220,8 +220,18 @@ func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, names
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	if err := refuseUnauthoredProperties(component.Properties, helmReleaseRequired); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
+
+// helmReleaseRequired is the required list of the helmrelease kind, generated
+// (kind_required.go) from the markers of the upstream source: every field the
+// API requires and the type writes whether or not it was authored, refused
+// where its parent is authored and it is not. It is read after the kind's own
+// checks (validate), so a document those refused is refused as before.
+var helmReleaseRequired = generatedKindRequired("helmrelease")
 
 // HelmReleaseConfig implements stack.ApplicationConfig for helmrelease
 // components.

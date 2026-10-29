@@ -70,8 +70,15 @@ func (h *BucketHandler) ToApplicationConfig(component *oam.Component, namespace 
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	if err := refuseUnauthoredProperties(component.Properties, bucketRequired); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
+
+// bucketRequired is the required list of the bucket kind, generated as
+// helmReleaseRequired is and read, as it is, after the kind's own checks.
+var bucketRequired = generatedKindRequired("bucket")
 
 // BucketConfig implements stack.ApplicationConfig for bucket components.
 type BucketConfig struct {

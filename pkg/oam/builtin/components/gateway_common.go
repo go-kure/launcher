@@ -12,8 +12,9 @@ import (
 // controller may start pods for it, and the object sizes none of them.
 //
 // The module ships the CRDs of both channels of the API.
-// TestGatewayKinds_RequiredMatchCRD holds each kind's required list to them,
-// and TestGatewayKinds_DefaultedZeros the claim that a CRD default turns an
+// Each kind's required list is generated from them (kind_required.go),
+// TestGatewayKinds_WrittenEmptyAccepted holds the fields the types write
+// unauthored to them, and TestGatewayKinds_DefaultedZeros the claim that a CRD default turns an
 // authored 0, false or "" into another value only on the fields of a kind's
 // defaultedZeros, where the kind refuses one.
 //

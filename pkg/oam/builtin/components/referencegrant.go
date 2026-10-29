@@ -55,24 +55,29 @@ func (h *ReferenceGrantHandler) PropertySchema() map[string]oam.PropertySchema {
 // referenceGrantKind is the referencegrant kind: see policyFreeKind. The API
 // requires `from` and `to`, of a source its group, kind and namespace and of a
 // target its group and kind; the type would write each one empty. The API's
-// value rules are left to the API server. TestGatewayKinds_RequiredMatchCRD
-// holds the list to the CRD.
+// value rules are left to the API server. The list is generated
+// (kind_required.go) from the CRD the linked module ships.
 var referenceGrantKind = &policyFreeKind[gatewayv1.ReferenceGrantSpec]{
 	upstream: "gateway.networking.k8s.io/v1 ReferenceGrantSpec",
-	required: map[string]string{
-		"from":             "the kinds of object, and their namespaces, that may refer to the objects `to` names, at least one",
-		"from[].group":     `the API group of the objects that refer; "" is the core group`,
-		"from[].kind":      "the kind of the objects that refer, such as HTTPRoute",
-		"from[].namespace": "the namespace of the objects that refer",
-		"to":               "the kinds of object in this namespace that may be referred to, at least one",
-		"to[].group":       `the API group of the objects referred to; "" is the core group`,
-		"to[].kind":        "the kind of the objects referred to, such as Service or Secret",
-	},
+	required: generatedKindRequired("referencegrant"),
 	build: func(name, namespace string, spec *gatewayv1.ReferenceGrantSpec) client.Object {
 		grant := kubernetes.CreateReferenceGrant(name, namespace)
 		spec.DeepCopyInto(&grant.Spec)
 		return grant
 	},
+}
+
+// referenceGrantRequiredText is what the generated required paths of the
+// referencegrant kind say of themselves (requiredText): the sentences of the
+// list the kind kept by hand before its list was generated, byte for byte.
+var referenceGrantRequiredText = map[string]string{
+	"from":             "the kinds of object, and their namespaces, that may refer to the objects `to` names, at least one",
+	"from[].group":     `the API group of the objects that refer; "" is the core group`,
+	"from[].kind":      "the kind of the objects that refer, such as HTTPRoute",
+	"from[].namespace": "the namespace of the objects that refer",
+	"to":               "the kinds of object in this namespace that may be referred to, at least one",
+	"to[].group":       `the API group of the objects referred to; "" is the core group`,
+	"to[].kind":        "the kind of the objects referred to, such as Service or Secret",
 }
 
 // ToApplicationConfig decodes an OAM referencegrant component into its config.

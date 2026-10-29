@@ -78,8 +78,8 @@ func (h *ImageRepositoryHandler) PropertySchema() map[string]oam.PropertySchema 
 // omission is refused here (validate); it writes an unauthored `interval` as
 // 0s, the unauthored `name` of an authored Secret reference as empty and the
 // unauthored `namespaceSelectors` of an authored `accessFrom` as null, so
-// those are on the required list, which TestFluxKinds_RequiredMatchMarkers
-// holds to the markers of the upstream source. `interval` and `timeout` are each held to the form their pattern
+// those are on the required list, which is generated (imageRepositoryRequired)
+// from the markers of the upstream source. `interval` and `timeout` are each held to the form their pattern
 // takes: `timeout` takes no h, and one of an hour or more is written in
 // minutes (emitFluxKind). The registry of `image` is held to the allowed
 // registries of the environment policy, by the rule an image of a pod is held
@@ -95,14 +95,7 @@ var imageRepositoryKind = &fluxKind[imagev1.ImageRepositorySpec]{
 			}
 			return nil
 		},
-		required: map[string]string{
-			"interval":            "the time to wait between two scans of the repository, such as `10m`",
-			"secretRef.name":      "the name of the Secret that holds the credentials of the registry",
-			"proxySecretRef.name": "the name of the Secret that holds the configuration of the proxy",
-			"certSecretRef.name":  "the name of the Secret that holds the certificates the registry is connected to with",
-			"accessFrom.namespaceSelectors": "the selectors of the namespaces that may refer to this ImageRepository; " +
-				"an entry with no `matchLabels` selects every namespace",
-		},
+		required: imageRepositoryRequired,
 		build: func(name, namespace string, spec *imagev1.ImageRepositorySpec) client.Object {
 			repo := fluxcd.CreateImageRepository(name, namespace)
 			spec.DeepCopyInto(&repo.Spec)
@@ -128,6 +121,22 @@ var imageRepositoryKind = &fluxKind[imagev1.ImageRepositorySpec]{
 	enforce: func(spec *imagev1.ImageRepositorySpec, p oam.Policy) error {
 		return enforceAllowedRegistries(spec.Image, p.AllowedRegistries())
 	},
+}
+
+// imageRepositoryRequired is the required list of the imagerepository kind,
+// generated (kind_required.go) as fluxcdAlertRequired is.
+var imageRepositoryRequired = generatedKindRequired(imageRepositoryType)
+
+// imageRepositoryRequiredText is what the generated required paths of the
+// imagerepository kind say of themselves (requiredText): the sentences of the
+// list the kind kept by hand before its list was generated, byte for byte.
+var imageRepositoryRequiredText = map[string]string{
+	"interval":            "the time to wait between two scans of the repository, such as `10m`",
+	"secretRef.name":      "the name of the Secret that holds the credentials of the registry",
+	"proxySecretRef.name": "the name of the Secret that holds the configuration of the proxy",
+	"certSecretRef.name":  "the name of the Secret that holds the certificates the registry is connected to with",
+	"accessFrom.namespaceSelectors": "the selectors of the namespaces that may refer to this ImageRepository; " +
+		"an entry with no `matchLabels` selects every namespace",
 }
 
 // ToApplicationConfig decodes an OAM imagerepository component into its config.

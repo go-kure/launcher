@@ -76,8 +76,16 @@ func (h *GitRepositoryHandler) ToApplicationConfig(component *oam.Component, nam
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	if err := refuseUnauthoredProperties(component.Properties, gitRepositoryRequired); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
+
+// gitRepositoryRequired is the required list of the gitrepository kind,
+// generated as helmReleaseRequired is and read, as it is, after the kind's own
+// checks.
+var gitRepositoryRequired = generatedKindRequired("gitrepository")
 
 // GitRepositoryConfig implements stack.ApplicationConfig for gitrepository
 // components.

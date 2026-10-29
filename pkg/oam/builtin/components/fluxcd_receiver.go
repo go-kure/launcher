@@ -180,7 +180,7 @@ func validateReceiver(spec *notificationv1.ReceiverSpec) error {
 // requires `type` and `resources`, of a resource its `kind` and `name`, of an
 // authored `secretRef` its `name`, and of an OIDC provider its `issuerURL` and
 // `validations` with the fields of each validation and variable; the type would
-// write each one empty. TestFluxKinds_RequiredMatchMarkers holds the list to
+// write each one empty. The list is generated (fluxcdReceiverRequired) from
 // the markers of the upstream source. The API's expression rules, which tie
 // `secretRef` and `oidcProviders` to `type`, are left to the API server
 // (fluxRulesLeft). A resource with no `apiVersion` of a kind the controller
@@ -191,19 +191,7 @@ var fluxcdReceiverKind = &fluxKind[notificationv1.ReceiverSpec]{
 	policyFreeKind: policyFreeKind[notificationv1.ReceiverSpec]{
 		upstream: "notification.toolkit.fluxcd.io/v1 ReceiverSpec",
 		validate: validateReceiver,
-		required: map[string]string{
-			"type":                        "the sender of the webhook, such as `github` or `generic-hmac`",
-			"resources":                   "the Flux objects a webhook makes the controller reconcile",
-			"resources[].kind":            "the kind of the objects, such as GitRepository or OCIRepository",
-			"resources[].name":            "the name of the object, or `*` for every object of the kind, or with `matchLabels` every one that carries those labels",
-			"secretRef.name":              "the name of the Secret that holds the token a request is validated with",
-			"oidcProviders[].issuerURL":   "the URL of the OIDC issuer, which must match the `iss` claim of its tokens",
-			"oidcProviders[].validations": "the CEL expressions a token's claims must satisfy",
-			"oidcProviders[].validations[].expression": "the CEL expression evaluated against the token's claims",
-			"oidcProviders[].validations[].message":    "the message returned when the expression is false",
-			"oidcProviders[].variables[].name":         "the name of the variable, a CEL identifier",
-			"oidcProviders[].variables[].expression":   "the CEL expression that defines the variable",
-		},
+		required: fluxcdReceiverRequired,
 		build: func(name, namespace string, spec *notificationv1.ReceiverSpec) client.Object {
 			receiver := fluxcd.CreateReceiver(name, namespace)
 			spec.DeepCopyInto(&receiver.Spec)
@@ -223,6 +211,27 @@ var fluxcdReceiverKind = &fluxKind[notificationv1.ReceiverSpec]{
 	durations: []fluxDurationField[notificationv1.ReceiverSpec]{
 		{path: []string{"interval"}, form: fluxduration.Interval, get: func(s *notificationv1.ReceiverSpec) *metav1.Duration { return s.Interval }},
 	},
+}
+
+// fluxcdReceiverRequired is the required list of the fluxcd-receiver kind,
+// generated (kind_required.go) as fluxcdAlertRequired is.
+var fluxcdReceiverRequired = generatedKindRequired(fluxcdReceiverType)
+
+// fluxcdReceiverRequiredText is what the generated required paths of the
+// fluxcd-receiver kind say of themselves (requiredText): the sentences of the
+// list the kind kept by hand before its list was generated, byte for byte.
+var fluxcdReceiverRequiredText = map[string]string{
+	"type":                        "the sender of the webhook, such as `github` or `generic-hmac`",
+	"resources":                   "the Flux objects a webhook makes the controller reconcile",
+	"resources[].kind":            "the kind of the objects, such as GitRepository or OCIRepository",
+	"resources[].name":            "the name of the object, or `*` for every object of the kind, or with `matchLabels` every one that carries those labels",
+	"secretRef.name":              "the name of the Secret that holds the token a request is validated with",
+	"oidcProviders[].issuerURL":   "the URL of the OIDC issuer, which must match the `iss` claim of its tokens",
+	"oidcProviders[].validations": "the CEL expressions a token's claims must satisfy",
+	"oidcProviders[].validations[].expression": "the CEL expression evaluated against the token's claims",
+	"oidcProviders[].validations[].message":    "the message returned when the expression is false",
+	"oidcProviders[].variables[].name":         "the name of the variable, a CEL identifier",
+	"oidcProviders[].variables[].expression":   "the CEL expression that defines the variable",
 }
 
 // ToApplicationConfig decodes an OAM fluxcd-receiver component into its config.

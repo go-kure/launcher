@@ -60,10 +60,11 @@ func (h *TLSRouteHandler) PropertySchema() map[string]oam.PropertySchema {
 // requires the name, which the list holds. The API's other value rules, the
 // form of a host name and the single rule a TLSRoute may hold among them, are
 // left to the API server.
-// TestGatewayKinds_RequiredMatchCRD holds the list to the CRD.
+// The list is generated (kind_required.go) from the CRD the linked module
+// ships.
 var tlsRouteKind = &policyFreeKind[gatewayv1.TLSRouteSpec]{
 	upstream: "gateway.networking.k8s.io/v1 TLSRouteSpec",
-	required: gatewayRouteRequired(),
+	required: generatedKindRequired("tlsroute"),
 	validate: func(spec *gatewayv1.TLSRouteSpec) error {
 		if len(spec.Hostnames) == 0 {
 			return errors.New("hostnames: required (at least one server name (SNI) of the TLS handshakes the route takes)")

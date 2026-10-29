@@ -876,7 +876,7 @@ const generatorRuleGround = "the source of the linked metav1.LabelSelectorRequir
 const externalSecretsRuleGround = "the source of the linked metav1.LabelSelectorRequirement by the schema generators' rule, no optional marker and no omitempty, from which TestExternalSecretsKinds_RequiredMatchSource derives the expressions of the kind's required list; the module ships no CRD to read"
 
 // fluxRuleGround is generatorRuleGround for the kinds of the Flux APIs.
-const fluxRuleGround = "the source of the linked metav1.LabelSelectorRequirement by the schema generators' rule, no optional marker and no omitempty, from which TestFluxKinds_RequiredMatchMarkers derives the expressions of the kind's required list; the module ships no CRD to read"
+const fluxRuleGround = "the source of the linked metav1.LabelSelectorRequirement by the schema generators' rule, no optional marker and no omitempty, from which TestKindComponents_RequiredIsGenerated derives the kind's whole required list; the module ships no CRD to read"
 
 // hpaMetricSelectorReason is why the horizontalpodautoscaler kind holds no
 // metric selector.

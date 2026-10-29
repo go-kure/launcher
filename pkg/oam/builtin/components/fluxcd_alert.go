@@ -93,26 +93,35 @@ func (h *FluxcdAlertHandler) UnsupportedFieldHint(key string) string {
 // fluxcdAlertKind is the fluxcd-alert kind: see fluxKind. The API requires
 // `providerRef` with its `name` and `eventSources`, of a source its `kind` and
 // `name`; the type would write each one empty. The API's value rules are left
-// to the API server. TestFluxKinds_RequiredMatchMarkers holds the list to the
-// markers of the upstream source. An Alert reads no ConfigMap or Secret: the
-// Provider it names does.
+// to the API server. The list is generated (fluxcdAlertRequired). An Alert
+// reads no ConfigMap or Secret: the Provider it names does.
 var fluxcdAlertKind = &fluxKind[notificationv1.AlertSpec]{
 	policyFreeKind: policyFreeKind[notificationv1.AlertSpec]{
 		upstream:       "notification.toolkit.fluxcd.io/v1 AlertSpec",
 		defaultedZeros: fluxDefaultedZeros(map[string]string{"eventSeverity": `"info"`}),
-		required: map[string]string{
-			"providerRef":         "the Provider the events are sent to",
-			"providerRef.name":    "the name of the Provider, in the namespace the Alert lands in",
-			"eventSources":        "the Flux objects whose events are sent",
-			"eventSources[].kind": "the kind of the objects, such as Kustomization or HelmRelease",
-			"eventSources[].name": "the name of the object, or `*` for every object of the kind, or with `matchLabels` every one that carries those labels",
-		},
+		required:       fluxcdAlertRequired,
 		build: func(name, namespace string, spec *notificationv1.AlertSpec) client.Object {
 			alert := fluxcd.CreateAlert(name, namespace)
 			spec.DeepCopyInto(&alert.Spec)
 			return alert
 		},
 	},
+}
+
+// fluxcdAlertRequired is the required list of the fluxcd-alert kind, generated
+// (kind_required.go) from the markers of the upstream source: every field the
+// API requires and the type writes whether or not it was authored.
+var fluxcdAlertRequired = generatedKindRequired(fluxcdAlertType)
+
+// fluxcdAlertRequiredText is what the generated required paths of the
+// fluxcd-alert kind say of themselves (requiredText): the sentences of the
+// list the kind kept by hand before its list was generated, byte for byte.
+var fluxcdAlertRequiredText = map[string]string{
+	"providerRef":         "the Provider the events are sent to",
+	"providerRef.name":    "the name of the Provider, in the namespace the Alert lands in",
+	"eventSources":        "the Flux objects whose events are sent",
+	"eventSources[].kind": "the kind of the objects, such as Kustomization or HelmRelease",
+	"eventSources[].name": "the name of the object, or `*` for every object of the kind, or with `matchLabels` every one that carries those labels",
 }
 
 // ToApplicationConfig decodes an OAM fluxcd-alert component into its config.

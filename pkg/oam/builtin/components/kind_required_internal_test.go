@@ -145,24 +145,49 @@ func webKeyFileInstead(at string) kindForcedParent {
 // generatedKindRequiredLists are the required lists of the generated kinds,
 // by component, as the kinds hold them.
 var generatedKindRequiredLists = map[string]map[string]string{
-	"certificate":           certificateKind.required,
-	"clusterissuer":         clusterIssuerKind.required,
-	"issuer":                issuerKind.required,
-	"cnpg-cluster":          cnpgClusterRequired,
-	"cnpg-database":         cnpgDatabaseRequired,
-	"cnpg-objectstore":      cnpgObjectStoreRequired,
-	"cnpg-pooler":           cnpgPoolerRequired,
-	"clusterexternalsecret": clusterExternalSecretKind.required,
-	"clustersecretstore":    clusterSecretStoreKind.required,
-	"externalsecret":        externalSecretKind.required,
-	"secretstore":           secretStoreKind.required,
-	"alertmanager":          alertmanagerKind.generatedRequired,
-	"podmonitor":            podMonitorKind.generatedRequired,
-	"prometheus":            prometheusKind.generatedRequired,
-	"prometheus-probe":      prometheusProbeKind.generatedRequired,
-	"prometheusrule":        prometheusRuleKind.generatedRequired,
-	"servicemonitor":        serviceMonitorKind.generatedRequired,
-	"thanosruler":           thanosRulerKind.generatedRequired,
+	"certificate":              certificateKind.required,
+	"clusterissuer":            clusterIssuerKind.required,
+	"issuer":                   issuerKind.required,
+	"cnpg-cluster":             cnpgClusterRequired,
+	"cnpg-database":            cnpgDatabaseRequired,
+	"cnpg-objectstore":         cnpgObjectStoreRequired,
+	"cnpg-pooler":              cnpgPoolerRequired,
+	"clusterexternalsecret":    clusterExternalSecretKind.required,
+	"clustersecretstore":       clusterSecretStoreKind.required,
+	"externalsecret":           externalSecretKind.required,
+	"secretstore":              secretStoreKind.required,
+	"alertmanager":             alertmanagerKind.generatedRequired,
+	"podmonitor":               podMonitorKind.generatedRequired,
+	"prometheus":               prometheusKind.generatedRequired,
+	"prometheus-probe":         prometheusProbeKind.generatedRequired,
+	"prometheusrule":           prometheusRuleKind.generatedRequired,
+	"servicemonitor":           serviceMonitorKind.generatedRequired,
+	"thanosruler":              thanosRulerKind.generatedRequired,
+	"artifactgenerator":        artifactGeneratorKind.required,
+	"bucket":                   bucketRequired,
+	"fluxcd-alert":             fluxcdAlertKind.required,
+	"fluxcd-kustomization":     fluxcdKustomizationRequired,
+	"fluxcd-provider":          fluxcdProviderKind.required,
+	"fluxcd-receiver":          fluxcdReceiverKind.required,
+	"gitrepository":            gitRepositoryRequired,
+	"helmchart":                helmChartRequired,
+	"helmrelease":              helmReleaseRequired,
+	"helmrepository":           helmRepositoryRequired,
+	"imagepolicy":              imagePolicyKind.required,
+	"imagerepository":          imageRepositoryKind.required,
+	"imageupdateautomation":    imageUpdateAutomationKind.required,
+	"ocirepository":            ociRepositoryRequired,
+	"resourcesetinputprovider": resourceSetInputProviderKind.required,
+	"backendtlspolicy":         backendTLSPolicyKind.required,
+	"gateway":                  gatewayKind.required,
+	"gatewayclass":             gatewayClassKind.required,
+	"grpcroute":                grpcRouteRequired,
+	"httproute":                httpRouteRequired,
+	"listenerset":              listenerSetKind.required,
+	"referencegrant":           referenceGrantKind.required,
+	"tcproute":                 tcpRouteKind.required,
+	"tlsroute":                 tlsRouteKind.required,
+	"udproute":                 udpRouteKind.required,
 }
 
 // requiredWrittenKind returns the measured kind of a component.
@@ -592,6 +617,21 @@ var generatedKindCRDFiles = map[string]struct{ modulePath, file string }{
 	"cnpg-database":    {cnpgModulePath, cnpgCRDs + "databases.yaml"},
 	"cnpg-objectstore": {barmanCloudModulePath, "config/crd/bases/barmancloud.cnpg.io_objectstores.yaml"},
 	"cnpg-pooler":      {cnpgModulePath, cnpgCRDs + "poolers.yaml"},
+	// The Gateway API's module ships the CRDs of both channels; the
+	// experimental one holds every field the Go types do.
+	"backendtlspolicy": {gatewayAPIModulePath, gatewayAPICRDFile("experimental", "backendtlspolicies")},
+	"gateway":          {gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gateways")},
+	"gatewayclass":     {gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gatewayclasses")},
+	"grpcroute":        {gatewayAPIModulePath, gatewayAPICRDFile("experimental", "grpcroutes")},
+	"httproute":        {gatewayAPIModulePath, gatewayAPICRDFile("experimental", "httproutes")},
+	"listenerset":      {gatewayAPIModulePath, gatewayAPICRDFile("experimental", "listenersets")},
+	"referencegrant":   {gatewayAPIModulePath, gatewayAPICRDFile("experimental", "referencegrants")},
+	"tcproute":         {gatewayAPIModulePath, gatewayAPICRDFile("experimental", "tcproutes")},
+	"tlsroute":         {gatewayAPIModulePath, gatewayAPICRDFile("experimental", "tlsroutes")},
+	"udproute":         {gatewayAPIModulePath, gatewayAPICRDFile("experimental", "udproutes")},
+	// The Flux Operator's module ships its CRDs; the Flux controllers'
+	// modules ship none.
+	"resourcesetinputprovider": {"github.com/controlplaneio-fluxcd/flux-operator", fluxOperatorCRDs[resourceSetInputProviderType]},
 }
 
 // generatedKindsWithoutCRD are the generated kinds whose linked module ships no
@@ -650,6 +690,74 @@ var generatedHarnessSamples = map[string]map[string]any{
 	"cnpg-pooler pgbouncer.imageCatalogRef.key":  cnpgCatalogRefSample("pgbouncer.imageCatalogRef"),
 	"cnpg-pooler pgbouncer.imageCatalogRef.kind": cnpgCatalogRefSample("pgbouncer.imageCatalogRef"),
 	"cnpg-pooler pgbouncer.imageCatalogRef.name": cnpgCatalogRefSample("pgbouncer.imageCatalogRef"),
+	// A BackendTLSPolicy's validation names CA certificates or the well-known
+	// ones, not both, and a subject alternative name of type Hostname holds a
+	// hostname.
+	"backendtlspolicy validation.caCertificateRefs[].group": {"validation.wellKnownCACertificates": nil},
+	"backendtlspolicy validation.subjectAltNames[].type":    {"validation.subjectAltNames[].hostname": "payments.example.com"},
+	// A listener with TLS speaks HTTPS.
+	"gateway listeners[].tls.certificateRefs[].name":     {"listeners[].protocol": "HTTPS", "listeners[].port": 443},
+	"listenerset listeners[].tls.certificateRefs[].name": {"listeners[].protocol": "HTTPS", "listeners[].port": 443},
+	// A backend reference to a Service has a port, and a filter holds the
+	// configuration of its type and of no other.
+	"grpcroute rules[].backendRefs[].filters[].extensionRef.group":               gatewayFilterSample("ExtensionRef", nil),
+	"grpcroute rules[].backendRefs[].filters[].requestHeaderModifier.add[].name": gatewayFilterSample("RequestHeaderModifier", nil),
+	"grpcroute rules[].backendRefs[].filters[].requestMirror.backendRef":         gatewayFilterSample("RequestMirror", map[string]any{"requestMirror.backendRef.port": 8080}),
+	"grpcroute rules[].backendRefs[].filters[].requestMirror.backendRef.name":    gatewayFilterSample("RequestMirror", map[string]any{"requestMirror.backendRef.port": 8080}),
+	"grpcroute rules[].backendRefs[].filters[].requestMirror.fraction.numerator": gatewayFilterSample("RequestMirror", map[string]any{"requestMirror.backendRef.port": 8080}),
+	"grpcroute rules[].backendRefs[].filters[].type":                             gatewayFilterSample("", map[string]any{"responseHeaderModifier.remove": []any{"x-debug"}}),
+	"httproute rules[].backendRefs[].filters[].extensionRef.group":               gatewayFilterSample("ExtensionRef", nil),
+	"httproute rules[].backendRefs[].filters[].externalAuth.backendRef":          gatewayFilterSample("ExternalAuth", map[string]any{"externalAuth.backendRef.port": 8080, "externalAuth.http": map[string]any{}}),
+	"httproute rules[].backendRefs[].filters[].externalAuth.backendRef.name":     gatewayFilterSample("ExternalAuth", map[string]any{"externalAuth.backendRef.port": 8080, "externalAuth.http": map[string]any{}}),
+	"httproute rules[].backendRefs[].filters[].requestHeaderModifier.add[].name": gatewayFilterSample("", nil),
+	"httproute rules[].backendRefs[].filters[].requestMirror.backendRef":         gatewayFilterSample("RequestMirror", map[string]any{"requestMirror.backendRef.port": 8080}),
+	"httproute rules[].backendRefs[].filters[].requestMirror.backendRef.name":    gatewayFilterSample("RequestMirror", map[string]any{"requestMirror.backendRef.port": 8080}),
+	"httproute rules[].backendRefs[].filters[].requestMirror.fraction.numerator": gatewayFilterSample("RequestMirror", map[string]any{"requestMirror.backendRef.port": 8080}),
+	"httproute rules[].backendRefs[].filters[].requestRedirect.path.type":        gatewayFilterSample("RequestRedirect", map[string]any{"requestRedirect.path.replaceFullPath": "/next"}),
+	"httproute rules[].backendRefs[].filters[].type":                             gatewayFilterSample("", map[string]any{"requestHeaderModifier.remove": []any{"x-debug"}}),
+	// A ResourceSetInputProvider takes a CA certificate on a Git provider, and
+	// selectors on an ExternalArtifact one only.
+	"resourcesetinputprovider certSecretRef.name":                 {"type": "GitHubBranch", "url": "https://github.com/example/app"},
+	"resourcesetinputprovider selectors[].matchExpressions[].key": {"type": "ExternalArtifact"},
+}
+
+// gatewayFilterSample is a route rule's backend reference to a Service, with
+// its port, and a filter of the given type (the filled one where it is
+// empty) with the given fields under the filter.
+func gatewayFilterSample(filterType string, fields map[string]any) map[string]any {
+	const filter = "rules[].backendRefs[].filters[]."
+	out := map[string]any{"rules[].backendRefs[].port": 8080}
+	if filterType != "" {
+		out[filter+"type"] = filterType
+	}
+	for at, value := range fields {
+		out[filter+at] = value
+	}
+	return out
+}
+
+// generatedRefusedFirst are the generated paths whose omission a kind's own
+// check refuses, by kind and path, each with the check: it runs before the
+// generated refusal (the Flux kinds that decode their properties themselves
+// read their list after validate), so the document is refused in the words it
+// was refused with before the list was generated.
+// TestKindComponents_GeneratedRequiredBothWays holds each to a refusal that
+// names the path, and fails on an entry the generated refusal answers instead.
+var generatedRefusedFirst = map[string]string{
+	"bucket bucketName":                   "BucketConfig.validate",
+	"bucket endpoint":                     "BucketConfig.validate",
+	"fluxcd-kustomization sourceRef":      "FluxcdKustomizationConfig.validate",
+	"fluxcd-kustomization sourceRef.kind": "FluxcdKustomizationConfig.validate",
+	"fluxcd-kustomization sourceRef.name": "FluxcdKustomizationConfig.validate",
+	"gitrepository url":                   "GitRepositoryConfig.validate",
+	"helmchart chart":                     "HelmChartConfig.validate",
+	"helmchart sourceRef":                 "HelmChartConfig.validate",
+	"helmchart sourceRef.kind":            "HelmChartConfig.validate",
+	"helmchart sourceRef.name":            "HelmChartConfig.validate",
+	"helmrelease chart.spec":              "HelmReleaseConfig.validate",
+	"helmrelease valuesFrom[].kind":       "HelmReleaseConfig.validate",
+	"helmrelease valuesFrom[].name":       "HelmReleaseConfig.validate",
+	"helmrepository url":                  "HelmRepositoryConfig.validate",
 }
 
 // cnpgCatalogRefSample is the group and the kind of an image catalog
@@ -667,8 +775,9 @@ func cnpgCatalogRefSample(at string) map[string]any {
 // Where the linked module ships the kind's CRD, the API server answers too,
 // on one path of each type that declares one: the control's object is
 // accepted, and the same object without the field is refused as missing a
-// required one. The External Secrets Operator's module and the Prometheus
-// operator's ship no CRD, and their kinds are answered by the kind only. Each
+// required one. The External Secrets Operator's module, the Prometheus
+// operator's and the Flux controllers' ship no CRD, and their kinds are
+// answered by the kind only (a follow-up reads the Flux controllers' CRDs). Each
 // answer kindRequiredForced records is shown by the kind (showForcedAnswer),
 // and on the CRD where one is read: the control without the parent builds, and
 // the API server accepts the object.
@@ -679,21 +788,38 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s is generated, and requiredWrittenKinds does not measure it", component)
 			}
-			if k.altBase != nil || k.prefixes != nil {
-				t.Fatalf("%s has an alternative base or prefixes, which this test does not measure", component)
+			if k.prefixes != nil {
+				t.Fatalf("%s has prefixes, which this test does not measure", component)
 			}
 			schema := k.schema(t)
-			base := pinCopy(k.base)
-			pinFill(base, schema, "")
+			// A path is measured on the base the pin measures it on
+			// (pinKind.baseFor): altBase's under one of altPrefixes.
+			var bases [2]map[string]any
+			for i, b := range []map[string]any{k.base, k.altBase} {
+				if i == 1 && b == nil {
+					bases[1] = bases[0]
+					break
+				}
+				bases[i] = pinCopy(b)
+				pinFill(bases[i], schema, "")
+			}
+			base := bases[0]
 			var create *crdCreate
 			if crd := generatedKindCRDOf(t, component); crd != nil {
 				create = crdCreateOf(t, crd, "v1")
 			}
 			list := generatedKindRequiredLists[component]
+			generated := generatedRequiredPaths(t, k)
+			for _, key := range slices.Sorted(maps.Keys(generatedRefusedFirst)) {
+				c, path, _ := strings.Cut(key, " ")
+				if c == component && !slices.ContainsFunc(generated, func(d requiredWrittenField) bool { return d.path == path }) {
+					t.Errorf("generatedRefusedFirst names %s, which is not generated; drop the entry", path)
+				}
+			}
 			answered, rows := map[reflect.Type]bool{}, 0
-			for _, d := range generatedRequiredPaths(t, k) {
+			for _, d := range generated {
 				path := d.path
-				with, err := pinControl(k, base, path, schema)
+				with, err := pinControl(k, k.baseFor(path, bases), path, schema)
 				if err != nil {
 					t.Errorf("%s: no control builds with the field authored: %v", path, err)
 					continue
@@ -715,9 +841,16 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 				// it created is under the key pinParent gives it, k.
 				at := strings.ReplaceAll(strings.ReplaceAll(path, "[]", "[0]"), "{}", "[k]")
 				want := at + ": required (" + list[path] + ")"
+				_, first := generatedRefusedFirst[component+" "+path]
 				switch {
 				case err == nil:
 					t.Errorf("%s: the omission builds", path)
+				case first && strings.Contains(err.Error(), want):
+					t.Errorf("%s: the omission is refused by the generated list (%q), and generatedRefusedFirst says the kind's own check refuses it first; drop the entry", path, err)
+				// A field the kind's own check requires is refused by that check,
+				// which runs before the generated refusal and names the field in
+				// the words it always did.
+				case first && pinRefusalNames(at, err):
 				case strings.Contains(err.Error(), want):
 				// A struct the type writes whether or not it was authored is
 				// refused by the kind's own check of its value, which runs before

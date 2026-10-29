@@ -70,8 +70,16 @@ func (h *OCIRepositoryHandler) ToApplicationConfig(component *oam.Component, nam
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	if err := refuseUnauthoredProperties(component.Properties, ociRepositoryRequired); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
+
+// ociRepositoryRequired is the required list of the ocirepository kind,
+// generated as helmReleaseRequired is and read, as it is, after the kind's own
+// checks.
+var ociRepositoryRequired = generatedKindRequired("ocirepository")
 
 // OCIRepositoryConfig implements stack.ApplicationConfig for ocirepository
 // components.
