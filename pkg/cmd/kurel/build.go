@@ -75,9 +75,9 @@ kurel.yaml for parameterized packages). Output is written to stdout (default) or
 func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	// The global -f/--output-file names one file for the whole stream; --output
 	// names a directory. Each says where the manifests go, so both is a conflict.
-	var outputFile string
-	if f := cmd.Flags().Lookup("output-file"); f != nil {
-		outputFile = f.Value.String()
+	outputFile, err := outputFileFlag(cmd)
+	if err != nil {
+		return err
 	}
 	if outputFile != "" && opts.outputDir != "" {
 		return errors.New("--output-file (-f) and --output (-o) cannot be used together: -f writes the manifests to one file, -o writes <app name>.yaml into a directory")
@@ -221,6 +221,10 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 
 	if len(objects) == 0 {
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "warning: no resources generated")
+		if outputFile != "" {
+			// The named file holds the (empty) stream, never an earlier build's.
+			return writeOutputFile(outputFile, nil)
+		}
 		return nil
 	}
 
@@ -424,18 +428,44 @@ func generatedObjects(apps []oam.GeneratedApplication) []*client.Object {
 	return objects
 }
 
+// outputFileFlag returns the global -f/--output-file, or "" when it was not
+// given. An explicitly empty value is refused rather than read as no flag, which
+// would send the manifests to stdout. -f is refused together with --dry-run,
+// which promises to write no files.
+func outputFileFlag(cmd *cobra.Command) (string, error) {
+	f := cmd.Flags().Lookup("output-file")
+	if f == nil || !f.Changed {
+		return "", nil
+	}
+	path := f.Value.String()
+	if path == "" {
+		return "", errors.New("--output-file (-f) needs a file path")
+	}
+	if d := cmd.Flags().Lookup("dry-run"); d != nil && d.Value.String() == "true" {
+		return "", errors.New("--output-file (-f) and --dry-run cannot be used together: --dry-run writes no files")
+	}
+	return path, nil
+}
+
 // writeOutputFile writes the stream to path, the -f/--output-file the invoking
 // operator passed on their own command line. The file's directory must exist.
+// A new file is created owner-only, since the stream can carry Secret values in
+// base64; an existing file keeps the mode its owner set.
 func writeOutputFile(path string, data []byte) error {
 	//nolint:gosec // G703: path is the -f/--output-file the invoking operator
 	// passed directly on their own command line (same trust boundary as the
 	// process itself, like writeOutputDir's dir and `go build -o`), not
 	// attacker-supplied input crossing a privilege boundary, so the CLI Safety
 	// standard's path-escape rule does not apply to it.
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return errors.Wrapf(err, "opening output file %q", path)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
 		return errors.Wrapf(err, "writing output file %q", path)
 	}
-	return nil
+	return errors.Wrapf(f.Close(), "closing output file %q", path)
 }
 
 func writeOutputDir(dir, appName string, data []byte) error {
