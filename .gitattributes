@@ -1,10 +1,11 @@
 # Upstream CRDs vendored as test data for the required-field API-server harness
-# (go-kure/launcher#883). Each is pinned to its upstream blob by the SOURCE file
-# beside it and held to that pin by the package's tests, so it is not reviewed by
-# hand. Marking it generated collapses its diff on GitHub and leaves it out of the
-# hosted pr-review: adding or re-vendoring the largest CRDs produces hunks over
-# that review's per-hunk ceiling, which would otherwise mark the PR's review
-# incomplete. The review reads this file from the PR's base commit, never from
-# the PR's head.
+# (go-kure/launcher#883, go-kure/launcher#1108). Each is pinned to its upstream
+# blob by the SOURCE file beside it and held to that pin by the package's tests,
+# so it is not reviewed by hand. Marking it generated collapses its diff on
+# GitHub and leaves it out of the hosted pr-review: adding or re-vendoring the
+# largest CRDs produces hunks over that review's per-hunk ceiling, which would
+# otherwise mark the PR's review incomplete. The review reads this file from the
+# PR's base commit, never from the PR's head.
 pkg/oam/builtin/components/testdata/upstream/prometheus-operator/example/prometheus-operator-crd/*.yaml linguist-generated
 pkg/oam/builtin/components/testdata/upstream/*/config/crd/bases/*.yaml linguist-generated
+pkg/oam/builtin/components/testdata/upstream/*/config/crds/bases/*.yaml linguist-generated
