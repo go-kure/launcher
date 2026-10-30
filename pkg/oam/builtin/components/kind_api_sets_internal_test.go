@@ -328,6 +328,21 @@ func podSpecOmitted(path string) map[string]string {
 	return out
 }
 
+// gatewayListenerWithExternalAuth is a listener of a Gateway or a ListenerSet
+// with one request filter, an external authorization over HTTP: it holds every
+// field of a listener the two kinds refuse the omission of.
+func gatewayListenerWithExternalAuth() map[string]any {
+	return map[string]any{
+		"name": "http", "port": 80, "protocol": "HTTP",
+		"filters": map[string]any{"requests": []any{map[string]any{
+			"type": "ExternalAuth",
+			"externalAuth": map[string]any{
+				"protocol": "HTTP", "backendRef": map[string]any{"name": "auth", "port": 8080}, "http": map[string]any{},
+			},
+		}}},
+	}
+}
+
 func handlerBuild(h oam.ComponentHandler, typ string) func(map[string]any) error {
 	return func(props map[string]any) error {
 		_, err := h.ToApplicationConfig(&oam.Component{Name: "fast", Type: typ, Properties: props}, "data")
@@ -508,7 +523,18 @@ var apiSetKinds = []apiSetKind{
 	{component: "fluxcd-kustomization", typ: reflect.TypeFor[kustv1.KustomizationSpec](), source: markerAPISource},
 	{component: "fluxcd-provider", typ: reflect.TypeFor[notificationv1.ProviderSpec](), source: markerAPISource},
 	{component: "fluxcd-receiver", typ: reflect.TypeFor[notificationv1.ReceiverSpec](), source: markerAPISource},
-	{component: "gateway", typ: reflect.TypeFor[gatewayv1.GatewaySpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gateways"), "v1")},
+	{
+		component: "gateway", typ: reflect.TypeFor[gatewayv1.GatewaySpec](),
+		source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gateways"), "v1"),
+		build:  handlerBuild(&GatewayHandler{}, "gateway"),
+		documents: []func() map[string]any{func() map[string]any {
+			return map[string]any{
+				"gatewayClassName": "public",
+				"listeners":        []any{gatewayListenerWithExternalAuth()},
+			}
+		}},
+		refused: []string{"listeners[].filters.requests[].externalAuth.protocol"},
+	},
 	{component: "gatewayclass", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "gatewayclasses"), "v1")},
 	{component: "gitrepository", typ: reflect.TypeFor[sourcev1.GitRepositorySpec](), source: markerAPISource},
 	{component: "grpcroute", typ: reflect.TypeFor[gatewayv1.GRPCRouteSpec](), source: crdAPISource(gatewayAPIModulePath, gatewayAPICRDFile("experimental", "grpcroutes"), "v1")},
@@ -564,10 +590,10 @@ var apiSetKinds = []apiSetKind{
 		documents: []func() map[string]any{func() map[string]any {
 			return map[string]any{
 				"parentRef": map[string]any{"name": "public"},
-				"listeners": []any{map[string]any{"name": "http", "port": 80, "protocol": "HTTP"}},
+				"listeners": []any{gatewayListenerWithExternalAuth()},
 			}
 		}},
-		refused: []string{"listeners", "listeners[].name", "listeners[].port", "listeners[].protocol"},
+		refused: []string{"listeners", "listeners[].filters.requests[].externalAuth.protocol", "listeners[].name", "listeners[].port", "listeners[].protocol"},
 	},
 	// MetalLB's API, from the CRDs its module ships.
 	{component: "metallb-bfdprofile", typ: reflect.TypeFor[metallbv1beta1.BFDProfileSpec](), source: crdAPISource(metallbModulePath, metallbCRDDir+"/metallb.io_bfdprofiles.yaml", metallbVersion)},

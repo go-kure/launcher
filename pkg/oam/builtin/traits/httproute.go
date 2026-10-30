@@ -797,11 +797,11 @@ func parseExternalAuth(filterMap map[string]any, scope string) (*HTTPExternalAut
 	if rawFwd, ok := raw["forwardBody"].(map[string]any); ok && rawFwd != nil {
 		fb := &HTTPForwardBody{}
 		if rawSize, ok := rawFwd["maxSize"]; ok {
-			size, err := oam.IntegerInRange(rawSize, 0, math.MaxUint16)
+			size, err := oam.IntegerInRange(rawSize, 0, math.MaxInt32)
 			if err != nil {
 				return nil, errors.Errorf("%s: externalAuth.forwardBody.maxSize: %w", scope, err)
 			}
-			fb.MaxSize = uint16(size) //nolint:gosec // bounded to 0..MaxUint16 above
+			fb.MaxSize = int32(size) //nolint:gosec // bounded to 0..MaxInt32 above
 		}
 		ea.ForwardBody = fb
 	}
@@ -1113,7 +1113,7 @@ type HTTPHTTPAuth struct {
 
 // HTTPForwardBody is the optional forwardBody sub-object for ExternalAuth.
 type HTTPForwardBody struct {
-	MaxSize uint16
+	MaxSize int32
 }
 
 // HTTPRouteTimeouts is the parsed form of `rules[].timeouts`.

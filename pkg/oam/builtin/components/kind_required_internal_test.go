@@ -832,6 +832,10 @@ var generatedHarnessSamples = map[string]map[string]any{
 	"httproute rules[].backendRefs[].filters[].requestMirror.fraction.numerator": gatewayFilterSample("RequestMirror", map[string]any{"requestMirror.backendRef.port": 8080}),
 	"httproute rules[].backendRefs[].filters[].requestRedirect.path.type":        gatewayFilterSample("RequestRedirect", map[string]any{"requestRedirect.path.replaceFullPath": "/next"}),
 	"httproute rules[].backendRefs[].filters[].type":                             gatewayFilterSample("", map[string]any{"requestHeaderModifier.remove": []any{"x-debug"}}),
+	// A session persistence of the Header type holds the header's configuration
+	// and no cookie's.
+	"grpcroute rules[].sessionPersistence.header.name": {"rules[].sessionPersistence.type": "Header"},
+	"httproute rules[].sessionPersistence.header.name": {"rules[].sessionPersistence.type": "Header"},
 	// A ResourceSetInputProvider takes a CA certificate on a Git provider, and
 	// selectors on an ExternalArtifact one only.
 	"resourcesetinputprovider certSecretRef.name":                 {"type": "GitHubBranch", "url": "https://github.com/example/app"},
@@ -857,7 +861,35 @@ func init() {
 		}
 		generatedHarnessSamples["clusterexternalsecret externalSecretSpec."+at] = prefixed
 	}
+	for at, samples := range listenerFilterSamples {
+		for _, component := range []string{"gateway", "listenerset"} {
+			generatedHarnessSamples[component+" "+listenerFilter+at] = samples
+		}
+	}
 }
+
+// listenerFilter is the path of a listener's request filter, on a Gateway and
+// on a ListenerSet.
+const listenerFilter = "listeners[].filters.requests[]."
+
+// listenerFilterSamples are a listener request filter's, by the path under
+// the filter they are under: the filter holds the configuration of its type
+// and of no other, and an external authorization over HTTP holds its HTTP
+// configuration and, on a Service backend, a port.
+var listenerFilterSamples = func() map[string]map[string]any {
+	externalAuth := map[string]any{
+		listenerFilter + "externalAuth.protocol":        "HTTP",
+		listenerFilter + "externalAuth.backendRef.name": "auth",
+		listenerFilter + "externalAuth.backendRef.port": 8080,
+		listenerFilter + "externalAuth.http":            map[string]any{},
+	}
+	return map[string]map[string]any{
+		"extensionRef.group":           {listenerFilter + "type": "ExtensionRef"},
+		"externalAuth.backendRef":      externalAuth,
+		"externalAuth.backendRef.name": externalAuth,
+		"type":                         externalAuth,
+	}
+}()
 
 // externalSecretsStoreSamples are a store's samples, by the path they are
 // under: a provider's enumerated values (an AWS service, a Vault or OpenBao

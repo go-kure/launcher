@@ -51,7 +51,7 @@ func (h *GatewayHandler) PropertySchema() map[string]oam.PropertySchema {
 			Description: spec + "addresses: the addresses requested for the Gateway, at most 16. Unset, the controller assigns one.",
 			Items: &oam.PropertySchema{
 				Type: oam.PropertyTypeObject, AdditionalProperties: true,
-				Description: "One address: `type` (IPAddress, the API's default, Hostname, or a domain-prefixed one) and `value`." + gatewayDecoded + "GatewaySpecAddress in its API reference.",
+				Description: "One address: `type` (IPAddress, the API's default, Hostname, or a domain-prefixed one), `value` and `routability`, an experimental-channel field." + gatewayDecoded + "GatewaySpecAddress in its API reference.",
 			},
 		},
 		"infrastructure": {
@@ -118,10 +118,21 @@ var gatewayRequiredText = func() map[string]string {
 // writes as expressions included (a listener's tls against its protocol, the
 // uniqueness of a listener), are left to the API server. An authored "" on a
 // frontend TLS validation's mode, which the type omits and the CRD defaults to
-// AllowValidOnly, is refused (refuseUncarriedSpecValues).
+// AllowValidOnly, is refused (refuseUncarriedSpecValues). The protocol of a
+// listener request filter's external authorization is required too, and the
+// type omits it when it is not authored: validate refuses that, naming the
+// listener and the filter by their index.
 var gatewayKind = &policyFreeKind[gatewayv1.GatewaySpec]{
 	upstream: "gateway.networking.k8s.io/v1 GatewaySpec",
 	required: gatewayRequired,
+	validate: func(spec *gatewayv1.GatewaySpec) error {
+		for i, listener := range spec.Listeners {
+			if err := refuseOmittedListenerFilterFields(i, listener.Filters); err != nil {
+				return err
+			}
+		}
+		return nil
+	},
 	defaultedZeros: defaultedZeroFields{api: "Gateway", defaulter: "API server", fields: map[string]string{
 		"tls.frontend.default.validation.mode":       `"AllowValidOnly"`,
 		"tls.frontend.perPort[].tls.validation.mode": `"AllowValidOnly"`,

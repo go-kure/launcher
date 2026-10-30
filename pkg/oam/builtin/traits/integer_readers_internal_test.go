@@ -65,14 +65,20 @@ func TestRequestRedirect_FractionalStatusCodeRefused(t *testing.T) {
 	}
 }
 
-// TestExternalAuth_MaxSizeFitsUint16: 65536 used to wrap to 0, 65537 to 1.
-func TestExternalAuth_MaxSizeFitsUint16(t *testing.T) {
-	for _, v := range []any{65535, 65536, 65537, -1, 1e20} {
+// TestExternalAuth_MaxSizeFitsInt32: the field is an int32 with a minimum of 0
+// since gateway-api v1.7.0 (a uint16 before, where 65536 wrapped to 0), so
+// 65536 now builds and a value past MaxInt32 or below 0 is refused, never wrapped.
+func TestExternalAuth_MaxSizeFitsInt32(t *testing.T) {
+	accepted := map[any]int32{0: 0, 65535: 65535, 65536: 65536, int64(math.MaxInt32): math.MaxInt32}
+	for _, v := range []any{0, 65535, 65536, int64(math.MaxInt32), int64(math.MaxInt32) + 1, -1, 1e20} {
 		ea, err := parseExternalAuth(map[string]any{"externalAuth": map[string]any{"protocol": "HTTP",
 			"backendRef": map[string]any{"name": "auth", "port": 8080}, "forwardBody": map[string]any{"maxSize": v}}}, "f")
-		if v == 65535 && (err != nil || ea.ForwardBody.MaxSize != 65535) || v != 65535 && (err == nil ||
-			!strings.Contains(err.Error(), "externalAuth.forwardBody.maxSize: must be an integer between 0 and 65535")) {
-			t.Errorf("maxSize %v = %v, %v", v, ea, err)
+		if want, ok := accepted[v]; ok {
+			if err != nil || ea.ForwardBody.MaxSize != want {
+				t.Errorf("maxSize %v = %v, %v; want %d", v, ea, err, want)
+			}
+		} else if err == nil || !strings.Contains(err.Error(), "externalAuth.forwardBody.maxSize: must be an integer between 0 and 2147483647") {
+			t.Errorf("maxSize %v = %v, %v; want refused", v, ea, err)
 		}
 	}
 }
