@@ -1,6 +1,53 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.3] - 2026-10-30
+
+### Added
+
+- Publish postgresql backup prerequisites in contract metadata
+
+### Build
+
+- Update module github.com/prometheus/common to v0.73.0
+- Move to kure v0.2.0-beta.22 and take k8s.io v0.37.2
+- Update dependency cosign to v3
+- Update module github.com/prometheus/common to v0.73.1
+- Pin github.com/go-kure/kure to v0.2.0-beta.23
+
+### Document Format
+
+- Order a component-made ConfigMap or Secret before every Flux object that requires it
+- App.yaml artifactgenerator takes an artifact's inputsFrom and a copy's optional
+- App.yaml artifactgenerator takes serviceAccountName and an artifact's namespace
+- App.yaml artifactgenerator refuses managedNamespaces for good, with the reason
+- List artifactgenerator's serviceAccountName and inputsFrom patterns as unchecked
+- Order an app.yaml component-made Flux source before every Flux object that names it
+- App.yaml cert-manager issuer, clusterissuer and certificate components refuse every unauthored required field
+- App.yaml cnpg cluster, pooler, objectstore and database components refuse every unauthored required field
+- App.yaml prometheus, alertmanager, thanosruler, servicemonitor, podmonitor, prometheus-probe and prometheusrule components refuse every unauthored required field
+- App.yaml flux and gateway route components refuse every unauthored required field
+- App.yaml replicationsource and replicationdestination components refuse every unauthored required field
+- App.yaml gateway, listenerset, httproute and grpcroute components take Gateway API v1.7.0's listener filters and session persistence
+
+### Documentation
+
+- Say what an ExternalSecret writes under creationPolicy None
+- Say the defaulter re-vendor takes the Kubernetes tag
+- Mark go-kure/launcher#1001 shipped and go-kure/launcher#790 closed
+- Mark go-kure/launcher#795 shipped
+- State that operator-named output paths are not contained
+
+### Fixed
+
+- Write the build stream to the global -f/--output-file
+- Guard the -f output file against dry-run, empty and stale output
+
+### Testing
+
+- Vendor the prometheus-operator and Flux controller CRDs for the required-field harness
+- Vendor the External Secrets CRDs for the required-field harness
+
 ## [0.2.0-beta.2] - 2026-10-28
 
 ### Added
