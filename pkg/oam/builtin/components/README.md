@@ -2771,9 +2771,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   classifies. A dependency bump that adds, drops or moves one fails there.
   The Flux Operator's module ships its CRDs: the list of a
   `resourcesetinputprovider` is derived from its CRD instead, and held to that
-  CRD by the API server (`TestKindComponents_GeneratedRequiredBothWays`); the other kinds here are
-  not held to the API server's own validator, which answers from a CRD, until
-  a follow-up reads the controllers' CRDs. Of an `artifactgenerator`, the
+  CRD by the API server (`TestKindComponents_GeneratedRequiredBothWays`). The
+  other kinds here are held to the API server's own validator on the
+  controllers' CRDs, vendored from each controller's repository at the tag of
+  the linked API module, unmodified but for `allow-term` pragma comment lines
+  (see "Vendored CRDs" under the required fields) (`testdata/upstream/<repository>/`,
+  `scripts/vendor-flux-crds.sh`, each file checked against its git blob id by
+  `TestVendoredCRDs_MatchSource`): of every type that holds a generated path,
+  the same test creates the object with one such path authored, which the API
+  server accepts, and without it, which the API server refuses as missing a
+  required field; and every generated path is one the CRD declares. Of an `artifactgenerator`, the
   fields of `managedNamespaces` stay in its list by hand, under a path the
   kind refuses whatever is authored there. **Not refused:**
   - a list the API wants an item of that is authored empty
@@ -2821,8 +2828,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **The APIs' expression rules are not checked.** A kind checks an
   expression rule only where the check is held to the API server's own
-  validator, which answers from a CRD (go-kure/launcher#874), and the linked
-  modules of the Flux controllers' APIs ship none. **The Flux Operator's
+  validator, which answers from a CRD (go-kure/launcher#874), and the build
+  reads none for these kinds: the linked modules of the Flux controllers' APIs
+  ship none, and the CRDs vendored for the tests (go-kure/launcher#883) are
+  test data. **The Flux Operator's
   module does ship its CRDs, and the `resourcesetinputprovider` kind
   deliberately checks none of their rules:** it leaves every one to the API
   server, as the other Flux kinds do. A component that breaks one of the rules
@@ -4000,19 +4009,22 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `topologyKey`, a sysctl's `name` and `value`, a seccomp profile's `type`),
   and the `username` and the `password` of
   `alertmanagerConfiguration.global.httpConfig.basicAuth`, which the
-  operator refuses left out (the API server's acceptance is recorded by hand
-  until the follow-up shows it). A `clusterTLS` without
+  operator refuses left out (the API server accepts them left out, shown on the
+  operator's CRD). A `clusterTLS` without
   its `server` or its `client` stays refused, by the check of the TLS blocks
   below, which comes first. The `keySecret` of `web.tlsConfig` and of
   `clusterTLS.server` is asked for only where it is authored: the key may
   be read from `keyFile` instead.
 
   The list is derived from the markers of the linked module's source, which
-  ships no CRD, so no API server answers for it here; the harness rows on the
-  operator's CRDs follow in a follow-up. **Not refused:** the `apiVersion`,
+  ships no CRD; the API server answers for it on the operator's CRD, vendored
+  unmodified from the operator's repository at the linked release
+  (`testdata/upstream/prometheus-operator/`). **Not refused:** the `apiVersion`,
   `kind`, `name` and `uid` of an owner reference in an ephemeral claim
-  template's metadata (`storage.ephemeral`, `volumes[].ephemeral`), which stay
-  pinned until that follow-up shows what the API server makes of them; and
+  template's metadata (`storage.ephemeral`, `volumes[].ephemeral`): the CRD
+  declares that metadata as an object with no field, so the API server prunes
+  an owner reference there, authored whole or not, and requires none of its
+  fields; and
   two fields of a listed
   container or init container and two of a listed volume that upstream marks
   required and the type leaves out when empty (the `action` of a container
@@ -4260,9 +4272,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   **The API's expression rules are not checked.** The types the spec reaches
   state one: an `updateStrategy` with a `rollingUpdate` must have the type
-  `RollingUpdate`. The linked module ships no CRD, so there is no rule text
-  to run through the validator the other kinds use: the rule is listed
-  (`alertmanagerRulesLeft`) and left to the API server, and
+  `RollingUpdate`. The build reads no CRD (the linked module ships none; the
+  operator's CRD vendored for the tests, go-kure/launcher#883, is test data),
+  so the rule is not checked at build: it is listed
+  (`alertmanagerRulesLeft`) and left to the API server, which refuses the
+  object at apply, and
   `TestMonitoringWorkloadKinds_RulesListed` fails when a dependency bump adds,
   drops or rewords a rule on a reached type. The API's other value rules
   (formats, enumerations, minima) are left to it as well.
@@ -4656,8 +4670,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   and the `password` of a `remoteWrite` entry's `basicAuth`, which the
   operator refuses left out. The `keySecret` of `web.tlsConfig` is asked for
   only where it is authored, as on **prometheus**. **Not refused:** the owner
-  reference fields of an ephemeral claim template's metadata, pinned until a
-  follow-up shows them on the operator's CRDs, and the restart rule and pod
+  reference fields of an ephemeral claim template's metadata, which the API
+  server prunes, as on **alertmanager**, and the restart rule and pod
   certificate fields the type leaves out when empty, as on **alertmanager**.
 
   **What the operator builds from the spec is checked where the API would
@@ -5059,8 +5073,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   operator refuses left out. The `keySecret` of `web.tlsConfig` is asked for
   only where it is authored, the key being readable from `keyFile` instead.
   **Not refused:** the owner reference fields of an ephemeral claim
-  template's metadata, pinned until a follow-up shows them on the operator's
-  CRDs, and the restart rule and pod certificate fields the type leaves out
+  template's metadata, which the API server prunes, as on **alertmanager**,
+  and the restart rule and pod certificate fields the type leaves out
   when empty, as on **alertmanager**.
 
   **The group of an excluded object is written.** An
@@ -7448,8 +7462,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   those of the Kubernetes types the specs embed, so a dependency bump that
   adds, drops or moves one fails `TestKindComponents_RequiredIsGenerated`.
   `TestKindComponents_GeneratedRequiredBothWays` holds each field both ways
-  on the kind; the module ships no CRD, and the rows that run the fields
-  through the operator's CRDs follow in a follow-up. **Not refused:**
+  on the kind, and runs a path of every type that holds one through the
+  operator's CRD, vendored from its repository at the linked release (the
+  module ships none). **Not refused:**
   - an authored empty string in a required field (a group's `name: ""`),
     `prober.url` and a parameter's `name` excepted. It is a value, and the
     API server's to refuse;
@@ -13128,16 +13143,18 @@ rule and never by the type that declares it:
   `replicationSlots.synchronizeReplicas.enabled`);
 - a field under a path the kind refuses whatever is authored there (see Method);
 - an entry of `requiredWrittenExceptions`, the test's named exceptions, each with the API
-  server's answer for the object without it. At this pin: `cnpg-pooler`'s
-  `template.spec.containers`, which the kind writes `[]` and the Pooler CRD accepts, the
-  template's `spec` authored or left out; the operator adds its `pgbouncer` container;
-- an entry of `requiredWrittenUndecided`, a field no answer of the API server is read for yet:
-  on `prometheus`, `alertmanager` and `thanosruler`, the `apiVersion`, `kind`, `name` and `uid`
-  of an owner reference in the metadata of an ephemeral volume's claim template
+  server's answer for the object without it, in one of two classes. **Accepted**: the API
+  server accepts the omission as the kind writes it, and the operator handles it. At this pin:
+  `cnpg-pooler`'s `template.spec.containers`, which the kind writes `[]` and the Pooler CRD
+  accepts, the template's `spec` authored or left out; the operator adds its `pgbouncer`
+  container. **Pruned**: the Go source requires the field and the kind's CRD does not declare
+  it, so the API server prunes it, authored or not, and requires nothing of it. At this pin: on
+  `prometheus`, `alertmanager` and `thanosruler`, the `apiVersion`, `kind`, `name` and `uid` of
+  an owner reference in the metadata of an ephemeral volume's claim template
   (`storage.ephemeral` and `volumes[].ephemeral`), 8 per kind. The Go source declares the whole
-  `ObjectMeta` there, and the operator's module ships no CRD to show whether the API server
-  requires them or prunes the owner reference. They stay pinned, not refused and not
-  excepted, until a follow-up reads the operator's CRDs.
+  `ObjectMeta` there; the operator's CRDs declare that metadata as an object with no field, so
+  the API server prunes an owner reference there (strict field validation refuses it as an
+  unknown field) and requires none of its fields.
 
 A refusal reads the kind's own text for the field where it has one, else `the <API> API
 requires this field` (or `requires the name of what this refers to`, for a reference's
@@ -13148,9 +13165,11 @@ one to an answer. A monitoring basic auth (`basicAuth`, wherever a kind holds on
 parent: the API server accepts it without a `username` or `password`, and the Prometheus
 operator reads both keys and refuses the basic auth without either, so the kind refuses an
 authored basic auth that leaves either out; a web or cluster TLS server's `keySecret` is asked
-for only where it is authored, `keyFile` being the alternative. The Prometheus operator's
-module ships no CRD, so these answers are recorded by hand; the test shows what the kind does
-with each, and the API server rows on the operator's CRDs follow in a follow-up. Of the stores, the fields whose API default never applies because the type
+for only where it is authored, `keyFile` being the alternative. The test shows what the kind
+does with each, and what the API server answers on the operator's CRD: the object without the
+parent where the kind builds one, else the object with the parent as the type writes it
+unauthored (a `prometheus-probe`'s `prober` without a `url`, which the API server refuses as
+the kind does). Of the stores, the fields whose API default never applies because the type
 writes them (`secretStoreUnappliedDefaults`) are generated by the same test.
 
 The Flux kinds that decode their properties themselves (`helmrelease`, `fluxcd-kustomization`,
@@ -13162,8 +13181,39 @@ after their decode checks too. A refusal of these kinds that their list did not 
 says its class's sentence. No path of a Flux or Gateway kind needs a recorded answer for a
 parent left out. The Gateway API's module ships its CRDs, and so does the Flux Operator's: the
 test runs a row of each Gateway kind and of `resourcesetinputprovider` through the API server.
-The Flux controllers' modules ship none, so their kinds are held by the kind only, and the rows
-that run them through the controllers' CRDs follow in a follow-up.
+
+**Vendored CRDs.** The Prometheus operator's module and the Flux controllers' API modules ship
+no CRD, so the test reads copies, vendored for the tests only and each checked
+against its git blob id by `TestVendoredCRDs_MatchSource`, which also holds each directory to
+the tag of the module `go.mod` links:
+
+- the seven `monitoring.coreos.com` CRDs of the monitoring kinds, from
+  `example/prometheus-operator-crd/` of prometheus-operator `v0.94.2`, beside the operator
+  excerpt in `testdata/upstream/prometheus-operator/` (`scripts/vendor-prometheus-operator-gates.sh`);
+- the CRDs of the fourteen Flux kinds, from `config/crd/bases/` of each controller's repository
+  at the tag of its API module (`api/v1.7.1` of helm-controller, `api/v1.10.1` of
+  kustomize-controller and source-controller, `api/v1.10.0` of notification-controller,
+  `api/v1.3.0` of image-reflector-controller and image-automation-controller, `api/v2.3.1` of
+  source-watcher), one directory per repository under `testdata/upstream/` with its `LICENSE`
+  (`scripts/vendor-flux-crds.sh`). The one addition to their bytes is an `allow-term` pragma
+  comment line above an upstream line that names a term the repository's forbidden-terms guard
+  lists (a receiver type of the `Receiver` CRD). Each `file` pin in `SOURCE` is the blob id of
+  the committed file; a file carrying pragma lines also has an `# upstream` line naming
+  upstream's blob id, which the file must hash to with those lines stripped. A file with an
+  `# upstream` line and no pragma, a pragma in a file with none, and a pragma whose next line
+  does not name its term all fail the test.
+
+The kinds' lists stay derived from the markers of the Go source; the CRDs answer for them.
+The External Secrets Operator's kinds are the exception: its module ships no CRD and none is
+vendored yet, so the generated refusal answers for them and the API server does not
+(go-kure/launcher#1108).
+Of every type that holds a generated path, the test creates the object with one such path
+authored, which the API server accepts, and without it, which the API server refuses as
+missing a required field (a path whose CRD gives it a default is passed over for another of
+its type: the API server fills a default only where the field is left out of the object, not
+where the type writes it empty). Every generated path is one the CRD declares. The rows
+author what the marker schema cannot: a URL, duration or enumerated value where the filled
+control's would break a pattern or an enum (`generatedHarnessSamples`).
 
 The VolSync, MetalLB, further cnpg and Cilium kinds are derived from the CRDs their linked
 modules ship, and the test runs a row of each of their types that holds a generated field
@@ -13206,9 +13256,9 @@ match expression), has no member: those are refused on every kind
 | `cnpg-pooler` | 1 | | | 1 | |
 | `prometheus`, `alertmanager`, `thanosruler` | 8 each | | | | 8 |
 
-Every remaining member is an exception or undecided. None is left on the other kinds whose list
-is generated (`cnpg-pooler` keeps its exception, and `prometheus`, `alertmanager` and
-`thanosruler` their undecided owner reference fields), nor on the two Cilium network policy
+Every remaining member is an exception. None is left on the other kinds whose list is
+generated (`cnpg-pooler` keeps its accepted exception, and `prometheus`, `alertmanager` and
+`thanosruler` their pruned owner reference fields), nor on the two Cilium network policy
 kinds, whose list is kept by hand. `metallb-bfdprofile` and `metallb-community` are not
 measured: their CRDs require no field, and `TestMetalLBKinds_RequiredMatchCRD` holds each kind's
 empty list to its CRD. Nor is `apiservice`: no CRD serves it, the API server's aggregation layer
@@ -13223,8 +13273,10 @@ an object of such values.
 **What the API server makes of them** is a value rule of each field, not read here. The
 exceptions are shown: `TestKindComponents_GeneratedRequiredBothWays` creates the Pooler without
 `template.spec.containers`, and without the template's `spec`, and the API server accepts both.
-The Prometheus operator's module ships no CRD, so no API server answer is shown for its kinds
-here; those rows, and the undecided owner reference fields, follow in a follow-up.
+It creates each workload kind of the Prometheus operator with an owner reference in an
+ephemeral claim template's metadata authored whole, and with the field taken out: the API
+server names that `ownerReferences` an unknown field in both, and nothing else, and accepts
+the object it prunes it from, so it drops the owner reference whatever it holds.
 Before go-kure/launcher#883 generated their lists, the same was shown of `imageCatalogRef` on
 `cnpg-cluster` and `pgbouncer.imageCatalogRef` on `cnpg-pooler`: a `kind` written `""` refused
 by the CRD's own rule on the reference, a `name` written `""` and a `major` written `0` accepted.
@@ -13266,9 +13318,10 @@ value). The test fails on any difference, a new member or one that is gone, so a
 bump or a kind change that moves the set fails CI; `UPDATE_REQUIRED_WRITTEN_PIN=1` rewrites
 the file, and is refused where `CI` is set.
 
-What remains of go-kure/launcher#883 is the follow-up that vendors the Prometheus operator's and
-the Flux controllers' CRDs: it shows the API server's answers for those kinds and settles the
-undecided owner reference fields.
+At this pin the file holds 25 members, every one an exception: the accepted
+`cnpg-pooler template.spec.containers` and the 24 pruned owner reference fields. The External
+Secrets kinds' generated paths are held by the kind only, with no API server row, until their
+CRDs are vendored (go-kure/launcher#1108).
 
 ### Every spec field is this package's to write
 

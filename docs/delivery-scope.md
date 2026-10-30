@@ -1078,14 +1078,16 @@ and by scope, whatever component or trait emits it.
     commits their selections through its own GitRepository. Nothing gates this either.
   - Required fields follow the rule of the Prometheus operator's kinds, and are derived
     as theirs are, from the `+required` markers of the linked modules' Go source: the
-    API modules of the Flux controllers ship no CRD, so no list is held to the API
-    server's validator yet; a follow-up adds those rows. The Flux Operator's module
+    API modules of the Flux controllers ship no CRD, so the lists are held to the API
+    server's validator on the controllers' CRDs, vendored for the tests from each
+    controller's repository at the tag of its linked API module. The Flux Operator's module
     ships its CRDs; the list of a resourcesetinputprovider is read from its CRD
     instead, and held to that CRD by the API server. Since go-kure/launcher#883 the lists are generated from that
     derivation, with the same paths and messages as the lists kept by hand before.
-  - **The APIs' expression rules are not checked,** for the same reason: a check is
-    held to the API server's validator (go-kure/launcher#874), which answers from a
-    CRD. An ImagePolicy with `interval` and no `digestReflectionPolicy: Always`, or the
+  - **The APIs' expression rules are not checked at build:** a check is held to the
+    API server's validator (go-kure/launcher#874), which answers from a CRD, and the
+    build reads none for these kinds (the linked modules ship none; the CRDs vendored
+    for the tests, go-kure/launcher#883, are test data). An ImagePolicy with `interval` and no `digestReflectionPolicy: Always`, or the
     reverse, builds and is refused at apply; so does an ArtifactGenerator without a
     `pathPattern` whose artifact is not named as a Kubernetes object, and a
     ResourceSetInputProvider whose `url`, Secret references, account, `insecure` or
@@ -1228,11 +1230,12 @@ and by scope, whatever component or trait emits it.
   policies, whose one rule's list is kept by hand and refuses every derived field;
   `cnpg-pooler` keeps one named exception, the `containers: []` it writes into its
   template, which the Pooler CRD accepts, and `prometheus`, `alertmanager` and
-  `thanosruler` keep eight each pinned, the owner reference fields of an ephemeral claim
-  template's metadata, which a follow-up settles on the operator's CRDs together with
-  the monitoring kinds' API server rows; the API server rows of the Flux controllers'
-  kinds, on their CRDs, follow in that follow-up too); the pin holds those 25 fields
-  only, each an exception or undecided.
+  `thanosruler` keep eight named exceptions each, the owner reference fields of an
+  ephemeral claim template's metadata, which the API server prunes: the operator's
+  CRDs, vendored for the tests, declare that metadata as an object with no field); the
+  pin holds those 25 fields only, each an exception. The External Secrets kinds' lists
+  are held by the kind only, with no API server answer, until their CRDs are vendored
+  (go-kure/launcher#1108).
 - **Shipped: three kinds of cert-manager's `cert-manager.io/v1` API,** `issuer`,
   `clusterissuer` and `certificate` (`issuer.go`, `clusterissuer.go`, `certificate.go`,
   with what they share in `certmanager_common.go`), each the strict projection of its
@@ -1406,7 +1409,8 @@ and by scope, whatever component or trait emits it.
     module, which ships no CRD. **The lists are generated** (a store's 265 paths over
     every provider at this pin, in `zz_generated_kind_required.go`, with those of the
     cert-manager and CloudNativePG kinds, go-kure/launcher#883), and a test fails where the file and the
-    derivation differ. Four more fields of a store are
+    derivation differ. The lists are held by the kind only: no CRD of the operator is
+    vendored, so no API server answers for them (go-kure/launcher#1108). Four more fields of a store are
     ones the API would default and the type always writes, so the default never
     applies and the value must be written: **a Vault store writes its `version`.** The
     `key` and `operator` of a match expression must be authored too, presence only
@@ -1785,8 +1789,8 @@ and by scope, whatever component or trait emits it.
     container's `name`) is refused unauthored under an authored parent, and so are the
     `username` and the `password` of a `basicAuth`, which the API server accepts left
     out and the operator refuses (**breaking** for a document that leaves one out). The
-    harness rows that run these fields through the operator's CRDs follow in a
-    follow-up.
+    harness runs these fields through the operator's CRDs, vendored for the tests from
+    its repository at the linked release.
   - A Probe needs `prober.url` here because the object always carries a prober: a limit
     of the Go type, which writes one whether or not it was authored, not a rule of the
     API, which does not require `prober` and refuses one without a `url`.
@@ -1845,9 +1849,10 @@ and by scope, whatever component or trait emits it.
     label only if the author writes the component's own value into `podMetadata.labels`;
     otherwise the NetworkPolicies generated for the component do not select them.
   - **The module ships no CRD.** The required fields are held to the markers of its
-    source, and the one expression rule the spec reaches (an `updateStrategy` with a
-    `rollingUpdate` must be of type `RollingUpdate`) is listed and left to the API
-    server. On a listed container, init container or volume, and on a patch of one of
+    source. The build reads no CRD (the one vendored for the tests, go-kure/launcher#883,
+    is test data), so the one expression rule the spec reaches (an `updateStrategy` with
+    a `rollingUpdate` must be of type `RollingUpdate`) is not checked at build: it is
+    listed and left to the API server, which refuses the object at apply. On a listed container, init container or volume, and on a patch of one of
     the operator's own containers too, the kind refuses what the pod kinds refuse: an
     authored `0` on a probe timing, an empty string the API server defaults, and a
     `hostPort` of `0` under `hostNetwork`. It also refuses an empty `portName`,
@@ -1973,9 +1978,11 @@ and by scope, whatever component or trait emits it.
     group would be refused. An authored empty group is refused by the entry's index, not
     repaired, and a test holds the written value to the module's default and enum.
   - **The module ships no CRD.** The required fields are held to the markers of its
-    source, and the two expression rules the spec reaches (a `remoteWrite[].sigv4`
+    source. The build reads no CRD (the one vendored for the tests, go-kure/launcher#883,
+    is test data), so the two expression rules the spec reaches (a `remoteWrite[].sigv4`
     `externalId` needs a `roleArn`; an `updateStrategy` with a `rollingUpdate` must be of
-    type `RollingUpdate`) are listed and left to the API server.
+    type `RollingUpdate`) are not checked at build: they are listed and left to the API
+    server, which refuses the object at apply.
 - **Shipped: `prometheus`, the Prometheus of the same API** (`prometheus.go`, on what
   `monitoring_workload.go` shares): the strict projection of `PrometheusSpec`, built on
   `policyHeldKind`, namespaced, declaring its object and taking `objectName`. Launcher
@@ -2115,10 +2122,11 @@ and by scope, whatever component or trait emits it.
     index: the Go type writes the field even when empty, and the API admits only that
     one group, which it defaults where the field is absent.
   - **The module ships no CRD.** The required fields are held to the markers of its
-    source, and the five expression rules the spec reaches (two on the Topology sharding
-    strategy, the `updateStrategy` type, and a `sigv4` `externalId` without a `roleArn`
-    on a remote write entry and an Alertmanager endpoint) are listed and left to the API
-    server.
+    source. The build reads no CRD (the one vendored for the tests, go-kure/launcher#883,
+    is test data), so the five expression rules the spec reaches (two on the Topology
+    sharding strategy, the `updateStrategy` type, and a `sigv4` `externalId` without a
+    `roleArn` on a remote write entry and an Alertmanager endpoint) are not checked at
+    build: they are listed and left to the API server, which refuses the object at apply.
   - **A test-derivation limit:** the check that every pod-shaping field is held or listed
     derives top-level fields only. `shards`, `thanos.image` and `thanos.resources` are
     held by tests of their own; the other fields of the sidecar (its volume mounts,
@@ -2530,7 +2538,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Shipped | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` | §7 | Shipped | — |
 | [go-kure/launcher#849](https://github.com/go-kure/launcher/issues/849) | Policy refusals carry a class | §5.3 | Shipped | — |
-| [go-kure/launcher#883](https://github.com/go-kure/launcher/issues/883) | Refuse every required field a kind writes unauthored, from one generated list | §6.2 | Partly: the generator and its rule; the cert-manager, External Secrets, CloudNativePG (`cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-database`), Prometheus operator, Flux, Flux Operator, Gateway API and VolSync kinds; the MetalLB, further CloudNativePG and Cilium kinds but the two network policies. In progress: the follow-up that vendors the Prometheus operator's and Flux controllers' CRDs remains | — |
+| [go-kure/launcher#883](https://github.com/go-kure/launcher/issues/883) | Refuse every required field a kind writes unauthored, from one generated list | §6.2 | Shipped: the generator and its rule; the cert-manager, External Secrets, CloudNativePG, Prometheus operator, Flux, Flux Operator, Gateway API, VolSync, MetalLB and Cilium kinds but the two Cilium network policies, whose hand-kept list refuses every derived field; the Prometheus operator's and the Flux controllers' CRDs vendored for the harness; the External Secrets kinds are held by the kind only until their CRDs are vendored (go-kure/launcher#1108) | — |
 | [go-kure/launcher#934](https://github.com/go-kure/launcher/issues/934) | Object kind policy (the decision of [go-kure/launcher#922](https://github.com/go-kure/launcher/issues/922)) | §5.4 | Shipped | go-kure/launcher#849 |
 | [go-kure/launcher#959](https://github.com/go-kure/launcher/issues/959) | One rule for every Service-derived name, with its cluster-version limit | §3.5 | Shipped | — |
 | [go-kure/launcher#1001](https://github.com/go-kure/launcher/issues/1001) | Complete CNPG backup and recovery to S3 through OAM lowering | §6.3 | Shipped | — |

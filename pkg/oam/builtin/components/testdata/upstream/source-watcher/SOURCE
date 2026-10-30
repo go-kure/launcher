@@ -1,0 +1,9 @@
+# CRDs of fluxcd/source-watcher, copied by scripts/vendor-flux-crds.sh.
+# Licensed under the Apache License, Version 2.0; LICENSE is the project's copy of the licence, at the same tag.
+# Each pin below is the git blob id of the committed file. A line naming a term the forbidden-terms
+# guard lists is preceded by an allow-term pragma comment line; an "# upstream" line names upstream's
+# blob id of a file that carries one, which the components tests check with those lines stripped.
+tag api/v2.3.1
+tag-object 3c3b15cee860bb911ca426eb94fcdda55adf1f51
+licence LICENSE 261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64
+file config/crd/bases/source.extensions.fluxcd.io_artifactgenerators.yaml b3664072a25381f80bd46d743db573c3e712acb7

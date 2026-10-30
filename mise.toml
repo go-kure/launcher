@@ -80,8 +80,12 @@ description = "Re-fetch the Kubernetes defaulter excerpt the components defaulte
 run = "bash scripts/vendor-k8s-defaulters.sh"
 
 [tasks.vendor-prometheus-operator-gates]
-description = "Re-fetch the Prometheus operator excerpt the components version-gate tests read (mise run vendor-prometheus-operator-gates vX.Y.Z; never run by CI)"
+description = "Re-fetch the Prometheus operator excerpt the components version-gate and required-field tests read, its CRDs included (mise run vendor-prometheus-operator-gates vX.Y.Z; never run by CI)"
 run = "bash scripts/vendor-prometheus-operator-gates.sh"
+
+[tasks.vendor-flux-crds]
+description = "Re-fetch the Flux controllers' CRDs the components required-field tests read, at the tags of the API modules go.mod links (never run by CI)"
+run = "bash scripts/vendor-flux-crds.sh"
 
 [tasks.vendor-alertmanager-features]
 description = "Re-fetch the Alertmanager featurecontrol.go copies the components feature-flag test reads (mise run vendor-alertmanager-features 0.27 0.34; never run by CI)"

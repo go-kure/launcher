@@ -458,7 +458,7 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 // and volumes their specs list. It is podSpecOmitted without the ephemeral
 // containers, which these specs do not have.
 func monitoringWorkloadPodOmitted() map[string]string {
-	const reason = "marked required in the upstream source and not checked: the linked module ships no CRD that shows the API server refuses the object without it, and the field is behind a feature gate of the cluster"
+	const reason = "marked required in the upstream source and not checked at build: the build reads no CRD (the linked module ships none; the CRD vendored for the tests, go-kure/launcher#883, is test data), so the field is left to the API server, and it is behind a feature gate of the cluster"
 	out := map[string]string{}
 	for _, list := range []string{"containers", "initContainers"} {
 		out[list+"[].restartPolicyRules[].action"] = reason
@@ -663,9 +663,10 @@ func reachedRules(t *testing.T, typ reflect.Type) map[string][]string {
 // TestMonitoringWorkloadKinds_RulesListed derives, from the markers of the
 // linked modules' source, every expression rule the API states on a type or a
 // field the kind's spec reaches, and holds the kind's list of the rules it
-// leaves to the API server to them. The linked module ships no CRD, so none is
-// checked: a dependency bump that adds a rule to a reached type, drops one or
-// rewords one fails here, naming it.
+// leaves to the API server to them. None is checked at build: the build reads
+// no CRD (the linked module ships none; the CRDs vendored for the tests,
+// go-kure/launcher#883, are test data). A dependency bump that adds a rule to a
+// reached type, drops one or rewords one fails here, naming it.
 func TestMonitoringWorkloadKinds_RulesListed(t *testing.T) {
 	// Vacuity guard: the markers are read, on a type the kinds do not reach
 	// and on one they do.

@@ -25,9 +25,9 @@ import (
 
 // vendoredPromOpDir holds the excerpt of the Prometheus operator's source the
 // version gates of the kinds whose pods it runs are held to
-// (monitoring_version_gates.go): copied unmodified from
-// prometheus-operator/prometheus-operator at the release of the linked
-// monitoring API, under its Apache-2.0 licence, by
+// (monitoring_version_gates.go), and the CRDs of its kinds launcher writes:
+// copied unmodified from prometheus-operator/prometheus-operator at the
+// release of the linked monitoring API, under its Apache-2.0 licence, by
 // scripts/vendor-prometheus-operator-gates.sh, with the project's LICENSE and
 // NOTICE. Its SOURCE file names the tag and the git blob id of each file.
 const vendoredPromOpDir = "testdata/upstream/prometheus-operator"
@@ -38,6 +38,10 @@ type vendoredPromOp struct {
 	fset  *token.FileSet
 	tag   string
 	files map[string]*ast.File
+	// crds are the CustomResourceDefinitions of the excerpt, by the path of
+	// each in the operator's repository: the kinds' CRDs, which the linked
+	// module does not ship (go-kure/launcher#883).
+	crds map[string][]byte
 }
 
 // vendoredBlobID is the git blob id of content, the id SOURCE names a file by.
@@ -65,18 +69,20 @@ func linkedPromOpVersion(t *testing.T) string {
 	return ""
 }
 
-// loadVendoredPromOp reads SOURCE and parses every Go file it names, failing
-// on a file whose blob id differs, a Go file without its licence header, a
-// file in the directory that SOURCE does not name, an excerpt without the
-// licence's full text or the project's NOTICE (Apache-2.0 asks a
-// redistributor to pass on both), and a tag other than the linked release.
+// loadVendoredPromOp reads SOURCE, parses every Go file it names and reads
+// every CRD it names (a `.yaml` file), failing on a file whose blob id
+// differs, a Go file without its licence header, a CRD that is not one of
+// monitoring.coreos.com, a file in the directory that SOURCE does not name, an
+// excerpt without the licence's full text or the project's NOTICE (Apache-2.0
+// asks a redistributor to pass on both), and a tag other than the linked
+// release.
 func loadVendoredPromOp(t *testing.T) *vendoredPromOp {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(vendoredPromOpDir, "SOURCE"))
 	if err != nil {
 		t.Fatalf("read SOURCE: %v", err)
 	}
-	src := &vendoredPromOp{fset: token.NewFileSet(), files: map[string]*ast.File{}}
+	src := &vendoredPromOp{fset: token.NewFileSet(), files: map[string]*ast.File{}, crds: map[string][]byte{}}
 	listed := map[string]bool{"SOURCE": true}
 	read := func(rel, blob string) []byte {
 		listed[rel] = true
@@ -108,6 +114,13 @@ func loadVendoredPromOp(t *testing.T) *vendoredPromOp {
 		case fields[0] == "notice" && len(fields) == 3:
 			read(fields[1], fields[2])
 			notice = true
+		case fields[0] == "file" && len(fields) == 3 && strings.HasSuffix(fields[1], ".yaml"):
+			rel := fields[1]
+			body := read(rel, fields[2])
+			if !bytes.Contains(body, []byte("kind: CustomResourceDefinition")) || !bytes.Contains(body, []byte("group: monitoring.coreos.com")) {
+				t.Fatalf("%s is not a CustomResourceDefinition of monitoring.coreos.com", rel)
+			}
+			src.crds[rel] = body
 		case fields[0] == "file" && len(fields) == 3:
 			rel := fields[1]
 			body := read(rel, fields[2])
