@@ -44,13 +44,13 @@ REPOS=(
 
 GUARD="$REPO_ROOT/site/scripts/check-forbidden-terms.sh"
 
-# The terms the forbidden-terms guard lists, read from the guard so that this
-# script names none, and the comment line a pragma for them is written as.
-TERMS="$(sed -n "s/^TERMS_RE='\([a-z|]*\)'$/\1/p" "$GUARD")"
-if [[ -z "$TERMS" ]]; then
-  echo "ERROR: no TERMS_RE line in $GUARD" >&2
-  exit 1
-fi
+# The forbidden-terms guard's terms and matcher, read from the guard so that
+# this script names no term and pragmas every line the guard would refuse, a
+# term inside an identifier included; and the comment line a pragma is written
+# as.
+# shellcheck source=scripts/forbidden-terms-lib.sh
+source "$SCRIPT_DIR/forbidden-terms-lib.sh"
+ft_load "$GUARD"
 PRAGMA_RE='^ *# allow-term:[a-z]+( allow-term:[a-z]+)*$'
 
 WORK=""
@@ -111,15 +111,7 @@ for entry in "${REPOS[@]}"; do
   # tests check it.
   declare -A committed=()
   for f in "${files[@]:1}"; do
-    awk -v terms="$TERMS" '
-      BEGIN { n = split(terms, t, "|") }
-      {
-        low = tolower($0); tags = ""
-        for (i = 1; i <= n; i++)
-          if (match(low, "(^|[^a-z0-9_])" t[i] "([^a-z0-9_]|$)")) tags = tags (tags == "" ? "" : " ") "allow-term:" t[i]
-        if (tags != "") { match($0, /^ */); print substr($0, 1, RLENGTH) "# " tags }
-        print
-      }' "$stage/$f" >"$stage/$f.pragma"
+    ft_add_pragmas "$stage/$f" "$stage/$f.pragma"
     mv "$stage/$f.pragma" "$stage/$f"
     stripped="$(grep -vE "$PRAGMA_RE" "$stage/$f" | git hash-object --no-filters --stdin)"
     if [[ "$stripped" != "${blob[$f]}" ]]; then

@@ -408,11 +408,15 @@ test-verify-merge: ## Self-test scripts/verify-merge.sh against a throwaway fixt
 test-pin-impact: ## Run scripts/check-pin-impact.sh's hermetic cases (stub curl, throwaway git repositories, no network)
 	bash scripts/test/run-tests.sh
 
+.PHONY: test-forbidden-terms
+test-forbidden-terms: ## Self-test the vendor scripts' guard matcher and cliff.toml's changelog scrub against the forbidden-terms guard (throwaway repositories, no network; needs git-cliff on PATH)
+	bash scripts/test/forbidden-terms-test.sh
+
 .PHONY: check
-check: lint vet test-short check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact check-issue-refs ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins, verify-merge self-test, pin-impact cases, issue refs)
+check: lint vet test-short check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact test-forbidden-terms check-issue-refs ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins, verify-merge self-test, pin-impact cases, forbidden-terms self-test, issue refs)
 
 .PHONY: precommit
-precommit: fmt tidy lint test check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact check-issue-refs ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync, tool pins, verify-merge self-test, pin-impact cases, issue refs)
+precommit: fmt tidy lint test check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact test-forbidden-terms check-issue-refs ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync, tool pins, verify-merge self-test, pin-impact cases, forbidden-terms self-test, issue refs)
 
 .PHONY: ci
 ci: deps fmt tidy lint vet test test-race test-coverage test-integration build vuln check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact check-issue-refs ## Run comprehensive CI pipeline
