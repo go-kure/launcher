@@ -1,6 +1,9 @@
 package components
 
 import (
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -39,24 +42,47 @@ const gatewayDecoded = " Decoded strictly into the Gateway API's type: see "
 func gatewayListenerItems(typ string) *oam.PropertySchema {
 	return &oam.PropertySchema{
 		Type: oam.PropertyTypeObject, AdditionalProperties: true,
-		Description: "One listener: `name`, `port` (1 to 65535) and `protocol` (HTTP, HTTPS, TLS, TCP, UDP, or a domain-prefixed one), which the API requires and launcher asks for; `hostname`, `tls` (`mode`, `certificateRefs`, `options`) and `allowedRoutes` (`namespaces`, `kinds`) are optional." + gatewayDecoded + typ + " in its API reference.",
+		Description: "One listener: `name`, `port` (1 to 65535) and `protocol` (HTTP, HTTPS, TLS, TCP, UDP, or a domain-prefixed one), which the API requires and launcher asks for; `hostname`, `tls` (`mode`, `certificateRefs`, `options`), `allowedRoutes` (`namespaces`, `kinds`) and `filters` (`requests`, each an ExternalAuth or ExtensionRef filter; an experimental-channel field) are optional." + gatewayDecoded + typ + " in its API reference.",
 	}
 }
 
 // gatewayListenerRequired is the required list of the listeners under the
 // path at ("listeners[]") that a Gateway and a ListenerSet share: of a
-// certificate reference and of an allowed route kind that are authored, the
-// field the API requires that the type would write empty, and the key and the
-// operator of a match expression in the selector of the namespaces routes may
-// attach from (gatewayNamespacesRequired).
+// certificate reference, of an allowed route kind and of a request filter that
+// are authored, the fields the API requires that the type would write empty,
+// and the key and the operator of a match expression in the selector of the
+// namespaces routes may attach from (gatewayNamespacesRequired).
 func gatewayListenerRequired(at string) map[string]string {
+	const filter = ".filters.requests[]"
 	return requiredFields(
 		map[string]string{
 			at + ".tls.certificateRefs[].name": "the name of the Secret, or of the other object, that holds the certificate",
 			at + ".allowedRoutes.kinds[].kind": "the kind of route the listener allows, such as HTTPRoute",
+
+			at + filter + ".type":                         "the type of the filter, ExternalAuth or ExtensionRef",
+			at + filter + ".externalAuth.backendRef":      "the backend the authorization requests are sent to",
+			at + filter + ".externalAuth.backendRef.name": "the name of the backend the authorization requests are sent to",
 		},
 		gatewayNamespacesRequired(at+".allowedRoutes.namespaces"),
+		gatewayReferenceRequired("the object that implements the filter", at+filter+".extensionRef"),
 	)
+}
+
+// refuseOmittedListenerFilterFields refuses a request filter of the listener
+// at index i that leaves out a field the API requires and the type omits
+// when it is not authored or is authored empty: the protocol of an external
+// authorization. A filter's other required fields the type writes, and the
+// kind's required list names them (gatewayListenerRequired).
+func refuseOmittedListenerFilterFields(i int, filters *gatewayv1.ListenerFilters) error {
+	if filters == nil {
+		return nil
+	}
+	for j, filter := range filters.Requests {
+		if filter.ExternalAuth != nil && filter.ExternalAuth.ExternalAuthProtocol == "" {
+			return errors.Errorf("listeners[%d].filters.requests[%d].externalAuth.protocol: required (the protocol the authorization server speaks, HTTP or GRPC)", i, j)
+		}
+	}
+	return nil
 }
 
 // gatewayNamespacesRequired is the required list of the namespace choices

@@ -1157,9 +1157,10 @@ and by scope, whatever component or trait emits it.
   - Required fields follow the rule of the Prometheus operator's kinds: a field the API
     requires that the Go type writes whether or not it was authored must be authored.
     Since go-kure/launcher#883 each list is generated from the CRDs the linked module
-    ships, with the same paths and messages as the list kept by hand before (4 paths for a gatewayclass,
-    26 for a gateway, 6 for a listenerset, 7 for a referencegrant, 9 for a
-    backendtlspolicy), read in the experimental channel's CRDs, which hold every field
+    ships, with the same paths and messages as the list kept by hand before, and since
+    go-kure/launcher#1117 (Gateway API v1.7.0) those of a listener's request filters (4
+    paths for a gatewayclass, 32 for a gateway, 12 for a listenerset, 7 for a
+    referencegrant, 9 for a backendtlspolicy), read in the experimental channel's CRDs, which hold every field
     the Go types do, and held to agree with the standard channel's. A `gateway` and a
     `listenerset` also hold the `key` and `operator` of a match expression in a namespace
     selector (`allowedRoutes.namespaces.selector`, `allowedListeners.namespaces.selector`),
@@ -1170,12 +1171,14 @@ and by scope, whatever component or trait emits it.
     the kind itself,** as `servicecidr` refuses a missing `cidrs`, absent or authored
     empty: a `listenerset` with no `listeners`, a `backendtlspolicy` with no
     `targetRefs`, and **a ListenerSet listener without its `name`, `port` or
-    `protocol`,** which a Gateway's listener must author too. The same test derives
-    that set from the CRDs, at every depth, and holds each member to the kind's refusal
-    or to a stated reason the decoded value cannot show the omission; there are five,
-    all refused.
-  - `defaultScope` on a Gateway is an experimental-channel field, the only one of the
-    five specs; a test holds that.
+    `protocol`,** which a Gateway's listener must author too, and, on a `gateway` and a
+    `listenerset` since go-kure/launcher#1117, **the `protocol` of a listener request
+    filter's `externalAuth`**. The same test derives that set from the CRDs, at every
+    depth, and holds each member to the kind's refusal or to a stated reason the decoded
+    value cannot show the omission; there are seven, all refused.
+  - `defaultScope` and an address's `routability` on a Gateway, and a listener's
+    `filters` on a Gateway and a ListenerSet, are experimental-channel fields, the only
+    ones of the five specs; a test holds that.
   - **No host these objects name is held to the allowed registries** (a listener's
     hostname, a requested address, the hostname and subject alternative names a
     BackendTLSPolicy validates): none is an artifact source. **No field holds a literal
@@ -1209,7 +1212,8 @@ and by scope, whatever component or trait emits it.
     Service names its `port`. Tests run the CRD of each channel through the API
     server's creation path and hold a kind's refusals to that path's; every other
     expression rule a CRD declares is named there with the reason it is left to the
-    API server.
+    API server, the experimental channel's rule that an `XBackend` backend names no
+    `port` included.
   - `useDefaultGateways` is an experimental-channel field; a test holds that.
 - **Shipped: the `grpcroute` kind** (`grpcroute.go`), the strict projection of
   `GRPCRouteSpec`, on the `httproute` kind's recipe rather than on `policyFreeKind`:

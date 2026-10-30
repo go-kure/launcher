@@ -6801,13 +6801,25 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   a parent and of a backend (`parentRefs[0].name: required (the Gateway API
   requires the name of what this refers to)`), a filter's `type`, the `name`
   and `value` of a header or query parameter match and of a header modifier,
-  a mirror's `backendRef`, 44 paths at v1.6.3.
+  a mirror's `backendRef`, the `name` of a header session persistence's
+  `header`, 45 paths at v1.7.0.
   The list is generated from the CRD (see "Required fields a kind writes
   unauthored and does not refuse"), and the refusal runs after the decode's
   own checks. Each says the generic sentence of its class: the kind kept no
   list by hand before. `useDefaultGateways` is a field of the
   Gateway API's experimental channel: the standard channel's HTTPRoute CRD
   does not hold it, so a cluster on that channel does not keep it.
+
+  **A rule's `sessionPersistence` changed shape at Gateway API v1.7.0**
+  (go-kure/launcher#1117, **breaking**): `sessionName` is gone and
+  `cookieConfig` is now `cookie`, so a document that authors either key is
+  refused by the strict decode. The cookie's name moves to `cookie.name`, with
+  `type: Cookie` (the API's default); a header session is `type: Header` with
+  `header.name`, which is then required (above). The API requires the object
+  of the `type` and refuses the other, so a `sessionPersistence` that authors
+  neither is a Cookie one without its `cookie` and is refused by the API
+  server (`cookie: {}` asks for nothing more); the kind leaves those rules to
+  it. Unset, `cookie.path` is `/` by the API's documentation.
 
   **It is an authored object, not the `httproute` trait**, although the two
   share the type name. The trait attaches to a component and routes to that
@@ -6851,10 +6863,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   capability, and `ApplyPolicy` is a no-op. A field the GRPCRoute CRD
   requires that the type writes unauthored is refused under an authored
   parent, as on an `httproute` (`rules[0].backendRefs[0].name: required (the
-  Gateway API requires the name of what this refers to)`), 34 paths at
-  v1.6.3; the
+  Gateway API requires the name of what this refers to)`), 35 paths at
+  v1.7.0; the
   list is generated (go-kure/launcher#883; see [Required fields a kind writes
   unauthored and does not refuse](#required-fields-a-kind-writes-unauthored-and-does-not-refuse)).
+  A rule's `sessionPersistence` changed shape at v1.7.0 as on an `httproute`
+  (**breaking**): `sessionName` and `cookieConfig` are refused, and
+  `cookie.name` or `header.name` takes their place.
 
   **Labels and annotations** are the `labels` and `annotations` properties.
   **Not covered:** its `status`, which the Gateway controller writes.
@@ -8201,12 +8216,16 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `description`.
   - `gateway` (`GatewaySpec`): `gatewayClassName`, `listeners`, `addresses`,
     `infrastructure`, `allowedListeners`, `tls` and `defaultScope`.
-    **`defaultScope` is an experimental-channel field:** the Go type holds it
-    and the standard channel's Gateway CRD does not, so a cluster on that
-    channel does not keep it. It is the only such field of these five specs
-    at v1.6.3, and `TestGatewayKinds_WrittenEmptyAccepted` holds that.
+    **`defaultScope`, an address's `routability` and a listener's `filters`
+    are experimental-channel fields:** the Go type holds them and the
+    standard channel's Gateway CRD does not, so a cluster on that channel does
+    not keep them. A listener's `filters` holds `requests`, each an
+    `ExternalAuth` or an `ExtensionRef` filter by its `type`. They are the
+    only such fields of these five specs at v1.7.0, and
+    `TestGatewayKinds_WrittenEmptyAccepted` holds that.
   - `listenerset` (`ListenerSetSpec`): `parentRef` and `listeners`, whose
-    entries take the fields of a Gateway's listener.
+    entries take the fields of a Gateway's listener, `filters` included, an
+    experimental-channel field here too.
   - `referencegrant` (`ReferenceGrantSpec`): `from` and `to`.
   - `backendtlspolicy` (`BackendTLSPolicySpec`): `targetRefs`, `validation`
     and `options`.
@@ -8225,7 +8244,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     the `mode` of a Gateway's frontend TLS validation (`AllowValidOnly`), so
     an authored `mode: ""` would be left out and defaulted, and it is refused
     (`tls.frontend.default.validation.mode: "" cannot be carried by the
-    Gateway API types (…)`).
+    Gateway API types (…)`). A listener request filter's
+    `externalAuth.forwardBody.maxSize` is omitted when zero too; the CRD gives
+    it no default, and by the API unset and `0` both forward no body.
     `TestGatewayKinds_DefaultedZeros` holds each kind's list of such fields to
     the numbers, booleans and strings that are omitted when zero and that a
     CRD of either channel defaults to something else.
@@ -8243,6 +8264,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     and of a `perPort` entry its `port` and `tls`; of a `validation` that is
     authored, its `caCertificateRefs`.
   - A `listenerset`: `parentRef` with its `name`.
+  - Of a listener request filter that is authored, on a `gateway` and a
+    `listenerset`: its `type`; of its `externalAuth`, the `backendRef` with
+    its `name`; of its `extensionRef`, the `group`, `kind` and `name`.
   - A `referencegrant`: `from` and `to`; of a source its `group`, `kind` and
     `namespace`, of a target its `group` and `kind`. The core group is
     authored as `group: ""`.
@@ -8271,7 +8295,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   **A required field the type omits is refused by the kind itself,** since no
   required list can name it: the type leaves it out where it is not authored
   and where it is authored empty alike, and the API server refuses the object
-  either way. There are five at v1.6.3:
+  either way. There are seven at v1.7.0:
   - a `listenerset` with no `listeners` and a `backendtlspolicy` with no
     `targetRefs`, absent or empty (`listeners: required (…)`), as a
     `servicecidr` with no `cidrs` is;
@@ -8279,18 +8303,24 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     absent or empty, a `port: 0` included
     (`listeners[1].port: required (…)`). A Gateway's listener must author the
     same three, by the list above: the two listener types carry different
-    json tags, and the answer is the same on both kinds.
+    json tags, and the answer is the same on both kinds;
+  - the `protocol` of a listener request filter's `externalAuth` (HTTP or
+    GRPC), on a `gateway` and a `listenerset`, absent or empty
+    (`listeners[0].filters.requests[0].externalAuth.protocol: required (…)`).
+    Since go-kure/launcher#1117 (**breaking** for a document that leaves it
+    out; the API server refuses that document too).
 
   `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives that set
   from the CRDs, at every depth of the five specs, and holds each member to
   one of two answers: the kind's refusal, which it runs, or a stated reason
   the decoded value cannot show the omission. None has the second answer.
   `TestGatewayKinds_RefusedOmissions` holds each refused field to being
-  required in both channels.
+  required in both channels, or, for a field only the experimental channel
+  holds (the filter's `protocol`), in that channel.
 
   **The lists are generated** (go-kure/launcher#883; see "Required fields a
   kind writes unauthored and does not refuse") from the CRDs the linked
-  module ships: 4 paths for a gatewayclass, 26 for a gateway, 6 for a
+  module ships: 4 paths for a gatewayclass, 32 for a gateway, 12 for a
   listenerset, 7 for a referencegrant, 9 for a backendtlspolicy. The module
   ships two sets, one per channel of the API. The experimental one holds every
   field the Go types do and is the one each path is read in;
@@ -8313,7 +8343,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     and of a `perPort` port, one of `caCertificateRefs` and
     `wellKnownCACertificates`, a subject alternative name's field against
     its `type`, a target's `sectionName` among several targets, a
-    GatewayClass's `controllerName` not changing);
+    GatewayClass's `controllerName` not changing, a listener request filter's
+    `externalAuth` or `extensionRef` against its `type` and its `http` or
+    `grpc` against its `protocol`, and the `port` of its `backendRef`, which
+    a Service must name and an `XBackend` must not);
   - what a Gateway API controller refuses when it reads the object, which
     shows in the object's status, not at creation.
 
@@ -8397,7 +8430,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - **`useDefaultGateways` is an experimental-channel field:** the Go types
     hold it and the standard channel's CRDs do not, so a cluster on that
     channel does not keep it. It is the only such field of these specs at
-    v1.6.3, and `TestGatewayKinds_WrittenEmptyAccepted` holds that.
+    v1.7.0, and `TestGatewayKinds_WrittenEmptyAccepted` holds that.
   - **No default is filled.** The defaults are the CRDs', and the API server
     applies them to what the object leaves out: the `group` and `kind` of a
     parent (a Gateway), and the `group`, `kind` and `weight` of a backend (a
@@ -8444,6 +8477,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     parent apart (by `sectionName`, and in the experimental channel by `port`
     too). The channels write them differently, so a refusal by the kind would
     be wider than one of them;
+  - the experimental channel's rule that a backend of the `XBackend` kind
+    (group `gateway.networking.x-k8s.io`) names no `port`: the standard
+    channel does not declare it, so a refusal by the kind would be wider than
+    that channel;
   - the three expression rules on a TLSRoute's `hostnames` (a name is no IP
     address, it is a DNS name, and a wildcard is its first label alone): they
     hold the form of a value that is authored, as a pattern does;

@@ -33,15 +33,28 @@ var gatewayRouteParentRules = map[string]string{
 	`spec.parentRefs: self.all(p1, self.exists_one(p2, p1.group == p2.group && p1.kind == p2.kind && p1.name == p2.name && (((!has(p1.__namespace__) || p1.__namespace__ == '') && (!has(p2.__namespace__) || p2.__namespace__ == '')) || (has(p1.__namespace__) && has(p2.__namespace__) && p1.__namespace__ == p2.__namespace__ )) && (((!has(p1.sectionName) || p1.sectionName == '') && (!has(p2.sectionName) || p2.sectionName == '')) || (has(p1.sectionName) && has(p2.sectionName) && p1.sectionName == p2.sectionName))))`: gatewayRouteParentsLeft,
 }
 
+// gatewayRouteXBackendLeft says why the rule that an XBackend backend names
+// no port is left to the API server.
+const gatewayRouteXBackendLeft = "only the experimental channel declares the rule, so a refusal by the kind would be wider than the standard channel, which admits a port on that backend"
+
+// gatewayRouteRules are the rules each route kind leaves to the API server:
+// those of the parents, and, of the experimental channel only, that a backend
+// of the XBackend kind names no port.
+var gatewayRouteRules = func() map[string]string {
+	left := maps.Clone(gatewayRouteParentRules)
+	left[`spec.rules[].backendRefs[]: (self.group == 'gateway.networking.x-k8s.io' && self.kind == 'XBackend') ? !has(self.port) : true`] = gatewayRouteXBackendLeft
+	return left
+}()
+
 // gatewayRouteHostnamesLeft says why the rules of a TLSRoute's host names are
 // left to the API server.
 const gatewayRouteHostnamesLeft = "the rule holds the form of a value that is authored, which the kinds leave to the API server, as they leave a pattern or a length"
 
 // gatewayRouteTLSRules are the rules a tlsroute leaves to the API server:
-// those of the parents, and the three that hold the form of a host name. Both
-// channels declare the three alike.
+// those of every route kind (gatewayRouteRules), and the three that hold the
+// form of a host name. Both channels declare the three alike.
 var gatewayRouteTLSRules = func() map[string]string {
-	left := maps.Clone(gatewayRouteParentRules)
+	left := maps.Clone(gatewayRouteRules)
 	for _, rule := range []string{
 		`self.all(h, !isIP(h))`,
 		`self.all(h, !h.contains('*') ? h.matches('^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*)$') : true)`,
@@ -66,8 +79,8 @@ var gatewayRouteKinds = []struct {
 	base      map[string]any
 	left      map[string]string
 }{
-	{component: "tcproute", handler: &TCPRouteHandler{}, crd: "tcproutes", left: gatewayRouteParentRules},
-	{component: "udproute", handler: &UDPRouteHandler{}, crd: "udproutes", left: gatewayRouteParentRules},
+	{component: "tcproute", handler: &TCPRouteHandler{}, crd: "tcproutes", left: gatewayRouteRules},
+	{component: "udproute", handler: &UDPRouteHandler{}, crd: "udproutes", left: gatewayRouteRules},
 	{
 		component: "tlsroute", handler: &TLSRouteHandler{}, crd: "tlsroutes",
 		base: map[string]any{"hostnames": []any{"db.example.com"}},

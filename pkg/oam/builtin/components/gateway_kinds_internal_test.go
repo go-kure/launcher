@@ -47,13 +47,18 @@ var gatewayAPIKinds = []struct {
 	{component: "gatewayclass", crd: "gatewayclasses", typ: reflect.TypeFor[gatewayv1.GatewayClassSpec]()},
 	{
 		component: "gateway", crd: "gateways", typ: reflect.TypeFor[gatewayv1.GatewaySpec](),
-		experimental: []string{"defaultScope"},
-		omitted:      []string{"addresses[].value", "defaultScope", "tls.frontend.default.validation.mode", "tls.frontend.perPort[].tls.validation.mode"},
-		defaulted:    gatewayKind.defaultedZeros.fields,
+		experimental: append([]string{"addresses[].routability", "defaultScope"}, gatewayListenerFiltersExperimental()...),
+		omitted: slices.Concat(
+			[]string{"addresses[].routability", "addresses[].value", "defaultScope"},
+			gatewayListenerFiltersOmitted,
+			[]string{"tls.frontend.default.validation.mode", "tls.frontend.perPort[].tls.validation.mode"},
+		),
+		defaulted: gatewayKind.defaultedZeros.fields,
 	},
 	{
 		component: "listenerset", crd: "listenersets", typ: reflect.TypeFor[gatewayv1.ListenerSetSpec](),
-		omitted: []string{"listeners[].name", "listeners[].port", "listeners[].protocol"},
+		experimental: gatewayListenerFiltersExperimental(),
+		omitted:      append(slices.Clone(gatewayListenerFiltersOmitted), "listeners[].name", "listeners[].port", "listeners[].protocol"),
 	},
 	{component: "referencegrant", crd: "referencegrants", typ: reflect.TypeFor[gatewayv1.ReferenceGrantSpec]()},
 	{
@@ -72,6 +77,34 @@ var gatewayAPIKinds = []struct {
 		component: "tlsroute", crd: "tlsroutes", typ: reflect.TypeFor[gatewayv1.TLSRouteSpec](),
 		experimental: gatewayRouteExperimental, omitted: gatewayRouteExperimental,
 	},
+}
+
+// gatewayListenerFiltersExperimental names, in order, the properties of a
+// listener's request filters, which only the experimental channel's CRD
+// holds, on a Gateway and on a ListenerSet.
+func gatewayListenerFiltersExperimental() []string {
+	const filters = "listeners[].filters"
+	out := []string{filters, filters + ".requests"}
+	for _, field := range []string{
+		"extensionRef", "extensionRef.group", "extensionRef.kind", "extensionRef.name",
+		"externalAuth", "externalAuth.backendRef", "externalAuth.backendRef.group", "externalAuth.backendRef.kind",
+		"externalAuth.backendRef.name", "externalAuth.backendRef.namespace", "externalAuth.backendRef.port",
+		"externalAuth.forwardBody", "externalAuth.forwardBody.maxSize",
+		"externalAuth.grpc", "externalAuth.grpc.allowedHeaders",
+		"externalAuth.http", "externalAuth.http.allowedHeaders", "externalAuth.http.allowedResponseHeaders", "externalAuth.http.path",
+		"externalAuth.protocol", "type",
+	} {
+		out = append(out, filters+".requests[]."+field)
+	}
+	return out
+}
+
+// gatewayListenerFiltersOmitted are, in order, the numbers and strings of a
+// listener's request filter that the type omits when zero.
+var gatewayListenerFiltersOmitted = []string{
+	"listeners[].filters.requests[].externalAuth.forwardBody.maxSize",
+	"listeners[].filters.requests[].externalAuth.http.path",
+	"listeners[].filters.requests[].externalAuth.protocol",
 }
 
 // gatewayRouteExperimental names the property of a route that only the
@@ -236,7 +269,10 @@ func gatewayAPIRefused(t *testing.T, component string) []string {
 // so the refusal is no wider than what a cluster on either channel refuses.
 // The kind refuses an authored empty value as it refuses the omission, since
 // the type omits both; of a list that is an empty list, so each refused list
-// must be one the API wants at least one item of, in both channels.
+// must be one the API wants at least one item of, in both channels. A path
+// that is one of the kind's experimental fields is held to the experimental
+// channel only: the standard one holds no such property, so no document of a
+// cluster on it reaches the refusal.
 func TestGatewayKinds_RefusedOmissions(t *testing.T) {
 	refusals := 0
 	for _, kind := range gatewayAPIKinds {
@@ -246,6 +282,9 @@ func TestGatewayKinds_RefusedOmissions(t *testing.T) {
 				for _, channel := range gatewayAPIChannels {
 					props, required := schemaProperties(gatewayAPICRDSpec(t, channel, kind.crd))
 					held, ok := props[path]
+					if !ok && channel == "standard" && slices.Contains(kind.experimental, path) {
+						continue
+					}
 					if !ok {
 						t.Fatalf("%s is no property of the %s channel's CRD; the kind refuses its omission on every cluster", path, channel)
 					}
@@ -263,8 +302,8 @@ func TestGatewayKinds_RefusedOmissions(t *testing.T) {
 		}
 	}
 	// Vacuity guard: the rows hold the refusals this test reads.
-	if refusals != 12 {
-		t.Errorf("read %d refusals, want 12: a ListenerSet's listeners with a listener's name, port and protocol, a BackendTLSPolicy's targetRefs, a TCPRoute's, a UDPRoute's and a TLSRoute's rules with a rule's backendRefs, and a TLSRoute's hostnames", refusals)
+	if refusals != 14 {
+		t.Errorf("read %d refusals, want 14: the protocol of a listener request filter's external authorization on a Gateway and on a ListenerSet, a ListenerSet's listeners with a listener's name, port and protocol, a BackendTLSPolicy's targetRefs, a TCPRoute's, a UDPRoute's and a TLSRoute's rules with a rule's backendRefs, and a TLSRoute's hostnames", refusals)
 	}
 }
 
@@ -279,8 +318,9 @@ func TestGatewayKinds_RefusedOmissions(t *testing.T) {
 //
 // The numbers, booleans and strings a type omits when zero are held to the
 // kind's row, so the reflection walk is seen to reach them and a dependency
-// bump that adds one fails here, naming it. At v1.6.3 there are twelve, three
-// of them each route's useDefaultGateways, and two of the twelve the CRDs
+// bump that adds one fails here, naming it. At v1.7.0 there are nineteen: three
+// are each route's useDefaultGateways, six the three of a listener request
+// filter on a Gateway and on a ListenerSet, and two of the nineteen the CRDs
 // default: the mode of a Gateway's frontend TLS validation.
 func TestGatewayKinds_DefaultedZeros(t *testing.T) {
 	for _, kind := range gatewayAPIKinds {

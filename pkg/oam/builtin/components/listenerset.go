@@ -52,7 +52,9 @@ func (h *ListenerSetHandler) PropertySchema() map[string]oam.PropertySchema {
 // that one, as the API server refuses a ListenerSet without it. A listener's
 // name, port and protocol are required too, and the type omits each one that
 // is not authored or is authored empty (a port of 0 included): validate
-// refuses those as well, naming the listener by its index. The API's value
+// refuses those as well, naming the listener by its index, and so is the
+// protocol of a listener request filter's external authorization
+// (refuseOmittedListenerFilterFields). The API's value
 // rules are left to the API server. The list is generated (kind_required.go)
 // from the CRD the linked module ships, and
 // TestKindComponents_OmittedRequiredAndWrittenDefaults holds what validate
@@ -72,6 +74,9 @@ var listenerSetKind = &policyFreeKind[gatewayv1.ListenerSetSpec]{
 				return errors.Errorf("listeners[%d].port: required (the network port the listener is bound on)", i)
 			case listener.Protocol == "":
 				return errors.Errorf("listeners[%d].protocol: required (the protocol the listener expects, such as HTTP or HTTPS)", i)
+			}
+			if err := refuseOmittedListenerFilterFields(i, listener.Filters); err != nil {
+				return err
 			}
 		}
 		return nil
