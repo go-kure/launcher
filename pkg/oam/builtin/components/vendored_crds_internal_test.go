@@ -116,7 +116,9 @@ var allowTermPragma = regexp.MustCompile(`^ *# allow-term:[a-z]+( allow-term:[a-
 // stripAllowTermPragmas returns body without its allow-term pragma lines, the
 // bytes upstream wrote, and how many it stripped, failing on a pragma whose
 // next line does not name each word it allows, so that no pragma outlives the
-// line it was written for.
+// line it was written for. The next line may name a word inside an identifier
+// (`newTermClient`), a shape the guard refuses as well (go-kure/launcher#1119),
+// so a word counts as named wherever it stands in the line.
 func stripAllowTermPragmas(t *testing.T, name string, body []byte) ([]byte, int) {
 	t.Helper()
 	lines := strings.SplitAfter(string(body), "\n")
@@ -134,7 +136,7 @@ func stripAllowTermPragmas(t *testing.T, name string, body []byte) ([]byte, int)
 		}
 		for _, w := range strings.Fields(strings.TrimPrefix(strings.TrimSpace(line), "#")) {
 			word := strings.TrimPrefix(w, "allow-term:")
-			if !regexp.MustCompile(`\b` + regexp.QuoteMeta(word) + `\b`).MatchString(next) {
+			if !strings.Contains(next, word) {
 				t.Fatalf("%s:%d: the pragma %q stands above a line that does not name %q", name, i+1, strings.TrimSpace(line), word)
 			}
 		}

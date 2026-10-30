@@ -13202,7 +13202,10 @@ also holds each directory to the tag of the module `go.mod` links:
   source-watcher), one directory per repository under `testdata/upstream/` with its `LICENSE`
   (`scripts/vendor-flux-crds.sh`). The one addition to their bytes is an `allow-term` pragma
   comment line above an upstream line that names a term the repository's forbidden-terms guard
-  lists (a receiver type of the `Receiver` CRD). Each `file` pin in `SOURCE` is the blob id of
+  lists (a receiver type of the `Receiver` CRD), as a whole word or inside an identifier: the
+  script reads the guard's own matcher (`scripts/forbidden-terms-lib.sh`, self-tested by `make
+  test-forbidden-terms`), so it marks every line the guard would refuse, under the C locale or
+  C.UTF-8. Each `file` pin in `SOURCE` is the blob id of
   the committed file; a file carrying pragma lines also has an `# upstream` line naming
   upstream's blob id, which the file must hash to with those lines stripped. A file with an
   `# upstream` line and no pragma, a pragma in a file with none, and a pragma whose next line
@@ -13217,7 +13220,8 @@ also holds each directory to the tag of the module `go.mod` links:
   `tag-object` line of `SOURCE` is the object the tag ref names, the commit, and the test
   requires its first 12 hex digits to be the pseudo-version's; the script takes the tag, checks
   with `git ls-remote` that it names that commit, and refuses an annotated tag or another
-  commit.
+  commit. Copied unmodified, these files take no pragma: the script refuses one with a line the
+  forbidden-terms guard would refuse, read with the guard's own matcher as above.
 
 The kinds' lists stay derived from the markers of the Go source; the CRDs answer for them. Every
 generated kind's CRD is read, shipped or vendored, and a kind whose CRD is not read fails the

@@ -324,6 +324,7 @@ the `replace` target, and move it, in step with kure's, to take the fix.
 - `verify-merge PR=<n>` - Build and test the PR's merge ref (`refs/pull/<n>/merge`), the tree its CI builds
 - `test-verify-merge` - Self-test `scripts/verify-merge.sh`
 - `test-pin-impact` - Run `scripts/check-pin-impact.sh`'s hermetic cases (`bash scripts/test/run-tests.sh`)
+- `test-forbidden-terms` - Self-test the guard matcher the CRD vendor scripts read (`scripts/forbidden-terms-lib.sh`) and `cliff.toml`'s changelog scrub against the forbidden-terms guard (`bash scripts/test/forbidden-terms-test.sh`; needs `git-cliff` on `PATH`, which mise installs)
 - `check-issue-refs` - Reject bare `#N` and ownerless `name#N` references (self-test, the tree, then commit messages since `ISSUE_REFS_BASE`, default `origin/main`; `AGENTS.md` § "Issue references")
 
 ### Release

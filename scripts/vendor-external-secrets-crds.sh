@@ -73,14 +73,13 @@ if [[ "${TAG_OBJECT:0:12}" != "$REV" ]]; then
   exit 1
 fi
 
-# The terms the forbidden-terms guard lists, read from the guard so that this
-# script names none: the CRDs are copied unmodified, so one that names a term
-# is refused here rather than given a pragma.
-TERMS="$(sed -n "s/^TERMS_RE='\([a-z|]*\)'$/\1/p" "$GUARD")"
-if [[ -z "$TERMS" ]]; then
-  echo "ERROR: no TERMS_RE line in $GUARD" >&2
-  exit 1
-fi
+# The forbidden-terms guard's terms and matcher, read from the guard so that
+# this script names no term: the CRDs are copied unmodified, so one with a line
+# the guard would refuse, a term inside an identifier included, is refused here
+# rather than given a pragma.
+# shellcheck source=scripts/forbidden-terms-lib.sh
+source "$SCRIPT_DIR/forbidden-terms-lib.sh"
+ft_load "$GUARD"
 
 WORK=""
 trap 'rm -rf ${WORK:+"$WORK"}' EXIT
@@ -110,8 +109,9 @@ for f in "${FILES[@]}"; do
     echo "ERROR: $REPO $f was written as blob $written, not the tag's ${BLOB[$f]}" >&2
     exit 1
   fi
-  if grep -qiwE "$TERMS" "$STAGE/$f"; then
-    echo "ERROR: $REPO $f names a term $GUARD lists; it is vendored unmodified, so it cannot carry a pragma" >&2
+  hits="$(ft_hits "$STAGE/$f")"
+  if [[ -n "$hits" ]]; then
+    echo "ERROR: $REPO $f names a term $GUARD lists (line ${hits%%$'\t'*}); it is vendored unmodified, so it cannot carry a pragma" >&2
     exit 1
   fi
 done

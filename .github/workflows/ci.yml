@@ -1045,6 +1045,25 @@ jobs:
     - name: Diff vendored shared workflows guide vs canonical
       run: diff -u .tmp/go-kure-dot-github/standards/github-workflows.md docs/shared-workflows.md
 
+    # The CRD vendor scripts and cliff.toml write files the guard above scans, and
+    # must match what it refuses (go-kure/launcher#1119); none runs in CI otherwise.
+    # The changelog case needs git-cliff itself, whose Rust regex engine scrubs a
+    # release's changelog: installed at mise.toml's pin with the release
+    # workflow's installer, from the go-kure/.github checkout at the guard's pin,
+    # which verifies its signature. Throwaway repositories, no network beyond that.
+    - name: Install git-cliff
+      run: |
+        CLIFF_VERSION=$(sed -n 's/^git-cliff = "\(.*\)"$/\1/p' mise.toml)
+        if [ -z "$CLIFF_VERSION" ]; then
+          echo "::error::Failed to parse the git-cliff version from mise.toml"
+          exit 1
+        fi
+        mkdir -p "$RUNNER_TEMP/git-cliff"
+        GIT_CLIFF_INSTALL_DIR="$RUNNER_TEMP/git-cliff" bash .tmp/go-kure-dot-github/scripts/release/install-git-cliff.sh "$CLIFF_VERSION"
+        echo "$RUNNER_TEMP/git-cliff" >> "$GITHUB_PATH"
+    - name: Self-test forbidden-terms matchers
+      run: make test-forbidden-terms
+
     - name: Read Hugo version from mise.toml
       id: hugo-version
       run: |

@@ -26,6 +26,21 @@ trim = true
 # commit subjects, so the generated changelog never names a downstream consumer
 # (org "No Downstream References" rule; enforced by check-forbidden-terms.sh).
 # Ordered specific → catch-all; the catch-all is a safety net for stray words.
+# The three identifier patterns before it replace a whole identifier that holds a
+# term in one of the guard's identifier shapes (go-kure/launcher#1119): a
+# capitalised camelCase segment after a lowercase letter, a digit or `_`, not
+# followed by a lowercase letter; the leading segment, lower-case or capitalised
+# before a capital, a digit or `_`; the upper-case leading segment before a digit
+# or `_`.
+# The guard's classes are ASCII under the C locale and Unicode under C.UTF-8, and
+# it runs in whatever locale its runner sets, so each pattern covers both: Unicode
+# letters where C.UTF-8 reads them (\p{Ll}, \p{Lu}), and a non-ASCII word
+# character standing as a boundary where C reads one ([^\WA-Za-z0-9_], with \w*
+# taking the rest of the identifier). The catch-all does the same for a whole word,
+# case-insensitive for the terms only: under (?i) the boundary class would exclude
+# a character that folds to an ASCII letter (the Kelvin sign, the long s).
+# scripts/test/forbidden-terms-test.sh renders subjects in each shape through
+# git-cliff and runs the guard on the result in both locales.
 # The terms below are the redaction patterns themselves, not references that leak
 # out — same self-referential case the standard grants an escape hatch for.
 postprocessors = [
@@ -33,7 +48,10 @@ postprocessors = [
     { pattern = 'wharf\.zone', replace = "the platform domain" }, # allow-term:wharf
     { pattern = '(?i)\bfrom crane\b', replace = "from the downstream operator" }, # allow-term:crane
     { pattern = '(?i)\bwith crane\b', replace = "with the downstream operator" }, # allow-term:crane
-    { pattern = '(?i)\b(wharf|crane|barge|harbor|rudder)\b', replace = "the downstream operator" }, # allow-term:wharf allow-term:crane allow-term:barge allow-term:harbor allow-term:rudder
+    { pattern = '\w*[\p{Ll}0-9_](Wharf|Crane|Barge|Harbor|Rudder)(?:[^\Wa-z]\w*)?\b', replace = "a downstream identifier" }, # allow-term:wharf allow-term:crane allow-term:barge allow-term:harbor allow-term:rudder
+    { pattern = '\w*(?:\b|[^\WA-Za-z0-9_])(wharf|crane|barge|harbor|rudder|Wharf|Crane|Barge|Harbor|Rudder)[\p{Lu}0-9_]\w*', replace = "a downstream identifier" }, # allow-term:wharf allow-term:crane allow-term:barge allow-term:harbor allow-term:rudder
+    { pattern = '\w*(?:\b|[^\WA-Za-z0-9_])(WHARF|CRANE|BARGE|HARBOR|RUDDER)[0-9_]\w*', replace = "a downstream identifier" }, # allow-term:wharf allow-term:crane allow-term:barge allow-term:harbor allow-term:rudder
+    { pattern = '\w*(?:\b|[^\WA-Za-z0-9_])(?i:wharf|crane|barge|harbor|rudder)(?:\b|[^\WA-Za-z0-9_]\w*)', replace = "the downstream operator" }, # allow-term:wharf allow-term:crane allow-term:barge allow-term:harbor allow-term:rudder
 ]
 
 [git]
