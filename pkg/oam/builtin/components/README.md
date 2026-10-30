@@ -8622,7 +8622,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   kinds held by hand before the lists were generated, byte for byte.
   `TestExternalSecretsKinds_RequiredMatchSource` shows that no field of the
   four specs is required and omitted by the type when unauthored at this pin,
-  and fails on the first one a bump brings.
+  and fails on the first one a bump brings. The API server holds the lists
+  too: `TestKindComponents_GeneratedRequiredBothWays` runs one path of every
+  type holding a generated path through its validator on the operator's CRDs,
+  vendored for the tests from the release the linked commit is tagged
+  (go-kure/launcher#1108; see "Vendored CRDs" under the required fields), and
+  every generated path is one those CRDs declare.
 
   **The API's count and expression rules.** Every rule the source declares on
   a type these specs reach is classified in `TestExternalSecretsKinds_Rules`,
@@ -13182,10 +13187,10 @@ says its class's sentence. No path of a Flux or Gateway kind needs a recorded an
 parent left out. The Gateway API's module ships its CRDs, and so does the Flux Operator's: the
 test runs a row of each Gateway kind and of `resourcesetinputprovider` through the API server.
 
-**Vendored CRDs.** The Prometheus operator's module and the Flux controllers' API modules ship
-no CRD, so the test reads copies, vendored for the tests only and each checked
-against its git blob id by `TestVendoredCRDs_MatchSource`, which also holds each directory to
-the tag of the module `go.mod` links:
+**Vendored CRDs.** The Prometheus operator's module, the Flux controllers' API modules and the
+External Secrets Operator's API module ship no CRD, so the test reads copies, vendored for the
+tests only and each checked against its git blob id by `TestVendoredCRDs_MatchSource`, which
+also holds each directory to the tag of the module `go.mod` links:
 
 - the seven `monitoring.coreos.com` CRDs of the monitoring kinds, from
   `example/prometheus-operator-crd/` of prometheus-operator `v0.94.2`, beside the operator
@@ -13201,19 +13206,35 @@ the tag of the module `go.mod` links:
   the committed file; a file carrying pragma lines also has an `# upstream` line naming
   upstream's blob id, which the file must hash to with those lines stripped. A file with an
   `# upstream` line and no pragma, a pragma in a file with none, and a pragma whose next line
-  does not name its term all fail the test.
+  does not name its term all fail the test;
+- the CRDs of the four External Secrets kinds (`secretstore`, `clustersecretstore`,
+  `externalsecret`, `clusterexternalsecret`), unmodified from `config/crds/bases/` of
+  external-secrets `v2.14.0`, under the same path in `testdata/upstream/external-secrets/` with
+  its `LICENSE` (`scripts/vendor-external-secrets-crds.sh`, `mise run
+  vendor-external-secrets-crds vX.Y.Z`; go-kure/launcher#1108). `go.mod` links the API module
+  at a pseudo-version of a commit, not at a tag of its own, and that commit is the release tag
+  `v2.14.0`, a lightweight tag: its ref names the commit, with no tag object. So the
+  `tag-object` line of `SOURCE` is the object the tag ref names, the commit, and the test
+  requires its first 12 hex digits to be the pseudo-version's; the script takes the tag, checks
+  with `git ls-remote` that it names that commit, and refuses an annotated tag or another
+  commit.
 
-The kinds' lists stay derived from the markers of the Go source; the CRDs answer for them.
-The External Secrets Operator's kinds are the exception: its module ships no CRD and none is
-vendored yet, so the generated refusal answers for them and the API server does not
-(go-kure/launcher#1108).
+The kinds' lists stay derived from the markers of the Go source; the CRDs answer for them. Every
+generated kind's CRD is read, shipped or vendored, and a kind whose CRD is not read fails the
+test.
 Of every type that holds a generated path, the test creates the object with one such path
 authored, which the API server accepts, and without it, which the API server refuses as
 missing a required field (a path whose CRD gives it a default is passed over for another of
 its type: the API server fills a default only where the field is left out of the object, not
-where the type writes it empty). Every generated path is one the CRD declares. The rows
-author what the marker schema cannot: a URL, duration or enumerated value where the filled
-control's would break a pattern or an enum (`generatedHarnessSamples`).
+where the type writes it empty). A type whose every generated path the CRD defaults (a Vault
+store's JWT authentication, whose one generated path is its mount `path`, defaulted to `jwt`)
+is answered instead with the field authored and left out, both accepted, the default filled
+in the second, and written `""` as the type writes it unauthored, which the API server keeps:
+the default never applies, which is why the kind refuses it. Every generated path is one the
+CRD declares. The rows author what the marker schema cannot: a URL, duration or enumerated
+value where the filled control's would break a pattern or an enum, and, of the External
+Secrets stores, one authentication method where a provider's property count or expression rule
+requires exactly one (`generatedHarnessSamples`).
 
 The VolSync, MetalLB, further cnpg and Cilium kinds are derived from the CRDs their linked
 modules ship, and the test runs a row of each of their types that holds a generated field
@@ -13320,8 +13341,8 @@ the file, and is refused where `CI` is set.
 
 At this pin the file holds 25 members, every one an exception: the accepted
 `cnpg-pooler template.spec.containers` and the 24 pruned owner reference fields. The External
-Secrets kinds' generated paths are held by the kind only, with no API server row, until their
-CRDs are vendored (go-kure/launcher#1108).
+Secrets kinds' generated paths are held to the API server too, on their vendored CRDs
+(go-kure/launcher#1108).
 
 ### Every spec field is this package's to write
 

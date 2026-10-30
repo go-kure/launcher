@@ -1234,7 +1234,7 @@ and by scope, whatever component or trait emits it.
   ephemeral claim template's metadata, which the API server prunes: the operator's
   CRDs, vendored for the tests, declare that metadata as an object with no field); the
   pin holds those 25 fields only, each an exception. The External Secrets kinds' lists
-  are held by the kind only, with no API server answer, until their CRDs are vendored
+  are held to the API server too, on their CRDs, vendored for the tests
   (go-kure/launcher#1108).
 - **Shipped: three kinds of cert-manager's `cert-manager.io/v1` API,** `issuer`,
   `clusterissuer` and `certificate` (`issuer.go`, `clusterissuer.go`, `certificate.go`,
@@ -1409,8 +1409,9 @@ and by scope, whatever component or trait emits it.
     module, which ships no CRD. **The lists are generated** (a store's 265 paths over
     every provider at this pin, in `zz_generated_kind_required.go`, with those of the
     cert-manager and CloudNativePG kinds, go-kure/launcher#883), and a test fails where the file and the
-    derivation differ. The lists are held by the kind only: no CRD of the operator is
-    vendored, so no API server answers for them (go-kure/launcher#1108). Four more fields of a store are
+    derivation differ. The lists are held to the API server's validator on the operator's
+    CRDs, vendored for the tests from `config/crds/bases/` of external-secrets `v2.14.0`, the
+    lightweight release tag of the commit `go.mod` links (go-kure/launcher#1108). Four more fields of a store are
     ones the API would default and the type always writes, so the default never
     applies and the value must be written: **a Vault store writes its `version`.** The
     `key` and `operator` of a match expression must be authored too, presence only
@@ -2538,7 +2539,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#794](https://github.com/go-kure/launcher/issues/794) | Asymmetries | §7 | Shipped | go-kure/launcher#783, go-kure/launcher#784, go-kure/launcher#788 |
 | [go-kure/launcher#795](https://github.com/go-kure/launcher/issues/795) | `kurel build` ignores the global `-f/--output-file` | §7 | Shipped | — |
 | [go-kure/launcher#849](https://github.com/go-kure/launcher/issues/849) | Policy refusals carry a class | §5.3 | Shipped | — |
-| [go-kure/launcher#883](https://github.com/go-kure/launcher/issues/883) | Refuse every required field a kind writes unauthored, from one generated list | §6.2 | Shipped: the generator and its rule; the cert-manager, External Secrets, CloudNativePG, Prometheus operator, Flux, Flux Operator, Gateway API, VolSync, MetalLB and Cilium kinds but the two Cilium network policies, whose hand-kept list refuses every derived field; the Prometheus operator's and the Flux controllers' CRDs vendored for the harness; the External Secrets kinds are held by the kind only until their CRDs are vendored (go-kure/launcher#1108) | — |
+| [go-kure/launcher#883](https://github.com/go-kure/launcher/issues/883) | Refuse every required field a kind writes unauthored, from one generated list | §6.2 | Shipped: the generator and its rule; the cert-manager, External Secrets, CloudNativePG, Prometheus operator, Flux, Flux Operator, Gateway API, VolSync, MetalLB and Cilium kinds but the two Cilium network policies, whose hand-kept list refuses every derived field; the Prometheus operator's and the Flux controllers' CRDs vendored for the harness, and the External Secrets Operator's since go-kure/launcher#1108 | — |
 | [go-kure/launcher#934](https://github.com/go-kure/launcher/issues/934) | Object kind policy (the decision of [go-kure/launcher#922](https://github.com/go-kure/launcher/issues/922)) | §5.4 | Shipped | go-kure/launcher#849 |
 | [go-kure/launcher#959](https://github.com/go-kure/launcher/issues/959) | One rule for every Service-derived name, with its cluster-version limit | §3.5 | Shipped | — |
 | [go-kure/launcher#1001](https://github.com/go-kure/launcher/issues/1001) | Complete CNPG backup and recovery to S3 through OAM lowering | §6.3 | Shipped | — |
