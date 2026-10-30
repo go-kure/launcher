@@ -2,11 +2,13 @@ package components
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"go/format"
 	"maps"
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,42 +29,40 @@ const (
 
 // requiredWrittenExceptions are the fields, by kind and path, that the
 // derivation lists and a generated kind does not refuse unauthored, each with
-// the reason: a harness sample no rule of the API admits, so the omission
-// cannot be shown refused, or an omission the API server accepts as the kind
-// writes it and the operator handles, so refusing it would refuse a working
-// document (go-kure/launcher#883). The generated list leaves them out, and the
-// pin keeps them. An entry the derivation no longer lists, or the pin no
-// longer holds, fails the test, and TestKindComponents_GeneratedRequiredBothWays
-// shows each omission accepted on the kind's CRD where one is read.
-var requiredWrittenExceptions = map[string]string{
+// the reason, in one of two classes (go-kure/launcher#883):
+//
+//   - "accepted: ", an omission the API server accepts as the kind writes it
+//     and the operator handles, so refusing it would refuse a working
+//     document;
+//   - "pruned: ", a field the Go source requires and the kind's CRD does not
+//     declare: the API server prunes it, authored or not, and requires
+//     nothing of it.
+//
+// The generated list leaves them out, and the pin keeps them. An entry the
+// derivation no longer lists, or the pin no longer holds, or of neither class,
+// fails the test, and TestKindComponents_GeneratedRequiredBothWays shows each
+// on the kind's CRD: accepted, or pruned with the field authored and left out
+// alike.
+var requiredWrittenExceptions = requiredFields(map[string]string{
 	// The Go type writes the template's spec whether or not it was authored,
 	// and the kind writes an unset container list as [] (CnpgPoolerConfig.Generate):
 	// the Pooler CRD accepts both, and the operator adds its pgbouncer container
 	// to an empty list as to an omitted spec.
 	"cnpg-pooler template.spec.containers": "accepted: the kind writes the list as [], which the Pooler CRD accepts and to which the operator adds its pgbouncer container, with the template's spec authored or left out",
-}
-
-// requiredWrittenUndecided are the fields, by kind and path, that the
-// derivation lists and a generated kind neither refuses unauthored nor keeps
-// as an exception, because what the API server makes of them is not shown
-// here: the fields of an owner reference in the metadata of an ephemeral
-// volume's claim template, on the Prometheus operator's workload kinds. The Go
-// source declares the whole ObjectMeta there; the operator's module ships no
-// CRD to read, so whether the API server requires them or prunes them is not
-// measured. The generated list leaves them out, the pin keeps them, and a
-// follow-up of go-kure/launcher#883 that reads the operator's CRDs settles
-// each. An entry the derivation no longer lists fails the test.
-var requiredWrittenUndecided = promOpClaimOwnerReferences()
+}, promOpClaimOwnerReferences())
 
 // promOpClaimOwnerReferences are the fields of an owner reference in the
 // metadata of an ephemeral volume's claim template, on the Prometheus
-// operator's workload kinds, each with why it is undecided.
+// operator's workload kinds: the Go source declares the whole ObjectMeta there,
+// and the operator's CRDs declare that metadata as an object with no field, so
+// the API server prunes an owner reference whatever it holds (strict field
+// validation refuses it) and requires none of its fields.
 func promOpClaimOwnerReferences() map[string]string {
 	out := map[string]string{}
 	for _, component := range []string{"alertmanager", "prometheus", "thanosruler"} {
 		for _, at := range []string{"storage.ephemeral", "volumes[].ephemeral"} {
 			for _, field := range []string{"apiVersion", "kind", "name", "uid"} {
-				out[component+" "+at+".volumeClaimTemplate.metadata.ownerReferences[]."+field] = "the Go source requires it of an owner reference, and no CRD of the operator is read to show whether the API server requires it there or prunes the owner reference"
+				out[component+" "+at+".volumeClaimTemplate.metadata.ownerReferences[]."+field] = "pruned: the CRD declares an ephemeral volume's claim template metadata as an object with no field, so the API server prunes an owner reference there, authored whole or not (strict field validation refuses it), and requires none of its fields"
 			}
 		}
 	}
@@ -93,10 +93,8 @@ type kindForcedParent struct {
 // path under such a parent; TestKindComponents_RequiredIsGenerated fails on
 // one without an answer and on an answer for no such path, and
 // TestKindComponents_GeneratedRequiredBothWays shows what the kind does with
-// each, and the answer on the kind's CRD where one is read. The Prometheus
-// operator's module ships no CRD, so its kinds' answers are recorded from the
-// operator's CRDs by hand (generatedKindsWithoutCRD), and a follow-up of
-// go-kure/launcher#883 shows them on those CRDs.
+// each, and the answer on the kind's CRD: the one its module ships, or the one
+// vendored where the module ships none (the Prometheus operator's).
 //
 // The cert-manager entries and the monitoring keySecret ones are optional
 // alternatives: the API server accepts the object without the parent, which
@@ -243,8 +241,7 @@ func unauthorableAncestor(component, path string) (string, bool) {
 // generatedRequiredPaths returns, sorted by path, the fields of a kind that its
 // generated required list holds: what deriveRequiredWritten lists, but for a
 // value requiredWrittenValidDefaults holds, a field requiredWrittenExceptions
-// or requiredWrittenUndecided holds, and a field under a path
-// requiredWrittenUnauthorable lists.
+// holds, and a field under a path requiredWrittenUnauthorable lists.
 func generatedRequiredPaths(t *testing.T, k pinKind) []requiredWrittenField {
 	t.Helper()
 	var out []requiredWrittenField
@@ -254,9 +251,6 @@ func generatedRequiredPaths(t *testing.T, k pinKind) []requiredWrittenField {
 			continue
 		}
 		if _, ok := requiredWrittenExceptions[key]; ok {
-			continue
-		}
-		if _, ok := requiredWrittenUndecided[key]; ok {
 			continue
 		}
 		if _, ok := unauthorableAncestor(k.component, d.path); ok {
@@ -412,13 +406,14 @@ func TestKindComponents_RequiredIsGenerated(t *testing.T) {
 			}
 		}
 	}
-	for name, list := range map[string]map[string]string{"requiredWrittenExceptions": requiredWrittenExceptions, "requiredWrittenUndecided": requiredWrittenUndecided} {
-		for _, key := range slices.Sorted(maps.Keys(list)) {
-			component, path, _ := strings.Cut(key, " ")
-			k, ok := requiredWrittenKind(component)
-			if !ok || !slices.ContainsFunc(deriveRequiredWritten(t, k, k.schema(t)), func(d requiredWrittenField) bool { return d.path == path }) {
-				t.Errorf("%s lists %s, which the derivation no longer lists; drop it", name, key)
-			}
+	for _, key := range slices.Sorted(maps.Keys(requiredWrittenExceptions)) {
+		component, path, _ := strings.Cut(key, " ")
+		k, ok := requiredWrittenKind(component)
+		if !ok || !slices.ContainsFunc(deriveRequiredWritten(t, k, k.schema(t)), func(d requiredWrittenField) bool { return d.path == path }) {
+			t.Errorf("requiredWrittenExceptions lists %s, which the derivation no longer lists; drop it", key)
+		}
+		if reason := requiredWrittenExceptions[key]; !strings.HasPrefix(reason, "accepted: ") && !strings.HasPrefix(reason, "pruned: ") {
+			t.Errorf("requiredWrittenExceptions gives %s the reason %q; a reason starts with \"accepted: \" or \"pruned: \"", key, reason)
 		}
 	}
 	if t.Failed() {
@@ -701,31 +696,22 @@ var generatedKindCRDVersions = map[string]string{
 	"cilium-nodeconfig":            ciliumBGPVersion,
 }
 
-// generatedKindCRDVersion is the version of its CRD a generated kind emits.
+// generatedKindCRDVersion is the version of its CRD a generated kind emits:
+// the one generatedKindCRDVersions or fluxVendoredCRDs names, else v1.
 func generatedKindCRDVersion(component string) string {
 	if version, ok := generatedKindCRDVersions[component]; ok {
 		return version
 	}
+	if at, ok := fluxVendoredCRDs[component]; ok {
+		return at.version
+	}
 	return "v1"
 }
 
-// generatedKindsWithoutCRD are the generated kinds whose linked module ships no
-// CRD and whose kindRequiredForced answers are recorded by hand from the
-// operator's CRDs: the Prometheus operator's. A follow-up of
-// go-kure/launcher#883 reads those CRDs and shows the answers on them.
-var generatedKindsWithoutCRD = map[string]bool{
-	"alertmanager":     true,
-	"podmonitor":       true,
-	"prometheus":       true,
-	"prometheus-probe": true,
-	"prometheusrule":   true,
-	"servicemonitor":   true,
-	"thanosruler":      true,
-}
-
-// generatedKindCRDOf reads the CRD of a generated kind whose linked module
-// ships one, a cert-manager kind or one of generatedKindCRDFiles, nil for
-// another component.
+// generatedKindCRDOf reads the CRD of a generated kind: one its linked module
+// ships (a cert-manager kind or one of generatedKindCRDFiles), or one vendored
+// where the module ships none (fluxVendoredCRDs, promOpVendoredCRDs), held to
+// its SOURCE; nil for another component.
 func generatedKindCRDOf(t *testing.T, component string) *apiextensionsv1.CustomResourceDefinition {
 	t.Helper()
 	var file string
@@ -737,12 +723,18 @@ func generatedKindCRDOf(t *testing.T, component string) *apiextensionsv1.CustomR
 	if f, ok := generatedKindCRDFiles[component]; ok {
 		file = linkedModuleDir(t, f.modulePath) + "/" + f.file
 	}
-	if file == "" {
+	data := fluxVendoredCRD(t, component)
+	if data == nil {
+		data = promOpVendoredCRD(t, component)
+	}
+	if file == "" && data == nil {
 		return nil
 	}
-	data, err := os.ReadFile(file)
-	if err != nil {
-		t.Fatalf("read the CRD of %s: %v", component, err)
+	if data == nil {
+		var err error
+		if data, err = os.ReadFile(file); err != nil {
+			t.Fatalf("read the CRD of %s: %v", component, err)
+		}
 	}
 	var crd apiextensionsv1.CustomResourceDefinition
 	if err := yaml.Unmarshal(data, &crd); err != nil {
@@ -751,10 +743,60 @@ func generatedKindCRDOf(t *testing.T, component string) *apiextensionsv1.CustomR
 	return &crd
 }
 
-// generatedHarnessSamples are what a harness control of one generated path
-// authors beside what pinControl fills, by kind and path: an expression rule
-// of the CRD the filled control does not meet.
+// generatedHarnessSamples are what a harness control of a generated path
+// authors beside what pinControl fills, by kind and the path it is or is under:
+// an expression rule, a pattern or an enum of the CRD the filled control does
+// not meet. The Prometheus operator's and the Flux controllers' kinds are
+// measured on the Go source (pinMarkerSchema), which carries no pattern of a
+// type and no enum of the Kubernetes types, so their URLs, durations and
+// enumerated values are sampled here.
 var generatedHarnessSamples = map[string]map[string]any{
+	// A URL of the Prometheus operator's API matches ^(http|https)://.+$.
+	"alertmanager alertmanagerConfiguration.global.httpConfig.oauth2": promOpTokenURL("alertmanagerConfiguration.global.httpConfig.oauth2"),
+	"podmonitor podMetricsEndpoints[].oauth2":                         promOpTokenURL("podMetricsEndpoints[].oauth2"),
+	"prometheus-probe oauth2":                                         promOpTokenURL("oauth2"),
+	"servicemonitor endpoints[].oauth2":                               promOpTokenURL("endpoints[].oauth2"),
+	"prometheus remoteRead[]":                                         {"remoteRead[].url": "https://read.example.com/api/v1/read"},
+	"prometheus remoteRead[].oauth2":                                  promOpTokenURL("remoteRead[].oauth2"),
+	"prometheus remoteWrite[]":                                        {"remoteWrite[].url": "https://write.example.com/api/v1/write"},
+	"prometheus remoteWrite[].oauth2":                                 promOpTokenURL("remoteWrite[].oauth2"),
+	"thanosruler remoteWrite[]":                                       {"remoteWrite[].url": "https://write.example.com/api/v1/write"},
+	"thanosruler remoteWrite[].oauth2":                                promOpTokenURL("remoteWrite[].oauth2"),
+	// An excluded object is one of the kinds the operator selects, a
+	// retention a Prometheus duration.
+	"prometheus excludedFromEnforcement[]":   {"excludedFromEnforcement[].resource": "prometheusrules"},
+	"thanosruler excludedFromEnforcement[]":  {"excludedFromEnforcement[].resource": "prometheusrules"},
+	"prometheus shardRetentionPolicy.retain": {"shardRetentionPolicy.retain.retentionPeriod": "1d"},
+	// The Kubernetes enums: a StatefulSet's update strategy, a volume health
+	// condition's status.
+	"alertmanager updateStrategy": {"updateStrategy.type": "RollingUpdate"},
+	"prometheus updateStrategy":   {"updateStrategy.type": "RollingUpdate"},
+	"thanosruler updateStrategy":  {"updateStrategy.type": "RollingUpdate"},
+	"alertmanager storage.volumeClaimTemplate.status.healthStatus.healthConditions[]": {"storage.volumeClaimTemplate.status.healthStatus.healthConditions[].status": "Degraded"},
+	"prometheus storage.volumeClaimTemplate.status.healthStatus.healthConditions[]":   {"storage.volumeClaimTemplate.status.healthStatus.healthConditions[].status": "Degraded"},
+	"thanosruler storage.volumeClaimTemplate.status.healthStatus.healthConditions[]":  {"storage.volumeClaimTemplate.status.healthStatus.healthConditions[].status": "Degraded"},
+	// The Flux controllers' enums: a source, event source or resource kind, a
+	// provider or receiver type, a verification or decryption provider, a
+	// remediation or wait strategy; and their patterns: an artifact copy's
+	// source and destination, an endpoint or issuer URL.
+	"artifactgenerator":               {"sources[].kind": "GitRepository", "artifacts[].copy[].from": "@app/deploy/**", "artifacts[].copy[].to": "@artifact/"},
+	"bucket sts":                      {"sts.provider": "ldap", "sts.endpoint": "https://sts.example.com"},
+	"fluxcd-alert":                    {"eventSources[].kind": "GitRepository"},
+	"fluxcd-kustomization decryption": {"decryption.provider": "sops"},
+	"fluxcd-kustomization postBuild.substituteFrom": {"postBuild.substituteFrom[].kind": "ConfigMap"},
+	"fluxcd-provider":                                 {"type": "generic"},
+	"fluxcd-receiver":                                 {"type": "generic"},
+	"fluxcd-receiver resources":                       {"secretRef.name": "webhook-token"},
+	"fluxcd-receiver oidcProviders":                   {"type": "generic-oidc", "oidcProviders[].issuerURL": "https://issuer.example.com"},
+	"helmchart":                                       {"sourceRef.kind": "HelmRepository"},
+	"helmchart verify":                                {"verify.provider": "cosign"},
+	"helmrelease chart.spec":                          {"chart.spec.sourceRef.kind": "HelmRepository"},
+	"helmrelease chart.spec.verify.matchOIDCIdentity": {"chart.spec.verify.provider": "cosign"},
+	"helmrelease install.strategy":                    {"install.strategy.name": "RetryOnFailure"},
+	"helmrelease upgrade.strategy":                    {"upgrade.strategy.name": "RetryOnFailure"},
+	"helmrelease waitStrategy":                        {"waitStrategy.name": "poller"},
+	"imageupdateautomation":                           {"sourceRef.kind": "GitRepository"},
+	"ocirepository verify":                            {"verify.provider": "cosign"},
 	// A Venafi issuer configures exactly one of tpp, cloud and ngts.
 	"issuer venafi.zone":        {"venafi.cloud.apiTokenSecretRef.name": "venafi-token"},
 	"clusterissuer venafi.zone": {"venafi.cloud.apiTokenSecretRef.name": "venafi-token"},
@@ -841,21 +883,69 @@ func cnpgCatalogRefSample(at string) map[string]any {
 	return map[string]any{at + ".apiGroup": "postgresql.cnpg.io", at + ".kind": "ImageCatalog"}
 }
 
+// promOpTokenURL is the token URL of the OAuth2 client at the path at.
+func promOpTokenURL(at string) map[string]any {
+	return map[string]any{at + ".tokenUrl": "https://token.example.com/oauth2/token"}
+}
+
+// harnessSamples authors in doc, the properties of a control of path, what
+// generatedHarnessSamples holds for path, for a path it is under, or for the
+// whole kind (a key that is the component alone). A path measured on the
+// kind's alternative base (pinKind.baseFor) takes only what is keyed at or
+// under its alternative prefix: the other samples are of the base.
+func harnessSamples(doc map[string]any, k pinKind, path string) {
+	alt := ""
+	for _, prefix := range k.altPrefixes {
+		if underPath(path, prefix) {
+			alt = prefix
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(generatedHarnessSamples)) {
+		c, at, ofPath := strings.Cut(key, " ")
+		if c != k.component || (ofPath && !underPath(path, at)) || (alt != "" && !(ofPath && underPath(at, alt))) {
+			continue
+		}
+		samples := generatedHarnessSamples[key]
+		for _, field := range slices.Sorted(maps.Keys(samples)) {
+			if parent, name, ok := pinParent(doc, field, true); ok {
+				parent[name] = samples[field]
+			}
+		}
+	}
+}
+
+// crdSpecDeclared returns the properties of the spec of the named version of
+// crd, by json path as pinSchema keys them.
+func crdSpecDeclared(t *testing.T, crd *apiextensionsv1.CustomResourceDefinition, version string) map[string]apiextensionsv1.JSONSchemaProps {
+	t.Helper()
+	at := slices.IndexFunc(crd.Spec.Versions, func(v apiextensionsv1.CustomResourceDefinitionVersion) bool { return v.Name == version })
+	if at < 0 || crd.Spec.Versions[at].Schema == nil || crd.Spec.Versions[at].Schema.OpenAPIV3Schema == nil {
+		t.Fatalf("%s has no schema for the version %s", crd.Name, version)
+	}
+	props, _ := schemaProperties(crd.Spec.Versions[at].Schema.OpenAPIV3Schema.Properties["spec"])
+	if len(props) == 0 {
+		t.Fatalf("%s declares no field of its spec", crd.Name)
+	}
+	return props
+}
+
 // TestKindComponents_GeneratedRequiredBothWays holds every generated path of
 // every generated kind both ways, as the pin measures it: a control that
 // authors the path (its base, the path and the required fields around it)
 // builds, and the same properties without it are refused, naming the path
 // with an index for a list element and saying what the list says of it.
 //
-// Where the linked module ships the kind's CRD, the API server answers too,
-// on one path of each type that declares one: the control's object is
-// accepted, and the same object without the field is refused as missing a
-// required one. The External Secrets Operator's module, the Prometheus
-// operator's and the Flux controllers' ship no CRD, and their kinds are
-// answered by the kind only (a follow-up reads the Flux controllers' CRDs). Each
-// answer kindRequiredForced records is shown by the kind (showForcedAnswer),
-// and on the CRD where one is read: the control without the parent builds, and
-// the API server accepts the object.
+// Where the kind's CRD is read, the one the linked module ships or the one
+// vendored where it ships none (the Prometheus operator's and the Flux
+// controllers', go-kure/launcher#883), the API server answers too, on one path
+// of each type that declares one: the control's object is accepted, and the
+// same object without the field is refused as missing a required one; every
+// generated path is one the CRD declares. The External Secrets Operator's
+// kinds are answered by the kind only: its module ships no CRD and none is
+// vendored yet (go-kure/launcher#1108). Each answer kindRequiredForced records
+// is shown by the kind and on the CRD (showForcedAnswer), and each exception
+// on the CRD: accepted (showExceptionAccepted) or pruned
+// (showExceptionPruned).
 func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 	for _, component := range slices.Sorted(maps.Keys(kindRequiredAPI)) {
 		t.Run(component, func(t *testing.T) {
@@ -880,8 +970,10 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 			}
 			base := bases[0]
 			var create *crdCreate
+			var declared map[string]apiextensionsv1.JSONSchemaProps
 			if crd := generatedKindCRDOf(t, component); crd != nil {
 				create = crdCreateOf(t, crd, generatedKindCRDVersion(component))
+				declared = crdSpecDeclared(t, crd, generatedKindCRDVersion(component))
 			}
 			list := generatedKindRequiredLists[component]
 			generated := generatedRequiredPaths(t, k)
@@ -894,15 +986,19 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 			answered, rows := map[reflect.Type]bool{}, 0
 			for _, d := range generated {
 				path := d.path
+				// The derivation reads the Go source where the module ships no
+				// CRD; a field that source declares and the CRD does not is
+				// pruned by the API server, which requires nothing of it.
+				if _, ok := declared[path]; declared != nil && !ok {
+					t.Errorf("%s: the kind's CRD declares no such field, and the API server prunes it; requiredWrittenExceptions keeps it, as pruned", path)
+					continue
+				}
 				with, err := pinControl(k, k.baseFor(path, bases), path, schema)
 				if err != nil {
 					t.Errorf("%s: no control builds with the field authored: %v", path, err)
 					continue
 				}
-				for at, value := range generatedHarnessSamples[component+" "+path] {
-					parent, name, _ := pinParent(with, at, true)
-					parent[name] = value
-				}
+				harnessSamples(with, k, path)
 				obj, err := pinBuild(k, with)
 				if err != nil {
 					t.Errorf("%s: the control is refused: %v", path, err)
@@ -936,7 +1032,11 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 				default:
 					t.Errorf("%s: the omission is refused with %q, want one saying %q", path, err, want)
 				}
-				if create == nil || answered[d.field.owner] {
+				// The API server fills in a field its CRD defaults where the field
+				// is left out of the object, not where the type writes it empty, as
+				// it does every generated path; the row takes another path of the
+				// type.
+				if prop := declared[path]; create == nil || answered[d.field.owner] || prop.Default != nil {
 					continue
 				}
 				answered[d.field.owner] = true
@@ -969,10 +1069,20 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 				if c != component || create == nil {
 					continue
 				}
+				if strings.HasPrefix(requiredWrittenExceptions[key], "pruned: ") {
+					showExceptionPruned(t, k, base, schema, create, declared, path)
+					continue
+				}
 				showExceptionAccepted(t, k, base, schema, create, path)
 			}
 			if create != nil && rows == 0 {
 				t.Errorf("no path of %s was answered by the API server", component)
+			}
+			for _, d := range generated {
+				if create != nil && !answered[d.field.owner] {
+					t.Errorf("no path of %s's type %s was answered by the API server", component, d.field.owner)
+					answered[d.field.owner] = true
+				}
 			}
 			t.Logf("%d API server rows", rows)
 		})
@@ -983,11 +1093,11 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 // the parent f names. The control that authors path builds; the same
 // properties without the parent, and with what f authors instead, are refused
 // by the kind naming the parent or a field under it where f says the kind
-// refuses them, and build otherwise. Where the kind builds the object without
-// the parent and its CRD is read, the API server accepts that object. A kind
-// of generatedKindsWithoutCRD has its answers recorded by hand, and the kinds
-// that refuse a parent are all of it, so no API server answer is shown for an
-// object the kind refuses.
+// refuses them, and build otherwise. The API server answers the object as f
+// says: the object the kind builds without the parent where it builds one,
+// else the control's object with the parent written as the type writes its
+// zero value, which is what the kind would emit for those properties without
+// its refusal.
 func showForcedAnswer(t *testing.T, k pinKind, base map[string]any, schema pinSchema, create *crdCreate, path string, f kindForcedParent) {
 	t.Helper()
 	what := fmt.Sprintf("%s %s, %s left out", k.component, path, f.parent)
@@ -996,7 +1106,9 @@ func showForcedAnswer(t *testing.T, k pinKind, base map[string]any, schema pinSc
 		t.Errorf("%s: no control builds with the field authored: %v", path, err)
 		return
 	}
-	if _, err := pinBuild(k, with); err != nil {
+	harnessSamples(with, k, path)
+	authored, err := pinBuild(k, with)
+	if err != nil {
 		t.Errorf("%s: the control is refused: %v", path, err)
 		return
 	}
@@ -1023,19 +1135,122 @@ func showForcedAnswer(t *testing.T, k pinKind, base map[string]any, schema pinSc
 	case f.refused && !pinRefusalNames(f.parent, err):
 		t.Errorf("%s: refused with %q, want a refusal naming %s or a field under it", what, err, f.parent)
 		return
-	case !f.refused && err != nil:
+	case f.refused:
+		obj = pinCopy(authored)
+		zero, ok := pinZeroOf(k, f.parent)
+		if !ok {
+			t.Errorf("%s: %s is no struct of the kind's type", what, f.parent)
+			return
+		}
+		p, n, ok := pinParent(obj, "spec."+f.parent, false)
+		if !ok {
+			t.Errorf("%s: the control's object does not hold %s", what, f.parent)
+			return
+		}
+		p[n] = zero
+	case err != nil:
 		t.Errorf("%s: refused: %v; kindRequiredForced says the kind does not refuse it", what, err)
 		return
 	}
-	switch {
-	case generatedKindsWithoutCRD[k.component]:
-		t.Logf("%s: the kind's answer is shown; the API server's, %q, is recorded by hand", what, f.answer)
-	case create == nil:
+	if create == nil {
 		t.Errorf("%s %s: kindRequiredForced answers for a kind no CRD is read for", k.component, path)
-	case f.refused:
-		t.Errorf("%s: kindRequiredForced says the kind refuses it, and no API server answer is shown for a refused object of a kind whose CRD is read", what)
-	default:
-		create.create(t, obj).accepted(t, what)
+		return
+	}
+	answer := create.create(t, obj)
+	if strings.HasPrefix(f.answer, "refused: ") {
+		if !answer.refused() {
+			t.Errorf("%s: the API server accepts the object, and kindRequiredForced says it refuses it", what)
+		}
+		t.Logf("%s: the API server answers %q", what, answer)
+		return
+	}
+	answer.accepted(t, what)
+}
+
+// pinZeroOf is what the kind's type writes for the struct at path when nothing
+// was decoded into it: its zero value, encoded.
+func pinZeroOf(k pinKind, path string) (any, bool) {
+	var typ reflect.Type
+	walkKindFields(k.typ, func(kindField) bool { return false }, func(f kindField) {
+		if f.path == path && f.field.Type.Kind() == reflect.Struct {
+			typ = f.field.Type
+		}
+	})
+	if typ == nil {
+		return nil, false
+	}
+	raw, err := json.Marshal(reflect.Zero(typ).Interface())
+	if err != nil {
+		return nil, false
+	}
+	var zero any
+	if err := json.Unmarshal(raw, &zero); err != nil {
+		return nil, false
+	}
+	return zero, true
+}
+
+// showExceptionPruned shows a "pruned" omission requiredWrittenExceptions keeps
+// on the kind's CRD: the CRD does not declare the field, and the API server
+// answers the control's object, and the same object without the field, alike:
+// by naming an ancestor of the field as unknown, which it prunes from the
+// object (and refuses under strict field validation), and by nothing else; the
+// object it pruned no longer holds the field and is accepted.
+func showExceptionPruned(t *testing.T, k pinKind, base map[string]any, schema pinSchema, create *crdCreate, declared map[string]apiextensionsv1.JSONSchemaProps, path string) {
+	t.Helper()
+	what := k.component + " " + path
+	if _, ok := declared[path]; ok {
+		t.Errorf("%s: the kind's CRD declares the field, and requiredWrittenExceptions says it prunes it", what)
+		return
+	}
+	with, err := pinControl(k, base, path, schema)
+	if err != nil {
+		t.Errorf("%s: no control builds with the field authored: %v", what, err)
+		return
+	}
+	harnessSamples(with, k, path)
+	obj, err := pinBuild(k, with)
+	if err != nil {
+		t.Errorf("%s: the control is refused: %v", what, err)
+		return
+	}
+	without := pinCopy(obj)
+	parent, name, ok := pinParent(without, "spec."+path, false)
+	if !ok {
+		t.Errorf("%s: the object does not hold the field", what)
+		return
+	}
+	delete(parent, name)
+	index := regexp.MustCompile(`\[[0-9]+\]`)
+	for _, c := range []struct {
+		doc  map[string]any
+		said string
+	}{{obj, "authored"}, {without, "left out"}} {
+		answer := create.create(t, c.doc)
+		pruned := len(answer.unknown) > 0 && len(answer.schema)+len(answer.rules) == 0 && !answer.skipped
+		for _, unknown := range answer.unknown {
+			if !underPath("spec."+path, index.ReplaceAllString(unknown, "[]")) {
+				pruned = false
+			}
+		}
+		if !pruned {
+			t.Errorf("%s, %s: the API server answers %q, want an ancestor of the field named unknown and nothing else", what, c.said, answer)
+			continue
+		}
+		// create stops at an unknown field, before the schema and the
+		// expression rules are read: the object it pruned is answered again,
+		// and must no longer hold the field and be accepted.
+		if parent, name, ok := pinParent(answer.object, "spec."+path, false); ok {
+			if _, held := parent[name]; held {
+				t.Errorf("%s, %s: the field is named unknown and is still in the pruned object", what, c.said)
+				continue
+			}
+		}
+		if again := create.create(t, answer.object); again.String() != "accepted" {
+			t.Errorf("%s, %s: the API server prunes the field, and answers the pruned object %q, want accepted", what, c.said, again)
+			continue
+		}
+		t.Logf("%s, %s: the API server answers %q, and accepts the pruned object", what, c.said, answer)
 	}
 }
 

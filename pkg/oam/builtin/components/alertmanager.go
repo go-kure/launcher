@@ -166,8 +166,9 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 // requires no top-level field of the spec, and of what is authored below it
 // the fields alertmanagerRequired lists; the type would write each one empty.
 // The API's value rules are left to it, the expression rule on updateStrategy
-// included (alertmanagerRulesLeft): the linked module ships no CRD to hold
-// either to.
+// included (alertmanagerRulesLeft): neither is checked at build, since the
+// build reads no CRD (the linked module ships none; the CRD vendored for the
+// tests, go-kure/launcher#883, is test data).
 //
 // The fields on which an authored 0 or "" cannot be carried are the ones of a
 // pod spec's containers and volumes (podSpecDefaultedZeros): the spec lists
@@ -252,8 +253,9 @@ var alertmanagerRequiredText = requiredFields(map[string]string{ //nolint:gosec 
 
 // alertmanagerRulesLeft lists, by the property that reaches it, each
 // expression rule the API states on a type the spec reaches, as its
-// expression and its message. None is checked here: the linked module ships
-// no CRD, so there is no rule text for the validator harness to evaluate.
+// expression and its message. None is checked at build: the build reads no
+// CRD (the linked module ships none; the CRD vendored for the tests,
+// go-kure/launcher#883, is test data), so each is left to the API server.
 // TestMonitoringWorkloadKinds_RulesListed derives the list from the markers of
 // the module's source.
 var alertmanagerRulesLeft = map[string]string{

@@ -177,8 +177,9 @@ func (h *ThanosRulerHandler) PropertySchema() map[string]oam.PropertySchema {
 // requires no top-level field of the spec, and of what is authored below it
 // the fields thanosRulerRequired lists; the type would write each one empty.
 // The API's value rules are left to it, the expression rules the spec reaches
-// included (thanosRulerRulesLeft): the linked module ships no CRD to hold
-// either to.
+// included (thanosRulerRulesLeft): neither is checked at build, since the
+// build reads no CRD (the linked module ships none; the CRD vendored for the
+// tests, go-kure/launcher#883, is test data).
 //
 // The fields on which an authored 0 or "" cannot be carried are the ones of a
 // pod spec's containers and volumes (podSpecDefaultedZeros): the spec lists
@@ -266,8 +267,9 @@ var thanosRulerRequiredText = requiredFields(map[string]string{ //nolint:gosec /
 
 // thanosRulerRulesLeft lists, by the property that reaches it, each
 // expression rule the API states on a type the spec reaches. None is checked
-// here: the linked module ships no CRD, so there is no rule text for the
-// validator harness to evaluate. TestMonitoringWorkloadKinds_RulesListed
+// at build: the build reads no CRD (the linked module ships none; the CRD
+// vendored for the tests, go-kure/launcher#883, is test data), so each is left
+// to the API server. TestMonitoringWorkloadKinds_RulesListed
 // derives the list from the markers of the module's source.
 var thanosRulerRulesLeft = map[string]string{
 	"remoteWrite[].sigv4": "!has(self.externalId) || has(self.roleArn) (externalId can only be used when roleArn is specified)",

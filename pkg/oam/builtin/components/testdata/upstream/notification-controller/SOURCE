@@ -1,0 +1,12 @@
+# CRDs of fluxcd/notification-controller, copied by scripts/vendor-flux-crds.sh.
+# Licensed under the Apache License, Version 2.0; LICENSE is the project's copy of the licence, at the same tag.
+# Each pin below is the git blob id of the committed file. A line naming a term the forbidden-terms
+# guard lists is preceded by an allow-term pragma comment line; an "# upstream" line names upstream's
+# blob id of a file that carries one, which the components tests check with those lines stripped.
+tag api/v1.10.0
+tag-object 8cdb768fe5ea4be57142569fa57806bf842390c7
+licence LICENSE 261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64
+file config/crd/bases/notification.toolkit.fluxcd.io_alerts.yaml 799d3f7d9452016ad27e30b276c39c5f69c25b74
+file config/crd/bases/notification.toolkit.fluxcd.io_providers.yaml cd53db1a6e8b1bf76ba90b6e9f0e23aa03c6f8ad
+file config/crd/bases/notification.toolkit.fluxcd.io_receivers.yaml 208dea26b7a41b0e6fb54c03c559bd898bbfb2fa
+# upstream config/crd/bases/notification.toolkit.fluxcd.io_receivers.yaml 669f36533f9c303e46030ad517de221af0966838

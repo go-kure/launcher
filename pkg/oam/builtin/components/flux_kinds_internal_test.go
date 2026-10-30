@@ -40,7 +40,10 @@ import (
 // the Prometheus operator's API. The Flux Operator's module ships its CRDs
 // beside its types; its markers are read the same way, so that one rule holds
 // every Flux kind. Nothing here is held to the API server's own validator
-// (crdCreate), which answers from a CRD. The shared type modules are meta, the
+// (crdCreate), which answers from a CRD; the required lists are, on the CRDs
+// vendored from each controller's repository at the tag of the linked API
+// module (TestKindComponents_GeneratedRequiredBothWays, go-kure/launcher#883).
+// The shared type modules are meta, the
 // kustomize one a Kustomization's patches and images are declared in, and the
 // access-control one a HelmRepository's accessFrom is declared in.
 var fluxMarkerModules = []string{
@@ -89,8 +92,10 @@ func durationForms[T any](fields []fluxDurationField[T]) map[string]fluxduration
 
 // fluxNoCRD is why no kind of these APIs checks an expression rule
 // (go-kure/launcher#874): a check is held to the API server's own validator,
-// which answers from a CRD, and the linked modules ship none.
-const fluxNoCRD = "the linked module ships no CRD, so a check could not be held to the API server's validator"
+// which answers from a CRD, and the build reads none for these kinds (the
+// linked modules ship none; the CRDs vendored for the tests,
+// go-kure/launcher#883, are test data).
+const fluxNoCRD = "not checked at build: the build reads no CRD (the linked module ships none; the CRD vendored for the tests, go-kure/launcher#883, is test data), so the rule is listed and left to the API server"
 
 // fluxOperatorUnchecked is why the kind of the Flux Operator's API checks no
 // expression rule although its module ships the CRD: it is held to the rule of

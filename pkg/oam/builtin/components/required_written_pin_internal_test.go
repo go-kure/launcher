@@ -52,10 +52,10 @@ import (
 // written empty, and what the API server or the operator then says of it is
 // not the kind's answer. The kinds whose required list is generated from the
 // same derivation (kind_required.go, go-kure/launcher#883) refuse each such
-// field, but for those requiredWrittenExceptions and requiredWrittenUndecided
-// list. Every kind measured here is generated but the two Cilium network
-// policies, whose hand-kept list (requiredfields.CiliumRule) refuses each
-// such field as well, so the set holds only those two lists' fields. This
+// field, but for those requiredWrittenExceptions lists. Every kind measured
+// here is generated but the two Cilium network policies, whose hand-kept list
+// (requiredfields.CiliumRule) refuses each such field as well, so the set
+// holds only the fields requiredWrittenExceptions lists. This
 // test pins which fields are not refused: the set is checked in,
 // one line per field, and a field that joins it (a new gap) or leaves it (a
 // new refusal) fails the test until the file is regenerated with
@@ -1268,10 +1268,9 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 	if t.Failed() {
 		return
 	}
-	// Vacuity guards: the measurement finds a member in each list that keeps
-	// one (KIND on the Prometheus operator's kinds, an entry
-	// requiredWrittenUndecided lists, and POD on cnpg-pooler, the one
-	// requiredWrittenExceptions lists), a refusal of an omission (two of the
+	// Vacuity guards: the measurement finds a member of each class of
+	// requiredWrittenExceptions (KIND on the Prometheus operator's kinds, a
+	// pruned one, and POD on cnpg-pooler, an accepted one), a refusal of an omission (two of the
 	// KIND family, one of the AFF family on a kind whose list is generated, of
 	// the CloudNativePG, the Prometheus operator's and VolSync's kinds whose
 	// lists are generated one of each family their members were in, a map's
@@ -1337,22 +1336,16 @@ func TestKindComponents_RequiredWrittenNotRefused(t *testing.T) {
 		}
 	}
 	// Every kind refuses every field the measurement visits, but for those
-	// requiredWrittenExceptions or requiredWrittenUndecided lists, and each of
-	// those stays a member: every member of the set is one of them
-	// (go-kure/launcher#883).
+	// requiredWrittenExceptions lists, and each of those stays a member: every
+	// member of the set is one of them (go-kure/launcher#883).
 	for _, m := range all {
-		key := m.component + " " + m.path
-		_, excepted := requiredWrittenExceptions[key]
-		_, undecided := requiredWrittenUndecided[key]
-		if !excepted && !undecided {
-			t.Errorf("%s does not refuse the omission of %s, which neither requiredWrittenExceptions nor requiredWrittenUndecided lists", m.component, m.path)
+		if _, excepted := requiredWrittenExceptions[m.component+" "+m.path]; !excepted {
+			t.Errorf("%s does not refuse the omission of %s, which requiredWrittenExceptions does not list", m.component, m.path)
 		}
 	}
-	for name, list := range map[string]map[string]string{"requiredWrittenExceptions": requiredWrittenExceptions, "requiredWrittenUndecided": requiredWrittenUndecided} {
-		for _, key := range slices.Sorted(maps.Keys(list)) {
-			if !have[key] {
-				t.Errorf("%s: %s lists it, and it is no member; drop it", key, name)
-			}
+	for _, key := range slices.Sorted(maps.Keys(requiredWrittenExceptions)) {
+		if !have[key] {
+			t.Errorf("%s: requiredWrittenExceptions lists it, and it is no member; drop it", key)
 		}
 	}
 	// The omission of each valid default builds and writes its value; one

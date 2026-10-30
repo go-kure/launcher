@@ -262,7 +262,9 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 // no top-level field of the spec, and of what is authored below it the fields
 // prometheusRequired lists; the type would write each one empty. The API's
 // value rules are left to it, the expression rules the spec reaches included
-// (prometheusRulesLeft): the linked module ships no CRD to hold either to.
+// (prometheusRulesLeft): neither is checked at build, since the build reads
+// no CRD (the linked module ships none; the CRD vendored for the tests,
+// go-kure/launcher#883, is test data).
 //
 // The fields on which an authored 0 or "" cannot be carried are the ones of a
 // pod spec's containers and volumes (podSpecDefaultedZeros): the spec lists
@@ -380,9 +382,10 @@ var prometheusRequiredText = requiredFields(map[string]string{ //nolint:gosec //
 )...))
 
 // prometheusRulesLeft lists, by the property that reaches it, each expression
-// rule the API states on a type the spec reaches. None is checked here: the
-// linked module ships no CRD, so there is no rule text for the validator
-// harness to evaluate. TestMonitoringWorkloadKinds_RulesListed derives the
+// rule the API states on a type the spec reaches. None is checked at build:
+// the build reads no CRD (the linked module ships none; the CRD vendored for
+// the tests, go-kure/launcher#883, is test data), so each is left to the API
+// server. TestMonitoringWorkloadKinds_RulesListed derives the
 // list from the markers of the module's source.
 var prometheusRulesLeft = map[string]string{
 	"":                               "!has(self.shardingStrategy) || !has(self.shardingStrategy.mode) || self.shardingStrategy.mode != 'Topology' || !has(self.shardingStrategy.topology) || !has(self.shardingStrategy.topology.values) || self.shardingStrategy.topology.values.size() == 0 || (has(self.shards) ? self.shards : 1) >= self.shardingStrategy.topology.values.size() (shards must be greater than or equal to the number of topology values when sharding strategy mode is Topology)",

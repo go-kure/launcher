@@ -1,5 +1,5 @@
 # Excerpt of prometheus-operator/prometheus-operator, copied unmodified by scripts/vendor-prometheus-operator-gates.sh.
-# Licensed under the Apache License, Version 2.0 (each file carries its header);
+# Licensed under the Apache License, Version 2.0 (each Go file carries its header; each CRD is generated from the project's types);
 # LICENSE is the project's copy of the licence and NOTICE its notice file, at the same tag.
 # The components tests check each file against its git blob id below.
 tag v0.94.2
@@ -30,3 +30,10 @@ file pkg/thanos/rules.go f7e29b44f089e3c2b3fadde2adcf2f25a4f8ef82
 file pkg/thanos/statefulset.go fe5093cde242423a83aad03456d6ebf189775378
 file pkg/operator/defaults.go e0a4d715bd29b7467658f3a9cff464c507501a87
 file pkg/operator/validations.go 7811b1a21bdb283ec265a5ffe7f40fe571e6b93b
+file example/prometheus-operator-crd/monitoring.coreos.com_alertmanagers.yaml a3d95d77e07deb84dd79ac4f097e56748a85abb2
+file example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml 65b5c43752e43aaab2e199e1412208910225c1ac
+file example/prometheus-operator-crd/monitoring.coreos.com_probes.yaml fb66c0195b8a9e808deb714ef7bc8fe95999224a
+file example/prometheus-operator-crd/monitoring.coreos.com_prometheuses.yaml 9a491b67d2262b073522acbb4194134b5fcdf39c
+file example/prometheus-operator-crd/monitoring.coreos.com_prometheusrules.yaml 66527eaa35950c4cc2723defd0730ded823dd877
+file example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml e9b38f05d3e8a57b1ced6205d3dfb813f7ece7be
+file example/prometheus-operator-crd/monitoring.coreos.com_thanosrulers.yaml b45cac8ece9e2a4c45d21501e978c5c50b001486

@@ -15,6 +15,14 @@
 # the tag, the tag object and the git blob id of each file, of LICENSE and of
 # NOTICE, and the test checks every blob id against the file.
 #
+# Beside the code, it copies the CustomResourceDefinitions of the
+# monitoring.coreos.com kinds launcher writes, unmodified from the tag's
+# example/prometheus-operator-crd/ (the linked module ships none): the
+# components tests create each generated kind's object against its CRD to show
+# the API server's answer for a required field left out (go-kure/launcher#883).
+# SOURCE names each on a `file` line with its git blob id, checked as the Go
+# files are.
+#
 # Run by hand when the linked
 # github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring moves;
 # CI never runs it. Pass the operator tag that go.mod links, then run the
@@ -57,7 +65,7 @@ UPSTREAM="$(mktemp -d)"
 # (LICENSE, NOTICE), which a cone-mode sparse checkout always holds.
 PACKAGES=(pkg/alertmanager pkg/prometheus pkg/prometheus/server pkg/prometheus/validation pkg/thanos)
 git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$TAG" --filter=blob:none --sparse "https://github.com/$REPO.git" "$UPSTREAM"
-git -C "$UPSTREAM" sparse-checkout set pkg/alertmanager pkg/prometheus pkg/thanos pkg/operator
+git -C "$UPSTREAM" sparse-checkout set pkg/alertmanager pkg/prometheus pkg/thanos pkg/operator example/prometheus-operator-crd
 
 # The files the tests read, by their path in prometheus-operator/prometheus-operator:
 # every Go file of each package of PACKAGES, its tests aside, so that the tests
@@ -82,6 +90,12 @@ done
 shopt -u nullglob
 FILES+=(pkg/operator/defaults.go pkg/operator/validations.go)
 
+# The CRDs of the kinds launcher writes: alertmanager, podmonitor,
+# prometheus-probe, prometheus, prometheusrule, servicemonitor and thanosruler.
+for plural in alertmanagers podmonitors probes prometheuses prometheusrules servicemonitors thanosrulers; do
+  FILES+=("example/prometheus-operator-crd/monitoring.coreos.com_${plural}.yaml")
+done
+
 # Each file is read from the tag's tree, not the checkout, so that no checkout
 # conversion (core.autocrlf, a filter) changes its bytes.
 for f in "${FILES[@]}" LICENSE NOTICE; do
@@ -104,7 +118,7 @@ done
 
 {
   echo "# Excerpt of prometheus-operator/prometheus-operator, copied unmodified by scripts/vendor-prometheus-operator-gates.sh."
-  echo "# Licensed under the Apache License, Version 2.0 (each file carries its header);"
+  echo "# Licensed under the Apache License, Version 2.0 (each Go file carries its header; each CRD is generated from the project's types);"
   echo "# LICENSE is the project's copy of the licence and NOTICE its notice file, at the same tag."
   echo "# The components tests check each file against its git blob id below."
   echo "tag $TAG"

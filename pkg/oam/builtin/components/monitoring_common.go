@@ -25,9 +25,10 @@ import (
 // The fields of a Kubernetes type, which carries no +required marker (the key
 // and the operator of a match expression, a container's name), are derived
 // from its source by the schema generators' rule: a field with no optional
-// marker whose json tag keeps it when empty is required. No CRD answers for the
-// derived lists here; a follow-up of go-kure/launcher#883 reads the operator's
-// CRDs for that.
+// marker whose json tag keeps it when empty is required. The operator's CRDs,
+// vendored from its repository at the linked release for the tests, answer for
+// the derived lists (TestKindComponents_GeneratedRequiredBothWays,
+// go-kure/launcher#883).
 //
 // A host these objects name is one Prometheus reaches, not an artifact source:
 // a prober, a proxy, an OAuth2 token endpoint, a static probe target. None is

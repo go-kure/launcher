@@ -1,0 +1,9 @@
+# CRDs of fluxcd/image-automation-controller, copied by scripts/vendor-flux-crds.sh.
+# Licensed under the Apache License, Version 2.0; LICENSE is the project's copy of the licence, at the same tag.
+# Each pin below is the git blob id of the committed file. A line naming a term the forbidden-terms
+# guard lists is preceded by an allow-term pragma comment line; an "# upstream" line names upstream's
+# blob id of a file that carries one, which the components tests check with those lines stripped.
+tag api/v1.3.0
+tag-object 98c7d65251625f8487e4308e3fe0005326878008
+licence LICENSE 261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64
+file config/crd/bases/image.toolkit.fluxcd.io_imageupdateautomations.yaml 6fe4fa0ef4e6eec22385917e94ab45e54a5c4c1b
