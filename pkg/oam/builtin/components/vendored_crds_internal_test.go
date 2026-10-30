@@ -2,6 +2,7 @@ package components
 
 import (
 	"bytes"
+	"fmt"
 	"io/fs"
 	"maps"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
@@ -20,41 +22,67 @@ import (
 	swv1beta1 "github.com/fluxcd/source-watcher/api/v2/v1beta1"
 )
 
-// vendoredFluxRepo is one Flux controller's repository whose CRDs are vendored
-// under testdata/upstream/<name>, by scripts/vendor-flux-crds.sh: the API
-// modules of the Flux controllers that go.mod links ship no CRD, so each CRD
-// of a kind launcher ships is copied from the repository at the tag
-// of the linked API module, with the repository's LICENSE. Its SOURCE file
-// names the tag, the tag object and the git blob id of each file as committed
-// (go-kure/launcher#883). The one addition is an allow-term pragma comment
-// line above an upstream line that names a term the repository's
-// forbidden-terms guard lists; for a file that carries one, a line
-// "# upstream <path> <blob>" names upstream's blob id, that of the file
-// without them.
-type vendoredFluxRepo struct {
-	// name is the repository's name under github.com/fluxcd, and the
-	// directory's under testdata/upstream.
+// vendoredCRDRepo is one repository whose CRDs are vendored under
+// testdata/upstream/<name>, because the API module go.mod links ship none:
+//
+//   - a Flux controller's, by scripts/vendor-flux-crds.sh, each CRD of a kind
+//     launcher ships copied from the repository at the tag of the linked API
+//     module, api/<its version> (go-kure/launcher#883). The one addition is an
+//     allow-term pragma comment line above an upstream line that names a term
+//     the repository's forbidden-terms guard lists; for a file that carries
+//     one, a line "# upstream <path> <blob>" names upstream's blob id, that of
+//     the file without them;
+//   - the External Secrets Operator's, by scripts/vendor-external-secrets-crds.sh,
+//     unmodified (go-kure/launcher#1108). go.mod links its API module at a
+//     pseudo-version of a commit, not at a tag of its own; the commit is the
+//     operator's release tag, a lightweight one, whose ref names the commit
+//     with no tag object. SOURCE's tag-object is then the object the tag ref
+//     names, the commit, and its first 12 hex digits must be the
+//     pseudo-version's.
+//
+// Each comes with the repository's LICENSE, and its SOURCE file names the tag,
+// the tag object and the git blob id of each file as committed.
+type vendoredCRDRepo struct {
+	// name is the directory's name under testdata/upstream: the repository's
+	// under github.com/fluxcd, or external-secrets.
 	name string
-	// module is the API module go.mod links; the tag is api/<its version>.
+	// module is the API module go.mod links: the tag is api/<its version>, or,
+	// where pseudo is set, the tag object is the commit of its pseudo-version.
 	module string
+	// script is the script that vendors the repository.
+	script string
+	// pseudo says go.mod links module at a pseudo-version of the tag's commit.
+	pseudo bool
 }
 
-// vendoredFluxRepos are the Flux controllers' repositories whose CRDs are
-// vendored, as scripts/vendor-flux-crds.sh lists them.
-var vendoredFluxRepos = []vendoredFluxRepo{
-	{"helm-controller", "github.com/fluxcd/helm-controller/api"},
-	{"image-automation-controller", "github.com/fluxcd/image-automation-controller/api"},
-	{"image-reflector-controller", "github.com/fluxcd/image-reflector-controller/api"},
-	{"kustomize-controller", "github.com/fluxcd/kustomize-controller/api"},
-	{"notification-controller", "github.com/fluxcd/notification-controller/api"},
-	{"source-controller", "github.com/fluxcd/source-controller/api"},
-	{"source-watcher", "github.com/fluxcd/source-watcher/api/v2"},
+// The scripts that vendor the repositories.
+const (
+	vendorFluxScript            = "scripts/vendor-flux-crds.sh"
+	vendorExternalSecretsScript = "scripts/vendor-external-secrets-crds.sh"
+)
+
+// vendoredCRDRepos are the repositories whose CRDs are vendored, as
+// scripts/vendor-flux-crds.sh and scripts/vendor-external-secrets-crds.sh list
+// them.
+var vendoredCRDRepos = []vendoredCRDRepo{
+	{"helm-controller", "github.com/fluxcd/helm-controller/api", vendorFluxScript, false},
+	{"image-automation-controller", "github.com/fluxcd/image-automation-controller/api", vendorFluxScript, false},
+	{"image-reflector-controller", "github.com/fluxcd/image-reflector-controller/api", vendorFluxScript, false},
+	{"kustomize-controller", "github.com/fluxcd/kustomize-controller/api", vendorFluxScript, false},
+	{"notification-controller", "github.com/fluxcd/notification-controller/api", vendorFluxScript, false},
+	{"source-controller", "github.com/fluxcd/source-controller/api", vendorFluxScript, false},
+	{"source-watcher", "github.com/fluxcd/source-watcher/api/v2", vendorFluxScript, false},
+	{"external-secrets", externalSecretsModulePath, vendorExternalSecretsScript, true},
 }
 
-// fluxVendoredCRDs are the vendored CRDs of the Flux controllers' kinds, by
-// component: the repository, the CRD's path in it, and the version of it the
-// kind emits.
-var fluxVendoredCRDs = map[string]struct{ repo, file, version string }{
+// externalSecretsCRDs is the directory and file prefix of the External Secrets
+// Operator's CRDs in its repository, and so in testdata/upstream/external-secrets.
+const externalSecretsCRDs = "config/crds/bases/external-secrets.io_"
+
+// vendoredCRDs are the vendored CRDs of the Flux controllers' and the External
+// Secrets Operator's kinds, by component: the repository, the CRD's path in
+// it, and the version of it the kind emits.
+var vendoredCRDs = map[string]struct{ repo, file, version string }{
 	"helmrelease":           {"helm-controller", "config/crd/bases/helm.toolkit.fluxcd.io_helmreleases.yaml", helmv2.GroupVersion.Version},
 	"imageupdateautomation": {"image-automation-controller", "config/crd/bases/image.toolkit.fluxcd.io_imageupdateautomations.yaml", autov1.GroupVersion.Version},
 	"imagepolicy":           {"image-reflector-controller", "config/crd/bases/image.toolkit.fluxcd.io_imagepolicies.yaml", imagev1.GroupVersion.Version},
@@ -69,7 +97,15 @@ var fluxVendoredCRDs = map[string]struct{ repo, file, version string }{
 	"helmrepository":        {"source-controller", "config/crd/bases/source.toolkit.fluxcd.io_helmrepositories.yaml", sourcev1.GroupVersion.Version},
 	"ocirepository":         {"source-controller", "config/crd/bases/source.toolkit.fluxcd.io_ocirepositories.yaml", sourcev1.GroupVersion.Version},
 	"artifactgenerator":     {"source-watcher", "config/crd/bases/source.extensions.fluxcd.io_artifactgenerators.yaml", swv1beta1.GroupVersion.Version},
+	"clusterexternalsecret": {"external-secrets", externalSecretsCRDs + "clusterexternalsecrets.yaml", esv1.SchemeGroupVersion.Version},
+	"clustersecretstore":    {"external-secrets", externalSecretsCRDs + "clustersecretstores.yaml", esv1.SchemeGroupVersion.Version},
+	"externalsecret":        {"external-secrets", externalSecretsCRDs + "externalsecrets.yaml", esv1.SchemeGroupVersion.Version},
+	"secretstore":           {"external-secrets", externalSecretsCRDs + "secretstores.yaml", esv1.SchemeGroupVersion.Version},
 }
+
+// pseudoVersionRev matches a pseudo-version, its last field the first 12 hex
+// digits of the commit it names.
+var pseudoVersionRev = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+-(?:.*[.-])?[0-9]{14}-([0-9a-f]{12})$`)
 
 // allowTermPragma is a comment line scripts/vendor-flux-crds.sh writes above an
 // upstream line that names a term the repository's forbidden-terms guard
@@ -122,13 +158,16 @@ func goModVersion(t *testing.T, module string) string {
 	return ""
 }
 
-// loadVendoredFluxCRDs reads the SOURCE of the vendored repository and every
+// loadVendoredCRDs reads the SOURCE of the vendored repository and every
 // CRD it names, by the path of each in the repository, failing on a file
 // whose blob id differs from its pin, a file whose allow-term pragma lines
 // and "# upstream" line disagree, a file that is no CustomResourceDefinition, a file in
 // the directory that SOURCE does not name, a directory without the licence's
-// full text, and a tag other than that of the API module go.mod links.
-func loadVendoredFluxCRDs(t *testing.T, repo vendoredFluxRepo) map[string][]byte {
+// full text, and a tag other than that of the API module go.mod links: for a
+// module linked at a pseudo-version (vendoredCRDRepo.pseudo), a release tag
+// whose tag object, the commit a lightweight tag names, is not the
+// pseudo-version's.
+func loadVendoredCRDs(t *testing.T, repo vendoredCRDRepo) map[string][]byte {
 	t.Helper()
 	dir := filepath.Join("testdata", "upstream", repo.name)
 	data, err := os.ReadFile(filepath.Join(dir, "SOURCE"))
@@ -144,14 +183,14 @@ func loadVendoredFluxCRDs(t *testing.T, repo vendoredFluxRepo) map[string][]byte
 			t.Fatalf("the SOURCE of %s names %s: %v", repo.name, rel, err)
 		}
 		if got := vendoredBlobID(body); got != blob {
-			t.Fatalf("%s/%s has blob id %s, SOURCE says %s: each pin is the committed file's; re-run scripts/vendor-flux-crds.sh", repo.name, rel, got, blob)
+			t.Fatalf("%s/%s has blob id %s, SOURCE says %s: each pin is the committed file's; re-run %s", repo.name, rel, got, blob, repo.script)
 		}
 		return body
 	}
 	// upstream is upstream's blob id of each file that carries allow-term
 	// pragma lines, by path, from the SOURCE lines "# upstream <path> <blob>".
 	upstream := map[string]string{}
-	tag, tagObject, licence := "", false, false
+	tag, tagObject, licence := "", "", false
 	for line := range strings.Lines(string(data)) {
 		fields := strings.Fields(line)
 		switch {
@@ -160,10 +199,11 @@ func loadVendoredFluxCRDs(t *testing.T, repo vendoredFluxRepo) map[string][]byte
 		case len(fields) == 0 || strings.HasPrefix(line, "#"):
 		case fields[0] == "tag" && len(fields) == 2:
 			tag = fields[1]
-		case fields[0] == "tag-object" && len(fields) == 2 && len(fields[1]) == 40:
+		case fields[0] == "tag-object" && len(fields) == 2 && regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(fields[1]):
 			// Provenance for whoever refreshes the CRDs; offline, the test holds
-			// the tag to go.mod and each file to its blob id.
-			tagObject = true
+			// the tag to go.mod, or this object to a pseudo-version's commit, and
+			// each file to its blob id.
+			tagObject = fields[1]
 		case fields[0] == "licence" && len(fields) == 3:
 			body := read(fields[1], fields[2])
 			if !bytes.Contains(body, []byte("Apache License")) || !bytes.Contains(body, []byte("Version 2.0, January 2004")) {
@@ -189,10 +229,10 @@ func loadVendoredFluxCRDs(t *testing.T, repo vendoredFluxRepo) map[string][]byte
 		}
 		stripped, pragmas := stripAllowTermPragmas(t, repo.name+"/"+rel, crds[rel])
 		if pragmas == 0 {
-			t.Fatalf("%s/%s carries no allow-term pragma line, and SOURCE names upstream's blob id of it: re-run scripts/vendor-flux-crds.sh", repo.name, rel)
+			t.Fatalf("%s/%s carries no allow-term pragma line, and SOURCE names upstream's blob id of it: re-run %s", repo.name, rel, repo.script)
 		}
 		if got := vendoredBlobID(stripped); got != blob {
-			t.Fatalf("%s/%s has blob id %s without its allow-term pragma lines, and upstream's is %s: the CRDs are copied unmodified but for those lines; re-run scripts/vendor-flux-crds.sh", repo.name, rel, got, blob)
+			t.Fatalf("%s/%s has blob id %s without its allow-term pragma lines, and upstream's is %s: the CRDs are copied unmodified but for those lines; re-run %s", repo.name, rel, got, blob, repo.script)
 		}
 	}
 	for rel, body := range crds {
@@ -200,7 +240,7 @@ func loadVendoredFluxCRDs(t *testing.T, repo vendoredFluxRepo) map[string][]byte
 			continue
 		}
 		if _, pragmas := stripAllowTermPragmas(t, repo.name+"/"+rel, body); pragmas != 0 {
-			t.Fatalf("%s/%s carries %d allow-term pragma lines, and SOURCE names no upstream blob id of it: re-run scripts/vendor-flux-crds.sh", repo.name, rel, pragmas)
+			t.Fatalf("%s/%s carries %d allow-term pragma lines, and SOURCE names no upstream blob id of it: re-run %s", repo.name, rel, pragmas, repo.script)
 		}
 	}
 	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -219,30 +259,57 @@ func loadVendoredFluxCRDs(t *testing.T, repo vendoredFluxRepo) map[string][]byte
 	if err != nil {
 		t.Fatalf("walk %s: %v", dir, err)
 	}
-	if !licence || !tagObject || len(crds) == 0 {
-		t.Fatalf("the SOURCE of %s names licence %v, a tag object %v and %d CRDs: each vendored repository carries the Apache License, Version 2.0, its tag object and its CRDs", repo.name, licence, tagObject, len(crds))
+	if !licence || tagObject == "" || len(crds) == 0 {
+		t.Fatalf("the SOURCE of %s names licence %v, a tag object %q and %d CRDs: each vendored repository carries the Apache License, Version 2.0, its tag object and its CRDs", repo.name, licence, tagObject, len(crds))
 	}
-	if want := "api/" + goModVersion(t, repo.module); tag != want {
-		t.Fatalf("the CRDs of %s are of %s, and go.mod links %s at the tag %s: re-run scripts/vendor-flux-crds.sh", repo.name, tag, repo.module, want)
+	if mismatch := vendoredTagMismatch(repo, goModVersion(t, repo.module), tag, tagObject); mismatch != "" {
+		t.Fatal(mismatch)
 	}
 	return crds
 }
 
-// fluxVendoredCRD returns the vendored CRD of a Flux controller's kind, nil for
-// another component.
-func fluxVendoredCRD(t *testing.T, component string) []byte {
+// vendoredTagMismatch holds the tag and the tag object a vendored repository's
+// SOURCE names to the version go.mod links its module at, and says how they
+// differ, "" where they agree. A module linked at its own tag is held by the
+// tag: api/<version>. A module linked at a pseudo-version
+// (vendoredCRDRepo.pseudo) has no tag of its own; its commit is a release tag
+// of the repository, a lightweight one, whose ref names the commit with no tag
+// object, so SOURCE's tag-object is that commit and its first 12 hex digits
+// must be the pseudo-version's.
+func vendoredTagMismatch(repo vendoredCRDRepo, linked, tag, tagObject string) string {
+	if !repo.pseudo {
+		if want := "api/" + linked; tag != want {
+			return fmt.Sprintf("the CRDs of %s are of %s, and go.mod links %s at the tag %s: re-run %s", repo.name, tag, repo.module, want, repo.script)
+		}
+		return ""
+	}
+	m := pseudoVersionRev.FindStringSubmatch(linked)
+	switch {
+	case m == nil:
+		return fmt.Sprintf("go.mod links %s at %s, not a pseudo-version, and the CRDs of %s are held to one: re-run %s", repo.module, linked, repo.name, repo.script)
+	case !regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(tag):
+		return fmt.Sprintf("the CRDs of %s are of %s, not a release tag: re-run %s", repo.name, tag, repo.script)
+	case !strings.HasPrefix(tagObject, m[1]):
+		return fmt.Sprintf("the CRDs of %s are of %s at %s, and go.mod links %s at %s, commit %s: re-run %s with the release tag of that commit", repo.name, tag, tagObject, repo.module, linked, m[1], repo.script)
+	}
+	return ""
+}
+
+// vendoredCRD returns the vendored CRD of a Flux controller's or the External
+// Secrets Operator's kind, nil for another component.
+func vendoredCRD(t *testing.T, component string) []byte {
 	t.Helper()
-	at, ok := fluxVendoredCRDs[component]
+	at, ok := vendoredCRDs[component]
 	if !ok {
 		return nil
 	}
-	for _, repo := range vendoredFluxRepos {
+	for _, repo := range vendoredCRDRepos {
 		if repo.name != at.repo {
 			continue
 		}
-		data := loadVendoredFluxCRDs(t, repo)[at.file]
+		data := loadVendoredCRDs(t, repo)[at.file]
 		if data == nil {
-			t.Fatalf("the vendored %s holds no %s, the CRD of %s; re-run scripts/vendor-flux-crds.sh", at.repo, at.file, component)
+			t.Fatalf("the vendored %s holds no %s, the CRD of %s; re-run %s", at.repo, at.file, component, repo.script)
 		}
 		return data
 	}
@@ -251,20 +318,25 @@ func fluxVendoredCRD(t *testing.T, component string) []byte {
 }
 
 // TestVendoredCRDs_MatchSource holds every vendored CRD to its SOURCE: the
-// Flux controllers' repositories and the Prometheus operator's excerpt, each
-// file to its git blob id, each directory to the tag of the module go.mod
-// links, and each CRD a kind's harness rows read to a file one of them names
-// (go-kure/launcher#883). Every vendored repository holds the CRD of a kind.
+// Flux controllers' repositories, the External Secrets Operator's and the
+// Prometheus operator's excerpt, each file to its git blob id, each directory
+// to the tag of the module go.mod links, or, for the External Secrets
+// Operator's API module, linked at a pseudo-version, its tag object to that
+// pseudo-version's commit (checkVendoredTag), and each CRD a kind's harness
+// rows read to a file one of them names (go-kure/launcher#883,
+// go-kure/launcher#1108). Every vendored repository holds the CRD of a kind.
 func TestVendoredCRDs_MatchSource(t *testing.T) {
 	named := map[string]bool{}
-	for _, repo := range vendoredFluxRepos {
-		for rel := range loadVendoredFluxCRDs(t, repo) {
+	scripts := map[string]string{}
+	for _, repo := range vendoredCRDRepos {
+		for rel := range loadVendoredCRDs(t, repo) {
 			named[repo.name+"/"+rel] = true
 		}
+		scripts[repo.name] = repo.script
 	}
 	used := map[string]bool{}
-	for _, component := range slices.Sorted(maps.Keys(fluxVendoredCRDs)) {
-		at := fluxVendoredCRDs[component]
+	for _, component := range slices.Sorted(maps.Keys(vendoredCRDs)) {
+		at := vendoredCRDs[component]
 		if !named[at.repo+"/"+at.file] {
 			t.Errorf("%s reads %s/%s, which no SOURCE names", component, at.repo, at.file)
 		}
@@ -272,7 +344,8 @@ func TestVendoredCRDs_MatchSource(t *testing.T) {
 	}
 	for _, path := range slices.Sorted(maps.Keys(named)) {
 		if !used[path] {
-			t.Errorf("%s is vendored, and no kind reads it; drop it from scripts/vendor-flux-crds.sh", path)
+			repo, _, _ := strings.Cut(path, "/")
+			t.Errorf("%s is vendored, and no kind reads it; drop it from %s", path, scripts[repo])
 		}
 	}
 	promOp := loadVendoredPromOp(t)
@@ -284,7 +357,33 @@ func TestVendoredCRDs_MatchSource(t *testing.T) {
 	if len(promOp.crds) != len(promOpVendoredCRDs) {
 		t.Errorf("the Prometheus operator's excerpt holds %d CRDs, and %d kinds read one", len(promOp.crds), len(promOpVendoredCRDs))
 	}
-	t.Logf("%d Flux CRDs in %d repositories, %d of the Prometheus operator's", len(named), len(vendoredFluxRepos), len(promOp.crds))
+	t.Logf("%d Flux and External Secrets CRDs in %d repositories, %d of the Prometheus operator's", len(named), len(vendoredCRDRepos), len(promOp.crds))
+}
+
+// TestVendoredCRDs_TagRuleBites: vendoredTagMismatch refuses, for a module
+// linked at a pseudo-version, a tag object whose first 12 hex digits are not
+// the pseudo-version's, a go.mod link that is no pseudo-version and a tag that
+// is no release; and accepts the pseudo-version's commit.
+func TestVendoredCRDs_TagRuleBites(t *testing.T) {
+	const (
+		linked = "v0.0.0-20261023150316-e932f3a3f6f2"
+		commit = "e932f3a3f6f274e8e269c01aa1f5fb3d1322e3c9"
+	)
+	repo := vendoredCRDRepo{"external-secrets", externalSecretsModulePath, vendorExternalSecretsScript, true}
+	for _, c := range []struct {
+		name, linked, tag, tagObject string
+		refused                      bool
+	}{
+		{"the pseudo-version's commit", linked, "v2.14.0", commit, false},
+		{"another commit", linked, "v2.14.0", "e932f3a3f6f3" + commit[12:], true},
+		{"no pseudo-version", "v2.14.0", "v2.14.0", commit, true},
+		{"no release tag", linked, "main", commit, true},
+	} {
+		mismatch := vendoredTagMismatch(repo, c.linked, c.tag, c.tagObject)
+		if refused := mismatch != ""; refused != c.refused {
+			t.Errorf("%s: vendoredTagMismatch(%s, %s, %s) = %q, want refused %v", c.name, c.linked, c.tag, c.tagObject, mismatch, c.refused)
+		}
+	}
 }
 
 // promOpVendoredCRDs are the vendored CRDs of the Prometheus operator's kinds,

@@ -1,0 +1,13 @@
+# CRDs of external-secrets/external-secrets, copied unmodified by scripts/vendor-external-secrets-crds.sh.
+# Licensed under the Apache License, Version 2.0; LICENSE is the project's copy of the licence, at the same tag.
+# Each pin below is the git blob id of the committed file, which is upstream's.
+# go.mod links the API module at a pseudo-version of the tag's commit, and the tag is lightweight: its
+# ref names that commit, with no tag object, so tag-object is the commit, and the components tests
+# require its first 12 hex digits to be the pseudo-version's.
+tag v2.14.0
+tag-object e932f3a3f6f274e8e269c01aa1f5fb3d1322e3c9
+licence LICENSE 7a4a3ea2424c09fbe48d455aed1eaa94d9124835
+file config/crds/bases/external-secrets.io_clusterexternalsecrets.yaml 6f23900ccc1b213fc5050c392b611648e3427075
+file config/crds/bases/external-secrets.io_clustersecretstores.yaml 33d9c3815b431d1dd0da065d78304a13fff7b5a3
+file config/crds/bases/external-secrets.io_externalsecrets.yaml d3aed525d9b15ef2f507671e8543d1ef4c36373b
+file config/crds/bases/external-secrets.io_secretstores.yaml cea0b3e5909323bbb366d7af943ad2a7a6e98646

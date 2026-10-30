@@ -87,6 +87,10 @@ run = "bash scripts/vendor-prometheus-operator-gates.sh"
 description = "Re-fetch the Flux controllers' CRDs the components required-field tests read, at the tags of the API modules go.mod links (never run by CI)"
 run = "bash scripts/vendor-flux-crds.sh"
 
+[tasks.vendor-external-secrets-crds]
+description = "Re-fetch the External Secrets Operator's CRDs the components required-field tests read, at the lightweight release tag of the commit go.mod links (mise run vendor-external-secrets-crds vX.Y.Z; never run by CI)"
+run = "bash scripts/vendor-external-secrets-crds.sh"
+
 [tasks.vendor-alertmanager-features]
 description = "Re-fetch the Alertmanager featurecontrol.go copies the components feature-flag test reads (mise run vendor-alertmanager-features 0.27 0.34; never run by CI)"
 run = "bash scripts/vendor-alertmanager-features.sh"

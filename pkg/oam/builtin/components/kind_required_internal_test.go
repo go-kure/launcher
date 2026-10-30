@@ -697,12 +697,12 @@ var generatedKindCRDVersions = map[string]string{
 }
 
 // generatedKindCRDVersion is the version of its CRD a generated kind emits:
-// the one generatedKindCRDVersions or fluxVendoredCRDs names, else v1.
+// the one generatedKindCRDVersions or vendoredCRDs names, else v1.
 func generatedKindCRDVersion(component string) string {
 	if version, ok := generatedKindCRDVersions[component]; ok {
 		return version
 	}
-	if at, ok := fluxVendoredCRDs[component]; ok {
+	if at, ok := vendoredCRDs[component]; ok {
 		return at.version
 	}
 	return "v1"
@@ -710,8 +710,8 @@ func generatedKindCRDVersion(component string) string {
 
 // generatedKindCRDOf reads the CRD of a generated kind: one its linked module
 // ships (a cert-manager kind or one of generatedKindCRDFiles), or one vendored
-// where the module ships none (fluxVendoredCRDs, promOpVendoredCRDs), held to
-// its SOURCE; nil for another component.
+// where the module ships none (vendoredCRDs, promOpVendoredCRDs), held to its
+// SOURCE; nil for another component.
 func generatedKindCRDOf(t *testing.T, component string) *apiextensionsv1.CustomResourceDefinition {
 	t.Helper()
 	var file string
@@ -723,7 +723,7 @@ func generatedKindCRDOf(t *testing.T, component string) *apiextensionsv1.CustomR
 	if f, ok := generatedKindCRDFiles[component]; ok {
 		file = linkedModuleDir(t, f.modulePath) + "/" + f.file
 	}
-	data := fluxVendoredCRD(t, component)
+	data := vendoredCRD(t, component)
 	if data == nil {
 		data = promOpVendoredCRD(t, component)
 	}
@@ -838,6 +838,81 @@ var generatedHarnessSamples = map[string]map[string]any{
 	"resourcesetinputprovider selectors[].matchExpressions[].key": {"type": "ExternalArtifact"},
 }
 
+// The External Secrets Operator's kinds are measured on the Go source
+// (readExternalSecretsSource), which carries none of the CRD's enums, patterns,
+// property counts and expression rules: the stores' samples are written for
+// both store kinds, and the external secrets' for the two external-secret
+// kinds, a ClusterExternalSecret's under externalSecretSpec.
+func init() {
+	for at, samples := range externalSecretsStoreSamples {
+		for _, component := range []string{"secretstore", "clustersecretstore"} {
+			generatedHarnessSamples[component+" "+at] = samples
+		}
+	}
+	for at, samples := range externalSecretSamples {
+		generatedHarnessSamples["externalsecret "+at] = samples
+		prefixed := map[string]any{}
+		for field, value := range samples {
+			prefixed["externalSecretSpec."+field] = value
+		}
+		generatedHarnessSamples["clusterexternalsecret externalSecretSpec."+at] = prefixed
+	}
+}
+
+// externalSecretsStoreSamples are a store's samples, by the path they are
+// under: a provider's enumerated values (an AWS service, a Vault or OpenBao
+// version, a CA provider's type) and a pattern (a Nebius service account id);
+// one authentication method where a provider's rules or property count require
+// one and the filled control authors none; and, where another method is
+// authored below, that method alone, the sample's written null, which the API
+// server drops.
+var externalSecretsStoreSamples = map[string]map[string]any{
+	"provider.akeyless.caProvider": {"provider.akeyless.caProvider.type": "Secret"},
+	"provider.webhook.caProvider":  {"provider.webhook.caProvider.type": "Secret"},
+	"provider.aws":                 {"provider.aws.service": "SecretsManager"},
+	"provider.vault":               {"provider.vault.version": "v2"},
+	"provider.openBao":             {"provider.openBao.version": "v2"},
+	// A Barbican authentication by application credential.
+	"provider.barbican.auth": {
+		"provider.barbican.auth.authType":                              "applicationCredential",
+		"provider.barbican.auth.applicationCredentialID.secretRef":     map[string]any{"name": "barbican", "key": "id"},
+		"provider.barbican.auth.applicationCredentialSecret.secretRef": map[string]any{"name": "barbican", "key": "secret"},
+	},
+	// Conjur and Doppler authenticate by exactly one method.
+	"provider.conjur.auth":             {"provider.conjur.auth.apikey": map[string]any{"account": "conjur", "userRef": map[string]any{"name": "conjur", "key": "user"}, "apiKeyRef": map[string]any{"name": "conjur", "key": "apikey"}}},
+	"provider.conjur.auth.azure":       {"provider.conjur.auth.apikey": nil},
+	"provider.conjur.auth.cert":        {"provider.conjur.auth.apikey": nil},
+	"provider.conjur.auth.gcp":         {"provider.conjur.auth.apikey": nil},
+	"provider.conjur.auth.iam":         {"provider.conjur.auth.apikey": nil},
+	"provider.conjur.auth.jwt":         {"provider.conjur.auth.apikey": nil},
+	"provider.doppler.auth":            {"provider.doppler.auth.secretRef.dopplerToken": map[string]any{"name": "doppler", "key": "token"}},
+	"provider.doppler.auth.oidcConfig": {"provider.doppler.auth.secretRef": nil},
+	"provider.crd.resource":            {"provider.crd.auth.token.bearerToken": map[string]any{"name": "crd-token", "key": "token"}},
+	"provider.ibm.auth":                {"provider.ibm.auth.containerAuth.profile": "ibm-profile"},
+	// A Barbican authentication by password, where the password is authored.
+	"provider.barbican.auth.password": {
+		"provider.barbican.auth.authType":                    "password",
+		"provider.barbican.auth.applicationCredentialID":     nil,
+		"provider.barbican.auth.applicationCredentialSecret": nil,
+		"provider.barbican.auth.username.secretRef":          map[string]any{"name": "barbican", "key": "username"},
+	},
+	// An OpenBao AppRole takes one role, a Kubernetes login one token source.
+	"provider.openBao.auth.appRole":                   {"provider.openBao.auth.appRole.roleId": "launcher"},
+	"provider.openBao.auth.kubernetes":                {"provider.openBao.auth.kubernetes.serviceAccountRef": map[string]any{"name": "openbao"}},
+	"provider.ngrok":                                  {"provider.ngrok.auth.apiKey.secretRef": map[string]any{"name": "ngrok", "key": "apikey"}},
+	"provider.nebiusmysterybox.apiDomain":             {"provider.nebiusmysterybox.auth.tokenSecretRef": map[string]any{"name": "nebius", "key": "token"}},
+	"provider.nebiusmysterybox.auth.workloadIdentity": {"provider.nebiusmysterybox.auth.workloadIdentity.iamServiceAccountID": "serviceaccount-abc123"},
+	"provider.pulumi.environment":                     {"provider.pulumi.auth.accessToken.secretRef": map[string]any{"name": "pulumi", "key": "token"}},
+	"provider.secretserver.serverURL":                 {"provider.secretserver.token.secretRef": map[string]any{"name": "secretserver", "key": "token"}},
+}
+
+// externalSecretSamples are an external secret's, by the path they are under:
+// a generator's kind and a sync window's kind, both enumerated.
+var externalSecretSamples = map[string]map[string]any{
+	"dataFrom[].sourceRef.generatorRef": {"dataFrom[].sourceRef.generatorRef.kind": "Password"},
+	"syncWindows":                       {"syncWindows.kind": "allow"},
+}
+
 // gatewayFilterSample is a route rule's backend reference to a Service, with
 // its port, and a filter of the given type (the filled one where it is
 // empty) with the given fields under the filter.
@@ -935,14 +1010,15 @@ func crdSpecDeclared(t *testing.T, crd *apiextensionsv1.CustomResourceDefinition
 // builds, and the same properties without it are refused, naming the path
 // with an index for a list element and saying what the list says of it.
 //
-// Where the kind's CRD is read, the one the linked module ships or the one
-// vendored where it ships none (the Prometheus operator's and the Flux
-// controllers', go-kure/launcher#883), the API server answers too, on one path
-// of each type that declares one: the control's object is accepted, and the
-// same object without the field is refused as missing a required one; every
-// generated path is one the CRD declares. The External Secrets Operator's
-// kinds are answered by the kind only: its module ships no CRD and none is
-// vendored yet (go-kure/launcher#1108). Each answer kindRequiredForced records
+// The kind's CRD is read, the one the linked module ships or the one vendored
+// where it ships none (the Prometheus operator's and the Flux controllers',
+// go-kure/launcher#883, and the External Secrets Operator's,
+// go-kure/launcher#1108), and a kind whose CRD is not read fails. The API
+// server answers too, on one path of each type that declares one: the
+// control's object is accepted, and the same object without the field is
+// refused as missing a required one; every generated path is one the CRD
+// declares. A type whose every generated path the CRD defaults is answered by
+// showDefaulted instead. Each answer kindRequiredForced records
 // is shown by the kind and on the CRD (showForcedAnswer), and each exception
 // on the CRD: accepted (showExceptionAccepted) or pruned
 // (showExceptionPruned).
@@ -974,6 +1050,10 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 			if crd := generatedKindCRDOf(t, component); crd != nil {
 				create = crdCreateOf(t, crd, generatedKindCRDVersion(component))
 				declared = crdSpecDeclared(t, crd, generatedKindCRDVersion(component))
+			} else {
+				// Every generated kind's CRD is read, shipped or vendored, so no
+				// kind's rows pass without the API server's answer.
+				t.Errorf("no CRD of %s is read; the API server answers for none of its paths", component)
 			}
 			list := generatedKindRequiredLists[component]
 			generated := generatedRequiredPaths(t, k)
@@ -984,6 +1064,7 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 				}
 			}
 			answered, rows := map[reflect.Type]bool{}, 0
+			defaulted := map[reflect.Type]defaultedRow{}
 			for _, d := range generated {
 				path := d.path
 				// The derivation reads the Go source where the module ships no
@@ -1035,8 +1116,11 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 				// The API server fills in a field its CRD defaults where the field
 				// is left out of the object, not where the type writes it empty, as
 				// it does every generated path; the row takes another path of the
-				// type.
+				// type, or, where the type has none, this one (showDefaulted).
 				if prop := declared[path]; create == nil || answered[d.field.owner] || prop.Default != nil {
+					if _, ok := defaulted[d.field.owner]; create != nil && !ok && prop.Default != nil {
+						defaulted[d.field.owner] = defaultedRow{d, obj, prop.Default.Raw}
+					}
 					continue
 				}
 				answered[d.field.owner] = true
@@ -1075,6 +1159,13 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 				}
 				showExceptionAccepted(t, k, base, schema, create, path)
 			}
+			for _, d := range generated {
+				if r, ok := defaulted[d.field.owner]; ok && !answered[d.field.owner] {
+					answered[d.field.owner] = true
+					rows++
+					showDefaulted(t, component, create, r)
+				}
+			}
 			if create != nil && rows == 0 {
 				t.Errorf("no path of %s was answered by the API server", component)
 			}
@@ -1087,6 +1178,63 @@ func TestKindComponents_GeneratedRequiredBothWays(t *testing.T) {
 			t.Logf("%d API server rows", rows)
 		})
 	}
+}
+
+// defaultedRow is a generated path the kind's CRD gives a default, with the
+// object of the control that authors it and that default, encoded.
+type defaultedRow struct {
+	field   requiredWrittenField
+	obj     map[string]any
+	initial []byte
+}
+
+// showDefaulted answers, on the kind's CRD, for a type whose every generated
+// path the CRD defaults (a Vault JWT authentication's mount `path`, defaulted
+// to jwt): the API server fills such a field where it is left out of the
+// object, so it cannot be refused as missing, and the kind refuses it because
+// its Go type writes the field whether or not it was authored. The control's
+// object is accepted; the object without the field is accepted with the
+// default filled; and the object holding the field as the type writes it
+// unauthored, its zero value, is accepted and keeps that zero value without
+// the default, which is why the kind refuses that omission.
+func showDefaulted(t *testing.T, component string, create *crdCreate, r defaultedRow) {
+	t.Helper()
+	what := fmt.Sprintf("%s %s (%s, defaulted by the CRD)", component, r.field.path, r.field.field.owner)
+	var initial any
+	if err := json.Unmarshal(r.initial, &initial); err != nil {
+		t.Fatalf("%s: decode the default: %v", what, err)
+	}
+	create.create(t, r.obj).accepted(t, what+", authored")
+	at := "spec." + r.field.path
+	without := pinCopy(r.obj)
+	parent, name, ok := pinParent(without, at, false)
+	if !ok {
+		t.Errorf("%s: the object does not hold the field", what)
+		return
+	}
+	delete(parent, name)
+	answer := create.create(t, without)
+	answer.accepted(t, what+", left out")
+	if got := pinValueAt(answer.object, at); !reflect.DeepEqual(got, initial) {
+		t.Errorf("%s, left out: the API server fills %s, want the CRD's default %s", what, pinJSON(got), pinJSON(initial))
+	}
+	zeroRaw, err := json.Marshal(reflect.Zero(r.field.field.field.Type).Interface())
+	if err != nil {
+		t.Fatalf("%s: encode the zero value: %v", what, err)
+	}
+	var zero any
+	if err := json.Unmarshal(zeroRaw, &zero); err != nil {
+		t.Fatalf("%s: decode the zero value: %v", what, err)
+	}
+	written := pinCopy(r.obj)
+	parent, name, _ = pinParent(written, at, false)
+	parent[name] = zero
+	answer = create.create(t, written)
+	answer.accepted(t, what+", written as the type writes it unauthored")
+	if got := pinValueAt(answer.object, at); !reflect.DeepEqual(got, zero) {
+		t.Errorf("%s, written %s as the type writes it unauthored: the API server keeps %s, want the zero value kept and the default %s not applied", what, pinJSON(zero), pinJSON(got), pinJSON(initial))
+	}
+	t.Logf("%s: left out, the API server fills %s; written %s as the type writes it unauthored, it answers %q and keeps %s", what, pinJSON(initial), pinJSON(zero), answer, pinJSON(pinValueAt(answer.object, at)))
 }
 
 // showForcedAnswer shows the answer kindRequiredForced records for path, under
