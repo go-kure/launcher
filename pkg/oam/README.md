@@ -3439,6 +3439,11 @@ when a non-built-in type has a `CapabilityDefinition` whose schema is applied.
 With none of those validators, `EvaluateProfile` passes the binding through
 unchecked. This method mirrors the validation branches in `EvaluateProfile`.
 
+**Pre-GA behavior change**: `EvaluateProfile` now also checks a binding whose type has
+a `CapabilityDefinition` but no trait handler and no trait lowering rule. The schema
+applies its defaults and refuses a rendering that breaks it. Before, such a binding
+passed through unchecked. Built-in types stay exempt.
+
 ### Capability rendering: types and nulls
 
 A `CapabilityDefinition` rendering property uses the **flat** vocabulary —
@@ -3503,8 +3508,9 @@ string, got int`). A component with no schema relies on the trait side, and its
 fill is refused when the component has no schema and no trait handler or trait
 lowering rule for the capability's type validates the rendering, meaning it
 implements `ValidateAndApplyDefaults`, or the type is not built in and has a
-`CapabilityDefinition` applied (go-kure/launcher#772). A type with neither a handler
-nor a rule, whose binding `EvaluateProfile` never checks, is refused there too. The
+`CapabilityDefinition` applied (go-kure/launcher#772). A type with no handler, no rule
+and no applicable `CapabilityDefinition`, whose binding `EvaluateProfile` never checks,
+is refused there too. The
 error names the component, the capability and the rendering keys. **Pre-GA input
 change**: a fill that used to reach a component unvalidated is now refused when
 nothing validates it, and a value the component's schema does not accept is refused.

@@ -1121,8 +1121,8 @@ func TestTransformer_CapabilityValidated(t *testing.T) {
 	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{"definition": capDefFixture("definition")})
 
 	tests := []struct {
-		typeName string
-		want     bool
+		typeName  string
+		want      bool
 		rendering map[string]any
 		wantError bool
 	}{
