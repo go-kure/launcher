@@ -2,6 +2,7 @@ package oam
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -280,7 +281,10 @@ func TestProvenance_SiblingGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TransformWithProvenance: %v", err)
 	}
-	checkComplete(t, prov, c)
+	checkComplete(t, prov, c, provExpect{
+		groups: map[string]bool{"grp": true},
+		traits: map[string][]provOwner{"grp/expose": {{member: "web"}, {member: "store"}}},
+	})
 	for _, member := range []string{"web", "store"} {
 		got := entriesFor(prov, "grp", member, "expose")
 		if len(got) != 2 || got["port"].Kind != SourceAuthored || got["proto"] != (Source{Kind: SourceCapability, Ref: "expose"}) {
@@ -537,71 +541,160 @@ func TestProvenance_Completeness(t *testing.T) {
 	for _, s := range provScenarios() {
 		t.Run(s.name, func(t *testing.T) {
 			prov, c := runProvenance(t, s)
-			checkComplete(t, prov, c)
+			checkComplete(t, prov, c, authoredExpect(s.app()))
 		})
 	}
 }
 
-// checkComplete holds prov to the final properties c captured.
-func checkComplete(t *testing.T, prov *Provenance, c *provCapture) {
+// provOwner is the part of a trait's identity the handler cannot see: the member of
+// a same-name group it belongs to and its index among its component's (or member's)
+// traits.
+type provOwner struct {
+	member string
+	index  int
+}
+
+// provExpect declares, independently of the report, which owners the handlers were
+// reached for: the component names that form same-name groups, and for each
+// "component/trait type" the owner of each handler call, in call order.
+type provExpect struct {
+	groups map[string]bool
+	traits map[string][]provOwner
+}
+
+// authoredExpect derives the expectation from an app whose components and traits
+// are all authored: no group, each trait at its position.
+func authoredExpect(app *Application) provExpect {
+	exp := provExpect{traits: map[string][]provOwner{}}
+	for _, comp := range app.Spec.Components {
+		for i, tr := range comp.Traits {
+			key := comp.Name + "/" + tr.Type
+			exp.traits[key] = append(exp.traits[key], provOwner{index: i})
+		}
+	}
+	return exp
+}
+
+// checkComplete holds prov to the final properties c captured and to the owners exp
+// declares.
+func checkComplete(t *testing.T, prov *Provenance, c *provCapture, exp provExpect) {
 	t.Helper()
 	if len(c.components) == 0 {
 		t.Fatal("no component reached its handler: the check would pass vacuously")
 	}
-	grouped := map[string]bool{}
-	for _, e := range prov.Entries {
-		if e.Member != "" {
-			grouped[e.Component] = true
-		}
+	for _, p := range completenessProblems(prov, c, exp) {
+		t.Error(p)
 	}
+}
+
+// completenessProblems lists every way prov differs from what c captured and exp
+// declares, in both directions, keyed by the full owner identity.
+func completenessProblems(prov *Provenance, c *provCapture, exp provExpect) []string {
+	var problems []string
 	for key, props := range c.components {
 		name, typ := splitKey(key)
 		member := ""
-		if grouped[name] {
+		if exp.groups[name] {
 			member = typ
 		}
 		got := sortedKeys(entriesFor(prov, name, member, ""))
 		want := sortedKeys(leafValues(props))
 		if !slices.Equal(got, want) {
-			t.Errorf("component %s: reported %v, final leaves %v", key, got, want)
+			problems = append(problems, fmt.Sprintf("component %s: reported %v, final leaves %v", key, got, want))
 		}
 	}
-	// Traits: the handler does not see the member or the index, so each trait
-	// (component, type) is compared as a multiset of property maps. The report's side
-	// is split by (Member, TraitIndex), so an entry under a member or index no trait
-	// has is a group with no counterpart, and a missing one the reverse.
-	reported := map[string]map[propOwner][]string{}
+	// Every reported component entry belongs to a component a handler received.
+	handled := map[string]bool{}
+	for key := range c.components {
+		name, typ := splitKey(key)
+		if exp.groups[name] {
+			handled[name+"/"+typ] = true
+		} else {
+			handled[name+"/"] = true
+		}
+	}
 	for _, e := range prov.Entries {
-		if e.Trait == "" {
+		if e.Trait == "" && !handled[e.Component+"/"+e.Member] {
+			problems = append(problems, fmt.Sprintf("component entry %s (member %q) has no handler call", e.Component, e.Member))
+			break
+		}
+	}
+	// Traits: expected side is each handler call's leaf set at its declared owner,
+	// reported side is the report's leaf set per full owner identity.
+	reported := map[string]map[provOwner]string{}
+	paths := map[propOwner][]string{}
+	for _, e := range prov.Entries {
+		if e.Trait != "" {
+			o := propOwner{component: e.Component, member: e.Member, trait: e.Trait, index: e.TraitIndex}
+			paths[o] = append(paths[o], e.Path)
+		}
+	}
+	for o, ps := range paths {
+		slices.Sort(ps)
+		key := o.component + "/" + o.trait
+		if reported[key] == nil {
+			reported[key] = map[provOwner]string{}
+		}
+		reported[key][provOwner{o.member, o.index}] = strings.Join(ps, ",")
+	}
+	keys := map[string]bool{}
+	for key := range reported {
+		keys[key] = true
+	}
+	for key := range c.traits {
+		keys[key] = true
+	}
+	for key := range exp.traits {
+		keys[key] = true
+	}
+	for _, key := range sortedKeys(keys) {
+		calls, owners := c.traits[key], exp.traits[key]
+		if len(calls) != len(owners) {
+			problems = append(problems, fmt.Sprintf("trait %s: %d handler calls, %d declared owners", key, len(calls), len(owners)))
 			continue
 		}
-		key := e.Component + "/" + e.Trait
-		o := propOwner{component: e.Component, member: e.Member, trait: e.Trait, index: e.TraitIndex}
-		if reported[key] == nil {
-			reported[key] = map[propOwner][]string{}
+		want := map[provOwner]string{}
+		for i, props := range calls {
+			want[owners[i]] = strings.Join(sortedKeys(leafValues(props)), ",")
 		}
-		reported[key][o] = append(reported[key][o], e.Path)
-	}
-	for key := range reported {
-		if _, ok := c.traits[key]; !ok {
-			t.Errorf("trait %s is reported but no handler received it", key)
+		if !reflect.DeepEqual(want, reported[key]) {
+			problems = append(problems, fmt.Sprintf("trait %s: reported %v, expected %v", key, reported[key], want))
 		}
 	}
-	for key, calls := range c.traits {
-		var want []string
-		for _, props := range calls {
-			want = append(want, strings.Join(sortedKeys(leafValues(props)), ","))
-		}
-		var got []string
-		for _, paths := range reported[key] {
-			slices.Sort(paths)
-			got = append(got, strings.Join(paths, ","))
-		}
-		slices.Sort(want)
-		slices.Sort(got)
-		if !slices.Equal(got, want) {
-			t.Errorf("trait %s: reported groups %v, final leaf sets %v", key, got, want)
-		}
+	return problems
+}
+
+// TestProvenance_CompletenessDetectsMovedOwner is the control for checkComplete: a
+// report whose trait group moved to an invented index, or an invented member, fails
+// it though the leaf sets are the same.
+func TestProvenance_CompletenessDetectsMovedOwner(t *testing.T) {
+	s := provScenarios()[0]
+	prov, c := runProvenance(t, s)
+	exp := authoredExpect(s.app())
+	if p := completenessProblems(prov, c, exp); len(p) != 0 {
+		t.Fatalf("the unmodified report already fails: %v", p)
+	}
+	for name, mutate := range map[string]func(*PropertySource){
+		"moved index":     func(e *PropertySource) { e.TraitIndex = 99 },
+		"invented member": func(e *PropertySource) { e.Member = "ghost" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			moved := &Provenance{Application: prov.Application}
+			changed := false
+			for _, e := range prov.Entries {
+				if e.Trait == "expose" {
+					mutate(&e)
+					changed = true
+				}
+				moved.Entries = append(moved.Entries, e)
+			}
+			if !changed {
+				t.Fatal("the scenario has no expose trait to move")
+			}
+			if len(completenessProblems(moved, c, exp)) == 0 {
+				t.Errorf("checkComplete accepts a trait group moved by %s", name)
+			}
+		})
 	}
 }
 
@@ -645,6 +738,8 @@ func TestProvenance_LoweredElements(t *testing.T) {
 		component string
 		trait     string
 		want      map[string]Source
+		// owners declares the handler calls for traits: one owner per call.
+		owners map[string][]provOwner
 	}{{
 		name: "schema-less component rule",
 		register: func(tr *Transformer) {
@@ -687,6 +782,7 @@ func TestProvenance_LoweredElements(t *testing.T) {
 		component: "web",
 		trait:     "expose",
 		want:      map[string]Source{"port": {Kind: SourceLowered, Ref: "component/traited"}},
+		owners:    map[string][]provOwner{"web/expose": {{}}},
 	}}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -697,7 +793,7 @@ func TestProvenance_LoweredElements(t *testing.T) {
 			if err != nil {
 				t.Fatalf("TransformWithProvenance: %v", err)
 			}
-			checkComplete(t, prov, c)
+			checkComplete(t, prov, c, provExpect{traits: tc.owners})
 			got := entriesFor(prov, tc.component, "", tc.trait)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("entries = %+v, want %+v", got, tc.want)
