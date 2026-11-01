@@ -372,8 +372,9 @@ func snapshotLeaf(v any) any {
 	switch rv.Kind() {
 	case reflect.Map, reflect.Slice, reflect.Array:
 		return snapshotValue(rv, map[uintptr]bool{}).Interface()
+	default:
+		return v
 	}
-	return v
 }
 
 // snapshotValue copies maps, slices and arrays recursively, through interface
@@ -423,8 +424,9 @@ func snapshotValue(rv reflect.Value, onPath map[uintptr]bool) reflect.Value {
 			out.Index(i).Set(snapshotValue(rv.Index(i), onPath))
 		}
 		return out
+	default:
+		return rv
 	}
-	return rv
 }
 
 // eachLeaf calls fn for each leaf of v at path: a value that is not a
