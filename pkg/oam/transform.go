@@ -789,6 +789,24 @@ func (t *Transformer) Transform(app *Application, ctx TransformContext) (*stack.
 // returns the accumulated PolicyResult. ctx.Policy is normalized to NoopPolicy
 // if nil so that all pipeline stages always receive a non-nil Policy value.
 func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext) (*stack.Cluster, *PolicyResult, error) {
+	return t.transform(app, ctx, nil)
+}
+
+// transformHook observes a transform at the point its NetworkPolicy synthesis
+// would start: the cluster is built and its sibling groups checked, every trait
+// has run, and no decorator has yet hidden the interfaces a trait
+// sub-application's config offers. observe is handed the transform's own
+// context, whose shared state (traitSubApps, subAppOrigins) the transform
+// created for this call, not the caller's copy. With stop set the transform
+// returns at the hook, so nothing after it runs or is seen.
+type transformHook struct {
+	observe func(cluster *stack.Cluster, components map[string]componentEntry, ctx TransformContext) error
+	stop    bool
+}
+
+// transform is the body of TransformWithPolicy. A nil hook is that method,
+// unchanged; a hook observes the transform where transformHook says.
+func (t *Transformer) transform(app *Application, ctx TransformContext, hook *transformHook) (*stack.Cluster, *PolicyResult, error) {
 	// A lowering rule whose declared targets are not registered is refused here,
 	// whether or not this document uses it (Seal).
 	if err := t.Seal(); err != nil {
@@ -969,6 +987,14 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 	componentMap := make(map[string]componentEntry, len(entries))
 	for _, e := range entries {
 		componentMap[e.component.Name] = e
+	}
+	if hook != nil {
+		if err := hook.observe(cluster, componentMap, ctx); err != nil {
+			return nil, nil, err
+		}
+		if hook.stop {
+			return cluster, policyResult, nil
+		}
 	}
 	labelKey := ctx.componentLabelKey()
 	if err := synthesizeNetworkPolicies(cluster, componentMap, labelKey); err != nil {
