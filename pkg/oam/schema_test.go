@@ -284,7 +284,7 @@ func (h readinessComponent) ToApplicationConfig(*Component, string) (stack.Appli
 	return nil, nil
 }
 func (h readinessComponent) ContractMetadata() ContractMetadata {
-	return ContractMetadata{Family: "db", Version: "v1", Readiness: contractReadinessWant}
+	return ContractMetadata{Family: "db", Version: "v1", Readiness: slices.Clone(contractReadinessWant)}
 }
 
 // contractReadinessWant is what readinessComponent and
@@ -346,7 +346,7 @@ func (r readinessComponentLoweringRule) LowerComponent(*Component, LoweringConte
 	return LoweringResult{}, nil
 }
 func (r readinessComponentLoweringRule) ContractMetadata() ContractMetadata {
-	return ContractMetadata{Family: "dbrule", Version: "v1", Readiness: contractReadinessWant}
+	return ContractMetadata{Family: "dbrule", Version: "v1", Readiness: slices.Clone(contractReadinessWant)}
 }
 
 // TestHandlerContracts_ReadinessOnLoweringRule: a lowering rule's Readiness reaches
