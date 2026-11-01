@@ -197,6 +197,8 @@ func TestChartEndpoints_Refusals(t *testing.T) {
 // lowering alike. Without a declaration the same targetNamespace is accepted, and an empty one
 // reads as absent.
 func TestChartEndpoints_RefusedBesideTargetNamespace(t *testing.T) {
+	// A named string type decodes as the string it holds, so it is refused like one.
+	type namespaceName string
 	for _, k := range chartEndpointKinds() {
 		if k.name != "helm/flux" && k.name != "helmrelease" {
 			continue // the other types take no targetNamespace
@@ -204,9 +206,19 @@ func TestChartEndpoints_RefusedBesideTargetNamespace(t *testing.T) {
 		t.Run(k.name, func(t *testing.T) {
 			const want = `endpoints: cannot be declared beside targetNamespace "data"`
 			// The decode matches keys whatever their case, so the guard must too.
-			for _, key := range []string{"targetNamespace", "TargetNamespace", "TARGETNAMESPACE"} {
+			data := "data"
+			for _, key := range []string{"targetNamespace", "TargetNamespace", "TARGETNAMESPACE", "named string", "pointer", "raw message"} {
 				props := k.props()
-				props[key] = "data"
+				switch key {
+				case "named string":
+					props["targetNamespace"] = namespaceName("data")
+				case "pointer":
+					props["targetNamespace"] = &data
+				case "raw message":
+					props["targetNamespace"] = json.RawMessage(`"data"`)
+				default:
+					props[key] = "data"
+				}
 				props["endpoints"] = []any{chartEntry("http", "", 8080)}
 				comp := chartComponent(k, props)
 				if _, err := k.provider.Endpoints(comp); err == nil || !strings.Contains(err.Error(), want) {
