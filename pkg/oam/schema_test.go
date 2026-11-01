@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -271,6 +272,95 @@ func TestHandlerContracts(t *testing.T) {
 	// Component and trait maps are distinct (no cross-registry collision).
 	if _, ok := set.Traits["webservice"]; ok {
 		t.Error("component contract metadata leaked into Traits map")
+	}
+}
+
+// readinessComponent is a stub ComponentHandler that declares two readiness
+// entries, one signalled by a condition and one by a field.
+type readinessComponent struct{ typ string }
+
+func (h readinessComponent) CanHandle(t string) bool { return t == h.typ }
+func (h readinessComponent) ToApplicationConfig(*Component, string) (stack.ApplicationConfig, error) {
+	return nil, nil
+}
+func (h readinessComponent) ContractMetadata() ContractMetadata {
+	return ContractMetadata{Family: "db", Version: "v1", Readiness: contractReadinessWant}
+}
+
+// contractReadinessWant is what readinessComponent and
+// readinessComponentLoweringRule declare.
+var contractReadinessWant = []ContractReadiness{
+	{Group: "example.test", Kind: "Cluster", NamePattern: "the component name", Condition: "Ready", Generic: GenericJudges},
+	{Group: "example.test", Kind: "Pooler", NamePattern: "<component>-pooler", Field: "status.phase", Value: "Healthy", Generic: GenericCannotJudge},
+}
+
+// undeclaredReadinessComponent describes its contract and leaves Readiness nil.
+type undeclaredReadinessComponent struct{ typ string }
+
+func (h undeclaredReadinessComponent) CanHandle(t string) bool { return t == h.typ }
+func (h undeclaredReadinessComponent) ToApplicationConfig(*Component, string) (stack.ApplicationConfig, error) {
+	return nil, nil
+}
+func (h undeclaredReadinessComponent) ContractMetadata() ContractMetadata {
+	return ContractMetadata{Family: "plain", Version: "v1"}
+}
+
+// TestHandlerContracts_Readiness: HandlerContracts publishes a declared Readiness
+// unchanged and a nil one as nil (go-kure/launcher#1134). Map membership is
+// asserted first: a non-describer is omitted, and indexing its absent entry would
+// also read nil.
+func TestHandlerContracts_Readiness(t *testing.T) {
+	tr := NewTransformer(
+		map[string]ComponentHandler{
+			"db":    readinessComponent{typ: "db"},
+			"plain": undeclaredReadinessComponent{typ: "plain"},
+		},
+		nil,
+	)
+
+	set := tr.HandlerContracts()
+
+	declared, ok := set.Components["db"]
+	if !ok {
+		t.Fatalf("expected component 'db' contract metadata, got %v", set.Components)
+	}
+	if !slices.Equal(declared.Readiness, contractReadinessWant) {
+		t.Errorf("db Readiness = %+v, want %+v", declared.Readiness, contractReadinessWant)
+	}
+
+	undeclared, ok := set.Components["plain"]
+	if !ok {
+		t.Fatalf("expected component 'plain' contract metadata, got %v", set.Components)
+	}
+	if undeclared.Readiness != nil {
+		t.Errorf("plain Readiness = %+v, want nil (undeclared)", undeclared.Readiness)
+	}
+}
+
+// readinessComponentLoweringRule declares the same readiness through a component
+// lowering rule, the other source of contracts.
+type readinessComponentLoweringRule struct{ typ string }
+
+func (r readinessComponentLoweringRule) ComponentType() string { return r.typ }
+func (r readinessComponentLoweringRule) LowerComponent(*Component, LoweringContext) (LoweringResult, error) {
+	return LoweringResult{}, nil
+}
+func (r readinessComponentLoweringRule) ContractMetadata() ContractMetadata {
+	return ContractMetadata{Family: "dbrule", Version: "v1", Readiness: contractReadinessWant}
+}
+
+// TestHandlerContracts_ReadinessOnLoweringRule: a lowering rule's Readiness reaches
+// HandlerContracts like a handler's.
+func TestHandlerContracts_ReadinessOnLoweringRule(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(readinessComponentLoweringRule{typ: "dbrule"})
+
+	got, ok := tr.HandlerContracts().Components["dbrule"]
+	if !ok {
+		t.Fatalf("expected lowering rule 'dbrule' contract metadata in set.Components")
+	}
+	if !slices.Equal(got.Readiness, contractReadinessWant) {
+		t.Errorf("dbrule Readiness = %+v, want %+v", got.Readiness, contractReadinessWant)
 	}
 }
 

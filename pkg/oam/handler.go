@@ -138,6 +138,15 @@ type ContractMetadata struct {
 	// it needs none: a contract whose output is a CRD's object needs that CRD
 	// and its controller whether it lists them or not.
 	Prerequisites []ContractPrerequisite
+	// Readiness lists, for each kind of resource an entity of this contract
+	// provides, how a reader judges that the resource is ready: the status
+	// condition or field that signals it, and whether a generic health check can
+	// judge the kind. The engine reads none of it and nothing enforces it; a
+	// consumer reads it, for example to decide which kinds need a
+	// resource-specific readiness rule. nil when the contract declares none,
+	// which does not mean its resources are ready at once or need no waiting. An
+	// empty non-nil slice reads the same as nil.
+	Readiness []ContractReadiness
 	// Deprecated marks the contract as deprecated.
 	Deprecated bool
 	// DeprecationMessage is guidance shown when Deprecated is true (e.g. pointing at
@@ -158,9 +167,52 @@ type ContractPrerequisite struct {
 	When string
 }
 
+// ContractReadiness is one entry of ContractMetadata.Readiness: one kind of
+// resource the entity provides, and how a reader judges that it is ready. Every
+// field is text or an enum for a reader; the engine parses and checks none of it.
+//
+// Declare exactly one of Condition or Field, with Value only alongside Field. The
+// exception is a kind that gives no signal of its own: set Generic to
+// GenericCannotJudge and leave Condition and Field empty. A record with an empty
+// Kind declares nothing.
+type ContractReadiness struct {
+	// Group and Kind identify the resource; an empty Group is the core group.
+	Group string
+	Kind  string
+	// NamePattern says how the resource is named, as text for a reader, e.g. "the
+	// component name" or "<component>-pooler". It is not parsed.
+	NamePattern string
+	// Condition is the status condition type that reads "True" when the resource
+	// is ready, e.g. "Ready". "" when readiness is signalled by Field.
+	Condition string
+	// Field is a status field path that signals readiness, e.g. "status.phase",
+	// and Value is what it holds when the resource is ready, e.g. "Healthy". Both
+	// are "" when readiness is signalled by Condition.
+	Field string
+	Value string
+	// Generic says whether a generic health check can judge this kind at all.
+	Generic GenericReadiness
+}
+
+// GenericReadiness says whether a generic health check, one that knows no
+// resource-specific rule, can judge a kind's readiness.
+type GenericReadiness string
+
+const (
+	// GenericUndeclared means the entity does not say.
+	GenericUndeclared GenericReadiness = ""
+	// GenericJudges asserts that a reader which treats a status condition of type
+	// "Ready" with status "True" as ready, and applies no other rule, reaches the
+	// right answer for this kind. Set it only on a record whose signal is
+	// Condition "Ready".
+	GenericJudges GenericReadiness = "judges"
+	// GenericCannotJudge means the kind needs a resource-specific rule.
+	GenericCannotJudge GenericReadiness = "cannot-judge"
+)
+
 // ContractDescriber is an optional interface implemented by component, trait and
 // policy handlers and lowering rules that declare contract metadata: family,
-// version, required capability keys, prerequisites, and deprecation info. Queryable at
+// version, required capability keys, prerequisites, readiness, and deprecation info. Queryable at
 // registration time alongside PropertySchema(), through
 // Transformer.HandlerContracts() — the HandlerSchemas-shaped accessor covering all
 // six registries a component, trait or policy type can be claimed by (the three
