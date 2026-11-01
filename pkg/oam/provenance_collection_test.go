@@ -113,6 +113,7 @@ func TestProvenance_UnchangedNaNKeepsOrigin(t *testing.T) {
 // The comparison used for leaves ends on a self-referential value and treats NaN as
 // equal to NaN only where DeepEqual would otherwise find the values equal.
 func TestProvenance_SameLeafValue(t *testing.T) {
+	pa, pb := 1, 2
 	cyc := make([]any, 2)
 	cyc[0] = math.NaN()
 	cyc[1] = cyc
@@ -145,6 +146,15 @@ func TestProvenance_SameLeafValue(t *testing.T) {
 		{"map with a nan key against a number key", map[float64]string{math.NaN(): "v"}, map[float64]string{1: "v"}, false},
 		{"map with two nan keys", map[float64]string{math.NaN(): "a", math.NaN(): "b"}, map[float64]string{math.NaN(): "b", math.NaN(): "a"}, true},
 		{"map with two nan keys, one value differs", map[float64]string{math.NaN(): "a", math.NaN(): "b"}, map[float64]string{math.NaN(): "a", math.NaN(): "c"}, false},
+		{
+			// A failed match of one NaN-key entry must not leave its pointer pair behind as
+			// equal for the next candidate.
+			"nan keys with pointer values, different pointees",
+			map[float64]*int{math.NaN(): &pa, math.NaN(): &pa},
+			map[float64]*int{math.NaN(): &pb, math.NaN(): &pb},
+			false,
+		},
+		{"nan keys with pointer values, same pointee", map[float64]*int{math.NaN(): &pa}, map[float64]*int{math.NaN(): &pa}, true},
 		{"plain equal", "x", "x", true},
 		{"plain differs", "x", "y", false},
 	}
