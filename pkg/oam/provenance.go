@@ -364,16 +364,67 @@ func leafValues(props map[string]any) map[string]any {
 }
 
 // snapshotLeaf deep-copies a leaf that holds a map, slice or array, keeping its Go
-// type. A value checkRenderedValue refuses is returned as it is: it is not a
-// property value, and the copy would panic on it.
+// type. Unlike copyRenderedValue it accepts what a profile may hold before its
+// handler normalizes it (a null inside a typed collection), because the snapshot
+// exists to be compared with that handler's result.
 func snapshotLeaf(v any) any {
-	switch reflect.ValueOf(v).Kind() {
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
 	case reflect.Map, reflect.Slice, reflect.Array:
-		if checkRenderedValue(v, map[propertyCopyKey]bool{}) == nil {
-			return copyRenderedValue(v)
-		}
+		return snapshotValue(rv, map[uintptr]bool{}).Interface()
 	}
 	return v
+}
+
+// snapshotValue copies maps, slices and arrays recursively, through interface
+// values. Any other value, a struct or pointer included, is kept as it is. onPath
+// holds the maps and slices being copied above rv, so a collection that contains
+// itself is left shared instead of looping.
+func snapshotValue(rv reflect.Value, onPath map[uintptr]bool) reflect.Value {
+	switch rv.Kind() {
+	case reflect.Interface:
+		if rv.IsNil() {
+			return rv
+		}
+		out := reflect.New(rv.Type()).Elem()
+		out.Set(snapshotValue(rv.Elem(), onPath))
+		return out
+	case reflect.Map:
+		if rv.IsNil() || onPath[rv.Pointer()] {
+			return rv
+		}
+		onPath[rv.Pointer()] = true
+		defer delete(onPath, rv.Pointer())
+		out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
+		for it := rv.MapRange(); it.Next(); {
+			out.SetMapIndex(it.Key(), snapshotValue(it.Value(), onPath))
+		}
+		return out
+	case reflect.Slice:
+		if rv.IsNil() {
+			return rv
+		}
+		if rv.Len() == 0 {
+			return reflect.MakeSlice(rv.Type(), 0, 0)
+		}
+		if onPath[rv.Pointer()] {
+			return rv
+		}
+		onPath[rv.Pointer()] = true
+		defer delete(onPath, rv.Pointer())
+		out := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
+		for i := range rv.Len() {
+			out.Index(i).Set(snapshotValue(rv.Index(i), onPath))
+		}
+		return out
+	case reflect.Array:
+		out := reflect.New(rv.Type()).Elem()
+		for i := range rv.Len() {
+			out.Index(i).Set(snapshotValue(rv.Index(i), onPath))
+		}
+		return out
+	}
+	return rv
 }
 
 // eachLeaf calls fn for each leaf of v at path: a value that is not a
