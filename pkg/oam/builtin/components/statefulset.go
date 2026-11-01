@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 // StatefulsetHandler handles OAM statefulset components.
@@ -104,6 +105,17 @@ func (h *StatefulsetHandler) FillCapabilityDefaults(props map[string]any, lctx o
 	out := maps.Clone(props)
 	out["volumeClaimTemplates"] = filled
 	return out, nil
+}
+
+// Endpoints implements oam.EndpointProvider: one endpoint per port the main
+// container declares (containerPortEndpoints). The handler's own parse runs
+// first, so a component it refuses has no endpoint, in the parse's words.
+func (h *StatefulsetHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	cfg, err := h.ToApplicationConfig(component, "")
+	if err != nil {
+		return nil, err
+	}
+	return containerPortEndpoints(component.Name, cfg.(*StatefulsetConfig).Ports), nil
 }
 
 // ToApplicationConfig converts an OAM statefulset component to a StatefulsetConfig.

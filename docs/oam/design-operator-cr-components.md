@@ -204,6 +204,14 @@ the component name unless `objectName` or the naming hook names it. `postgresql`
 identical endpoint, which a test pins byte for byte. `cnpg-database` and
 `cnpg-objectstore` run no pods and declare no endpoint.
 
+An endpoint may also carry a `Name` and a `Protocol` (go-kure/launcher#1132). The
+two CNPG endpoints leave both unset: unnamed, and TCP. A `Name` is empty or an
+IANA service name, the rule the API server applies to a container port name
+(`validation.IsValidPortName`), and a component's non-empty names are unique.
+The kind-named workloads (`deployment`, `statefulset`, `daemonset`) name an
+endpoint after the container port it comes from. A name belongs to the
+endpoint, not to the Service or the NetworkPolicy, so no object name changes.
+
 ### Semantic components as lowering rules
 
 A semantic component keeps its curated authoring surface and its opinions, and

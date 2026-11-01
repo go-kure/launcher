@@ -41,16 +41,25 @@ func TestWebserviceHandler_Endpoints(t *testing.T) {
 // TestWorker_NotEndpointProvider documents the go-kure/launcher#225 decision: worker declares no
 // in-cluster port and emits no Service, so it deliberately provides no endpoints
 // (ComponentEndpoints then returns (nil,nil) for a worker component). Worker is a
-// lowering rule now, so neither the rule nor the deployment handler it lowers
-// into may provide them.
+// lowering rule, so the rule may not provide them. The deployment handler it lowers
+// into does provide endpoints, from the main container's `ports`; a worker declares
+// none, so what it lowers into reports none.
 func TestWorker_NotEndpointProvider(t *testing.T) {
 	for name, v := range map[string]any{
-		"WorkerRule":        components.WorkerRule{},
-		"DeploymentHandler": &components.DeploymentHandler{},
+		"WorkerRule": components.WorkerRule{},
 	} {
 		if _, ok := v.(oam.EndpointProvider); ok {
 			t.Errorf("%s should not implement oam.EndpointProvider (worker has no in-cluster port)", name)
 		}
+	}
+	// A deployment with no main-container ports, which is what a worker lowers into,
+	// reports no endpoint.
+	eps, err := (&components.DeploymentHandler{}).Endpoints(&oam.Component{
+		Name: "jobs", Type: "deployment",
+		Properties: map[string]any{"image": "ghcr.io/example/worker:1.0"},
+	})
+	if err != nil || len(eps) != 0 {
+		t.Errorf("a deployment without ports: endpoints = %v, err = %v; want none", eps, err)
 	}
 }
 

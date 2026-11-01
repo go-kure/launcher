@@ -172,8 +172,8 @@ reads it.
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `csidriver` | CSIDriver | Kind-named CSIDriver: the whole `CSIDriverSpec`, strictly decoded. Cluster-scoped, and the object's name (the component's, or its `objectName`) is the driver's name; no environment policy applies — see below. |
-| `daemonset` | DaemonSet | Per-node daemon; honors `tolerations`, the raw `affinity` and `topologySpreadConstraints`, and takes `sidecars`. Emits no Service (go-kure/launcher#690). |
-| `deployment` | Deployment | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, the main container's `ports`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Not a superset of `worker` — see below. |
+| `daemonset` | DaemonSet | Per-node daemon; honors `tolerations`, the raw `affinity` and `topologySpreadConstraints`, and takes `sidecars`. Emits no Service (go-kure/launcher#690). Declares one endpoint per main-container port. |
+| `deployment` | Deployment | Kind-named Deployment: the shared container and pod surface, the rest of `DeploymentSpec`, the main container's `ports`, and the raw `corev1` `affinity`/`tolerations`/`topologySpreadConstraints`. Declares one endpoint per main-container port. Not a superset of `worker` — see below. |
 | `endpointslice` | EndpointSlice | Kind-named EndpointSlice: the object's own fields (`addressType`, required; `endpoints`; `ports`), strictly decoded; an endpoint's `addresses` are required. It belongs to a Service through the `kubernetes.io/service-name` label, authored under `labels` as a literal that does not follow a Service's `objectName`. Namespaced; no environment policy applies and no capability is required — see below. |
 | `externalsecret` | ExternalSecret | Kind-named External Secrets Operator ExternalSecret: the whole `ExternalSecretSpec` (`secretStoreRef`, `target`, `refreshPolicy`, `refreshInterval`, `syncWindows`, `data`, `dataFrom`), strictly decoded; no top-level field is required. The store is the author's. The environment policy reaches one field: a `target.manifest` of a kind the policy checks is refused. No capability is required. Under a delivery whose groups wait for their Flux objects, an ExternalSecret in a later group than a Flux object requiring its target Secret is refused, unless `creationPolicy` is `Merge` or `None`, a `target.manifest` is set, or the document holds that Secret by the Flux object's group (go-kure/launcher#1086). Beside the `external-secret` trait — see below. |
 | `fluxcd-alert` | Alert | Kind-named Flux Alert: the whole `AlertSpec`, strictly decoded; `providerRef` with its `name` and `eventSources`, each with its `kind` and `name`, are required. A source may name the objects of another namespace, and nothing gates it. No environment policy applies — see below. |
@@ -242,7 +242,7 @@ reads it.
 | `serviceaccount` | ServiceAccount | Kind-named ServiceAccount: `automountServiceAccountToken`, `imagePullSecrets`. A workload names it with `serviceAccountName` — see below. |
 | `servicecidr` | ServiceCIDR | Kind-named ServiceCIDR: the whole `ServiceCIDRSpec` (`cidrs`, required, at least one), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `servicemonitor` | ServiceMonitor | Kind-named Prometheus operator ServiceMonitor: the whole `ServiceMonitorSpec`, strictly decoded; `endpoints` and `selector` are required. The selector is the author's. No environment policy applies and no capability is required — see below. |
-| `statefulset` | StatefulSet | Stateful workload with `volumeClaimTemplates`; `serviceName` names a governing `service` authored beside it. Emits no Service (go-kure/launcher#690). |
+| `statefulset` | StatefulSet | Stateful workload with `volumeClaimTemplates`; `serviceName` names a governing `service` authored beside it. Emits no Service (go-kure/launcher#690). Declares one endpoint per main-container port. |
 | `storageclass` | StorageClass | Kind-named StorageClass: the object's fields beside its identity (`provisioner`, required, `parameters`, `reclaimPolicy`, …), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `tcproute` | TCPRoute | Kind-named Gateway API TCPRoute: the whole `TCPRouteSpec`, strictly decoded; `rules` and a rule's `backendRefs` are required, with the `name` of a backend and the `port` of one that is a Service. An authored object, as the `httproute` kind is: no parent is synthesized from a capability, no NetworkPolicy allow rule is synthesized for it, no capability is required and no environment policy applies — see below. |
 | `thanosruler` | ThanosRuler | Kind-named Prometheus operator ThanosRuler: the whole `ThanosRulerSpec`, strictly decoded, with the spec's `labels` (Prometheus external labels) published as `externalLabels`; no top-level field is required. The operator runs the pods: `image`, `replicas`, `resources`, storage, `containers`, `initContainers`, `volumes` and `securityContext` are held to the environment policy as the Alertmanager's are, and a literal `remoteWrite[].bearerToken` under a policy that forbids explicit secrets. The replica count and memory request the operator fills where they are unset are held, not written. An image the operator chooses, for `thanos-ruler` or its config-reloader, is refused under a policy with allowed registries. No capability is required — see below. |
@@ -1684,6 +1684,20 @@ already carries raw `topologySpreadConstraints`, so the two never merge.
 `deployment` publishes `ports`, the main container's `corev1.ContainerPort` list
 (go-kure/launcher#280). It declares container ports only: the kind still emits
 no Service (use `webservice`, or a `service` component, for one).
+
+**Endpoints (go-kure/launcher#1132).** `deployment`, `statefulset` and
+`daemonset` implement `oam.EndpointProvider` from the main container's `ports`:
+one endpoint per entry, in the authored order. An endpoint's `Name` is the port's
+`name` (empty when unnamed), its `Ports` hold the numeric `containerPort` alone,
+and its `Protocol` is the entry's (`TCP` when unset). Its selector is
+`app: <component name>`, the label the pods carry, whatever `objectName` or a
+Naming hook names the object. The type's own parse runs first, so a component it
+refuses has no endpoint and is refused in the parse's words. Sidecar ports are
+not the component's service surface and declare none. `job` and `cronjob`
+publish `ports` but report no endpoint, and `worker` lowers into a `deployment`
+without ports, so it reports none (go-kure/launcher#225). Only TCP endpoints
+synthesize a NetworkPolicy allow; a UDP or SCTP endpoint is collected and
+validated, and synthesizes nothing.
 
 `daemonset`, `statefulset`, `job` and `cronjob` publish the same `ports`, with
 the same entry rules (go-kure/launcher#334): container ports are a PodSpec
@@ -5818,7 +5832,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `DeploymentSpec`-level surface, the last of which it now shares with
   `webservice` and `worker` rather than owning. What distinguishes it is mostly
   what it leaves out: no `topologySpread`, no four-key `affinity` shorthand, no
-  `port`; it declares no endpoint and emits no Service. It is not `worker` minus
+  `port`; it emits no Service, and declares one endpoint per main-container
+  `ports` entry (see "Main container ports" above). It is not `worker` minus
   a few things either — it reads nulls as omissions across its whole surface,
   which the role kinds do not. The one thing it
   adds is the raw `corev1` scheduling surface the role kinds lack: `affinity`,

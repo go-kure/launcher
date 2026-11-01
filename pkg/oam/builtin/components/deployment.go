@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 // DeploymentHandler handles OAM deployment components.
@@ -89,6 +90,19 @@ func (h *DeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDeploymentSpec())
 	return m
+}
+
+// Endpoints implements oam.EndpointProvider: one endpoint per port the main
+// container declares (containerPortEndpoints). Endpoints are collected apart
+// from the build, so the handler's own parse runs here too: a component it
+// refuses has no endpoint, in the parse's words, whether or not it declares
+// ports.
+func (h *DeploymentHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	cfg, err := h.ToApplicationConfig(component, "")
+	if err != nil {
+		return nil, err
+	}
+	return containerPortEndpoints(component.Name, cfg.(*DeploymentConfig).Ports), nil
 }
 
 // ToApplicationConfig converts an OAM deployment component to a DeploymentConfig.

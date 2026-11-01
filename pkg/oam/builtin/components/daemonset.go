@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 // DaemonsetHandler handles OAM daemonset components.
@@ -49,6 +50,17 @@ func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDaemonSetSpec())
 	return m
+}
+
+// Endpoints implements oam.EndpointProvider: one endpoint per port the main
+// container declares (containerPortEndpoints). The handler's own parse runs
+// first, so a component it refuses has no endpoint, in the parse's words.
+func (h *DaemonsetHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	cfg, err := h.ToApplicationConfig(component, "")
+	if err != nil {
+		return nil, err
+	}
+	return containerPortEndpoints(component.Name, cfg.(*DaemonsetConfig).Ports), nil
 }
 
 // ToApplicationConfig converts an OAM daemonset component to a DaemonsetConfig.

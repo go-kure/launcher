@@ -251,12 +251,16 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 }
 
 // TestEndpoints_TypesWithAnEntry pins which component types have an endpoint
-// entry: the five the table above holds to the rule. It reads the two
-// registries `kurel build` registers its component types from, and asks each
-// handler and rule whether it implements an endpoint interface, so a type that
-// gains an entry fails here until the table has its rows.
+// entry: the five the table above holds to the rule, and the three workload
+// kinds (deployment, statefulset, daemonset), which take their endpoints from the
+// main container's ports. It reads the two registries `kurel build` registers its
+// component types from, and asks each handler and rule whether it implements an
+// endpoint interface, so a type that gains an entry fails here until it is listed.
 func TestEndpoints_TypesWithAnEntry(t *testing.T) {
-	withEntry := map[string]bool{"webservice": true, "service": true, "postgresql": true, "cnpg-cluster": true, "cnpg-pooler": true}
+	withEntry := map[string]bool{
+		"webservice": true, "service": true, "postgresql": true, "cnpg-cluster": true, "cnpg-pooler": true,
+		"deployment": true, "statefulset": true, "daemonset": true,
+	}
 	registered := map[string]any{}
 	for typ, h := range builtinComponentHandlers() {
 		registered[typ] = h
