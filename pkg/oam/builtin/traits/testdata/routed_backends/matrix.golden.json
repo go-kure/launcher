@@ -1,0 +1,267 @@
+{
+  "chart_with_service_port": [
+    {
+      "component": "metrics",
+      "application": "metrics-ingress",
+      "service": "metrics",
+      "owner": "metrics",
+      "pods": {
+        "kind": "owner"
+      },
+      "ports": [
+        {
+          "port": 9090,
+          "status": "unchecked"
+        }
+      ]
+    }
+  ],
+  "config_wrapped": [
+    {
+      "component": "router",
+      "application": "router-ingress",
+      "service": "api",
+      "owner": "api",
+      "pods": {
+        "kind": "selector",
+        "selector": {
+          "matchLabels": {
+            "app": "api-server"
+          }
+        }
+      },
+      "ports": [
+        {
+          "port": 80,
+          "status": "matched",
+          "targetPorts": [
+            8080
+          ]
+        }
+      ]
+    }
+  ],
+  "deployment_without_a_service_is_unowned": [
+    {
+      "component": "router",
+      "application": "router-ingress",
+      "service": "api-server",
+      "pods": {
+        "kind": "unowned"
+      },
+      "ports": [
+        {
+          "port": 8080,
+          "status": "unchecked"
+        }
+      ]
+    }
+  ],
+  "externalname": [
+    {
+      "component": "router",
+      "application": "router-ingress",
+      "service": "db",
+      "owner": "db",
+      "pods": {
+        "kind": "none"
+      },
+      "ports": [
+        {
+          "port": 5432,
+          "status": "unmatched"
+        }
+      ]
+    }
+  ],
+  "httproute": [
+    {
+      "component": "gate",
+      "application": "gate-httproute",
+      "service": "api",
+      "owner": "api",
+      "pods": {
+        "kind": "selector",
+        "selector": {
+          "matchLabels": {
+            "app": "api-server"
+          }
+        }
+      },
+      "ports": [
+        {
+          "port": 80,
+          "status": "matched",
+          "targetPorts": [
+            8080
+          ]
+        }
+      ]
+    }
+  ],
+  "owned_service_in_two_selector_groups": [
+    {
+      "component": "router",
+      "application": "router-ingress",
+      "service": "api",
+      "owner": "api",
+      "pods": {
+        "kind": "selector",
+        "selector": {
+          "matchLabels": {
+            "app": "api-server"
+          }
+        }
+      },
+      "ports": [
+        {
+          "port": 80,
+          "status": "matched",
+          "targetPorts": [
+            8080
+          ]
+        },
+        {
+          "port": "http",
+          "status": "matched",
+          "targetPorts": [
+            8080
+          ]
+        }
+      ]
+    }
+  ],
+  "selector_numbered_and_named_port": [
+    {
+      "component": "router",
+      "application": "router-ingress",
+      "service": "api",
+      "owner": "api",
+      "pods": {
+        "kind": "selector",
+        "selector": {
+          "matchLabels": {
+            "app": "api-server"
+          }
+        }
+      },
+      "ports": [
+        {
+          "port": 80,
+          "status": "matched",
+          "targetPorts": [
+            8080
+          ]
+        },
+        {
+          "port": "http",
+          "status": "matched",
+          "targetPorts": [
+            8080
+          ]
+        }
+      ]
+    }
+  ],
+  "selector_unmatched_port_and_udp": [
+    {
+      "component": "router",
+      "application": "router-ingress",
+      "service": "api",
+      "owner": "api",
+      "pods": {
+        "kind": "selector",
+        "selector": {
+          "matchLabels": {
+            "app": "api-server"
+          }
+        }
+      },
+      "ports": [
+        {
+          "port": 53,
+          "status": "unmatched"
+        },
+        {
+          "port": 9999,
+          "status": "unmatched"
+        }
+      ]
+    }
+  ],
+  "self_route": [
+    {
+      "component": "api",
+      "application": "api-ingress",
+      "service": "api",
+      "owner": "api",
+      "pods": {
+        "kind": "selector",
+        "selector": {
+          "matchLabels": {
+            "app": "api-server"
+          }
+        }
+      },
+      "ports": [
+        {
+          "port": 80,
+          "status": "matched",
+          "targetPorts": [
+            8080
+          ]
+        }
+      ]
+    }
+  ],
+  "unowned_bare_service": [
+    {
+      "component": "router",
+      "application": "router-ingress",
+      "service": "legacy",
+      "pods": {
+        "kind": "unowned",
+        "selector": {
+          "matchLabels": {
+            "app": "legacy"
+          }
+        }
+      },
+      "ports": [
+        {
+          "port": 80,
+          "status": "unchecked"
+        }
+      ]
+    }
+  ],
+  "webservice_owner": [
+    {
+      "component": "router",
+      "application": "router-ingress",
+      "service": "web",
+      "owner": "web",
+      "pods": {
+        "kind": "selector",
+        "selector": {
+          "matchLabels": {
+            "app": "web"
+          }
+        }
+      },
+      "ports": [
+        {
+          "port": 8080,
+          "status": "matched",
+          "targetPorts": [
+            8080
+          ]
+        },
+        {
+          "port": 9999,
+          "status": "unmatched"
+        }
+      ]
+    }
+  ]
+}

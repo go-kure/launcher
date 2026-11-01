@@ -614,6 +614,12 @@ backend's pods on the backend ports. Without a `backendSelector`, an external ba
 is rejected (it could never take effect), and a `backendSelector` on a ref that resolves to a
 sibling component is ignored (component-label retargeting wins). Same-namespace only.
 
+Where each of these routes lands, resolved through the same lookups, is reported by
+`Transformer.RoutedBackends` (see `pkg/oam/README.md`): the Service a route names, the component
+that owns it, the pods it selects, and whether the Service has each routed port. The traits'
+route-to-own-Service name (`BackendServiceName()`, else the application's name) is the `Service`
+it reports for a route to the component's own Service.
+
 ### Null `trafficSources` and `matchLabels`
 
 `networkPolicy.trafficSources` is required once `networkPolicy` is present, and an
