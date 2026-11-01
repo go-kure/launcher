@@ -15,7 +15,7 @@ func TestProvenance_TypedCollectionElementsKeepOrigin(t *testing.T) {
 		"tags":      []string{"a", "b"},
 		"nested":    map[string][]string{"zones": {"x"}},
 	}
-	steps := defaultSteps{profile: leafValues(profile)}
+	steps := defaultSteps{profile: indexOf(profile)}
 	steps.schema = steps.profile
 
 	final := map[string]any{
@@ -39,7 +39,7 @@ func TestProvenance_TypedCollectionElementsKeepOrigin(t *testing.T) {
 
 	// Negative control: with no snapshot of the typed value, the same final leaves are
 	// all the handler's, so the test above fails if the elements are not consulted.
-	bare := defaultSteps{profile: map[string]any{}, schema: map[string]any{}}
+	bare := defaultSteps{}
 	for path, d := range bare.detail(final) {
 		if d != detailHandlerDefault {
 			t.Fatalf("detail[%s] = %q without a snapshot, want %q", path, d, detailHandlerDefault)
@@ -54,7 +54,7 @@ func TestProvenance_PartiallyNormalizedCollectionKeepsOrigin(t *testing.T) {
 	profile := map[string]any{
 		"nested": map[string][]string{"zones": {"x"}, "other": {"a"}},
 	}
-	steps := defaultSteps{profile: leafValues(profile)}
+	steps := defaultSteps{profile: indexOf(profile)}
 	steps.schema = steps.profile
 
 	final := map[string]any{
@@ -83,7 +83,7 @@ func TestProvenance_UnchangedNaNKeepsOrigin(t *testing.T) {
 		"nested":    map[string][]float64{"w": {math.NaN()}},
 		"plain":     "v",
 	}
-	steps := defaultSteps{profile: leafValues(profile)}
+	steps := defaultSteps{profile: indexOf(profile)}
 	steps.schema = steps.profile
 
 	got := steps.detail(profile)
@@ -136,6 +136,10 @@ func TestProvenance_SameLeafValue(t *testing.T) {
 		{"any holding nan", []any{math.NaN()}, []any{math.NaN()}, true},
 		{"cyclic with nan", cyc, other, true},
 		{"cyclic differs", cyc, []any{math.NaN(), 1}, false},
+		{"struct with nan and nil func", nanFunc{N: math.NaN()}, nanFunc{N: math.NaN()}, true},
+		{"struct with nan and different func", nanFunc{N: math.NaN(), F: func() {}}, nanFunc{N: math.NaN()}, false},
+		{"struct with nan and non-nil funcs", nanFunc{N: math.NaN(), F: func() {}}, nanFunc{N: math.NaN(), F: func() {}}, false},
+		{"struct with nan, different number", nanFunc{N: math.NaN()}, nanFunc{N: 1}, false},
 		{"plain equal", "x", "x", true},
 		{"plain differs", "x", "y", false},
 	}
@@ -155,9 +159,9 @@ func TestProvenance_SnapshotCopiesOverlappingSubSlice(t *testing.T) {
 	s[0] = "v"
 	s[1] = s[:1]
 
-	c, ok := snapshotLeaf(s).([]any)
+	c, ok := canonicalValue(s).([]any)
 	if !ok || len(c) != 2 {
-		t.Fatalf("snapshotLeaf = %#v, want a two-element []any", snapshotLeaf(s))
+		t.Fatalf("canonicalValue = %#v, want a two-element []any", canonicalValue(s))
 	}
 	s[0] = "changed"
 	sub, ok := c[1].([]any)
@@ -210,7 +214,7 @@ func TestProvenance_SelfReferentialValuesDoNotLoop(t *testing.T) {
 				t.Fatalf("eachLeaf paths = %v, want %v", seen, tc.wantPaths)
 			}
 
-			steps := defaultSteps{profile: leafValues(props)}
+			steps := defaultSteps{profile: indexOf(props)}
 			steps.schema = steps.profile
 			got := steps.detail(props)
 			if len(got) != len(tc.wantPaths) {
