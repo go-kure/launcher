@@ -1,0 +1,24 @@
+application: myapp
+entries:
+- component: filled
+  path: class
+  source:
+    kind: capability
+    ref: store
+- component: filled
+  path: size
+  source:
+    kind: authored
+- component: kept
+  path: class
+  source:
+    kind: authored
+- component: kept
+  path: size
+  source:
+    kind: authored
+- component: nulled
+  path: class
+  source:
+    kind: capability
+    ref: store

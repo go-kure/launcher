@@ -1,0 +1,24 @@
+application: myapp
+entries:
+- component: external
+  path: class
+  source:
+    kind: capability
+    ref: ingress
+  trait: ingress
+- component: external
+  path: scope
+  source:
+    kind: authored
+  trait: ingress
+- component: internal
+  path: class
+  source:
+    kind: capability
+    ref: ingress.internal
+  trait: ingress
+- component: internal
+  path: scope
+  source:
+    kind: authored
+  trait: ingress
