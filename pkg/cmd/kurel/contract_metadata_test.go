@@ -31,6 +31,11 @@ func builtinsByPosition() map[string]map[string]any {
 	return out
 }
 
+// builtinsDeclaringReadiness lists the built-ins allowed to set
+// ContractMetadata.Readiness, as "<position>/<type>". Empty: no built-in
+// declares readiness yet.
+var builtinsDeclaringReadiness = map[string]bool{}
+
 // TestBuiltins_EveryOneDescribesItsContract: every built-in implements
 // oam.ContractDescriber under the one scheme: the family is the type it is
 // registered under, the version is builtin.ContractVersion, and the required
@@ -57,6 +62,12 @@ func TestBuiltins_EveryOneDescribesItsContract(t *testing.T) {
 			}
 			if !slices.Equal(meta.RequiredCapabilityKeys, wantKeys) {
 				t.Errorf("%s %q: RequiredCapabilityKeys = %v, want %v", position, name, meta.RequiredCapabilityKeys, wantKeys)
+			}
+			// Checked before the postgresql skip below, so postgresql is not
+			// exempt. A built-in that starts declaring readiness is added to
+			// builtinsDeclaringReadiness (go-kure/launcher#1134) on purpose.
+			if meta.Readiness != nil && !builtinsDeclaringReadiness[position+"/"+name] {
+				t.Errorf("%s %q declares readiness %+v; no built-in is on the allow list yet", position, name, meta.Readiness)
 			}
 			if position == "component" && name == "postgresql" {
 				continue // TestNewBuiltinTransformer_PublishesPostgresqlPrerequisites
