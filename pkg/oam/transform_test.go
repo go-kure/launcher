@@ -1116,20 +1116,21 @@ func TestEvaluateProfile_ScopedKey(t *testing.T) {
 
 func TestTransformer_CapabilityValidated(t *testing.T) {
 	tr := NewTransformer(nil, nil)
-	tr.RegisterTrait("handler", &customVADHandler{stubTraitHandler: stubTraitHandler{typ: "handler"}})
-	tr.RegisterTraitLowering(customVADLoweringRule{typ: "rule"})
+	tr.RegisterTrait("handler", &markingVADHandler{stubTraitHandler: stubTraitHandler{typ: "handler"}})
+	tr.RegisterTraitLowering(markingVADLoweringRule{typ: "rule"})
 	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{"definition": capDefFixture("definition")})
 
 	tests := []struct {
-		typeName  string
-		want      bool
-		rendering map[string]any
-		wantError bool
+		typeName   string
+		want       bool
+		rendering  map[string]any
+		wantError  bool
+		wantMarked bool // the validator ran and left its marker on the evaluated rendering
 	}{
-		{"handler", true, map[string]any{"anything": "accepted by handler"}, false},
-		{"rule", true, map[string]any{"anything": "accepted by rule"}, false},
-		{"definition", true, map[string]any{"mode": "custom"}, true},
-		{"unknown", false, map[string]any{"anything": "passed through"}, false},
+		{"handler", true, map[string]any{"anything": "accepted by handler"}, false, true},
+		{"rule", true, map[string]any{"anything": "accepted by rule"}, false, true},
+		{"definition", true, map[string]any{"mode": "custom"}, true, false},
+		{"unknown", false, map[string]any{"anything": "passed through"}, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.typeName, func(t *testing.T) {
@@ -1138,9 +1139,15 @@ func TestTransformer_CapabilityValidated(t *testing.T) {
 					tt.typeName: {Rendering: tt.rendering},
 				},
 			}}
-			_, err := tr.EvaluateProfile(profile)
+			evaluated, err := tr.EvaluateProfile(profile)
 			if (err != nil) != tt.wantError {
 				t.Fatalf("EvaluateProfile() error = %v, wantError %t", err, tt.wantError)
+			}
+			if err == nil {
+				_, marked := evaluated.Spec.Capabilities[tt.typeName].Rendering["validated"]
+				if marked != tt.wantMarked {
+					t.Errorf("validator ran = %t, want %t", marked, tt.wantMarked)
+				}
 			}
 			validated := tr.CapabilityValidated(tt.typeName)
 			if validated != tt.want {
@@ -1162,6 +1169,36 @@ func TestTransformer_CapabilityValidated(t *testing.T) {
 			}
 		})
 	}
+}
+
+// withValidatedMarker returns a copy of rendering with "validated" set, so a test can
+// see that a ValidateAndApplyDefaults implementation ran.
+func withValidatedMarker(rendering map[string]any) map[string]any {
+	out := make(map[string]any, len(rendering)+1)
+	for k, v := range rendering {
+		out[k] = v
+	}
+	out["validated"] = true
+	return out
+}
+
+// markingVADHandler accepts any rendering and marks the one it validated.
+type markingVADHandler struct{ stubTraitHandler }
+
+func (h *markingVADHandler) CapabilityRequired() bool { return false }
+func (h *markingVADHandler) ValidateAndApplyDefaults(r map[string]any) (map[string]any, error) {
+	return withValidatedMarker(r), nil
+}
+
+// markingVADLoweringRule is the trait-lowering-rule counterpart of markingVADHandler.
+type markingVADLoweringRule struct{ typ string }
+
+func (r markingVADLoweringRule) TraitType() string { return r.typ }
+func (r markingVADLoweringRule) LowerTrait(trait *Trait, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Traits: []Trait{{Type: "ingress", Properties: map[string]any{}}}}, nil
+}
+func (r markingVADLoweringRule) ValidateAndApplyDefaults(rendering map[string]any) (map[string]any, error) {
+	return withValidatedMarker(rendering), nil
 }
 
 // customVADHandler is a trait handler for test custom types that accepts any rendering.
