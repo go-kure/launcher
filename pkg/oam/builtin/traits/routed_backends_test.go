@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -375,6 +376,72 @@ func TestRoutedBackends_SiblingGroup(t *testing.T) {
 	}
 }
 
+// chartWithNamedService is chartWithServiceRule with the group's Service named
+// apart from the group by the consumer's Naming hook, and a chart ingress whose
+// one path names that Service. The routing member's own Service is then not the
+// group's, so the route is a route to another Service of the same component.
+type chartWithNamedService struct{}
+
+func (chartWithNamedService) ComponentType() string { return "chart-with-named-service" }
+
+func (chartWithNamedService) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
+	svc := oam.Component{
+		Name: comp.Name,
+		Type: "service",
+		Properties: map[string]any{
+			"selector": map[string]any{"app": "chart"},
+			"ports":    []any{map[string]any{"name": "http", "port": 9090, "targetPort": 9091}},
+		},
+	}
+	if err := lctx.ResolveMemberName(&svc, oam.NameSpec{Role: oam.NameRoleObject, Kind: schema.GroupKind{Kind: "Service"}}); err != nil {
+		return oam.LoweringResult{}, err
+	}
+	return oam.LoweringResult{Components: []oam.Component{
+		{
+			Name: comp.Name,
+			Type: "helmrelease",
+			Properties: map[string]any{"chart": map[string]any{"spec": map[string]any{
+				"chart":     "kube-prometheus-stack",
+				"sourceRef": map[string]any{"kind": "HelmRepository", "name": "prometheus-community"},
+			}}},
+			Traits: []oam.Trait{{Type: "ingress", Properties: map[string]any{
+				"rules": []any{map[string]any{"host": "m.example.com", "paths": []any{
+					map[string]any{"path": "/", "backend": "metrics-http", "port": 9090},
+				}}},
+			}}},
+		},
+		svc,
+	}}, nil
+}
+
+// A route that names another Service of its own component, here the group's
+// Service under a name the consumer chose, is reported like any other route.
+func TestRoutedBackends_SiblingServiceNamedApart(t *testing.T) {
+	tr := routedTransformer()
+	tr.RegisterComponentLowering(chartWithNamedService{})
+	got, err := tr.RoutedBackends(routedApp(oam.Component{
+		Name: "metrics", Type: "chart-with-named-service", Properties: map[string]any{},
+	}), oam.TransformContext{Namespace: "default", Naming: func(req oam.NameRequest) (string, bool) {
+		if req.Role == oam.NameRoleObject && req.Component == "metrics" {
+			return "metrics-http", true
+		}
+		return "", false
+	}})
+	if err != nil {
+		t.Fatalf("RoutedBackends: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows = %+v, want one", got)
+	}
+	row := got[0]
+	if row.Component != "metrics" || row.Service != "metrics-http" || row.Owner != "metrics" {
+		t.Errorf("component %q service %q owner %q, want metrics, metrics-http, metrics", row.Component, row.Service, row.Owner)
+	}
+	if row.Pods.Kind != oam.RoutedPodsSelector || len(row.Ports) != 1 || row.Ports[0].Status != oam.RoutedPortMatched {
+		t.Errorf("pods %+v ports %+v, want the service member's selector and a matched port", row.Pods, row.Ports)
+	}
+}
+
 // subAppStampTrait wraps every sub-application of its component, so the routing
 // sub-application ends the build behind a decorator.
 type subAppStampTrait struct{}
@@ -418,6 +485,9 @@ func TestRoutedBackends_SubApplicationDecorated(t *testing.T) {
 	got := routedBackends(t, tr, app, nil)
 	plain := routedBackends(t, routedTransformer(), routedApp(apiServerComponent(), apiServiceComponent(),
 		routerTo(routePath("api", 80))), nil)
+	if len(got) != 1 {
+		t.Fatalf("rows = %+v, want one", got)
+	}
 	if !reflect.DeepEqual(got, plain) {
 		t.Errorf("rows = %+v, want %+v", got, plain)
 	}
