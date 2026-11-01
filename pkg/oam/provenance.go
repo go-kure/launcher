@@ -113,12 +113,12 @@ func (t *Transformer) EvaluateProfileWithProvenance(profile *ClusterProfile) (*C
 	return t.evaluateProfile(profile, true)
 }
 
-// defaultSteps holds leaf snapshots of one rendering: as the profile gave it and as
-// the schema-defaults step left it. A handler rewrites the rendering it is handed in
+// defaultSteps holds snapshots of one rendering: as the profile gave it and as the
+// schema-defaults step left it. A handler rewrites the rendering it is handed in
 // place, so both are taken before the next step runs, never kept as references.
 type defaultSteps struct {
-	profile map[string]any
-	schema  map[string]any
+	profile propIndex
+	schema  propIndex
 }
 
 // binding returns the evaluated binding for final, with its leaf origins when stamp.
@@ -137,27 +137,162 @@ func (s defaultSteps) binding(final map[string]any, stamp bool) CapabilityBindin
 // not decide.
 func (s defaultSteps) detail(final map[string]any) map[string]string {
 	out := map[string]string{}
-	// A typed collection is one leaf of a snapshot, but a handler may hand it back as
-	// map[string]any or []any, which eachLeaf walks into. The final leaves under it are
-	// then compared with the elements of the typed value, so an element the handler left
-	// alone keeps the origin of the step that supplied it.
-	schemaIn, profileIn := collectionElements(s.schema), collectionElements(s.profile)
 	eachLeaf("", final, func(path string, v any) {
-		sv, inSchema := snapshotAt(s.schema, schemaIn, path)
-		if !inSchema || !sameLeafValue(sv, v) {
+		switch {
+		case !s.schema.holds(path, v):
 			out[path] = detailHandlerDefault
-			return
-		}
-		if pv, inProfile := snapshotAt(s.profile, profileIn, path); inProfile && sameLeafValue(pv, v) {
+		case s.profile.holds(path, v):
 			out[path] = detailProfile
-			return
+		default:
+			out[path] = detailSchemaDefault
 		}
-		out[path] = detailSchemaDefault
 	})
 	return out
 }
 
-// sameLeafValue reports whether two leaf values are the same value. It is
+// propIndex is a snapshot of one property map for comparing it with what a later step
+// returns, whatever Go shape that step gave the values. The comparison goes through one
+// canonical form (canonicalValue): a typed map or slice is a map[string]any or []any
+// there, on both sides. leaves holds the leaves of the map as eachLeaf names them, nodes
+// every value under it at any depth, each leaf and each collection whole, typed or not.
+// A later leaf is looked up in nodes, so it is found whether the step handed back the
+// collection whole, in pieces or in another shape, with no special case per shape.
+type propIndex struct {
+	leaves map[string]any
+	nodes  map[string]any
+}
+
+// indexOf snapshots props. Every collection in it is copied, because a handler may
+// change one in place after the snapshot is taken.
+func indexOf(props map[string]any) propIndex {
+	ix := propIndex{leaves: leafValues(props), nodes: map[string]any{}}
+	recordNodes("", canonicalValue(props), map[collectionID]bool{}, ix.nodes)
+	return ix
+}
+
+// holds reports whether the snapshot has, at path, the value v that a later step left
+// there. A value compares equal to itself in another shape, so v is canonicalized as
+// the snapshot is; the raw v is tried too, for the one value canonical form keeps as it
+// is (a collection met again inside itself).
+func (ix propIndex) holds(path string, v any) bool {
+	n, ok := ix.nodes[path]
+	return ok && (sameLeafValue(n, canonicalValue(v)) || sameLeafValue(n, v))
+}
+
+// recordNodes records v, canonical, at path and every value under it. A null is no
+// node, as it is no leaf. A collection met again inside itself is recorded where it is
+// met, not entered a second time.
+func recordNodes(path string, v any, onPath map[collectionID]bool, out map[string]any) {
+	if isNullValue(v) {
+		return
+	}
+	if path != "" {
+		out[path] = v
+	}
+	switch x := v.(type) {
+	case map[string]any:
+		if len(x) == 0 {
+			return
+		}
+		id := idOf(reflect.ValueOf(x))
+		if onPath[id] {
+			return
+		}
+		onPath[id] = true
+		defer delete(onPath, id)
+		for k, e := range x {
+			recordNodes(joinPath(path, k), e, onPath, out)
+		}
+	case []any:
+		if len(x) == 0 {
+			return
+		}
+		id := idOf(reflect.ValueOf(x))
+		if onPath[id] {
+			return
+		}
+		onPath[id] = true
+		defer delete(onPath, id)
+		for i, e := range x {
+			recordNodes(path+"["+strconv.Itoa(i)+"]", e, onPath, out)
+		}
+	default:
+	}
+}
+
+// canonicalValue returns a copy of v in canonical form: a map with string keys is a
+// map[string]any, any other map a map[any]any, a slice or array a []any, all the way
+// down and through interface values; a null stays a null. Any other value, a struct or
+// pointer included, is kept as it is. A collection that contains itself is not entered
+// a second time: where it is met again it is kept as it is, so the walk ends.
+func canonicalValue(v any) any {
+	return canonicalWalk(reflect.ValueOf(v), map[collectionID]bool{})
+}
+
+// canonicalWalk is canonicalValue with onPath, the maps and slices being copied above rv.
+func canonicalWalk(rv reflect.Value, onPath map[collectionID]bool) any {
+	switch rv.Kind() {
+	case reflect.Invalid:
+		return nil
+	case reflect.Interface:
+		if rv.IsNil() {
+			return nil
+		}
+		return canonicalWalk(rv.Elem(), onPath)
+	case reflect.Map:
+		stringKeys := rv.Type().Key().Kind() == reflect.String
+		if rv.IsNil() {
+			if stringKeys {
+				return map[string]any(nil)
+			}
+			return map[any]any(nil)
+		}
+		if onPath[idOf(rv)] {
+			return rv.Interface()
+		}
+		onPath[idOf(rv)] = true
+		defer delete(onPath, idOf(rv))
+		if !stringKeys {
+			out := make(map[any]any, rv.Len())
+			for it := rv.MapRange(); it.Next(); {
+				out[it.Key().Interface()] = canonicalWalk(it.Value(), onPath)
+			}
+			return out
+		}
+		out := make(map[string]any, rv.Len())
+		for it := rv.MapRange(); it.Next(); {
+			out[it.Key().String()] = canonicalWalk(it.Value(), onPath)
+		}
+		return out
+	case reflect.Slice:
+		if rv.IsNil() {
+			return []any(nil)
+		}
+		if rv.Len() > 0 {
+			if onPath[idOf(rv)] {
+				return rv.Interface()
+			}
+			onPath[idOf(rv)] = true
+			defer delete(onPath, idOf(rv))
+		}
+		return canonicalElements(rv, onPath)
+	case reflect.Array:
+		return canonicalElements(rv, onPath)
+	default:
+		return rv.Interface()
+	}
+}
+
+// canonicalElements is the []any of the canonical elements of a slice or array.
+func canonicalElements(rv reflect.Value, onPath map[collectionID]bool) []any {
+	out := make([]any, rv.Len())
+	for i := range out {
+		out[i] = canonicalWalk(rv.Index(i), onPath)
+	}
+	return out
+}
+
+// sameLeafValue reports whether two values are the same value. It is
 // reflect.DeepEqual, except that a NaN equals a NaN: an unchanged NaN is the value its
 // source gave, though NaN != NaN would make DeepEqual call a handler's work on it.
 func sameLeafValue(a, b any) bool {
@@ -254,10 +389,15 @@ func sameValue(x, y reflect.Value, seen map[sameVisit]bool) bool {
 		return x.Uint() == y.Uint()
 	case reflect.String:
 		return x.String() == y.String()
-	default:
-		// A func, channel or unsafe pointer: DeepEqual's verdict stands.
+	case reflect.Func:
+		// As DeepEqual: a func equals only another nil func.
+		return x.IsNil() && y.IsNil()
+	case reflect.Chan, reflect.UnsafePointer:
+		return x.Pointer() == y.Pointer()
+	case reflect.Invalid:
 		return false
 	}
+	return false
 }
 
 // sameElements compares two slices or arrays of equal length element by element.
@@ -457,28 +597,70 @@ func (r *ownerRecorder) dropUnder(path string) {
 }
 
 // nestedFill attributes what a component's nested filler changed. before is the
-// leaf set of the properties it was handed, after the one of the properties it
-// returned; reads is the set of capability keys it read during the call. A leaf
-// that is new or holds a different value is a capability leaf, a leaf that is gone
-// has no entry.
-func (r *ownerRecorder) nestedFill(before map[string]any, after map[string]any, reads map[string]struct{}) {
+// snapshot of the properties it was handed, after the properties it returned; reads is
+// the set of capability keys it read during the call. A leaf that is new or holds a
+// different value is a capability leaf, a leaf that is gone has no entry. A leaf that
+// holds the value it had keeps its source, also when the filler handed the value back in
+// another shape: a collection it returned in pieces or whole takes the source of the
+// entry its value was recorded under (the collection's own, or all its elements' when
+// they agree).
+func (r *ownerRecorder) nestedFill(before propIndex, after map[string]any, reads map[string]struct{}) {
 	if r == nil {
 		return
 	}
-	now := leafValues(after)
-	for p := range before {
+	now := map[string]any{}
+	eachLeaf("", after, func(path string, v any) { now[path] = v })
+	kept := map[string]Source{}
+	for p, v := range now {
+		if !before.holds(p, v) {
+			continue
+		}
+		if own, ok := r.entries[p]; ok {
+			kept[p] = own
+		} else if src, ok := r.sourceOfValue(p); ok {
+			kept[p] = src
+		}
+	}
+	for p := range before.leaves {
 		if _, ok := now[p]; !ok {
 			delete(r.entries, p)
 		}
 	}
 	src := Source{Kind: SourceCapability, Ref: strings.Join(slices.Sorted(maps.Keys(reads)), ",")}
 	for _, p := range slices.Sorted(maps.Keys(now)) {
-		if was, ok := before[p]; ok && sameLeafValue(was, now[p]) {
+		if k, ok := kept[p]; ok {
+			r.entries[p] = k
 			continue
 		}
 		r.dropAncestors(p)
 		r.entries[p] = src
 	}
+}
+
+// sourceOfValue is the source recorded for the value at path when path has no entry of
+// its own: that of the nearest enclosing entry (an object recorded as one leaf), else
+// the one source all entries under path share. Entries that differ have no one source.
+func (r *ownerRecorder) sourceOfValue(path string) (Source, bool) {
+	best, found := "", false
+	for q := range r.entries {
+		if q != path && pathWithin(path, q) && (!found || len(q) > len(best)) {
+			best, found = q, true
+		}
+	}
+	if found {
+		return r.entries[best], true
+	}
+	var one Source
+	for q, s := range r.entries {
+		if !pathWithin(q, path) {
+			continue
+		}
+		if one != (Source{}) && s != one {
+			return Source{}, false
+		}
+		one = s
+	}
+	return one, one != Source{}
 }
 
 // dropAncestors deletes the entries of the objects that contain path: a container
@@ -491,12 +673,12 @@ func (r *ownerRecorder) dropAncestors(path string) {
 	}
 }
 
-// leafValues returns the leaves of props by path, as a snapshot: a leaf that is a
-// typed map or slice (map[string]string, []string) is copied, because a handler may
-// change one in place after the snapshot is taken.
+// leafValues returns the leaves of props by path, as a snapshot in canonical form: a
+// leaf that is a typed map or slice (map[string]string, []string) is copied, because a
+// handler may change one in place after the snapshot is taken.
 func leafValues(props map[string]any) map[string]any {
 	out := map[string]any{}
-	eachLeaf("", props, func(path string, v any) { out[path] = snapshotLeaf(v) })
+	eachLeaf("", props, func(path string, v any) { out[path] = canonicalValue(v) })
 	return out
 }
 
@@ -517,157 +699,6 @@ func idOf(rv reflect.Value) collectionID {
 		id.n = rv.Len()
 	}
 	return id
-}
-
-// collectionElements returns the elements inside each typed map or slice leaf of snap, by
-// the path eachLeaf would give them had the collection been a map[string]any or a
-// []any: a string-keyed map adds ".key", a slice or array adds "[i]". Descent goes
-// through interface values and stops at any other value, which is an element. A
-// collection that contains itself is not entered again.
-func collectionElements(snap map[string]any) map[string]any {
-	out := map[string]any{}
-	for _, path := range slices.Sorted(maps.Keys(snap)) {
-		rv := reflect.ValueOf(snap[path])
-		switch rv.Kind() {
-		case reflect.Map, reflect.Slice, reflect.Array:
-			collectionElementsWalk(path, rv, map[collectionID]bool{}, out)
-		default:
-		}
-	}
-	return out
-}
-
-// collectionElementsWalk records the elements of rv, a typed collection at path, into out.
-// The collection itself is not recorded: the snapshot already holds it as one leaf.
-func collectionElementsWalk(path string, rv reflect.Value, onPath map[collectionID]bool, out map[string]any) {
-	for rv.Kind() == reflect.Interface && !rv.IsNil() {
-		rv = rv.Elem()
-	}
-	switch rv.Kind() {
-	case reflect.Map:
-		if rv.Type().Key().Kind() != reflect.String || rv.Len() == 0 || onPath[idOf(rv)] {
-			return
-		}
-		onPath[idOf(rv)] = true
-		defer delete(onPath, idOf(rv))
-		for it := rv.MapRange(); it.Next(); {
-			collectionElementsAt(joinPath(path, it.Key().String()), it.Value(), onPath, out)
-		}
-	case reflect.Slice:
-		if rv.Len() == 0 || onPath[idOf(rv)] {
-			return
-		}
-		onPath[idOf(rv)] = true
-		defer delete(onPath, idOf(rv))
-		for i := range rv.Len() {
-			collectionElementsAt(path+"["+strconv.Itoa(i)+"]", rv.Index(i), onPath, out)
-		}
-	case reflect.Array:
-		for i := range rv.Len() {
-			collectionElementsAt(path+"["+strconv.Itoa(i)+"]", rv.Index(i), onPath, out)
-		}
-	default:
-	}
-}
-
-// collectionElementsAt records one element of a typed collection: a null is no element,
-// anything else is one. A nested non-empty collection is recorded as a whole and its
-// own elements are entered too, because a handler may return the outer collection as a
-// map[string]any that still holds the inner one typed (the final leaf is then the inner
-// collection itself, not its elements).
-func collectionElementsAt(path string, rv reflect.Value, onPath map[collectionID]bool, out map[string]any) {
-	for rv.Kind() == reflect.Interface && !rv.IsNil() {
-		rv = rv.Elem()
-	}
-	if rv.Kind() == reflect.Interface {
-		return
-	}
-	if rv.CanInterface() {
-		out[path] = rv.Interface()
-	}
-	switch rv.Kind() {
-	case reflect.Map, reflect.Slice, reflect.Array:
-		if rv.Len() > 0 {
-			collectionElementsWalk(path, rv, onPath, out)
-		}
-	default:
-	}
-}
-
-// snapshotAt returns the value a snapshot holds at path: the leaf itself, else the
-// element of a typed collection leaf that eachLeaf reaches at path.
-func snapshotAt(snap, elements map[string]any, path string) (any, bool) {
-	if v, ok := snap[path]; ok {
-		return v, true
-	}
-	v, ok := elements[path]
-	return v, ok
-}
-
-// snapshotLeaf deep-copies a leaf that holds a map, slice or array, keeping its Go
-// type. Unlike copyRenderedValue it accepts what a profile may hold before its
-// handler normalizes it (a null inside a typed collection), because the snapshot
-// exists to be compared with that handler's result.
-func snapshotLeaf(v any) any {
-	rv := reflect.ValueOf(v)
-	switch rv.Kind() {
-	case reflect.Map, reflect.Slice, reflect.Array:
-		return snapshotValue(rv, map[collectionID]bool{}).Interface()
-	default:
-		return v
-	}
-}
-
-// snapshotValue copies maps, slices and arrays recursively, through interface
-// values. Any other value, a struct or pointer included, is kept as it is. onPath
-// holds the maps and slices being copied above rv, so a collection that contains
-// itself is left shared instead of looping.
-func snapshotValue(rv reflect.Value, onPath map[collectionID]bool) reflect.Value {
-	switch rv.Kind() {
-	case reflect.Interface:
-		if rv.IsNil() {
-			return rv
-		}
-		out := reflect.New(rv.Type()).Elem()
-		out.Set(snapshotValue(rv.Elem(), onPath))
-		return out
-	case reflect.Map:
-		if rv.IsNil() || onPath[idOf(rv)] {
-			return rv
-		}
-		onPath[idOf(rv)] = true
-		defer delete(onPath, idOf(rv))
-		out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
-		for it := rv.MapRange(); it.Next(); {
-			out.SetMapIndex(it.Key(), snapshotValue(it.Value(), onPath))
-		}
-		return out
-	case reflect.Slice:
-		if rv.IsNil() {
-			return rv
-		}
-		if rv.Len() == 0 {
-			return reflect.MakeSlice(rv.Type(), 0, 0)
-		}
-		if onPath[idOf(rv)] {
-			return rv
-		}
-		onPath[idOf(rv)] = true
-		defer delete(onPath, idOf(rv))
-		out := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
-		for i := range rv.Len() {
-			out.Index(i).Set(snapshotValue(rv.Index(i), onPath))
-		}
-		return out
-	case reflect.Array:
-		out := reflect.New(rv.Type()).Elem()
-		for i := range rv.Len() {
-			out.Index(i).Set(snapshotValue(rv.Index(i), onPath))
-		}
-		return out
-	default:
-		return rv
-	}
 }
 
 // eachLeaf calls fn for each leaf of v at path: a value that is not a
