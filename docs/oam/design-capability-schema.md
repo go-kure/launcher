@@ -260,6 +260,12 @@ source supplied each property leaf, is populated only by `TransformWithProvenanc
 same README section describes it. A key in `ConsumedCapabilities` says a binding was read,
 not which values of it survived the merge with the authored properties.
 
+The provenance report has one documented limit. Values that a Go caller or handler builds
+in shapes YAML or JSON cannot express (a NaN, a map with non-string keys, a func or chan
+field, a collection re-typed from the one it was given) may report a less specific
+source, for example a missing `Detail` or a filler's capability key in place of the
+original one.
+
 ---
 
 ## 3. Custom Capability Schema
