@@ -1,0 +1,7 @@
+application: myapp
+entries:
+- component: web
+  path: ports[0]
+  source:
+    kind: authored
+  trait: expose

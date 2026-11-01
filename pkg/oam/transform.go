@@ -158,6 +158,11 @@ type TransformContext struct {
 	// Reference type, so every by-value ctx copy through the pipeline shares one
 	// map — same sharing pattern Capabilities/EgressPeers already rely on.
 	consumedCapabilities map[string]struct{}
+	// provenance records which source supplied each property leaf for
+	// TransformWithProvenance. Internal only: nil on every other path, where each
+	// recording step is a no-op; a pointer, so every by-value ctx copy records into
+	// one report.
+	provenance *provenanceRecorder
 	// subAppDecorations accumulates, per component, each decorating trait
 	// (SubApplicationDecorator) and the trait sub-applications it covers, recorded by
 	// applyEntryTraits and applied by decorateSubApplications as the last step of
@@ -1079,17 +1084,29 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		}
 		component = labelled
 
+		// The report's baseline for the component's own properties, before any fill
+		// hook below changes them.
+		var rec *ownerRecorder
+		if ctx.provenance != nil {
+			member := ""
+			if component.siblingGroup != nil {
+				member = component.Type
+			}
+			rec = ctx.provenance.forOwner(propOwner{component: component.Name, member: member})
+			rec.authored(component.Properties)
+		}
+
 		// After D3, which checks only what was authored: the capability defaults a
 		// ComponentCapabilityDefaults handler names fill the keys left unauthored.
 		if d, ok := handler.(ComponentCapabilityDefaults); ok && !component.synthesized {
-			filled, err := t.applyComponentCapabilityDefaults(d, component.Properties, ctx)
+			filled, err := t.applyComponentCapabilityDefaults(d, component.Properties, ctx, rec)
 			if err != nil {
 				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 			}
 			component.Properties = filled
 		}
 		if f, ok := handler.(ComponentCapabilityFiller); ok && !component.synthesized {
-			filled, err := f.FillCapabilityDefaults(component.Properties, LoweringContext{capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities})
+			filled, err := fillComponentCapabilities(f, component.Properties, ctx, rec)
 			if err != nil {
 				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 			}
@@ -1585,7 +1602,15 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			matched := false
 			matchedKey := ""
 			if !trait.sealed {
-				resolved, matchedKey, matched = resolveCapability(trait, ctx.Capabilities)
+				var rec *ownerRecorder
+				if ctx.provenance != nil {
+					memberType := ""
+					if len(e.members) > 0 {
+						memberType = entry.component.Type
+					}
+					rec = ctx.provenance.forOwner(propOwner{component: entry.component.Name, member: memberType, trait: trait.Type, index: step.first + position})
+				}
+				resolved, matchedKey, matched = resolveCapability(trait, ctx.Capabilities, rec)
 
 				if aware, ok := handler.(CapabilityAware); ok && aware.CapabilityRequired() && !matched {
 					return nil, &TransformError{
@@ -1812,8 +1837,13 @@ func decorateSubApplications(decorations []subAppDecoration) error {
 // trait, matched key, true) — a match with empty Rendering still counts as consumed.
 // The rendering is copied with its Go types kept (copyRendering), which relies on
 // TransformWithPolicy having checked it (checkCapabilityRenderings).
-func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (Trait, string, bool) {
+//
+// rec is the trait's entry in the provenance report, nil when none is wanted. With a
+// match that has a rendering it holds every leaf of the merged properties by source;
+// with no match, or a match with no rendering, every leaf is authored.
+func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding, rec *ownerRecorder) (Trait, string, bool) {
 	if len(capabilities) == 0 {
+		rec.authored(trait.Properties)
 		return trait, "", false
 	}
 	key := buildCapabilityKey(trait)
@@ -1824,14 +1854,19 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (
 		matchedKey = trait.Type
 	}
 	if !ok {
+		rec.authored(trait.Properties)
 		return trait, "", false
 	}
 	if len(cap.Rendering) == 0 {
+		rec.authored(trait.Properties)
 		return trait, matchedKey, true
 	}
 
 	result := trait
-	result.Properties = mergeRenderedProperties(copyRendering(cap.Rendering), trait.Properties)
+	rendered := copyRendering(cap.Rendering)
+	rec.bind(matchedKey)
+	rec.seedCapability(rendered)
+	result.Properties = mergeRenderedProperties(rendered, trait.Properties, rec, "")
 	return result, matchedKey, true
 }
 
@@ -1845,22 +1880,35 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding) (
 // rendered object of another Go type (map[string]string). rendered must be the
 // caller's own copy: its top level is written into and returned, and each nested
 // object is cloned before it is written into. authored is never mutated.
-func mergeRenderedProperties(rendered, authored map[string]any) map[string]any {
+//
+// rec, seeded with the rendering's leaves by the caller (nil for none), is brought in
+// line with each step: an authored value that replaces records its leaves as
+// authored, a skipped null records nothing, and a recursion closes on its object.
+// path is the address of rendered within the trait's properties, built only when rec
+// is set.
+func mergeRenderedProperties(rendered, authored map[string]any, rec *ownerRecorder, path string) map[string]any {
 	for k, v := range authored {
 		r, has := rendered[k]
 		if has && isNullValue(v) {
 			continue
+		}
+		kp := ""
+		if rec != nil {
+			kp = joinPath(path, k)
 		}
 		if rm, ok := r.(map[string]any); ok && rm != nil {
 			if am, ok := v.(map[string]any); ok {
 				// Cloned before it is written into: copyRendering keeps an object the
 				// rendering shares between two keys shared, and an override of one
 				// must not reach the other.
-				rendered[k] = mergeRenderedProperties(maps.Clone(rm), am)
+				merged := mergeRenderedProperties(maps.Clone(rm), am, rec, kp)
+				rendered[k] = merged
+				rec.recursed(kp, merged)
 				continue
 			}
 		}
 		rendered[k] = v
+		rec.replace(kp, v, Source{Kind: SourceAuthored})
 	}
 	return rendered
 }
@@ -1879,7 +1927,7 @@ func mergeRenderedProperties(rendered, authored map[string]any) map[string]any {
 // each filled value is then validated against the component's schema
 // (validateCapabilityFill), and the merged properties against its top-level
 // exclusive groups.
-func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[string]any, ctx TransformContext) (map[string]any, error) {
+func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefaults, props map[string]any, ctx TransformContext, rec *ownerRecorder) (map[string]any, error) {
 	key, keys := d.CapabilityDefaults()
 	binding, ok := ctx.Capabilities[key]
 	if !ok {
@@ -1930,7 +1978,36 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 			return nil, errors.Wrapf(err, "capability %q defaults", key)
 		}
 	}
+	if rec != nil {
+		src := Source{Kind: SourceCapability, Ref: key}
+		for k, v := range copied {
+			rec.replace(joinPath("", k), v, src)
+		}
+	}
 	return out, nil
+}
+
+// fillComponentCapabilities runs a component's nested capability filler. With the
+// report on, the filler gets a call-local consumed set, so the keys it read are
+// told apart from every other step's in the transform-wide set, and the report
+// takes the leaves the call added or changed as capability values. The engine
+// does not see which read produced which value, so the Ref names the one key read,
+// or the sorted keys joined by ",".
+func fillComponentCapabilities(f ComponentCapabilityFiller, props map[string]any, ctx TransformContext, rec *ownerRecorder) (map[string]any, error) {
+	if rec == nil {
+		return f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities})
+	}
+	before := leafValues(props)
+	reads := map[string]struct{}{}
+	filled, err := f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: reads})
+	if err != nil {
+		return nil, err
+	}
+	if ctx.consumedCapabilities != nil {
+		maps.Copy(ctx.consumedCapabilities, reads)
+	}
+	rec.nestedFill(before, filled, reads)
+	return filled, nil
 }
 
 // capabilityValidated reports whether EvaluateProfile validates a rendering of

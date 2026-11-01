@@ -331,7 +331,7 @@ func TestTransformer_RegisterPolicy_PanicsIfClaimedByPolicyLowering(t *testing.T
 
 func TestResolveCapability_NoCapabilities(t *testing.T) {
 	trait := Trait{Type: "expose", Properties: map[string]any{"port": 80}}
-	got, _, _ := resolveCapability(trait, nil)
+	got, _, _ := resolveCapability(trait, nil, nil)
 	if got.Properties["port"] != 80 {
 		t.Errorf("expected port 80, got %v", got.Properties["port"])
 	}
@@ -346,7 +346,7 @@ func TestResolveCapability_MergesRendering(t *testing.T) {
 	}
 	// OAM inline value takes precedence.
 	trait := Trait{Type: "ingress", Properties: map[string]any{"host": "override.com"}}
-	got, _, _ := resolveCapability(trait, caps)
+	got, _, _ := resolveCapability(trait, caps, nil)
 	if got.Properties["host"] != "override.com" {
 		t.Errorf("expected OAM value to win: got %v", got.Properties["host"])
 	}

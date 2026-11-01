@@ -1,0 +1,15 @@
+application: myapp
+entries:
+- component: web
+  path: env.A
+  source:
+    kind: authored
+- component: web
+  path: image
+  source:
+    kind: authored
+- component: web
+  path: port
+  source:
+    kind: authored
+  trait: expose

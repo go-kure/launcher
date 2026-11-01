@@ -1,0 +1,24 @@
+application: myapp
+entries:
+- component: web
+  path: class
+  source:
+    kind: capability
+    ref: ingress
+  trait: ingress
+- component: web
+  path: empty
+  source:
+    kind: capability
+    ref: ingress
+  trait: ingress
+- component: web
+  path: labels
+  source:
+    kind: authored
+  trait: ingress
+- component: web
+  path: options.enabled
+  source:
+    kind: authored
+  trait: ingress
