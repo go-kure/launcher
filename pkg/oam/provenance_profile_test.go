@@ -120,6 +120,8 @@ func (h *provTypedVADHandler) CapabilityRequired() bool { return false }
 func (h *provTypedVADHandler) ValidateAndApplyDefaults(r map[string]any) (map[string]any, error) {
 	r["labels"].(map[string]string)["b"] = "y"
 	r["tags"].([]string)[0] = "z"
+	// A null inside a typed collection, replaced by a default.
+	r["nested"].(map[string][]string)["tags"] = []string{"default"}
 	return r, nil
 }
 
@@ -133,6 +135,7 @@ func TestProvenance_ProfileTypedCollectionMutation(t *testing.T) {
 		"typed": {Rendering: map[string]any{
 			"labels": map[string]string{"a": "x"},
 			"tags":   []string{"a"},
+			"nested": map[string][]string{"tags": nil},
 			"plain":  "p",
 		}},
 	}}}
@@ -140,7 +143,10 @@ func TestProvenance_ProfileTypedCollectionMutation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EvaluateProfileWithProvenance: %v", err)
 	}
-	want := map[string]string{"labels": detailHandlerDefault, "tags": detailHandlerDefault, "plain": detailProfile}
+	want := map[string]string{
+		"labels": detailHandlerDefault, "tags": detailHandlerDefault,
+		"nested": detailHandlerDefault, "plain": detailProfile,
+	}
 	if d := got.Spec.Capabilities["typed"].detail; !reflect.DeepEqual(d, want) {
 		t.Errorf("detail %v, want %v", d, want)
 	}
@@ -217,7 +223,7 @@ func TestProvenance_ProfileDetailInComponents(t *testing.T) {
 		}
 		// The nested and top-level fills are part of the fixture, so the report is
 		// held to the properties the handler received.
-		checkComplete(t, prov, c)
+		checkComplete(t, prov, c, authoredExpect(app))
 		return entriesFor(prov, "m", "", "")
 	}
 
