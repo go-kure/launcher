@@ -604,6 +604,19 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 				evaluated[key] = CapabilityBinding{Rendering: validated}
 				continue
 			}
+			if !t.builtinTraitTypes[typeName] {
+				if def, hasDef := t.capabilityDefs[typeName]; hasDef {
+					validated, err := applyDefinitionSchema(binding.Rendering, def)
+					if err != nil {
+						return nil, &TransformError{
+							Message: fmt.Sprintf("capability %q definition schema", key),
+							Cause:   err,
+						}
+					}
+					evaluated[key] = CapabilityBinding{Rendering: validated}
+					continue
+				}
+			}
 			evaluated[key] = binding
 			continue
 		}
@@ -1933,20 +1946,21 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 	return out, nil
 }
 
-// capabilityValidated reports whether EvaluateProfile validates a rendering of
+// CapabilityValidated reports whether EvaluateProfile validates a rendering of
 // capability type typeName: the trait handler registered for it, else the trait
 // lowering rule, implements ValidateAndApplyDefaults, or the type is not built in
-// and has a CapabilityDefinition, whose schema EvaluateProfile applies. With neither
-// a handler nor a rule, EvaluateProfile passes the binding through unchecked. It
-// mirrors EvaluateProfile's branches; a change to one is a change to both.
-func (t *Transformer) capabilityValidated(typeName string) bool {
+// and has a CapabilityDefinition, whose schema EvaluateProfile applies. With no
+// handler, rule, or applicable definition, EvaluateProfile passes the binding
+// through unchecked. It mirrors EvaluateProfile's branches; a change to one is a
+// change to both.
+func (t *Transformer) CapabilityValidated(typeName string) bool {
 	var registered any
 	if h, ok := t.traitHandlers[typeName]; ok {
 		registered = h
 	} else if rule, ok := t.traitLoweringRules[typeName]; ok {
 		registered = rule
 	} else {
-		return false
+		return !t.builtinTraitTypes[typeName] && t.capabilityDefs[typeName] != nil
 	}
 	if _, ok := registered.(ValidateAndApplyDefaults); ok {
 		return true
@@ -1967,7 +1981,7 @@ func (t *Transformer) validateCapabilityFill(d ComponentCapabilityDefaults, key 
 	p, ok := d.(PropertySchemaProvider)
 	if !ok {
 		typeName, _, _ := strings.Cut(key, ".")
-		if t.capabilityValidated(typeName) {
+		if t.CapabilityValidated(typeName) {
 			return nil
 		}
 		return errors.Errorf("capability %q defaults: nothing validates rendering keys %q: the component handler declares no PropertySchema, and no trait handler or trait lowering rule for type %q validates the rendering (none implements ValidateAndApplyDefaults, and no CapabilityDefinition applies to it); implement PropertySchemaProvider on the component handler, or ValidateAndApplyDefaults on the trait",

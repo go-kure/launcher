@@ -3432,6 +3432,13 @@ required platform inputs; the `ClusterProfile` provides them, and
 `CapabilityDefinition` rendering/property schemas validate custom capabilities
 (`--strict-capabilities` turns warnings into errors).
 
+`Transformer.CapabilityValidated(typeName)` reports whether `EvaluateProfile`
+validates a capability rendering of that type. It returns true when a registered
+trait handler or trait lowering rule implements `ValidateAndApplyDefaults`, or
+when a non-built-in type has a `CapabilityDefinition` whose schema is applied.
+With none of those validators, `EvaluateProfile` passes the binding through
+unchecked. This method mirrors the validation branches in `EvaluateProfile`.
+
 ### Capability rendering: types and nulls
 
 A `CapabilityDefinition` rendering property uses the **flat** vocabulary —

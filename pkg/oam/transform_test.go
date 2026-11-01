@@ -1114,6 +1114,56 @@ func TestEvaluateProfile_ScopedKey(t *testing.T) {
 
 // --- CapabilityDefinition tests ---
 
+func TestTransformer_CapabilityValidated(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterTrait("handler", &customVADHandler{stubTraitHandler: stubTraitHandler{typ: "handler"}})
+	tr.RegisterTraitLowering(customVADLoweringRule{typ: "rule"})
+	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{"definition": capDefFixture("definition")})
+
+	tests := []struct {
+		typeName string
+		want     bool
+		rendering map[string]any
+		wantError bool
+	}{
+		{"handler", true, map[string]any{"anything": "accepted by handler"}, false},
+		{"rule", true, map[string]any{"anything": "accepted by rule"}, false},
+		{"definition", true, map[string]any{"mode": "custom"}, true},
+		{"unknown", false, map[string]any{"anything": "passed through"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.typeName, func(t *testing.T) {
+			profile := &ClusterProfile{Spec: ClusterProfileSpec{
+				Capabilities: map[string]CapabilityBinding{
+					tt.typeName: {Rendering: tt.rendering},
+				},
+			}}
+			_, err := tr.EvaluateProfile(profile)
+			if (err != nil) != tt.wantError {
+				t.Fatalf("EvaluateProfile() error = %v, wantError %t", err, tt.wantError)
+			}
+			validated := tr.CapabilityValidated(tt.typeName)
+			if validated != tt.want {
+				t.Errorf("CapabilityValidated(%q) = %t, want %t", tt.typeName, validated, tt.want)
+			}
+			if tt.typeName == "definition" {
+				// A valid rendering must receive the definition's default, and an
+				// invalid one must be rejected by EvaluateProfile.
+				validProfile := &ClusterProfile{Spec: ClusterProfileSpec{Capabilities: map[string]CapabilityBinding{
+					"definition": {Rendering: map[string]any{"timeout": float64(30)}},
+				}}}
+				valid, err := tr.EvaluateProfile(validProfile)
+				if err != nil {
+					t.Fatalf("EvaluateProfile() valid definition rendering: %v", err)
+				}
+				if got := valid.Spec.Capabilities["definition"].Rendering["mode"]; got != "auto" {
+					t.Errorf("definition schema default mode = %v, want auto", got)
+				}
+			}
+		})
+	}
+}
+
 // customVADHandler is a trait handler for test custom types that accepts any rendering.
 type customVADHandler struct{ stubTraitHandler }
 
