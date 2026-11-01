@@ -386,6 +386,25 @@ func leafValues(props map[string]any) map[string]any {
 	return out
 }
 
+// collectionID identifies a map or slice being walked: its address and, for a slice,
+// its length. A slice and a shorter slice of the same backing array (s and s[:1]) are
+// different values, so a sub-slice of an acyclic slice is not mistaken for a cycle,
+// while a slice that holds a slice of itself (s[0] = s[:1]) is still caught when the
+// walk meets the same (address, length) again.
+type collectionID struct {
+	addr uintptr
+	n    int
+}
+
+// idOf returns the collectionID of rv, a non-nil map or slice.
+func idOf(rv reflect.Value) collectionID {
+	id := collectionID{addr: rv.Pointer()}
+	if rv.Kind() == reflect.Slice {
+		id.n = rv.Len()
+	}
+	return id
+}
+
 // collectionElements returns the elements inside each typed map or slice leaf of snap, by
 // the path eachLeaf would give them had the collection been a map[string]any or a
 // []any: a string-keyed map adds ".key", a slice or array adds "[i]". Descent goes
@@ -397,7 +416,7 @@ func collectionElements(snap map[string]any) map[string]any {
 		rv := reflect.ValueOf(snap[path])
 		switch rv.Kind() {
 		case reflect.Map, reflect.Slice, reflect.Array:
-			collectionElementsWalk(path, rv, map[uintptr]bool{}, out)
+			collectionElementsWalk(path, rv, map[collectionID]bool{}, out)
 		default:
 		}
 	}
@@ -406,26 +425,26 @@ func collectionElements(snap map[string]any) map[string]any {
 
 // collectionElementsWalk records the elements of rv, a typed collection at path, into out.
 // The collection itself is not recorded: the snapshot already holds it as one leaf.
-func collectionElementsWalk(path string, rv reflect.Value, onPath map[uintptr]bool, out map[string]any) {
+func collectionElementsWalk(path string, rv reflect.Value, onPath map[collectionID]bool, out map[string]any) {
 	for rv.Kind() == reflect.Interface && !rv.IsNil() {
 		rv = rv.Elem()
 	}
 	switch rv.Kind() {
 	case reflect.Map:
-		if rv.Type().Key().Kind() != reflect.String || rv.Len() == 0 || onPath[rv.Pointer()] {
+		if rv.Type().Key().Kind() != reflect.String || rv.Len() == 0 || onPath[idOf(rv)] {
 			return
 		}
-		onPath[rv.Pointer()] = true
-		defer delete(onPath, rv.Pointer())
+		onPath[idOf(rv)] = true
+		defer delete(onPath, idOf(rv))
 		for it := rv.MapRange(); it.Next(); {
 			collectionElementsAt(joinPath(path, it.Key().String()), it.Value(), onPath, out)
 		}
 	case reflect.Slice:
-		if rv.Len() == 0 || onPath[rv.Pointer()] {
+		if rv.Len() == 0 || onPath[idOf(rv)] {
 			return
 		}
-		onPath[rv.Pointer()] = true
-		defer delete(onPath, rv.Pointer())
+		onPath[idOf(rv)] = true
+		defer delete(onPath, idOf(rv))
 		for i := range rv.Len() {
 			collectionElementsAt(path+"["+strconv.Itoa(i)+"]", rv.Index(i), onPath, out)
 		}
@@ -439,7 +458,7 @@ func collectionElementsWalk(path string, rv reflect.Value, onPath map[uintptr]bo
 
 // collectionElementsAt records one element of a typed collection: a nested non-empty
 // collection is entered, a null is no element, anything else is one.
-func collectionElementsAt(path string, rv reflect.Value, onPath map[uintptr]bool, out map[string]any) {
+func collectionElementsAt(path string, rv reflect.Value, onPath map[collectionID]bool, out map[string]any) {
 	for rv.Kind() == reflect.Interface && !rv.IsNil() {
 		rv = rv.Elem()
 	}
@@ -476,7 +495,7 @@ func snapshotLeaf(v any) any {
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
 	case reflect.Map, reflect.Slice, reflect.Array:
-		return snapshotValue(rv, map[uintptr]bool{}).Interface()
+		return snapshotValue(rv, map[collectionID]bool{}).Interface()
 	default:
 		return v
 	}
@@ -486,7 +505,7 @@ func snapshotLeaf(v any) any {
 // values. Any other value, a struct or pointer included, is kept as it is. onPath
 // holds the maps and slices being copied above rv, so a collection that contains
 // itself is left shared instead of looping.
-func snapshotValue(rv reflect.Value, onPath map[uintptr]bool) reflect.Value {
+func snapshotValue(rv reflect.Value, onPath map[collectionID]bool) reflect.Value {
 	switch rv.Kind() {
 	case reflect.Interface:
 		if rv.IsNil() {
@@ -496,11 +515,11 @@ func snapshotValue(rv reflect.Value, onPath map[uintptr]bool) reflect.Value {
 		out.Set(snapshotValue(rv.Elem(), onPath))
 		return out
 	case reflect.Map:
-		if rv.IsNil() || onPath[rv.Pointer()] {
+		if rv.IsNil() || onPath[idOf(rv)] {
 			return rv
 		}
-		onPath[rv.Pointer()] = true
-		defer delete(onPath, rv.Pointer())
+		onPath[idOf(rv)] = true
+		defer delete(onPath, idOf(rv))
 		out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
 		for it := rv.MapRange(); it.Next(); {
 			out.SetMapIndex(it.Key(), snapshotValue(it.Value(), onPath))
@@ -513,11 +532,11 @@ func snapshotValue(rv reflect.Value, onPath map[uintptr]bool) reflect.Value {
 		if rv.Len() == 0 {
 			return reflect.MakeSlice(rv.Type(), 0, 0)
 		}
-		if onPath[rv.Pointer()] {
+		if onPath[idOf(rv)] {
 			return rv
 		}
-		onPath[rv.Pointer()] = true
-		defer delete(onPath, rv.Pointer())
+		onPath[idOf(rv)] = true
+		defer delete(onPath, idOf(rv))
 		out := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
 		for i := range rv.Len() {
 			out.Index(i).Set(snapshotValue(rv.Index(i), onPath))
@@ -543,11 +562,11 @@ func snapshotValue(rv reflect.Value, onPath map[uintptr]bool) reflect.Value {
 // path where the walk meets it again, never descended into twice. Only a binding built in
 // Go can hold one; the walk must not run without bound on it.
 func eachLeaf(path string, v any, fn func(path string, v any)) {
-	eachLeafWalk(path, v, map[uintptr]bool{}, fn)
+	eachLeafWalk(path, v, map[collectionID]bool{}, fn)
 }
 
 // eachLeafWalk is eachLeaf with onPath, the maps and slices being walked above v.
-func eachLeafWalk(path string, v any, onPath map[uintptr]bool, fn func(path string, v any)) {
+func eachLeafWalk(path string, v any, onPath map[collectionID]bool, fn func(path string, v any)) {
 	if isNullValue(v) {
 		return
 	}
@@ -559,7 +578,7 @@ func eachLeafWalk(path string, v any, onPath map[uintptr]bool, fn func(path stri
 			}
 			return
 		}
-		id := reflect.ValueOf(x).Pointer()
+		id := idOf(reflect.ValueOf(x))
 		if onPath[id] {
 			fn(path, v)
 			return
@@ -574,7 +593,7 @@ func eachLeafWalk(path string, v any, onPath map[uintptr]bool, fn func(path stri
 			fn(path, v)
 			return
 		}
-		id := reflect.ValueOf(x).Pointer()
+		id := idOf(reflect.ValueOf(x))
 		if onPath[id] {
 			fn(path, v)
 			return
