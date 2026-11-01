@@ -152,6 +152,76 @@ func TestProvenance_ProfileTypedCollectionMutation(t *testing.T) {
 	}
 }
 
+// TestProvenance_PlainEvaluationClearsStamps: a profile the opt-in call stamped comes
+// back unstamped from the plain call, for a binding no step touches too (review
+// finding on a retained binding.detail).
+func TestProvenance_PlainEvaluationClearsStamps(t *testing.T) {
+	tr := provProfileTransformer()
+	stamped, err := tr.EvaluateProfileWithProvenance(provProfile())
+	if err != nil {
+		t.Fatalf("EvaluateProfileWithProvenance: %v", err)
+	}
+	if stamped.Spec.Capabilities["plain"].detail == nil {
+		t.Fatal("the opt-in call stamped nothing on the untouched binding; the test would prove nothing")
+	}
+	again, err := tr.EvaluateProfile(stamped)
+	if err != nil {
+		t.Fatalf("EvaluateProfile: %v", err)
+	}
+	for key, b := range again.Spec.Capabilities {
+		if b.detail != nil {
+			t.Errorf("%s: the plain call kept the stamp %v", key, b.detail)
+		}
+	}
+}
+
+// TestProvenance_StampForNormalizedDescendants: a leaf the component schema check
+// expanded from a typed collection the profile stamped as one leaf takes the stamp
+// of its nearest stamped ancestor; an unstamped path stays empty (review finding on
+// normalized descendants).
+func TestProvenance_StampForNormalizedDescendants(t *testing.T) {
+	detail := map[string]string{"class": detailProfile, "class.deep": detailHandlerDefault, "other": detailSchemaDefault}
+	for path, want := range map[string]string{
+		"class":        detailProfile,
+		"class.tier":   detailProfile,
+		"class[0]":     detailProfile,
+		"class.deep.x": detailHandlerDefault,
+		"classy":       "",
+		"missing.x":    "",
+	} {
+		if got := stampFor(detail, path); got != want {
+			t.Errorf("stampFor(%q) = %q, want %q", path, got, want)
+		}
+	}
+	if got := stampFor(nil, "class.tier"); got != "" {
+		t.Errorf("stampFor on no stamp = %q, want empty", got)
+	}
+}
+
+// TestProvenance_TypedFillKeepsStampAfterNormalization: end to end, the component
+// schema turns a profile's map[string]string at class into class.tier, and the
+// report keeps the profile's stamp on it.
+func TestProvenance_TypedFillKeepsStampAfterNormalization(t *testing.T) {
+	h := &objectDefaultsHandler{keyedDefaultsHandler{key: "store", keys: []string{"class"}}}
+	tr := NewTransformer(map[string]ComponentHandler{"store": h}, nil)
+	profile := &ClusterProfile{Spec: ClusterProfileSpec{Capabilities: map[string]CapabilityBinding{
+		"store": {Rendering: map[string]any{"class": map[string]string{"tier": "fast"}}},
+	}}}
+	evaluated, err := tr.EvaluateProfileWithProvenance(profile)
+	if err != nil {
+		t.Fatalf("EvaluateProfileWithProvenance: %v", err)
+	}
+	app := storeApp(Component{Name: "data", Type: "store", Properties: map[string]any{}})
+	_, _, prov, err := tr.TransformWithProvenance(app, TransformContext{Capabilities: evaluated.Spec.Capabilities})
+	if err != nil {
+		t.Fatalf("TransformWithProvenance: %v", err)
+	}
+	want := map[string]Source{"class.tier": {Kind: SourceCapability, Ref: "store", Detail: detailProfile}}
+	if got := entriesFor(prov, "data", "", ""); !reflect.DeepEqual(got, want) {
+		t.Errorf("entries\n got %v\nwant %v", got, want)
+	}
+}
+
 // provMixedHandler fills the object-valued "class" key from the "store" capability
 // at the top level and a nested "volumes[0].storageClass" from the "pvc" one.
 type provMixedHandler struct{ provComponentHandler }
