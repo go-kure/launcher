@@ -625,7 +625,10 @@ func (t *Transformer) evaluateProfile(profile *ClusterProfile, stamp bool) (*Clu
 				evaluated[key] = steps.binding(validated, stamp)
 				continue
 			}
-			// No step touches the rendering: every leaf is the profile's.
+			// No step touches the rendering: every leaf is the profile's. A profile an
+			// earlier opt-in evaluation stamped comes back unstamped from the plain
+			// call, as the handler branches return it.
+			binding.detail = nil
 			if stamp {
 				binding.detail = steps.detail(binding.Rendering)
 			}

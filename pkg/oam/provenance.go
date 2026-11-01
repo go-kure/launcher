@@ -236,7 +236,7 @@ func (r *ownerRecorder) bind(ref string, detail map[string]string) {
 
 // capability is the source of the value at path that the bound rendering supplied.
 func (r *ownerRecorder) capability(path string) Source {
-	return Source{Kind: SourceCapability, Ref: r.ref, Detail: r.detail[path]}
+	return Source{Kind: SourceCapability, Ref: r.ref, Detail: stampFor(r.detail, path)}
 }
 
 // authored records every leaf of props as authored.
@@ -280,8 +280,26 @@ func (r *ownerRecorder) replaceCapability(path string, v any, ref string, detail
 	}
 	r.dropUnder(path)
 	eachLeaf(path, v, func(p string, _ any) {
-		r.entries[p] = Source{Kind: SourceCapability, Ref: ref, Detail: detail[p]}
+		r.entries[p] = Source{Kind: SourceCapability, Ref: ref, Detail: stampFor(detail, p)}
 	})
+}
+
+// stampFor returns the origin recorded for the leaf at path. When the component's
+// schema check expanded a typed collection the profile stamped as one leaf (a
+// map[string]string at class becomes class.tier), the descendant has no stamp of its
+// own and takes the one on its nearest stamped ancestor. No stamp stays empty: not
+// determined.
+func stampFor(detail map[string]string, path string) string {
+	if d, ok := detail[path]; ok {
+		return d
+	}
+	best := ""
+	for q := range detail {
+		if q != "" && len(q) > len(best) && pathWithin(path, q) {
+			best = q
+		}
+	}
+	return detail[best]
 }
 
 // replace records the leaves of v, which now stand at path, as src. Whatever was
