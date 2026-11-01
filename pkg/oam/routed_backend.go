@@ -204,10 +204,11 @@ func routedBackendsOf(reg *npSynthesisRegistry, components map[string]componentE
 	var targets []routedTarget
 	ownedAt := map[string]int{}
 	for _, target := range bt.BackendTargets() {
+		// BackendTargets never holds the Service the route resolved for the
+		// component itself (the row above), so a target owned by the router is
+		// another Service of the same component, such as a sibling group's, and is
+		// a route like any other.
 		owner, owned := reg.serviceToComponent[target.ServiceName]
-		if owned && owner == router {
-			continue // the component's own Service: its ports are the row above
-		}
 		if !owned {
 			targets = append(targets, routedTarget{service: target.ServiceName, ports: target.Ports, selector: target.PodSelector})
 			continue
