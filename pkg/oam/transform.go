@@ -586,7 +586,7 @@ func (t *Transformer) evaluateProfile(profile *ClusterProfile, stamp bool) (*Clu
 		typeName, _, _ := strings.Cut(key, ".")
 		var steps defaultSteps
 		if stamp {
-			steps.profile = leafValues(binding.Rendering)
+			steps.profile = indexOf(binding.Rendering)
 			steps.schema = steps.profile
 		}
 		vad, def := t.capabilityValidators(typeName)
@@ -602,7 +602,7 @@ func (t *Transformer) evaluateProfile(profile *ClusterProfile, stamp bool) (*Clu
 				}
 			}
 			if stamp {
-				steps.schema = leafValues(rendering)
+				steps.schema = indexOf(rendering)
 			}
 		}
 		if vad != nil {
@@ -2014,7 +2014,7 @@ func fillComponentCapabilities(f ComponentCapabilityFiller, props map[string]any
 	if rec == nil {
 		return f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities})
 	}
-	before := leafValues(props)
+	before := indexOf(props)
 	reads := map[string]struct{}{}
 	filled, err := f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: reads})
 	if err != nil {

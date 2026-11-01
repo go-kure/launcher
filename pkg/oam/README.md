@@ -2264,7 +2264,9 @@ evaluated with `EvaluateProfile`, for a binding built by hand, for a leaf a
 `ComponentCapabilityFiller` wrote (the engine cannot map the filler's destination to a
 rendering path), and for the other kinds. A top-level fill of an object carries each
 leaf's own `Detail`, since one object can hold leaves of different origins. A leaf a step
-removes is not reported.
+removes is not reported. A value a step hands back unchanged keeps its source and `Detail`
+whatever Go shape the step gave it (a `map[string]string` returned as a `map[string]any`,
+a NaN, a list returned typed); only a value the step added or changed takes the step's.
 
 `Path` is dot-separated object keys, `[i]` for a list element, and `["key"]` (a quoted
 string) for a key that is empty or holds `.`, `[` or `]`: `tls.enabled`,
