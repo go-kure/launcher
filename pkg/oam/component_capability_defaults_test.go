@@ -152,7 +152,7 @@ func TestComponentCapabilityDefaults_UncopyableValueRefused(t *testing.T) {
 		t.Errorf("handler ran with %v", h.got)
 	}
 
-	_, err = tr.applyComponentCapabilityDefaults(h, map[string]any{}, TransformContext{Capabilities: caps})
+	_, err = tr.applyComponentCapabilityDefaults(h, map[string]any{}, TransformContext{Capabilities: caps}, nil)
 	if err == nil || !strings.Contains(err.Error(), `capability "store" defaults: rendering key "class"`) {
 		t.Errorf("applyComponentCapabilityDefaults error = %v, want one naming the capability and the key", err)
 	}
@@ -406,7 +406,7 @@ func TestCapabilityMerge_NullIsAbsent(t *testing.T) {
 	want := map[string]any{"class": "platform", "tier": "gold", "other": nil, "name": "x"}
 
 	t.Run("resolveCapability", func(t *testing.T) {
-		got, key, matched := resolveCapability(Trait{Type: "store-trait", Properties: authored()}, caps)
+		got, key, matched := resolveCapability(Trait{Type: "store-trait", Properties: authored()}, caps, nil)
 		if !matched || key != "store-trait" {
 			t.Fatalf("resolveCapability matched=%v key=%q", matched, key)
 		}
@@ -528,7 +528,7 @@ func TestCapabilityMerge_Nested(t *testing.T) {
 			caps := map[string]CapabilityBinding{"store-trait": {Rendering: tc.rendering()}}
 
 			authored := tc.authored()
-			got, _, matched := resolveCapability(Trait{Type: "store-trait", Properties: authored}, caps)
+			got, _, matched := resolveCapability(Trait{Type: "store-trait", Properties: authored}, caps, nil)
 			if !matched || !reflect.DeepEqual(got.Properties, tc.want) {
 				t.Errorf("resolveCapability merged %v (matched %v), want %v", got.Properties, matched, tc.want)
 			}

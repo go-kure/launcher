@@ -1,0 +1,13 @@
+application: myapp
+entries:
+- component: web
+  path: tls.enabled
+  source:
+    kind: authored
+  trait: ingress
+- component: web
+  path: tls.issuer
+  source:
+    kind: capability
+    ref: ingress
+  trait: ingress

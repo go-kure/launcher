@@ -322,7 +322,7 @@ func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait, 
 	}
 	// Looked up only after validation, which normalizes what the author wrote: a scope
 	// of a named string type matches its binding here, as it does in Transform.
-	merged, matchedKey, _ := resolveCapability(*trait, capabilities)
+	merged, matchedKey, _ := resolveCapability(*trait, capabilities, nil)
 	return checkNestedRequired(schema, exclusive, merged.Properties, path, matchedKey)
 }
 

@@ -1538,7 +1538,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				// the same merge applyTraits performs for a dispatchable handler — so a
 				// TraitLoweringRule sees the identical "rendering as defaults, inline
 				// wins" view a TraitHandler would.
-				resolvedTrait, matchedKey, matched = resolveCapability(trait, ctx.Capabilities)
+				resolvedTrait, matchedKey, matched = resolveCapability(trait, ctx.Capabilities, nil)
 
 				// CapabilityAware is engine-enforced here exactly as applyTraits
 				// enforces it for a dispatchable TraitHandler: a lowering rule that

@@ -1,0 +1,13 @@
+application: myapp
+entries:
+- component: web
+  path: host
+  source:
+    kind: capability
+    ref: ingress
+  trait: ingress
+- component: web
+  path: path
+  source:
+    kind: authored
+  trait: ingress

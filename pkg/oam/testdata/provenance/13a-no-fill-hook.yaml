@@ -1,0 +1,14 @@
+application: myapp
+entries:
+- component: plain
+  path: env.A
+  source:
+    kind: authored
+- component: plain
+  path: image
+  source:
+    kind: authored
+- component: unmatched
+  path: size
+  source:
+    kind: authored

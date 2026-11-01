@@ -2235,6 +2235,40 @@ the binding and whether the profile has one, and records a key it finds. The
 a rule directly, and used to set the field, uses
 `lctx.WithCapabilities(m)` instead; its reads are recorded nowhere.
 
+**Property provenance.** `Transformer.TransformWithProvenance(app, ctx)` returns the same
+`*stack.Cluster` and `*PolicyResult` as `TransformWithPolicy`, plus a `*Provenance`: for
+each component and trait, the source of every leaf property value. A `PropertySource`
+names the component, the `Member` (the component type of a member of a same-name sibling
+group, empty otherwise), the trait type and its index (empty and 0 for the component's own
+properties), the leaf `Path` and a `Source`. A `Source` has a `Kind`:
+
+| Kind | Meaning |
+|------|---------|
+| `authored` | The value is in the properties the caller passed. |
+| `capability` | A `ClusterProfile` binding supplied it. `Ref` is the binding's key: the scoped key or the bare type key that matched, `pvc` for a top-level fill, or, for a value a `ComponentCapabilityFiller` wrote below the top level, the capability the filler read (the sorted keys joined by `,` when it read several). |
+
+`Path` is dot-separated object keys, `[i]` for a list element, and `["key"]` (a quoted
+string) for a key that is empty or holds `.`, `[` or `]`: `tls.enabled`,
+`volumeClaimTemplates[0].storageClass`. An empty object or an empty list is its own leaf
+and a null is none. Entries are sorted by component, member, trait, trait index and path,
+so two calls on the same input report the same bytes.
+
+The report follows the merge rule exactly (the rendering is the default, an authored value
+wins, a null over a rendered key is skipped, two objects merge key by key, anything else
+replaces whole), so it names the winner and never a source that was shadowed. A
+`ComponentCapabilityFiller` is attributed by comparing the properties before and after the
+call: a leaf it added or changed is `capability`. The filler is handed a call-local
+consumed set for that, merged into `ConsumedCapabilities` afterwards, so the result of
+`TransformWithPolicy` is unchanged.
+
+The report costs nothing when it is not asked for: `Transform` and `TransformWithPolicy`
+carry no recorder, and their allocations are those they had before. It does not cover
+values a policy supplies (the environment policy acts on the typed config, not the
+property map), defaults a handler applies while it builds its typed config, parameter
+substitution, the names, labels and annotations the engine stamps on an object, or a
+statement about the generated objects: entries key property paths. A trait a lowering
+rule emits is not reported by this entry point yet.
+
 ### Registering the builtins
 
 [`pkg/oam/builtin/registry`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/registry)
@@ -2319,7 +2353,9 @@ declares `ContractMetadata().Version`), `From` the authored `metadata.name` and 
 claimed inputs of one kind and name in different namespaces are told apart only by their
 position. A pass-through input has no step; on error the steps are nil and the
 `LoweringError`'s `Chain` reports the failing document's steps. `LowerRaws` is
-`LowerRawsWithSteps` with the steps dropped.
+`LowerRawsWithSteps` with the steps dropped. The source of each property value after
+`TransformWithPolicy` is a separate report, `TransformWithProvenance` (see "Property
+provenance" above).
 
 `NameAllocator`'s generated-name collision detection (D2) is scoped by `Origin.Namespace`,
 not by name alone: two documents authored in different namespaces may generate the same
