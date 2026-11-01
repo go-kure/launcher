@@ -136,13 +136,18 @@ func (s defaultSteps) binding(final map[string]any, stamp bool) CapabilityBindin
 // not decide.
 func (s defaultSteps) detail(final map[string]any) map[string]string {
 	out := map[string]string{}
+	// A typed collection is one leaf of a snapshot, but a handler may hand it back as
+	// map[string]any or []any, which eachLeaf walks into. The final leaves under it are
+	// then compared with the elements of the typed value, so an element the handler left
+	// alone keeps the origin of the step that supplied it.
+	schemaIn, profileIn := collectionElements(s.schema), collectionElements(s.profile)
 	eachLeaf("", final, func(path string, v any) {
-		sv, inSchema := s.schema[path]
+		sv, inSchema := snapshotAt(s.schema, schemaIn, path)
 		if !inSchema || !reflect.DeepEqual(sv, v) {
 			out[path] = detailHandlerDefault
 			return
 		}
-		if pv, inProfile := s.profile[path]; inProfile && reflect.DeepEqual(pv, v) {
+		if pv, inProfile := snapshotAt(s.profile, profileIn, path); inProfile && reflect.DeepEqual(pv, v) {
 			out[path] = detailProfile
 			return
 		}
@@ -381,6 +386,88 @@ func leafValues(props map[string]any) map[string]any {
 	return out
 }
 
+// collectionElements returns the elements inside each typed map or slice leaf of snap, by
+// the path eachLeaf would give them had the collection been a map[string]any or a
+// []any: a string-keyed map adds ".key", a slice or array adds "[i]". Descent goes
+// through interface values and stops at any other value, which is an element. A
+// collection that contains itself is not entered again.
+func collectionElements(snap map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, path := range slices.Sorted(maps.Keys(snap)) {
+		rv := reflect.ValueOf(snap[path])
+		switch rv.Kind() {
+		case reflect.Map, reflect.Slice, reflect.Array:
+			collectionElementsWalk(path, rv, map[uintptr]bool{}, out)
+		default:
+		}
+	}
+	return out
+}
+
+// collectionElementsWalk records the elements of rv, a typed collection at path, into out.
+// The collection itself is not recorded: the snapshot already holds it as one leaf.
+func collectionElementsWalk(path string, rv reflect.Value, onPath map[uintptr]bool, out map[string]any) {
+	for rv.Kind() == reflect.Interface && !rv.IsNil() {
+		rv = rv.Elem()
+	}
+	switch rv.Kind() {
+	case reflect.Map:
+		if rv.Type().Key().Kind() != reflect.String || rv.Len() == 0 || onPath[rv.Pointer()] {
+			return
+		}
+		onPath[rv.Pointer()] = true
+		defer delete(onPath, rv.Pointer())
+		for it := rv.MapRange(); it.Next(); {
+			collectionElementsAt(joinPath(path, it.Key().String()), it.Value(), onPath, out)
+		}
+	case reflect.Slice:
+		if rv.Len() == 0 || onPath[rv.Pointer()] {
+			return
+		}
+		onPath[rv.Pointer()] = true
+		defer delete(onPath, rv.Pointer())
+		for i := range rv.Len() {
+			collectionElementsAt(path+"["+strconv.Itoa(i)+"]", rv.Index(i), onPath, out)
+		}
+	case reflect.Array:
+		for i := range rv.Len() {
+			collectionElementsAt(path+"["+strconv.Itoa(i)+"]", rv.Index(i), onPath, out)
+		}
+	default:
+	}
+}
+
+// collectionElementsAt records one element of a typed collection: a nested non-empty
+// collection is entered, a null is no element, anything else is one.
+func collectionElementsAt(path string, rv reflect.Value, onPath map[uintptr]bool, out map[string]any) {
+	for rv.Kind() == reflect.Interface && !rv.IsNil() {
+		rv = rv.Elem()
+	}
+	switch rv.Kind() {
+	case reflect.Interface:
+		return
+	case reflect.Map, reflect.Slice, reflect.Array:
+		if rv.Len() > 0 {
+			collectionElementsWalk(path, rv, onPath, out)
+			return
+		}
+	default:
+	}
+	if rv.CanInterface() {
+		out[path] = rv.Interface()
+	}
+}
+
+// snapshotAt returns the value a snapshot holds at path: the leaf itself, else the
+// element of a typed collection leaf that eachLeaf reaches at path.
+func snapshotAt(snap, elements map[string]any, path string) (any, bool) {
+	if v, ok := snap[path]; ok {
+		return v, true
+	}
+	v, ok := elements[path]
+	return v, ok
+}
+
 // snapshotLeaf deep-copies a leaf that holds a map, slice or array, keeping its Go
 // type. Unlike copyRenderedValue it accepts what a profile may hold before its
 // handler normalizes it (a null inside a typed collection), because the snapshot
@@ -451,7 +538,16 @@ func snapshotValue(rv reflect.Value, onPath map[uintptr]bool) reflect.Value {
 // map[string]any or a []any, and an empty one of those. A null is no leaf. Only
 // map[string]any and []any are descended into, as mergeRenderedProperties does,
 // so a typed map or slice is one leaf.
+//
+// A map or slice that contains itself, directly or through another, is one leaf at the
+// path where the walk meets it again, never descended into twice. Only a binding built in
+// Go can hold one; the walk must not run without bound on it.
 func eachLeaf(path string, v any, fn func(path string, v any)) {
+	eachLeafWalk(path, v, map[uintptr]bool{}, fn)
+}
+
+// eachLeafWalk is eachLeaf with onPath, the maps and slices being walked above v.
+func eachLeafWalk(path string, v any, onPath map[uintptr]bool, fn func(path string, v any)) {
 	if isNullValue(v) {
 		return
 	}
@@ -463,16 +559,30 @@ func eachLeaf(path string, v any, fn func(path string, v any)) {
 			}
 			return
 		}
+		id := reflect.ValueOf(x).Pointer()
+		if onPath[id] {
+			fn(path, v)
+			return
+		}
+		onPath[id] = true
+		defer delete(onPath, id)
 		for _, k := range slices.Sorted(maps.Keys(x)) {
-			eachLeaf(joinPath(path, k), x[k], fn)
+			eachLeafWalk(joinPath(path, k), x[k], onPath, fn)
 		}
 	case []any:
 		if len(x) == 0 {
 			fn(path, v)
 			return
 		}
+		id := reflect.ValueOf(x).Pointer()
+		if onPath[id] {
+			fn(path, v)
+			return
+		}
+		onPath[id] = true
+		defer delete(onPath, id)
 		for i, e := range x {
-			eachLeaf(path+"["+strconv.Itoa(i)+"]", e, fn)
+			eachLeafWalk(path+"["+strconv.Itoa(i)+"]", e, onPath, fn)
 		}
 	default:
 		fn(path, v)
