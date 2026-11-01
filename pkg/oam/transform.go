@@ -567,6 +567,14 @@ func (t *Transformer) SetWarningHandler(h func(string)) {
 // must be called before Transform so that malformed profile renderings are caught at
 // load time rather than silently propagated into the pipeline.
 func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile, error) {
+	return t.evaluateProfile(profile, false)
+}
+
+// evaluateProfile is EvaluateProfile; with stamp set, each returned binding also
+// carries the per-leaf origin EvaluateProfileWithProvenance documents. A leaf-to-value
+// snapshot is taken before each defaulting step, because a handler rewrites the
+// rendering it is handed in place; none is taken with stamp unset.
+func (t *Transformer) evaluateProfile(profile *ClusterProfile, stamp bool) (*ClusterProfile, error) {
 	if profile == nil {
 		return nil, nil
 	}
@@ -576,6 +584,11 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 	evaluated := make(map[string]CapabilityBinding, len(profile.Spec.Capabilities))
 	for key, binding := range profile.Spec.Capabilities {
 		typeName, _, _ := strings.Cut(key, ".")
+		var steps defaultSteps
+		if stamp {
+			steps.profile = leafValues(binding.Rendering)
+			steps.schema = steps.profile
+		}
 		vad, def := t.capabilityValidators(typeName)
 		rendering := binding.Rendering
 		// The definition schema goes first, so that VAD sees the schema's defaults.
@@ -588,6 +601,9 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 					Cause:   err,
 				}
 			}
+			if stamp {
+				steps.schema = leafValues(rendering)
+			}
 		}
 		if vad != nil {
 			var err error
@@ -596,7 +612,7 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 				return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
 			}
 		}
-		evaluated[key] = CapabilityBinding{Rendering: rendering}
+		evaluated[key] = steps.binding(rendering, stamp)
 	}
 	result := *profile
 	result.Spec = profile.Spec           // copy all fields (future-proof: new fields survive automatically)
@@ -1866,7 +1882,7 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding, r
 
 	result := trait
 	rendered := copyRendering(cap.Rendering)
-	rec.bind(matchedKey)
+	rec.bind(matchedKey, cap.detail)
 	rec.seedCapability(rendered)
 	result.Properties = mergeRenderedProperties(rendered, trait.Properties, rec, "")
 	return result, matchedKey, true
@@ -1981,9 +1997,8 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 		}
 	}
 	if rec != nil {
-		src := Source{Kind: SourceCapability, Ref: key}
 		for k, v := range copied {
-			rec.replace(joinPath("", k), v, src)
+			rec.replaceCapability(joinPath("", k), v, key, binding.detail)
 		}
 	}
 	return out, nil

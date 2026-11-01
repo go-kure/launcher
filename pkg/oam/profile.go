@@ -42,6 +42,11 @@ type ClusterProfileSpec struct {
 // See docs/oam/design-cluster-profile.md §2 and docs/oam/design-capability-schema.md §3.6.
 type CapabilityBinding struct {
 	Rendering map[string]any `yaml:"rendering,omitempty" json:"rendering,omitempty"`
+
+	// detail is set only by EvaluateProfileWithProvenance: for each leaf path of
+	// Rendering, which step supplied it (see Source.Detail). Unexported, so a
+	// serialized binding carries none, and a binding built by hand has none.
+	detail map[string]string
 }
 
 // ParseClusterProfile parses a ClusterProfile YAML document in strict mode.
