@@ -70,6 +70,37 @@ func TestComponentEndpoints_MalformedProviderErrors(t *testing.T) {
 	}
 }
 
+// A provider that returns a bad name or a repeated non-empty name is refused, in words that carry
+// the component name and the endpoint index.
+func TestComponentEndpoints_RefusesBadAndRepeatedNames(t *testing.T) {
+	named := func(n string) netpol.Endpoint { return withNameProtocol(n, "") }
+	cases := []struct {
+		name string
+		eps  []netpol.Endpoint
+		want string
+	}{
+		{"bad name", []netpol.Endpoint{named("Http")}, `component "x" endpoint[0]`},
+		{"bad protocol", []netpol.Endpoint{withNameProtocol("", "ICMP")}, `component "x" endpoint[0]`},
+		{"repeated name", []netpol.Endpoint{named("http"), named("grpc"), named("http")}, `component "x": endpoint[2] repeats the name "http" of endpoint[0]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := NewTransformer(nil, nil)
+			tr.RegisterComponent("db", &stubEndpointHandler{typeName: "db", eps: tc.eps})
+			_, err := tr.ComponentEndpoints(&Component{Name: "x", Type: "db"})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+	// Unnamed endpoints may repeat.
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponent("db", &stubEndpointHandler{typeName: "db", eps: []netpol.Endpoint{named(""), named("")}})
+	if eps, err := tr.ComponentEndpoints(&Component{Name: "x", Type: "db"}); err != nil || len(eps) != 2 {
+		t.Errorf("unnamed repeats: eps=%v err=%v", eps, err)
+	}
+}
+
 // stubEndpointRule is a ComponentLoweringRule that also implements EndpointProvider.
 type stubEndpointRule struct {
 	typeName string

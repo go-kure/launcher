@@ -28,6 +28,10 @@ Package `netpol` contains shared types for automatic `NetworkPolicy` synthesis:
 - `Endpoint` — a component's declared in-cluster data-plane endpoint: a pod selector
   (matchLabels only) + ports. Namespace is deliberately absent (the caller knows the target's
   namespace). Declared by a component handler via the optional `oam.EndpointProvider`.
+  `Name` (optional) tells two endpoints of one component apart: empty or a valid IANA service
+  name, unique within the component when non-empty. `Protocol` is the transport of every port:
+  empty (TCP), `TCP`, `UDP` or `SCTP`. Synthesis emits TCP only, so an `IngressPeer` whose endpoint
+  is UDP or SCTP is skipped, and neither field changes a synthesized policy's name.
 - `IngressPeer` — one **target-side** allow (an `Endpoint` + the `Sources` allowed to reach
   it), carried on `TransformContext.IngressPeers`; platform-supplied and non-authorable.
   **Fail-closed contract:** unlike `TrafficSource` (where a nil pod selector means "all pods"),
