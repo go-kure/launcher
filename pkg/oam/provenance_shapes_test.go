@@ -117,6 +117,7 @@ func TestProvenance_ValueShapesKeepOrigin(t *testing.T) {
 	})
 
 	t.Run("nested filler", func(t *testing.T) {
+		ptrA, ptrB := 1, 2
 		authored := Source{Kind: SourceAuthored}
 		filler := Source{Kind: SourceCapability, Ref: "k"}
 		cases := []struct {
@@ -190,6 +191,12 @@ func TestProvenance_ValueShapesKeepOrigin(t *testing.T) {
 				props:  map[string]any{"m": map[float64]string{math.NaN(): "v"}},
 				filled: map[string]any{"m": map[float64]string{math.NaN(): "v"}},
 				want:   map[string]Source{"m": authored},
+			},
+			{
+				name:   "authored nan-key map of pointers, every pointee changed by the filler",
+				props:  map[string]any{"m": map[float64]*int{math.NaN(): &ptrA, math.NaN(): &ptrA}},
+				filled: map[string]any{"m": map[float64]*int{math.NaN(): &ptrB, math.NaN(): &ptrB}},
+				want:   map[string]Source{"m": filler},
 			},
 			{
 				name:   "authored map with a nan key, value changed by the filler",
