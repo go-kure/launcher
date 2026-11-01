@@ -19,12 +19,17 @@ const (
 	// SourceCapability is a value a ClusterProfile capability binding supplied;
 	// Source.Ref is the binding's key.
 	SourceCapability SourceKind = "capability"
+	// SourceLowered is a value of an element a lowering rule emitted; Source.Ref is
+	// the rule's identity (Origin.Rule). The report does not split what the rule
+	// copied from authored input from what it rendered.
+	SourceLowered SourceKind = "lowered"
 )
 
 // Source is the origin of one property value.
 type Source struct {
 	Kind SourceKind `json:"kind" yaml:"kind"`
-	// Ref names the capability key that supplied a SourceCapability value. For a
+	// Ref names the lowering rule of a SourceLowered value, and the capability key
+	// that supplied a SourceCapability value. For a
 	// value a component's nested filler supplied it is the capability the filler
 	// read, or the sorted keys joined by "," when it read several: the engine does
 	// not see which read produced which value.
@@ -170,6 +175,16 @@ func (r *ownerRecorder) authored(props map[string]any) {
 	}
 	eachLeaf("", props, func(path string, _ any) {
 		r.entries[path] = Source{Kind: SourceAuthored}
+	})
+}
+
+// lowered records every leaf of props as the output of the lowering rule.
+func (r *ownerRecorder) lowered(props map[string]any, rule string) {
+	if r == nil {
+		return
+	}
+	eachLeaf("", props, func(path string, _ any) {
+		r.entries[path] = Source{Kind: SourceLowered, Ref: rule}
 	})
 }
 

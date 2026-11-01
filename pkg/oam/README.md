@@ -2234,6 +2234,7 @@ properties), the leaf `Path` and a `Source`. A `Source` has a `Kind`:
 |------|---------|
 | `authored` | The value is in the properties the caller passed. |
 | `capability` | A `ClusterProfile` binding supplied it. `Ref` is the binding's key: the scoped key or the bare type key that matched, `pvc` for a top-level fill, or, for a value a `ComponentCapabilityFiller` wrote below the top level, the capability the filler read (the sorted keys joined by `,` when it read several). |
+| `lowered` | A lowering rule emitted the element, so its properties are the rule's output: a component whose origin names a rule (whether or not it counts as synthesized), and a sealed trait. `Ref` is the rule's identity, such as `component/<type>`. The report does not split what the rule copied from authored input from what it rendered. A capability fill on a rule-emitted component no rule synthesized stays `capability`. |
 
 `Path` is dot-separated object keys, `[i]` for a list element, and `["key"]` (a quoted
 string) for a key that is empty or holds `.`, `[` or `]`: `tls.enabled`,
@@ -2254,8 +2255,7 @@ carry no recorder, and their allocations are those they had before. It does not 
 values a policy supplies (the environment policy acts on the typed config, not the
 property map), defaults a handler applies while it builds its typed config, parameter
 substitution, the names, labels and annotations the engine stamps on an object, or a
-statement about the generated objects: entries key property paths. A trait a lowering
-rule emits is not reported by this entry point yet.
+statement about the generated objects: entries key property paths.
 
 ### Registering the builtins
 
