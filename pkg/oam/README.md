@@ -2236,6 +2236,24 @@ properties), the leaf `Path` and a `Source`. A `Source` has a `Kind`:
 | `capability` | A `ClusterProfile` binding supplied it. `Ref` is the binding's key: the scoped key or the bare type key that matched, `pvc` for a top-level fill, or, for a value a `ComponentCapabilityFiller` wrote below the top level, the capability the filler read (the sorted keys joined by `,` when it read several). |
 | `lowered` | A lowering rule emitted the element, so its properties are the rule's output: a component whose origin names a rule (whether or not it counts as synthesized), and a sealed trait. `Ref` is the rule's identity, such as `component/<type>`. The report does not split what the rule copied from authored input from what it rendered. A capability fill on a rule-emitted component no rule synthesized stays `capability`. |
 
+A `capability` source also has a `Detail` when the profile went through
+`Transformer.EvaluateProfileWithProvenance`, which returns what `EvaluateProfile` returns
+plus, on each binding, the step that supplied each leaf of its rendering (an unexported
+field, so serialization ignores it):
+
+| Detail | Meaning |
+|--------|---------|
+| `profile` | The value is in the profile document. A binding no handler or rule claims is all `profile`. |
+| `schema-default` | A `CapabilityDefinition` default for a key the profile left out or set to null. |
+| `handler-default` | The trait handler's or lowering rule's `ValidateAndApplyDefaults` added the leaf or changed its value (an empty `issuerRef.kind` rewritten to `ClusterIssuer` is the handler's, not the profile's). |
+
+An empty `Detail` means not determined, never `profile`: it is empty for a profile
+evaluated with `EvaluateProfile`, for a binding built by hand, for a leaf a
+`ComponentCapabilityFiller` wrote (the engine cannot map the filler's destination to a
+rendering path), and for the other kinds. A top-level fill of an object carries each
+leaf's own `Detail`, since one object can hold leaves of different origins. A leaf a step
+removes is not reported.
+
 `Path` is dot-separated object keys, `[i]` for a list element, and `["key"]` (a quoted
 string) for a key that is empty or holds `.`, `[` or `]`: `tls.enabled`,
 `volumeClaimTemplates[0].storageClass`. An empty object or an empty list is its own leaf

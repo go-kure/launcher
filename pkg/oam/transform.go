@@ -557,6 +557,14 @@ func (t *Transformer) SetWarningHandler(h func(string)) {
 // must be called before Transform so that malformed profile renderings are caught at
 // load time rather than silently propagated into the pipeline.
 func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile, error) {
+	return t.evaluateProfile(profile, false)
+}
+
+// evaluateProfile is EvaluateProfile; with stamp set, each returned binding also
+// carries the per-leaf origin EvaluateProfileWithProvenance documents. A leaf-to-value
+// snapshot is taken before each defaulting step, because a handler rewrites the
+// rendering it is handed in place; none is taken with stamp unset.
+func (t *Transformer) evaluateProfile(profile *ClusterProfile, stamp bool) (*ClusterProfile, error) {
 	if profile == nil {
 		return nil, nil
 	}
@@ -566,6 +574,11 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 	evaluated := make(map[string]CapabilityBinding, len(profile.Spec.Capabilities))
 	for key, binding := range profile.Spec.Capabilities {
 		typeName, _, _ := strings.Cut(key, ".")
+		var steps defaultSteps
+		if stamp {
+			steps.profile = leafValues(binding.Rendering)
+			steps.schema = steps.profile
+		}
 		// capabilityValidated mirrors which of the branches below validate the
 		// rendering; a change here is a change there.
 		handler, ok := t.traitHandlers[typeName]
@@ -595,19 +608,26 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 							}
 						}
 						currentRendering = withDefaults
+						if stamp {
+							steps.schema = leafValues(currentRendering)
+						}
 					}
 				}
 				vad, ok := rule.(ValidateAndApplyDefaults)
 				if !ok {
-					evaluated[key] = CapabilityBinding{Rendering: currentRendering}
+					evaluated[key] = steps.binding(currentRendering, stamp)
 					continue
 				}
 				validated, err := vad.ValidateAndApplyDefaults(currentRendering)
 				if err != nil {
 					return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
 				}
-				evaluated[key] = CapabilityBinding{Rendering: validated}
+				evaluated[key] = steps.binding(validated, stamp)
 				continue
+			}
+			// No step touches the rendering: every leaf is the profile's.
+			if stamp {
+				binding.detail = steps.detail(binding.Rendering)
 			}
 			evaluated[key] = binding
 			continue
@@ -627,19 +647,22 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 					}
 				}
 				currentRendering = withDefaults
+				if stamp {
+					steps.schema = leafValues(currentRendering)
+				}
 			}
 		}
 
 		vad, ok := handler.(ValidateAndApplyDefaults)
 		if !ok {
-			evaluated[key] = CapabilityBinding{Rendering: currentRendering}
+			evaluated[key] = steps.binding(currentRendering, stamp)
 			continue
 		}
 		validated, err := vad.ValidateAndApplyDefaults(currentRendering)
 		if err != nil {
 			return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
 		}
-		evaluated[key] = CapabilityBinding{Rendering: validated}
+		evaluated[key] = steps.binding(validated, stamp)
 	}
 	result := *profile
 	result.Spec = profile.Spec           // copy all fields (future-proof: new fields survive automatically)
@@ -1879,7 +1902,7 @@ func resolveCapability(trait Trait, capabilities map[string]CapabilityBinding, r
 
 	result := trait
 	rendered := copyRendering(cap.Rendering)
-	rec.bind(matchedKey)
+	rec.bind(matchedKey, cap.detail)
 	rec.seedCapability(rendered)
 	result.Properties = mergeRenderedProperties(rendered, trait.Properties, rec, "")
 	return result, matchedKey, true
@@ -1994,9 +2017,8 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 		}
 	}
 	if rec != nil {
-		src := Source{Kind: SourceCapability, Ref: key}
 		for k, v := range copied {
-			rec.replace(joinPath("", k), v, src)
+			rec.replaceCapability(joinPath("", k), v, key, binding.detail)
 		}
 	}
 	return out, nil
