@@ -251,6 +251,61 @@ func TestChartEndpoints_RefusedBesideTargetNamespace(t *testing.T) {
 	}
 }
 
+// kubeConfig releases the chart on another cluster, where an endpoint's NetworkPolicy, created
+// in the application's own cluster, selects none of its pods. Only helmrelease takes the
+// property; helm and helmtemplate refuse it as an unknown key before any declaration is read.
+func TestChartEndpoints_RefusedBesideKubeConfig(t *testing.T) {
+	remote := func() map[string]any { return map[string]any{"secretRef": map[string]any{"name": "remote-cluster"}} }
+	for _, k := range chartEndpointKinds() {
+		if k.name != "helmrelease" {
+			continue
+		}
+		t.Run(k.name, func(t *testing.T) {
+			const want = "endpoints: cannot be declared beside kubeConfig"
+			// The decode matches keys whatever their case, so the guard must too.
+			for _, key := range []string{"kubeConfig", "KubeConfig", "KUBECONFIG"} {
+				props := k.props()
+				props[key] = remote()
+				props["endpoints"] = []any{chartEntry("http", "", 8080)}
+				comp := chartComponent(k, props)
+				if _, err := k.provider.Endpoints(comp); err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("%s: Endpoints err = %v, want it to contain %q", key, err, want)
+				}
+				_, buildErr := k.provider.(oam.ComponentHandler).ToApplicationConfig(comp, "demo")
+				if buildErr == nil || !strings.Contains(buildErr.Error(), want) {
+					t.Errorf("%s: build err = %v, want it to contain %q", key, buildErr, want)
+				}
+			}
+
+			// Without a declaration, or with a null kubeConfig, nothing changes.
+			plain := k.props()
+			plain["kubeConfig"] = remote()
+			if eps, err := k.provider.Endpoints(chartComponent(k, plain)); err != nil || eps != nil {
+				t.Errorf("no declaration: Endpoints = %+v, %v; want none and no error", eps, err)
+			}
+			null := k.props()
+			null["kubeConfig"] = nil
+			null["endpoints"] = []any{chartEntry("http", "", 8080)}
+			if eps, err := k.provider.Endpoints(chartComponent(k, null)); err != nil || len(eps) != 1 {
+				t.Errorf("null kubeConfig: Endpoints = %+v, %v; want one endpoint", eps, err)
+			}
+		})
+	}
+	for _, k := range chartEndpointKinds() {
+		if k.name == "helmrelease" {
+			continue
+		}
+		t.Run(k.name+"/unknown key", func(t *testing.T) {
+			props := k.props()
+			props["kubeConfig"] = remote()
+			props["endpoints"] = []any{chartEntry("http", "", 8080)}
+			if eps, err := k.provider.Endpoints(chartComponent(k, props)); err == nil || eps != nil {
+				t.Errorf("Endpoints = %+v, %v; want no endpoint and a refusal", eps, err)
+			}
+		})
+	}
+}
+
 // A declaration on a component the type itself refuses changes nothing: no endpoint, and the
 // refusal is the type's own, word for word, as it is without the declaration.
 func TestChartEndpoints_InvalidChartIsRefusedInTheParsesWords(t *testing.T) {

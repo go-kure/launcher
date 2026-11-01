@@ -2272,11 +2272,20 @@ One shared schema and parser (`chartEndpoints`) serve the three types.
   path (`endpoints[1].selector.matchLabels`) and is refused by a build, by the lowering and by
   a direct `Endpoints` call alike. What the `helm` lowering refuses after its decode is not
   seen by `Endpoints`.
-- **Application namespace only.** An endpoint's NetworkPolicy is created in the application
-  namespace, so the declared pods must run there. A declaration beside an authored,
-  non-empty `targetNamespace` (`helmrelease`, and `helm` under Flux delivery) is refused,
-  because launcher cannot compare that namespace with the application's. `helmtemplate`
-  renders into the application namespace and takes no `targetNamespace`.
+- **Application namespace and cluster only.** An endpoint's NetworkPolicy is created in the
+  application namespace of the application's own cluster, so the declared pods must run
+  there. A declaration beside a property that places the pods elsewhere is refused, because
+  launcher cannot compare that place with the application's: an authored, non-empty
+  `targetNamespace` (another namespace; `helmrelease`, and `helm` under Flux delivery) and a
+  `kubeConfig` (another cluster; `helmrelease` only, `helm` and `helmtemplate` take none). A
+  null `kubeConfig` reads as absent. `helmtemplate` renders into the application namespace and
+  takes no `targetNamespace`. The other `HelmReleaseSpec` fields do not place the pods and are
+  accepted: `storageNamespace` (where Helm keeps release state), `serviceAccountName` (the
+  identity Helm acts as), the namespaces of the chart source (`chart.spec.sourceRef`,
+  `chartRef`) and of `dependsOn`, `install.createNamespace` (creates the namespace the release
+  already targets) and `commonMetadata` (labels and annotations only). `postRenderers` can
+  patch an object's namespace, but a patch is opaque to launcher, as are the chart's own
+  templates; the declared selector is the author's claim about the rendered pods either way.
 - **No declaration** reports none, as before. A declaration is the only source: a workload
   type derives its endpoints from its container ports and takes no `endpoints` property.
 
