@@ -3437,7 +3437,8 @@ validates a capability rendering of that type. It returns true when a registered
 trait handler or trait lowering rule implements `ValidateAndApplyDefaults`, or
 when a non-built-in type has a `CapabilityDefinition` whose schema is applied.
 With none of those validators, `EvaluateProfile` passes the binding through
-unchecked. This method mirrors the validation branches in `EvaluateProfile`.
+unchecked. `EvaluateProfile` and this method resolve the validators through the same
+unexported function, so they cannot disagree.
 
 **Pre-GA behavior change**: `EvaluateProfile` now also checks a binding whose type has
 a `CapabilityDefinition` but no trait handler and no trait lowering rule. The schema

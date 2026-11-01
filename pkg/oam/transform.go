@@ -571,73 +571,27 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 	evaluated := make(map[string]CapabilityBinding, len(profile.Spec.Capabilities))
 	for key, binding := range profile.Spec.Capabilities {
 		typeName, _, _ := strings.Cut(key, ".")
-		// CapabilityValidated mirrors which of the branches below validate the
-		// rendering; a change here is a change there.
-		handler, ok := t.traitHandlers[typeName]
-		if !ok {
-			// The type may be a trait-position lowering rule instead of a dispatchable
-			// handler (e.g. "expose") — a rule never reaches applyTraits, so this is
-			// the only place its ValidateAndApplyDefaults ever runs. A lowering-rule
-			// type CAN still have a loaded CapabilityDefinition, and must get the
-			// identical schema-defaults step the handler branch below applies before
-			// its own VAD runs — otherwise a TraitLoweringRule's VAD sees undefaulted,
-			// unchecked-against-declared-schema values purely because its type lowers
-			// instead of dispatching. But a BUILT-IN lowering rule (registered via
-			// RegisterBuiltinTraitLowering, e.g. "expose") is exempt from
-			// CapabilityDefinition application exactly like a built-in TraitHandler is
-			// (t.builtinTraitTypes gates both registries identically) — otherwise a
-			// caller loading a definition that happens to share a built-in lowering
-			// rule's type name would have it silently applied to that rule's rendering.
-			if rule, ok := t.traitLoweringRules[typeName]; ok {
-				currentRendering, _, err := t.applyCapabilityDefinition(key, typeName, binding.Rendering)
-				if err != nil {
-					return nil, err
-				}
-				vad, ok := rule.(ValidateAndApplyDefaults)
-				if !ok {
-					evaluated[key] = CapabilityBinding{Rendering: currentRendering}
-					continue
-				}
-				validated, err := vad.ValidateAndApplyDefaults(currentRendering)
-				if err != nil {
-					return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
-				}
-				evaluated[key] = CapabilityBinding{Rendering: validated}
-				continue
-			}
-			// A definition-only type has neither a handler nor a rule, so its
-			// CapabilityDefinition schema is the only check: a rendering that breaks
-			// it is refused, one that passes gets the schema's defaults. Any other
-			// type of this kind passes through unchecked.
-			validated, applied, err := t.applyCapabilityDefinition(key, typeName, binding.Rendering)
+		vad, def := t.capabilityValidators(typeName)
+		rendering := binding.Rendering
+		// The definition schema goes first, so that VAD sees the schema's defaults.
+		if def != nil {
+			var err error
+			rendering, err = applyDefinitionSchema(rendering, def)
 			if err != nil {
-				return nil, err
+				return nil, &TransformError{
+					Message: fmt.Sprintf("capability %q definition schema", key),
+					Cause:   err,
+				}
 			}
-			if applied {
-				evaluated[key] = CapabilityBinding{Rendering: validated}
-			} else {
-				evaluated[key] = binding
+		}
+		if vad != nil {
+			var err error
+			rendering, err = vad.ValidateAndApplyDefaults(rendering)
+			if err != nil {
+				return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
 			}
-			continue
 		}
-
-		// For custom (non-built-in) trait types, apply CapabilityDefinition schema
-		// defaults before handler VAD so that VAD sees schema-defaulted values.
-		currentRendering, _, err := t.applyCapabilityDefinition(key, typeName, binding.Rendering)
-		if err != nil {
-			return nil, err
-		}
-
-		vad, ok := handler.(ValidateAndApplyDefaults)
-		if !ok {
-			evaluated[key] = CapabilityBinding{Rendering: currentRendering}
-			continue
-		}
-		validated, err := vad.ValidateAndApplyDefaults(currentRendering)
-		if err != nil {
-			return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
-		}
-		evaluated[key] = CapabilityBinding{Rendering: validated}
+		evaluated[key] = CapabilityBinding{Rendering: rendering}
 	}
 	result := *profile
 	result.Spec = profile.Spec           // copy all fields (future-proof: new fields survive automatically)
@@ -645,37 +599,31 @@ func (t *Transformer) EvaluateProfile(profile *ClusterProfile) (*ClusterProfile,
 	return &result, nil
 }
 
-// capabilityDefinition returns the CapabilityDefinition that EvaluateProfile
-// applies to capability type typeName: one a caller loaded for a type that is not
-// built in. A built-in type is exempt whichever registry claims it, handler or
-// lowering rule (t.builtinTraitTypes gates both identically), so a definition that
-// shares a built-in type's name is never applied to that type's rendering. It is
-// the one presence test EvaluateProfile and CapabilityValidated both use.
-func (t *Transformer) capabilityDefinition(typeName string) (*CapabilityDefinition, bool) {
-	if t.builtinTraitTypes[typeName] {
-		return nil, false
+// capabilityValidators resolves how EvaluateProfile checks a rendering of capability
+// type typeName, and is the only place that decides it; CapabilityValidated reads the
+// same answer.
+//
+// vad is the ValidateAndApplyDefaults of the trait handler registered for the type, or
+// else of the trait lowering rule (a rule never reaches applyTraits, so EvaluateProfile
+// is the only place its VAD runs). It is nil when neither is registered or the one
+// registered does not implement it.
+//
+// def is the CapabilityDefinition a caller loaded for the type, nil when there is none.
+// A built-in type never gets one, whichever registry claims it, handler or lowering rule
+// (t.builtinTraitTypes gates both identically): a definition that shares a built-in
+// type's name is not applied to that type's rendering.
+//
+// With both nil, EvaluateProfile passes the rendering through unchecked.
+func (t *Transformer) capabilityValidators(typeName string) (vad ValidateAndApplyDefaults, def *CapabilityDefinition) {
+	if h, ok := t.traitHandlers[typeName]; ok {
+		vad, _ = h.(ValidateAndApplyDefaults)
+	} else if rule, ok := t.traitLoweringRules[typeName]; ok {
+		vad, _ = rule.(ValidateAndApplyDefaults)
 	}
-	def, hasDef := t.capabilityDefs[typeName]
-	return def, hasDef
-}
-
-// applyCapabilityDefinition applies the CapabilityDefinition schema of typeName to
-// rendering and reports whether there was one to apply. With none, it returns
-// rendering unchanged. A rendering that breaks the schema is a TransformError for
-// capability key.
-func (t *Transformer) applyCapabilityDefinition(key, typeName string, rendering map[string]any) (map[string]any, bool, error) {
-	def, hasDef := t.capabilityDefinition(typeName)
-	if !hasDef {
-		return rendering, false, nil
+	if !t.builtinTraitTypes[typeName] {
+		def = t.capabilityDefs[typeName]
 	}
-	withDefaults, err := applyDefinitionSchema(rendering, def)
-	if err != nil {
-		return nil, false, &TransformError{
-			Message: fmt.Sprintf("capability %q definition schema", key),
-			Cause:   err,
-		}
-	}
-	return withDefaults, true, nil
+	return vad, def
 }
 
 // ComponentEndpoints returns the endpoints declared for comp.Type by its
@@ -1974,20 +1922,10 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 // lowering rule, implements ValidateAndApplyDefaults, or the type is not built in
 // and has a CapabilityDefinition, whose schema EvaluateProfile applies, alone for
 // a type with neither a handler nor a rule. With no handler, rule, or applicable
-// definition, EvaluateProfile passes the binding through unchecked. It mirrors
-// EvaluateProfile's branches; a change to one is a change to both.
+// definition, EvaluateProfile passes the binding through unchecked.
 func (t *Transformer) CapabilityValidated(typeName string) bool {
-	var registered any
-	if h, ok := t.traitHandlers[typeName]; ok {
-		registered = h
-	} else if rule, ok := t.traitLoweringRules[typeName]; ok {
-		registered = rule
-	}
-	if _, ok := registered.(ValidateAndApplyDefaults); ok {
-		return true
-	}
-	_, hasDef := t.capabilityDefinition(typeName)
-	return hasDef
+	vad, def := t.capabilityValidators(typeName)
+	return vad != nil || def != nil
 }
 
 // validateCapabilityFill checks the values applyComponentCapabilityDefaults is about

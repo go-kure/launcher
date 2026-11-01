@@ -2,6 +2,7 @@ package oam
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -1118,22 +1119,40 @@ func TestTransformer_CapabilityValidated(t *testing.T) {
 	tr := NewTransformer(nil, nil)
 	tr.RegisterTrait("handler", &markingVADHandler{stubTraitHandler: stubTraitHandler{typ: "handler"}})
 	tr.RegisterTraitLowering(markingVADLoweringRule{typ: "rule"})
-	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{"definition": capDefFixture("definition")})
+	tr.RegisterTrait("handler-plain", &stubTraitHandler{typ: "handler-plain"})
+	tr.RegisterTrait("handler-plain-def", &stubTraitHandler{typ: "handler-plain-def"})
+	tr.RegisterTraitLowering(plainLoweringRule{typ: "rule-plain"})
+	tr.RegisterBuiltinTrait("builtin-def", &stubTraitHandler{typ: "builtin-def"})
+	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{
+		"definition":        capDefFixture("definition"),
+		"handler-plain-def": capDefFixture("handler-plain-def"),
+		"builtin-def":       capDefFixture("builtin-def"),
+	})
 
+	// Every type here is one outcome of capabilityValidators. For each rendering,
+	// CapabilityValidated must agree with whether EvaluateProfile refused it or
+	// changed it: a validator that acts is a validated type, and one that does not
+	// is a pass-through.
 	tests := []struct {
-		typeName   string
-		want       bool
-		rendering  map[string]any
-		wantError  bool
-		wantMarked bool // the validator ran and left its marker on the evaluated rendering
+		name      string
+		typeName  string
+		rendering map[string]any
+		want      bool
+		wantError bool
 	}{
-		{"handler", true, map[string]any{"anything": "accepted by handler"}, false, true},
-		{"rule", true, map[string]any{"anything": "accepted by rule"}, false, true},
-		{"definition", true, map[string]any{"mode": "custom"}, true, false},
-		{"unknown", false, map[string]any{"anything": "passed through"}, false, false},
+		{"handler with VAD", "handler", map[string]any{"anything": "accepted"}, true, false},
+		{"rule with VAD", "rule", map[string]any{"anything": "accepted"}, true, false},
+		{"definition only, valid", "definition", map[string]any{"timeout": float64(30)}, true, false},
+		{"definition only, invalid", "definition", map[string]any{"mode": "custom"}, true, true},
+		{"handler without VAD, with definition, valid", "handler-plain-def", map[string]any{"timeout": float64(30)}, true, false},
+		{"handler without VAD, with definition, invalid", "handler-plain-def", map[string]any{"mode": "custom"}, true, true},
+		{"handler without VAD, no definition", "handler-plain", map[string]any{"anything": "passed through"}, false, false},
+		{"rule without VAD, no definition", "rule-plain", map[string]any{"anything": "passed through"}, false, false},
+		{"built-in with definition", "builtin-def", map[string]any{"mode": "custom"}, false, false},
+		{"unknown", "unknown", map[string]any{"anything": "passed through"}, false, false},
 	}
 	for _, tt := range tests {
-		t.Run(tt.typeName, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			profile := &ClusterProfile{Spec: ClusterProfileSpec{
 				Capabilities: map[string]CapabilityBinding{
 					tt.typeName: {Rendering: tt.rendering},
@@ -1143,32 +1162,41 @@ func TestTransformer_CapabilityValidated(t *testing.T) {
 			if (err != nil) != tt.wantError {
 				t.Fatalf("EvaluateProfile() error = %v, wantError %t", err, tt.wantError)
 			}
-			if err == nil {
-				_, marked := evaluated.Spec.Capabilities[tt.typeName].Rendering["validated"]
-				if marked != tt.wantMarked {
-					t.Errorf("validator ran = %t, want %t", marked, tt.wantMarked)
-				}
+			if got := tr.CapabilityValidated(tt.typeName); got != tt.want {
+				t.Errorf("CapabilityValidated(%q) = %t, want %t", tt.typeName, got, tt.want)
 			}
-			validated := tr.CapabilityValidated(tt.typeName)
-			if validated != tt.want {
-				t.Errorf("CapabilityValidated(%q) = %t, want %t", tt.typeName, validated, tt.want)
-			}
-			if tt.typeName == "definition" {
-				// A valid rendering must receive the definition's default, and an
-				// invalid one must be rejected by EvaluateProfile.
-				validProfile := &ClusterProfile{Spec: ClusterProfileSpec{Capabilities: map[string]CapabilityBinding{
-					"definition": {Rendering: map[string]any{"timeout": float64(30)}},
-				}}}
-				valid, err := tr.EvaluateProfile(validProfile)
-				if err != nil {
-					t.Fatalf("EvaluateProfile() valid definition rendering: %v", err)
-				}
-				if got := valid.Spec.Capabilities["definition"].Rendering["mode"]; got != "auto" {
-					t.Errorf("definition schema default mode = %v, want auto", got)
-				}
+			acted := err != nil || !reflect.DeepEqual(evaluated.Spec.Capabilities[tt.typeName].Rendering, tt.rendering)
+			if acted != tt.want {
+				t.Errorf("EvaluateProfile refused or changed the rendering = %t, but CapabilityValidated = %t", acted, tt.want)
 			}
 		})
 	}
+}
+
+// TestTransformer_CapabilityValidated_DefinitionDefaults pins what a definition does to
+// a rendering that passes: its default is applied. The order against a handler's VAD is
+// pinned by TestEvaluateProfile_CapabilityDefinition_AppliesSchemaBeforeVAD.
+func TestTransformer_CapabilityValidated_DefinitionDefaults(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{"definition": capDefFixture("definition")})
+	profile := &ClusterProfile{Spec: ClusterProfileSpec{Capabilities: map[string]CapabilityBinding{
+		"definition": {Rendering: map[string]any{"timeout": float64(30)}},
+	}}}
+	got, err := tr.EvaluateProfile(profile)
+	if err != nil {
+		t.Fatalf("EvaluateProfile() valid definition rendering: %v", err)
+	}
+	if mode := got.Spec.Capabilities["definition"].Rendering["mode"]; mode != "auto" {
+		t.Errorf("definition schema default mode = %v, want auto", mode)
+	}
+}
+
+// plainLoweringRule is a TraitLoweringRule that does not implement ValidateAndApplyDefaults.
+type plainLoweringRule struct{ typ string }
+
+func (r plainLoweringRule) TraitType() string { return r.typ }
+func (r plainLoweringRule) LowerTrait(trait *Trait, lctx LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Traits: []Trait{{Type: "ingress", Properties: map[string]any{}}}}, nil
 }
 
 // withValidatedMarker returns a copy of rendering with "validated" set, so a test can
