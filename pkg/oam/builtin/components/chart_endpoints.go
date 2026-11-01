@@ -29,7 +29,7 @@ func chartEndpointsSchema() oam.PropertySchema {
 		Type: oam.PropertyTypeArray,
 		Description: "The pods a consumer connects to, as the chart renders them: one entry per port. " +
 			"The chart's pods are not visible to launcher, so they are declared here and not derived. " +
-			"A non-empty name is unique within the component. A launcher property: it is not a chart value " +
+			"A non-empty name is unique within the component. The pods run in the application namespace: refused beside targetNamespace. A launcher property: it is not a chart value " +
 			"and is never forwarded to Flux or to the render.",
 		Items: &oam.PropertySchema{
 			Type:        oam.PropertyTypeObject,
@@ -218,6 +218,14 @@ func declaredChartEndpoints(props map[string]any) ([]netpol.Endpoint, error) {
 	eps, err := parseChartEndpoints(raw)
 	if err != nil || len(eps) == 0 {
 		return nil, err
+	}
+	// The endpoint's NetworkPolicy is created in the application namespace. A chart released
+	// into another namespace puts its pods where that policy does not select them, and
+	// launcher cannot compare the two here, so the declaration is refused beside one.
+	if ns, _, err := parseStringField(props, "targetNamespace", "targetNamespace"); err != nil {
+		return nil, err
+	} else if ns != "" {
+		return nil, errors.Errorf("%s: cannot be declared beside targetNamespace %q: an endpoint's NetworkPolicy is created in the application namespace, so the chart's pods must run there", chartEndpointsKey, ns)
 	}
 	return eps, nil
 }

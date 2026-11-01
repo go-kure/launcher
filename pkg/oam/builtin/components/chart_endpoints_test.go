@@ -192,6 +192,50 @@ func TestChartEndpoints_Refusals(t *testing.T) {
 	}
 }
 
+// An endpoint's NetworkPolicy is created in the application namespace, so a declaration beside
+// an authored targetNamespace is refused, on a direct Endpoints call and on a build or
+// lowering alike. Without a declaration the same targetNamespace is accepted, and an empty one
+// reads as absent.
+func TestChartEndpoints_RefusedBesideTargetNamespace(t *testing.T) {
+	for _, k := range chartEndpointKinds() {
+		if k.name != "helm/flux" && k.name != "helmrelease" {
+			continue // the other types take no targetNamespace
+		}
+		t.Run(k.name, func(t *testing.T) {
+			const want = `endpoints: cannot be declared beside targetNamespace "data"`
+			props := k.props()
+			props["targetNamespace"] = "data"
+			props["endpoints"] = []any{chartEntry("http", "", 8080)}
+			comp := chartComponent(k, props)
+			if _, err := k.provider.Endpoints(comp); err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("Endpoints err = %v, want it to contain %q", err, want)
+			}
+			var buildErr error
+			switch h := k.provider.(type) {
+			case components.HelmRule:
+				_, buildErr = h.LowerComponent(comp, helmLowering("doc"))
+			case oam.ComponentHandler:
+				_, buildErr = h.ToApplicationConfig(comp, "demo")
+			}
+			if buildErr == nil || !strings.Contains(buildErr.Error(), want) {
+				t.Errorf("build/lowering err = %v, want it to contain %q", buildErr, want)
+			}
+
+			plain := k.props()
+			plain["targetNamespace"] = "data"
+			if eps, err := k.provider.Endpoints(chartComponent(k, plain)); err != nil || eps != nil {
+				t.Errorf("no declaration: Endpoints = %+v, %v; want none and no error", eps, err)
+			}
+			empty := k.props()
+			empty["targetNamespace"] = ""
+			empty["endpoints"] = []any{chartEntry("http", "", 8080)}
+			if eps, err := k.provider.Endpoints(chartComponent(k, empty)); err != nil || len(eps) != 1 {
+				t.Errorf("empty targetNamespace: Endpoints = %+v, %v; want one endpoint", eps, err)
+			}
+		})
+	}
+}
+
 // A declaration on a component the type itself refuses changes nothing: no endpoint, and the
 // refusal is the type's own, word for word, as it is without the declaration.
 func TestChartEndpoints_InvalidChartIsRefusedInTheParsesWords(t *testing.T) {
