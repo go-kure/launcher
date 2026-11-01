@@ -7,8 +7,10 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -20,11 +22,13 @@ var updateProvenance = flag.Bool("update", false, "rewrite the provenance golden
 // properties each one was handed, keyed for the completeness test.
 type provCapture struct {
 	components map[string]map[string]any
-	traits     map[string]map[string]any
+	// traits keeps every call, in order: members of a same-name group and repeated
+	// traits of a type reach the handler under one key.
+	traits map[string][]map[string]any
 }
 
 func newProvCapture() *provCapture {
-	return &provCapture{components: map[string]map[string]any{}, traits: map[string]map[string]any{}}
+	return &provCapture{components: map[string]map[string]any{}, traits: map[string][]map[string]any{}}
 }
 
 type provComponentHandler struct {
@@ -35,8 +39,17 @@ type provComponentHandler struct {
 func (h provComponentHandler) CanHandle(t string) bool { return t == h.typ }
 func (h provComponentHandler) ToApplicationConfig(c *Component, _ string) (stack.ApplicationConfig, error) {
 	h.c.components[c.Name+"/"+c.Type] = c.Properties
-	return &stubAppConfig{}, nil
+	return &provRetained{Props: c.Properties}, nil
 }
+
+// provRetained is the config the handlers return: it keeps the properties the
+// component and its traits ended with, so a cluster comparison sees them.
+type provRetained struct {
+	Props  map[string]any
+	Traits []map[string]any
+}
+
+func (*provRetained) Generate(*stack.Application) ([]*client.Object, error) { return nil, nil }
 
 // provStoreHandler takes "class" from the "store" capability, as a top-level fill.
 type provStoreHandler struct {
@@ -55,7 +68,11 @@ type provTraitHandler struct {
 
 func (h provTraitHandler) CanHandle(t string) bool { return t == h.typ }
 func (h provTraitHandler) Apply(tr *Trait, app *stack.Application, _ *stack.Bundle) error {
-	h.c.traits[app.Name+"/"+tr.Type] = tr.Properties
+	key := app.Name + "/" + tr.Type
+	h.c.traits[key] = append(h.c.traits[key], tr.Properties)
+	if cfg, ok := app.Config.(*provRetained); ok {
+		cfg.Traits = append(cfg.Traits, tr.Properties)
+	}
 	return nil
 }
 
@@ -280,18 +297,76 @@ func TestProvenance_SiblingGroup(t *testing.T) {
 	}
 }
 
-// TestProvenance_OutputEquality: TransformWithProvenance returns the cluster and
-// PolicyResult TransformWithPolicy does (test 14).
-func TestProvenance_OutputEquality(t *testing.T) {
+// provEqualityFixtures are the apps test 14 compares: every scenario, a nested
+// filler, a component rule and a same-name sibling group. Each handler keeps the
+// final properties of its component and traits in the config it returns
+// (provRetained), so a cluster comparison sees any effective value that differs.
+func provEqualityFixtures() []struct {
+	name string
+	tr   func(*provCapture) *Transformer
+	app  func() *Application
+	caps map[string]CapabilityBinding
+} {
+	type fixture = struct {
+		name string
+		tr   func(*provCapture) *Transformer
+		app  func() *Application
+		caps map[string]CapabilityBinding
+	}
+	var out []fixture
 	for _, s := range provScenarios() {
-		t.Run(s.name, func(t *testing.T) {
-			wantCluster, wantResult, err := provTransformer(newProvCapture()).TransformWithPolicy(s.app(), TransformContext{Capabilities: s.caps})
+		out = append(out, fixture{s.name, provTransformer, s.app, s.caps})
+	}
+	out = append(out,
+		fixture{"nested-filler", provMixedTransformer,
+			func() *Application {
+				return provApp(Component{Name: "m", Type: "mixed", Properties: map[string]any{"size": "1Gi"}})
+			},
+			map[string]CapabilityBinding{
+				"store": rend(map[string]any{"class": map[string]any{"name": "platform", "kind": "Default"}}),
+				"pvc":   rend(map[string]any{"storageClassName": "ssd"}),
+			}},
+		fixture{"component-rule", func(c *provCapture) *Transformer {
+			tr := provTransformer(c)
+			tr.RegisterComponentLowering(storeLoweringRule{props: map[string]any{"size": "1Gi"}})
+			return tr
+		}, func() *Application {
+			return provApp(Component{Name: "data", Type: "store-rule", Properties: map[string]any{},
+				Traits: []Trait{{Type: "expose", Properties: map[string]any{"port": 80}}}})
+		}, map[string]CapabilityBinding{"expose": rend(map[string]any{"proto": "tcp"})}},
+		fixture{"sibling-group", func(c *provCapture) *Transformer {
+			tr := provTransformer(c)
+			tr.RegisterComponentLowering(emitRule{"pair", func(c *Component) []Component {
+				return []Component{
+					{Name: c.Name, Type: "web", Properties: map[string]any{"image": "a"}, Traits: c.Traits},
+					{Name: c.Name, Type: "store", Properties: map[string]any{"size": "1Gi"}, Traits: c.Traits},
+				}
+			}})
+			return tr
+		}, func() *Application {
+			return siblingDoc(Component{Name: "grp", Type: "pair",
+				Traits: []Trait{{Type: "expose", Properties: map[string]any{"port": 80}}}})
+		}, map[string]CapabilityBinding{"expose": rend(map[string]any{"proto": "tcp"})}},
+	)
+	return out
+}
+
+// TestProvenance_OutputEquality: TransformWithProvenance returns the cluster and
+// PolicyResult TransformWithPolicy does (test 14), on fixtures whose handlers keep
+// the effective properties in the cluster they build.
+func TestProvenance_OutputEquality(t *testing.T) {
+	for _, f := range provEqualityFixtures() {
+		t.Run(f.name, func(t *testing.T) {
+			wantCluster, wantResult, err := f.tr(newProvCapture()).TransformWithPolicy(f.app(), TransformContext{Capabilities: f.caps})
 			if err != nil {
 				t.Fatalf("TransformWithPolicy: %v", err)
 			}
-			gotCluster, gotResult, _, err := provTransformer(newProvCapture()).TransformWithProvenance(s.app(), TransformContext{Capabilities: s.caps})
+			gotCluster, gotResult, prov, err := f.tr(newProvCapture()).TransformWithProvenance(f.app(), TransformContext{Capabilities: f.caps})
 			if err != nil {
 				t.Fatalf("TransformWithProvenance: %v", err)
+			}
+			if len(prov.Entries) == 0 {
+				t.Fatal("empty report: the comparison would not exercise the recorder")
 			}
 			if !reflect.DeepEqual(wantResult, gotResult) {
 				t.Errorf("PolicyResult differs:\n got %+v\nwant %+v", gotResult, wantResult)
@@ -300,6 +375,22 @@ func TestProvenance_OutputEquality(t *testing.T) {
 				t.Errorf("cluster differs from TransformWithPolicy's")
 			}
 		})
+	}
+}
+
+// TestProvenance_OutputEqualityDetectsDifference is the control for the test above:
+// the same comparison does fail when an effective property differs.
+func TestProvenance_OutputEqualityDetectsDifference(t *testing.T) {
+	run := func(image string) *stack.Cluster {
+		app := provApp(Component{Name: "web", Type: "web", Properties: map[string]any{"image": image}})
+		cluster, _, err := provTransformer(newProvCapture()).TransformWithPolicy(app, TransformContext{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cluster
+	}
+	if reflect.DeepEqual(run("a"), run("b")) {
+		t.Fatal("clusters built from different properties compare equal: the equality test cannot see a difference")
 	}
 }
 
@@ -475,17 +566,41 @@ func checkComplete(t *testing.T, prov *Provenance, c *provCapture) {
 			t.Errorf("component %s: reported %v, final leaves %v", key, got, want)
 		}
 	}
-	for key, props := range c.traits {
-		name, typ := splitKey(key)
-		got := map[string]bool{}
-		for _, e := range prov.Entries {
-			if e.Component == name && e.Trait == typ {
-				got[e.Path] = true
-			}
+	// Traits: the handler does not see the member or the index, so each trait
+	// (component, type) is compared as a multiset of property maps. The report's side
+	// is split by (Member, TraitIndex), so an entry under a member or index no trait
+	// has is a group with no counterpart, and a missing one the reverse.
+	reported := map[string]map[propOwner][]string{}
+	for _, e := range prov.Entries {
+		if e.Trait == "" {
+			continue
 		}
-		want := sortedKeys(leafValues(props))
-		if !slices.Equal(sortedKeys(got), want) {
-			t.Errorf("trait %s: reported %v, final leaves %v", key, sortedKeys(got), want)
+		key := e.Component + "/" + e.Trait
+		o := propOwner{component: e.Component, member: e.Member, trait: e.Trait, index: e.TraitIndex}
+		if reported[key] == nil {
+			reported[key] = map[propOwner][]string{}
+		}
+		reported[key][o] = append(reported[key][o], e.Path)
+	}
+	for key := range reported {
+		if _, ok := c.traits[key]; !ok {
+			t.Errorf("trait %s is reported but no handler received it", key)
+		}
+	}
+	for key, calls := range c.traits {
+		var want []string
+		for _, props := range calls {
+			want = append(want, strings.Join(sortedKeys(leafValues(props)), ","))
+		}
+		var got []string
+		for _, paths := range reported[key] {
+			slices.Sort(paths)
+			got = append(got, strings.Join(paths, ","))
+		}
+		slices.Sort(want)
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			t.Errorf("trait %s: reported groups %v, final leaf sets %v", key, got, want)
 		}
 	}
 }
