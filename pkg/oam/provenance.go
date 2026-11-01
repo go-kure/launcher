@@ -426,7 +426,14 @@ func sameEntries(x, y reflect.Value, seen map[sameVisit]bool) bool {
 	for _, e := range xLoose {
 		match := false
 		for i, f := range yLoose {
-			if !used[i] && sameValue(e.k, f.k, seen) && sameValue(e.v, f.v, seen) {
+			if used[i] {
+				continue
+			}
+			// A candidate that fails must leave no visited pair behind: a later candidate
+			// would take that pair as equal.
+			try := maps.Clone(seen)
+			if sameValue(e.k, f.k, try) && sameValue(e.v, f.v, try) {
+				maps.Copy(seen, try)
 				used[i], match = true, true
 				break
 			}
