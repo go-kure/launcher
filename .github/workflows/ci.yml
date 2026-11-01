@@ -863,8 +863,12 @@ jobs:
         name: codecov-umbrella
         fail_ci_if_error: false
 
+    # Skipped on a fork PR: GITHUB_TOKEN is read-only there regardless of this
+    # workflow's permissions block, so the comment call fails with "Resource not
+    # accessible by integration" and fails the required build check. The
+    # threshold check above still runs and still gates.
     - name: Comment coverage on PR
-      if: github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
       uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
       with:
         header: coverage
