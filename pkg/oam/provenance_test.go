@@ -248,7 +248,8 @@ func TestProvenance_SynthesizedComponentSkipsFill(t *testing.T) {
 // own Member (test 12). A trait the rule hard-codes is sealed and is not reported by
 // this change.
 func TestProvenance_SiblingGroup(t *testing.T) {
-	tr := provTransformer(newProvCapture())
+	c := newProvCapture()
+	tr := provTransformer(c)
 	tr.RegisterComponentLowering(emitRule{"pair", func(c *Component) []Component {
 		return []Component{
 			{Name: c.Name, Type: "web", Properties: map[string]any{"image": "a"}, Traits: c.Traits},
@@ -262,6 +263,7 @@ func TestProvenance_SiblingGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TransformWithProvenance: %v", err)
 	}
+	checkComplete(t, prov, c)
 	for _, member := range []string{"web", "store"} {
 		got := entriesFor(prov, "grp", member, "expose")
 		if len(got) != 2 || got["port"].Kind != SourceAuthored || got["proto"] != (Source{Kind: SourceCapability, Ref: "expose"}) {
@@ -437,45 +439,54 @@ func sortedKeys[V any](m map[string]V) []string {
 
 // TestProvenance_Completeness: for every component and trait, the reported paths
 // are exactly the non-null leaf paths of the properties it ended with (test 19).
-// This commit runs it over the fixtures with no lowering-rule output. The fixtures
-// keep a trait type unique within a same-name group, so a trait is told apart by
-// its component name and type alone.
+// It runs over every fixture app: the scenarios, the sibling group and the
+// lowering-rule outputs. The fixtures keep a trait type unique within a same-name
+// group, so a trait is told apart by its component name and type alone.
 func TestProvenance_Completeness(t *testing.T) {
 	for _, s := range provScenarios() {
 		t.Run(s.name, func(t *testing.T) {
 			prov, c := runProvenance(t, s)
-			grouped := map[string]bool{}
-			for _, e := range prov.Entries {
-				if e.Member != "" {
-					grouped[e.Component] = true
-				}
-			}
-			for key, props := range c.components {
-				name, typ := splitKey(key)
-				member := ""
-				if grouped[name] {
-					member = typ
-				}
-				got := sortedKeys(entriesFor(prov, name, member, ""))
-				want := sortedKeys(leafValues(props))
-				if !slices.Equal(got, want) {
-					t.Errorf("component %s: reported %v, final leaves %v", key, got, want)
-				}
-			}
-			for key, props := range c.traits {
-				name, typ := splitKey(key)
-				got := map[string]bool{}
-				for _, e := range prov.Entries {
-					if e.Component == name && e.Trait == typ {
-						got[e.Path] = true
-					}
-				}
-				want := sortedKeys(leafValues(props))
-				if !slices.Equal(sortedKeys(got), want) {
-					t.Errorf("trait %s: reported %v, final leaves %v", key, sortedKeys(got), want)
-				}
-			}
+			checkComplete(t, prov, c)
 		})
+	}
+}
+
+// checkComplete holds prov to the final properties c captured.
+func checkComplete(t *testing.T, prov *Provenance, c *provCapture) {
+	t.Helper()
+	if len(c.components) == 0 {
+		t.Fatal("no component reached its handler: the check would pass vacuously")
+	}
+	grouped := map[string]bool{}
+	for _, e := range prov.Entries {
+		if e.Member != "" {
+			grouped[e.Component] = true
+		}
+	}
+	for key, props := range c.components {
+		name, typ := splitKey(key)
+		member := ""
+		if grouped[name] {
+			member = typ
+		}
+		got := sortedKeys(entriesFor(prov, name, member, ""))
+		want := sortedKeys(leafValues(props))
+		if !slices.Equal(got, want) {
+			t.Errorf("component %s: reported %v, final leaves %v", key, got, want)
+		}
+	}
+	for key, props := range c.traits {
+		name, typ := splitKey(key)
+		got := map[string]bool{}
+		for _, e := range prov.Entries {
+			if e.Component == name && e.Trait == typ {
+				got[e.Path] = true
+			}
+		}
+		want := sortedKeys(leafValues(props))
+		if !slices.Equal(sortedKeys(got), want) {
+			t.Errorf("trait %s: reported %v, final leaves %v", key, sortedKeys(got), want)
+		}
 	}
 }
 
@@ -486,4 +497,96 @@ func splitKey(k string) (string, string) {
 		}
 	}
 	return k, ""
+}
+
+// provDocRule claims the kind "ProvDoc" and builds a terminal document whose one
+// component is a "store" with the property size.
+type provDocRule struct{}
+
+func (provDocRule) Kind() string { return "ProvDoc" }
+func (provDocRule) LowerDocument(doc *Application, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Documents: []Application{{
+		APIVersion: SupportedAPIVersion,
+		Kind:       terminalDocumentKind,
+		Metadata:   Metadata{Name: doc.Metadata.Name, Namespace: doc.Metadata.Namespace},
+		Spec: ApplicationSpec{Components: []Component{
+			{Name: doc.Spec.Components[0].Name, Type: "store", Properties: map[string]any{"size": "1Gi"}},
+		}},
+	}}}, nil
+}
+
+// TestProvenance_LoweredElements: what a lowering rule emits is reported as
+// lowered, with the rule's identity as Ref; a capability fill on an emitted
+// component no rule synthesized stays capability (test 9).
+func TestProvenance_LoweredElements(t *testing.T) {
+	caps := map[string]CapabilityBinding{
+		"store":  rend(map[string]any{"class": "platform"}),
+		"expose": rend(map[string]any{"proto": "tcp"}),
+	}
+	cases := []struct {
+		name      string
+		register  func(*Transformer)
+		app       func() *Application
+		component string
+		trait     string
+		want      map[string]Source
+	}{{
+		name: "schema-less component rule",
+		register: func(tr *Transformer) {
+			tr.RegisterComponentLowering(emitRule{"plain-rule", func(c *Component) []Component {
+				return []Component{{Name: c.Name, Type: "store", Properties: map[string]any{"size": "1Gi"}}}
+			}})
+		},
+		app:       func() *Application { return provApp(Component{Name: "data", Type: "plain-rule"}) },
+		component: "data",
+		want: map[string]Source{
+			"size":  {Kind: SourceLowered, Ref: "component/plain-rule"},
+			"class": {Kind: SourceCapability, Ref: "store"},
+		},
+	}, {
+		name:      "document rule",
+		register:  func(tr *Transformer) { tr.RegisterDocumentLowering(provDocRule{}) },
+		app:       func() *Application { return singleComponentApp("ProvDoc", "web", nil) },
+		component: "web",
+		want: map[string]Source{
+			"size":  {Kind: SourceLowered, Ref: "document/ProvDoc"},
+			"class": {Kind: SourceCapability, Ref: "store"},
+		},
+	}, {
+		name: "synthesized component",
+		register: func(tr *Transformer) {
+			tr.RegisterComponentLowering(storeLoweringRule{props: map[string]any{"size": "1Gi"}})
+		},
+		app:       func() *Application { return provApp(Component{Name: "data", Type: "store-rule"}) },
+		component: "data",
+		want:      map[string]Source{"size": {Kind: SourceLowered, Ref: "component/store-rule"}},
+	}, {
+		name: "trait the rule hard-codes",
+		register: func(tr *Transformer) {
+			tr.RegisterComponentLowering(emitRule{"traited", func(c *Component) []Component {
+				return []Component{{Name: c.Name, Type: "web", Properties: map[string]any{"image": "a"},
+					Traits: []Trait{{Type: "expose", Properties: map[string]any{"port": 80}}}}}
+			}})
+		},
+		app:       func() *Application { return provApp(Component{Name: "web", Type: "traited"}) },
+		component: "web",
+		trait:     "expose",
+		want:      map[string]Source{"port": {Kind: SourceLowered, Ref: "component/traited"}},
+	}}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newProvCapture()
+			tr := provTransformer(c)
+			tc.register(tr)
+			_, _, prov, err := tr.TransformWithProvenance(tc.app(), TransformContext{Capabilities: caps})
+			if err != nil {
+				t.Fatalf("TransformWithProvenance: %v", err)
+			}
+			checkComplete(t, prov, c)
+			got := entriesFor(prov, tc.component, "", tc.trait)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("entries = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
 }
