@@ -355,13 +355,7 @@ func sameValue(x, y reflect.Value, seen map[sameVisit]bool) bool {
 			return true
 		}
 		seen[visit] = true
-		for _, k := range x.MapKeys() {
-			yv := y.MapIndex(k)
-			if !yv.IsValid() || !sameValue(x.MapIndex(k), yv, seen) {
-				return false
-			}
-		}
-		return true
+		return sameEntries(x, y, seen)
 	case reflect.Slice:
 		if x.IsNil() != y.IsNil() || x.Len() != y.Len() {
 			return false
@@ -398,6 +392,50 @@ func sameValue(x, y reflect.Value, seen map[sameVisit]bool) bool {
 		return false
 	}
 	return false
+}
+
+// sameEntries compares two maps of equal length entry by entry. An entry whose key the
+// other map cannot look up (a NaN key, which is not equal to itself) is matched with an
+// entry of the other map that no lookup reaches either, key against key and value
+// against value, in any order.
+func sameEntries(x, y reflect.Value, seen map[sameVisit]bool) bool {
+	type entry struct{ k, v reflect.Value }
+	var xLoose, yLoose []entry
+	for it := x.MapRange(); it.Next(); {
+		yv := y.MapIndex(it.Key())
+		if !yv.IsValid() {
+			xLoose = append(xLoose, entry{it.Key(), it.Value()})
+			continue
+		}
+		if !sameValue(it.Value(), yv, seen) {
+			return false
+		}
+	}
+	if len(xLoose) == 0 {
+		return true
+	}
+	for it := y.MapRange(); it.Next(); {
+		if !x.MapIndex(it.Key()).IsValid() {
+			yLoose = append(yLoose, entry{it.Key(), it.Value()})
+		}
+	}
+	if len(xLoose) != len(yLoose) {
+		return false
+	}
+	used := make([]bool, len(yLoose))
+	for _, e := range xLoose {
+		match := false
+		for i, f := range yLoose {
+			if !used[i] && sameValue(e.k, f.k, seen) && sameValue(e.v, f.v, seen) {
+				used[i], match = true, true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
+	return true
 }
 
 // sameElements compares two slices or arrays of equal length element by element.
@@ -639,7 +677,9 @@ func (r *ownerRecorder) nestedFill(before propIndex, after map[string]any, reads
 
 // sourceOfValue is the source recorded for the value at path when path has no entry of
 // its own: that of the nearest enclosing entry (an object recorded as one leaf), else
-// the one source all entries under path share. Entries that differ have no one source.
+// the one source all entries under path share. Entries that differ only in Detail share
+// their kind and Ref, with Detail empty (not determined); any other difference leaves
+// no one source.
 func (r *ownerRecorder) sourceOfValue(path string) (Source, bool) {
 	best, found := "", false
 	for q := range r.entries {
@@ -651,16 +691,21 @@ func (r *ownerRecorder) sourceOfValue(path string) (Source, bool) {
 		return r.entries[best], true
 	}
 	var one Source
+	have := false
 	for q, s := range r.entries {
 		if !pathWithin(q, path) {
 			continue
 		}
-		if one != (Source{}) && s != one {
+		switch {
+		case !have:
+			one, have = s, true
+		case s.Kind != one.Kind || s.Ref != one.Ref:
 			return Source{}, false
+		case s.Detail != one.Detail:
+			one.Detail = ""
 		}
-		one = s
 	}
-	return one, one != Source{}
+	return one, have
 }
 
 // dropAncestors deletes the entries of the objects that contain path: a container

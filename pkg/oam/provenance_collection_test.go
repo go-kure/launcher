@@ -140,6 +140,11 @@ func TestProvenance_SameLeafValue(t *testing.T) {
 		{"struct with nan and different func", nanFunc{N: math.NaN(), F: func() {}}, nanFunc{N: math.NaN()}, false},
 		{"struct with nan and non-nil funcs", nanFunc{N: math.NaN(), F: func() {}}, nanFunc{N: math.NaN(), F: func() {}}, false},
 		{"struct with nan, different number", nanFunc{N: math.NaN()}, nanFunc{N: 1}, false},
+		{"map with a nan key", map[float64]string{math.NaN(): "v"}, map[float64]string{math.NaN(): "v"}, true},
+		{"map with a nan key, value differs", map[float64]string{math.NaN(): "v"}, map[float64]string{math.NaN(): "w"}, false},
+		{"map with a nan key against a number key", map[float64]string{math.NaN(): "v"}, map[float64]string{1: "v"}, false},
+		{"map with two nan keys", map[float64]string{math.NaN(): "a", math.NaN(): "b"}, map[float64]string{math.NaN(): "b", math.NaN(): "a"}, true},
+		{"map with two nan keys, one value differs", map[float64]string{math.NaN(): "a", math.NaN(): "b"}, map[float64]string{math.NaN(): "a", math.NaN(): "c"}, false},
 		{"plain equal", "x", "x", true},
 		{"plain differs", "x", "y", false},
 	}
