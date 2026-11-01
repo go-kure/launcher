@@ -19,6 +19,7 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 // helmType is the helm component type. It prefixes every error the rule raises
@@ -211,6 +212,9 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 		oam.HookGroupNamePrefixProperty:     str(hookGroupNamePrefixDescription + " Under delivery: template only; refused under delivery: flux, where a HelmRelease installs the chart and no hook-group layout exists."),
 		oam.LayoutKustomizationNameProperty: str(layoutKustomizationNameDescription + " Under delivery: template only; refused under delivery: flux, where the HelmRelease is applied with the bundle and the component has no layout of its own."),
 		scopeOverridesKey:                   scopeOverridesSchema("Explicit scope entries for kinds the chart renders under delivery: template, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered. Refused under delivery: flux, where Helm creates the objects in the cluster."),
+		// Launcher's own, under either delivery: split off before the decode and never
+		// forwarded to the terminals, so the lowered output does not change.
+		chartEndpointsKey: chartEndpointsSchema(),
 	}
 }
 
@@ -348,9 +352,16 @@ func (s *helmSource) inline() bool { return s.URL != "" || s.inlineBucket() }
 // LowerComponent decodes comp as a helm component and emits its terminal
 // components (see HelmRule).
 func (HelmRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
-	props, passthrough, secretValues, err := decodeHelm(comp.Properties)
+	// `endpoints` is split off before the decode and checked after it, so a component
+	// decodeHelm refuses is refused in its words first. It is not in helmOwnedKeys: those
+	// are forwarded to a terminal, and this one never is.
+	rest, _, _ := splitChartEndpoints(comp.Properties)
+	props, passthrough, secretValues, err := decodeHelm(rest)
 	if err != nil {
 		return oam.LoweringResult{}, err
+	}
+	if _, err := declaredChartEndpoints(comp.Properties); err != nil {
+		return oam.LoweringResult{}, errors.Errorf("%s: %w", helmType, err)
 	}
 	switch props.Delivery {
 	case "", "flux":
@@ -360,6 +371,29 @@ func (HelmRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (o
 	default:
 		return oam.LoweringResult{}, errors.Errorf("%s: unsupported delivery %q; supported values: flux, template", helmType, props.Delivery)
 	}
+}
+
+// Endpoints implements oam.EndpointProvider: the pods the author declared under
+// `endpoints` (go-kure/launcher#1132), the same under either delivery, none when it is
+// absent. The rule's decode runs first, so a component it refuses (no source, an unknown
+// key, an unsupported delivery) has no endpoint and is refused in the decode's words, as is
+// a malformed declaration. What the lowering refuses after the decode is not seen.
+func (HelmRule) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	rest, _, _ := splitChartEndpoints(component.Properties)
+	props, _, _, err := decodeHelm(rest)
+	if err != nil {
+		return nil, err
+	}
+	switch props.Delivery {
+	case "", "flux", "template":
+	default:
+		return nil, errors.Errorf("%s: unsupported delivery %q; supported values: flux, template", helmType, props.Delivery)
+	}
+	eps, err := declaredChartEndpoints(component.Properties)
+	if err != nil {
+		return nil, errors.Errorf("%s: %w", helmType, err)
+	}
+	return eps, nil
 }
 
 // decodeHelm decodes props strictly and checks what holds for every delivery:

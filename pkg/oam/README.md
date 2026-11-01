@@ -510,6 +510,10 @@ each a **separate** additive resource (the authored `networkpolicy` /
   port and protocol. `ComponentEndpoints` refuses a bad name, a bad protocol and a repeated name.
   Synthesis stays TCP-only: an `IngressPeer` whose endpoint is UDP or SCTP is skipped, never
   emitted as TCP, and neither field enters the grouping key, so no policy name depends on them.
+  Where endpoints come from: `deployment`, `statefulset` and `daemonset` report one per
+  main-container port (the port's name, its number, its protocol); `helm`, `helmrelease` and
+  `helmtemplate` report what an `endpoints` property declares, since a chart's pods are not
+  visible to launcher; the other providers are unchanged.
 
 The inbound/egress families select the component's own pods (the ingress recipients / the egress
 source pods) via a **derived `<domain>/component`** label by default — the domain comes

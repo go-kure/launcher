@@ -184,11 +184,11 @@ reads it.
 | `gatewayclass` | GatewayClass | Kind-named Gateway API GatewayClass: the whole `GatewayClassSpec` (`controllerName`, required, `parametersRef` and `description`), strictly decoded. Cluster-scoped. No capability is required and no environment policy applies — see below. |
 | `gitrepository` | GitRepository | Kind-named: the full Flux `GitRepositorySpec`. |
 | `grpcroute` | GRPCRoute | Kind-named GRPCRoute: the whole `GRPCRouteSpec` (`parentRefs`, `useDefaultGateways`, `hostnames`, `rules`), strictly decoded, on the `httproute` kind's recipe: nothing required or filled, no NetworkPolicy allow rule and no environment policy — see below. |
-| `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. See below. |
+| `helm` | via `helmrelease` (+ a values `configmap` trait, a `secretValues` `secret` trait) + a generated `helmrepository`/`ocirepository`/`gitrepository`/`bucket`, or via `helmtemplate` | Role-named Helm component: Flux (`flux`) or client-side `template` delivery. Lowered to the kind-named terminals (`HelmRule`), sharing one generated source per content identity within a document. `endpoints` declares the pods the chart renders (see "Declared endpoints of a chart" below). See below. |
 | `helmchart` | HelmChart | Kind-named: the full Flux `HelmChartSpec`, a chart from an existing source. Not the composite removed under this name (go-kure/launcher#350); that is `helm`. Under a delivery whose groups wait for their Flux objects, a component of a later group making the source its `sourceRef` names is refused (go-kure/launcher#1088). |
-| `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source, or an OCI chart helm-controller fetches itself (`chart.kind: OCIRepository`). Under a delivery whose groups wait for their Flux objects, a component of a later group making the source its `chartRef` or its chart template's `sourceRef` names is refused (go-kure/launcher#1088). |
+| `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source, or an OCI chart helm-controller fetches itself (`chart.kind: OCIRepository`). Under a delivery whose groups wait for their Flux objects, a component of a later group making the source its `chartRef` or its chart template's `sourceRef` names is refused (go-kure/launcher#1088). Beside the Flux fields it takes launcher's own `endpoints` (the pods the chart renders), split off before the decode and never part of the emitted spec. |
 | `helmrepository` | HelmRepository | Kind-named: the full Flux `HelmRepositorySpec`, and nothing else. |
-| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`, `secretValues`, `scopeOverrides`. What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. |
+| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`, `secretValues`, `scopeOverrides`, and `endpoints` (the pods the chart renders). What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. |
 | `horizontalpodautoscaler` | HorizontalPodAutoscaler | Kind-named HorizontalPodAutoscaler: the whole `HorizontalPodAutoscalerSpec`, strictly decoded; `scaleTargetRef` and `maxReplicas` are required. `maxReplicas` is held to the environment policy's replica maximum, no default filled; the target is the author's and is not checked — see below. |
 | `httproute` | HTTPRoute | Kind-named HTTPRoute: the whole `HTTPRouteSpec` (`parentRefs`, `useDefaultGateways`, `hostnames`, `rules`), strictly decoded. An authored object, not the `httproute` trait: no parent is synthesized from a capability, no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
 | `imagepolicy` | ImagePolicy | Kind-named Flux ImagePolicy: the whole `ImagePolicySpec`, strictly decoded; `imageRepositoryRef` with its `name` and `policy` are required, and of a `semver` policy its `range`. The policy may name the ImageRepository of another namespace, and nothing gates it. The API's expression rules are not checked. No environment policy applies — see below. |
@@ -2248,6 +2248,31 @@ if pod, prefix, ok := components.MonitoringPodSpec(obj); ok {
 Each monitoring workload kind adds its case from its own `monitoringWorkload` mapping;
 `TestMonitoringPodSpec_CoversEveryRegisteredWorkloadKind` (`pkg/oam/builtin/registry`) fails on a
 registered kind of the operator's API whose spec lists containers and that has no case.
+
+## Declared endpoints of a chart
+
+`helm`, `helmrelease` and `helmtemplate` implement `oam.EndpointProvider` from an
+`endpoints` property (go-kure/launcher#1132). A chart renders pods this package cannot see,
+so the author declares the pods a consumer connects to; nothing is derived from the chart.
+One shared schema and parser (`chartEndpoints`) serve the three types.
+
+- **An entry** is `{name?, protocol?, port, selector}`. `name` is empty or an IANA service
+  name, unique among the component's non-empty names. `protocol` is `TCP` (the default),
+  `UDP` or `SCTP`. `port` is a number from 1 to 65535 or an IANA port name (a string of
+  digits is not a name). `selector` is required and has `matchLabels` alone, not empty: an
+  empty selector would match every pod of the namespace. No other key is taken.
+- **Not a chart value.** The key is split off before any strict decode and never forwarded:
+  `helmrelease` decodes the rest as its `HelmReleaseSpec` (the schema-parity test names
+  `endpoints` as its one exception), `helmtemplate` splits it off as it does `scopeOverrides`,
+  and `helm` does not put it in `helmOwnedKeys`, which are forwarded, so the lowered members
+  are the same with and without it, under either delivery.
+- **The type's parse runs first.** A component the type refuses has no endpoint and is
+  refused in the parse's words, with or without a declaration. A refused declaration names its
+  path (`endpoints[1].selector.matchLabels`) and is refused by a build, by the lowering and by
+  a direct `Endpoints` call alike. What the `helm` lowering refuses after its decode is not
+  seen by `Endpoints`.
+- **No declaration** reports none, as before. A declaration is the only source: a workload
+  type derives its endpoints from its container ports and takes no `endpoints` property.
 
 ## Per-type highlights
 
