@@ -2254,7 +2254,11 @@ rendering path), and for the other kinds. A top-level fill of an object carries 
 leaf's own `Detail`, since one object can hold leaves of different origins. A leaf a step
 removes is not reported. A value a step hands back unchanged keeps its source and `Detail`
 whatever Go shape the step gave it (a `map[string]string` returned as a `map[string]any`,
-a NaN, a list returned typed); only a value the step added or changed takes the step's.
+a list returned typed); only a value the step added or changed takes the step's.
+One limit: values that a Go caller or handler builds in shapes YAML or JSON cannot express
+(a NaN, a map with non-string keys, a func or chan field, a collection re-typed from the
+one it was given) may report a less specific source, such as a missing `Detail` or a
+filler's capability key in place of the original one.
 
 `Path` is dot-separated object keys, `[i]` for a list element, and `["key"]` (a quoted
 string) for a key that is empty or holds `.`, `[` or `]`: `tls.enabled`,
