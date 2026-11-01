@@ -1,6 +1,7 @@
 package components
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -222,10 +223,19 @@ func declaredChartEndpoints(props map[string]any) ([]netpol.Endpoint, error) {
 	// The endpoint's NetworkPolicy is created in the application namespace. A chart released
 	// into another namespace puts its pods where that policy does not select them, and
 	// launcher cannot compare the two here, so the declaration is refused beside one. The
-	// key matches as the decode does, whatever its case; the type's own parse has already
-	// refused a value that is not a string.
+	// key matches as the decode does, whatever its case, and so does the value: it is read
+	// the way builtin.DecodeStrictJSON reads it, through JSON, so a named string, a pointer
+	// to a string and a json.RawMessage count like a plain string (the type's own parse has
+	// already refused a value that is not a string).
 	for _, k := range slices.Sorted(maps.Keys(props)) {
-		if ns, _ := props[k].(string); ns != "" && strings.EqualFold(k, "targetNamespace") {
+		if !strings.EqualFold(k, "targetNamespace") {
+			continue
+		}
+		var ns string
+		if data, err := json.Marshal(props[k]); err == nil {
+			_ = json.Unmarshal(data, &ns) // null and any other shape leave ns empty
+		}
+		if ns != "" {
 			return nil, errors.Errorf("%s: cannot be declared beside targetNamespace %q: an endpoint's NetworkPolicy is created in the application namespace, so the chart's pods must run there", chartEndpointsKey, ns)
 		}
 	}
