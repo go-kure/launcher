@@ -25,6 +25,7 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
 	"github.com/go-kure/launcher/pkg/oam/internal/fluxduration"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 // helmReleaseDefaultInterval is spec.interval when the component leaves it
@@ -153,6 +154,8 @@ func (h *HelmReleaseHandler) PropertySchema() map[string]oam.PropertySchema {
 		"postRenderStrategy": str("HelmRelease spec.postRenderStrategy."),
 		"waitStrategy":       object("HelmRelease spec.waitStrategy."),
 		"healthCheckExprs":   objects("HelmRelease spec.healthCheckExprs: custom CEL health checks.", "One custom health check."),
+		// Not a HelmReleaseSpec field: launcher's own, split off before the decode.
+		chartEndpointsKey: chartEndpointsSchema(),
 	}
 }
 
@@ -184,7 +187,11 @@ func (h *HelmReleaseHandler) UnsupportedFieldHint(key string) string {
 // constraints, and chart.spec.verify.provider not an authored "". Every other
 // constraint is left to Flux's own CRD admission.
 func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	spec, _, err := builtin.DecodeStrictJSON[helmv2.HelmReleaseSpec](component.Properties)
+	// `endpoints` is launcher's, not a HelmReleaseSpec field: it is split off before the
+	// strict decode and checked after the rest, so a refused release is refused in its
+	// own words first. It never reaches the emitted spec.
+	props, _, _ := splitChartEndpoints(component.Properties)
+	spec, _, err := builtin.DecodeStrictJSON[helmv2.HelmReleaseSpec](props)
 	if err != nil {
 		hint := ""
 		if strings.Contains(err.Error(), `unknown field "valuesMode"`) {
@@ -199,14 +206,14 @@ func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, names
 			return f.name() == "chart.spec.timeout"
 		})
 	}
-	if err := checkAuthoredFluxDurations("helmrelease", component.Properties, durations); err != nil {
+	if err := checkAuthoredFluxDurations("helmrelease", props, durations); err != nil {
 		return nil, err
 	}
-	if err := refuseEmptyFluxVerifyProvider(component.Properties, "chart", "spec", "verify"); err != nil {
+	if err := refuseEmptyFluxVerifyProvider(props, "chart", "spec", "verify"); err != nil {
 		return nil, err
 	}
 	if spec.Chart != nil && isHelmChartTemplateKind(spec.Chart.Kind) {
-		if err := refuseAuthoredInertChartFields(component.Properties); err != nil {
+		if err := refuseAuthoredInertChartFields(props); err != nil {
 			return nil, err
 		}
 	}
@@ -220,10 +227,24 @@ func (h *HelmReleaseHandler) ToApplicationConfig(component *oam.Component, names
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	if err := refuseUnauthoredProperties(component.Properties, helmReleaseRequired); err != nil {
+	if err := refuseUnauthoredProperties(props, helmReleaseRequired); err != nil {
 		return nil, err
 	}
+	if _, err := declaredChartEndpoints(component.Properties); err != nil {
+		return nil, errors.Errorf("helmrelease: %w", err)
+	}
 	return cfg, nil
+}
+
+// Endpoints implements oam.EndpointProvider: the pods the author declared under
+// `endpoints` (go-kure/launcher#1132), none when it is absent. The release's own parse
+// runs first, so a release it refuses has no endpoint and is refused in the parse's
+// words, as is a malformed declaration.
+func (h *HelmReleaseHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	if _, err := h.ToApplicationConfig(component, ""); err != nil {
+		return nil, err
+	}
+	return declaredChartEndpoints(component.Properties)
 }
 
 // helmReleaseRequired is the required list of the helmrelease kind, generated

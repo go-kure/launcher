@@ -31,7 +31,11 @@ func jsonKeys(t reflect.Type) []string {
 // strict decode then admit the same set.
 func TestHelmRule_SchemaMatchesDecode(t *testing.T) {
 	schema := HelmRule{}.PropertySchema()
+	// chartEndpointsKey is the one schema key in neither set: launcher's own declaration,
+	// split off before the decode and, unlike helmOwnedKeys, never forwarded to a terminal
+	// (go-kure/launcher#1132). TestHelmRule_EndpointsKeyNeverForwarded holds the second half.
 	want := append(jsonKeys(reflect.TypeFor[helmProperties]()), helmOwnedKeys...)
+	want = append(want, chartEndpointsKey)
 	slices.Sort(want)
 	if got := slices.Sorted(maps.Keys(schema)); !slices.Equal(got, want) {
 		t.Errorf("schema keys = %v, want %v", got, want)

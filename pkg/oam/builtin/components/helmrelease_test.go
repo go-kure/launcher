@@ -106,6 +106,14 @@ func TestHelmReleaseHandler_SchemaMatchesSpec(t *testing.T) {
 			t.Errorf("property %q has no description", k)
 		}
 	}
+	// The one named exception to "exactly HelmReleaseSpec's keys": `endpoints` is
+	// launcher's own declaration of the pods the chart renders (go-kure/launcher#1132),
+	// split off before the strict decode and never part of the spec. Everything else must
+	// still be the struct's.
+	if s, ok := schema["endpoints"]; !ok || s.Type != oam.PropertyTypeArray {
+		t.Errorf("schema[endpoints] = %+v, want the launcher-owned array", s)
+	}
+	delete(got, "endpoints")
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("schema keys/types = %v\nwant %v", got, want)
 	}
@@ -217,7 +225,7 @@ func TestHelmReleaseHandler_ProjectsEveryField(t *testing.T) {
 	for k := range props {
 		authoredKeys = append(authoredKeys, k)
 	}
-	if len(authoredKeys) != len((&components.HelmReleaseHandler{}).PropertySchema())-1 { // minus chartRef
+	if len(authoredKeys) != len((&components.HelmReleaseHandler{}).PropertySchema())-2 { // minus chartRef and the launcher-owned endpoints
 		t.Errorf("fixture sets %d keys; it must set every spec key but chartRef", len(authoredKeys))
 	}
 }

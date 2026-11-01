@@ -102,7 +102,7 @@ metadata:
 // and no fewer. It also pins which nodes are required, the two the handler
 // itself refuses when missing.
 func TestHelmTemplateHandler_SchemaMatchesProperties(t *testing.T) {
-	want := map[string]oam.PropertyType{helmTemplateValuesKey: oam.PropertyTypeObject, helmSecretValuesKey: oam.PropertyTypeObject, scopeOverridesKey: oam.PropertyTypeArray}
+	want := map[string]oam.PropertyType{helmTemplateValuesKey: oam.PropertyTypeObject, helmSecretValuesKey: oam.PropertyTypeObject, scopeOverridesKey: oam.PropertyTypeArray, chartEndpointsKey: oam.PropertyTypeArray}
 	var walk func(prefix string, st reflect.Type)
 	walk = func(prefix string, st reflect.Type) {
 		for f := range st.Fields() {

@@ -14,6 +14,7 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 // helmTemplateType is the helmtemplate component type. It prefixes the errors
@@ -68,6 +69,7 @@ func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 		scopeOverridesKey:                   scopeOverridesSchema("Explicit scope entries for kinds the chart renders, taking precedence over kure's own guess (not over a kind the Kubernetes API itself scopes; contradicting a CRD the chart renders is an error). A rendered object of a kind stated Namespaced that carries no namespace gets the application namespace; one of a kind stated Cluster is left as rendered."),
 		oam.HookGroupNamePrefixProperty:     {Type: oam.PropertyTypeString, Description: hookGroupNamePrefixDescription},
 		oam.LayoutKustomizationNameProperty: {Type: oam.PropertyTypeString, Description: layoutKustomizationNameDescription},
+		chartEndpointsKey:                   chartEndpointsSchema(),
 	}
 }
 
@@ -119,7 +121,11 @@ type helmTemplateSource struct {
 // reads its own (parseScopeOverrides), with the same refusals of a malformed
 // entry.
 func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	overrides, rest, err := parseScopeOverrides(component.Properties)
+	// `endpoints` is launcher's declaration of the pods the chart renders, not a render
+	// input: split off before the strict decode, like scopeOverrides, and checked last so
+	// a component the render refuses is refused in its own words first.
+	properties, _, _ := splitChartEndpoints(component.Properties)
+	overrides, rest, err := parseScopeOverrides(properties)
 	if err != nil {
 		return nil, errors.Errorf("%s: %w", helmTemplateType, err)
 	}
@@ -171,7 +177,21 @@ func (h *HelmTemplateHandler) ToApplicationConfig(component *oam.Component, name
 	if props.LayoutKustomizationName != nil {
 		cfg.LayoutKustomizationName, cfg.layoutNameAuthored = *props.LayoutKustomizationName, true
 	}
+	if _, err := declaredChartEndpoints(component.Properties); err != nil {
+		return nil, errors.Errorf("%s: %w", helmTemplateType, err)
+	}
 	return cfg, nil
+}
+
+// Endpoints implements oam.EndpointProvider: the pods the author declared under
+// `endpoints` (go-kure/launcher#1132), none when it is absent. The component's own parse
+// runs first, so one it refuses has no endpoint and is refused in the parse's words, as is
+// a malformed declaration.
+func (h *HelmTemplateHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
+	if _, err := h.ToApplicationConfig(component, ""); err != nil {
+		return nil, err
+	}
+	return declaredChartEndpoints(component.Properties)
 }
 
 // helmTemplateObject reads key, values or secretValues, from the keys split off
