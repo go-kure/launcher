@@ -542,8 +542,8 @@ One exception on the inbound side: a component whose config reports a routing ta
 `service` kind, whose Service fronts pods another component owns — gets its
 `{comp}-allow-ingress-traffic` policy on the Service's `selector` pods instead of the component
 label, with each routed Service port translated to its `targetPort`. A routed port that is not
-one of the Service's TCP ports is dropped (the rules are TCP), and a route left with no port
-synthesizes no policy. A `service` of type `ExternalName` selects no pods: it reports a routing
+one of the Service's TCP ports is dropped (the rules are TCP, so a route to a UDP or SCTP port
+is dropped the same way), and a route left with no port synthesizes no policy. A `service` of type `ExternalName` selects no pods: it reports a routing
 target without labels and no port for any routed port, so a route to it synthesizes no policy
 either, alone or as a member of a sibling group (go-kure/launcher#790). That label-less
 selector is a marker for "owns its Service name and selects no pods" and is never written into
@@ -575,6 +575,53 @@ source, egress peer, backend or endpoint selector it came from. The inputs are r
 trait configuration, reused by every rule and every policy built from them, so a label a
 consumer stamps onto one generated policy would otherwise reach all of them
 (go-kure/launcher#396).
+
+**Where a route lands: `Transformer.RoutedBackends`.** `RoutedBackends(app, ctx)` reports, for
+every route of every routing trait (`ingress`, `httproute`) of the document, the Service it
+names, the component that owns that Service, the pods the Service selects and, for each routed
+port, whether the Service has it. A downstream consumer calls it to check its own view of the
+document against what the routing traits resolve, whether or not any traffic source is
+configured. It is read-only and works on the whole document, not on one component
+(go-kure/launcher#1133).
+
+- **One row per routing sub-application and Service** (`RoutedBackend`): `Component` carries the
+  trait, `Application` is the sub-application's name, `Service` the Service the route names, and
+  `Owner` the component that owns it (the routing component itself for a route to its own
+  Service; empty when no component owns it). A route to the component's own Service gets a row
+  only when it routes a port to it; a route that names only other components' Services gets no
+  such row. For a route to the component's own Service, `Service` is the Service name the
+  routing trait resolves for the application it ran on: that application's backend Service name,
+  else its name. The paths of one route to an owned Service are one row, with each port once. A
+  Service no component owns gets one row per backend selector the route authored for it, because
+  those select different pods. Rows are ordered by `Component`, `Application` and `Service`; those three are
+  not a unique key, because equally named sub-applications can sit in different bundles of one
+  component.
+- **Pods** (`RoutedPods.Kind`): `selector` (the owner is a routing target, such as a `service`,
+  a `webservice` or a sibling group forwarding to one; `Selector` is its Service's selector),
+  `owner` (a component owns the Service but is not a routing target, such as a `deployment` or
+  a chart release; the route lands on that component's own pods), `none` (an `ExternalName`
+  Service, which selects no pods) and `unowned` (no component owns the Service; `Selector` is
+  the `backendSelector` the route authored, if any).
+- **Ports** (`RoutedPort.Status`): `matched` (a TCP port of the Service matches the routed port,
+  by number or by name; `TargetPorts` are the ports its pods listen on), `unmatched` (the owner
+  was asked and no TCP port matches; the route is reported, not dropped) and `unchecked` (launcher
+  has no list of Service ports to ask: the `owner` and `unowned` kinds). `unchecked` is neither
+  a match nor a mismatch, and is never guessed. `RoutedPort.Port` is a Service port, a number or a
+  Service port name, and is never a container port.
+- **Same resolution as the synthesis, not a copy.** The Service owners come from the lookups the
+  NetworkPolicy synthesis builds, and a port is matched by asking the owner's
+  `ServiceRoutingTarget` once per port.
+
+Limits. The method runs the transform up to the point where the synthesis would start and
+stops there: an error raised before that point is returned, and what runs after it (the
+NetworkPolicy, egress and endpoint-ingress synthesis, naming, decoration, the cluster-wide name
+checks, component ownership) is not seen, so the result is not the build's verdict on the
+document. Matching is TCP-only, like the synthesis: a route to a UDP or SCTP port reads
+`unmatched`. A routing sub-application a trait put straight into a child bundle has no recorded
+owning application, so a route to its own Service takes its Service name from the component's
+application, which for a sibling group is the group. The result does not say which trait type
+a route came from. A consumer that has already transformed the document pays for a second
+transform; recording the result in `PolicyResult` is a deliberate later step.
 
 ## Component label and ownership
 
