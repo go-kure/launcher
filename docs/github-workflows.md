@@ -16,7 +16,7 @@ This document provides an overview of all GitHub Actions workflows used in the l
 | [Release / Publish](#releasing) (automatic on tag) | `release-publish.yml` | tag push, `workflow_dispatch` | GoReleaser (kurel binaries, checksums, SBOM, cosign signature), docs deploy, proxy refresh |
 | [Release / State](#releasing) | `release-state.yml` | `workflow_dispatch` (tag) | Read-only report of what a tag's publish run did, in the job summary |
 | [PR Review](#pr-review-workflow) | `pr-review.yml` | pull_request, merge_group | Two-pass AI code review via claude-max-proxy |
-| [Claude](#claude-workflow) | `claude.yml` | issue/comment/review events mentioning `@claude` | @claude AI assistant |
+| [Claude](#claude-workflow) | `claude.yml` | issue and conversation-comment events mentioning `@claude` | @claude AI assistant |
 
 The last five workflows are thin callers that delegate to reusable workflows in
 [go-kure/.github](https://github.com/go-kure/.github). See
@@ -520,8 +520,18 @@ with:
 
 ## Claude Workflow
 
-**File:** `.github/workflows/claude.yml`, calling `go-kure/.github`'s `claude.yml@main`. Triggers
-and requirements are on the Shared Workflows page.
+**File:** `.github/workflows/claude.yml`, calling `go-kure/.github`'s `claude.yml@main`. The
+requirements are on the Shared Workflows page.
+
+### Triggers
+
+This caller registers `issue_comment` (created) and `issues` (opened, assigned) only. The
+Shared Workflows page describes the shared workflow's full trigger set, which also has
+`pull_request_review_comment` and `pull_request_review`; this repository leaves those two out.
+Copilot fires both on every push, GitHub holds a bot-triggered run for a human approval before
+the job condition is read, and that left the pull request not clean. Neither event has ever run
+the assistant to completion here. `@claude` in an inline diff thread or a review body therefore
+does nothing: mention it in a pull-request conversation comment.
 
 ---
 
