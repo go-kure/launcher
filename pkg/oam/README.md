@@ -502,6 +502,14 @@ each a **separate** additive resource (the authored `networkpolicy` /
   the endpoint, so the names are distinct and stay stable across unrelated endpoint additions. The
   suffix names the emitted **NetworkPolicy resource** itself (not just the internal layout entry),
   so a multi-endpoint component's resource ids are unique and `kustomize build` accepts them.
+  **Endpoint names and protocols.** An `Endpoint` carries an optional `Name`, empty or a valid IANA
+  service name (the rule a container port name obeys: at most 15 characters, `[a-z0-9-]`, at least
+  one letter, no leading, trailing or doubled hyphen), and a `Protocol` (empty meaning TCP, `TCP`,
+  `UDP` or `SCTP`) that applies to every port of the endpoint. A non-empty `Name` is unique within
+  one component's endpoint list; unnamed endpoints may repeat, and a consumer tells them apart by
+  port and protocol. `ComponentEndpoints` refuses a bad name, a bad protocol and a repeated name.
+  Synthesis stays TCP-only: an `IngressPeer` whose endpoint is UDP or SCTP is skipped, never
+  emitted as TCP, and neither field enters the grouping key, so no policy name depends on them.
 
 The inbound/egress families select the component's own pods (the ingress recipients / the egress
 source pods) via a **derived `<domain>/component`** label by default — the domain comes

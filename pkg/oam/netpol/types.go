@@ -5,6 +5,7 @@
 package netpol
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -54,10 +55,23 @@ type BackendTarget struct {
 // Endpoint is a component's declared in-cluster data-plane endpoint (e.g. an operator-managed
 // database's instance pods). Namespace is deliberately absent — the platform caller knows the
 // target's namespace, and the synthesized NetworkPolicy is emitted in the component's namespace.
-// PodSelector is required (matchLabels only); Ports is required and non-empty (TCP).
+// PodSelector is required (matchLabels only); Ports is required and non-empty.
+//
+// Name tells two endpoints of one component apart. It is empty or a valid IANA service
+// name (at most 15 characters, [a-z0-9-], at least one letter), the rule a container port
+// name obeys, and a non-empty Name is unique within one component's endpoint list. An
+// endpoint derived from a container port carries that port's name; an unnamed port gives
+// an empty Name, and such endpoints are told apart by Ports and Protocol.
+//
+// Protocol is the transport of every port in Ports: empty (meaning TCP), TCP, UDP or SCTP.
+// NetworkPolicy synthesis emits TCP only; an IngressPeer whose endpoint is UDP or SCTP is
+// skipped, never emitted as TCP. Neither field takes part in the grouping of synthesized
+// policies, so their names do not depend on them.
 type Endpoint struct {
+	Name        string                // optional; empty or a valid IANA service name
 	PodSelector *metav1.LabelSelector // required; matchLabels only
-	Ports       []intstr.IntOrString  // required, non-empty; TCP
+	Ports       []intstr.IntOrString  // required, non-empty
+	Protocol    corev1.Protocol       // empty means TCP; TCP, UDP or SCTP
 }
 
 // IngressPeer is a target-side allow: who may reach one of a component's endpoints. It is a

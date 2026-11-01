@@ -734,6 +734,9 @@ func (t *Transformer) componentEndpoints(comp *Component, application string, na
 			return nil, errors.Wrapf(err, "component %q endpoint[%d]", comp.Name, i)
 		}
 	}
+	if err := checkEndpointNames(eps); err != nil {
+		return nil, errors.Wrapf(err, "component %q", comp.Name)
+	}
 	return eps, nil
 }
 

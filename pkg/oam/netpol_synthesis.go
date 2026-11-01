@@ -13,6 +13,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -938,7 +939,8 @@ func validateMatchLabelsSelector(sel *metav1.LabelSelector) error {
 }
 
 // validateEndpoint fails closed on a malformed endpoint: the pod selector is required and
-// matchLabels-only, and at least one port is required. Used to reject bad EndpointProvider
+// matchLabels-only, at least one port is required, a name is empty or a valid IANA service
+// name, and a protocol is empty (TCP), TCP, UDP or SCTP. Used to reject bad EndpointProvider
 // output (a launcher-internal bug) and to guard directly-built endpoint-ingress configs.
 func validateEndpoint(e netpol.Endpoint) error {
 	if err := validateMatchLabelsSelector(e.PodSelector); err != nil {
@@ -947,12 +949,45 @@ func validateEndpoint(e netpol.Endpoint) error {
 	if len(e.Ports) == 0 {
 		return errors.New("endpoint must declare at least one port")
 	}
+	if e.Name != "" {
+		if errs := validation.IsValidPortName(e.Name); len(errs) > 0 {
+			return errors.Errorf("endpoint name %q is not a valid port name: %s", e.Name, strings.Join(errs, "; "))
+		}
+	}
+	switch e.Protocol {
+	case "", corev1.ProtocolTCP, corev1.ProtocolUDP, corev1.ProtocolSCTP:
+	default:
+		return errors.Errorf("endpoint protocol %q must be TCP, UDP or SCTP", e.Protocol)
+	}
 	return nil
 }
 
 // endpointValid reports whether e passes validateEndpoint — a boolean form for fail-closed
-// drop/skip paths (Generate, grouping) that must not surface a nil error.
+// drop/skip paths that must not surface a nil error.
 func endpointValid(e netpol.Endpoint) bool { return validateEndpoint(e) == nil }
+
+// endpointSynthesizable reports whether e is a valid endpoint synthesis can emit. Synthesis
+// writes every port as TCP, so a UDP or SCTP endpoint is skipped rather than emitted as TCP.
+// The two callers are Generate and groupIngressPeers.
+func endpointSynthesizable(e netpol.Endpoint) bool {
+	return endpointValid(e) && (e.Protocol == "" || e.Protocol == corev1.ProtocolTCP)
+}
+
+// checkEndpointNames refuses a repeated non-empty endpoint name within one component's list.
+// Unnamed endpoints may repeat.
+func checkEndpointNames(eps []netpol.Endpoint) error {
+	seen := make(map[string]int, len(eps))
+	for i, e := range eps {
+		if e.Name == "" {
+			continue
+		}
+		if first, dup := seen[e.Name]; dup {
+			return errors.Errorf("endpoint[%d] repeats the name %q of endpoint[%d]", i, e.Name, first)
+		}
+		seen[e.Name] = i
+	}
+	return nil
+}
 
 // validSources keeps only fail-closed traffic sources: each must carry a namespace and a
 // non-empty matchLabels pod selector (matchLabels-only). Namespace-wide sources are dropped —
@@ -1043,8 +1078,8 @@ func (c *componentEndpointIngressPolicyConfig) ApplyPolicy(_ Policy) error { ret
 func (c *componentEndpointIngressPolicyConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	// Fail closed: never emit a deny-all (no rules) or allow-from-all (bad selectors) policy,
 	// even for a directly-built config. Filter sources with the same strict rule as synthesis.
-	if !endpointValid(c.Endpoint) {
-		return nil, nil // invalid endpoint: emit nothing (not an error at the Generate boundary)
+	if !endpointSynthesizable(c.Endpoint) {
+		return nil, nil // invalid or non-TCP endpoint: emit nothing (not an error at the Generate boundary)
 	}
 	var rules []endpointIngressRule
 	for _, r := range c.Rules {
@@ -1147,14 +1182,14 @@ type endpointIngressGroup struct {
 }
 
 // groupIngressPeers normalizes platform-supplied ingress peers into per-endpoint groups for
-// deterministic, fail-closed output: it drops peers whose endpoint is malformed or whose sources
+// deterministic, fail-closed output: it drops peers whose endpoint is malformed or not TCP, or whose sources
 // are all namespace-wide, groups the survivors by endpoint (selector + ports), deduplicates
 // identical source sets within a group, and sorts groups + rules by canonical key.
 func groupIngressPeers(peers []netpol.IngressPeer) []endpointIngressGroup {
 	byEndpoint := map[string]*endpointIngressGroup{}
 	var order []string
 	for _, p := range peers {
-		if !endpointValid(p.Endpoint) {
+		if !endpointSynthesizable(p.Endpoint) {
 			continue
 		}
 		srcs := validSources(p.Sources)

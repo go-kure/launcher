@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -49,6 +50,14 @@ func validEndpoint() netpol.Endpoint {
 	}
 }
 
+// withNameProtocol is validEndpoint with a name and a protocol.
+func withNameProtocol(name string, protocol corev1.Protocol) netpol.Endpoint {
+	ep := validEndpoint()
+	ep.Name = name
+	ep.Protocol = protocol
+	return ep
+}
+
 func TestValidateEndpoint(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -71,6 +80,20 @@ func TestValidateEndpoint(t *testing.T) {
 		{"empty ports", netpol.Endpoint{
 			PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"a": "b"}},
 		}, true},
+		{"name valid", withNameProtocol("http", ""), false},
+		{"name 15 characters", withNameProtocol("abcdefghijklmno", ""), false},
+		{"name 16 characters", withNameProtocol("abcdefghijklmnop", ""), true},
+		{"name uppercase", withNameProtocol("Http", ""), true},
+		{"name leading hyphen", withNameProtocol("-http", ""), true},
+		{"name doubled hyphen", withNameProtocol("ht--tp", ""), true},
+		{"name all digits", withNameProtocol("8080", ""), true},
+		{"name empty", withNameProtocol("", ""), false},
+		{"protocol empty", withNameProtocol("", ""), false},
+		{"protocol TCP", withNameProtocol("", corev1.ProtocolTCP), false},
+		{"protocol UDP", withNameProtocol("", corev1.ProtocolUDP), false},
+		{"protocol SCTP", withNameProtocol("", corev1.ProtocolSCTP), false},
+		{"protocol lowercase", withNameProtocol("", "tcp"), true},
+		{"protocol ICMP", withNameProtocol("", "ICMP"), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -201,6 +224,89 @@ func TestGroupIngressPeers_TwoDistinctEndpoints(t *testing.T) {
 	})
 	if len(groups) != 2 {
 		t.Fatalf("expected 2 endpoint groups, got %d", len(groups))
+	}
+}
+
+// A UDP or SCTP endpoint is skipped by both synthesis entry points, never emitted as TCP.
+func TestEndpointIngress_NonTCPEndpointEmitsNothing(t *testing.T) {
+	for _, proto := range []corev1.Protocol{corev1.ProtocolUDP, corev1.ProtocolSCTP} {
+		t.Run(string(proto), func(t *testing.T) {
+			ep := withNameProtocol("dns", proto)
+			cfg := &componentEndpointIngressPolicyConfig{
+				ComponentName: "pg",
+				Endpoint:      ep,
+				Rules:         []endpointIngressRule{{Sources: []netpol.TrafficSource{src("app", "app", "web")}}},
+			}
+			if np := endpointPolicyOrNil(t, cfg); np != nil {
+				t.Errorf("Generate emitted a policy for a %s endpoint: %+v", proto, np.Spec)
+			}
+			groups := groupIngressPeers([]netpol.IngressPeer{{Endpoint: ep, Sources: []netpol.TrafficSource{src("app", "app", "web")}}})
+			if len(groups) != 0 {
+				t.Errorf("groupIngressPeers kept a %s endpoint: %+v", proto, groups)
+			}
+		})
+	}
+}
+
+// An empty protocol and an explicit TCP are the same endpoint to synthesis: one group, the same
+// policy name, the same emitted TCP ports. Name and Protocol are not part of the grouping key.
+func TestEndpointIngress_TCPExplicitAndEmptyAreIdentical(t *testing.T) {
+	implicit := validEndpoint()
+	explicit := withNameProtocol("pg", corev1.ProtocolTCP)
+	if endpointKey(implicit) != endpointKey(explicit) {
+		t.Fatalf("endpointKey differs: %q vs %q", endpointKey(implicit), endpointKey(explicit))
+	}
+	const wantKey = "sel:cnpg.io/cluster=pg;ports:0:5432"
+	if got := endpointKey(implicit); got != wantKey {
+		t.Errorf("endpointKey = %q, want %q", got, wantKey)
+	}
+	groups := groupIngressPeers([]netpol.IngressPeer{
+		{Endpoint: implicit, Sources: []netpol.TrafficSource{src("app", "app", "web")}},
+		{Endpoint: explicit, Sources: []netpol.TrafficSource{src("app", "app", "web")}},
+	})
+	if len(groups) != 1 || len(groups[0].Rules) != 1 {
+		t.Fatalf("expected 1 group with 1 rule, got %+v", groups)
+	}
+	for _, multi := range []bool{false, true} {
+		if a, b := endpointIngressPolicyName("pg", implicit, multi), endpointIngressPolicyName("pg", explicit, multi); a != b {
+			t.Errorf("multi=%v: policy name differs: %q vs %q", multi, a, b)
+		}
+	}
+	for _, ep := range []netpol.Endpoint{implicit, explicit} {
+		np := endpointPolicyOrNil(t, &componentEndpointIngressPolicyConfig{
+			ComponentName: "pg",
+			Endpoint:      ep,
+			Rules:         []endpointIngressRule{{Sources: []netpol.TrafficSource{src("app", "app", "web")}}},
+		})
+		if np == nil || len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].Ports) != 1 ||
+			*np.Spec.Ingress[0].Ports[0].Protocol != corev1.ProtocolTCP {
+			t.Errorf("endpoint %+v: expected one TCP port, got %+v", ep, np)
+		}
+	}
+}
+
+func TestCheckEndpointNames(t *testing.T) {
+	named := func(n string) netpol.Endpoint { return withNameProtocol(n, "") }
+	cases := []struct {
+		name    string
+		eps     []netpol.Endpoint
+		wantErr bool
+	}{
+		{"none", nil, false},
+		{"distinct", []netpol.Endpoint{named("http"), named("grpc")}, false},
+		{"unnamed may repeat", []netpol.Endpoint{named(""), named(""), named("http")}, false},
+		{"repeated non-empty name", []netpol.Endpoint{named("http"), named("grpc"), named("http")}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkEndpointNames(tc.eps)
+			if tc.wantErr != (err != nil) {
+				t.Errorf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), `"http"`) {
+				t.Errorf("error %q does not name the repeated name", err)
+			}
+		})
 	}
 }
 
