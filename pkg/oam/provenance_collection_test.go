@@ -46,6 +46,32 @@ func TestProvenance_TypedCollectionElementsKeepOrigin(t *testing.T) {
 	}
 }
 
+// A handler may return the outer typed collection as a map[string]any that still holds
+// the inner one typed. The final leaf is then the inner collection itself, and it keeps
+// the profile's origin when unchanged and is the handler's when it differs.
+func TestProvenance_PartiallyNormalizedCollectionKeepsOrigin(t *testing.T) {
+	profile := map[string]any{
+		"nested": map[string][]string{"zones": {"x"}, "other": {"a"}},
+	}
+	steps := defaultSteps{profile: leafValues(profile)}
+	steps.schema = steps.profile
+
+	final := map[string]any{
+		"nested": map[string]any{
+			"zones": []string{"x"},
+			"other": []string{"a", "b"},
+		},
+	}
+	got := steps.detail(final)
+	want := map[string]string{
+		"nested.zones": detailProfile,
+		"nested.other": detailHandlerDefault,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("detail = %v, want %v", got, want)
+	}
+}
+
 // The leaf snapshot copies a sub-slice of an acyclic slice instead of sharing it: a
 // later change to the original must not show through the copy.
 func TestProvenance_SnapshotCopiesOverlappingSubSlice(t *testing.T) {

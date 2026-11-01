@@ -456,24 +456,27 @@ func collectionElementsWalk(path string, rv reflect.Value, onPath map[collection
 	}
 }
 
-// collectionElementsAt records one element of a typed collection: a nested non-empty
-// collection is entered, a null is no element, anything else is one.
+// collectionElementsAt records one element of a typed collection: a null is no element,
+// anything else is one. A nested non-empty collection is recorded as a whole and its
+// own elements are entered too, because a handler may return the outer collection as a
+// map[string]any that still holds the inner one typed (the final leaf is then the inner
+// collection itself, not its elements).
 func collectionElementsAt(path string, rv reflect.Value, onPath map[collectionID]bool, out map[string]any) {
 	for rv.Kind() == reflect.Interface && !rv.IsNil() {
 		rv = rv.Elem()
 	}
-	switch rv.Kind() {
-	case reflect.Interface:
+	if rv.Kind() == reflect.Interface {
 		return
-	case reflect.Map, reflect.Slice, reflect.Array:
-		if rv.Len() > 0 {
-			collectionElementsWalk(path, rv, onPath, out)
-			return
-		}
-	default:
 	}
 	if rv.CanInterface() {
 		out[path] = rv.Interface()
+	}
+	switch rv.Kind() {
+	case reflect.Map, reflect.Slice, reflect.Array:
+		if rv.Len() > 0 {
+			collectionElementsWalk(path, rv, onPath, out)
+		}
+	default:
 	}
 }
 
