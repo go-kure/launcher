@@ -221,11 +221,13 @@ func declaredChartEndpoints(props map[string]any) ([]netpol.Endpoint, error) {
 	}
 	// The endpoint's NetworkPolicy is created in the application namespace. A chart released
 	// into another namespace puts its pods where that policy does not select them, and
-	// launcher cannot compare the two here, so the declaration is refused beside one.
-	if ns, _, err := parseStringField(props, "targetNamespace", "targetNamespace"); err != nil {
-		return nil, err
-	} else if ns != "" {
-		return nil, errors.Errorf("%s: cannot be declared beside targetNamespace %q: an endpoint's NetworkPolicy is created in the application namespace, so the chart's pods must run there", chartEndpointsKey, ns)
+	// launcher cannot compare the two here, so the declaration is refused beside one. The
+	// key matches as the decode does, whatever its case; the type's own parse has already
+	// refused a value that is not a string.
+	for _, k := range slices.Sorted(maps.Keys(props)) {
+		if ns, _ := props[k].(string); ns != "" && strings.EqualFold(k, "targetNamespace") {
+			return nil, errors.Errorf("%s: cannot be declared beside targetNamespace %q: an endpoint's NetworkPolicy is created in the application namespace, so the chart's pods must run there", chartEndpointsKey, ns)
+		}
 	}
 	return eps, nil
 }
