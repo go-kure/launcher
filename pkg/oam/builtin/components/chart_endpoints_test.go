@@ -203,22 +203,25 @@ func TestChartEndpoints_RefusedBesideTargetNamespace(t *testing.T) {
 		}
 		t.Run(k.name, func(t *testing.T) {
 			const want = `endpoints: cannot be declared beside targetNamespace "data"`
-			props := k.props()
-			props["targetNamespace"] = "data"
-			props["endpoints"] = []any{chartEntry("http", "", 8080)}
-			comp := chartComponent(k, props)
-			if _, err := k.provider.Endpoints(comp); err == nil || !strings.Contains(err.Error(), want) {
-				t.Errorf("Endpoints err = %v, want it to contain %q", err, want)
-			}
-			var buildErr error
-			switch h := k.provider.(type) {
-			case components.HelmRule:
-				_, buildErr = h.LowerComponent(comp, helmLowering("doc"))
-			case oam.ComponentHandler:
-				_, buildErr = h.ToApplicationConfig(comp, "demo")
-			}
-			if buildErr == nil || !strings.Contains(buildErr.Error(), want) {
-				t.Errorf("build/lowering err = %v, want it to contain %q", buildErr, want)
+			// The decode matches keys whatever their case, so the guard must too.
+			for _, key := range []string{"targetNamespace", "TargetNamespace", "TARGETNAMESPACE"} {
+				props := k.props()
+				props[key] = "data"
+				props["endpoints"] = []any{chartEntry("http", "", 8080)}
+				comp := chartComponent(k, props)
+				if _, err := k.provider.Endpoints(comp); err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("%s: Endpoints err = %v, want it to contain %q", key, err, want)
+				}
+				var buildErr error
+				switch h := k.provider.(type) {
+				case components.HelmRule:
+					_, buildErr = h.LowerComponent(comp, helmLowering("doc"))
+				case oam.ComponentHandler:
+					_, buildErr = h.ToApplicationConfig(comp, "demo")
+				}
+				if buildErr == nil || !strings.Contains(buildErr.Error(), want) {
+					t.Errorf("%s: build/lowering err = %v, want it to contain %q", key, buildErr, want)
+				}
 			}
 
 			plain := k.props()
