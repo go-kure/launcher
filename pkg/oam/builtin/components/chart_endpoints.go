@@ -30,7 +30,7 @@ func chartEndpointsSchema() oam.PropertySchema {
 		Type: oam.PropertyTypeArray,
 		Description: "The pods a consumer connects to, as the chart renders them: one entry per port. " +
 			"The chart's pods are not visible to launcher, so they are declared here and not derived. " +
-			"A non-empty name is unique within the component. The pods run in the application namespace: refused beside targetNamespace. A launcher property: it is not a chart value " +
+			"A non-empty name is unique within the component. The pods run in the application namespace of the application's cluster: refused beside targetNamespace and kubeConfig. A launcher property: it is not a chart value " +
 			"and is never forwarded to Flux or to the render.",
 		Items: &oam.PropertySchema{
 			Type:        oam.PropertyTypeObject,
@@ -220,24 +220,41 @@ func declaredChartEndpoints(props map[string]any) ([]netpol.Endpoint, error) {
 	if err != nil || len(eps) == 0 {
 		return nil, err
 	}
-	// The endpoint's NetworkPolicy is created in the application namespace. A chart released
-	// into another namespace puts its pods where that policy does not select them, and
-	// launcher cannot compare the two here, so the declaration is refused beside one. The
-	// key matches as the decode does, whatever its case, and so does the value: it is read
-	// the way builtin.DecodeStrictJSON reads it, through JSON, so a named string, a pointer
-	// to a string and a json.RawMessage count like a plain string (the type's own parse has
-	// already refused a value that is not a string).
-	for _, k := range slices.Sorted(maps.Keys(props)) {
-		if !strings.EqualFold(k, "targetNamespace") {
-			continue
-		}
-		var ns string
-		if data, err := json.Marshal(props[k]); err == nil {
-			_ = json.Unmarshal(data, &ns) // null and any other shape leave ns empty
-		}
-		if ns != "" {
-			return nil, errors.Errorf("%s: cannot be declared beside targetNamespace %q: an endpoint's NetworkPolicy is created in the application namespace, so the chart's pods must run there", chartEndpointsKey, ns)
-		}
+	if err := refuseEndpointsBesideRelocation(props); err != nil {
+		return nil, err
 	}
 	return eps, nil
+}
+
+// refuseEndpointsBesideRelocation refuses a declaration beside a property that puts the
+// chart's pods somewhere the endpoint's NetworkPolicy does not select them. That policy is
+// created in the application namespace of the application's own cluster, and launcher
+// cannot compare it with another place, so a declaration is refused beside each property
+// that moves the pods: targetNamespace (another namespace) and kubeConfig (another
+// cluster). A HelmRelease has no other field that places its pods; the others considered
+// are listed in the components README. The key matches as the decode does, whatever its
+// case, and so does the value: it is read the way builtin.DecodeStrictJSON reads it,
+// through JSON, so a named string, a pointer to a string and a json.RawMessage count like
+// a plain string (the type's own parse has already refused a value of the wrong type).
+func refuseEndpointsBesideRelocation(props map[string]any) error {
+	for _, k := range slices.Sorted(maps.Keys(props)) {
+		data, err := json.Marshal(props[k])
+		if err != nil {
+			continue // the type's own decode has already refused a value that is not JSON
+		}
+		switch {
+		case strings.EqualFold(k, "targetNamespace"):
+			var ns string
+			_ = json.Unmarshal(data, &ns) // null and any other shape leave ns empty
+			if ns != "" {
+				return errors.Errorf("%s: cannot be declared beside targetNamespace %q: an endpoint's NetworkPolicy is created in the application namespace, so the chart's pods must run there", chartEndpointsKey, ns)
+			}
+		case strings.EqualFold(k, "kubeConfig"):
+			// A null reads as omission, as in the decode; any other value is a remote cluster.
+			if string(data) != "null" {
+				return errors.Errorf("%s: cannot be declared beside kubeConfig: the chart's pods run on another cluster, and an endpoint's NetworkPolicy is created in the application's own cluster, where it selects none of them", chartEndpointsKey)
+			}
+		}
+	}
+	return nil
 }
