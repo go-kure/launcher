@@ -46,6 +46,24 @@ func TestProvenance_TypedCollectionElementsKeepOrigin(t *testing.T) {
 	}
 }
 
+// The leaf snapshot copies a sub-slice of an acyclic slice instead of sharing it: a
+// later change to the original must not show through the copy.
+func TestProvenance_SnapshotCopiesOverlappingSubSlice(t *testing.T) {
+	s := make([]any, 2)
+	s[0] = "v"
+	s[1] = s[:1]
+
+	c, ok := snapshotLeaf(s).([]any)
+	if !ok || len(c) != 2 {
+		t.Fatalf("snapshotLeaf = %#v, want a two-element []any", snapshotLeaf(s))
+	}
+	s[0] = "changed"
+	sub, ok := c[1].([]any)
+	if !ok || len(sub) != 1 || sub[0] != "v" || c[0] != "v" {
+		t.Fatalf("snapshot after a change to the original = %#v, want [v [v]]", c)
+	}
+}
+
 // A map or slice that contains itself is one leaf where the walk meets it again; the
 // walk, the leaf snapshot and the origin comparison all end.
 func TestProvenance_SelfReferentialValuesDoNotLoop(t *testing.T) {
@@ -58,6 +76,18 @@ func TestProvenance_SelfReferentialValuesDoNotLoop(t *testing.T) {
 
 	shared := map[string]any{"k": "v"}
 
+	// Acyclic: the second element is a shorter slice of the same backing array, so both
+	// have one address but are different values, and every leaf is reported.
+	overlap := make([]any, 2)
+	overlap[0] = "v"
+	overlap[1] = overlap[:1]
+
+	// Cyclic: the first element is a one-element slice of the array that holds it, so
+	// the walk meets the same (address, length) again and stops there.
+	selfSub := make([]any, 2)
+	selfSub[0] = selfSub[:1]
+	selfSub[1] = "w"
+
 	cases := []struct {
 		name      string
 		value     any
@@ -66,6 +96,8 @@ func TestProvenance_SelfReferentialValuesDoNotLoop(t *testing.T) {
 		{"map", map[string]any{"m": cyclicMap}, []string{"m.ok", "m.self"}},
 		{"slice", map[string]any{"l": cyclicList}, []string{"l[0]", "l[1]"}},
 		{"shared not cyclic", map[string]any{"a": shared, "b": shared}, []string{"a.k", "b.k"}},
+		{"overlapping sub-slice is not a cycle", map[string]any{"l": overlap}, []string{"l[0]", "l[1][0]"}},
+		{"self-containing sub-slice is a cycle", map[string]any{"l": selfSub}, []string{"l[0][0]", "l[1]"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
