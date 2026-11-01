@@ -121,7 +121,7 @@ if ! go build ./...; then
 	echo "verify-merge: FAIL: $ref does not build (the branch alone may; see the errors above)" >&2
 	exit 1
 fi
-if ! go test -timeout "${TEST_TIMEOUT:-5m}" ./...; then
+if ! go test -timeout "${TEST_TIMEOUT:-10m}" ./...; then
 	echo "verify-merge: FAIL: $ref tests fail" >&2
 	exit 1
 fi

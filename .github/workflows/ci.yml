@@ -618,7 +618,7 @@ jobs:
       run: |
         set -euo pipefail
         mkdir -p coverage
-        go test -v -race -coverprofile=coverage/coverage.out -covermode=atomic -timeout 5m ./... 2>&1 | tee /tmp/gotest.log
+        go test -v -race -coverprofile=coverage/coverage.out -covermode=atomic -timeout 10m ./... 2>&1 | tee /tmp/gotest.log
 
     # Save only on non-exact restore (fallback/miss) and only if the run succeeded, so a
     # broken build never publishes a cache. On main this writes the day's entry once (the

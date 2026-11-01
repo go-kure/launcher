@@ -174,7 +174,7 @@ Runs on main and `release/*` branches only (not PRs):
 - Golangci-lint Version: `v2.15.0`
 - govulncheck Version: `v1.9.0` (pinned via the `GOVULNCHECK_VERSION` workflow env)
 - Coverage Threshold: `80%`
-- Test Timeout: `5m` per test binary (the `test` job's `go test -timeout`); `TEST_TIMEOUT` in the
+- Test Timeout: `10m` per test binary (the `test` job's `go test -timeout`); `TEST_TIMEOUT` in the
   `Makefile` is the local copy and matches it
 
 ### Features

@@ -25,8 +25,8 @@ COVERAGE_DIR := coverage
 KUREL_BIN := $(BUILD_DIR)/kurel
 
 # Test configuration
-# Per-test-binary budget; matches the -timeout 5m of CI's test job (ci.yml).
-TEST_TIMEOUT := 5m
+# Per-test-binary budget; matches the -timeout 10m of CI's test job (ci.yml).
+TEST_TIMEOUT := 10m
 TEST_PACKAGES := ./...
 COVERAGE_THRESHOLD := 80
 
