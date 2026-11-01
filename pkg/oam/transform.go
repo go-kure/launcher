@@ -1080,7 +1080,13 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 				member = component.Type
 			}
 			rec = ctx.provenance.forOwner(propOwner{component: component.Name, member: member})
-			rec.authored(component.Properties)
+			if component.origin != nil && component.origin.Rule != "" {
+				// A lowering rule emitted the component, whether or not it counts as
+				// synthesized: its properties are the rule's output.
+				rec.lowered(component.Properties, component.origin.Rule)
+			} else {
+				rec.authored(component.Properties)
+			}
 		}
 
 		// After D3, which checks only what was authored: the capability defaults a
@@ -1588,15 +1594,24 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			resolved := trait
 			matched := false
 			matchedKey := ""
-			if !trait.sealed {
-				var rec *ownerRecorder
-				if ctx.provenance != nil {
-					memberType := ""
-					if len(e.members) > 0 {
-						memberType = entry.component.Type
-					}
-					rec = ctx.provenance.forOwner(propOwner{component: entry.component.Name, member: memberType, trait: trait.Type, index: step.first + position})
+			var rec *ownerRecorder
+			if ctx.provenance != nil {
+				memberType := ""
+				if len(e.members) > 0 {
+					memberType = entry.component.Type
 				}
+				rec = ctx.provenance.forOwner(propOwner{component: entry.component.Name, member: memberType, trait: trait.Type, index: step.first + position})
+				if trait.sealed {
+					// A lowering rule emitted the trait and merged any capability
+					// rendering into it itself; its properties are the rule's output.
+					rule := ""
+					if trait.origin != nil {
+						rule = trait.origin.Rule
+					}
+					rec.lowered(trait.Properties, rule)
+				}
+			}
+			if !trait.sealed {
 				resolved, matchedKey, matched = resolveCapability(trait, ctx.Capabilities, rec)
 
 				if aware, ok := handler.(CapabilityAware); ok && aware.CapabilityRequired() && !matched {
