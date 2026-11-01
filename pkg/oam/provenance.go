@@ -2,6 +2,7 @@ package oam
 
 import (
 	"maps"
+	"math"
 	"reflect"
 	"slices"
 	"strconv"
@@ -143,17 +144,130 @@ func (s defaultSteps) detail(final map[string]any) map[string]string {
 	schemaIn, profileIn := collectionElements(s.schema), collectionElements(s.profile)
 	eachLeaf("", final, func(path string, v any) {
 		sv, inSchema := snapshotAt(s.schema, schemaIn, path)
-		if !inSchema || !reflect.DeepEqual(sv, v) {
+		if !inSchema || !sameLeafValue(sv, v) {
 			out[path] = detailHandlerDefault
 			return
 		}
-		if pv, inProfile := snapshotAt(s.profile, profileIn, path); inProfile && reflect.DeepEqual(pv, v) {
+		if pv, inProfile := snapshotAt(s.profile, profileIn, path); inProfile && sameLeafValue(pv, v) {
 			out[path] = detailProfile
 			return
 		}
 		out[path] = detailSchemaDefault
 	})
 	return out
+}
+
+// sameLeafValue reports whether two leaf values are the same value. It is
+// reflect.DeepEqual, except that a NaN equals a NaN: an unchanged NaN is the value its
+// source gave, though NaN != NaN would make DeepEqual call a handler's work on it.
+func sameLeafValue(a, b any) bool {
+	if reflect.DeepEqual(a, b) {
+		return true
+	}
+	return sameValue(reflect.ValueOf(a), reflect.ValueOf(b), map[sameVisit]bool{})
+}
+
+// sameVisit is a pair of collections already under comparison; meeting it again ends
+// the walk, as reflect.DeepEqual does for a self-referential value.
+type sameVisit struct {
+	typ  reflect.Type
+	x, y uintptr
+	n    int
+}
+
+// sameValue is the deep comparison behind sameLeafValue. It is reached only after
+// reflect.DeepEqual found the values different, so it looks for the one way the two
+// can still be the same value: a NaN somewhere inside.
+func sameValue(x, y reflect.Value, seen map[sameVisit]bool) bool {
+	if !x.IsValid() || !y.IsValid() {
+		return x.IsValid() == y.IsValid()
+	}
+	if x.Type() != y.Type() {
+		return false
+	}
+	switch x.Kind() {
+	case reflect.Float32, reflect.Float64:
+		xf, yf := x.Float(), y.Float()
+		return xf == yf || (math.IsNaN(xf) && math.IsNaN(yf))
+	case reflect.Complex64, reflect.Complex128:
+		xc, yc := x.Complex(), y.Complex()
+		return (real(xc) == real(yc) || (math.IsNaN(real(xc)) && math.IsNaN(real(yc)))) &&
+			(imag(xc) == imag(yc) || (math.IsNaN(imag(xc)) && math.IsNaN(imag(yc))))
+	case reflect.Interface:
+		if x.IsNil() || y.IsNil() {
+			return x.IsNil() == y.IsNil()
+		}
+		return sameValue(x.Elem(), y.Elem(), seen)
+	case reflect.Pointer:
+		if x.IsNil() || y.IsNil() {
+			return x.IsNil() == y.IsNil()
+		}
+		if x.Pointer() == y.Pointer() {
+			return true
+		}
+		visit := sameVisit{typ: x.Type(), x: x.Pointer(), y: y.Pointer()}
+		if seen[visit] {
+			return true
+		}
+		seen[visit] = true
+		return sameValue(x.Elem(), y.Elem(), seen)
+	case reflect.Map:
+		if x.IsNil() != y.IsNil() || x.Len() != y.Len() {
+			return false
+		}
+		visit := sameVisit{typ: x.Type(), x: x.Pointer(), y: y.Pointer(), n: x.Len()}
+		if seen[visit] {
+			return true
+		}
+		seen[visit] = true
+		for _, k := range x.MapKeys() {
+			yv := y.MapIndex(k)
+			if !yv.IsValid() || !sameValue(x.MapIndex(k), yv, seen) {
+				return false
+			}
+		}
+		return true
+	case reflect.Slice:
+		if x.IsNil() != y.IsNil() || x.Len() != y.Len() {
+			return false
+		}
+		visit := sameVisit{typ: x.Type(), x: x.Pointer(), y: y.Pointer(), n: x.Len()}
+		if seen[visit] {
+			return true
+		}
+		seen[visit] = true
+		return sameElements(x, y, seen)
+	case reflect.Array:
+		return sameElements(x, y, seen)
+	case reflect.Struct:
+		for i := range x.NumField() {
+			if !sameValue(x.Field(i), y.Field(i), seen) {
+				return false
+			}
+		}
+		return true
+	case reflect.Bool:
+		return x.Bool() == y.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return x.Int() == y.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return x.Uint() == y.Uint()
+	case reflect.String:
+		return x.String() == y.String()
+	default:
+		// A func, channel or unsafe pointer: DeepEqual's verdict stands.
+		return false
+	}
+}
+
+// sameElements compares two slices or arrays of equal length element by element.
+func sameElements(x, y reflect.Value, seen map[sameVisit]bool) bool {
+	for i := range x.Len() {
+		if !sameValue(x.Index(i), y.Index(i), seen) {
+			return false
+		}
+	}
+	return true
 }
 
 // propOwner identifies the property map a leaf belongs to: a component's own
@@ -359,7 +473,7 @@ func (r *ownerRecorder) nestedFill(before map[string]any, after map[string]any, 
 	}
 	src := Source{Kind: SourceCapability, Ref: strings.Join(slices.Sorted(maps.Keys(reads)), ",")}
 	for _, p := range slices.Sorted(maps.Keys(now)) {
-		if was, ok := before[p]; ok && reflect.DeepEqual(was, now[p]) {
+		if was, ok := before[p]; ok && sameLeafValue(was, now[p]) {
 			continue
 		}
 		r.dropAncestors(p)
