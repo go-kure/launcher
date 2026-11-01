@@ -354,11 +354,26 @@ func (r *ownerRecorder) dropAncestors(path string) {
 	}
 }
 
-// leafValues returns the leaves of props by path.
+// leafValues returns the leaves of props by path, as a snapshot: a leaf that is a
+// typed map or slice (map[string]string, []string) is copied, because a handler may
+// change one in place after the snapshot is taken.
 func leafValues(props map[string]any) map[string]any {
 	out := map[string]any{}
-	eachLeaf("", props, func(path string, v any) { out[path] = v })
+	eachLeaf("", props, func(path string, v any) { out[path] = snapshotLeaf(v) })
 	return out
+}
+
+// snapshotLeaf deep-copies a leaf that holds a map, slice or array, keeping its Go
+// type. A value checkRenderedValue refuses is returned as it is: it is not a
+// property value, and the copy would panic on it.
+func snapshotLeaf(v any) any {
+	switch reflect.ValueOf(v).Kind() {
+	case reflect.Map, reflect.Slice, reflect.Array:
+		if checkRenderedValue(v, map[propertyCopyKey]bool{}) == nil {
+			return copyRenderedValue(v)
+		}
+	}
+	return v
 }
 
 // eachLeaf calls fn for each leaf of v at path: a value that is not a

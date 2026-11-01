@@ -113,6 +113,39 @@ func TestProvenance_ProfileEvaluation(t *testing.T) {
 	}
 }
 
+// provTypedVADHandler changes typed collections in place, as a handler may.
+type provTypedVADHandler struct{ stubTraitHandler }
+
+func (h *provTypedVADHandler) CapabilityRequired() bool { return false }
+func (h *provTypedVADHandler) ValidateAndApplyDefaults(r map[string]any) (map[string]any, error) {
+	r["labels"].(map[string]string)["b"] = "y"
+	r["tags"].([]string)[0] = "z"
+	return r, nil
+}
+
+// TestProvenance_ProfileTypedCollectionMutation: a handler that changes a typed map
+// or slice leaf in place still has the leaf attributed to it, because the snapshots
+// taken before the step are copies, not references (review finding on the snapshot).
+func TestProvenance_ProfileTypedCollectionMutation(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterTrait("typed", &provTypedVADHandler{stubTraitHandler{typ: "typed"}})
+	profile := &ClusterProfile{Spec: ClusterProfileSpec{Capabilities: map[string]CapabilityBinding{
+		"typed": {Rendering: map[string]any{
+			"labels": map[string]string{"a": "x"},
+			"tags":   []string{"a"},
+			"plain":  "p",
+		}},
+	}}}
+	got, err := tr.EvaluateProfileWithProvenance(profile)
+	if err != nil {
+		t.Fatalf("EvaluateProfileWithProvenance: %v", err)
+	}
+	want := map[string]string{"labels": detailHandlerDefault, "tags": detailHandlerDefault, "plain": detailProfile}
+	if d := got.Spec.Capabilities["typed"].detail; !reflect.DeepEqual(d, want) {
+		t.Errorf("detail %v, want %v", d, want)
+	}
+}
+
 // provMixedHandler fills the object-valued "class" key from the "store" capability
 // at the top level and a nested "volumes[0].storageClass" from the "pvc" one.
 type provMixedHandler struct{ provComponentHandler }
@@ -143,6 +176,12 @@ func (h *provMixedStoreTrait) ValidateAndApplyDefaults(r map[string]any) (map[st
 	return r, nil
 }
 
+func provMixedTransformer(c *provCapture) *Transformer {
+	return NewTransformer(
+		map[string]ComponentHandler{"mixed": provMixedHandler{provComponentHandler{typ: "mixed", c: c}}},
+		map[string]TraitHandler{"store": &provMixedStoreTrait{stubTraitHandler{typ: "store"}}})
+}
+
 // TestProvenance_ProfileDetailInComponents: a top-level fill from an evaluated
 // profile carries the stamp of each leaf, an object-valued fill whose leaves have
 // different origins carries each one's own, and a nested-fill leaf has no Detail
@@ -155,15 +194,13 @@ func TestProvenance_ProfileDetailInComponents(t *testing.T) {
 			"pvc":   {Rendering: map[string]any{"storageClassName": "ssd"}},
 		}}}
 	}
-	build := func() (*Transformer, *Application) {
+	build := func() (*Transformer, *Application, *provCapture) {
 		c := newProvCapture()
-		tr := NewTransformer(
-			map[string]ComponentHandler{"mixed": provMixedHandler{provComponentHandler{typ: "mixed", c: c}}},
-			map[string]TraitHandler{"store": &provMixedStoreTrait{stubTraitHandler{typ: "store"}}})
-		return tr, provApp(Component{Name: "m", Type: "mixed", Properties: map[string]any{"size": "1Gi"}})
+		tr := provMixedTransformer(c)
+		return tr, provApp(Component{Name: "m", Type: "mixed", Properties: map[string]any{"size": "1Gi"}}), c
 	}
 	run := func(opt bool) map[string]Source {
-		tr, app := build()
+		tr, app, c := build()
 		var evaluated *ClusterProfile
 		var err error
 		if opt {
@@ -178,6 +215,9 @@ func TestProvenance_ProfileDetailInComponents(t *testing.T) {
 		if err != nil {
 			t.Fatalf("TransformWithProvenance (opt-in %v): %v", opt, err)
 		}
+		// The nested and top-level fills are part of the fixture, so the report is
+		// held to the properties the handler received.
+		checkComplete(t, prov, c)
 		return entriesFor(prov, "m", "", "")
 	}
 
