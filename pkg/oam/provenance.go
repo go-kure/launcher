@@ -34,7 +34,23 @@ type Source struct {
 	// read, or the sorted keys joined by "," when it read several: the engine does
 	// not see which read produced which value.
 	Ref string `json:"ref,omitempty" yaml:"ref,omitempty"`
+	// Detail says, for a SourceCapability value whose profile went through
+	// EvaluateProfileWithProvenance, which step of the profile evaluation supplied
+	// it: "profile" (the profile document), "schema-default" (a CapabilityDefinition
+	// default) or "handler-default" (the trait handler's or lowering rule's
+	// ValidateAndApplyDefaults). Empty means not determined, never "profile": it is
+	// empty for a profile evaluated with EvaluateProfile, for a binding built by
+	// hand, for a value a component's nested filler supplied, and for every kind
+	// but SourceCapability.
+	Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
 }
+
+// The Source.Detail values.
+const (
+	detailProfile        = "profile"
+	detailSchemaDefault  = "schema-default"
+	detailHandlerDefault = "handler-default"
+)
 
 // PropertySource is the source of one leaf property of a component or a trait.
 type PropertySource struct {
@@ -83,6 +99,56 @@ func (t *Transformer) TransformWithProvenance(app *Application, ctx TransformCon
 		return nil, nil, nil, err
 	}
 	return cluster, result, rec.report(app.Metadata.Name), nil
+}
+
+// EvaluateProfileWithProvenance is EvaluateProfile plus, on each returned
+// CapabilityBinding, the origin of every leaf of its rendering: the profile
+// document, a CapabilityDefinition default or a handler default. TransformWithProvenance
+// reads it and reports it as Source.Detail. The profile and the renderings it returns
+// are exactly those EvaluateProfile returns; the origin is an unexported field that
+// serialization ignores. A profile evaluated by EvaluateProfile, or a binding built by
+// hand, yields an empty Detail.
+func (t *Transformer) EvaluateProfileWithProvenance(profile *ClusterProfile) (*ClusterProfile, error) {
+	return t.evaluateProfile(profile, true)
+}
+
+// defaultSteps holds leaf snapshots of one rendering: as the profile gave it and as
+// the schema-defaults step left it. A handler rewrites the rendering it is handed in
+// place, so both are taken before the next step runs, never kept as references.
+type defaultSteps struct {
+	profile map[string]any
+	schema  map[string]any
+}
+
+// binding returns the evaluated binding for final, with its leaf origins when stamp.
+func (s defaultSteps) binding(final map[string]any, stamp bool) CapabilityBinding {
+	b := CapabilityBinding{Rendering: final}
+	if stamp {
+		b.detail = s.detail(final)
+	}
+	return b
+}
+
+// detail names, for each leaf of final, the step that supplied it. A leaf the schema
+// step left as it found it is the profile's, a leaf that step added or changed is the
+// schema's; a leaf the handler step added or changed is the handler's. A handler can
+// rewrite a leaf the profile gave (an empty issuerRef.kind), so presence alone does
+// not decide.
+func (s defaultSteps) detail(final map[string]any) map[string]string {
+	out := map[string]string{}
+	eachLeaf("", final, func(path string, v any) {
+		sv, inSchema := s.schema[path]
+		if !inSchema || !reflect.DeepEqual(sv, v) {
+			out[path] = detailHandlerDefault
+			return
+		}
+		if pv, inProfile := s.profile[path]; inProfile && reflect.DeepEqual(pv, v) {
+			out[path] = detailProfile
+			return
+		}
+		out[path] = detailSchemaDefault
+	})
+	return out
 }
 
 // propOwner identifies the property map a leaf belongs to: a component's own
@@ -152,20 +218,25 @@ func (r *provenanceRecorder) report(application string) *Provenance {
 // path, which allocates.
 type ownerRecorder struct {
 	entries map[string]Source
-	// ref is the capability key the rendering being merged came from.
-	ref string
+	// ref is the capability key the rendering being merged came from, and detail
+	// the origin of its leaves by path (nil when its profile was not evaluated with
+	// provenance).
+	ref    string
+	detail map[string]string
 }
 
-// bind sets the capability key later capability entries name.
-func (r *ownerRecorder) bind(ref string) {
+// bind sets the capability key later capability entries name, and the origin of the
+// bound rendering's leaves.
+func (r *ownerRecorder) bind(ref string, detail map[string]string) {
 	if r != nil {
 		r.ref = ref
+		r.detail = detail
 	}
 }
 
-// capability is the source of a value the bound rendering supplied.
-func (r *ownerRecorder) capability() Source {
-	return Source{Kind: SourceCapability, Ref: r.ref}
+// capability is the source of the value at path that the bound rendering supplied.
+func (r *ownerRecorder) capability(path string) Source {
+	return Source{Kind: SourceCapability, Ref: r.ref, Detail: r.detail[path]}
 }
 
 // authored records every leaf of props as authored.
@@ -196,7 +267,20 @@ func (r *ownerRecorder) seedCapability(rendering map[string]any) {
 		return
 	}
 	eachLeaf("", rendering, func(path string, _ any) {
-		r.entries[path] = r.capability()
+		r.entries[path] = r.capability(path)
+	})
+}
+
+// replaceCapability is replace for a value copied from the rendering of capability
+// ref at the same path: each leaf carries its own origin from detail, because an
+// object can hold leaves of different origins.
+func (r *ownerRecorder) replaceCapability(path string, v any, ref string, detail map[string]string) {
+	if r == nil {
+		return
+	}
+	r.dropUnder(path)
+	eachLeaf(path, v, func(p string, _ any) {
+		r.entries[p] = Source{Kind: SourceCapability, Ref: ref, Detail: detail[p]}
 	})
 }
 

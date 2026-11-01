@@ -399,7 +399,7 @@ func TestProvenance_MergeRuleCoupling(t *testing.T) {
 			rendLeaves := leafValues(copyRendering(tc.rendered))
 			authLeaves := leafValues(tc.authored)
 			o := &ownerRecorder{entries: map[string]Source{}}
-			o.bind("k")
+			o.bind("k", nil)
 			rendered := copyRendering(tc.rendered)
 			o.seedCapability(rendered)
 			merged := mergeRenderedProperties(rendered, tc.authored, o, "")
