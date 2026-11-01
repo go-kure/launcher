@@ -1690,8 +1690,9 @@ no Service (use `webservice`, or a `service` component, for one).
 one endpoint per entry, in the authored order. An endpoint's `Name` is the port's
 `name` (empty when unnamed), its `Ports` hold the numeric `containerPort` alone,
 and its `Protocol` is the entry's (`TCP` when unset). Its selector is
-`app: <component name>`, the label the pods carry, whatever `objectName` or a
-Naming hook names the object. The type's own parse runs first, so a component it
+`app: <value>`, the label the pods carry, where the value is the component name
+as "The `app` label" derives it (a name over 63 characters is shortened), whatever
+`objectName` or a Naming hook names the object. The type's own parse runs first, so a component it
 refuses has no endpoint and is refused in the parse's words. Sidecar ports are
 not the component's service surface and declare none. `job` and `cronjob`
 publish `ports` but report no endpoint, and `worker` lowers into a `deployment`
