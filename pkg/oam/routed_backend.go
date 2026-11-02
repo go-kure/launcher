@@ -118,9 +118,13 @@ func (t *Transformer) RoutedBackends(app *Application, ctx TransformContext) ([]
 	out := []RoutedBackend{}
 	hook := &transformHook{
 		stop: true,
-		observe: func(cluster *stack.Cluster, components map[string]componentEntry, ctx TransformContext) error {
+		observe: func(cluster *stack.Cluster, entries []componentEntry, subApps []traitSubApps) error {
+			components := make(map[string]componentEntry, len(entries))
+			for _, e := range entries {
+				components[e.component.Name] = e
+			}
 			var err error
-			out, err = collectRoutedBackends(cluster, components, ctx)
+			out, err = collectRoutedBackends(cluster, components, subApps)
 			return err
 		},
 	}
@@ -133,7 +137,7 @@ func (t *Transformer) RoutedBackends(app *Application, ctx TransformContext) ([]
 // collectRoutedBackends reads the routing trait sub-applications of a built
 // cluster, before any decorator wraps them, and resolves each route against the
 // owners the NetworkPolicy synthesis would find. It changes nothing.
-func collectRoutedBackends(cluster *stack.Cluster, components map[string]componentEntry, ctx TransformContext) ([]RoutedBackend, error) {
+func collectRoutedBackends(cluster *stack.Cluster, components map[string]componentEntry, subApps []traitSubApps) ([]RoutedBackend, error) {
 	reg := newNPSynthesisRegistry()
 	if err := reg.buildLookups(cluster, components); err != nil {
 		return nil, err
@@ -141,11 +145,9 @@ func collectRoutedBackends(cluster *stack.Cluster, components map[string]compone
 	// The trait additions are an ownership index only: a later trait may remove
 	// a sub-application, so the inventory is the cluster, not this log.
 	ranOn := map[*stack.Application]*stack.Application{}
-	if ctx.traitSubApps != nil {
-		for _, rec := range *ctx.traitSubApps {
-			for _, sub := range rec.subApps {
-				ranOn[sub] = rec.owner
-			}
+	for _, rec := range subApps {
+		for _, sub := range rec.subApps {
+			ranOn[sub] = rec.owner
 		}
 	}
 
@@ -186,7 +188,19 @@ func routedBackendsOf(reg *npSynthesisRegistry, components map[string]componentE
 		if own == nil {
 			own = components[router].app
 		}
-		rows = append(rows, resolveRoutedBackend(reg, router, sub.Name, routingServiceName(own, router), router, ports, nil))
+		// The router's routing target describes the Service its component owns. A
+		// component whose Service is named apart from the application the trait ran
+		// on (a sibling group's, under a consumer's Naming hook) routes here to
+		// another Service, whose pods the target does not describe: its ports stay
+		// unchecked.
+		svc := routingServiceName(own, router)
+		describes := true
+		if app := components[router].app; app != nil {
+			if owned, ok := componentServiceName(app); ok {
+				describes = owned == svc
+			}
+		}
+		rows = append(rows, resolveRoutedBackend(reg, router, sub.Name, svc, router, describes, ports, nil))
 	}
 	bt, ok := sub.Config.(backendRefTargetCollector)
 	if !ok {
@@ -226,7 +240,7 @@ func routedBackendsOf(reg *npSynthesisRegistry, components map[string]componentE
 		}
 	}
 	for _, t := range targets {
-		rows = append(rows, resolveRoutedBackend(reg, router, sub.Name, t.service, t.owner, t.ports, t.selector))
+		rows = append(rows, resolveRoutedBackend(reg, router, sub.Name, t.service, t.owner, true, t.ports, t.selector))
 	}
 	return rows
 }
@@ -246,11 +260,14 @@ func routingServiceName(own *stack.Application, router string) string {
 }
 
 // resolveRoutedBackend resolves the routed ports of one Service against its
-// owner. authored is the backend selector the route carried for a Service no
-// component owns.
-func resolveRoutedBackend(reg *npSynthesisRegistry, router, application, service, owner string, ports []intstr.IntOrString, authored *metav1.LabelSelector) RoutedBackend {
+// owner. describes is whether the owner's routing target describes this Service
+// (a component with a Service of another name does not describe this one).
+// authored is the backend selector the route carried for a Service no component
+// owns.
+func resolveRoutedBackend(reg *npSynthesisRegistry, router, application, service, owner string, describes bool, ports []intstr.IntOrString, authored *metav1.LabelSelector) RoutedBackend {
 	row := RoutedBackend{Component: router, Application: application, Service: service, Owner: owner, Ports: make([]RoutedPort, 0, len(ports))}
 	rt, targeter := reg.routingTargets[owner]
+	targeter = targeter && describes
 	switch {
 	case owner == "":
 		row.Pods = RoutedPods{Kind: RoutedPodsUnowned, Selector: authored.DeepCopy()}

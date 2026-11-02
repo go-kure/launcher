@@ -803,12 +803,14 @@ func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext
 // transformHook observes a transform at the point its NetworkPolicy synthesis
 // would start: the cluster is built and its sibling groups checked, every trait
 // has run, and no decorator has yet hidden the interfaces a trait
-// sub-application's config offers. observe is handed the transform's own
-// context, whose shared state (traitSubApps, subAppOrigins) the transform
-// created for this call, not the caller's copy. With stop set the transform
-// returns at the hook, so nothing after it runs or is seen.
+// sub-application's config offers. observe is handed the component entries and
+// the applications each trait ran on (traitSubApps), which the transform
+// created for this call, not the caller's copy. It is not handed the context or
+// the component map: passing either to a function value makes it escape, and
+// the plain path (a nil hook) would then allocate more. With stop set the
+// transform returns at the hook, so nothing after it runs or is seen.
 type transformHook struct {
-	observe func(cluster *stack.Cluster, components map[string]componentEntry, ctx TransformContext) error
+	observe func(cluster *stack.Cluster, entries []componentEntry, subApps []traitSubApps) error
 	stop    bool
 }
 
@@ -997,7 +999,7 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 		componentMap[e.component.Name] = e
 	}
 	if hook != nil {
-		if err := hook.observe(cluster, componentMap, ctx); err != nil {
+		if err := hook.observe(cluster, entries, *ctx.traitSubApps); err != nil {
 			return nil, nil, err
 		}
 		if hook.stop {
