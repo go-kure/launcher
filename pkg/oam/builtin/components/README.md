@@ -42,7 +42,20 @@ Every built-in component handler and component lowering rule implements
 `oam.ContractDescriber` (go-kure/launcher#789): family is the component type, version is
 `builtin.ContractVersion` (`v1alpha1`), no capability key is required and none is deprecated.
 Only `postgresql` declares `Prerequisites`: what its `backup` and `recovery` need in the
-cluster (see its entry under "Per-type highlights").
+cluster (see its entry under "Per-type highlights"). It is also the only one that declares
+`Readiness` (go-kure/launcher#1144), one entry for each kind it lowers into, each signal read
+from the status type of the CloudNativePG v1.30.1 or Barman Cloud plugin v0.15.1 module go.mod
+pins (nothing checks it against a live resource). A consumer's naming hook can answer another
+name for any kind:
+
+| Kind | Named | Signal | Generic check |
+|------|-------|--------|---------------|
+| `postgresql.cnpg.io` `Cluster` | the component name, or `clusterObjectName` | condition `Ready` (`ClusterStatus.Conditions`) | judges it |
+| `barmancloud.cnpg.io` `ObjectStore` | the component name, or `backup.objectStoreObjectName`; `<component>-recovery-source` for an inline `recovery.source.objectStore` | none: `ObjectStoreStatus` holds only a backup history | cannot judge |
+| `postgresql.cnpg.io` `Pooler` | `<component>-pooler`, or `poolerName` | `status.phase` is `active` (`PoolerStatus.Phase`) | cannot judge |
+| `postgresql.cnpg.io` `Database` | `<component>-<database>`, or `databases[].objectName` | `status.applied` is `true` (`DatabaseStatus.Applied`) | cannot judge |
+| `postgresql.cnpg.io` `ScheduledBackup` | `<component>-<schedule>` | none: `ScheduledBackupStatus` holds schedule times and an error | cannot judge |
+
 The four rules (`webservice`, `worker`, `helm`, `postgresql`) also implement
 `oam.LoweringTargetDeclarer`, naming every type they lower into:
 

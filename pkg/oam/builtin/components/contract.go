@@ -443,7 +443,37 @@ func (OCIRule) LoweringTargets() oam.LoweringTargets {
 func (PostgresqlRule) ContractMetadata() oam.ContractMetadata {
 	meta := contract("postgresql")
 	meta.Prerequisites = postgresqlBackupPrerequisites()
+	meta.Readiness = postgresqlReadiness()
 	return meta
+}
+
+// postgresqlReadiness is how a reader judges each kind postgresql lowers into,
+// in the order LoweringTargets lists them (go-kure/launcher#1144). Each signal is
+// read from the status type of the module version go.mod pins, and nothing
+// checks it against a live resource. Each NamePattern gives the default name and
+// the authored property that replaces it; a consumer's naming hook can answer
+// another name for any of them:
+//   - Cluster: the "Ready" condition, ClusterStatus.Conditions and
+//     ConditionClusterReady in cloudnative-pg api/v1 cluster_types.go. A reader
+//     that applies only the Ready rule judges it.
+//   - ObjectStore: ObjectStoreStatus in plugin-barman-cloud api/v1
+//     objectstore_types.go holds only ServerRecoveryWindow, a backup history, so
+//     the kind has no readiness signal.
+//   - Pooler: PoolerStatus.Phase, which is "active" when the pooler serves
+//     traffic (PoolerPhaseActive; "paused" is up but holding connections). It has
+//     no conditions.
+//   - Database: DatabaseStatus.Applied, true when the database was reconciled
+//     (api/v1 database_types.go). It has no conditions.
+//   - ScheduledBackup: ScheduledBackupStatus holds schedule times and an error,
+//     with no readiness signal (api/v1 scheduledbackup_types.go).
+func postgresqlReadiness() []oam.ContractReadiness {
+	return []oam.ContractReadiness{
+		{Group: "postgresql.cnpg.io", Kind: "Cluster", NamePattern: "the component name, or clusterObjectName", Condition: "Ready", Generic: oam.GenericJudges},
+		{Group: "barmancloud.cnpg.io", Kind: "ObjectStore", NamePattern: "the component name, or backup.objectStoreObjectName; <component>-recovery-source for an inline recovery.source.objectStore", Generic: oam.GenericCannotJudge},
+		{Group: "postgresql.cnpg.io", Kind: "Pooler", NamePattern: "<component>-pooler, or poolerName", Field: "status.phase", Value: "active", Generic: oam.GenericCannotJudge},
+		{Group: "postgresql.cnpg.io", Kind: "Database", NamePattern: "<component>-<database>, or databases[].objectName", Field: "status.applied", Value: "true", Generic: oam.GenericCannotJudge},
+		{Group: "postgresql.cnpg.io", Kind: "ScheduledBackup", NamePattern: "<component>-<schedule>", Generic: oam.GenericCannotJudge},
+	}
 }
 
 // postgresqlBackupWhen is the When of every prerequisite of postgresql's
