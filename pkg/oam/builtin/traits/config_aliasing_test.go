@@ -35,6 +35,7 @@ func TestIngressTrait_GenerationDoesNotShareConfig(t *testing.T) {
 	assertTraitGeneration(t, &traits.IngressHandler{}, &oam.Trait{
 		Type: "ingress",
 		Properties: map[string]any{
+			"annotations": map[string]any{"example.com/owner": "platform-team"},
 			"rules": []any{map[string]any{
 				"host":  "example.com",
 				"paths": []any{map[string]any{"path": "/"}},
