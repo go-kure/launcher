@@ -789,7 +789,7 @@ func (c *IngressConfig) Generate(app *stack.Application) ([]*client.Object, erro
 
 	for _, tls := range c.TLS {
 		kubernetes.AddIngressTLS(ingress, networkingv1.IngressTLS{
-			Hosts:      tls.Hosts,
+			Hosts:      slices.Clone(tls.Hosts),
 			SecretName: tls.SecretName,
 		})
 	}

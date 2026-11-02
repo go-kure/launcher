@@ -1,6 +1,7 @@
 package traits
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
@@ -178,6 +179,18 @@ type rbacRule struct {
 	Verbs     []string
 }
 
+// policyRule builds a PolicyRule that owns its slices. The result leaves the
+// package on objects a caller edits, so it must not alias the config, nor the
+// rule another object was built from (the Role and the ClusterRole read the
+// same rbacRule).
+func (r rbacRule) policyRule() rbacv1.PolicyRule {
+	return rbacv1.PolicyRule{
+		APIGroups: slices.Clone(r.APIGroups),
+		Resources: slices.Clone(r.Resources),
+		Verbs:     slices.Clone(r.Verbs),
+	}
+}
+
 type rbacTraitConfig struct {
 	componentName string
 	// objectName is the authored name of every object the trait generates and
@@ -266,11 +279,7 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 	role.Labels = componentLabels(c.componentName)
 	role.Annotations = nil
 	for _, r := range c.Rules {
-		kubernetes.AddRoleRule(role, rbacv1.PolicyRule{
-			APIGroups: r.APIGroups,
-			Resources: r.Resources,
-			Verbs:     r.Verbs,
-		})
+		kubernetes.AddRoleRule(role, r.policyRule())
 	}
 
 	rb := kubernetes.CreateRoleBinding(c.nameOf("RoleBinding"), c.Namespace)
@@ -299,11 +308,7 @@ func (c *rbacTraitConfig) Generate(app *stack.Application) ([]*client.Object, er
 	cr.Labels = componentLabels(c.componentName)
 	cr.Annotations = nil
 	for _, r := range c.Rules {
-		kubernetes.AddClusterRoleRule(cr, rbacv1.PolicyRule{
-			APIGroups: r.APIGroups,
-			Resources: r.Resources,
-			Verbs:     r.Verbs,
-		})
+		kubernetes.AddClusterRoleRule(cr, r.policyRule())
 	}
 
 	crb := kubernetes.CreateClusterRoleBinding(c.nameOf("ClusterRoleBinding"))
