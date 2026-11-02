@@ -320,7 +320,9 @@ func copyTyped(rv reflect.Value, copies map[copyKey]reflect.Value) reflect.Value
 		if c, ok := copies[key]; ok {
 			return c
 		}
-		out := reflect.New(rv.Type().Elem())
+		// New yields a plain *T; Convert gives a pointer of a defined type (type P *T)
+		// back its own type.
+		out := reflect.New(rv.Type().Elem()).Convert(rv.Type())
 		copies[key] = out
 		out.Elem().Set(copyTyped(rv.Elem(), copies))
 		return out

@@ -24,6 +24,9 @@ type shapeSpec struct {
 	Next     *shapeSpec
 }
 
+// shapePtr is a defined pointer type: a snapshot of it must keep the type.
+type shapePtr *int
+
 // shapeHidden holds its collection in an unexported field, which a snapshot cannot copy.
 type shapeHidden struct {
 	tags []string
@@ -297,6 +300,18 @@ func TestProvenance_InPlaceChangeKeepsOrigin(t *testing.T) {
 		{"pointer replaced by one with a different value", func() (map[string]any, map[string]any, func()) {
 			a, b := 1, 2
 			return map[string]any{"v": &a}, map[string]any{"v": &b}, func() {}
+		}, detailHandlerDefault},
+		{"defined pointer type, untouched", func() (map[string]any, map[string]any, func()) {
+			n := 1
+			return map[string]any{"v": shapePtr(&n)}, map[string]any{"v": shapePtr(&n)}, func() {}
+		}, detailProfile},
+		{"defined pointer type, pointee changed in place", func() (map[string]any, map[string]any, func()) {
+			n := 1
+			return map[string]any{"v": shapePtr(&n)}, map[string]any{"v": shapePtr(&n)}, func() { n = 2 }
+		}, detailHandlerDefault},
+		{"defined pointer type returned as a plain pointer to an equal value", func() (map[string]any, map[string]any, func()) {
+			n := 1
+			return map[string]any{"v": shapePtr(&n)}, map[string]any{"v": &n}, func() {}
 		}, detailHandlerDefault},
 		{"nan field in a pointee, untouched", func() (map[string]any, map[string]any, func()) {
 			p := &nanFunc{N: math.NaN()}
