@@ -603,7 +603,10 @@ configured. It is read-only and works on the whole document, not on one componen
   only when it routes a port to it; a route that names only other components' Services gets no
   such row. For a route to the component's own Service, `Service` is the Service name the
   routing trait resolves for the application it ran on: that application's backend Service name,
-  else its name. The paths of one route to an owned Service are one row, with each port once. A
+  else its name. When the component owns a Service of another name (a sibling group's, named
+  apart by a consumer's naming hook), that route is to a Service the component's routing target
+  does not describe: the row reads `owner` pods and its ports `unchecked`. The paths of one
+  route to an owned Service are one row, with each port once. A
   Service no component owns gets one row per backend selector the route authored for it, because
   those select different pods. Rows are ordered by `Component`, `Application` and `Service`; those three are
   not a unique key, because equally named sub-applications can sit in different bundles of one

@@ -380,11 +380,15 @@ func TestRoutedBackends_SiblingGroup(t *testing.T) {
 // apart from the group by the consumer's Naming hook, and a chart ingress whose
 // one path names that Service. The routing member's own Service is then not the
 // group's, so the route is a route to another Service of the same component.
-type chartWithNamedService struct{}
+//
+// With selfRoute, the ingress also routes one implicit port (a trait-level
+// servicePort and a path with no backend) to the chart member's own Service,
+// which is not the group's.
+type chartWithNamedService struct{ selfRoute bool }
 
 func (chartWithNamedService) ComponentType() string { return "chart-with-named-service" }
 
-func (chartWithNamedService) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
+func (c chartWithNamedService) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
 	svc := oam.Component{
 		Name: comp.Name,
 		Type: "service",
@@ -396,6 +400,12 @@ func (chartWithNamedService) LowerComponent(comp *oam.Component, lctx oam.Loweri
 	if err := lctx.ResolveMemberName(&svc, oam.NameSpec{Role: oam.NameRoleObject, Kind: schema.GroupKind{Kind: "Service"}}); err != nil {
 		return oam.LoweringResult{}, err
 	}
+	paths := []any{map[string]any{"path": "/", "backend": "metrics-http", "port": 9090}}
+	ingress := map[string]any{"rules": []any{map[string]any{"host": "m.example.com", "paths": paths}}}
+	if c.selfRoute {
+		ingress["servicePort"] = 9090
+		ingress["rules"] = []any{map[string]any{"host": "m.example.com", "paths": append(paths, map[string]any{"path": "/self"})}}
+	}
 	return oam.LoweringResult{Components: []oam.Component{
 		{
 			Name: comp.Name,
@@ -404,14 +414,53 @@ func (chartWithNamedService) LowerComponent(comp *oam.Component, lctx oam.Loweri
 				"chart":     "kube-prometheus-stack",
 				"sourceRef": map[string]any{"kind": "HelmRepository", "name": "prometheus-community"},
 			}}},
-			Traits: []oam.Trait{{Type: "ingress", Properties: map[string]any{
-				"rules": []any{map[string]any{"host": "m.example.com", "paths": []any{
-					map[string]any{"path": "/", "backend": "metrics-http", "port": 9090},
-				}}},
-			}}},
+			Traits: []oam.Trait{{Type: "ingress", Properties: ingress}},
 		},
 		svc,
 	}}, nil
+}
+
+// metricsNaming names the group's Service apart from the group.
+func metricsNaming(req oam.NameRequest) (string, bool) {
+	if req.Role == oam.NameRoleObject && req.Component == "metrics" {
+		return "metrics-http", true
+	}
+	return "", false
+}
+
+// A route to the chart member's own Service, when the group's Service is named
+// apart, is not a route to a Service the group's targeter describes: its ports
+// stay unchecked, never matched against the other Service's selector.
+func TestRoutedBackends_SelfRouteNotTheGroupsService(t *testing.T) {
+	tr := routedTransformer()
+	tr.RegisterComponentLowering(chartWithNamedService{selfRoute: true})
+	got, err := tr.RoutedBackends(routedApp(oam.Component{
+		Name: "metrics", Type: "chart-with-named-service", Properties: map[string]any{},
+	}), oam.TransformContext{Namespace: "default", Naming: metricsNaming})
+	if err != nil {
+		t.Fatalf("RoutedBackends: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("rows = %+v, want two: the chart member's own Service and the group's", got)
+	}
+	byService := map[string]oam.RoutedBackend{}
+	for _, row := range got {
+		byService[row.Service] = row
+	}
+	group, ok := byService["metrics-http"]
+	if !ok || group.Owner != "metrics" || group.Pods.Kind != oam.RoutedPodsSelector || len(group.Ports) != 1 || group.Ports[0].Status != oam.RoutedPortMatched {
+		t.Errorf("group row %+v, want owner metrics, the service member's selector and a matched port", group)
+	}
+	self, ok := byService["metrics"]
+	if !ok {
+		t.Fatalf("rows = %+v, want one for the chart member's own Service %q", got, "metrics")
+	}
+	if self.Owner != "metrics" || self.Pods.Kind != oam.RoutedPodsOwner || self.Pods.Selector != nil {
+		t.Errorf("self row owner %q pods %+v, want owner metrics, owner pods and no selector", self.Owner, self.Pods)
+	}
+	if len(self.Ports) != 1 || self.Ports[0].Status != oam.RoutedPortUnchecked || len(self.Ports[0].TargetPorts) != 0 {
+		t.Errorf("self row ports %+v, want one unchecked port with no target ports", self.Ports)
+	}
 }
 
 // A route that names another Service of its own component, here the group's
