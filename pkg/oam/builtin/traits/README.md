@@ -1183,6 +1183,15 @@ added to the HPA into a label on the PDB. The same rule and the reason behind it
 the Conventions section of the component handlers' README
 (`pkg/oam/builtin/components/README.md`).
 
+The same holds for every slice, map and pointer a trait keeps in its config. Generate
+copies each one into the object it builds: the `ingress` TLS hosts and annotations, the
+`rbac` rule API groups, resources and verbs, the `networkpolicy` peer selectors and IP
+block, and the `httproute` annotations. Two Generate calls on one config then return
+objects that share nothing, and the Role and the ClusterRole share nothing with each
+other. A caller that edits a returned object does not change the config or a later result
+(go-kure/launcher#1163). `config_aliasing_test.go` checks this for each trait with
+`stacktest.AssertGeneration`.
+
 Every `app` label and `app` selector a trait generates to identify its component — on
 the `configmap`, `secret`, `pvc`, `rbac`, `scaler`, `ingress`, `httproute`, `networkpolicy` and
 `external-secret` objects, and the PodDisruptionBudget and NetworkPolicy `podSelector`
