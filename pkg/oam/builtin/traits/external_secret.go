@@ -2,6 +2,7 @@ package traits
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -623,7 +624,7 @@ func (c *ExternalSecretConfig) Generate(app *stack.Application) ([]*client.Objec
 	if c.Template != nil {
 		target.Template = &esv1.ExternalSecretTemplate{
 			Type: corev1.SecretType(c.Template.Type),
-			Data: c.Template.Data,
+			Data: maps.Clone(c.Template.Data),
 		}
 	}
 	es.Spec.Target = target
@@ -661,7 +662,7 @@ func (c *ExternalSecretConfig) Generate(app *stack.Application) ([]*client.Objec
 			entry.Extract = extract
 		}
 		if df.Find != nil {
-			find := &esv1.ExternalSecretFind{Tags: df.Find.Tags}
+			find := &esv1.ExternalSecretFind{Tags: maps.Clone(df.Find.Tags)}
 			if df.Find.Name != nil {
 				find.Name = &esv1.FindName{RegExp: df.Find.Name.RegExp}
 			}

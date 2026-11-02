@@ -3,6 +3,7 @@ package traits_test
 import (
 	"testing"
 
+	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/stacktest"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -22,7 +23,13 @@ import (
 // generation contract on the application the trait wrote to.
 func assertTraitGeneration(t *testing.T, h oam.TraitHandler, trait *oam.Trait) {
 	t.Helper()
-	app := newWebApp("api", "default")
+	assertTraitGenerationOn(t, newWebApp("api", "default"), h, trait)
+}
+
+// assertTraitGenerationOn is assertTraitGeneration for a trait that needs a
+// particular component application, such as a workload.
+func assertTraitGenerationOn(t *testing.T, app *stack.Application, h oam.TraitHandler, trait *oam.Trait) {
+	t.Helper()
 	bundle := newBundle()
 	bundle.Applications = append(bundle.Applications, app)
 	if err := h.Apply(trait, app, bundle); err != nil {
@@ -89,6 +96,23 @@ func TestNetworkPolicyTrait_GenerationDoesNotShareConfig(t *testing.T) {
 			assertTraitGeneration(t, &traits.NetworkPolicyHandler{}, &oam.Trait{Type: "networkpolicy", Properties: tc.props})
 		})
 	}
+}
+
+func TestExternalSecretTrait_GenerationDoesNotShareConfig(t *testing.T) {
+	assertTraitGenerationOn(t, stack.NewApplication("worker", "default", newWorkerStubConfig(t)),
+		&traits.ExternalSecretHandler{}, &oam.Trait{
+			Type: "external-secret",
+			Properties: map[string]any{
+				"secretName": "creds",
+				"provider":   "vault-backend",
+				"target": map[string]any{"template": map[string]any{
+					"data": map[string]any{"config.yaml": "token: {{ .token }}"},
+				}},
+				"dataFrom": []any{map[string]any{"find": map[string]any{
+					"tags": map[string]any{"env": "prod"},
+				}}},
+			},
+		})
 }
 
 func TestHTTPRouteTrait_GenerationDoesNotShareConfig(t *testing.T) {
