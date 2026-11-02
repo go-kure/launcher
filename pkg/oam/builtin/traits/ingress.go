@@ -634,6 +634,7 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 	// Self is the component's own Service, not config.ServiceName: a trait-level serviceName may
 	// name a Service the component does not own, and that backend is external (go-kure/launcher#399).
 	selfServiceName := resolveServiceName(app)
+	config.ownServiceName = selfServiceName
 	config.ports = collectIngressPorts(config, selfServiceName)
 	backendTargets, err := collectIngressBackendTargets(config, selfServiceName)
 	if err != nil {
@@ -672,6 +673,9 @@ type IngressConfig struct {
 	// backendTargets are external backendRef targets (paths naming a separate Service); they
 	// drive ingress-synthesis retargeting onto the backend's pods (go-kure/launcher#227).
 	backendTargets []netpol.BackendTarget
+	// ownServiceName is the Service of the application the trait ran on, the one ports belongs to
+	// (go-kure/launcher#1157).
+	ownServiceName string
 }
 
 // TrafficSources implements the cluster-level trafficSourceCollector contract.
@@ -692,6 +696,10 @@ func (c *IngressConfig) TargetComponentName() string { return c.ComponentName() 
 
 // BackendPorts implements the cluster-level trafficSourceCollector contract.
 func (c *IngressConfig) BackendPorts() []intstr.IntOrString { return c.ports }
+
+// OwnServiceName implements the cluster-level ownServiceReporter contract: the Service BackendPorts
+// addresses, which the synthesis attributes to that Service's owner.
+func (c *IngressConfig) OwnServiceName() string { return c.ownServiceName }
 
 // PlatformAnnotations returns the annotations the Ingress carries from the
 // platform's input, not from the document: what the trait's platformAnnotations

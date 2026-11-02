@@ -423,6 +423,7 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 	// Self is the component's own Service, not defaultServiceName: a trait-level serviceName may
 	// name a Service the component does not own, and that backend is external (go-kure/launcher#399).
 	selfServiceName := resolveServiceName(app)
+	config.ownServiceName = selfServiceName
 	config.ports = collectHTTPRoutePorts(config, selfServiceName)
 	backendTargets, err := collectHTTPRouteBackendTargets(config, selfServiceName)
 	if err != nil {
@@ -976,6 +977,9 @@ type HTTPRouteConfig struct {
 	// backendTargets are external backendRef targets (refs naming a separate Service); they
 	// drive ingress-synthesis retargeting onto the backend's pods (go-kure/launcher#227).
 	backendTargets []netpol.BackendTarget
+	// ownServiceName is the Service of the application the trait ran on, the one ports belongs to
+	// (go-kure/launcher#1157).
+	ownServiceName string
 }
 
 // TrafficSources implements the cluster-level trafficSourceCollector contract.
@@ -996,6 +1000,10 @@ func (c *HTTPRouteConfig) TargetComponentName() string { return c.ComponentName(
 
 // BackendPorts implements the cluster-level trafficSourceCollector contract.
 func (c *HTTPRouteConfig) BackendPorts() []intstr.IntOrString { return c.ports }
+
+// OwnServiceName implements the cluster-level ownServiceReporter contract: the Service BackendPorts
+// addresses, which the synthesis attributes to that Service's owner.
+func (c *HTTPRouteConfig) OwnServiceName() string { return c.ownServiceName }
 
 // ParentRef represents a gateway parent reference.
 type ParentRef struct {
