@@ -3239,8 +3239,9 @@ entry per kind, in a stable order. The declaration is made by the entity, read b
 consumer and enforced by nothing: the engine never reads the field, no registration
 or build step checks it, and nothing checks that the named condition or field exists
 on the real resource. A nil list means none is declared, not that the resources are
-ready at once or need no waiting; an empty non-nil list reads the same as nil. No
-built-in declares readiness yet. **Breaking library change**: `ContractMetadata`
+ready at once or need no waiting; an empty non-nil list reads the same as nil. Only
+`postgresql` declares readiness (go-kure/launcher#1144), one entry for each kind it
+lowers into; `pkg/oam/builtin/components/README.md` lists them. **Breaking library change**: `ContractMetadata`
 gained the field, so an unkeyed composite literal of it no longer compiles.
 
 ### Lowering targets and `Seal`

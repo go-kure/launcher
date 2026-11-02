@@ -32,9 +32,10 @@ func builtinsByPosition() map[string]map[string]any {
 }
 
 // builtinsDeclaringReadiness lists the built-ins allowed to set
-// ContractMetadata.Readiness, as "<position>/<type>". Empty: no built-in
-// declares readiness yet.
-var builtinsDeclaringReadiness = map[string]bool{}
+// ContractMetadata.Readiness, as "<position>/<type>". Only postgresql declares
+// it (go-kure/launcher#1144), and TestBuiltins_EveryOneDescribesItsContract
+// requires that it does.
+var builtinsDeclaringReadiness = map[string]bool{"component/postgresql": true}
 
 // TestBuiltins_EveryOneDescribesItsContract: every built-in implements
 // oam.ContractDescriber under the one scheme: the family is the type it is
@@ -65,9 +66,11 @@ func TestBuiltins_EveryOneDescribesItsContract(t *testing.T) {
 			}
 			// Checked before the postgresql skip below, so postgresql is not
 			// exempt. A built-in that starts declaring readiness is added to
-			// builtinsDeclaringReadiness (go-kure/launcher#1134) on purpose.
-			if meta.Readiness != nil && !builtinsDeclaringReadiness[position+"/"+name] {
-				t.Errorf("%s %q declares readiness %+v; no built-in is on the allow list yet", position, name, meta.Readiness)
+			// builtinsDeclaringReadiness (go-kure/launcher#1134) on purpose, and
+			// one on the list must declare it.
+			declares := len(meta.Readiness) > 0
+			if allowed := builtinsDeclaringReadiness[position+"/"+name]; declares != allowed {
+				t.Errorf("%s %q: declares readiness = %t (%+v), want %t (builtinsDeclaringReadiness)", position, name, declares, meta.Readiness, allowed)
 			}
 			if position == "component" && name == "postgresql" {
 				continue // TestNewBuiltinTransformer_PublishesPostgresqlPrerequisites
@@ -100,6 +103,58 @@ func TestNewBuiltinTransformer_PublishesPostgresqlPrerequisites(t *testing.T) {
 %+v
 want
 %+v`, got, want)
+	}
+}
+
+// TestNewBuiltinTransformer_PublishesPostgresqlReadiness: HandlerContracts
+// publishes one readiness entry for each kind postgresql lowers into
+// (go-kure/launcher#1144), exactly these, in the order the rule declares its
+// targets. Each signal is read from the status type of the CloudNativePG and
+// Barman Cloud versions go.mod pins.
+func TestNewBuiltinTransformer_PublishesPostgresqlReadiness(t *testing.T) {
+	got := newBuiltinTransformer().HandlerContracts().Components["postgresql"].Readiness
+	const cnpg, barman = "postgresql.cnpg.io", "barmancloud.cnpg.io"
+	want := []oam.ContractReadiness{
+		{Group: cnpg, Kind: "Cluster", NamePattern: "the component name, or clusterObjectName", Condition: "Ready", Generic: oam.GenericJudges},
+		{Group: barman, Kind: "ObjectStore", NamePattern: "the component name, or backup.objectStoreObjectName; <component>-recovery-source for an inline recovery.source.objectStore", Generic: oam.GenericCannotJudge},
+		{Group: cnpg, Kind: "Pooler", NamePattern: "<component>-pooler, or poolerName", Field: "status.phase", Value: "active", Generic: oam.GenericCannotJudge},
+		{Group: cnpg, Kind: "Database", NamePattern: "<component>-<database>, or databases[].objectName", Field: "status.applied", Value: "true", Generic: oam.GenericCannotJudge},
+		{Group: cnpg, Kind: "ScheduledBackup", NamePattern: "<component>-<schedule>", Generic: oam.GenericCannotJudge},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf(`HandlerContracts().Components["postgresql"].Readiness =
+%+v
+want
+%+v`, got, want)
+	}
+}
+
+// TestBuiltins_ReadinessFollowsTheDeclarationRules: every readiness entry a
+// built-in declares obeys the rules oam.ContractReadiness states: a Kind, one of
+// Condition or Field with Value only beside Field, GenericJudges only on a
+// "Ready" condition, and an entry with neither signal says GenericCannotJudge.
+func TestBuiltins_ReadinessFollowsTheDeclarationRules(t *testing.T) {
+	for position, byType := range builtinsByPosition() {
+		for name, b := range byType {
+			d, ok := b.(oam.ContractDescriber)
+			if !ok {
+				continue
+			}
+			for _, r := range d.ContractMetadata().Readiness {
+				switch {
+				case r.Kind == "":
+					t.Errorf("%s %q: a readiness entry has no Kind: %+v", position, name, r)
+				case r.Condition != "" && r.Field != "":
+					t.Errorf("%s %q: %s declares both Condition and Field: %+v", position, name, r.Kind, r)
+				case r.Value != "" && r.Field == "":
+					t.Errorf("%s %q: %s has a Value without a Field: %+v", position, name, r.Kind, r)
+				case r.Generic == oam.GenericJudges && r.Condition != "Ready":
+					t.Errorf("%s %q: %s says a generic check judges it but its signal is not the Ready condition: %+v", position, name, r.Kind, r)
+				case r.Condition == "" && r.Field == "" && r.Generic != oam.GenericCannotJudge:
+					t.Errorf("%s %q: %s gives no signal and does not say cannot-judge: %+v", position, name, r.Kind, r)
+				}
+			}
+		}
 	}
 }
 
