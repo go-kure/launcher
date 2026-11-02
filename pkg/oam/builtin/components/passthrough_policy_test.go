@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -491,7 +492,9 @@ func TestPassthrough_LargeIntegerIsEmittedAndWrittenAsAuthored(t *testing.T) {
 			t.Fatalf("%s: generated %d objects, want 1", name, len(objs))
 		}
 		spec := objs[0].(*unstructured.Unstructured).Object["spec"].(map[string]any)
-		for key, want := range map[string]any{"at53": 9007199254740992, "over53": 9007199254740993, "over63": uint64(9223372036854775808)} {
+		// The emitted types are the JSON ones (go-kure/launcher#1162): an int64, and a
+		// json.Number beyond its range, so that no digit is lost.
+		for key, want := range map[string]any{"at53": int64(9007199254740992), "over53": int64(9007199254740993), "over63": json.Number("9223372036854775808")} {
 			if spec[key] != want {
 				t.Errorf("%s: emitted spec.%s = %v (%T), want the authored %v (%T)", name, key, spec[key], spec[key], want, want)
 			}

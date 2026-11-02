@@ -1,9 +1,11 @@
 package components_test
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-kure/kure/pkg/stack"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -462,6 +464,126 @@ func TestPassthroughHandler_DeepCopyIsolatesSource(t *testing.T) {
 	}
 }
 
+// phase and tags are named types a Go-assembled body can hold.
+type (
+	phase string
+	tags  map[string]int
+)
+
+// TestPassthrough_EmittedObjectIsJSONShaped: the emitted object holds only the types an
+// object decoded from JSON holds (map[string]any, []any, string, bool, int64, float64),
+// whatever the authored map carries: the YAML decoder produces int, a Go caller can add
+// any integer or float type, named scalars and typed maps, slices and arrays. A caller
+// that deep-copies the emitted object, through DeepCopyObject, panics on any other
+// (go-kure/launcher#1162). The document it serializes to is the authored one.
+func TestPassthrough_EmittedObjectIsJSONShaped(t *testing.T) {
+	bigUnsigned := uint64(9223372036854775809)
+	port := map[string]any{
+		"port":     8080,
+		"weight":   float32(0.5),
+		"small":    int8(3),
+		"unsigned": uint32(7),
+		"huge":     uint64(1 << 63),
+		"stamp":    time.Date(2026, 11, 2, 21, 0, 0, 0, time.UTC),
+		"raw":      json.RawMessage(`{"a":1}`),
+		"exact":    int64(9),
+		"ratio":    1.5,
+		"name":     "http",
+		"on":       true,
+		"phase":    phase("up"),
+		"tags":     tags{"a": 1},
+		"counts":   []int32{1, 2},
+		"pair":     [2]uint8{3, 4},
+		"blob":     []byte("hi"),
+		"labels":   map[string]string{"k": "v"},
+		"nilTyped": []string(nil),
+		// A key encoding/json writes as a string, and numbers it must not round.
+		"intKeys":   map[int]string{1: "x"},
+		"rawBig":    json.RawMessage("9223372036854775809"),
+		"ptrBig":    &bigUnsigned,
+		"marshaled": []markedByte{1},
+		"viaPtr":    []ptrMarkedByte{1},
+		"nestedPtr": [][1]ptrMarkedByte{{1}},
+		"fieldPtr":  []struct{ F ptrMarkedByte }{{1}},
+		"rawFrac":   json.RawMessage("1.5"),
+		"rawExp":    json.RawMessage("1e3"),
+		"rawNegBig": json.RawMessage("-9223372036854775809"),
+		"f32":       float32(0.1),
+	}
+	object := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"spec": map[string]any{
+			"type":         "ExternalName",
+			"externalName": "example.invalid",
+			"ports":        []any{port},
+		},
+	}
+
+	u := generatePassthrough(t, map[string]any{"object": object}, "ns1")
+
+	// The assertion that matters: DeepCopyObject panics ("cannot deep copy int") on a plain int.
+	var copied *unstructured.Unstructured
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("DeepCopyObject of the emitted object panicked: %v", r)
+			}
+		}()
+		copied = u.DeepCopyObject().(*unstructured.Unstructured)
+	}()
+	got := copied.Object["spec"].(map[string]any)["ports"].([]any)[0].(map[string]any)
+	want := map[string]any{
+		"port":      int64(8080),
+		"weight":    float64(0.5),
+		"small":     int64(3),
+		"unsigned":  int64(7),
+		"huge":      json.Number("9223372036854775808"), // beyond int64: its own digits, as authored
+		"stamp":     "2026-11-02T21:00:00Z",
+		"raw":       map[string]any{"a": int64(1)},
+		"exact":     int64(9),
+		"ratio":     1.5,
+		"name":      "http",
+		"on":        true,
+		"phase":     "up",
+		"tags":      map[string]any{"a": int64(1)},
+		"counts":    []any{int64(1), int64(2)},
+		"pair":      []any{int64(3), int64(4)},
+		"blob":      "aGk=", // what encoding/json writes for a []byte
+		"labels":    map[string]any{"k": "v"},
+		"nilTyped":  nil,
+		"intKeys":   map[string]any{"1": "x"},
+		"rawBig":    json.Number("9223372036854775809"),
+		"ptrBig":    json.Number("9223372036854775809"),
+		"marshaled": []any{"x"}, // the element's own form, not base64
+		"viaPtr":    []any{"y"}, // a marshaler on the pointer, which a slice element has
+		"nestedPtr": []any{[]any{"y"}},
+		"fieldPtr":  []any{map[string]any{"F": "y"}},
+		"rawFrac":   1.5,
+		"rawExp":    float64(1000),
+		"rawNegBig": json.Number("-9223372036854775809"),
+		"f32":       0.1,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("emitted port = %#v, want %#v", got, want)
+	}
+
+	// The authored map is not touched: the normalization is of the emitted copy.
+	if port["port"] != 8080 {
+		t.Errorf("authored port changed to %#v", port["port"])
+	}
+}
+
+// markedByte is a byte that serializes itself, so a slice of it is an array and not base64.
+type markedByte byte
+
+func (markedByte) MarshalJSON() ([]byte, error) { return []byte(`"x"`), nil }
+
+// ptrMarkedByte is the same with the marshaler on the pointer.
+type ptrMarkedByte byte
+
+func (*ptrMarkedByte) MarshalJSON() ([]byte, error) { return []byte(`"y"`), nil }
+
 // TestPassthrough_FrozenCopyDetachesTypedContainers covers the half of the freeze the
 // authored path cannot reach. yaml.v3 decoding into `any` only ever produces
 // map[string]any and []any, so the two fast paths in deepCopyValue looked complete;
@@ -510,14 +632,27 @@ func TestPassthrough_FrozenCopyDetachesTypedContainers(t *testing.T) {
 		t.Fatalf("Generate emitted %T, want *unstructured.Unstructured", *out[0])
 	}
 
-	if got := u.Object["args"].([]string); !reflect.DeepEqual(got, []string{"before"}) {
+	// The frozen object stays as authored, typed containers included; what is emitted from
+	// it is JSON-shaped (TestPassthrough_EmittedObjectIsJSONShaped), still detached.
+	frozen := cfg.(*components.PassthroughConfig).Object
+	if got := frozen["args"].([]string); !reflect.DeepEqual(got, []string{"before"}) {
+		t.Errorf("frozen args = %#v, want [before] — the []string aliased the caller's slice", got)
+	}
+	if got := frozen["data"].(map[string]string)["k"]; got != "before" {
+		t.Errorf("frozen data[k] = %q, want before — the map[string]string aliased the caller's map", got)
+	}
+	if got := frozen["nested"].([]any)[0].([]string); !reflect.DeepEqual(got, []string{"before"}) {
+		t.Errorf("frozen nested[0] = %#v, want [before] — a typed slice inside an []any aliased through", got)
+	}
+
+	if got := u.Object["args"]; !reflect.DeepEqual(got, []any{"before"}) {
 		t.Errorf("emitted args = %#v, want [before] — the []string aliased the caller's slice", got)
 	}
-	if got := u.Object["data"].(map[string]string)["k"]; got != "before" {
-		t.Errorf("emitted data[k] = %q, want before — the map[string]string aliased the caller's map", got)
+	if got := u.Object["data"]; !reflect.DeepEqual(got, map[string]any{"k": "before"}) {
+		t.Errorf("emitted data = %#v, want k: before — the map[string]string aliased the caller's map", got)
 	}
-	if got := u.Object["nested"].([]any)[0].([]string); !reflect.DeepEqual(got, []string{"before"}) {
-		t.Errorf("emitted nested[0] = %#v, want [before] — a typed slice inside an []any aliased through", got)
+	if got := u.Object["nested"]; !reflect.DeepEqual(got, []any{[]any{"before"}}) {
+		t.Errorf("emitted nested = %#v, want [[before]] — a typed slice inside an []any aliased through", got)
 	}
 
 	nilMap, present := u.Object["nilMap"]
@@ -557,9 +692,12 @@ func TestPassthrough_FrozenCopyKeepsNilsInsideNamedCollections(t *testing.T) {
 	// panicked on the nil element.
 	u := generatePassthrough(t, map[string]any{"object": object}, "ns1")
 
-	m, ok := u.Object["m"].(namedAnyMap)
+	// The copy keeps the named types, and so the nils inside them; what is emitted from
+	// it is the JSON-shaped form (TestPassthrough_EmittedObjectIsJSONShaped), the nils
+	// still in place.
+	m, ok := u.Object["m"].(map[string]any)
 	if !ok {
-		t.Fatalf("emitted m = %T, want namedAnyMap", u.Object["m"])
+		t.Fatalf("emitted m = %T, want map[string]any", u.Object["m"])
 	}
 	if v, present := m["null"]; !present {
 		t.Error(`emitted m dropped the "null" key — SetMapIndex took the zero Value as a delete`)
@@ -570,9 +708,9 @@ func TestPassthrough_FrozenCopyKeepsNilsInsideNamedCollections(t *testing.T) {
 		t.Errorf(`emitted m["present"] = %#v, want "x"`, got)
 	}
 
-	s, ok := u.Object["s"].(namedAnySlice)
+	s, ok := u.Object["s"].([]any)
 	if !ok {
-		t.Fatalf("emitted s = %T, want namedAnySlice", u.Object["s"])
+		t.Fatalf("emitted s = %T, want []any", u.Object["s"])
 	}
 	if len(s) != 2 {
 		t.Fatalf("emitted s has %d elements, want 2", len(s))
