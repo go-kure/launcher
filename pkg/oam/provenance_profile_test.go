@@ -59,6 +59,8 @@ func provProfile() *ClusterProfile {
 		"custom-rule": {Rendering: map[string]any{"timeout": float64(5)}},
 		// no handler, no rule: nothing touches it.
 		"plain": {Rendering: map[string]any{"a": "x", "b": map[string]any{"c": 1}}},
+		// no handler, no rule, but a definition: only the schema step touches it.
+		"definition-only": {Rendering: map[string]any{"timeout": float64(7)}},
 	}}}
 }
 
@@ -67,8 +69,9 @@ func provProfileTransformer() *Transformer {
 	tr.RegisterTrait("custom", &provVADHandler{stubTraitHandler{typ: "custom"}})
 	tr.RegisterTraitLowering(provVADRule{typ: "custom-rule"})
 	tr.SetCapabilityDefs(map[string]*CapabilityDefinition{
-		"custom":      provCapDef("custom"),
-		"custom-rule": provCapDef("custom-rule"),
+		"custom":          provCapDef("custom"),
+		"custom-rule":     provCapDef("custom-rule"),
+		"definition-only": provCapDef("definition-only"),
 	})
 	return tr
 }
@@ -99,6 +102,10 @@ func TestProvenance_ProfileEvaluation(t *testing.T) {
 			"retries": detailHandlerDefault,
 		},
 		"plain": {"a": detailProfile, "b.c": detailProfile},
+		"definition-only": {
+			"timeout": detailProfile,
+			"mode":    detailSchemaDefault,
+		},
 	}
 	for key, w := range want {
 		if got := stamped.Spec.Capabilities[key].detail; !reflect.DeepEqual(got, w) {
