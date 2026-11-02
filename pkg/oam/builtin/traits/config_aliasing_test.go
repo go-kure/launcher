@@ -7,6 +7,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack/stacktest"
 
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
@@ -113,6 +114,30 @@ func TestExternalSecretTrait_GenerationDoesNotShareConfig(t *testing.T) {
 				}}},
 			},
 		})
+}
+
+// The security-context trait decorates a workload. One built context used to go
+// to every container and init container, and its pointers came from the config.
+func TestSecurityContextTrait_GenerationDoesNotShareConfig(t *testing.T) {
+	for _, level := range []string{"restricted", "baseline"} {
+		t.Run(level, func(t *testing.T) {
+			cfg := newWorkerStubConfig(t)
+			cfg.InitContainers = []components.InitContainerConfig{{Name: "init", Image: "init:v1"}}
+			assertTraitGenerationOn(t, stack.NewApplication("worker", "default", cfg),
+				&traits.SecurityContextHandler{}, &oam.Trait{
+					Type: "security-context",
+					Properties: map[string]any{
+						"psaLevel":                 level,
+						"runAsNonRoot":             true,
+						"runAsUser":                1000,
+						"runAsGroup":               1000,
+						"fsGroup":                  1000,
+						"allowPrivilegeEscalation": false,
+						"readOnlyRootFilesystem":   true,
+					},
+				})
+		})
+	}
 }
 
 func TestHTTPRouteTrait_GenerationDoesNotShareConfig(t *testing.T) {

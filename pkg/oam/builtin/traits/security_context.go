@@ -237,14 +237,17 @@ func (s *securityContextSpec) applyToPodSpec(podSpec *corev1.PodSpec) error {
 		}
 	}
 
-	podSpec.SecurityContext = s.buildPodSecurityContext(windows)
+	// The builders put the config's own pointers into what they return, and the
+	// workload leaves the package on objects a caller owns and edits. Each context
+	// is a deep copy, so no two containers, the pod and the config share a value.
+	podSpec.SecurityContext = s.buildPodSecurityContext(windows).DeepCopy()
 
 	containerSC := s.buildContainerSecurityContext(windows)
 	for i := range podSpec.Containers {
-		podSpec.Containers[i].SecurityContext = containerSC
+		podSpec.Containers[i].SecurityContext = containerSC.DeepCopy()
 	}
 	for i := range podSpec.InitContainers {
-		podSpec.InitContainers[i].SecurityContext = containerSC
+		podSpec.InitContainers[i].SecurityContext = containerSC.DeepCopy()
 	}
 	return nil
 }
