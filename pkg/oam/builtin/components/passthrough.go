@@ -1,8 +1,13 @@
 package components
 
 import (
+	"bytes"
+	"encoding"
+	"encoding/base64"
 	"encoding/json"
+	"math"
 	"reflect"
+	"strconv"
 	"strings"
 
 	kureio "github.com/go-kure/kure/pkg/io"
@@ -112,7 +117,7 @@ func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, names
 	// own account (a clusterScoped that contradicts the object's kind, a
 	// namespace on a cluster-scoped object, a workload that sets a field its
 	// API type does not declare) fails the component now and not at generation.
-	if _, err := cfg.emitted(); err != nil {
+	if _, err := cfg.validated(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
@@ -271,8 +276,8 @@ func (c *PassthroughConfig) ComponentName() string { return c.componentName }
 //
 // The object is authored as a map, and the check reads Go types, so an object
 // whose group, version and kind kure's scheme registers is decoded as that kind
-// for the check alone (policyObject); what is emitted stays the authored
-// object. One that cannot be read is refused, not passed: a registered kind
+// for the check alone (policyObject); what is emitted is the authored
+// object's document, in the types of a decoded JSON one (Generate). One that cannot be read is refused, not passed: a registered kind
 // that does not decode, and a workload kind in an API version the scheme does
 // not register.
 //
@@ -284,7 +289,7 @@ func (c *PassthroughConfig) ApplyPolicy(p oam.Policy) error {
 		return nil
 	}
 	c.policy = p
-	u, err := c.emitted()
+	u, err := c.validated()
 	if err != nil {
 		return err
 	}
@@ -312,7 +317,7 @@ func enforcePassthroughPolicy(u *unstructured.Unstructured, p oam.Policy) error 
 // and kind kure's scheme registers comes back as the Go type of its kind,
 // decoded as the manifests component and template delivery decode a document
 // (kure's parser). That decode is the lenient one, so a field the vendored API
-// type does not declare is not read: emitted has already refused a workload or
+// type does not declare is not read: validated has already refused a workload or
 // a claim that sets one, and no other kind is read here beyond what it
 // declares. Any other object comes back unstructured,
 // with the value types a decoded document has: the authored map holds what the
@@ -373,10 +378,11 @@ func policyObject(u *unstructured.Unstructured) (client.Object, error) {
 //
 // For the same reason it holds that copy to the environment policy again, once
 // ApplyPolicy has supplied one: the object checked there and the object emitted
-// here are then the same bytes. A refusal here is the component's
+// here are then the same document (a repeated key in a value that serializes
+// itself is collapsed by the types Generate gives it, after the check). A refusal here is the component's
 // oam.ViolationError, as the transform reports one from ApplyPolicy.
 func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
-	u, err := c.emitted()
+	u, err := c.validated()
 	if err != nil {
 		return nil, err
 	}
@@ -385,14 +391,21 @@ func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, er
 			return nil, oam.NewViolationError(c.componentName, err)
 		}
 	}
+	// Last, so that every check above read the authored values, a value that serializes
+	// itself (a json.RawMessage with a repeated key) included. The emitted object is an
+	// Unstructured, whose DeepCopyObject takes only the types of a decoded JSON document
+	// and panics on any other, so it goes out in those (go-kure/launcher#1162). c.Object
+	// stays as authored.
+	jsonShape(u.Object)
 	out := client.Object(u)
 	return []*client.Object{&out}, nil
 }
 
-// emitted builds the object Generate emits: a validated copy of Object with the
-// metadata defaults stamped on. ApplyPolicy checks the same construction, and
-// ToApplicationConfig builds it once to fail early.
-func (c *PassthroughConfig) emitted() (*unstructured.Unstructured, error) {
+// validated builds the object Generate emits, before Generate gives it the JSON
+// types: a validated copy of Object, as authored, with the metadata defaults
+// stamped on. ApplyPolicy checks the same construction, and ToApplicationConfig
+// builds it once to fail early.
+func (c *PassthroughConfig) validated() (*unstructured.Unstructured, error) {
 	// Only a config that never went through ToApplicationConfig can be here with no
 	// object — the constructor requires a non-empty apiVersion and kind. Emitting a
 	// body consisting solely of the metadata stamped below would be a resource nobody
@@ -401,7 +414,6 @@ func (c *PassthroughConfig) emitted() (*unstructured.Unstructured, error) {
 		return nil, errors.Errorf("passthrough component %q: config has no 'object' — build it with PassthroughHandler.ToApplicationConfig", c.componentName)
 	}
 	obj := deepCopyMap(c.Object)
-
 	if err := validateEmittableObject(c.componentName, obj); err != nil {
 		return nil, err
 	}
@@ -436,6 +448,7 @@ func (c *PassthroughConfig) emitted() (*unstructured.Unstructured, error) {
 	if err := refuseUndeclaredWorkloadFields(u); err != nil {
 		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
 	}
+
 	return u, nil
 }
 
@@ -578,4 +591,153 @@ func copiedValue(v any, t reflect.Type) reflect.Value {
 		return reflect.Zero(t)
 	}
 	return reflect.ValueOf(c)
+}
+
+// jsonShape rewrites m, a copy no one else holds, into the types of a decoded JSON
+// document: map[string]any, []any, string, bool, int64, float64 and nil. An
+// Unstructured's DeepCopyObject (runtime.DeepCopyJSON) takes nothing else and panics on
+// the rest, and the unstructured readers (NestedString, NestedSlice, ...) read the same
+// types. The authored map holds whatever the YAML decoder or a Go caller put there, so
+// the shape is given to what is emitted and the authored object is left as it is.
+func jsonShape(m map[string]any) {
+	for k, v := range m {
+		m[k] = jsonValue(v)
+	}
+}
+
+// jsonValue is the JSON-typed form of v, with the document it serializes to unchanged:
+// an integer is an int64 (a uint64 beyond int64 a json.Number of its digits), a float32
+// the float64 of its shortest decimal form, a named scalar its underlying one, a typed
+// map with string keys a map[string]any, a slice or array an []any, a []byte the base64
+// string encoding/json writes, and a typed nil a null. A value with a form of its own
+// (it marshals itself, or is a struct, a pointer or a map with other keys) is decoded
+// from the JSON it serializes to. A map[string]any and an []any are rewritten in place.
+// A value that does not serialize is returned as it is, for the writer to refuse as it
+// did.
+func jsonValue(v any) any {
+	switch t := v.(type) {
+	case nil, string, bool, int64, float64, json.Number:
+		return v
+	case map[string]any:
+		jsonShape(t)
+		return t
+	case []any:
+		for i, e := range t {
+			t[i] = jsonValue(e)
+		}
+		return t
+	}
+	switch v.(type) {
+	case json.Marshaler, encoding.TextMarshaler:
+		return viaJSON(v)
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Bool:
+		return rv.Bool()
+	case reflect.String:
+		return rv.String()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		u := rv.Uint()
+		if u > math.MaxInt64 {
+			return json.Number(strconv.FormatUint(u, 10)) // its own digits, as authored
+		}
+		return int64(u)
+	case reflect.Float32:
+		f, _ := strconv.ParseFloat(strconv.FormatFloat(rv.Float(), 'g', -1, 32), 64)
+		return f
+	case reflect.Float64:
+		return rv.Float()
+	case reflect.Map:
+		if rv.IsNil() {
+			return nil
+		}
+		if rv.Type().Key().Kind() != reflect.String {
+			return viaJSON(v) // an integer or text-marshaling key is written as a string
+		}
+		out := make(map[string]any, rv.Len())
+		for iter := rv.MapRange(); iter.Next(); {
+			out[iter.Key().String()] = jsonValue(iter.Value().Interface())
+		}
+		return out
+	case reflect.Slice, reflect.Array:
+		if rv.Kind() == reflect.Slice {
+			if rv.IsNil() {
+				return nil
+			}
+			et := rv.Type().Elem()
+			if selfMarshaling(reflect.PointerTo(et)) || et.Kind() == reflect.Struct || et.Kind() == reflect.Array {
+				// The elements of a slice are addressable, and so is whatever they hold, at
+				// any depth, so encoding/json also takes a marshaler on a pointer there; the
+				// element copies below are not addressable.
+				return viaJSON(v)
+			}
+			if et.Kind() == reflect.Uint8 {
+				return base64.StdEncoding.EncodeToString(rv.Bytes())
+			}
+		}
+		out := make([]any, rv.Len())
+		for i := range out {
+			out[i] = jsonValue(rv.Index(i).Interface())
+		}
+		return out
+	case reflect.Struct, reflect.Pointer:
+		return viaJSON(v)
+	}
+	return v
+}
+
+// selfMarshaling reports whether type t has a marshaler encoding/json writes it through
+// (on a pointer type t, one of its element's too).
+func selfMarshaling(t reflect.Type) bool {
+	return t.Implements(reflect.TypeFor[json.Marshaler]()) || t.Implements(reflect.TypeFor[encoding.TextMarshaler]())
+}
+
+// viaJSON is v as the JSON document it serializes to, decoded into the JSON types, for a
+// value that has a form of its own (a json.RawMessage, a time, a quantity, a struct). A
+// value that does not serialize is returned as it is, for the checks and the writer to
+// refuse as they did.
+func viaJSON(v any) any {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return v
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var out any
+	if err := dec.Decode(&out); err != nil {
+		return v
+	}
+	return numbered(out)
+}
+
+// numbered gives the numbers of a document decoded with UseNumber the types of one
+// decoded as the API machinery does: an int64 where the integer fits, a float64 for a
+// fraction or an exponent, and a json.Number, with its own digits, for an integer beyond
+// the int64 range (which the API machinery would round to a float64).
+func numbered(v any) any {
+	switch t := v.(type) {
+	case json.Number:
+		if i, err := t.Int64(); err == nil {
+			return i
+		}
+		if !strings.ContainsAny(t.String(), ".eE") {
+			return t
+		}
+		if f, err := t.Float64(); err == nil {
+			return f
+		}
+		return t
+	case map[string]any:
+		for k, e := range t {
+			t[k] = numbered(e)
+		}
+	case []any:
+		for i, e := range t {
+			t[i] = numbered(e)
+		}
+	}
+	return v
 }

@@ -535,6 +535,30 @@ func TestDecodeManifestDocuments_FieldRecordedBeforeTheRepeatsIsKept(t *testing.
 	}
 }
 
+// TestPassthrough_PolicyReadsTheAuthoredValues: shaping the emitted object collapses a
+// repeated key in a value that serializes itself, so the policy has to read the object
+// before it (go-kure/launcher#1162). Here the first hostNetwork has the wrong type and
+// the last is valid: the object does not decode, and a policy refuses it, as it did
+// before the emitted object was shaped.
+func TestPassthrough_PolicyReadsTheAuthoredValues(t *testing.T) {
+	cfg := &PassthroughConfig{
+		componentName: "web",
+		Namespace:     "demo",
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata":   map[string]any{"name": "web"},
+			"spec":       json.RawMessage(`{"hostNetwork": "bad", "hostNetwork": false, "futureField": true}`),
+		},
+	}
+	if err := cfg.ApplyPolicy(&oam.NoopPolicy{}); err == nil {
+		t.Fatal("ApplyPolicy accepted an object that does not decode")
+	}
+	if _, err := cfg.Generate(nil); err == nil {
+		t.Fatal("Generate emitted an object that does not decode, under a policy")
+	}
+}
+
 // TestPassthrough_RepeatedKeysCannotHideAnUndeclaredField: an authored map
 // holds no key twice, but a value in it that serializes itself can. A Go
 // caller's json.RawMessage with enough repeated keys fills the strict decode's

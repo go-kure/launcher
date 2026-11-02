@@ -12224,7 +12224,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   defaults to the component name when it is absent, empty, **or not a string**, and
   on a namespaced object `metadata.namespace` likewise — so an inline *non-empty
   string* namespace survives untouched, while a non-string one is replaced rather
-  than emitted.
+  than emitted. The values of the emitted object are JSON values (`int64`, `float64`,
+  `json.Number` beyond the `int64` range, `map[string]any`, `[]any`), whatever Go types
+  the authored object held, so the emitted `Unstructured` can be deep-copied
+  (go-kure/launcher#1162); the config's own `Object` keeps the authored values.
 
   **Scope** (go-kure/launcher#794, item 13). Whether the object is namespaced is
   resolved with the precedence `manifests` gives a `scopeOverrides` entry,
