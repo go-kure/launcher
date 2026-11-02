@@ -717,7 +717,7 @@ func (c *IngressConfig) PlatformAnnotations() map[string]string {
 // authored value that differs from the platform's.
 func (c *IngressConfig) annotations() map[string]string {
 	if len(c.platformAnnotations) == 0 {
-		return c.Annotations
+		return maps.Clone(c.Annotations)
 	}
 	merged := make(map[string]string, len(c.Annotations)+len(c.platformAnnotations))
 	maps.Copy(merged, c.Annotations)
