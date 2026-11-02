@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
@@ -101,16 +102,29 @@ func sourceFieldNames(field *ast.Field) []string {
 	return names
 }
 
-// sourceStructs parses the Go files of the package in dir, its tests left out,
-// and visits every struct type they declare, with the comment of its
-// declaration.
-func sourceStructs(t *testing.T, dir string, visit func(typ *ast.TypeSpec, doc *ast.CommentGroup, st *ast.StructType)) {
+// parsedPackages holds the Go files parsedPackageFiles has parsed, by directory.
+var parsedPackages = struct {
+	sync.Mutex
+	byDir map[string][]*ast.File
+}{byDir: map[string][]*ast.File{}}
+
+// parsedPackageFiles parses the Go files of the package in dir, its tests left
+// out, once per directory for the whole test binary: the source of a linked
+// module cannot change while it runs. The files are shared, so a caller reads
+// them and changes none.
+func parsedPackageFiles(t *testing.T, dir string) []*ast.File {
 	t.Helper()
+	parsedPackages.Lock()
+	defer parsedPackages.Unlock()
+	if files, ok := parsedPackages.byDir[dir]; ok {
+		return files
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("read the package in %s: %v", dir, err)
 	}
 	fset := token.NewFileSet()
+	var files []*ast.File
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -120,6 +134,17 @@ func sourceStructs(t *testing.T, dir string, visit func(typ *ast.TypeSpec, doc *
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
 		}
+		files = append(files, file)
+	}
+	parsedPackages.byDir[dir] = files
+	return files
+}
+
+// sourceStructs visits every struct type the Go files of the package in dir
+// declare, its tests left out, with the comment of its declaration.
+func sourceStructs(t *testing.T, dir string, visit func(typ *ast.TypeSpec, doc *ast.CommentGroup, st *ast.StructType)) {
+	t.Helper()
+	for _, file := range parsedPackageFiles(t, dir) {
 		for _, decl := range file.Decls {
 			gen, ok := decl.(*ast.GenDecl)
 			if !ok || gen.Tok != token.TYPE {
