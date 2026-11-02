@@ -915,6 +915,17 @@ type npPeer struct {
 	IPBlock           *networkingv1.IPBlock
 }
 
+// policyPeer builds a NetworkPolicyPeer that owns its selectors and IPBlock.
+// The result leaves the package on an object a caller edits, so it must not
+// share a pointer with the config.
+func (p npPeer) policyPeer() networkingv1.NetworkPolicyPeer {
+	return networkingv1.NetworkPolicyPeer{
+		PodSelector:       p.PodSelector.DeepCopy(),
+		NamespaceSelector: p.NamespaceSelector.DeepCopy(),
+		IPBlock:           p.IPBlock.DeepCopy(),
+	}
+}
+
 type npPort struct {
 	Port     intstr.IntOrString
 	Protocol corev1.Protocol
@@ -950,17 +961,7 @@ func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object
 		for _, rule := range c.Ingress {
 			ingressRule := networkingv1.NetworkPolicyIngressRule{}
 			for _, peer := range rule.From {
-				p := networkingv1.NetworkPolicyPeer{}
-				if peer.PodSelector != nil {
-					p.PodSelector = peer.PodSelector
-				}
-				if peer.NamespaceSelector != nil {
-					p.NamespaceSelector = peer.NamespaceSelector
-				}
-				if peer.IPBlock != nil {
-					p.IPBlock = peer.IPBlock
-				}
-				kubernetes.AddNetworkPolicyIngressPeer(&ingressRule, p)
+				kubernetes.AddNetworkPolicyIngressPeer(&ingressRule, peer.policyPeer())
 			}
 			for _, port := range rule.Ports {
 				proto := port.Protocol
@@ -978,17 +979,7 @@ func (c *NetworkPolicyConfig) Generate(app *stack.Application) ([]*client.Object
 		for _, rule := range c.Egress {
 			egressRule := networkingv1.NetworkPolicyEgressRule{}
 			for _, peer := range rule.To {
-				p := networkingv1.NetworkPolicyPeer{}
-				if peer.PodSelector != nil {
-					p.PodSelector = peer.PodSelector
-				}
-				if peer.NamespaceSelector != nil {
-					p.NamespaceSelector = peer.NamespaceSelector
-				}
-				if peer.IPBlock != nil {
-					p.IPBlock = peer.IPBlock
-				}
-				kubernetes.AddNetworkPolicyEgressPeer(&egressRule, p)
+				kubernetes.AddNetworkPolicyEgressPeer(&egressRule, peer.policyPeer())
 			}
 			for _, port := range rule.Ports {
 				proto := port.Protocol

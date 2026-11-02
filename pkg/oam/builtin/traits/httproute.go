@@ -2,6 +2,7 @@ package traits
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"time"
 
@@ -1163,7 +1164,8 @@ type BackendRef struct {
 func (c *HTTPRouteConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	route := kubernetes.CreateHTTPRoute(routingObjectNameOr(c.objectName, app), app.Namespace)
 	route.Labels = componentLabels(c.componentName)
-	route.Annotations = c.Annotations
+	// A map per result: the config keeps c.Annotations, and the caller owns the route.
+	route.Annotations = maps.Clone(c.Annotations)
 
 	for _, ref := range c.ParentRefs {
 		pr := gatewayv1.ParentReference{
