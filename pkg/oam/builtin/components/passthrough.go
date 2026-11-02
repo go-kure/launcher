@@ -594,7 +594,8 @@ func copiedValue(v any, t reflect.Type) reflect.Value {
 }
 
 // jsonShape rewrites m, a copy no one else holds, into the types of a decoded JSON
-// document: map[string]any, []any, string, bool, int64, float64 and nil. An
+// document: map[string]any, []any, string, bool, int64, float64, nil and json.Number (an
+// integer beyond the int64 range, with its own digits). An
 // Unstructured's DeepCopyObject (runtime.DeepCopyJSON) takes nothing else and panics on
 // the rest, and the unstructured readers (NestedString, NestedSlice, ...) read the same
 // types. The authored map holds whatever the YAML decoder or a Go caller put there, so
@@ -685,6 +686,9 @@ func jsonValue(v any) any {
 		return out
 	case reflect.Struct, reflect.Pointer:
 		return viaJSON(v)
+	case reflect.Invalid, reflect.Complex64, reflect.Complex128, reflect.Chan, reflect.Func,
+		reflect.Interface, reflect.UnsafePointer:
+		// None of these serializes: left as it is (go-kure/launcher#1166).
 	}
 	return v
 }
