@@ -409,8 +409,12 @@ func provAllocApp() *Application {
 
 // TestProvenance_ZeroCostOff: the plain path allocates what it did before the
 // recorder existed (test 15). The handlers are ones that exist on origin/main, so
-// this same test body measured the baseline there.
+// this same test body measured the baseline there. The race detector changes
+// allocation counts, so the exact count is checked only in a build without it.
 func TestProvenance_ZeroCostOff(t *testing.T) {
+	if raceEnabled {
+		t.Skip("allocation counts differ under the race detector")
+	}
 	caps := map[string]CapabilityBinding{"ingress": rend(map[string]any{"tls": map[string]any{"enabled": true, "issuer": "x"}})}
 	tr := NewTransformer(
 		map[string]ComponentHandler{"web": &pipelineComponentHandler{typ: "web"}},
