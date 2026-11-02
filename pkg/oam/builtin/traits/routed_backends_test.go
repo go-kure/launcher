@@ -463,6 +463,58 @@ func TestRoutedBackends_SelfRouteNotTheGroupsService(t *testing.T) {
 	}
 }
 
+// A route to the routing component's own Service name, when another component
+// owns a Service of that name (a `service` with an objectName), lands on that
+// component's pods: the row names it as owner and matches the port against it.
+// Every routing trait that reaches the self row (ingress and httproute, the two
+// that report BackendPorts) does the same.
+func TestRoutedBackends_SelfNamedRouteToAnotherComponentsService(t *testing.T) {
+	traitsByName := map[string]oam.Trait{
+		"ingress": {Type: "ingress", Properties: map[string]any{
+			"servicePort": 80,
+			"rules":       []any{map[string]any{"host": "api.example.com", "paths": []any{map[string]any{"path": "/"}}}},
+		}},
+		"httproute": {Type: "httproute", Properties: map[string]any{
+			"servicePort": 80,
+			"parentRefs":  []any{map[string]any{"name": "gw"}},
+			"rules":       []any{map[string]any{}},
+		}},
+	}
+	for name, trait := range traitsByName {
+		t.Run(name, func(t *testing.T) {
+			api := oam.Component{
+				Name:       "api",
+				Type:       "deployment",
+				Properties: map[string]any{"image": "ghcr.io/example/api:1.0"},
+				Traits:     []oam.Trait{trait},
+			}
+			front := oam.Component{
+				Name: "front",
+				Type: "service",
+				Properties: map[string]any{
+					"objectName": "api",
+					"selector":   map[string]any{"app": "api-server"},
+					"ports":      []any{map[string]any{"name": "http", "port": 80, "targetPort": 8080}},
+				},
+			}
+			got := routedBackends(t, routedTransformer(), routedApp(api, front), nil)
+			if len(got) != 1 {
+				t.Fatalf("rows = %+v, want one", got)
+			}
+			row := got[0]
+			if row.Component != "api" || row.Service != "api" || row.Owner != "front" {
+				t.Errorf("component %q service %q owner %q, want api, api, front", row.Component, row.Service, row.Owner)
+			}
+			if row.Pods.Kind != oam.RoutedPodsSelector || row.Pods.Selector == nil || row.Pods.Selector.MatchLabels["app"] != "api-server" {
+				t.Errorf("pods %+v, want the front Service's selector", row.Pods)
+			}
+			if len(row.Ports) != 1 || row.Ports[0].Status != oam.RoutedPortMatched || len(row.Ports[0].TargetPorts) != 1 || row.Ports[0].TargetPorts[0].IntVal != 8080 {
+				t.Errorf("ports %+v, want port 80 matched to target port 8080", row.Ports)
+			}
+		})
+	}
+}
+
 // A route that names another Service of its own component, here the group's
 // Service under a name the consumer chose, is reported like any other route.
 func TestRoutedBackends_SiblingServiceNamedApart(t *testing.T) {
