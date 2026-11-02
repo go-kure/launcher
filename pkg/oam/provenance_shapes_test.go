@@ -15,6 +15,20 @@ type nanFunc struct {
 	F func()
 }
 
+// shapeSpec is a Go-built property value with exported fields that hold a scalar, a
+// slice, a map and a pointer.
+type shapeSpec struct {
+	Replicas int
+	Tags     []string
+	Opts     map[string]string
+	Next     *shapeSpec
+}
+
+// shapeHidden holds its collection in an unexported field, which a snapshot cannot copy.
+type shapeHidden struct {
+	tags []string
+}
+
 // shapeSteps builds the snapshots of a profile rendering whose schema step changed
 // nothing, the way evaluateProfile does.
 func shapeSteps(profile map[string]any) defaultSteps {
@@ -218,6 +232,118 @@ func TestProvenance_ValueShapesKeepOrigin(t *testing.T) {
 					t.Fatalf("sources = %v, want %v", rec.entries, tc.want)
 				}
 			})
+		}
+	})
+}
+
+// A handler may change a Go-built value in place and hand the same value back. The
+// snapshot taken before the step must not move with it, so the change is seen through a
+// pointer and through an exported struct field that holds a collection or a pointer.
+func TestProvenance_InPlaceChangeKeepsOrigin(t *testing.T) {
+	type tc struct {
+		name string
+		// setup returns the profile rendering, the rendering the step leaves, and the
+		// in-place change the step makes between the two snapshots.
+		setup func() (profile, final map[string]any, mutate func())
+		want  string
+	}
+	cases := []tc{
+		{"pointer to int, changed in place", func() (map[string]any, map[string]any, func()) {
+			n := 1
+			return map[string]any{"v": &n}, map[string]any{"v": &n}, func() { n = 2 }
+		}, detailHandlerDefault},
+		{"pointer to struct, scalar field changed", func() (map[string]any, map[string]any, func()) {
+			p := &shapeSpec{Replicas: 1}
+			return map[string]any{"v": p}, map[string]any{"v": p}, func() { p.Replicas = 3 }
+		}, detailHandlerDefault},
+		{"struct value, slice field changed in place", func() (map[string]any, map[string]any, func()) {
+			v := shapeSpec{Tags: []string{"a"}}
+			return map[string]any{"v": v}, map[string]any{"v": v}, func() { v.Tags[0] = "b" }
+		}, detailHandlerDefault},
+		{"struct value, map field changed in place", func() (map[string]any, map[string]any, func()) {
+			v := shapeSpec{Opts: map[string]string{"k": "a"}}
+			return map[string]any{"v": v}, map[string]any{"v": v}, func() { v.Opts["k"] = "b" }
+		}, detailHandlerDefault},
+		{"pointer to struct, slice field changed in place", func() (map[string]any, map[string]any, func()) {
+			p := &shapeSpec{Tags: []string{"a"}}
+			return map[string]any{"v": p}, map[string]any{"v": p}, func() { p.Tags[0] = "b" }
+		}, detailHandlerDefault},
+		{"pointer held in a map, pointee changed", func() (map[string]any, map[string]any, func()) {
+			n := 1
+			return map[string]any{"m": map[string]*int{"k": &n}}, map[string]any{"m": map[string]*int{"k": &n}}, func() { n = 2 }
+		}, detailHandlerDefault},
+		{"pointer cycle, field changed through the cycle", func() (map[string]any, map[string]any, func()) {
+			p := &shapeSpec{Replicas: 1}
+			p.Next = p
+			return map[string]any{"v": p}, map[string]any{"v": p}, func() { p.Next.Replicas = 2 }
+		}, detailHandlerDefault},
+		{"pointer to int, untouched", func() (map[string]any, map[string]any, func()) {
+			n := 1
+			return map[string]any{"v": &n}, map[string]any{"v": &n}, func() {}
+		}, detailProfile},
+		{"pointer to struct, untouched", func() (map[string]any, map[string]any, func()) {
+			p := &shapeSpec{Replicas: 1, Tags: []string{"a"}, Opts: map[string]string{"k": "a"}}
+			return map[string]any{"v": p}, map[string]any{"v": p}, func() {}
+		}, detailProfile},
+		{"pointer cycle, untouched", func() (map[string]any, map[string]any, func()) {
+			p := &shapeSpec{Replicas: 1}
+			p.Next = p
+			return map[string]any{"v": p}, map[string]any{"v": p}, func() {}
+		}, detailProfile},
+		{"pointer replaced by another with an equal value", func() (map[string]any, map[string]any, func()) {
+			a, b := 1, 1
+			return map[string]any{"v": &a}, map[string]any{"v": &b}, func() {}
+		}, detailProfile},
+		{"pointer replaced by one with a different value", func() (map[string]any, map[string]any, func()) {
+			a, b := 1, 2
+			return map[string]any{"v": &a}, map[string]any{"v": &b}, func() {}
+		}, detailHandlerDefault},
+		{"nan field in a pointee, untouched", func() (map[string]any, map[string]any, func()) {
+			p := &nanFunc{N: math.NaN()}
+			return map[string]any{"v": p}, map[string]any{"v": p}, func() {}
+		}, detailProfile},
+		{"struct with a nil pointer field, untouched", func() (map[string]any, map[string]any, func()) {
+			v := shapeSpec{Replicas: 1}
+			return map[string]any{"v": v}, map[string]any{"v": v}, func() {}
+		}, detailProfile},
+		{
+			// The documented limit: an unexported field is not copied, so a change to
+			// what it holds in place reads as no change.
+			"unexported slice field changed in place (documented limit)",
+			func() (map[string]any, map[string]any, func()) {
+				v := shapeHidden{tags: []string{"a"}}
+				return map[string]any{"v": v}, map[string]any{"v": v}, func() { v.tags[0] = "b" }
+			}, detailProfile,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			profile, final, mutate := c.setup()
+			steps := shapeSteps(profile)
+			mutate()
+			got := steps.detail(final)
+			if len(got) != 1 {
+				t.Fatalf("detail = %v, want one leaf", got)
+			}
+			for path, d := range got {
+				if d != c.want {
+					t.Fatalf("detail[%s] = %q, want %q", path, d, c.want)
+				}
+			}
+		})
+	}
+
+	t.Run("filler changes a pointee in place", func(t *testing.T) {
+		n := 1
+		props := map[string]any{"v": &n}
+		rec := &ownerRecorder{entries: map[string]Source{}}
+		rec.authored(props)
+		before := indexOf(props)
+		n = 2
+		rec.nestedFill(before, map[string]any{"v": &n}, map[string]struct{}{"k": {}})
+		want := map[string]Source{"v": {Kind: SourceCapability, Ref: "k"}}
+		if !reflect.DeepEqual(rec.entries, want) {
+			t.Fatalf("sources = %v, want %v", rec.entries, want)
 		}
 	})
 }

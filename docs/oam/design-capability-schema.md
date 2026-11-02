@@ -264,9 +264,10 @@ The provenance report has one documented limit. Values that a Go caller or handl
 in shapes YAML or JSON cannot express (a NaN, a map with non-string keys, a func or chan
 field, a collection re-typed from the one it was given) may report a less specific
 source, for example a missing `Detail` or a filler's capability key in place of the
-original one. A pointer, or a struct that holds a collection, is snapshotted by
-reference, so a handler that changes what it points to in place reads as having left it
-unchanged.
+original one. A pointer, and the exported fields of a struct, are copied for the
+comparison, so a handler that changes what a pointer points to in place is seen. An
+unexported field, a func and a chan are compared as they are, so a change made in place to
+what an unexported field holds reads as having left it unchanged.
 
 ---
 

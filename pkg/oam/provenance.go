@@ -222,9 +222,10 @@ func recordNodes(path string, v any, onPath map[collectionID]bool, out map[strin
 
 // canonicalValue returns a copy of v in canonical form: a map with string keys is a
 // map[string]any, any other map a map[any]any, a slice or array a []any, all the way
-// down and through interface values; a null stays a null. Any other value, a struct or
-// pointer included, is kept as it is. A collection that contains itself is not entered
-// a second time: where it is met again it is kept as it is, so the walk ends.
+// down and through interface values; a null stays a null. A pointer or a struct is deep
+// copied with its types kept (copyTyped), so a change made in place afterwards does not
+// reach the copy. Any other value is kept as it is. A collection that contains itself is
+// not entered a second time: where it is met again it is kept as it is, so the walk ends.
 func canonicalValue(v any) any {
 	return canonicalWalk(reflect.ValueOf(v), map[collectionID]bool{})
 }
@@ -278,8 +279,98 @@ func canonicalWalk(rv reflect.Value, onPath map[collectionID]bool) any {
 		return canonicalElements(rv, onPath)
 	case reflect.Array:
 		return canonicalElements(rv, onPath)
+	case reflect.Pointer, reflect.Struct:
+		return copyTyped(rv, map[copyKey]reflect.Value{}).Interface()
 	default:
 		return rv.Interface()
+	}
+}
+
+// copyKey names a pointer, map or slice already copied by copyTyped. A pointer to a
+// struct and a pointer to its first field share an address, so the type is part of it.
+type copyKey struct {
+	typ  reflect.Type
+	addr uintptr
+	n    int
+}
+
+// copyTyped returns a deep copy of rv that keeps every type, so an in-place change to
+// rv afterwards does not reach the copy. It follows pointers, interface values and the
+// exported fields of a struct, and copies the slices, arrays and maps it meets (a map's
+// keys are kept, as a pointer key is its identity). A pointer, map or slice met again,
+// through a cycle or a second path, is the copy already made, so the walk ends and the
+// copy has the shape of the original.
+//
+// An unexported field is kept as it is: reflect cannot set it. A func, a chan and an
+// unsafe pointer are kept as they are too.
+func copyTyped(rv reflect.Value, copies map[copyKey]reflect.Value) reflect.Value {
+	switch rv.Kind() {
+	case reflect.Interface:
+		if rv.IsNil() {
+			return rv
+		}
+		out := reflect.New(rv.Type()).Elem()
+		out.Set(copyTyped(rv.Elem(), copies))
+		return out
+	case reflect.Pointer:
+		if rv.IsNil() {
+			return rv
+		}
+		key := copyKey{typ: rv.Type(), addr: rv.Pointer()}
+		if c, ok := copies[key]; ok {
+			return c
+		}
+		out := reflect.New(rv.Type().Elem())
+		copies[key] = out
+		out.Elem().Set(copyTyped(rv.Elem(), copies))
+		return out
+	case reflect.Struct:
+		out := reflect.New(rv.Type()).Elem()
+		out.Set(rv)
+		for i := range rv.NumField() {
+			if f := out.Field(i); f.CanSet() {
+				f.Set(copyTyped(rv.Field(i), copies))
+			}
+		}
+		return out
+	case reflect.Slice:
+		if rv.IsNil() {
+			return rv
+		}
+		key := copyKey{typ: rv.Type(), addr: rv.Pointer(), n: rv.Len()}
+		if c, ok := copies[key]; ok && rv.Len() > 0 {
+			return c
+		}
+		out := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
+		if rv.Len() > 0 {
+			copies[key] = out
+		}
+		for i := range rv.Len() {
+			out.Index(i).Set(copyTyped(rv.Index(i), copies))
+		}
+		return out
+	case reflect.Array:
+		out := reflect.New(rv.Type()).Elem()
+		for i := range rv.Len() {
+			out.Index(i).Set(copyTyped(rv.Index(i), copies))
+		}
+		return out
+	case reflect.Map:
+		if rv.IsNil() {
+			return rv
+		}
+		key := copyKey{typ: rv.Type(), addr: rv.Pointer()}
+		if c, ok := copies[key]; ok {
+			return c
+		}
+		out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
+		copies[key] = out
+		for it := rv.MapRange(); it.Next(); {
+			out.SetMapIndex(it.Key(), copyTyped(it.Value(), copies))
+		}
+		return out
+	default:
+		return rv
 	}
 }
 
