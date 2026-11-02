@@ -2255,7 +2255,7 @@ field, so serialization ignores it):
 
 | Detail | Meaning |
 |--------|---------|
-| `profile` | The value is in the profile document. A binding no handler or rule claims is all `profile`. |
+| `profile` | The value is in the profile document. A binding no handler, rule or applicable `CapabilityDefinition` claims is all `profile`. |
 | `schema-default` | A `CapabilityDefinition` default for a key the profile left out or set to null. |
 | `handler-default` | The trait handler's or lowering rule's `ValidateAndApplyDefaults` added the leaf or changed its value (an empty `issuerRef.kind` rewritten to `ClusterIssuer` is the handler's, not the profile's). |
 
