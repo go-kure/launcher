@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -543,7 +544,6 @@ func TestApplyStrategicMergePatch_TypedResultKeepsNumbers(t *testing.T) {
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
 			"metadata":   map[string]any{"name": "test"},
-			"data":       map[string]any{"big": "kept"},
 		},
 	}
 	patch := map[string]any{
@@ -570,6 +570,50 @@ func TestApplyStrategicMergePatch_TypedResultKeepsNumbers(t *testing.T) {
 	}
 	// Every value must be one DeepCopy accepts.
 	_ = resource.DeepCopy()
+}
+
+// TestApplyStrategicPatchesToDocument_BigIntegerWrittenAsNumber checks that an
+// integer beyond the int64 range, which the merged object holds as a
+// json.Number, is written to the YAML document as a plain number. yaml.v3 would
+// quote the json.Number as a string.
+func TestApplyStrategicPatchesToDocument_BigIntegerWrittenAsNumber(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+	docSet, err := LoadResourcesWithStructure(strings.NewReader(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config
+  generation: 18446744073709551615
+`))
+	if err != nil {
+		t.Fatalf("LoadResourcesWithStructure: %v", err)
+	}
+	doc := docSet.Documents[0]
+
+	patches := []StrategicPatch{{Patch: map[string]any{
+		"metadata": map[string]any{"labels": map[string]any{"a": "b"}},
+	}}}
+	if err := doc.ApplyStrategicPatchesToDocument(patches, lookup); err != nil {
+		t.Fatalf("ApplyStrategicPatchesToDocument: %v", err)
+	}
+
+	got, found, err := unstructured.NestedFieldNoCopy(doc.Resource.Object, "metadata", "generation")
+	if err != nil || !found {
+		t.Fatalf("generation not found: %v", err)
+	}
+	if got != json.Number("18446744073709551615") {
+		t.Errorf("generation = %v (%T), want json.Number 18446744073709551615", got, got)
+	}
+
+	out, err := yaml.Marshal(doc.Node)
+	if err != nil {
+		t.Fatalf("marshal node: %v", err)
+	}
+	if !strings.Contains(string(out), "generation: 18446744073709551615\n") {
+		t.Errorf("generation not written as a plain number:\n%s", out)
+	}
 }
 
 // TestApplyStrategicMergePatch_TypedUnserializableLeavesResource checks that a

@@ -67,8 +67,8 @@ func applyTypedSMP(resource *unstructured.Unstructured, patch map[string]any, ty
 // jsonTyped returns m as the JSON document it serializes to, decoded into the
 // types an unstructured object may hold: map[string]any, []any, string, bool,
 // nil and numbers. A number is an int64 where the integer fits, a float64 for a
-// fraction or an exponent, and a json.Number, with its own digits, for an
-// integer beyond the int64 range, which a float64 would round.
+// fraction or an exponent that a float64 holds, and a json.Number, with its own
+// digits, for an integer beyond the int64 range, which a float64 would round.
 func jsonTyped(m map[string]any) (map[string]any, error) {
 	raw, err := json.Marshal(m)
 	if err != nil {
