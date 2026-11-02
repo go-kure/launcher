@@ -188,19 +188,25 @@ func routedBackendsOf(reg *npSynthesisRegistry, components map[string]componentE
 		if own == nil {
 			own = components[router].app
 		}
-		// The router's routing target describes the Service its component owns. A
-		// component whose Service is named apart from the application the trait ran
-		// on (a sibling group's, under a consumer's Naming hook) routes here to
-		// another Service, whose pods the target does not describe: its ports stay
-		// unchecked.
 		svc := routingServiceName(own, router)
-		describes := true
-		if app := components[router].app; app != nil {
+		// Whichever component the registry says owns the Service is its owner, which
+		// is not always the router: a trait that names another component's Service
+		// lands on that component's pods, and that component's routing target
+		// describes the Service.
+		owner, describes := router, true
+		if o, ok := reg.serviceToComponent[svc]; ok {
+			owner = o
+		} else if app := components[router].app; app != nil {
+			// No component owns the Service. The router's routing target describes the
+			// Service its component owns; a component whose Service is named apart from
+			// the application the trait ran on (a sibling group's, under a consumer's
+			// Naming hook) routes here to another Service, whose pods the target does
+			// not describe: its ports stay unchecked.
 			if owned, ok := componentServiceName(app); ok {
 				describes = owned == svc
 			}
 		}
-		rows = append(rows, resolveRoutedBackend(reg, router, sub.Name, svc, router, describes, ports, nil))
+		rows = append(rows, resolveRoutedBackend(reg, router, sub.Name, svc, owner, describes, ports, nil))
 	}
 	bt, ok := sub.Config.(backendRefTargetCollector)
 	if !ok {

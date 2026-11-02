@@ -598,8 +598,9 @@ configured. It is read-only and works on the whole document, not on one componen
 
 - **One row per routing sub-application and Service** (`RoutedBackend`): `Component` carries the
   trait, `Application` is the sub-application's name, `Service` the Service the route names, and
-  `Owner` the component that owns it (the routing component itself for a route to its own
-  Service; empty when no component owns it). A route to the component's own Service gets a row
+  `Owner` the component that owns it (empty when no component owns it). A route to the
+  component's own Service names the routing component, unless another component declares a
+  Service of that name: then that component is the owner and its Service answers the ports. A route to the component's own Service gets a row
   only when it routes a port to it; a route that names only other components' Services gets no
   such row. For a route to the component's own Service, `Service` is the Service name the
   routing trait resolves for the application it ran on: that application's backend Service name,
