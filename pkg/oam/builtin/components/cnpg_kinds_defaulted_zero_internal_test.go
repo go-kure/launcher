@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
@@ -101,7 +102,28 @@ func cnpgCRDFile(moduleDir, plural string) string {
 
 // linkedModuleDir is cnpgModuleDir for any module: the directory of the
 // version the test binary links, read from the module cache with GOPROXY=off.
+// A directory is read once per module for the whole test binary: the linked
+// version cannot change while it runs.
 func linkedModuleDir(t *testing.T, modulePath string) string {
+	t.Helper()
+	linkedModuleDirs.Lock()
+	defer linkedModuleDirs.Unlock()
+	if dir, ok := linkedModuleDirs.byModule[modulePath]; ok {
+		return dir
+	}
+	dir := listLinkedModuleDir(t, modulePath)
+	linkedModuleDirs.byModule[modulePath] = dir
+	return dir
+}
+
+// linkedModuleDirs holds the directories linkedModuleDir has read.
+var linkedModuleDirs = struct {
+	sync.Mutex
+	byModule map[string]string
+}{byModule: map[string]string{}}
+
+// listLinkedModuleDir asks the go command for the directory of a linked module.
+func listLinkedModuleDir(t *testing.T, modulePath string) string {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), "go", "list", "-m", "-f", "{{.Dir}}", modulePath)
 	cmd.Env = append(os.Environ(), "GOPROXY=off")

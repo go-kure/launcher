@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -70,6 +71,19 @@ type crdCreate struct {
 	schema     apiservervalidation.SchemaValidator
 	// dropsStatus says the version has the status subresource.
 	dropsStatus bool
+	// rules compiles the expression rules of structural, once: the API server
+	// compiles them when it starts serving the CRD, not on each create.
+	rulesOnce sync.Once
+	rules     *cel.Validator
+}
+
+// ruleValidator returns the validator of the expression rules of the schema,
+// compiled on first use.
+func (c *crdCreate) ruleValidator() *cel.Validator {
+	c.rulesOnce.Do(func() {
+		c.rules = cel.NewValidator(c.structural, true, celconfig.PerCallLimit)
+	})
+	return c.rules
 }
 
 // crdCreateOf prepares the version of crd as the API server serves it. It
@@ -310,7 +324,7 @@ func (c *crdCreate) create(t *testing.T, doc map[string]any) crdAnswer {
 		}
 	}
 	if !answer.skipped {
-		answer.rules, _ = cel.NewValidator(c.structural, true, celconfig.PerCallLimit).Validate(ctx, nil, c.structural, object, nil, celconfig.RuntimeCELCostBudget)
+		answer.rules, _ = c.ruleValidator().Validate(ctx, nil, c.structural, object, nil, celconfig.RuntimeCELCostBudget)
 	}
 	return answer
 }
