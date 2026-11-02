@@ -1,7 +1,9 @@
 package patch
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -51,8 +53,65 @@ func applyTypedSMP(resource *unstructured.Unstructured, patch map[string]any, ty
 		return errors.Wrap(err, "strategic merge patch failed")
 	}
 
-	resource.Object = merged
+	// The merged map keeps the Go types of its inputs, such as a plain int, which
+	// DeepCopy refuses. Give it the types of a decoded JSON document first.
+	typed, err := jsonTyped(merged)
+	if err != nil {
+		return errors.Wrap(err, "failed to normalize strategic merge patch result")
+	}
+
+	resource.Object = typed
 	return nil
+}
+
+// jsonTyped returns m as the JSON document it serializes to, decoded into the
+// types an unstructured object may hold: map[string]any, []any, string, bool,
+// nil and numbers. A number is an int64 where the integer fits, a float64 for a
+// fraction or an exponent, and a json.Number, with its own digits, for an
+// integer beyond the int64 range, which a float64 would round.
+func jsonTyped(m map[string]any) (map[string]any, error) {
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var out map[string]any
+	if err := dec.Decode(&out); err != nil {
+		return nil, err
+	}
+	for k, v := range out {
+		out[k] = numbered(v)
+	}
+	return out, nil
+}
+
+// numbered gives the json.Number values of a document decoded with UseNumber
+// the types described on jsonTyped.
+func numbered(v any) any {
+	switch t := v.(type) {
+	case json.Number:
+		if i, err := t.Int64(); err == nil {
+			return i
+		}
+		if !strings.ContainsAny(t.String(), ".eE") {
+			return t
+		}
+		if f, err := t.Float64(); err == nil {
+			return f
+		}
+		return t
+	case map[string]any:
+		for k, e := range t {
+			t[k] = numbered(e)
+		}
+	case []any:
+		for i, e := range t {
+			t[i] = numbered(e)
+		}
+	}
+	return v
 }
 
 // applyJSONMergePatch applies RFC 7386 JSON merge patch as a fallback for

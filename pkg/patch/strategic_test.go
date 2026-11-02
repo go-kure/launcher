@@ -1,7 +1,9 @@
 package patch
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -446,6 +448,152 @@ func TestApplyTypedSMP_OriginalMapNotMutated(t *testing.T) {
 	}
 	if fmt.Sprintf("%v", patchedReplicas) != "5" {
 		t.Errorf("patched replicas = %v, want 5", patchedReplicas)
+	}
+}
+
+// TestApplyStrategicMergePatch_TypedResultDeepCopies is the reproducer of
+// go-kure/launcher#1164: plain Go ints in the resource and in the patch used to
+// stay ints in the merged object, and DeepCopy panicked on them.
+func TestApplyStrategicMergePatch_TypedResultDeepCopies(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+
+	resource := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]any{"name": "test"},
+			"spec": map[string]any{
+				"minReadySeconds": 3,
+				"template": map[string]any{
+					"spec": map[string]any{
+						"containers": []any{
+							map[string]any{
+								"name":  "app",
+								"ports": []any{map[string]any{"containerPort": 80}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	patch := map[string]any{
+		"spec": map[string]any{
+			"revisionHistoryLimit": 5,
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"ports": []any{map[string]any{"containerPort": 80, "hostPort": 8080}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := ApplyStrategicMergePatch(resource, patch, lookup); err != nil {
+		t.Fatalf("ApplyStrategicMergePatch: %v", err)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("DeepCopy panicked: %v", r)
+		}
+	}()
+	copied := resource.DeepCopy()
+
+	for _, path := range [][]string{
+		{"spec", "minReadySeconds"},
+		{"spec", "revisionHistoryLimit"},
+	} {
+		got, found, err := unstructured.NestedFieldNoCopy(copied.Object, path...)
+		if err != nil || !found {
+			t.Fatalf("%v not found in the copy: %v", path, err)
+		}
+		if _, ok := got.(int64); !ok {
+			t.Errorf("%v = %v (%T), want an int64", path, got, got)
+		}
+	}
+	ports, found, err := unstructured.NestedSlice(copied.Object, "spec", "template", "spec", "containers")
+	if err != nil || !found || len(ports) != 1 {
+		t.Fatalf("containers not found in the copy: %v", err)
+	}
+	port := ports[0].(map[string]any)["ports"].([]any)[0].(map[string]any)
+	if port["containerPort"] != int64(80) || port["hostPort"] != int64(8080) {
+		t.Errorf("port = %v, want containerPort 80 and hostPort 8080 as int64", port)
+	}
+}
+
+// TestApplyStrategicMergePatch_TypedResultKeepsNumbers pins the number types of
+// the merged object: an int64 where the integer fits, a float64 for a fraction,
+// and a json.Number with its own digits for an integer beyond the int64 range.
+func TestApplyStrategicMergePatch_TypedResultKeepsNumbers(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+
+	resource := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata":   map[string]any{"name": "test"},
+			"data":       map[string]any{"big": "kept"},
+		},
+	}
+	patch := map[string]any{
+		"metadata": map[string]any{
+			"annotations": map[string]any{"fraction": 0.5},
+			"generation":  int64(math.MaxInt64),
+			"extra":       uint64(math.MaxUint64),
+		},
+	}
+
+	if err := ApplyStrategicMergePatch(resource, patch, lookup); err != nil {
+		t.Fatalf("ApplyStrategicMergePatch: %v", err)
+	}
+
+	meta := resource.Object["metadata"].(map[string]any)
+	if got := meta["annotations"].(map[string]any)["fraction"]; got != float64(0.5) {
+		t.Errorf("fraction = %v (%T), want float64 0.5", got, got)
+	}
+	if got := meta["generation"]; got != int64(math.MaxInt64) {
+		t.Errorf("generation = %v (%T), want int64 max", got, got)
+	}
+	if got := meta["extra"]; got != json.Number("18446744073709551615") {
+		t.Errorf("extra = %v (%T), want json.Number 18446744073709551615", got, got)
+	}
+	// Every value must be one DeepCopy accepts.
+	_ = resource.DeepCopy()
+}
+
+// TestApplyStrategicMergePatch_TypedUnserializableLeavesResource checks that a
+// value that cannot be serialized is an error and leaves the resource as it was.
+func TestApplyStrategicMergePatch_TypedUnserializableLeavesResource(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+
+	resource := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata":   map[string]any{"name": "test"},
+		},
+	}
+	patch := map[string]any{"data": map[string]any{"bad": make(chan int)}}
+
+	if err := ApplyStrategicMergePatch(resource, patch, lookup); err == nil {
+		t.Fatal("ApplyStrategicMergePatch: want an error for an unserializable value")
+	}
+	if _, found := resource.Object["data"]; found {
+		t.Errorf("resource changed on error: %v", resource.Object)
 	}
 }
 
