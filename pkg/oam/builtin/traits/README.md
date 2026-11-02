@@ -588,9 +588,12 @@ routing component does not own: every path/backendRef that names no backend of i
 and synthesis treats it as an external backend. The allow is retargeted onto the component that owns
 that Service, on `servicePort`, and the routing component gets none. When no component owns it, it
 takes the bare-external-Service path below and — since a trait-level Service carries no
-`backendSelector` — stays authored. "Own" is decided from the component alone (its
-`BackendServiceName()`, else its component name), so `servicePort` without `serviceName`, or a
-`serviceName` equal to the component's own Service, keeps the allow on the routing component.
+`backendSelector` — stays authored. "Own" is the Service of the component the trait runs on (its
+`BackendServiceName()`, else its component name). A route to that Service (`servicePort` without
+`serviceName`, or a `serviceName` equal to it) is allowed on the pods of whichever component owns
+that Service: the routing component when it does, otherwise the owner, on the owner's target
+ports (go-kure/launcher#1157). A route that names a Service the routing component owns under a
+different name is allowed on the routing component's pods, not skipped.
 
 A backend that names a **bare external Service** (no owning OAM component in the bundle) cannot be
 resolved to a selector by name. To synthesize an allow for it, add an explicit authorable

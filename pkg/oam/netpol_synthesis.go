@@ -534,6 +534,31 @@ type backendRefTargetCollector interface {
 	BackendTargets() []netpol.BackendTarget
 }
 
+// ownServiceReporter is optionally implemented by routing trait configs (IngressConfig,
+// HTTPRouteConfig) to name the Service their BackendPorts address: the Service of the application
+// the trait ran on. Without it the ports are assumed to belong to the routing component
+// (go-kure/launcher#1157).
+type ownServiceReporter interface {
+	OwnServiceName() string
+}
+
+// otherServiceOwner resolves the component owning Service svc when that is not router, with its
+// placement. It reports false for an empty name, an unowned Service or a router that owns it.
+func (r *npSynthesisRegistry) otherServiceOwner(svc, router string) (string, componentPlacement, bool) {
+	if svc == "" {
+		return "", componentPlacement{}, false
+	}
+	owner, found := r.serviceToComponent[svc]
+	if !found || owner == router {
+		return "", componentPlacement{}, false
+	}
+	pl, ok := r.componentPlacement[owner]
+	if !ok || pl.bundle == nil {
+		return "", componentPlacement{}, false
+	}
+	return owner, pl, true
+}
+
 // synthesizeForBundle accumulates one leaf bundle's routing collectors into the cluster-wide
 // registry (reg): each component's own collectors, plus rules injected onto a backend component
 // (resolved cluster-wide, landing on the backend's OWN bundle — go-kure/launcher#242) or onto an external bare
@@ -550,11 +575,26 @@ func synthesizeForBundle(bundle *stack.Bundle, reg *npSynthesisRegistry) error {
 			continue
 		}
 		routerComp := col.TargetComponentName()
-		// The router's own collectors accumulate under its component, in this (the router's) bundle.
-		if _, err := reg.ensureComponent(routerComp, bundle, appPtr.Namespace); err != nil {
-			return err
+		ownName := ""
+		if osr, ok := col.(ownServiceReporter); ok {
+			ownName = osr.OwnServiceName()
 		}
-		reg.components[routerComp].collectors = append(reg.components[routerComp].collectors, col)
+		if ownerComp, pl, ok := reg.otherServiceOwner(ownName, routerComp); ok {
+			// go-kure/launcher#1157: the Service the router's own ports address belongs to another
+			// component, so the allow lands on that owner's pods, in the owner's OWN bundle, and
+			// not on the router's.
+			oce, err := reg.ensureComponent(ownerComp, pl.bundle, pl.namespace)
+			if err != nil {
+				return err
+			}
+			oce.injected = append(oce.injected, trafficRule{Sources: col.TrafficSources(), Ports: col.BackendPorts()})
+		} else {
+			// The router's own collectors accumulate under its component, in this (the router's) bundle.
+			if _, err := reg.ensureComponent(routerComp, bundle, appPtr.Namespace); err != nil {
+				return err
+			}
+			reg.components[routerComp].collectors = append(reg.components[routerComp].collectors, col)
+		}
 
 		// go-kure/launcher#227, go-kure/launcher#242: an external backendRef routes to a separate
 		// backend. Retarget its allow onto the backend component's pods, resolved cluster-wide so
@@ -570,8 +610,8 @@ func synthesizeForBundle(bundle *stack.Bundle, reg *npSynthesisRegistry) error {
 		for _, target := range bt.BackendTargets() {
 			backendComp, resolved := reg.serviceToComponent[target.ServiceName]
 			if resolved {
-				if backendComp == routerComp {
-					continue // self (already handled above)
+				if backendComp == routerComp && target.ServiceName == ownName {
+					continue // the router's own Service: its own ports already cover it (above)
 				}
 				// Retarget onto the backend component's pods, in the backend's OWN bundle. An authored
 				// backendSelector on a resolvable ref is ignored — component-label targeting wins.

@@ -564,6 +564,12 @@ with a port fails the build. A sibling group whose `service` member fronts its o
 unmapped ports keeps the component label, with the ports still translated and filtered the same
 way (see Same-name sibling groups below).
 
+A routing trait's ports for the Service of the component it runs on belong to whichever
+component owns that Service name, not to the routing component. When another component owns it
+(a `service` with `objectName` set to the routing component's name, say), the allow lands on
+that owner's pods through the routing target above, and the routing component gets none; a
+Service no component owns keeps the allow on the routing component (go-kure/launcher#1157).
+
 A synthesized `NetworkPolicy` is constructed with **no labels and no annotations** —
 only `metadata.name` and `metadata.namespace`, plus the spec. The one label it then gets
 is the component label of the component it was synthesized for, like every object that
