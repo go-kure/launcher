@@ -12237,7 +12237,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   naming the field, instead of being emitted for a deep copy to panic on
   (go-kure/launcher#1166). An object with a key given twice in one JSON object, at any
   depth (a `json.RawMessage` a Go caller built), is refused, naming the field: the
-  policy check and the emitted object would otherwise read it differently. A number
+  policy check and the emitted object would otherwise read it differently. The
+  field is named by the path every passthrough error uses (`fieldPath`): keys
+  joined by dots, and a key that is empty or holds a dot, a bracket or a quote
+  written as a quoted index, `labels[""]` or `labels["a.b"]`, so that two different
+  fields never share a path. A number
   beyond `float64` range in that object is read as text and is not refused
   (go-kure/launcher#1176).
 

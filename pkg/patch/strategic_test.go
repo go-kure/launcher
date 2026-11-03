@@ -908,6 +908,68 @@ func TestJSONTypedNilSliceAndMapAreEmpty(t *testing.T) {
 	}
 }
 
+// TestJSONTypedNumberLiteralBound pins the bound on the number literals read for
+// their digits: a whole float of maxNumberLiteral bytes still gets its exact
+// int64, and one byte more is kept as the json.Number it was, text unchanged and
+// never rounded to a float64.
+func TestJSONTypedNumberLiteralBound(t *testing.T) {
+	const head = "9007199254740993."
+	atBound := head + strings.Repeat("0", maxNumberLiteral-len(head))
+	pastBound := atBound + "0"
+	if len(atBound) != maxNumberLiteral || len(pastBound) != maxNumberLiteral+1 {
+		t.Fatalf("literal lengths %d and %d, want %d and %d", len(atBound), len(pastBound), maxNumberLiteral, maxNumberLiteral+1)
+	}
+	in := map[string]any{
+		"atBound":   json.Number(atBound),
+		"pastBound": json.Number(pastBound),
+	}
+	once, err := jsonTyped(in)
+	if err != nil {
+		t.Fatalf("jsonTyped: %v", err)
+	}
+	if once["atBound"] != int64(9007199254740993) {
+		t.Errorf("atBound = %#v (%T), want int64 9007199254740993", once["atBound"], once["atBound"])
+	}
+	if once["pastBound"] != json.Number(pastBound) {
+		t.Errorf("pastBound = %#v (%T), want the json.Number as written", once["pastBound"], once["pastBound"])
+	}
+	twice, err := jsonTyped(once)
+	if err != nil {
+		t.Fatalf("jsonTyped again: %v", err)
+	}
+	for k := range once {
+		if twice[k] != once[k] {
+			t.Errorf("%s changed on the second pass: %#v to %#v", k, once[k], twice[k])
+		}
+	}
+}
+
+// TestJSONTypedTypedNilContainerStaysNull pins the documented limit of the nil
+// rule: only a nil map[string]any and a nil []any become empty. Any other
+// container type goes to encoding/json as it is, so a nil one is null, as it is
+// anywhere else in Go.
+func TestJSONTypedTypedNilContainerStaysNull(t *testing.T) {
+	var nilStrings []string
+	var nilStringMap map[string]string
+	in := map[string]any{
+		"strings":   nilStrings,
+		"stringMap": nilStringMap,
+		"anySlice":  []any(nil),
+	}
+	out, err := jsonTyped(in)
+	if err != nil {
+		t.Fatalf("jsonTyped: %v", err)
+	}
+	for _, k := range []string{"strings", "stringMap"} {
+		if v, found := out[k]; !found || v != nil {
+			t.Errorf("%s = %#v (found %v), want an explicit nil", k, v, found)
+		}
+	}
+	if s, ok := out["anySlice"].([]any); !ok || s == nil || len(s) != 0 {
+		t.Errorf("anySlice = %#v, want an empty non-nil []any", out["anySlice"])
+	}
+}
+
 // TestJSONTypedSelfReferenceIsAnError checks that a document containing itself
 // is an error, as json.Marshal reports it, not a stack overflow.
 func TestJSONTypedSelfReferenceIsAnError(t *testing.T) {
