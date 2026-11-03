@@ -12225,12 +12225,20 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   on a namespaced object `metadata.namespace` likewise — so an inline *non-empty
   string* namespace survives untouched, while a non-string one is replaced rather
   than emitted. The values of the emitted object are JSON values (`int64`, `float64`,
-  `json.Number` beyond the `int64` range, `map[string]any`, `[]any`), whatever Go types
-  the authored object held, so the emitted `Unstructured` can be deep-copied
-  (go-kure/launcher#1162); the config's own `Object` keeps the authored values. An
-  object with a key given twice in one JSON object, at any depth (a `json.RawMessage`
-  a Go caller built), is refused, naming the field: the policy check and the emitted
-  object would otherwise read it differently.
+  `json.Number`, `map[string]any`, `[]any`), whatever Go types the authored object
+  held, so the emitted `Unstructured` can be deep-copied (go-kure/launcher#1162); the
+  config's own `Object` keeps the authored values. A number is an `int64` where it
+  fits, a `float64` where a `float64` holds it exactly, and otherwise a `json.Number`
+  with its own digits (an integer beyond the `int64` range, `9.223372036854775809e18`,
+  a `1e-9999999`), so no digit is rounded; an authored `json.Number` takes the type its
+  text has (go-kure/launcher#1167, go-kure/launcher#1170). A value with no JSON form (a func, a chan, a
+  complex number, a NaN or infinity, a `json.Number` that is not a number) is refused,
+  naming the field, instead of being emitted for a deep copy to panic on
+  (go-kure/launcher#1166). An object with a key given twice in one JSON object, at any
+  depth (a `json.RawMessage` a Go caller built), is refused, naming the field: the
+  policy check and the emitted object would otherwise read it differently. A number
+  beyond `float64` range in that object is read as text and is not refused
+  (go-kure/launcher#1176).
 
   **Scope** (go-kure/launcher#794, item 13). Whether the object is namespaced is
   resolved with the precedence `manifests` gives a `scopeOverrides` entry,
