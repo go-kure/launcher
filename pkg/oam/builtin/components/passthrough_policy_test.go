@@ -620,8 +620,9 @@ func hasIntegerKey(m map[any]any, want string) bool {
 // with no JSON form cannot be read, so it is refused under a policy. A
 // mapping key that is not a string and not an integer (YAML `80.5: http`
 // decodes to a map[any]any) is such a value: encoding/json rejects it as an
-// object name. Nothing that built before is lost: the same object, emitted
-// with no policy applied, does not encode as a manifest either.
+// object name. Nothing that built before is lost: the same object, with no
+// policy applied, is refused by Generate, and used to be emitted and fail to
+// encode as a manifest.
 func TestPassthrough_UnserializableObjectIsRefused(t *testing.T) {
 	doc := "apiVersion: example.io/v1\nkind: Widget\nmetadata:\n  name: thing\nspec:\n  ports:\n    80.5: http\n"
 	ports, ok := ptObject(t, doc)["spec"].(map[string]any)["ports"].(map[any]any)
@@ -639,12 +640,16 @@ func TestPassthrough_UnserializableObjectIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}
+	// With no policy applied Generate refuses it too, naming the field: the object
+	// was emitted before and did not encode as a manifest, so no build that worked
+	// is lost (go-kure/launcher#1166).
 	objs, err := cfg.Generate(nil)
-	if err != nil {
-		t.Fatalf("Generate with no policy applied: %v", err)
+	if err == nil {
+		out, encodeErr := kureio.EncodeObjectsToYAML(objs)
+		t.Fatalf("Generate with no policy applied emitted the object (encode: %v):\n%s", encodeErr, out)
 	}
-	if out, err := kureio.EncodeObjectsToYAML(objs); err == nil {
-		t.Fatalf("control: the object encodes as a manifest, so refusing it under a policy loses a build that worked:\n%s", out)
+	if !strings.Contains(err.Error(), "spec.ports") {
+		t.Errorf("error = %q, want it to name spec.ports", err)
 	}
 }
 
