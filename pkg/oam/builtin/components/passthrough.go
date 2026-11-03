@@ -813,6 +813,10 @@ func viaJSON(v any) any {
 func numbered(v any) any {
 	switch t := v.(type) {
 	case json.Number:
+		// encoding/json writes the zero value of json.Number as 0.
+		if t == "" {
+			return int64(0)
+		}
 		// Text that is not a JSON number ("+12", "012") is kept, for Generate to
 		// refuse: Int64 would read it as a valid integer.
 		if !jsonNumberGrammar.MatchString(t.String()) {

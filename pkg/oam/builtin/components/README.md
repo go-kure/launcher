@@ -12231,8 +12231,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   fits, a `float64` where a `float64` holds it exactly, and otherwise a `json.Number`
   with its own digits (an integer beyond the `int64` range, `9.223372036854775809e18`,
   a `1e-9999999`), so no digit is rounded; an authored `json.Number` takes the type its
-  text has (go-kure/launcher#1167, go-kure/launcher#1170). A value with no JSON form (a func, a chan, a
-  complex number, a NaN or infinity, a `json.Number` that is not a number) is refused,
+  text has, and an empty one is `0`, as `encoding/json` writes it
+  (go-kure/launcher#1167, go-kure/launcher#1170). A value with no JSON form (a func, a
+  chan, a complex number, a NaN or infinity, a `json.Number` that is not a number) is refused,
   naming the field, instead of being emitted for a deep copy to panic on
   (go-kure/launcher#1166). An object with a key given twice in one JSON object, at any
   depth (a `json.RawMessage` a Go caller built), is refused, naming the field: the
