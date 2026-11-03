@@ -280,9 +280,9 @@ func (c *PassthroughConfig) ComponentName() string { return c.componentName }
 // The object is authored as a map, and the check reads Go types, so an object
 // whose group, version and kind kure's scheme registers is decoded as that kind
 // for the check alone (policyObject); what is emitted is the authored
-// object's document, in the types of a decoded JSON one (Generate). One that cannot be read is refused, not passed: a registered kind
-// that does not decode, and a workload kind in an API version the scheme does
-// not register.
+// object's document, in the types of a decoded JSON one (Generate). One that
+// cannot be read is refused, not passed: a registered kind that does not
+// decode, and a workload kind in an API version the scheme does not register.
 //
 // The policy is kept, and Generate checks the object it is about to emit
 // against it again: Object is an exported field, so the map checked here need
@@ -515,10 +515,7 @@ func repeatedKey(dec *json.Decoder, path string) (string, error) {
 				return "", err
 			}
 			key, _ := keyTok.(string)
-			field := key
-			if path != "" {
-				field = path + "." + key
-			}
+			field := fieldPath(path, key)
 			if seen[key] {
 				return field, nil
 			}
