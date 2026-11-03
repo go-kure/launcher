@@ -973,3 +973,34 @@ func TestPassthrough_DecimalBeyondFloat64KeepsItsDigits(t *testing.T) {
 		})
 	}
 }
+
+// TestPassthrough_AuthoredJSONNumberIsShaped: a json.Number a Go caller put in the object
+// is given the type its text has, as the same text in a document is, so that the
+// unstructured readers find it (go-kure/launcher#1167).
+func TestPassthrough_AuthoredJSONNumberIsShaped(t *testing.T) {
+	u := generatePassthrough(t, map[string]any{"object": map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"data": map[string]any{
+			"int":   json.Number("12"),
+			"frac":  json.Number("1.5"),
+			"big":   json.Number("9223372036854775808"),
+			"round": json.Number("9.223372036854775809e18"),
+			"list":  []any{json.Number("7")},
+		},
+	}}, "ns1")
+
+	want := map[string]any{
+		"int":   int64(12),
+		"frac":  1.5,
+		"big":   json.Number("9223372036854775808"),
+		"round": json.Number("9.223372036854775809e18"),
+		"list":  []any{int64(7)},
+	}
+	if got := u.Object["data"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("data = %#v, want %#v", got, want)
+	}
+	if n, found, err := unstructured.NestedInt64(u.Object, "data", "int"); err != nil || !found || n != 12 {
+		t.Errorf("NestedInt64 = %d, %v, %v; want 12, true, nil", n, found, err)
+	}
+}
