@@ -12372,9 +12372,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
 
   The object is authored as a map and the check reads Go types, so an object whose group,
   version and kind kure's scheme registers is decoded as that kind **for the check only**.
-  What is emitted stays the authored map, so a field the Go type does not declare is
-  emitted with it, and a large integer is emitted as authored, which kure's manifest writer
-  writes with its own digits (`helmtemplate`'s *Rendered objects*). The check
+  What is emitted is the authored map in JSON types, so a field the Go type does not declare
+  is emitted with it, and a large integer keeps its digits, which kure's manifest writer
+  writes as they are (`helmtemplate`'s *Rendered objects*). The check
   cannot read such a field, so a workload or a claim that sets one is refused, as template
   delivery and `manifests` refuse it (`helmtemplate`'s *Undeclared fields*): when the
   component is built and again by `Generate`, under any policy and with none
@@ -12383,7 +12383,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   that serializes itself (a Go caller's `json.RawMessage`) repeats enough keys to fill the
   strict decode's record is refused on the same ground. An object of any other kind is
   emitted as authored, the field with it, whatever the strict decode says of it: nothing
-  it sets is dropped, so the full-record refusal of `manifests` has no part here.
+  it sets is dropped, so the full-record refusal of `manifests` has no part here. The
+  repeated keys that would fill the record are refused all the same, for the repeat itself
+  (see the key given twice above).
   **Breaking** (go-kure/launcher#794, item 7): a workload or claim with an
   undeclared field was emitted unchecked before and no longer builds.
   `Generate` runs the check again on the object it is about to emit, once

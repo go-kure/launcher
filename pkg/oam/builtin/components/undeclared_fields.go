@@ -621,10 +621,12 @@ func refuseItemsOnNoList(obj client.Object) error {
 // the fields the policy check, which reads that type, cannot see. A workload or
 // a claim whose record of strict errors is full is refused too, since such a
 // field cannot be ruled out. An object of any other kind passes whatever the
-// strict decode says of it, a full record included: passthrough emits the
-// authored map, so nothing the object sets is dropped, and no check reads it
-// for a field its type does not declare. So does one that does not decode as
-// its kind, which the policy check refuses on its own account.
+// strict decode says of it: passthrough emits the authored map, so nothing the
+// object sets is dropped, and no check reads it for a field its type does not
+// declare. So does one that does not decode as its kind, which the policy check
+// refuses on its own account. A full record is no ground for refusing such a
+// kind, but the repeated keys that fill it are: refuseRepeatedKeys refuses a
+// key given twice in one JSON object, of any kind, once this check has passed.
 func refuseUndeclaredWorkloadFields(u *unstructured.Unstructured) error {
 	gvk := u.GroupVersionKind()
 	if !isWorkloadGVK(gvk) {
