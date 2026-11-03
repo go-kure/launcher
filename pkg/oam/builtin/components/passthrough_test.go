@@ -929,3 +929,47 @@ func TestPassthrough_RepeatedKeyWalkTakesBigInteger(t *testing.T) {
 		}
 	})
 }
+
+// TestPassthrough_DecimalBeyondFloat64KeepsItsDigits: a fraction or an exponent becomes a
+// float64 only where that is the same number. Otherwise it stays a json.Number with its
+// own digits, as an integer beyond int64 does, so the emitted object does not round what
+// was authored (go-kure/launcher#1170).
+func TestPassthrough_DecimalBeyondFloat64KeepsItsDigits(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want any
+	}{
+		{"9.223372036854775809e18", json.Number("9.223372036854775809e18")},
+		{"1.0000000000000000000001", json.Number("1.0000000000000000000001")},
+		{"-0.30000000000000000000000001", json.Number("-0.30000000000000000000000001")},
+		{"1e400", json.Number("1e400")},
+		{"1e-9999999", json.Number("1e-9999999")},
+		{"1" + strings.Repeat("0", 1200) + ".5", json.Number("1" + strings.Repeat("0", 1200) + ".5")},
+		{"0.1", 0.1},
+		{"1.50", 1.5},
+		{"1e3", float64(1000)},
+		{"2.5E-3", 0.0025},
+		{"0.0", float64(0)},
+		{"1e-320", 1e-320},
+	}
+	for _, c := range cases {
+		name := c.raw
+		if len(name) > 30 {
+			name = name[:30] + "..."
+		}
+		t.Run(name, func(t *testing.T) {
+			start := time.Now()
+			u := generatePassthrough(t, map[string]any{"object": map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"data":       map[string]any{"n": json.RawMessage(c.raw)},
+			}}, "ns1")
+			if d := time.Since(start); d > time.Second {
+				t.Errorf("took %v, the input must be bounded before it is compared", d)
+			}
+			if got := u.Object["data"].(map[string]any)["n"]; got != c.want {
+				t.Errorf("n = %#v, want %#v", got, c.want)
+			}
+		})
+	}
+}

@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"math"
+	"math/big"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -670,8 +672,8 @@ func copiedValue(v any, t reflect.Type) reflect.Value {
 }
 
 // jsonShape rewrites m, a copy no one else holds, into the types of a decoded JSON
-// document: map[string]any, []any, string, bool, int64, float64, nil and json.Number (an
-// integer beyond the int64 range, with its own digits). An
+// document: map[string]any, []any, string, bool, int64, float64, nil and json.Number (a
+// number that an int64 or a float64 would not hold exactly, with its own digits). An
 // Unstructured's DeepCopyObject (runtime.DeepCopyJSON) takes nothing else and panics on
 // the rest, and the unstructured readers (NestedString, NestedSlice, ...) read the same
 // types. The authored map holds whatever the YAML decoder or a Go caller put there, so
@@ -795,8 +797,8 @@ func viaJSON(v any) any {
 
 // numbered gives the numbers of a document decoded with UseNumber the types of one
 // decoded as the API machinery does: an int64 where the integer fits, a float64 for a
-// fraction or an exponent, and a json.Number, with its own digits, for an integer beyond
-// the int64 range (which the API machinery would round to a float64).
+// fraction or an exponent that a float64 holds exactly, and a json.Number, with its own
+// digits, for any other number (which the API machinery would round to a float64).
 func numbered(v any) any {
 	switch t := v.(type) {
 	case json.Number:
@@ -806,7 +808,7 @@ func numbered(v any) any {
 		if !strings.ContainsAny(t.String(), ".eE") {
 			return t
 		}
-		if f, err := t.Float64(); err == nil {
+		if f, ok := exactFloat(t); ok {
 			return f
 		}
 		return t
@@ -820,4 +822,47 @@ func numbered(v any) any {
 		}
 	}
 	return v
+}
+
+// Bounds on a number's text before it is compared exactly: the comparison builds a
+// rational whose size follows the exponent, so authored input must not set that size
+// (the text of "1e-9999999" is short, and its float64 is 0).
+const (
+	maxExactNumberLen      = 1000
+	maxExactNumberExponent = 400
+)
+
+// jsonNumberGrammar is the JSON number grammar. A json.Number is only text, so
+// "true", "[]" and "0x10" are not numbers however a decoder would read them.
+var jsonNumberGrammar = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
+
+// exactFloat is n as a float64 where that is the same number: its shortest decimal form
+// denotes the value of n exactly. It reports false for a number that is not in the JSON
+// number grammar, is too long or has too large an exponent to compare, is beyond the
+// float64 range, or that a float64 would round, so that the caller keeps n with its own
+// digits.
+func exactFloat(n json.Number) (float64, bool) {
+	s := n.String()
+	if len(s) > maxExactNumberLen || !jsonNumberGrammar.MatchString(s) {
+		return 0, false
+	}
+	if i := strings.IndexAny(s, "eE"); i >= 0 {
+		exp, err := strconv.Atoi(s[i+1:])
+		if err != nil || exp > maxExactNumberExponent || exp < -maxExactNumberExponent {
+			return 0, false
+		}
+	}
+	f, err := n.Float64()
+	if err != nil {
+		return 0, false
+	}
+	want, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return 0, false
+	}
+	got, ok := new(big.Rat).SetString(strconv.FormatFloat(f, 'g', -1, 64))
+	if !ok || want.Cmp(got) != 0 {
+		return 0, false
+	}
+	return f, true
 }
