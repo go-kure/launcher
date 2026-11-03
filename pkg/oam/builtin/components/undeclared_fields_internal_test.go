@@ -535,27 +535,62 @@ func TestDecodeManifestDocuments_FieldRecordedBeforeTheRepeatsIsKept(t *testing.
 	}
 }
 
-// TestPassthrough_PolicyReadsTheAuthoredValues: shaping the emitted object collapses a
-// repeated key in a value that serializes itself, so the policy has to read the object
-// before it (go-kure/launcher#1162). Here the first hostNetwork has the wrong type and
-// the last is valid: the object does not decode, and a policy refuses it, as it did
-// before the emitted object was shaped.
-func TestPassthrough_PolicyReadsTheAuthoredValues(t *testing.T) {
-	cfg := &PassthroughConfig{
-		componentName: "web",
-		Namespace:     "demo",
-		Object: map[string]any{
-			"apiVersion": "v1",
-			"kind":       "Pod",
-			"metadata":   map[string]any{"name": "web"},
-			"spec":       json.RawMessage(`{"hostNetwork": "bad", "hostNetwork": false, "futureField": true}`),
+// TestPassthrough_RepeatedObjectKeyIsRefused: the policy reads the typed decode of the
+// document, which merges a repeated object member, while the emitted object takes the
+// last one. A Deployment spec whose selector is given twice would pass the policy with
+// matchLabels and be emitted with an empty selector (go-kure/launcher#1162). A repeated
+// key, at any depth, is refused instead, naming the field; no key is picked silently.
+func TestPassthrough_RepeatedObjectKeyIsRefused(t *testing.T) {
+	config := func(spec json.RawMessage) *PassthroughConfig {
+		return &PassthroughConfig{
+			componentName: "web",
+			Namespace:     "demo",
+			Object: map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata":   map[string]any{"name": "web"},
+				"spec":       spec,
+			},
+		}
+	}
+	for name, tc := range map[string]struct {
+		spec  json.RawMessage
+		field string
+	}{
+		"selector": {
+			spec:  json.RawMessage(`{"selector": {"matchLabels": {"app": "web"}}, "selector": {}}`),
+			field: "spec.selector",
 		},
+		"nested": {
+			spec:  json.RawMessage(`{"template": {"metadata": {"labels": {"app": "web", "app": "api"}}}}`),
+			field: "spec.template.metadata.labels.app",
+		},
+		"in an array": {
+			spec:  json.RawMessage(`{"template": {"spec": {"containers": [{"name": "a"}, {"name": "b", "name": "c"}]}}}`),
+			field: "spec.template.spec.containers[1].name",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := config(tc.spec)
+			err := cfg.ApplyPolicy(&oam.NoopPolicy{})
+			if err == nil {
+				t.Fatal("ApplyPolicy accepted an object with a repeated key")
+			}
+			if !strings.Contains(err.Error(), tc.field) {
+				t.Errorf("the refusal %q does not name the field %q", err, tc.field)
+			}
+			if _, err := cfg.Generate(nil); err == nil {
+				t.Fatal("Generate emitted an object with a repeated key")
+			}
+		})
 	}
-	if err := cfg.ApplyPolicy(&oam.NoopPolicy{}); err == nil {
-		t.Fatal("ApplyPolicy accepted an object that does not decode")
+	// A self-serializing value without a repeated key is still accepted and shaped.
+	cfg := config(json.RawMessage(`{"selector": {"matchLabels": {"app": "web"}}, "replicas": 1}`))
+	if err := cfg.ApplyPolicy(&oam.NoopPolicy{}); err != nil {
+		t.Fatalf("ApplyPolicy refused an object without a repeated key: %v", err)
 	}
-	if _, err := cfg.Generate(nil); err == nil {
-		t.Fatal("Generate emitted an object that does not decode, under a policy")
+	if _, err := cfg.Generate(nil); err != nil {
+		t.Fatalf("Generate refused an object without a repeated key: %v", err)
 	}
 }
 
@@ -585,10 +620,11 @@ func TestPassthrough_RepeatedKeysCannotHideAnUndeclaredField(t *testing.T) {
 			},
 		}
 	}
-	// The refusal is for what the policy check reads as a Go type. An object
-	// of any other kind is emitted as authored, whatever the strict decode
-	// says of it: nothing it sets is dropped.
-	t.Run("another kind is emitted as authored", func(t *testing.T) {
+	// The strict-record refusal is for what the policy check reads as a Go type.
+	// An object of any other kind is not held to it, but the repeated keys that
+	// fill the record are refused all the same, naming the first, so that no
+	// field after them is emitted on the strength of a key picked silently.
+	t.Run("another kind is refused for the repeated key", func(t *testing.T) {
 		cfg := config(strictErrorLimit)
 		cfg.Object["kind"] = "ConfigMap"
 		delete(cfg.Object, "spec")
@@ -605,19 +641,11 @@ func TestPassthrough_RepeatedKeysCannotHideAnUndeclaredField(t *testing.T) {
 		if _, err := decodeManifestDocuments(serialized); !errors.Is(err, errStrictRecordFull) {
 			t.Fatalf("the same document through the manifests decode gave %v, want it refused", err)
 		}
-		if err := cfg.ApplyPolicy(&oam.NoopPolicy{}); err != nil {
-			t.Fatalf("ApplyPolicy: %v", err)
+		if err := cfg.ApplyPolicy(&oam.NoopPolicy{}); err == nil || !strings.Contains(err.Error(), "metadata.labels.k0") {
+			t.Fatalf("ApplyPolicy gave %v, want a refusal naming metadata.labels.k0", err)
 		}
-		objs, err := cfg.Generate(nil)
-		if err != nil {
-			t.Fatalf("Generate: %v", err)
-		}
-		u, ok := (*objs[0]).(*unstructured.Unstructured)
-		if !ok {
-			t.Fatalf("generated a %T, want the authored map", *objs[0])
-		}
-		if got, found, _ := unstructured.NestedBool(u.Object, "zzFutureField"); !found || !got {
-			t.Errorf("zzFutureField = %v (found %v), want it emitted", got, found)
+		if _, err := cfg.Generate(nil); err == nil || !strings.Contains(err.Error(), "metadata.labels.k0") {
+			t.Fatalf("Generate gave %v, want a refusal naming metadata.labels.k0", err)
 		}
 	})
 
