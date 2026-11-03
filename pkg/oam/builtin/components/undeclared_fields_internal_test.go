@@ -565,6 +565,11 @@ func TestPassthrough_RepeatedObjectKeyIsRefused(t *testing.T) {
 			spec:  json.RawMessage(`{"template": {"metadata": {"labels": {"app": "web", "app": "api"}}}}`),
 			field: "spec.template.metadata.labels.app",
 		},
+		"escaped": {
+			// Token unescapes a key, so this is the same key as "app".
+			spec:  json.RawMessage(`{"template": {"metadata": {"labels": {"app": "web", "\u0061pp": "api"}}}}`),
+			field: "spec.template.metadata.labels.app",
+		},
 		"in an array": {
 			spec:  json.RawMessage(`{"template": {"spec": {"containers": [{"name": "a"}, {"name": "b", "name": "c"}]}}}`),
 			field: "spec.template.spec.containers[1].name",
@@ -585,7 +590,10 @@ func TestPassthrough_RepeatedObjectKeyIsRefused(t *testing.T) {
 		})
 	}
 	// A self-serializing value without a repeated key is still accepted and shaped.
-	cfg := config(json.RawMessage(`{"selector": {"matchLabels": {"app": "web"}}, "replicas": 1}`))
+	// The same key in sibling objects, in an array and in nested ones, is not a repeat.
+	cfg := config(json.RawMessage(`{"selector": {"matchLabels": {"app": "web"}}, "replicas": 1,
+		"template": {"metadata": {"labels": {"app": "web"}}, "spec": {"containers": [
+			{"name": "a", "image": "nginx:1"}, {"name": "b", "image": "nginx:1"}]}}}`))
 	if err := cfg.ApplyPolicy(&oam.NoopPolicy{}); err != nil {
 		t.Fatalf("ApplyPolicy refused an object without a repeated key: %v", err)
 	}
