@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -756,6 +757,8 @@ func TestApplyStrategicMergePatch_TypedWholeNumberKeysMatch(t *testing.T) {
 // type its own JSON encoding decodes to, so that normalizing twice changes
 // nothing.
 func TestJSONTypedNumbersMatchTheirJSON(t *testing.T) {
+	// "fraction", "fractionf" and "integer" are controls: they hold on the code
+	// without the exact-digits fix and show the fix leaves them alone.
 	in := map[string]any{
 		"whole":     json.Number("80.0"),
 		"exponent":  json.Number("8e1"),
@@ -796,6 +799,391 @@ func TestJSONTypedNumbersMatchTheirJSON(t *testing.T) {
 		if twice[k] != once[k] {
 			t.Errorf("%s changed on the second pass: %#v to %#v", k, once[k], twice[k])
 		}
+	}
+}
+
+// TestJSONTypedKeepsDigitsOfWholeFloatsBeyondFloat53 checks that a whole number
+// written with a point or an exponent keeps its own digits above 2^53, where a
+// float64 would round it.
+func TestJSONTypedKeepsDigitsOfWholeFloatsBeyondFloat53(t *testing.T) {
+	in := map[string]any{
+		"point":      json.Number("9007199254740993.0"),
+		"exponent":   json.Number("9.007199254740993e15"),
+		"negative":   json.Number("-9007199254740993.0"),
+		"beyondI64":  json.Number("12345678901234567891.0"),
+		"fraction":   json.Number("9007199254740993.5"),
+		"plain":      json.Number("9007199254740993"),
+		"belowFloat": json.Number("9007199254740991.0"),
+		// Rounds to 1e21 as a float64, but is below it as written.
+		"justBelow": json.Number("999999999999999999999.0"),
+		"atLimit":   json.Number("1000000000000000000000.0"),
+		"plainHuge": json.Number("1000000000000000000001"),
+	}
+	want := map[string]any{
+		"point":      int64(9007199254740993),
+		"exponent":   int64(9007199254740993),
+		"negative":   int64(-9007199254740993),
+		"beyondI64":  json.Number("12345678901234567891"),
+		"fraction":   int64(9007199254740994), // not a whole number as written: the float64 beside it
+		"plain":      int64(9007199254740993),
+		"belowFloat": int64(9007199254740991),
+		"justBelow":  json.Number("999999999999999999999"),
+		"atLimit":    1e21,
+		"plainHuge":  json.Number("1000000000000000000001"),
+	}
+
+	once, err := jsonTyped(in)
+	if err != nil {
+		t.Fatalf("jsonTyped: %v", err)
+	}
+	for k, w := range want {
+		if once[k] != w {
+			t.Errorf("%s = %#v (%T), want %#v (%T)", k, once[k], once[k], w, w)
+		}
+	}
+	twice, err := jsonTyped(once)
+	if err != nil {
+		t.Fatalf("jsonTyped again: %v", err)
+	}
+	for k := range want {
+		if twice[k] != once[k] {
+			t.Errorf("%s changed on the second pass: %#v to %#v", k, once[k], twice[k])
+		}
+	}
+}
+
+// TestJSONTypedNilSliceAndMapAreEmpty checks that a nil slice or map, at any
+// depth, comes out as an empty one, not null, and that an explicit nil stays nil.
+func TestJSONTypedNilSliceAndMapAreEmpty(t *testing.T) {
+	var nilSlice []any
+	var nilMap map[string]any
+	in := map[string]any{
+		"slice":  nilSlice,
+		"map":    nilMap,
+		"null":   nil,
+		"nested": map[string]any{"slice": nilSlice, "map": nilMap},
+		"inList": []any{nilSlice, nilMap},
+	}
+
+	once, err := jsonTyped(in)
+	if err != nil {
+		t.Fatalf("jsonTyped: %v", err)
+	}
+	if s, ok := once["slice"].([]any); !ok || s == nil || len(s) != 0 {
+		t.Errorf("slice = %#v, want an empty non-nil []any", once["slice"])
+	}
+	if m, ok := once["map"].(map[string]any); !ok || m == nil || len(m) != 0 {
+		t.Errorf("map = %#v, want an empty non-nil map", once["map"])
+	}
+	if v, found := once["null"]; !found || v != nil {
+		t.Errorf("null = %#v (found %v), want an explicit nil", v, found)
+	}
+	nested, _ := once["nested"].(map[string]any)
+	if s, ok := nested["slice"].([]any); !ok || s == nil {
+		t.Errorf("nested slice = %#v, want an empty []any", nested["slice"])
+	}
+	if m, ok := nested["map"].(map[string]any); !ok || m == nil {
+		t.Errorf("nested map = %#v, want an empty map", nested["map"])
+	}
+	list, _ := once["inList"].([]any)
+	if len(list) != 2 {
+		t.Fatalf("inList = %#v, want two entries", once["inList"])
+	}
+	if s, ok := list[0].([]any); !ok || s == nil {
+		t.Errorf("inList[0] = %#v, want an empty []any", list[0])
+	}
+	if m, ok := list[1].(map[string]any); !ok || m == nil {
+		t.Errorf("inList[1] = %#v, want an empty map", list[1])
+	}
+	if in["slice"].([]any) != nil || in["map"].(map[string]any) != nil {
+		t.Error("jsonTyped changed its input")
+	}
+
+	twice, err := jsonTyped(once)
+	if err != nil {
+		t.Fatalf("jsonTyped again: %v", err)
+	}
+	if s, ok := twice["slice"].([]any); !ok || s == nil {
+		t.Errorf("slice after second pass = %#v, want an empty []any", twice["slice"])
+	}
+}
+
+// TestJSONTypedSelfReferenceIsAnError checks that a document containing itself
+// is an error, as json.Marshal reports it, not a stack overflow.
+func TestJSONTypedSelfReferenceIsAnError(t *testing.T) {
+	m := map[string]any{}
+	m["self"] = m
+	if _, err := jsonTyped(m); err == nil {
+		t.Fatal("jsonTyped: want an error for a map that contains itself")
+	}
+}
+
+// deepMap returns a map nested n levels deep. Its innermost value is a string, one
+// level below the innermost map.
+func deepMap(n int) map[string]any {
+	return deepMapWith(n, "x")
+}
+
+// deepMapWith is deepMap with leaf as the innermost value.
+func deepMapWith(n int, leaf any) map[string]any {
+	m := map[string]any{"leaf": leaf}
+	for i := 0; i < n; i++ {
+		m = map[string]any{"k": m}
+	}
+	return m
+}
+
+// TestNormalizeNilDepthBound pins the exact bound: the walk accepts a document
+// whose deepest value sits at depth maxDepth and refuses one level more, with or
+// without a nil container to empty.
+func TestNormalizeNilDepthBound(t *testing.T) {
+	var nilSlice []any
+	for name, leaf := range map[string]any{"nil-free": "x", "with a nil slice": nilSlice} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := normalizeNil(deepMapWith(maxDepth-1, leaf)); err != nil {
+				t.Errorf("a document with its deepest value at depth %d: %v", maxDepth, err)
+			}
+			if _, err := normalizeNil(deepMapWith(maxDepth, leaf)); err == nil {
+				t.Errorf("a document with its deepest value at depth %d: want an error", maxDepth+1)
+			}
+		})
+	}
+}
+
+// TestApplyStrategicMergePatch_TypedRefusesCyclicAndTooDeepDocuments checks that
+// through the typed path a patch or a resource that contains itself, or nests
+// deeper than maxDepth, is an error and leaves the resource as it was.
+func TestApplyStrategicMergePatch_TypedRefusesCyclicAndTooDeepDocuments(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+	newResource := func() *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "test"},
+			"data": map[string]any{"a": "1"},
+		}}
+	}
+	cyclic := func() map[string]any {
+		m := map[string]any{}
+		m["self"] = m
+		return m
+	}
+
+	for name, tc := range map[string]struct {
+		resource func() *unstructured.Unstructured
+		patch    func() map[string]any
+	}{
+		"cyclic patch": {newResource, cyclic},
+		"deep patch":   {newResource, func() map[string]any { return map[string]any{"data": deepMap(maxDepth + 1)} }},
+		"cyclic resource": {
+			func() *unstructured.Unstructured {
+				r := newResource()
+				r.Object["self"] = r.Object
+				return r
+			},
+			func() map[string]any { return map[string]any{"data": map[string]any{"b": "2"}} },
+		},
+		"deep resource": {
+			func() *unstructured.Unstructured {
+				r := newResource()
+				r.Object["deep"] = deepMap(maxDepth + 1)
+				return r
+			},
+			func() map[string]any { return map[string]any{"data": map[string]any{"b": "2"}} },
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resource := tc.resource()
+			before := resource.Object
+			dataBefore := before["data"]
+			if err := ApplyStrategicMergePatch(resource, tc.patch(), lookup); err == nil {
+				t.Fatal("ApplyStrategicMergePatch: want an error")
+			}
+			if reflect.ValueOf(resource.Object).Pointer() != reflect.ValueOf(before).Pointer() {
+				t.Error("resource.Object was replaced")
+			}
+			if !reflect.DeepEqual(resource.Object["data"], dataBefore) || len(resource.Object["data"].(map[string]any)) != 1 {
+				t.Errorf("resource data changed: %v", resource.Object["data"])
+			}
+		})
+	}
+
+	// A nested patch well inside the bound is still applied; the bound itself is
+	// pinned by TestNormalizeNilDepthBound.
+	resource := newResource()
+	if err := ApplyStrategicMergePatch(resource, map[string]any{"data": deepMap(10)}, lookup); err != nil {
+		t.Errorf("ApplyStrategicMergePatch: a shallow nested patch: %v", err)
+	}
+}
+
+// TestNormalizeNilCopiesOnlyWhenNeeded checks that a document without a nil
+// slice or map is returned as it is, not copied, and one with a nil is copied.
+func TestNormalizeNilCopiesOnlyWhenNeeded(t *testing.T) {
+	var nilSlice []any
+	clean := map[string]any{
+		"a": map[string]any{"b": []any{"x", map[string]any{"c": nil}}},
+		"d": "e",
+	}
+	got, err := normalizeNil(clean)
+	if err != nil {
+		t.Fatalf("normalizeNil: %v", err)
+	}
+	if reflect.ValueOf(got).Pointer() != reflect.ValueOf(clean).Pointer() {
+		t.Error("a document without a nil container was copied")
+	}
+
+	dirty := map[string]any{"a": map[string]any{"b": nilSlice}}
+	got, err = normalizeNil(dirty)
+	if err != nil {
+		t.Fatalf("normalizeNil: %v", err)
+	}
+	if reflect.ValueOf(got).Pointer() == reflect.ValueOf(dirty).Pointer() {
+		t.Error("a document with a nil container was not copied")
+	}
+	if dirty["a"].(map[string]any)["b"].([]any) != nil {
+		t.Error("normalizeNil changed its input")
+	}
+	if b := got["a"].(map[string]any)["b"].([]any); b == nil || len(b) != 0 {
+		t.Errorf("b = %#v, want an empty non-nil list", b)
+	}
+
+	if got, err := normalizeNil(nil); got != nil || err != nil {
+		t.Errorf("normalizeNil(nil) = %v, %v, want nil, nil", got, err)
+	}
+}
+
+// TestApplyStrategicMergePatch_TypedNilMapInPatchKeepsField checks that on a known
+// kind a nil map in the patch is an empty one, so the field is kept as {}, while
+// an explicit nil value still deletes it.
+func TestApplyStrategicMergePatch_TypedNilMapInPatchKeepsField(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+	resource := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "test", "labels": map[string]any{"k": "v"}, "annotations": map[string]any{"a": "b"}},
+	}}
+	var nilMap map[string]any
+	patch := map[string]any{"metadata": map[string]any{"labels": nilMap, "annotations": nil}}
+	if err := ApplyStrategicMergePatch(resource, patch, lookup); err != nil {
+		t.Fatalf("ApplyStrategicMergePatch: %v", err)
+	}
+	meta := resource.Object["metadata"].(map[string]any)
+	if labels, ok := meta["labels"].(map[string]any); !ok || len(labels) != 1 {
+		t.Errorf("labels = %#v, want the existing labels kept", meta["labels"])
+	}
+	if _, found := meta["annotations"]; found {
+		t.Errorf("annotations = %#v, want it deleted by the explicit nil", meta["annotations"])
+	}
+}
+
+// TestApplyStrategicMergePatch_JSONMergeNilMapStillDeletes checks that the JSON
+// merge fallback, which has no typed normalization, still reads a nil map in the
+// patch as null, a deletion.
+func TestApplyStrategicMergePatch_JSONMergeNilMapStillDeletes(t *testing.T) {
+	resource := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "example.io/v1",
+		"kind":       "Widget",
+		"metadata":   map[string]any{"name": "test"},
+		"spec":       map[string]any{"a": "1"},
+	}}
+	var nilMap map[string]any
+	if err := ApplyStrategicMergePatch(resource, map[string]any{"spec": nilMap}, nil); err != nil {
+		t.Fatalf("ApplyStrategicMergePatch: %v", err)
+	}
+	if _, found := resource.Object["spec"]; found {
+		t.Errorf("spec = %v, want it deleted by the null", resource.Object["spec"])
+	}
+}
+
+// TestApplyStrategicMergePatch_TypedNilSliceInPatchStaysEmpty checks that a nil
+// slice in a patch writes an empty list, as it did before the patch was
+// normalized by a JSON round trip, instead of null, which deletes the field.
+func TestApplyStrategicMergePatch_TypedNilSliceInPatchStaysEmpty(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+
+	resource := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]any{"name": "test"},
+			"spec": map[string]any{
+				"template": map[string]any{
+					"spec": map[string]any{
+						"containers": []any{map[string]any{"name": "app", "args": []any{"-v"}}},
+					},
+				},
+			},
+		},
+	}
+	var none []any
+	patch := map[string]any{
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{map[string]any{"name": "app", "args": none}},
+				},
+			},
+		},
+	}
+
+	if err := ApplyStrategicMergePatch(resource, patch, lookup); err != nil {
+		t.Fatalf("ApplyStrategicMergePatch: %v", err)
+	}
+	containers, _, err := unstructured.NestedSlice(resource.Object, "spec", "template", "spec", "containers")
+	if err != nil || len(containers) != 1 {
+		t.Fatalf("containers = %v, %v", containers, err)
+	}
+	args, found := containers[0].(map[string]any)["args"]
+	if !found {
+		t.Fatal("args was deleted, want an empty list")
+	}
+	if list, ok := args.([]any); !ok || len(list) != 0 {
+		t.Errorf("args = %#v, want an empty list", args)
+	}
+	if patch["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)["args"].([]any) != nil {
+		t.Error("patch was changed")
+	}
+}
+
+// TestApplyStrategicMergePatch_TypedLeavesPatchUnchanged checks that the typed
+// path does not mutate the caller's patch.
+func TestApplyStrategicMergePatch_TypedLeavesPatchUnchanged(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+	resource := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata":   map[string]any{"name": "test"},
+			"data":       map[string]any{"a": "1", "b": "2"},
+		},
+	}
+	patch := map[string]any{
+		"data":     map[string]any{"a": "x", "b": nil},
+		"metadata": map[string]any{"labels": map[string]any{"k": "v"}},
+	}
+
+	if err := ApplyStrategicMergePatch(resource, patch, lookup); err != nil {
+		t.Fatalf("ApplyStrategicMergePatch: %v", err)
+	}
+	data := patch["data"].(map[string]any)
+	if len(data) != 2 || data["a"] != "x" {
+		t.Errorf("patch data = %#v, want it unchanged", data)
+	}
+	if v, found := data["b"]; !found || v != nil {
+		t.Errorf("patch data[b] = %#v (found %v), want an explicit nil", v, found)
+	}
+	if _, found := resource.Object["data"].(map[string]any)["b"]; found {
+		t.Errorf("resource data = %#v, want b deleted", resource.Object["data"])
 	}
 }
 
