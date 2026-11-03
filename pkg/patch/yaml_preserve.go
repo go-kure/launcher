@@ -3,6 +3,7 @@ package patch
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -141,6 +142,36 @@ func parseYAMLDocuments(content string) ([]string, error) {
 	return documents, nil
 }
 
+// marshalResource marshals a resource object to YAML. yaml.v3 does not know
+// json.Number, which a strategic merge patch leaves for an integer beyond the
+// int64 range, and would quote it as a string. A copy with a plain scalar in its
+// place is marshaled; the object itself is not changed.
+func marshalResource(obj map[string]any) ([]byte, error) {
+	return yaml.Marshal(yamlNumbers(obj))
+}
+
+// yamlNumbers returns v with each json.Number replaced by a plain scalar node
+// that holds its own text, so that no digit is rounded.
+func yamlNumbers(v any) any {
+	switch t := v.(type) {
+	case json.Number:
+		return &yaml.Node{Kind: yaml.ScalarNode, Value: t.String()}
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, e := range t {
+			out[k] = yamlNumbers(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = yamlNumbers(e)
+		}
+		return out
+	}
+	return v
+}
+
 // ApplyPatchesToDocument applies patches to a YAML document while preserving structure
 func (doc *YAMLDocument) ApplyPatchesToDocument(patches []PatchOp) error {
 	// Apply patches to the unstructured resource
@@ -152,7 +183,7 @@ func (doc *YAMLDocument) ApplyPatchesToDocument(patches []PatchOp) error {
 
 	// Update the YAML node with patched data
 	// First, marshal the patched resource to YAML
-	patchedYAML, err := yaml.Marshal(doc.Resource.Object)
+	patchedYAML, err := marshalResource(doc.Resource.Object)
 	if err != nil {
 		return fmt.Errorf("failed to marshal patched resource: %w", err)
 	}
@@ -184,7 +215,7 @@ func (doc *YAMLDocument) ApplyStrategicPatchesToDocument(patches []StrategicPatc
 	}
 
 	// Re-marshal the patched resource and merge into the existing YAML node
-	patchedYAML, err := yaml.Marshal(doc.Resource.Object)
+	patchedYAML, err := marshalResource(doc.Resource.Object)
 	if err != nil {
 		return fmt.Errorf("failed to marshal patched resource: %w", err)
 	}
@@ -525,7 +556,7 @@ func (set *YAMLDocumentSet) FindDocumentByKindNameAndNamespace(kind, name, names
 // UpdateDocumentFromResource updates a document's YAML node from its resource
 func (doc *YAMLDocument) UpdateDocumentFromResource() error {
 	// Marshal the updated resource to YAML
-	updatedYAML, err := yaml.Marshal(doc.Resource.Object)
+	updatedYAML, err := marshalResource(doc.Resource.Object)
 	if err != nil {
 		return fmt.Errorf("failed to marshal updated resource: %w", err)
 	}
