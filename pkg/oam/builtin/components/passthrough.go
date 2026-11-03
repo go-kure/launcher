@@ -685,7 +685,8 @@ func jsonShape(m map[string]any) {
 }
 
 // jsonValue is the JSON-typed form of v, with the document it serializes to unchanged:
-// an integer is an int64 (a uint64 beyond int64 a json.Number of its digits), a float32
+// an integer is an int64 (a uint64 beyond int64 a json.Number of its digits), a
+// json.Number the type its text has (see numbered), a float32
 // the float64 of its shortest decimal form, a named scalar its underlying one, a typed
 // map with string keys a map[string]any, a slice or array an []any, a []byte the base64
 // string encoding/json writes, and a typed nil a null. A value with a form of its own
@@ -695,8 +696,10 @@ func jsonShape(m map[string]any) {
 // did.
 func jsonValue(v any) any {
 	switch t := v.(type) {
-	case nil, string, bool, int64, float64, json.Number:
+	case nil, string, bool, int64, float64:
 		return v
+	case json.Number:
+		return numbered(t) // the type its text has, as in a decoded document (go-kure/launcher#1167)
 	case map[string]any:
 		jsonShape(t)
 		return t
