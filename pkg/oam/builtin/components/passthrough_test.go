@@ -946,6 +946,10 @@ func TestPassthrough_DecimalBeyondFloat64KeepsItsDigits(t *testing.T) {
 		{"1e400", json.Number("1e400")},
 		{"1e-9999999", json.Number("1e-9999999")},
 		{"1" + strings.Repeat("0", 1200) + ".5", json.Number("1" + strings.Repeat("0", 1200) + ".5")},
+		// Convertible without the bounds (a float64 0 is exact), so only the bounds keep
+		// these a json.Number: the text length, then the exponent.
+		{"0." + strings.Repeat("0", 1000), json.Number("0." + strings.Repeat("0", 1000))},
+		{"0e401", json.Number("0e401")},
 		{"0.1", 0.1},
 		{"1.50", 1.5},
 		{"1e3", float64(1000)},
