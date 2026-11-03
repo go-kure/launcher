@@ -1835,9 +1835,12 @@ func parseLifecycleHandler(m map[string]any, namedPortsAllowed bool, matchName s
 // a safe partial override should use the `security-context` trait instead; this
 // property is for raw, full-fidelity authoring. If the `security-context` trait is
 // also applied to the same component, the trait's Generate()-time pass runs after
-// this component's own Generate() and unconditionally overwrites
-// container.SecurityContext (traits/security_context.go:190) — the trait always
-// wins when both are used together.
+// this component's own Generate() and merges into what is authored here, field by
+// field (traits' applyToPodSpec; go-kure/launcher#1171): a trait property
+// (runAsNonRoot, runAsUser, runAsGroup, fsGroup, allowPrivilegeEscalation,
+// readOnlyRootFilesystem) that differs from an authored value is a build error,
+// every other authored field is kept, and a field still unset takes the level's
+// profile.
 
 // authoredValue answers "did the document supply a value for this key?" — the
 // presence primitive the shared optional-field helpers (parseBoolField,

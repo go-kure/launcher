@@ -1,6 +1,7 @@
 package traits
 
 import (
+	"reflect"
 	"strings"
 
 	"github.com/go-kure/kure/pkg/stack"
@@ -50,19 +51,40 @@ func workloadPodSpec(obj client.Object) *corev1.PodSpec {
 	}
 }
 
-// workloadPodSpecs returns the pod spec of every workload among objects
-// (workloadPodSpec), in their order. Every other object is skipped: a trait
-// applies to the workloads a component generates and leaves the rest of its
-// output alone.
-func workloadPodSpecs(objects []*client.Object) []*corev1.PodSpec {
-	var specs []*corev1.PodSpec
+// workloadRef is a workload's pod spec with the kind and name of the object
+// that holds it, for an error that has to say which object to change.
+type workloadRef struct {
+	podSpec    *corev1.PodSpec
+	kind, name string
+}
+
+// workloadRefs returns every workload among objects (workloadPodSpec), in
+// their order. Every other object is skipped: a trait applies to the
+// workloads a component generates and leaves the rest of its output alone.
+func workloadRefs(objects []*client.Object) []workloadRef {
+	var refs []workloadRef
 	for _, objPtr := range objects {
 		if objPtr == nil {
 			continue
 		}
 		if podSpec := workloadPodSpec(*objPtr); podSpec != nil {
-			specs = append(specs, podSpec)
+			// The Go type names the kind even when the object carries no TypeMeta.
+			t := reflect.TypeOf(*objPtr)
+			if t.Kind() == reflect.Pointer {
+				t = t.Elem()
+			}
+			refs = append(refs, workloadRef{podSpec: podSpec, kind: t.Name(), name: (*objPtr).GetName()})
 		}
+	}
+	return refs
+}
+
+// workloadPodSpecs returns the pod spec of every workload among objects
+// (workloadRefs).
+func workloadPodSpecs(objects []*client.Object) []*corev1.PodSpec {
+	var specs []*corev1.PodSpec
+	for _, w := range workloadRefs(objects) {
+		specs = append(specs, w.podSpec)
 	}
 	return specs
 }
