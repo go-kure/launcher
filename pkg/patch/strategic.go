@@ -126,6 +126,9 @@ func numbered(v any) any {
 		if !strings.ContainsAny(t.String(), ".eE") {
 			return t
 		}
+		if len(t) > maxNumberLiteral {
+			return t
+		}
 		f, err := t.Float64()
 		if err != nil {
 			return t
@@ -179,6 +182,15 @@ func exactDigits(n json.Number, f float64) string {
 	}
 	return r.Num().String()
 }
+
+// maxNumberLiteral is the longest number literal, in bytes, that numbered
+// reads for its digits. The numbers it must read are shorter: at most 21 digits
+// below bigLimit, a sign, a point and a few zeros or an exponent, about 30
+// bytes. A longer literal, such as "9007199254740993." followed by a million
+// zeros, would make the exact parse (big.Rat) cost time and memory in
+// proportion to its length for no gain, so it is kept as the json.Number it
+// was, with its text unchanged, and never rounded to a float64.
+const maxNumberLiteral = 64
 
 // bigLimit is 1e21, the first whole number the encoding of a float64 writes with
 // an exponent.
