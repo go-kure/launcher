@@ -378,9 +378,9 @@ func policyObject(u *unstructured.Unstructured) (client.Object, error) {
 //
 // For the same reason it holds that copy to the environment policy again, once
 // ApplyPolicy has supplied one: the object checked there and the object emitted
-// here are then the same document (a repeated key in a value that serializes
-// itself is collapsed by the types Generate gives it, after the check). A refusal here is the component's
-// oam.ViolationError, as the transform reports one from ApplyPolicy.
+// here are then the same document, a repeated key having been refused. A
+// refusal here is the component's oam.ViolationError, as the transform reports
+// one from ApplyPolicy.
 func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
 	u, err := c.validated()
 	if err != nil {
@@ -391,8 +391,7 @@ func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, er
 			return nil, oam.NewViolationError(c.componentName, err)
 		}
 	}
-	// Last, so that every check above read the authored values, a value that serializes
-	// itself (a json.RawMessage with a repeated key) included. The emitted object is an
+	// Last, after every check above. The emitted object is an
 	// Unstructured, whose DeepCopyObject takes only the types of a decoded JSON document
 	// and panics on any other, so it goes out in those (go-kure/launcher#1162). c.Object
 	// stays as authored.
@@ -449,7 +448,80 @@ func (c *PassthroughConfig) validated() (*unstructured.Unstructured, error) {
 		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
 	}
 
+	// A repeated key is refused, since the readers of one document disagree on it.
+	if err := refuseRepeatedKeys(u.Object); err != nil {
+		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
+	}
+
 	return u, nil
+}
+
+// refuseRepeatedKeys refuses an object that holds a key twice in one JSON object, at
+// any depth, and names the field. An authored map cannot: the repeat comes from a value
+// that serializes itself, such as a json.RawMessage a Go caller built. The readers of
+// such a document disagree. The typed decode the policy reads merges a repeated
+// object member (a selector given twice keeps the matchLabels of the first), while the
+// generic decode that gives the emitted object its JSON types takes the last one (an
+// empty selector), so the object checked is not the object emitted
+// (go-kure/launcher#1162). Refusing is strict mode: no key is picked silently.
+//
+// An object that does not serialize is passed on, since policyObject and the writer
+// refuse it with their own error (go-kure/launcher#1166).
+func refuseRepeatedKeys(object map[string]any) error {
+	raw, err := json.Marshal(object)
+	if err == nil {
+		var field string
+		if field, err = repeatedKey(json.NewDecoder(bytes.NewReader(raw)), ""); err != nil {
+			return errors.Wrap(err, "the object cannot be read")
+		}
+		if field != "" {
+			return errors.Errorf("%s is given more than once in the same object; give each key once", field)
+		}
+	}
+	return nil
+}
+
+// repeatedKey walks the next JSON value of dec and returns the path of the first key
+// that appears twice in one object, or "" if none does.
+func repeatedKey(dec *json.Decoder, path string) (string, error) {
+	tok, err := dec.Token()
+	if err != nil {
+		return "", err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return "", nil
+	}
+	switch delim {
+	case '{':
+		seen := map[string]bool{}
+		for dec.More() {
+			keyTok, err := dec.Token()
+			if err != nil {
+				return "", err
+			}
+			key, _ := keyTok.(string)
+			field := key
+			if path != "" {
+				field = path + "." + key
+			}
+			if seen[key] {
+				return field, nil
+			}
+			seen[key] = true
+			if found, err := repeatedKey(dec, field); err != nil || found != "" {
+				return found, err
+			}
+		}
+	case '[':
+		for i := 0; dec.More(); i++ {
+			if found, err := repeatedKey(dec, path+"["+strconv.Itoa(i)+"]"); err != nil || found != "" {
+				return found, err
+			}
+		}
+	}
+	_, err = dec.Token()
+	return "", err
 }
 
 // resolveClusterScoped reports whether the object passthrough emits is

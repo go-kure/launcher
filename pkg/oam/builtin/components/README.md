@@ -12227,7 +12227,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   than emitted. The values of the emitted object are JSON values (`int64`, `float64`,
   `json.Number` beyond the `int64` range, `map[string]any`, `[]any`), whatever Go types
   the authored object held, so the emitted `Unstructured` can be deep-copied
-  (go-kure/launcher#1162); the config's own `Object` keeps the authored values.
+  (go-kure/launcher#1162); the config's own `Object` keeps the authored values. An
+  object with a key given twice in one JSON object, at any depth (a `json.RawMessage`
+  a Go caller built), is refused, naming the field: the policy check and the emitted
+  object would otherwise read it differently.
 
   **Scope** (go-kure/launcher#794, item 13). Whether the object is namespaced is
   resolved with the precedence `manifests` gives a `scopeOverrides` entry,
