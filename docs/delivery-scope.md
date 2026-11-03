@@ -2399,7 +2399,8 @@ list and the disposition of every item:
   resource, storage and replica rules, on every kind that check reads.
   - `passthrough` (`PassthroughConfig.ApplyPolicy`, `passthrough.go`): an object of a
     kind kure's scheme registers is decoded as that kind for the check alone
-    (`policyObject`); what is emitted stays the authored object. One that cannot be read
+    (`policyObject`); what is emitted is the authored object's document, in the types of
+    a decoded JSON one (a large integer keeps its digits). One that cannot be read
     is refused: a registered kind that does not decode, and a workload kind, a claim or a
     PersistentVolume in an API version the scheme does not register. An object the decoder
     of its kind panics on is refused the same way, as is such a document in a `manifests`

@@ -574,6 +574,25 @@ func TestPassthrough_RepeatedObjectKeyIsRefused(t *testing.T) {
 			spec:  json.RawMessage(`{"template": {"spec": {"containers": [{"name": "a"}, {"name": "b", "name": "c"}]}}}`),
 			field: "spec.template.spec.containers[1].name",
 		},
+		// A key with a dot is quoted, so the path names one field: unquoted,
+		// labels.example.io/x would read as the field x of labels.example.io.
+		"a key with a dot": {
+			spec:  json.RawMessage(`{"template": {"metadata": {"labels": {"example.io/x": "1", "example.io/x": "2"}}}}`),
+			field: `spec.template.metadata.labels["example.io/x"]`,
+		},
+		"under a key with a dot": {
+			spec:  json.RawMessage(`{"template": {"metadata": {"labels": {"a.b": {"c": 1, "c": 2}}}}}`),
+			field: `spec.template.metadata.labels["a.b"].c`,
+		},
+		"a key with a bracket": {
+			spec:  json.RawMessage(`{"template": {"metadata": {"labels": {"a[0]": "1", "a[0]": "2"}}}}`),
+			field: `spec.template.metadata.labels["a[0]"]`,
+		},
+		// An empty key is quoted too: unquoted it would read as the path of its parent.
+		"an empty key": {
+			spec:  json.RawMessage(`{"template": {"metadata": {"labels": {"": "1", "": "2"}}}}`),
+			field: `spec.template.metadata.labels[""]`,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := config(tc.spec)

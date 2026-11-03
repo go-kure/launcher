@@ -475,11 +475,11 @@ func TestPassthrough_UndeclaredFieldOutsideAWorkloadIsEmitted(t *testing.T) {
 }
 
 // TestPassthrough_LargeIntegerIsEmittedAndWrittenAsAuthored: the component
-// emits a large integer as it was authored, under a policy and under none: the
-// object is the authored map, and the decode the policy check reads never
-// replaces it. kure's manifest writer then writes an integer the object holds
-// as one with its own digits, above 2^53 and above the int64 range alike
-// (go-kure/kure#1006); it wrote both rounded before.
+// emits the authored object's document, in the types of a decoded JSON one, so
+// a large integer keeps its digits, under a policy and under none: the decode
+// the policy check reads never replaces it. kure's manifest writer then writes
+// an integer the object holds as one with its own digits, above 2^53 and above
+// the int64 range alike (go-kure/kure#1006); it wrote both rounded before.
 func TestPassthrough_LargeIntegerIsEmittedAndWrittenAsAuthored(t *testing.T) {
 	doc := "apiVersion: example.io/v1\nkind: Widget\nmetadata:\n  name: thing\nspec:\n" +
 		"  at53: 9007199254740992\n  over53: 9007199254740993\n  over63: 9223372036854775808\n"
