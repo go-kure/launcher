@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -398,6 +399,12 @@ func (c *PassthroughConfig) Generate(_ *stack.Application) ([]*client.Object, er
 	// and panics on any other, so it goes out in those (go-kure/launcher#1162). c.Object
 	// stays as authored.
 	jsonShape(u.Object)
+	// A value that does not serialize stays as authored in the shaped copy, and
+	// DeepCopyObject panics on it, so it is refused here, naming the field
+	// (go-kure/launcher#1166).
+	if field, ok := unshapedField(u.Object, ""); ok {
+		return nil, errors.Errorf("passthrough component %q: object %s: %s holds a value that cannot be written as JSON; give it a string, a number, a boolean, a list or a map", c.componentName, renderedObjectRef(u), field)
+	}
 	out := client.Object(u)
 	return []*client.Object{&out}, nil
 }
@@ -467,8 +474,9 @@ func (c *PassthroughConfig) validated() (*unstructured.Unstructured, error) {
 // empty selector), so the object checked is not the object emitted
 // (go-kure/launcher#1162). Refusing is strict mode: no key is picked silently.
 //
-// An object that does not serialize is passed on, since policyObject and the writer
-// refuse it with their own error (go-kure/launcher#1166).
+// An object that does not serialize is passed on here: policyObject refuses it under a
+// policy, and Generate refuses it, naming the field, once it is shaped
+// (go-kure/launcher#1166).
 func refuseRepeatedKeys(object map[string]any) error {
 	raw, err := json.Marshal(object)
 	if err == nil {
@@ -692,8 +700,8 @@ func jsonShape(m map[string]any) {
 // string encoding/json writes, and a typed nil a null. A value with a form of its own
 // (it marshals itself, or is a struct, a pointer or a map with other keys) is decoded
 // from the JSON it serializes to. A map[string]any and an []any are rewritten in place.
-// A value that does not serialize is returned as it is, for the writer to refuse as it
-// did.
+// A value that does not serialize is returned as it is, for Generate to refuse
+// (unshapedField).
 func jsonValue(v any) any {
 	switch t := v.(type) {
 	case nil, string, bool, int64, float64:
@@ -769,7 +777,8 @@ func jsonValue(v any) any {
 		return viaJSON(v)
 	case reflect.Invalid, reflect.Complex64, reflect.Complex128, reflect.Chan, reflect.Func,
 		reflect.Interface, reflect.UnsafePointer:
-		// None of these serializes: left as it is (go-kure/launcher#1166).
+		// None of these serializes: left as it is, for Generate to refuse
+		// (go-kure/launcher#1166).
 	}
 	return v
 }
@@ -782,8 +791,7 @@ func selfMarshaling(t reflect.Type) bool {
 
 // viaJSON is v as the JSON document it serializes to, decoded into the JSON types, for a
 // value that has a form of its own (a json.RawMessage, a time, a quantity, a struct). A
-// value that does not serialize is returned as it is, for the checks and the writer to
-// refuse as they did.
+// value that does not serialize is returned as it is, for Generate to refuse.
 func viaJSON(v any) any {
 	raw, err := json.Marshal(v)
 	if err != nil {
@@ -805,6 +813,11 @@ func viaJSON(v any) any {
 func numbered(v any) any {
 	switch t := v.(type) {
 	case json.Number:
+		// Text that is not a JSON number ("+12", "012") is kept, for Generate to
+		// refuse: Int64 would read it as a valid integer.
+		if !jsonNumberGrammar.MatchString(t.String()) {
+			return t
+		}
 		if i, err := t.Int64(); err == nil {
 			return i
 		}
@@ -825,6 +838,60 @@ func numbered(v any) any {
 		}
 	}
 	return v
+}
+
+// unshapedField returns the path of the first value under v (keys in sorted order) that
+// is not one jsonShape gives: nil, a string, a bool, an int64, a finite float64 or a
+// json.Number in the JSON number grammar. It returns "" and false when there is none.
+// path is the path of v, "" for the object itself.
+func unshapedField(v any, path string) (string, bool) {
+	switch t := v.(type) {
+	case nil, string, bool, int64:
+		return "", false
+	case float64:
+		if math.IsNaN(t) || math.IsInf(t, 0) {
+			return path, true
+		}
+		return "", false
+	case json.Number:
+		if !jsonNumberGrammar.MatchString(t.String()) {
+			return path, true
+		}
+		return "", false
+	case map[string]any:
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if field, ok := unshapedField(t[k], fieldPath(path, k)); ok {
+				return field, true
+			}
+		}
+		return "", false
+	case []any:
+		for i, e := range t {
+			if field, ok := unshapedField(e, path+"["+strconv.Itoa(i)+"]"); ok {
+				return field, true
+			}
+		}
+		return "", false
+	}
+	return path, true
+}
+
+// fieldPath is the path of key under path: "path.key", or "path[\"key\"]" when the key is
+// empty or holds a dot, a bracket or a quote, so that two different fields never share a
+// path.
+func fieldPath(path, key string) string {
+	if key == "" || strings.ContainsAny(key, `.[]"`) {
+		return path + "[" + strconv.Quote(key) + "]"
+	}
+	if path == "" {
+		return key
+	}
+	return path + "." + key
 }
 
 // Bounds on a number's text before it is compared exactly: the comparison builds a

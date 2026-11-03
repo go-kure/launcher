@@ -2,6 +2,7 @@ package components_test
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -1002,5 +1003,94 @@ func TestPassthrough_AuthoredJSONNumberIsShaped(t *testing.T) {
 	}
 	if n, found, err := unstructured.NestedInt64(u.Object, "data", "int"); err != nil || !found || n != 12 {
 		t.Errorf("NestedInt64 = %d, %v, %v; want 12, true, nil", n, found, err)
+	}
+}
+
+// TestPassthrough_UnserializableValueIsRefused: a value that does not serialize cannot be
+// given the JSON types, and an Unstructured holding it panics when it is deep-copied. With
+// no policy nothing else refuses it, so Generate does, and names the field
+// (go-kure/launcher#1166).
+func TestPassthrough_UnserializableValueIsRefused(t *testing.T) {
+	type holdsFunc struct{ F func() }
+	cases := []struct {
+		name  string
+		value any
+	}{
+		{"func", func() {}},
+		{"chan", make(chan int)},
+		{"complex", complex(1, 2)},
+		{"NaN", math.NaN()},
+		{"infinity", math.Inf(1)},
+		{"text number", json.Number("abc")},
+		{"JSON value that is not a number", json.Number("true")},
+		{"plus sign", json.Number("+12")},
+		{"leading zero", json.Number("012")},
+		{"negative leading zero", json.Number("-01")},
+		{"struct holding a func", holdsFunc{F: func() {}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := &components.PassthroughHandler{}
+			cfg, err := h.ToApplicationConfig(passthroughComponent(map[string]any{"object": map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Service",
+				"spec": map[string]any{
+					"ports": []any{map[string]any{"x": c.value}},
+				},
+			}}), "ns1")
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			objs, err := cfg.Generate(nil)
+			if err == nil {
+				// Today the object is emitted, and the deep copy panics.
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							t.Errorf("Generate emitted the object, and DeepCopyObject panicked: %v", r)
+						}
+					}()
+					(*objs[0]).DeepCopyObject()
+				}()
+				t.Fatal("Generate returned no error")
+			}
+			if !strings.Contains(err.Error(), "spec.ports[0].x") {
+				t.Errorf("error = %q, want it to name spec.ports[0].x", err)
+			}
+		})
+	}
+}
+
+// TestPassthrough_RefusalPathKeepsLiteralKeys: the path in the refusal tells two fields
+// apart. A key with a dot, a bracket or a quote, or an empty key, is written quoted, so
+// spec["a.b"] is not confused with spec.a.b (go-kure/launcher#1166).
+func TestPassthrough_RefusalPathKeepsLiteralKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		spec map[string]any
+		want string
+	}{
+		{"dotted key", map[string]any{"a.b": func() {}}, `spec["a.b"]`},
+		{"nested under a dotted key", map[string]any{"a.b": map[string]any{"c": func() {}}}, `spec["a.b"].c`},
+		{"bracket key", map[string]any{"a[0]": func() {}}, `spec["a[0]"]`},
+		{"empty key", map[string]any{"": func() {}}, `spec[""]`},
+		{"plain key", map[string]any{"a": func() {}}, `spec.a`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := &components.PassthroughHandler{}
+			cfg, err := h.ToApplicationConfig(passthroughComponent(map[string]any{"object": map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Service",
+				"spec":       c.spec,
+			}}), "ns1")
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			_, err = cfg.Generate(nil)
+			if err == nil || !strings.Contains(err.Error(), c.want+" holds") {
+				t.Errorf("error = %v, want it to name %s", err, c.want)
+			}
+		})
 	}
 }
