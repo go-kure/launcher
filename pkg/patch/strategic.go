@@ -64,8 +64,9 @@ func applyTypedSMP(resource *unstructured.Unstructured, patch map[string]any, ty
 		return errors.Wrap(err, "strategic merge patch failed")
 	}
 
-	// The merged map keeps the Go types of its inputs, such as a plain int, which
-	// DeepCopy refuses. Give it the types of a decoded JSON document first.
+	// Both inputs are normalized, so the merged map already holds JSON types. This
+	// call copies it, so the resource shares nothing with the merge, and guards
+	// against a type the merge could add.
 	typed, err := jsonTyped(merged)
 	if err != nil {
 		return errors.Wrap(err, "failed to normalize strategic merge patch result")
