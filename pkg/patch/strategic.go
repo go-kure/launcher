@@ -3,6 +3,8 @@ package patch
 import (
 	"bytes"
 	"encoding/json"
+	"math"
+	"math/big"
 	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
@@ -30,16 +32,16 @@ func ApplyStrategicMergePatch(
 	lookup KindLookup,
 ) error {
 	gvk := resource.GroupVersionKind()
-	patchCopy := deepCopyMap(patch)
 
 	if lookup != nil {
 		typedObj, ok := lookup.LookupKind(gvk)
 		if ok {
-			return applyTypedSMP(resource, patchCopy, typedObj)
+			// applyTypedSMP normalizes, and so copies, the patch.
+			return applyTypedSMP(resource, patch, typedObj)
 		}
 	}
 
-	return applyJSONMergePatch(resource, patchCopy)
+	return applyJSONMergePatch(resource, deepCopyMap(patch))
 }
 
 // applyTypedSMP applies a strategic merge patch using Go struct tags from the
@@ -81,8 +83,21 @@ func applyTypedSMP(resource *unstructured.Unstructured, patch map[string]any, ty
 // nil and numbers. A number has the type its own JSON encoding decodes to: an
 // int64 where a whole number fits, so that 80, 80.0 and 8e1 are alike, a float64
 // for a fraction, and a json.Number, with its own digits, for an integer beyond
-// the int64 range, which a float64 would round. Normalizing twice changes nothing.
+// the int64 range, which a float64 would round. A whole number written with a
+// point or an exponent keeps its own digits too, up to 1e21: 9007199254740993.0 is
+// the integer 9007199254740993, not the float64 beside it. Written that way from
+// 1e21 a whole number stays a float64; between 2^63 and 1e21 it is a json.Number
+// of plain digits, as is a plain integer of any size beyond the int64 range.
+// Those are the types its encoding decodes to.
+// A nil slice or map, at any depth, becomes an empty one, not null, which a merge
+// patch reads as a deletion; an explicit nil value stays nil. A document that
+// nests deeper than maxDepth, or contains itself, is an error. Normalizing twice
+// changes nothing.
 func jsonTyped(m map[string]any) (map[string]any, error) {
+	m, err := normalizeNil(m)
+	if err != nil {
+		return nil, err
+	}
 	raw, err := json.Marshal(m)
 	if err != nil {
 		return nil, err
@@ -117,9 +132,17 @@ func numbered(v any) any {
 		}
 		// A whole float encodes as digits. Give it the type those digits decode to,
 		// an int64 or, beyond that range, a json.Number, so that normalizing the
-		// result again changes nothing.
-		if enc, err := json.Marshal(f); err == nil {
-			n := json.Number(enc)
+		// result again changes nothing. Above 2^53 a float64 has already rounded the
+		// number, so take the digits from the number as written when it is a whole
+		// number.
+		digits := exactDigits(t, f)
+		if digits == "" {
+			if enc, err := json.Marshal(f); err == nil {
+				digits = string(enc)
+			}
+		}
+		if digits != "" {
+			n := json.Number(digits)
 			if i, err := n.Int64(); err == nil {
 				return i
 			}
@@ -138,6 +161,113 @@ func numbered(v any) any {
 		}
 	}
 	return v
+}
+
+// exactDigits returns the digits of n as an integer when n is a whole number as
+// written, f is its float64 and the integer lies in [2^53, 1e21), where a float64
+// cannot hold every integer but the encoding of f is still plain digits.
+// Otherwise it returns "". f is tested with 1e21 inclusive, as a number just
+// below 1e21 rounds to it; the exact value is then tested against the bound. The
+// f range keeps an exponent such as 1e-99999999 away from the exact parser.
+func exactDigits(n json.Number, f float64) string {
+	if a := math.Abs(f); a < 1<<53 || a > 1e21 {
+		return ""
+	}
+	r, ok := new(big.Rat).SetString(n.String())
+	if !ok || !r.IsInt() || r.Num().CmpAbs(bigLimit) >= 0 {
+		return ""
+	}
+	return r.Num().String()
+}
+
+// bigLimit is 1e21, the first whole number the encoding of a float64 writes with
+// an exponent.
+var bigLimit = new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil)
+
+// maxDepth bounds how deep the nil scan and emptied walk, as encoding/json bounds the cycle
+// check of json.Marshal: a document that nests deeper, or that contains
+// itself, is an error, not a stack overflow.
+const maxDepth = 1000
+
+// normalizeNil returns m itself when it holds no nil []any or nil map[string]any,
+// and otherwise a copy in which each is an empty one. The scan only reads, so a
+// document without a nil container is not copied here. A nil m is returned as is.
+func normalizeNil(m map[string]any) (map[string]any, error) {
+	if m == nil {
+		return nil, nil
+	}
+	found, err := hasNilContainer(m, 0)
+	if err != nil || !found {
+		return m, err
+	}
+	c, err := emptied(m, 0)
+	if err != nil {
+		return nil, err
+	}
+	return c.(map[string]any), nil
+}
+
+// hasNilContainer reports whether v holds a nil []any or nil map[string]any at
+// any depth. A document nested deeper than maxDepth, or containing itself, is an
+// error.
+func hasNilContainer(v any, depth int) (bool, error) {
+	if depth > maxDepth {
+		return false, errTooDeep
+	}
+	switch t := v.(type) {
+	case map[string]any:
+		if t == nil {
+			return true, nil
+		}
+		for _, e := range t {
+			if found, err := hasNilContainer(e, depth+1); err != nil || found {
+				return found, err
+			}
+		}
+	case []any:
+		if t == nil {
+			return true, nil
+		}
+		for _, e := range t {
+			if found, err := hasNilContainer(e, depth+1); err != nil || found {
+				return found, err
+			}
+		}
+	}
+	return false, nil
+}
+
+var errTooDeep = errors.New("the document is nested too deeply or contains itself")
+
+// emptied returns a copy of v in which a nil []any or nil map[string]any, at any
+// depth, is an empty one. Other values, an explicit nil among them, are kept.
+func emptied(v any, depth int) (any, error) {
+	if depth > maxDepth {
+		return nil, errTooDeep
+	}
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, e := range t {
+			c, err := emptied(e, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			out[k] = c
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			c, err := emptied(e, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = c
+		}
+		return out, nil
+	}
+	return v, nil
 }
 
 // applyJSONMergePatch applies RFC 7386 JSON merge patch as a fallback for
