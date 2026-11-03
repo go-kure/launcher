@@ -470,8 +470,12 @@ func (c *PassthroughConfig) validated() (*unstructured.Unstructured, error) {
 func refuseRepeatedKeys(object map[string]any) error {
 	raw, err := json.Marshal(object)
 	if err == nil {
+		// UseNumber: the walk reads a number as its text, so an integer beyond
+		// float64 range is not an unreadable document (go-kure/launcher#1176).
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
 		var field string
-		if field, err = repeatedKey(json.NewDecoder(bytes.NewReader(raw)), ""); err != nil {
+		if field, err = repeatedKey(dec, ""); err != nil {
 			return errors.Wrap(err, "the object cannot be read")
 		}
 		if field != "" {

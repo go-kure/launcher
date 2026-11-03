@@ -896,3 +896,36 @@ func TestPassthroughHandler_DoesNotMutateSource(t *testing.T) {
 		t.Errorf("source metadata mutated: name set to %q", objMeta["name"])
 	}
 }
+
+// TestPassthrough_RepeatedKeyWalkTakesBigInteger: the check for a repeated key reads
+// numbers as text, so an authored integer beyond float64 range is accepted and emitted
+// with its own digits, and a real repeated key next to it is still refused
+// (go-kure/launcher#1176).
+func TestPassthrough_RepeatedKeyWalkTakesBigInteger(t *testing.T) {
+	digits := "1" + strings.Repeat("0", 399)
+	object := func(raw string) map[string]any {
+		return map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"data":       map[string]any{"big": json.RawMessage(raw)},
+		}
+	}
+
+	t.Run("an integer beyond float64 range is accepted", func(t *testing.T) {
+		u := generatePassthrough(t, map[string]any{"object": object(digits)}, "ns1")
+		got := u.Object["data"].(map[string]any)["big"]
+		if got != json.Number(digits) {
+			t.Errorf("big = %#v, want json.Number with its 400 digits", got)
+		}
+	})
+
+	t.Run("a repeated key next to it is still refused", func(t *testing.T) {
+		h := &components.PassthroughHandler{}
+		_, err := h.ToApplicationConfig(passthroughComponent(map[string]any{
+			"object": object(`{"n":` + digits + `,"n":2}`),
+		}), "ns1")
+		if err == nil || !strings.Contains(err.Error(), "more than once") {
+			t.Errorf("error = %v, want the repeated-key refusal", err)
+		}
+	})
+}
