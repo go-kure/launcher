@@ -1629,19 +1629,36 @@ below): both name a path on the node, which a pod reaches by binding the
 volume through a claim.
 
 Setting any `securityContext` field makes the container's `SecurityContext`
-non-nil, which opts it out of the `security-context` trait's nil-only
-backfill for every *other* `SecurityContext` field too. If a component uses
-both, the trait's `Generate()` pass runs later and unconditionally overwrites
-`container.SecurityContext` — the trait always wins when both are applied to
-the same component. This applies to a component-authored `initContainers`/
-`sidecars` entry's own `securityContext` too, not just the main container's:
-the trait's `applyToPodSpec` (`pkg/oam/builtin/traits/security_context.go`)
-overwrites `SecurityContext` on every entry of both `podSpec.Containers`
-(which includes rendered sidecars) and `podSpec.InitContainers`, so it wins
-over an init container's or sidecar's own authored value the same way it
-wins over the main container's. Use the trait for a safe, complete
-PSA-consistent default; use this property for raw, partial, full-fidelity
-authoring.
+non-nil, which opts it out of the downstream runtime's nil-only backfill for
+every *other* `SecurityContext` field too. If a component uses both this and
+the `security-context` trait, the trait's `Generate()` pass runs later and
+**merges into** what is authored (go-kure/launcher#1171), field by field, on
+the pod's `securityContext` and on every entry of `podSpec.Containers` (which
+includes rendered sidecars) and `podSpec.InitContainers`; an init container's
+or sidecar's own `securityContext` is merged the same way as the main
+container's. Precedence, highest first:
+
+1. A trait property: `runAsNonRoot`, `runAsUser`, `runAsGroup`, `fsGroup`,
+   `allowPrivilegeEscalation`, `readOnlyRootFilesystem`. A different authored
+   value for the same field, or a container-level `runAsUser`/`runAsGroup`
+   that differs from the trait's pod-level one (it would override it at run
+   time), fails the build with both values and the workload named. An equal
+   value is fine.
+2. The authored value. Everything the trait has no property for
+   (`capabilities.add`, `privileged`, a `Localhost` seccomp profile,
+   `seLinuxOptions`, `appArmorProfile`, `windowsOptions`, `procMount`,
+   `sysctls`, `supplementalGroups`) is kept as authored.
+3. The `psaLevel` profile, for a field still unset. At `restricted`, `ALL` is
+   added to an authored `capabilities.drop` that lacks it.
+
+The merged result is then checked against the declared `psaLevel`
+(`baseline` and `restricted`; `privileged` has no check): a field the Pod
+Security Standards forbid at that level, such as `privileged: true` or an
+unlisted `capabilities.add` at `baseline`, fails the build rather than the
+pod's admission at deploy time. Only `securityContext` fields are checked;
+host namespaces, `hostPath` and volume types are not. Use the trait for a
+safe, complete PSA-consistent default; use this property for the fields the
+trait has no property for.
 
 `env`, `envFrom`, `resources`, `lifecycle`, `securityContext`, `workingDir`, and
 `probes` are each schema fragments parameterized by a `reserved bool` (mirroring

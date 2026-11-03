@@ -1854,3 +1854,95 @@ func TestBuildCommand_RefusesInDocumentObjectCollision(t *testing.T) {
 		}
 	}
 }
+
+// securityContextMergeAppYAML is a deployment that authors its own container
+// security context next to a security-context trait; %s is the trait's
+// properties.
+const securityContextMergeAppYAML = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  components:
+    - name: web
+      type: deployment
+      properties:
+        image: ghcr.io/example/web:v1.0.0
+        securityContext:
+          capabilities:
+            add: [NET_BIND_SERVICE]
+            drop: [ALL]
+          seccompProfile:
+            type: Localhost
+            localhostProfile: profiles/app.json
+      traits:
+        - type: security-context
+          properties:
+%s
+`
+
+func buildSecurityContextMerge(t *testing.T, traitProps string) (string, error) {
+	t.Helper()
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", fmt.Sprintf(securityContextMergeAppYAML, traitProps))
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+// TestBuildCommand_SecurityContextTraitKeepsAuthoredContext is the reproduction
+// of go-kure/launcher#1171: the trait used to replace the authored container
+// context, losing the capability list and the Localhost seccomp profile, and
+// never wrote an explicit runAsNonRoot at baseline.
+func TestBuildCommand_SecurityContextTraitKeepsAuthoredContext(t *testing.T) {
+	got, err := buildSecurityContextMerge(t, "            psaLevel: baseline\n            runAsNonRoot: true")
+	if err != nil {
+		t.Fatalf("build failed: %v\noutput: %s", err, got)
+	}
+	for _, want := range []string{
+		"- NET_BIND_SERVICE",
+		"- ALL",
+		"type: Localhost",
+		"localhostProfile: profiles/app.json",
+		"runAsNonRoot: true",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in output, got:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "runAsNonRoot: true") != 2 {
+		t.Errorf("expected runAsNonRoot on the pod and on the container, got:\n%s", got)
+	}
+}
+
+// TestBuildCommand_SecurityContextTraitRefusesWhatTheLevelForbids: the merge
+// keeps an authored capability, so the declared level is checked on the result;
+// NET_BIND_SERVICE is fine, SYS_ADMIN is refused at baseline.
+func TestBuildCommand_SecurityContextTraitRefusesWhatTheLevelForbids(t *testing.T) {
+	appYAML := strings.Replace(securityContextMergeAppYAML, "add: [NET_BIND_SERVICE]", "add: [SYS_ADMIN]", 1)
+	dir := t.TempDir()
+	appPath := writeTempFile(t, dir, "app.yaml", fmt.Sprintf(appYAML, "            psaLevel: baseline"))
+	profilePath := writeTempFile(t, dir, "cluster.yaml", testClusterYAML)
+
+	cmd := NewKurelCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"build", appPath, "--profile", profilePath})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected the build to refuse SYS_ADMIN at baseline, output:\n%s", out.String())
+	}
+	for _, want := range []string{"SYS_ADMIN", "baseline", `container "web"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+}
