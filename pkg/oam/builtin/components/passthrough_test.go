@@ -1094,3 +1094,18 @@ func TestPassthrough_RefusalPathKeepsLiteralKeys(t *testing.T) {
 		})
 	}
 }
+
+// TestPassthrough_EmptyJSONNumberIsZero: encoding/json writes the zero value of json.Number
+// as 0, so the object it came in serialized before and is emitted with an int64 0, not
+// refused.
+func TestPassthrough_EmptyJSONNumberIsZero(t *testing.T) {
+	u := generatePassthrough(t, map[string]any{"object": map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"data":       map[string]any{"n": json.Number(""), "list": []any{json.Number("")}},
+	}}, "ns1")
+	want := map[string]any{"n": int64(0), "list": []any{int64(0)}}
+	if got := u.Object["data"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("data = %#v, want %#v", got, want)
+	}
+}
