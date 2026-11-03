@@ -43,10 +43,21 @@ func ApplyStrategicMergePatch(
 }
 
 // applyTypedSMP applies a strategic merge patch using Go struct tags from the
-// typed object. StrategicMergeMapPatch mutates its arguments, so we deep-copy
-// the resource map before passing it in. On error the resource is left untouched.
+// typed object. StrategicMergeMapPatch mutates its arguments, so it merges
+// normalized copies of the resource map and the patch. On error the resource is
+// left untouched.
 func applyTypedSMP(resource *unstructured.Unstructured, patch map[string]any, typedObj any) error {
-	original := deepCopyMap(resource.Object)
+	// Merge two inputs of the same types. The merge compares list merge keys by
+	// type, so an int in the patch would not match the int64 an earlier patch left
+	// in the resource. The round trip also copies, as the merge mutates its inputs.
+	original, err := jsonTyped(resource.Object)
+	if err != nil {
+		return errors.Wrap(err, "failed to normalize resource for strategic merge patch")
+	}
+	patch, err = jsonTyped(patch)
+	if err != nil {
+		return errors.Wrap(err, "failed to normalize patch for strategic merge patch")
+	}
 
 	merged, err := strategicpatch.StrategicMergeMapPatch(original, patch, typedObj)
 	if err != nil {

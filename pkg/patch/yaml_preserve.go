@@ -144,24 +144,18 @@ func parseYAMLDocuments(content string) ([]string, error) {
 
 // marshalResource marshals a resource object to YAML. yaml.v3 does not know
 // json.Number, which a strategic merge patch leaves for an integer beyond the
-// int64 range, and would quote it as a string. A copy with a plain number in its
+// int64 range, and would quote it as a string. A copy with a plain scalar in its
 // place is marshaled; the object itself is not changed.
 func marshalResource(obj map[string]any) ([]byte, error) {
 	return yaml.Marshal(yamlNumbers(obj))
 }
 
-// yamlNumbers returns v with each json.Number replaced by the uint64 or float64
-// that yaml.v3 writes as a plain number. A json.Number that is neither is kept.
+// yamlNumbers returns v with each json.Number replaced by a plain scalar node
+// that holds its own text, so that no digit is rounded.
 func yamlNumbers(v any) any {
 	switch t := v.(type) {
 	case json.Number:
-		if u, err := strconv.ParseUint(t.String(), 10, 64); err == nil {
-			return u
-		}
-		if f, err := t.Float64(); err == nil {
-			return f
-		}
-		return t
+		return &yaml.Node{Kind: yaml.ScalarNode, Value: t.String()}
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, e := range t {
