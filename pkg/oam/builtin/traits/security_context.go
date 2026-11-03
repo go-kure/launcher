@@ -265,7 +265,8 @@ func (s *securityContextSpec) applyToPodSpec(podSpec *corev1.PodSpec, where stri
 		}
 	}
 
-	pod, err := s.mergePodSecurityContext(podSpec.SecurityContext, windows, where+", pod")
+	authoredPod := podSpec.SecurityContext
+	pod, err := s.mergePodSecurityContext(authoredPod, windows, where+", pod")
 	if err != nil {
 		return err
 	}
@@ -273,14 +274,14 @@ func (s *securityContextSpec) applyToPodSpec(podSpec *corev1.PodSpec, where stri
 
 	for i := range podSpec.Containers {
 		c := &podSpec.Containers[i]
-		if c.SecurityContext, err = s.mergeContainerSecurityContext(c.SecurityContext, pod, windows,
+		if c.SecurityContext, err = s.mergeContainerSecurityContext(c.SecurityContext, authoredPod, pod, windows,
 			fmt.Sprintf("%s, container %q", where, c.Name)); err != nil {
 			return err
 		}
 	}
 	for i := range podSpec.InitContainers {
 		c := &podSpec.InitContainers[i]
-		if c.SecurityContext, err = s.mergeContainerSecurityContext(c.SecurityContext, pod, windows,
+		if c.SecurityContext, err = s.mergeContainerSecurityContext(c.SecurityContext, authoredPod, pod, windows,
 			fmt.Sprintf("%s, init container %q", where, c.Name)); err != nil {
 			return err
 		}
@@ -330,7 +331,7 @@ func (s *securityContextSpec) mergePodSecurityContext(authored *corev1.PodSecuri
 // error, and a restricted container with no seccomp profile of its own takes
 // the pod's rather than shadowing an authored pod-level profile with
 // RuntimeDefault.
-func (s *securityContextSpec) mergeContainerSecurityContext(authored *corev1.SecurityContext, pod *corev1.PodSecurityContext, windows bool, where string) (*corev1.SecurityContext, error) {
+func (s *securityContextSpec) mergeContainerSecurityContext(authored *corev1.SecurityContext, authoredPod, pod *corev1.PodSecurityContext, windows bool, where string) (*corev1.SecurityContext, error) {
 	sc := authored.DeepCopy()
 	if sc == nil {
 		sc = &corev1.SecurityContext{}
@@ -379,7 +380,78 @@ func (s *securityContextSpec) mergeContainerSecurityContext(authored *corev1.Sec
 			}
 		}
 	}
+	if !windows {
+		if err := s.refuseContradictions(authored, sc, authoredPod, pod, where); err != nil {
+			return nil, err
+		}
+	}
 	return sc, nil
+}
+
+// refuseContradictions rejects a merged container context that Kubernetes
+// refuses at admission or the kubelet cannot start, at every psaLevel. The
+// trait adds allowPrivilegeEscalation and runAsNonRoot to a context the
+// component parser checked before the trait ran, so those checks
+// (validateEffectiveRunAsUser and the privileged and CAP_SYS_ADMIN pair in the
+// components package) cannot see a contradiction the trait introduces. Each
+// error names the trait property, the level default or the workload as the
+// source of each side (authored is the context before the merge).
+func (s *securityContextSpec) refuseContradictions(authored, sc *corev1.SecurityContext, authoredPod, pod *corev1.PodSecurityContext, where string) error {
+	if sc.AllowPrivilegeEscalation != nil && !*sc.AllowPrivilegeEscalation {
+		src := s.sourceOf(s.AllowPrivilegeEscalation != nil, authored != nil && authored.AllowPrivilegeEscalation != nil, "allowPrivilegeEscalation: false")
+		if sc.Privileged != nil && *sc.Privileged {
+			return errors.Errorf("security-context: %s: %s, and the workload sets privileged: true, which makes allowPrivilegeEscalation true; set one of them in the workload", where, src)
+		}
+		if sc.Capabilities != nil {
+			for _, c := range sc.Capabilities.Add {
+				if c == "CAP_SYS_ADMIN" {
+					return errors.Errorf("security-context: %s: %s, and the workload adds capability CAP_SYS_ADMIN, which Kubernetes refuses together with it; set one of them in the workload", where, src)
+				}
+			}
+		}
+	}
+	// The kubelet takes the container's value, else the pod's. The trait writes
+	// runAsNonRoot on both levels and runAsUser on the pod only, so the source
+	// of each effective value follows the level it was taken from.
+	user, userFrom := sc.RunAsUser, "the workload sets runAsUser: 0 on the container"
+	if user == nil && pod != nil {
+		user = pod.RunAsUser
+		userFrom = "the workload sets runAsUser: 0 on the pod"
+		if s.RunAsUser != nil {
+			userFrom = "the trait sets runAsUser: 0"
+		}
+	}
+	nonRoot, nonRootFrom := sc.RunAsNonRoot, ""
+	switch {
+	case sc.RunAsNonRoot == nil && pod != nil:
+		nonRoot = pod.RunAsNonRoot
+		nonRootFrom = s.sourceOf(s.RunAsNonRoot != nil, authoredPod != nil && authoredPod.RunAsNonRoot != nil, "runAsNonRoot: true", "on the pod")
+	default:
+		nonRootFrom = s.sourceOf(s.RunAsNonRoot != nil, authored != nil && authored.RunAsNonRoot != nil, "runAsNonRoot: true", "on the container")
+	}
+	if user != nil && *user == 0 && nonRoot != nil && *nonRoot {
+		return errors.Errorf("security-context: %s: %s, and %s; the kubelet refuses to start a container with UID 0 under runAsNonRoot, so set a non-zero runAsUser or runAsNonRoot: false", where, nonRootFrom, userFrom)
+	}
+	return nil
+}
+
+// sourceOf says where a merged value came from: the trait property, the
+// workload that authored it, or the psaLevel profile's default.
+// level (optional) says where the workload set it: "on the pod" or "on the
+// container".
+func (s *securityContextSpec) sourceOf(fromTrait, authored bool, what string, level ...string) string {
+	at := ""
+	if len(level) > 0 {
+		at = " " + level[0]
+	}
+	switch {
+	case fromTrait:
+		return "the trait sets " + what
+	case authored:
+		return "the workload sets " + what + at
+	default:
+		return fmt.Sprintf("psaLevel %s sets %s", s.PSALevel, what)
+	}
 }
 
 // setExplicit writes the trait's value into *dst. A nil value is no property

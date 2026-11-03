@@ -1660,6 +1660,19 @@ host namespaces, `hostPath` and volume types are not. Use the trait for a
 safe, complete PSA-consistent default; use this property for the fields the
 trait has no property for.
 
+At every `psaLevel`, the merged result must also be a context Kubernetes
+accepts and the kubelet can start. The build refuses `allowPrivilegeEscalation:
+false` (from the trait property, the `restricted` default or the workload)
+together with `privileged: true` or an added `CAP_SYS_ADMIN`, and
+`runAsNonRoot: true` together with an effective `runAsUser` of 0, whether the
+container or the pod sets it. The error names where each side came from. The
+component's own checks run before the trait, so they cannot see a conflict the
+trait introduces. A sysctl name is checked as authored, as Pod Security
+Admission checks it: the component accepts `/` as a separator, but at
+`baseline` and `restricted` only the dotted spelling of a safe sysctl is
+allowed, so `net/ipv4/tcp_syncookies` and `net.ipv4/tcp_syncookies` are
+refused and `net.ipv4.tcp_syncookies` is not. `privileged` has no check.
+
 `env`, `envFrom`, `resources`, `lifecycle`, `securityContext`, `workingDir`, and
 `probes` are each schema fragments parameterized by a `reserved bool` (mirroring
 `pkg/oam/builtin/traits/schema.go`'s `schemaNetworkPolicy(reserved bool)`):

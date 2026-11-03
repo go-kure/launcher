@@ -121,6 +121,10 @@ func (c psaCheck) pod(sc *corev1.PodSecurityContext, at string) error {
 		return err
 	}
 	for _, s := range sc.Sysctls {
+		// The name is looked up as authored, as Pod Security Admission does
+		// (k8s.io/pod-security-admission policy/check_sysctls.go): the
+		// component parser accepts "/" as a separator, but admission does not
+		// read it as ".", so a slash spelling is refused here too.
 		if !baselineSysctls[s.Name] {
 			return c.notAllowed(at, fmt.Sprintf("sysctls: %s", s.Name))
 		}
