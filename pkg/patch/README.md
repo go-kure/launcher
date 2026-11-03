@@ -124,6 +124,8 @@ When using `NewPatchableAppSetWithStructure`, the original YAML document structu
 
 For broad document-level changes, strategic merge patch (SMP) deep-merges a partial YAML document into the target resource. Known Kubernetes kinds merge lists by key (e.g. containers by `name`); unknown kinds fall back to JSON merge patch (RFC 7386).
 
+For known kinds, the merged object holds only the types of a decoded JSON document, so it can be deep-copied. Whole numbers are `int64`, even when written as `80.0` or `8e1`. Fractions are `float64`, and an integer beyond the `int64` range is a `json.Number` that keeps its digits. A value that cannot be serialized to JSON is an error, and the resource is left unchanged.
+
 ```yaml
 - target: deployment.my-app
   type: strategic
