@@ -1372,21 +1372,29 @@ func TestApplyStrategicMergePatch_JSONMergeResourceNilContainerDeletedByNil(t *t
 // on the fallback, as on the typed path, and that the resource is left as it was.
 func TestApplyStrategicMergePatch_JSONMergeResourceErrorLeavesResourceAlone(t *testing.T) {
 	var nilSlice []any
-	self := map[string]any{"list": nilSlice}
-	self["self"] = self
-	for name, spec := range map[string]map[string]any{
-		"too deep":        deepMapWith(maxDepth, nilSlice),
-		"contains itself": self,
+	// Each case builds its resource twice, so the expected one shares no map with
+	// the one that is patched: a nil slice emptied in place would differ from it.
+	for name, spec := range map[string]func() map[string]any{
+		"too deep": func() map[string]any { return deepMapWith(maxDepth, nilSlice) },
+		"contains itself": func() map[string]any {
+			self := map[string]any{"list": nilSlice}
+			self["self"] = self
+			return self
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			resource := widget()
-			resource.Object["spec"] = spec
-			before := resource.Object["spec"]
+			build := func() *unstructured.Unstructured {
+				resource := widget()
+				resource.Object["spec"] = spec()
+				return resource
+			}
+			resource := build()
 			if err := ApplyStrategicMergePatch(resource, map[string]any{"a": "2"}, nil); err == nil {
 				t.Fatal("ApplyStrategicMergePatch: want an error")
 			}
-			if !reflect.DeepEqual(resource.Object["spec"], before) || len(resource.Object) != 4 {
-				t.Errorf("resource = %#v, want it unchanged", resource.Object)
+			// A fixed message: %#v of a self-containing resource never ends.
+			if !reflect.DeepEqual(resource.Object, build().Object) {
+				t.Error("resource changed by the failed patch, want it unchanged")
 			}
 		})
 	}
