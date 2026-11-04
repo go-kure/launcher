@@ -236,6 +236,10 @@ type operatorContainerMounts struct {
 // otherwise runs, and one of its mounts may hide or replace the other, the
 // operator's included, since the operator appends the spec's entries among
 // its own mounts. A hidden volume is not judged here.
+//
+// It refuses first, in each entry, a subPathExpr or a subPath that is absolute
+// or holds a ".." element (checkDescendingPath), as the API does: the operator
+// copies the entry as written.
 func refuseGeneratedMounts(m operatorContainerMounts) error {
 	generated := make(map[string]string, len(m.generated))
 	maps.Copy(generated, m.generated)
@@ -247,6 +251,17 @@ func refuseGeneratedMounts(m operatorContainerMounts) error {
 	}
 	authored := make(map[string]int, len(m.mounts))
 	for i, vm := range m.mounts {
+		label := fmt.Sprintf("%s[%d]", m.field, i)
+		if vm.SubPathExpr != "" {
+			if err := checkDescendingPath(label+".subPathExpr", vm.SubPathExpr); err != nil {
+				return err
+			}
+		}
+		if vm.SubPath != "" {
+			if err := checkDescendingPath(label+".subPath", vm.SubPath); err != nil {
+				return err
+			}
+		}
 		if what, ok := reservedAs(generated, m.patterns, vm.MountPath); ok {
 			return errors.Errorf("%s[%d] %q: the mount path is %s, and the API refuses a container with two mounts at one path; mount the volume elsewhere", m.field, i, vm.MountPath, what)
 		}

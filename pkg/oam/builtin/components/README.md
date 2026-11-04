@@ -4409,6 +4409,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `/etc/alertmanager/configmaps/<name>` for each entry of `secrets` and
     `configMaps` (:531-556, :575-692). The mounts of the web and cluster TLS
     credentials are left to the API, as their volumes are.
+  - an entry of `volumeMounts` whose `subPath` or `subPathExpr` is absolute or
+    holds a `..` element (go-kure/launcher#1211): the operator copies the
+    entry as written, and the API refuses it. Checked before the path.
   - an entry of `volumeMounts` at the path of an earlier one written alike: the
     API compares mount paths as written and refuses two mounts at one path
     (`pkg/apis/core/validation/validation.go:3177-3227` at Kubernetes
@@ -4928,6 +4931,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     of each Secret key's volume above, and
     `/etc/thanos/rules/thanos-ruler-<name>-rulefiles-<n>` (:297-302, :394,
     :441-471, :601-626).
+  - an entry of `volumeMounts` whose `subPath` or `subPathExpr` is absolute or
+    holds a `..` element (go-kure/launcher#1211): the operator copies the
+    entry as written, and the API refuses it. Checked before the path.
   - an entry of `volumeMounts` at the path of an earlier one written alike:
     the API refuses two mounts at one path. The message names both entries.
     As on `alertmanager`, a path written otherwise than another entry's, or
@@ -5339,6 +5345,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     for each entry of `secrets` and `configMaps`. The mounts of the web TLS
     credentials, under `/etc/prometheus/web_config/`, are left to the API,
     as their volumes are.
+  - an entry of `volumeMounts` whose `subPath` or `subPathExpr` is absolute or
+    holds a `..` element (go-kure/launcher#1211): the operator copies the
+    entry as written, and the API refuses it. Checked before the path. An
+    entry of `thanos.volumeMounts` with either field is refused below, as
+    not carried.
   - an entry of `thanos.volumeMounts` at a path the operator mounts a
     volume at in the thanos-sidecar container: `/prometheus` where
     `objectStorageConfig` or `objectStorageConfigFile` is set, and
