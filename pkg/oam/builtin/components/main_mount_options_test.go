@@ -253,6 +253,44 @@ func TestMainMount_BlockDeviceRefusesMountKeys(t *testing.T) {
 	}
 }
 
+// TestMainMount_NullIsAbsent: an explicit null on any mount key reads as
+// omission on every path that reads or refuses one (the null-as-absence rule in
+// the README). The four paths are a `volumes` mount, a `volumes` device, a
+// claim template mount and a claim template device. A device path used to
+// refuse the key by presence alone.
+func TestMainMount_NullIsAbsent(t *testing.T) {
+	sts := workloadKinds[2]
+	dep := workloadKinds[5]
+	if sts.name != "statefulset" || dep.name != "deployment" {
+		t.Fatalf("workloadKinds order changed: %q, %q", sts.name, dep.name)
+	}
+	for _, key := range mountKeys {
+		t.Run(key, func(t *testing.T) {
+			cases := []struct {
+				path string
+				kind struct {
+					name    string
+					handler oam.ComponentHandler
+					props   map[string]any
+				}
+				extra props
+			}{
+				{"volumes mount", dep, props{"volumes": []any{volumeEntry(props{key: nil})}}},
+				{"volumes device", dep, props{"volumes": []any{props{"name": "raw", "type": "pvc", "claimName": "existing", "volumeMode": "Block", "devicePath": "/dev/xvda", key: nil}}}},
+				{"claim template mount", sts, props{"volumeClaimTemplates": []any{props{"name": "data", "size": "1Gi", "mountPath": "/data", key: nil}}}},
+				{"claim template device", sts, props{"volumeClaimTemplates": []any{props{"name": "raw", "size": "1Gi", "volumeMode": "Block", "devicePath": "/dev/xvda", key: nil}}}},
+			}
+			for _, tc := range cases {
+				t.Run(tc.path, func(t *testing.T) {
+					if _, err := tc.kind.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: tc.kind.name, Properties: withProps(tc.kind.props, tc.extra)}, "default"); err != nil {
+						t.Errorf("a null %s was refused: %v", key, err)
+					}
+				})
+			}
+		})
+	}
+}
+
 // TestMainMount_BlockDeviceKeepsReadOnly pins the other half of the split: a
 // `volumes` pvc entry with devicePath still accepts readOnly. It sets the
 // claim source, a valid field before go-kure/launcher#1198, and the entry

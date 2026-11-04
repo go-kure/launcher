@@ -135,10 +135,11 @@ func checkMainContainerMountPropagation(mounts []corev1.VolumeMount, sc *corev1.
 // refuseMountKeysOnDevice refuses the keys in keys that a devicePath entry
 // authors: a volumeMode: Block claim reaches the container as a raw block
 // device, which has no mount to carry them (go-kure/launcher#1198). label names
-// the entry.
+// the entry. A key that is null, typed or untyped, is absent: authoredValue is
+// the presence test every parser of this package uses.
 func refuseMountKeysOnDevice(mm map[string]any, keys []string, label string) error {
 	for _, k := range keys {
-		if _, present := mm[k]; present {
+		if _, present := authoredValue(mm, k); present {
 			return errors.Errorf("%s: %s is not valid with devicePath, because a raw block device has no mount", label, k)
 		}
 	}
