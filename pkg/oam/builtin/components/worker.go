@@ -114,7 +114,7 @@ func (WorkerRule) PropertySchema() map[string]oam.PropertySchema {
 // LowerComponent validates comp as a worker and emits the equivalent
 // deployment component (see WorkerRule).
 func (r WorkerRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
-	opinions, err := parseWorker(comp.Properties)
+	opinions, err := parseWorker(comp.Name, comp.Properties)
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}
@@ -195,7 +195,7 @@ type workerOpinions struct {
 // first cause as before. Every other parsed value is discarded here — the
 // deployment component parses the forwarded properties again, with the same
 // helpers.
-func parseWorker(props map[string]any) (workerOpinions, error) {
+func parseWorker(name string, props map[string]any) (workerOpinions, error) {
 	var out workerOpinions
 
 	image, ok := props["image"].(string)
@@ -275,6 +275,9 @@ func parseWorker(props map[string]any) (workerOpinions, error) {
 		return out, err
 	}
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
+		return out, err
+	}
+	if err := checkPodContainerNames(name, initContainers, sidecars); err != nil {
 		return out, err
 	}
 	// The main container declares no ports, so only sidecars can collide.

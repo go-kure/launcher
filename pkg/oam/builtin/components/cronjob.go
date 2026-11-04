@@ -332,6 +332,9 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, nil); err != nil {
 		return nil, err
 	}
+	if err := checkPodContainerNames(component.Name, initContainers, nil); err != nil {
+		return nil, err
+	}
 	// The main container's `ports` and the native sidecars share one name space;
 	// jobs take no sidecars.
 	if err := checkPodPortNames(config.Ports, initContainers, nil); err != nil {

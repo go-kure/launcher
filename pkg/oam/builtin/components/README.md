@@ -1311,7 +1311,13 @@ sidecar's and every native sidecar's (go-kure/launcher#1225). The
 API server checks names only per container and merely warns across them,
 while a Service selecting the name reaches only the first container that
 declares it, so a repeated name is refused, naming both containers. A regular
-init container declares no ports, so it takes no part. Closing the entry is behavior-changing under an
+init container declares no ports, so it takes no part. A container name must be
+unique across the pod too: the main container (named after the component),
+every `initContainers` entry and every `sidecars` entry, and within each list.
+The API server refuses a pod whose containers share a name, so the document is
+refused when it is read, naming both entries (go-kure/launcher#1226). `job` and
+`cronjob` take no `sidecars`, so their pod holds the main container and the
+`initContainers` entries. Closing the entry is behavior-changing under an
 unchanged `launcher.gokure.dev/v1alpha1`: a document that authored any other
 key on an entry built before and errors now. It is taken on the same
 reasoning as the `volumeClaimTemplates` entry below — the key never reached
