@@ -32,7 +32,9 @@ type StrategicPatch struct {
 // chains of map[string]any and []any, as an empty one, so only an explicit nil
 // value deletes a field, and a chain nested deeper than maxDepth or containing
 // itself is an error. Any other container type is left to encoding/json: a nil
-// map[string]string is null.
+// map[string]string is null. On both paths a number in the merged resource has
+// the type jsonTyped describes: an int64 where a whole number fits, not the
+// float64 that the JSON merge fallback used to return.
 func ApplyStrategicMergePatch(
 	resource *unstructured.Unstructured,
 	patch map[string]any,
@@ -131,7 +133,13 @@ func jsonTyped(m map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return decodeTyped(raw)
+}
 
+// decodeTyped decodes a JSON object into the types described on jsonTyped. The
+// JSON merge fallback decodes its merged document with it too, so that an unknown
+// kind returns the same number types as a known one.
+func decodeTyped(raw []byte) (map[string]any, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var out map[string]any
@@ -342,8 +350,10 @@ func applyJSONMergePatch(resource *unstructured.Unstructured, patch map[string]a
 		return errors.Wrap(err, "JSON merge patch failed")
 	}
 
-	var merged map[string]any
-	if err := json.Unmarshal(mergedJSON, &merged); err != nil {
+	// Numbers get the types jsonTyped gives them, so a whole number is an int64 here
+	// as on a known kind, and an integer beyond 2^53 keeps its digits.
+	merged, err := decodeTyped(mergedJSON)
+	if err != nil {
 		return errors.Wrap(err, "failed to unmarshal merged result")
 	}
 
