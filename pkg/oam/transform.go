@@ -1126,8 +1126,9 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			rec = ctx.provenance.forOwner(propOwner{component: component.Name, member: member})
 			if component.origin != nil && component.origin.Rule != "" {
 				// A lowering rule emitted the component, whether or not it counts as
-				// synthesized: its properties are the rule's output.
-				rec.lowered(component.Properties, component.origin.Rule)
+				// synthesized: its properties are the rule's output, each leaf copied
+				// from what the rule was handed or rendered by the rule.
+				rec.fromRule(component.ruleInput, component.Properties, component.origin.Rule)
 			} else {
 				rec.authored(component.Properties)
 			}
@@ -1647,12 +1648,13 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 				rec = ctx.provenance.forOwner(propOwner{component: entry.component.Name, member: memberType, trait: trait.Type, index: step.first + position})
 				if trait.sealed {
 					// A lowering rule emitted the trait and merged any capability
-					// rendering into it itself; its properties are the rule's output.
+					// rendering into it itself; its properties are the rule's output,
+					// each leaf copied from what the rule was handed or rendered by it.
 					rule := ""
 					if trait.origin != nil {
 						rule = trait.origin.Rule
 					}
-					rec.lowered(trait.Properties, rule)
+					rec.fromRule(trait.ruleInput, trait.Properties, rule)
 				}
 			}
 			if !trait.sealed {

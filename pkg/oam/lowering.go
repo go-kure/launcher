@@ -1285,6 +1285,9 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 					}
 				} else {
 					comp.synthesized = false
+					// A by-value copy keeps the input of the rule that emitted the
+					// original; this rule's output is rendered.
+					comp.ruleInput = nil
 				}
 				// Nor does a document rule form or carry a sibling group (stampSiblingGroups).
 				comp.siblingGroup = nil
@@ -1414,6 +1417,11 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// read before this rule can touch its copy.
 			inheritedOrder := comp.orderAfter
 			inheritedWaits := comp.waitsAs
+			// What the rule is handed, for the provenance report: taken before it runs.
+			var compInput *ruleInput
+			if ctx.provenance != nil {
+				compInput = ruleInputFor(comp.Properties, comp.origin, comp.ruleInput)
+			}
 			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, Origin: compOrigin, Namer: namer}
 			result, err := rule.LowerComponent(&comp, lctx)
 			if err != nil {
@@ -1443,6 +1451,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			names := make([]string, len(result.Components))
 			for j := range result.Components {
 				result.Components[j].origin = &compOrigin
+				result.Components[j].ruleInput = compInput
 				result.Components[j].synthesized = inputChecked
 				names[j] = result.Components[j].Name
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
@@ -1533,12 +1542,17 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			resolvedTrait := trait
 			matched := false
 			matchedKey := ""
+			// The source of each leaf the rule is handed, kept only for a report.
+			var inputSources *ownerRecorder
+			if ctx.provenance != nil {
+				inputSources = &ownerRecorder{entries: map[string]Source{}}
+			}
 			if !trait.sealed {
 				// Capability rendering is merged in before the rule runs (D5 input 3),
 				// the same merge applyTraits performs for a dispatchable handler — so a
 				// TraitLoweringRule sees the identical "rendering as defaults, inline
 				// wins" view a TraitHandler would.
-				resolvedTrait, matchedKey, matched = resolveCapability(trait, ctx.Capabilities, nil)
+				resolvedTrait, matchedKey, matched = resolveCapability(trait, ctx.Capabilities, inputSources)
 
 				// CapabilityAware is engine-enforced here exactly as applyTraits
 				// enforces it for a dispatchable TraitHandler: a lowering rule that
@@ -1602,6 +1616,15 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// unpromoted: it holds only what the rule's own schema reserves, not what
 			// the components or traits the rule emits reserve.
 			inputChecked := trait.synthesized || (declaresSchema && !trait.sealed)
+			// What the rule is handed, for the provenance report: taken before it runs.
+			var traitInput *ruleInput
+			if ctx.provenance != nil {
+				if trait.sealed {
+					traitInput = ruleInputFor(trait.Properties, trait.origin, trait.ruleInput)
+				} else {
+					traitInput = newRuleInput(resolvedTrait.Properties, inputSources.entries)
+				}
+			}
 			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, Origin: traitOrigin, Namer: namer}
 			result, err := rule.LowerTrait(&resolvedTrait, lctx)
 			if err != nil {
@@ -1625,6 +1648,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			names := make([]string, len(result.Traits))
 			for j := range result.Traits {
 				result.Traits[j].origin = &traitOrigin
+				result.Traits[j].ruleInput = traitInput
 				result.Traits[j].sealed = true
 				result.Traits[j].synthesized = inputChecked
 				// A trait lowered from a forwarded one keeps its authored slot, so a
@@ -1638,6 +1662,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			newTraits = append(newTraits, result.Traits...)
 			for j := range result.Components {
 				result.Components[j].origin = &traitOrigin
+				result.Components[j].ruleInput = traitInput
 				result.Components[j].synthesized = inputChecked
 				// A trait rule never forms a sibling group; a by-value copy of the
 				// group member it decorates must not join that group (stampSiblingGroups).
@@ -1839,6 +1864,10 @@ func (t *Transformer) sealNestedTraits(comp *Component, parentOrigin Origin, syn
 		nestedOrigin.TraitType = trait.Type
 		nestedOrigin.Index = k
 		trait.origin = &nestedOrigin
+		// The rule's input held no trait at this path: a by-value copy of a trait an
+		// earlier rule emitted carries that rule's input, which says nothing of what
+		// this rule did, so the provenance report renders every leaf of the trait.
+		trait.ruleInput = nil
 		trait.sealed = true
 		trait.synthesized = synthesized
 		if err := t.validateEmittedTrait(trait); err != nil {

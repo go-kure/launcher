@@ -2308,7 +2308,12 @@ properties), the leaf `Path` and a `Source`. A `Source` has a `Kind`:
 |------|---------|
 | `authored` | The value is in the properties the caller passed. |
 | `capability` | A `ClusterProfile` binding supplied it. `Ref` is the binding's key: the scoped key or the bare type key that matched, `pvc` for a top-level fill, or, for a value a `ComponentCapabilityFiller` wrote below the top level, the capability the filler read (the sorted keys joined by `,` when it read several). |
-| `lowered` | A lowering rule emitted the element, so its properties are the rule's output: a component whose origin names a rule (whether or not it counts as synthesized), and a sealed trait. `Ref` is the rule's identity, such as `component/<type>`. The report does not split what the rule copied from authored input from what it rendered. A capability fill on a rule-emitted component no rule synthesized stays `capability`. |
+| `copied` | A lowering rule emitted the element (a component whose origin names a rule, whether or not it counts as synthesized, or a sealed trait), and the value is one the rule's input held at the same path. `Ref` is the rule's identity, such as `component/<type>`. `From` is the kind the value had in that input: `authored`, `capability` (its `Detail` is kept) or `rendered` (an earlier rule's). A rule that hands a value on unchanged reports where it came from, not that the rule touched it. A collection the rule hands back in another Go type (a `[]any` as a `[]string`) is copied when every item had the same source, and rendered when they differ. |
+| `rendered` | The same elements, and the value is any other: one the rule added, changed or moved to another path. `Ref` is the rule's identity. This is what `lowered` reported before, for the part of the output the rule made. A capability fill on a rule-emitted component no rule synthesized stays `capability`. |
+
+`lowered` is gone: a consumer that read `Source.Kind == "lowered"` reads `copied` or `rendered` now. A rule's input is what the engine handed it, as the next paragraph describes. The input is kept only while a report is wanted; `Transform` and `TransformWithPolicy` keep and compute nothing for it.
+
+A component rule is handed the component's properties as they stand: a capability fill of a component happens after lowering, so a missing property is not populated from the profile yet. An unsealed trait rule is handed the trait's properties merged over its capability rendering, in this order of precedence: an authored value wins over the profile, which wins over a schema default, which wins over a handler default (the last three are the capability rendering). A sealed trait (one an earlier rule emitted) is handed its properties as they stand: no capability rendering is merged at this step, and its properties are final. A lowering rule then returns its own properties, and what it returns replaces that input: it can keep a value (`copied`), change or move one, or add one the input lacks (`rendered`). A policy default is outside the report: it is applied to the typed config after the handler built it, so no property path names it, and the report has no kind for it. It fills a value only when the value was not present in the properties the handler received. That holds for `replicas`, which counts a value left by the author, by a lowering rule or by a capability fill as explicit, so a rule-added `replicas` beats the policy default. The `cpu`, `memory` and `storage` defaults were not traced.
 
 A `capability` source also has a `Detail` when the profile went through
 `Transformer.EvaluateProfileWithProvenance`, which returns what `EvaluateProfile` returns
@@ -3655,8 +3660,8 @@ the rendering supplies takes the platform value. A `null` under a key the render
 lacks is left as authored. **Pre-GA output changes**: the authored `null` used to
 replace the rendered value, so the handler saw the key unset (go-kure/launcher#742);
 an authored object used to replace the rendered object whole, dropping its sibling
-keys (go-kure/launcher#750). This holds for every trait with a rendering, on both the
-dispatch path and a trait lowering rule's input.
+keys (go-kure/launcher#750). This holds for every unsealed trait with a rendering, on both the
+dispatch path and an unsealed trait lowering rule's input.
 
 Authored validation checks nested `Required` on the merged properties too
 (`ValidateAuthoredPropertiesWithCapabilities`, go-kure/launcher#765), so a partial

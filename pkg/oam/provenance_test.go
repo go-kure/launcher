@@ -727,13 +727,63 @@ func (provDocRule) LowerDocument(doc *Application, _ LoweringContext) (LoweringR
 	}}}, nil
 }
 
-// TestProvenance_LoweredElements: what a lowering rule emits is reported as
-// lowered, with the rule's identity as Ref; a capability fill on an emitted
-// component no rule synthesized stays capability (test 9).
+// fnTraitRule is a TraitLoweringRule whose output is fn's.
+type fnTraitRule struct {
+	typ string
+	fn  func(*Trait) []Trait
+}
+
+func (r fnTraitRule) TraitType() string { return r.typ }
+func (r fnTraitRule) LowerTrait(t *Trait, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Traits: r.fn(t)}, nil
+}
+
+// compTraitRule is a TraitLoweringRule that emits components, as fn builds them.
+type compTraitRule struct {
+	typ string
+	fn  func(*Trait) []Component
+}
+
+func (r compTraitRule) TraitType() string { return r.typ }
+func (r compTraitRule) LowerTrait(t *Trait, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: r.fn(t)}, nil
+}
+
+// TestSealNestedTraits_DropsInheritedRuleInput: a trait a rule nests in a component
+// it emits is not attributed against the input of the rule that emitted the trait it
+// was copied from.
+func TestSealNestedTraits_DropsInheritedRuleInput(t *testing.T) {
+	stale := newRuleInput(map[string]any{"port": 80}, map[string]Source{"port": {Kind: SourceAuthored}})
+	comp := Component{Name: "web", Type: "web", Properties: map[string]any{},
+		Traits: []Trait{{Type: "expose", Properties: map[string]any{"port": 80}, ruleInput: stale}}}
+	tr := provTransformer(newProvCapture())
+	if err := tr.sealNestedTraits(&comp, Origin{}, false, func(*Trait) bool { return false }); err != nil {
+		t.Fatalf("sealNestedTraits: %v", err)
+	}
+	if comp.Traits[0].ruleInput != nil {
+		t.Error("a sealed nested trait kept the input of the rule that emitted its original")
+	}
+	forwarded := Component{Name: "web", Type: "web", Properties: map[string]any{},
+		Traits: []Trait{{Type: "expose", Properties: map[string]any{"port": 80}, ruleInput: stale}}}
+	if err := tr.sealNestedTraits(&forwarded, Origin{}, false, func(*Trait) bool { return true }); err != nil {
+		t.Fatalf("sealNestedTraits: %v", err)
+	}
+	if forwarded.Traits[0].ruleInput != stale {
+		t.Error("a forwarded trait lost its input")
+	}
+}
+
+// TestProvenance_LoweredElements: what a lowering rule emits is reported as copied
+// (a value its input held at the same path) or rendered (any other), with the rule's
+// identity as Ref; a capability fill on an emitted component no rule synthesized
+// stays capability (test 9).
 func TestProvenance_LoweredElements(t *testing.T) {
 	caps := map[string]CapabilityBinding{
 		"store":  rend(map[string]any{"class": "platform"}),
 		"expose": rend(map[string]any{"proto": "tcp"}),
+		// expose-src is the type a trait rule claims, so its rule is handed the
+		// capability rendering merged under the authored properties.
+		"expose-src": rend(map[string]any{"proto": "tcp"}),
 	}
 	cases := []struct {
 		name      string
@@ -754,7 +804,7 @@ func TestProvenance_LoweredElements(t *testing.T) {
 		app:       func() *Application { return provApp(Component{Name: "data", Type: "plain-rule"}) },
 		component: "data",
 		want: map[string]Source{
-			"size":  {Kind: SourceLowered, Ref: "component/plain-rule"},
+			"size":  {Kind: SourceRendered, Ref: "component/plain-rule"},
 			"class": {Kind: SourceCapability, Ref: "store"},
 		},
 	}, {
@@ -763,7 +813,7 @@ func TestProvenance_LoweredElements(t *testing.T) {
 		app:       func() *Application { return singleComponentApp("ProvDoc", "web", nil) },
 		component: "web",
 		want: map[string]Source{
-			"size":  {Kind: SourceLowered, Ref: "document/ProvDoc"},
+			"size":  {Kind: SourceRendered, Ref: "document/ProvDoc"},
 			"class": {Kind: SourceCapability, Ref: "store"},
 		},
 	}, {
@@ -773,7 +823,7 @@ func TestProvenance_LoweredElements(t *testing.T) {
 		},
 		app:       func() *Application { return provApp(Component{Name: "data", Type: "store-rule"}) },
 		component: "data",
-		want:      map[string]Source{"size": {Kind: SourceLowered, Ref: "component/store-rule"}},
+		want:      map[string]Source{"size": {Kind: SourceRendered, Ref: "component/store-rule"}},
 	}, {
 		name: "trait the rule hard-codes",
 		register: func(tr *Transformer) {
@@ -785,8 +835,91 @@ func TestProvenance_LoweredElements(t *testing.T) {
 		app:       func() *Application { return provApp(Component{Name: "web", Type: "traited"}) },
 		component: "web",
 		trait:     "expose",
-		want:      map[string]Source{"port": {Kind: SourceLowered, Ref: "component/traited"}},
+		want:      map[string]Source{"port": {Kind: SourceRendered, Ref: "component/traited"}},
 		owners:    map[string][]provOwner{"web/expose": {{}}},
+	}, {
+		name: "component rule passes an authored value through",
+		register: func(tr *Transformer) {
+			tr.RegisterComponentLowering(emitRule{"copier", func(c *Component) []Component {
+				return []Component{{Name: c.Name, Type: "store", Properties: map[string]any{"size": c.Properties["size"]}}}
+			}})
+		},
+		app: func() *Application {
+			return provApp(Component{Name: "data", Type: "copier", Properties: map[string]any{"size": "2Gi"}})
+		},
+		component: "data",
+		want: map[string]Source{
+			"size":  {Kind: SourceCopied, Ref: "component/copier", From: SourceAuthored},
+			"class": {Kind: SourceCapability, Ref: "store"},
+		},
+	}, {
+		name: "component rule changes an authored value",
+		register: func(tr *Transformer) {
+			tr.RegisterComponentLowering(emitRule{"changer", func(c *Component) []Component {
+				return []Component{{Name: c.Name, Type: "store", Properties: map[string]any{"size": "1Gi"}}}
+			}})
+		},
+		app: func() *Application {
+			return provApp(Component{Name: "data", Type: "changer", Properties: map[string]any{"size": "2Gi"}})
+		},
+		component: "data",
+		want: map[string]Source{
+			"size":  {Kind: SourceRendered, Ref: "component/changer"},
+			"class": {Kind: SourceCapability, Ref: "store"},
+		},
+	}, {
+		name: "trait rule passes authored and capability values through and adds its own",
+		register: func(tr *Transformer) {
+			tr.RegisterTraitLowering(fnTraitRule{"expose-src", func(t *Trait) []Trait {
+				props := map[string]any{"host": "h"}
+				for k, v := range t.Properties {
+					props[k] = v
+				}
+				return []Trait{{Type: "ingress", Properties: props}}
+			}})
+		},
+		app: func() *Application {
+			return provApp(Component{Name: "web", Type: "web", Properties: map[string]any{"image": "a"},
+				Traits: []Trait{{Type: "expose-src", Properties: map[string]any{"port": 80}}}})
+		},
+		component: "web",
+		trait:     "ingress",
+		want: map[string]Source{
+			"port":  {Kind: SourceCopied, Ref: "trait/expose-src", From: SourceAuthored},
+			"proto": {Kind: SourceCopied, Ref: "trait/expose-src", From: SourceCapability},
+			"host":  {Kind: SourceRendered, Ref: "trait/expose-src"},
+		},
+		owners: map[string][]provOwner{"web/ingress": {{}}},
+	}, {
+		name: "component a trait rule emits passes the trait's value through",
+		register: func(tr *Transformer) {
+			tr.RegisterTraitLowering(compTraitRule{"src", func(t *Trait) []Component {
+				return []Component{{Name: "data", Type: "store", Properties: map[string]any{"size": t.Properties["size"]}}}
+			}})
+		},
+		app: func() *Application {
+			return provApp(Component{Name: "web", Type: "web", Properties: map[string]any{"image": "a"},
+				Traits: []Trait{{Type: "src", Properties: map[string]any{"size": "2Gi"}}}})
+		},
+		component: "data",
+		want: map[string]Source{
+			"size":  {Kind: SourceCopied, Ref: "trait/src", From: SourceAuthored},
+			"class": {Kind: SourceCapability, Ref: "store"},
+		},
+	}, {
+		name: "collection handed back in another Go type",
+		register: func(tr *Transformer) {
+			tr.RegisterComponentLowering(emitRule{"retype", func(c *Component) []Component {
+				return []Component{{Name: c.Name, Type: "web", Properties: map[string]any{"tags": []string{"a", "b"}}}}
+			}})
+		},
+		app: func() *Application {
+			return provApp(Component{Name: "web", Type: "retype", Properties: map[string]any{"tags": []any{"a", "b"}}})
+		},
+		component: "web",
+		want: map[string]Source{
+			"tags": {Kind: SourceCopied, Ref: "component/retype", From: SourceAuthored},
+		},
 	}}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -803,5 +936,107 @@ func TestProvenance_LoweredElements(t *testing.T) {
 				t.Errorf("entries = %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestRuleInput_Attribute: a leaf the rule's input held at the same path is copied and
+// keeps the kind it had there; any other leaf is rendered, and so is every leaf when
+// no input was kept.
+func TestRuleInput_Attribute(t *testing.T) {
+	capSrc := Source{Kind: SourceCapability, Ref: "expose", Detail: "profile"}
+	in := newRuleInput(
+		map[string]any{"port": 80, "proto": "tcp", "tls": map[string]any{"secret": "s"}, "gone": "x"},
+		map[string]Source{
+			"port":       {Kind: SourceAuthored},
+			"proto":      capSrc,
+			"tls.secret": {Kind: SourceCopied, Ref: "trait/earlier", From: SourceAuthored},
+			"gone":       {Kind: SourceRendered, Ref: "component/earlier"},
+		})
+	out := map[string]any{
+		"port":  80,                            // same value, same path
+		"proto": "udp",                         // changed
+		"moved": "x",                           // the value of "gone", at another path
+		"tls":   map[string]any{"secret": "s"}, // copied through a copy
+		"host":  "h",                           // new
+		"gone":  nil,                           // a null is no leaf
+	}
+	want := map[string]Source{
+		"port":       {Kind: SourceCopied, Ref: "r", From: SourceAuthored},
+		"proto":      {Kind: SourceRendered, Ref: "r"},
+		"moved":      {Kind: SourceRendered, Ref: "r"},
+		"tls.secret": {Kind: SourceCopied, Ref: "r", From: SourceAuthored},
+		"host":       {Kind: SourceRendered, Ref: "r"},
+	}
+	if got := in.attribute(out, "r"); !reflect.DeepEqual(got, want) {
+		t.Errorf("attribute = %+v, want %+v", got, want)
+	}
+
+	// A capability leaf copied unchanged keeps its Detail; a rendered one chains as From.
+	same := map[string]any{"proto": "tcp", "gone": "x"}
+	got := in.attribute(same, "r")
+	if w := (Source{Kind: SourceCopied, Ref: "r", From: SourceCapability, Detail: capSrc.Detail}); !reflect.DeepEqual(got["proto"], w) {
+		t.Errorf("proto = %+v, want %+v", got["proto"], w)
+	}
+	if w := (Source{Kind: SourceCopied, Ref: "r", From: SourceRendered}); !reflect.DeepEqual(got["gone"], w) {
+		t.Errorf("gone = %+v, want %+v", got["gone"], w)
+	}
+
+	var none *ruleInput
+	for path, s := range none.attribute(map[string]any{"a": 1, "b": map[string]any{"c": 2}}, "r") {
+		if s != (Source{Kind: SourceRendered, Ref: "r"}) {
+			t.Errorf("nil input: %s = %+v, want rendered", path, s)
+		}
+	}
+}
+
+// TestNearestSource: an object a step recorded as one leaf attributes the leaves
+// under it; a path with no enclosing entry has no source.
+func TestNearestSource(t *testing.T) {
+	sources := map[string]Source{
+		"a":   {Kind: SourceAuthored},
+		"a.b": {Kind: SourceCapability, Ref: "x"},
+	}
+	for path, want := range map[string]SourceKind{
+		"a":     SourceAuthored,
+		"a.b":   SourceCapability,
+		"a.b.c": SourceCapability,
+		"a.d":   SourceAuthored,
+		"a[0]":  SourceAuthored,
+	} {
+		got, ok := nearestSource(sources, path)
+		if !ok || got.Kind != want {
+			t.Errorf("nearestSource(%q) = %+v, %v; want kind %s", path, got, ok, want)
+		}
+	}
+	if _, ok := nearestSource(sources, "ab"); ok {
+		t.Error("nearestSource(\"ab\") found an entry; \"ab\" is not under \"a\"")
+	}
+
+	// A collection the rule handed back as one leaf, held by its input as several: the
+	// entries under it stand for it when they agree, and name no source when they do not.
+	items := map[string]Source{
+		"tags[0]": {Kind: SourceCapability, Detail: "profile"},
+		"tags[1]": {Kind: SourceCapability, Detail: "profile"},
+	}
+	if got, ok := nearestSource(items, "tags"); !ok || got.Kind != SourceCapability || got.Detail != "profile" {
+		t.Errorf("nearestSource(tags) = %+v, %v; want the capability source the items agree on", got, ok)
+	}
+	items["tags[1]"] = Source{Kind: SourceAuthored}
+	if got, ok := nearestSource(items, "tags"); ok {
+		t.Errorf("nearestSource(tags) = %+v for items that disagree; want none", got)
+	}
+	if _, ok := nearestSource(items, "other"); ok {
+		t.Error("nearestSource(other) found an entry under a path nothing is recorded under")
+	}
+}
+
+// TestRuleInput_NilRecorderRecordsNothing: with no report wanted the recorder is nil
+// and attribution neither records nor allocates.
+func TestRuleInput_NilRecorderRecordsNothing(t *testing.T) {
+	in := newRuleInput(map[string]any{"a": 1}, map[string]Source{"a": {Kind: SourceAuthored}})
+	props := map[string]any{"a": 1, "b": map[string]any{"c": 2}}
+	var rec *ownerRecorder
+	if n := testing.AllocsPerRun(100, func() { rec.fromRule(in, props, "r") }); n != 0 {
+		t.Errorf("fromRule on a nil recorder allocated %v times, want 0", n)
 	}
 }
