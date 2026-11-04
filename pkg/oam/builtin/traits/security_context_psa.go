@@ -26,6 +26,13 @@ import (
 // written by the trait and not checked. kure's ValidatePodSpecPSA is not used:
 // it checks host namespaces and a narrower field set, and its restricted rules
 // ask for more than the standard does (a pod-level runAsNonRoot).
+//
+// The policy modelled is the latest one, as pod-security-admission v0.37.2 runs
+// it with the 1.35 relaxations for a pod with hostUsers: false (a user
+// namespace): baseline procMount, restricted runAsUser 0 and restricted
+// runAsNonRoot are skipped for such a pod. Restricted procMount is not: admission
+// re-applies the unconditional rule there. A namespace pinned to a policy version
+// below 1.35 still refuses these pods at deploy time.
 
 // baselineCapabilities are the capabilities the baseline profile lets a
 // container add.
@@ -64,12 +71,18 @@ var baselineSysctls = map[string]bool{
 // checkPSALevel returns an error for the first securityContext field of
 // podSpec the declared level does not allow. The privileged level allows
 // everything. windows skips the Linux-only rules, as Pod Security Admission
-// does for a Windows pod. where names the workload.
+// does for a Windows pod. A pod with hostUsers: false gets the user-namespace
+// relaxations in the header comment. where names the workload.
 func checkPSALevel(level kubernetes.PSALevel, podSpec *corev1.PodSpec, windows bool, where string) error {
 	if level != kubernetes.PSABaseline && level != kubernetes.PSARestricted {
 		return nil
 	}
-	c := psaCheck{level: level, restricted: level == kubernetes.PSARestricted, windows: windows}
+	c := psaCheck{
+		level:      level,
+		restricted: level == kubernetes.PSARestricted,
+		windows:    windows,
+		userNS:     podSpec.HostUsers != nil && !*podSpec.HostUsers,
+	}
 	pod := podSpec.SecurityContext
 	if pod == nil {
 		pod = &corev1.PodSecurityContext{}
@@ -96,6 +109,7 @@ type psaCheck struct {
 	level      kubernetes.PSALevel
 	restricted bool
 	windows    bool
+	userNS     bool // hostUsers: false, a pod in a user namespace
 }
 
 func (c psaCheck) notAllowed(at, what string) error {
@@ -111,7 +125,7 @@ func (c psaCheck) pod(sc *corev1.PodSecurityContext, at string) error {
 	if w := sc.WindowsOptions; w != nil && w.HostProcess != nil && *w.HostProcess {
 		return c.notAllowed(at, "windowsOptions.hostProcess: true")
 	}
-	if c.restricted && sc.RunAsNonRoot != nil && !*sc.RunAsNonRoot {
+	if c.restricted && !c.userNS && sc.RunAsNonRoot != nil && !*sc.RunAsNonRoot {
 		return c.notAllowed(at, "runAsNonRoot: false")
 	}
 	if c.windows {
@@ -129,7 +143,7 @@ func (c psaCheck) pod(sc *corev1.PodSecurityContext, at string) error {
 			return c.notAllowed(at, fmt.Sprintf("sysctls: %s", s.Name))
 		}
 	}
-	if c.restricted && sc.RunAsUser != nil && *sc.RunAsUser == 0 {
+	if c.restricted && !c.userNS && sc.RunAsUser != nil && *sc.RunAsUser == 0 {
 		return c.notAllowed(at, "runAsUser: 0")
 	}
 	return nil
@@ -169,7 +183,7 @@ func (c psaCheck) container(sc *corev1.SecurityContext, pod *corev1.PodSecurityC
 	if w := sc.WindowsOptions; w != nil && w.HostProcess != nil && *w.HostProcess {
 		return c.notAllowed(at, "windowsOptions.hostProcess: true")
 	}
-	if c.restricted {
+	if c.restricted && !c.userNS {
 		nonRoot := pod.RunAsNonRoot
 		if sc.RunAsNonRoot != nil {
 			nonRoot = sc.RunAsNonRoot
@@ -184,7 +198,8 @@ func (c psaCheck) container(sc *corev1.SecurityContext, pod *corev1.PodSecurityC
 	if err := c.common(sc.SELinuxOptions, sc.SeccompProfile, sc.AppArmorProfile, at); err != nil {
 		return err
 	}
-	if sc.ProcMount != nil && *sc.ProcMount != corev1.DefaultProcMount {
+	// Restricted keeps the rule in a user namespace; only baseline relaxes it.
+	if sc.ProcMount != nil && *sc.ProcMount != corev1.DefaultProcMount && (c.restricted || !c.userNS) {
 		return c.notAllowed(at, fmt.Sprintf("procMount: %s", *sc.ProcMount))
 	}
 	if sc.Capabilities != nil {
@@ -197,7 +212,7 @@ func (c psaCheck) container(sc *corev1.SecurityContext, pod *corev1.PodSecurityC
 	if !c.restricted {
 		return nil
 	}
-	if sc.RunAsUser != nil && *sc.RunAsUser == 0 {
+	if !c.userNS && sc.RunAsUser != nil && *sc.RunAsUser == 0 {
 		return c.notAllowed(at, "runAsUser: 0")
 	}
 	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
