@@ -462,7 +462,36 @@ func (c *PassthroughConfig) validated() (*unstructured.Unstructured, error) {
 		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
 	}
 
+	// The volumeMounts of a workload are held to the rules of an app.yaml mount,
+	// policy or none, as those of the kind components are (go-kure/launcher#1212,
+	// go-kure/launcher#1223).
+	if err := refuseWorkloadMounts(u); err != nil {
+		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
+	}
+
 	return u, nil
+}
+
+// refuseWorkloadMounts holds the pod spec of u, when u is a workload kure's
+// scheme registers, to validateTypedVolumeMounts. u is authored as a map, so
+// the rule reads it typed by way of policyObject, as the policy check does;
+// validated has already refused a workload that sets a field its type does not
+// declare, so that view loses nothing the rule reads. A kind that is no
+// workload is not read. A workload that cannot be read (an API version the
+// scheme does not register, or a document that does not decode as its kind)
+// passes here, and is the policy check's to refuse as unreadable, which every
+// transform runs. go-kure/launcher#1223.
+func refuseWorkloadMounts(u *unstructured.Unstructured) error {
+	if !isWorkloadGVK(u.GroupVersionKind()) {
+		return nil
+	}
+	// policyObject's error is the policy check's refusal to make, not this
+	// rule's: an object it cannot read has no pod spec here to hold.
+	obj, err := policyObject(u)
+	if err == nil {
+		return validateObjectMounts(obj)
+	}
+	return nil
 }
 
 // refuseRepeatedKeys refuses an object that holds a key twice in one JSON object, at

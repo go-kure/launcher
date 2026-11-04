@@ -311,6 +311,18 @@ func (r *chartRender) render(renderFn renderChartFunc, componentType, name strin
 	if err := stampRenderedNamespaces(src.Namespace, src.ScopeOverrides, groups); err != nil {
 		return errors.Wrapf(err, "%s %q", componentType, name)
 	}
+	// The volumeMounts of a rendered workload are held to the rules of an
+	// app.yaml mount, policy or none, as those of the kind components are
+	// (go-kure/launcher#1223). Like the scope refusal above, this one is reported
+	// as it came even with secretValues set, quoting the mount value as the
+	// policy check quotes what it refuses, and nothing is kept of the render.
+	for _, g := range groups {
+		for _, obj := range g.Resources {
+			if err := validateObjectMounts(obj); err != nil {
+				return errors.Wrapf(err, "%s %q: rendered %s", componentType, name, renderedObjectRef(obj))
+			}
+		}
+	}
 	r.hookGroups = groups
 	r.rendered = true
 	return nil
