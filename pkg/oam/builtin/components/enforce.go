@@ -385,6 +385,22 @@ func enforceMaxResources(res ResourceRequirements, maxCPU, maxMemory string) err
 	if maxCPU == "" && maxMemory == "" {
 		return nil
 	}
+	// An unlimited limit has no value to compare, and no value is not a bound:
+	// where the policy sets a maximum for that resource the author's opt-out is
+	// refused rather than read as under it (go-kure/launcher#1181).
+	for _, u := range []struct {
+		unlimited bool
+		max, name string
+	}{
+		{res.NoCPULimit, maxCPU, "cpu"},
+		{res.NoMemoryLimit, maxMemory, "memory"},
+	} {
+		if u.unlimited && u.max != "" {
+			return oam.NewPolicyRefusal(oam.RefusalResourceMaximum, fmt.Sprintf(
+				"%s limit %q exceeds enforced maximum %q: an unlimited limit has no upper bound, so it cannot stay under a maximum; give %s a quantity at or under it",
+				u.name, unlimitedLimit, u.max, "limits."+u.name))
+		}
+	}
 	eff := buildResourceRequirements(res)
 
 	checks := []struct {
@@ -409,6 +425,24 @@ func enforceMaxResources(res ResourceRequirements, maxCPU, maxMemory string) err
 			label += " (generated default)"
 		}
 		if err := enforceMaxResource(effVal, c.max, label); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyPolicyLimitDefaults applies the policy's default cpu and memory limits
+// (tier 2) to the limits the author left unmentioned, skipping a resource the
+// author opted out of with `unlimited` (tier 1, go-kure/launcher#1181). The
+// opt-out also stops buildResourceRequirements' memory-limit mirror.
+func (r *ResourceRequirements) applyPolicyLimitDefaults(p oam.Policy) error {
+	if !r.NoCPULimit {
+		if err := applyDefaultQuantity(&r.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
+			return err
+		}
+	}
+	if !r.NoMemoryLimit {
+		if err := applyDefaultQuantity(&r.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
 			return err
 		}
 	}

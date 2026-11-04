@@ -428,7 +428,7 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 				}
 			}
 		}
-		rr, err := parseResources(raw)
+		rr, err := parseResourcesWithoutDefaults(raw)
 		if err != nil {
 			return PodSpecConfig{}, errors.Wrap(err, "invalid podResources configuration")
 		}

@@ -3500,7 +3500,11 @@ then enforce the limits on the resulting effective value — for cpu/memory this
 includes the `pkg/oam/builtin/components` intrinsic handler-default tier (100m CPU / 128Mi
 memory request, applied by `buildResourceRequirements` at `Generate()` time, after
 `ApplyPolicy` runs), not just the authored/policy-defaulted value `ApplyPolicy` sees; see
-that package's README, "Policy defaults & enforcement ordering".
+that package's README, "Policy defaults & enforcement ordering". An author can opt a
+container out of its default cpu or memory limit with the string `unlimited` under
+`limits.cpu`/`limits.memory`; that is tier-1 authored, so a policy default limit does not
+apply over it, and it is refused with the `resource-maximum` class where the policy sets
+`MaxCPU()`/`MaxMemory()` for that resource.
 
 For example the `scaler` trait fills
 `minReplicas`/`maxReplicas` from the scaler defaults when omitted (erroring if neither the trait
