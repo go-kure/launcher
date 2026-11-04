@@ -638,6 +638,74 @@ func TestSecurityContextMerge_WindowsPodControls(t *testing.T) {
 	}
 }
 
+// The runAsNonRoot: false trait property is refused at restricted unless the pod has
+// hostUsers: false, where admission allows it (go-kure/launcher#1201). The pod
+// spec is known only when the trait generates, so the refusal names the workload.
+func TestSecurityContextMerge_RunAsNonRootPropertyNeedsUserNamespace(t *testing.T) {
+	withPod := func(hostUsers *bool, windows bool, ct *corev1.SecurityContext) func(*corev1.PodSpec) {
+		return func(p *corev1.PodSpec) {
+			p.HostUsers = hostUsers
+			if windows {
+				p.OS = &corev1.PodOS{Name: corev1.Windows}
+			}
+			p.Containers[0].SecurityContext = ct
+		}
+	}
+	userNS, hostNS := bptr(false), bptr(true)
+	cases := []struct {
+		name  string
+		level string
+		mut   func(*corev1.PodSpec)
+		ok    bool
+	}{
+		{"restricted, hostUsers false", "restricted", withPod(userNS, false, nil), true},
+		{"restricted, hostUsers false, container runAsUser 0", "restricted", withPod(userNS, false, &corev1.SecurityContext{RunAsUser: i64ptr(0)}), true},
+		{"restricted, hostUsers false, Windows", "restricted", withPod(userNS, true, nil), true},
+		{"restricted, hostUsers true", "restricted", withPod(hostNS, false, nil), false},
+		{"restricted, hostUsers unset", "restricted", withPod(nil, false, nil), false},
+		{"restricted, hostUsers unset, Windows", "restricted", withPod(nil, true, nil), false},
+		{"baseline, hostUsers unset", "baseline", withPod(nil, false, nil), true},
+		{"privileged, hostUsers unset", "privileged", withPod(nil, false, nil), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := map[string]any{"psaLevel": tc.level, "runAsNonRoot": false}
+			if !tc.ok {
+				mustRefuse(t, authoredDeployment(tc.mut), props,
+					"runAsNonRoot: false is incompatible with psaLevel restricted", `"web"`, "hostUsers: false")
+				return
+			}
+			spec := mustApply(t, authoredDeployment(tc.mut), props)
+			if sc := spec.SecurityContext; sc == nil || sc.RunAsNonRoot == nil || *sc.RunAsNonRoot {
+				t.Errorf("pod runAsNonRoot = %+v, want false", sc)
+			}
+			if sc := spec.Containers[0].SecurityContext; sc == nil || sc.RunAsNonRoot == nil || *sc.RunAsNonRoot {
+				t.Errorf("container runAsNonRoot = %+v, want false", sc)
+			}
+		})
+	}
+}
+
+// The runAsNonRoot: false refusal needs the pod spec, so it comes from the build, not
+// from applying the trait; allowPrivilegeEscalation has no such relaxation and
+// is still refused when the trait is applied.
+func TestSecurityContextHandler_RunAsNonRootRefusalComesFromGenerate(t *testing.T) {
+	apply := func(props map[string]any) (*stack.Application, error) {
+		app := stack.NewApplication("web", "ns", &objStub{obj: authoredDeployment(nil)})
+		return app, (&traits.SecurityContextHandler{}).Apply(&oam.Trait{Type: "security-context", Properties: props}, app, newBundle())
+	}
+	app, err := apply(map[string]any{"psaLevel": "restricted", "runAsNonRoot": false})
+	if err != nil {
+		t.Fatalf("Apply refused runAsNonRoot: false before the pod spec was known: %v", err)
+	}
+	if _, err := app.Generate(); err == nil || !strings.Contains(err.Error(), "incompatible with psaLevel restricted") {
+		t.Fatalf("Generate error = %v, want the restricted incompatibility", err)
+	}
+	if _, err := apply(map[string]any{"psaLevel": "restricted", "allowPrivilegeEscalation": true}); err == nil || !strings.Contains(err.Error(), "incompatible with psaLevel restricted") {
+		t.Fatalf("Apply error = %v, want the restricted incompatibility for allowPrivilegeEscalation", err)
+	}
+}
+
 // The refusal names the level and the component, kind, name and container so a
 // chart or manifests user can tell what to change.
 func TestSecurityContextMerge_LevelRefusalNamesItsSource(t *testing.T) {
