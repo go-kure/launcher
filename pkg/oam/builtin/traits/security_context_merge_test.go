@@ -567,6 +567,77 @@ func TestSecurityContextMerge_HostUsersKeepsTheUIDContradiction(t *testing.T) {
 	}
 }
 
+// A Windows pod is exempt from exactly three restricted controls (seccomp
+// required, capabilities including the add list, allowPrivilegeEscalation), as
+// in Pod Security Admission. Every other control applies to it.
+func TestSecurityContextMerge_WindowsPodControls(t *testing.T) {
+	windows := func(mut func(*corev1.PodSpec)) func(*corev1.PodSpec) {
+		return func(p *corev1.PodSpec) {
+			p.OS = &corev1.PodOS{Name: corev1.Windows}
+			mut(p)
+		}
+	}
+	containerSC := func(sc *corev1.SecurityContext) func(*corev1.PodSpec) {
+		return func(p *corev1.PodSpec) { p.Containers[0].SecurityContext = sc }
+	}
+	podSC := func(sc *corev1.PodSecurityContext) func(*corev1.PodSpec) {
+		return func(p *corev1.PodSpec) { p.SecurityContext = sc }
+	}
+	unmasked := corev1.UnmaskedProcMount
+	localhost := "profiles/app"
+	cases := []struct {
+		name        string
+		mut         func(*corev1.PodSpec)
+		baseline    bool // accepted at baseline
+		restricted  bool // accepted at restricted
+		wantMessage string
+	}{
+		{"container appArmor Unconfined", windows(containerSC(&corev1.SecurityContext{AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}})), false, false, "appArmorProfile"},
+		{"pod appArmor Unconfined", windows(podSC(&corev1.PodSecurityContext{AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}})), false, false, "appArmorProfile"},
+		{"container appArmor Localhost", windows(containerSC(&corev1.SecurityContext{AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeLocalhost, LocalhostProfile: &localhost}})), true, true, ""},
+		{"container SELinux spc_t", windows(containerSC(&corev1.SecurityContext{SELinuxOptions: &corev1.SELinuxOptions{Type: "spc_t"}})), false, false, "seLinuxOptions"},
+		{"pod unsafe sysctl", windows(podSC(&corev1.PodSecurityContext{Sysctls: []corev1.Sysctl{{Name: "kernel.msgmax", Value: "65536"}}})), false, false, "sysctls"},
+		{"container procMount Unmasked", windows(containerSC(&corev1.SecurityContext{ProcMount: &unmasked})), false, false, "procMount"},
+		// The restricted seccomp control replaces the baseline one and exempts a
+		// Windows pod whole, so only baseline refuses Unconfined there.
+		{"container seccomp Unconfined", windows(containerSC(&corev1.SecurityContext{SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}})), false, true, "seccompProfile"},
+		{"pod seccomp Unconfined", windows(podSC(&corev1.PodSecurityContext{SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}})), false, true, "seccompProfile"},
+		{"container privileged", windows(containerSC(&corev1.SecurityContext{Privileged: bptr(true)})), false, false, "privileged"},
+		// The capabilities add list is a restricted control, so restricted skips it
+		// on Windows and baseline keeps it.
+		{"container capabilities.add SYS_ADMIN", windows(containerSC(&corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"SYS_ADMIN"}}})), false, true, "SYS_ADMIN"},
+		{"container capabilities.add CHOWN", windows(containerSC(&corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"CHOWN"}}})), true, true, ""},
+		{"container allowPrivilegeEscalation true", windows(containerSC(&corev1.SecurityContext{AllowPrivilegeEscalation: bptr(true)})), true, true, ""},
+		// hostUsers false relaxes a Windows pod on its own terms.
+		{"hostUsers false, procMount Unmasked", windows(func(p *corev1.PodSpec) {
+			p.HostUsers = bptr(false)
+			p.Containers[0].SecurityContext = &corev1.SecurityContext{ProcMount: &unmasked}
+		}), true, false, "procMount"},
+		{"hostUsers false, appArmor Unconfined", windows(func(p *corev1.PodSpec) {
+			p.HostUsers = bptr(false)
+			p.Containers[0].SecurityContext = &corev1.SecurityContext{AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}}
+		}), false, false, "appArmorProfile"},
+	}
+	for _, tc := range cases {
+		for _, level := range []struct {
+			name string
+			ok   bool
+		}{{"baseline", tc.baseline}, {"restricted", tc.restricted}, {"privileged", true}} {
+			t.Run(tc.name+"/"+level.name, func(t *testing.T) {
+				_, err := runSecurityContextTrait(authoredDeployment(tc.mut), map[string]any{"psaLevel": level.name})
+				switch {
+				case level.ok && err != nil:
+					t.Fatalf("expected the build to pass at %s, got: %v", level.name, err)
+				case !level.ok && err == nil:
+					t.Fatalf("expected a refusal at %s, got none", level.name)
+				case !level.ok && !strings.Contains(err.Error(), tc.wantMessage):
+					t.Errorf("error %q does not name %q", err, tc.wantMessage)
+				}
+			})
+		}
+	}
+}
+
 // The refusal names the level and the component, kind, name and container so a
 // chart or manifests user can tell what to change.
 func TestSecurityContextMerge_LevelRefusalNamesItsSource(t *testing.T) {
