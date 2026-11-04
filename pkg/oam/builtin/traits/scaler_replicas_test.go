@@ -1,16 +1,16 @@
 package traits_test
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
 // The HorizontalPodAutoscaler owns the replica count of the Deployment it
@@ -150,70 +150,130 @@ func TestScaler_OmittingReplicasKeepsTheComponentsOtherObjects(t *testing.T) {
 	}
 }
 
-// topology-spread reads the generated Deployment's replica count, so the strip
-// must not make the output depend on which of the two traits is declared first:
-// both orders build, and both leave spec.replicas unset.
-func TestScaler_ReplicasAreUnsetInBothOrdersWithTopologySpread(t *testing.T) {
+// The omission is part of how the kind builds the Deployment, so the output does
+// not depend on which of the scaler and topology-spread traits is declared
+// first: both orders build byte-identical objects, and spec.replicas is unset.
+//
+// The topology-spread trait derives its constraints from the generated
+// Deployment's replica count, which is unset under a scaler, so it applies none
+// there, even where an environment policy default of 3 would have given the
+// Deployment three replicas and main emitted the constraints. That loss is
+// tracked in go-kure/launcher#1196; the assertion below pins it until that
+// issue lands and must then change with it.
+func TestScaler_OutputIsIdenticalInBothOrdersWithTopologySpread(t *testing.T) {
 	spread := oam.Trait{Type: "topology-spread", Properties: map[string]any{}}
-	orders := map[string][]oam.Trait{
-		"scaler first":          {scaledDeploymentTrait(), spread},
-		"topology-spread first": {spread, scaledDeploymentTrait()},
-	}
 	three := int32(3)
-	for name, trs := range orders {
-		for _, policy := range []oam.Policy{nil, &replicasPolicy{defaultReplicas: &three}} {
-			t.Run(name, func(t *testing.T) {
-				cluster, err := transformCluster(t, "deployment",
-					map[string]any{"image": "ghcr.io/org/app:v1"}, policy, trs...)
-				if err != nil {
-					t.Fatalf("transform: %v", err)
+	for _, kind := range []string{"deployment", "webservice", "worker"} {
+		for policyName, policy := range map[string]oam.Policy{
+			"no policy":        nil,
+			"policy default 3": &replicasPolicy{defaultReplicas: &three},
+		} {
+			t.Run(kind+"/"+policyName, func(t *testing.T) {
+				if policy != nil && kind != "deployment" {
+					// The webservice and worker kinds write their own spread at a
+					// count above one, which the topology-spread trait refuses on
+					// any component, scaled or not.
+					t.Skip("the kind's own spread default already applies at this count")
 				}
-				if got := oneDeployment(t, cluster).Spec.Replicas; got != nil {
-					t.Errorf("spec.replicas = %d, want it unset", *got)
+				props := map[string]any{"image": "ghcr.io/org/app:v1"}
+				render := func(trs ...oam.Trait) (string, *appsv1.Deployment) {
+					cluster, err := transformCluster(t, kind, props, policy, trs...)
+					if err != nil {
+						t.Fatalf("transform: %v", err)
+					}
+					out, err := json.Marshal(clusterObjects(t, cluster))
+					if err != nil {
+						t.Fatalf("marshal: %v", err)
+					}
+					return string(out), oneDeployment(t, cluster)
+				}
+				scalerFirst, depA := render(scaledDeploymentTrait(), spread)
+				spreadFirst, depB := render(spread, scaledDeploymentTrait())
+				if scalerFirst != spreadFirst {
+					t.Errorf("output depends on trait order:\nscaler first:          %s\ntopology-spread first: %s", scalerFirst, spreadFirst)
+				}
+				for _, dep := range []*appsv1.Deployment{depA, depB} {
+					if dep.Spec.Replicas != nil {
+						t.Errorf("spec.replicas = %d, want it unset", *dep.Spec.Replicas)
+					}
+					if n := len(dep.Spec.Template.Spec.TopologySpreadConstraints); n != 0 {
+						t.Errorf("%d spread constraints under a scaler, want none until go-kure/launcher#1196", n)
+					}
 				}
 			})
 		}
 	}
 }
 
-// twoDeploymentConfig generates two Deployments, the one the scaler targets
-// (named like the application) and another.
-type twoDeploymentConfig struct{}
-
-func (twoDeploymentConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	one := int32(4)
-	mk := func(name string) *client.Object {
-		var o client.Object = &appsv1.Deployment{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: app.Namespace},
-			Spec:       appsv1.DeploymentSpec{Replicas: &one},
+// generateErr runs Generate on every application in the cluster and returns the
+// first error, for the checks that run at Generate rather than at Transform.
+func generateErr(cluster *stack.Cluster) error {
+	var walk func(node *stack.Node) error
+	walk = func(node *stack.Node) error {
+		if node == nil {
+			return nil
 		}
-		return &o
+		if node.Bundle != nil {
+			for _, a := range node.Bundle.Applications {
+				if _, err := a.Generate(); err != nil {
+					return err
+				}
+			}
+		}
+		for _, child := range node.Children {
+			if err := walk(child); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	return []*client.Object{mk(app.Name), mk(app.Name + "-other")}, nil
+	return walk(cluster.Node)
 }
 
-// Only the Deployment the HPA targets loses its count; a handler applied
-// outside a transform (no trait naming) targets the application's name.
-func TestScaler_OnlyTheTargetedDeploymentLosesItsCount(t *testing.T) {
-	app := stack.NewApplication("api", "default", twoDeploymentConfig{})
-	bundle := &stack.Bundle{}
-	trait := scaledDeploymentTrait()
-	if err := (&traits.ScalerHandler{}).Apply(&trait, app, bundle); err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	objs, err := app.Config.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	got := map[string]*int32{}
-	for _, o := range objs {
-		dep := (*o).(*appsv1.Deployment)
-		got[dep.Name] = dep.Spec.Replicas
-	}
-	if got["api"] != nil {
-		t.Errorf("the targeted Deployment kept spec.replicas = %d", *got["api"])
-	}
-	if got["api-other"] == nil || *got["api-other"] != 4 {
-		t.Errorf("the other Deployment's spec.replicas = %v, want 4 untouched", got["api-other"])
+// Under a scaler the Deployment's own count is unused (the HPA owns it), so the
+// non-RWX replica check must not refuse an environment-policy default of 3 that
+// no Deployment will carry. Before this the workaround was to author
+// `replicas: 1`, which the scaler now refuses (go-kure/launcher#1179). The webservice
+// and worker rows reach the Deployment through a lowering rule that forwards the
+// scaler, so they prove the signal survives the fixpoint.
+func TestScaler_NonRWXClaim_UnusedPolicyDefaultCountIsNotChecked(t *testing.T) {
+	three := int32(3)
+	policy := &replicasPolicy{defaultReplicas: &three}
+	for _, kind := range []string{"deployment", "webservice", "worker"} {
+		t.Run(kind, func(t *testing.T) {
+			one := scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 1})
+			cluster, err := transformCluster(t, kind, claimProps(kind, "ReadWriteOnce"), policy, one)
+			if err != nil {
+				t.Fatalf("transform: %v", err)
+			}
+			if err := generateErr(cluster); err != nil {
+				t.Fatalf("a scaled single-pod Deployment with a non-RWX claim was refused: %v", err)
+			}
+			dep := oneDeployment(t, cluster)
+			if dep.Spec.Replicas != nil {
+				t.Errorf("spec.replicas = %d, want it unset", *dep.Spec.Replicas)
+			}
+			if dep.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
+				t.Errorf("strategy.type = %q, want Recreate: the claim's strategy guard stays", dep.Spec.Strategy.Type)
+			}
+
+			// Control: without the scaler the default count is the Deployment's
+			// own, and the claim refuses it.
+			cluster, err = transformCluster(t, kind, claimProps(kind, "ReadWriteOnce"), policy)
+			if err != nil {
+				t.Fatalf("transform without scaler: %v", err)
+			}
+			err = generateErr(cluster)
+			if err == nil || !strings.Contains(err.Error(), "at most one replica") {
+				t.Errorf("without a scaler: error = %v, want the non-RWX replica refusal", err)
+			}
+
+			// Control: the HPA-bound check still guards the pod count.
+			two := scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 2})
+			err = transformOne(t, kind, claimProps(kind, "ReadWriteOnce"), policy, two)
+			if err == nil || !strings.Contains(err.Error(), nonRWXClaimName(kind)) {
+				t.Errorf("maxReplicas 2 with a claim: error = %v, want the scaler refusal naming the claim", err)
+			}
+		})
 	}
 }

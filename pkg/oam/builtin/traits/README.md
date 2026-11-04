@@ -765,6 +765,10 @@ therefore meets the "no merging" rule below exactly as it did before.
 | 2 | `kubernetes.io/hostname`, `maxSkew: 1`, `DoNotSchedule` |
 | 3 or more | the above, plus `topology.kubernetes.io/zone`, `maxSkew: 1`, `ScheduleAnyway` |
 
+Under a `scaler` the Deployment is built without `spec.replicas`
+(go-kure/launcher#1179), so the trait reads an unset count and applies no
+constraints, in either trait order, until go-kure/launcher#1196.
+
 Each constraint's `labelSelector` is a copy of the Deployment's own
 `spec.selector.matchLabels` (`app: <component>` for `deployment`, `webservice`
 and `worker`; whatever the manifest declares for a `manifests` Deployment).
