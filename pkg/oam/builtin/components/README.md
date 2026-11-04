@@ -947,7 +947,11 @@ rejected, not silently dropped; a key other than `command` in the object,
 e.g. a misspelled `commnad`, is rejected outright too, instead of silently
 ignored)/`httpGet` (same named-port, `httpHeaders`,
 unknown-key, and optional-`path`/`host`/`scheme` rules as `probes`
-above)/`sleep` (`seconds` is required and must be a non-negative integer; a
+above)/`sleep` (`seconds` is required and must be a non-negative integer, and
+at most the pod's `terminationGracePeriodSeconds`, 30 when it sets none —
+checked on the assembled pod for the main container, every `sidecars` entry
+and every native sidecar, so a longer sleep is refused at `Generate` instead
+of by the API server (go-kure/launcher#1228); a
 key other than `seconds` in the object, e.g. a misspelled `sconds`, is
 rejected outright too, instead of silently ignored) — at
 most one of these three may be authored, and a present-but-non-object value
@@ -1616,7 +1620,7 @@ set the Linux-only pod and container fields, a `linux` pod may not set
 |----------|------|--------|------|
 | `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account; on `webservice` and `worker` the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). Unset on a pod kind, the pod names no account (the namespace's `default`), and the kind sets the pod-level `automountServiceAccountToken: false` unless that is authored (go-kure/launcher#702); a role kind's generated account carries `automountServiceAccountToken: false` itself. An authored account is owned elsewhere and its own setting governs, so authors who want the pod not to mount a token set the pod-level `automountServiceAccountToken: false` explicitly — the handler does not inject it. | additive when unset |
 | `automountServiceAccountToken` | bool | Pod-level token automount override. | additive |
-| `terminationGracePeriodSeconds` | int ≥ 0 | Grace period before SIGKILL. | additive |
+| `terminationGracePeriodSeconds` | int ≥ 0 | Grace period before SIGKILL. A `lifecycle` `sleep` hook may not exceed it (30 when unset). | additive |
 | `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob and job only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it, and refuse the upstream name `activeDeadlineSeconds` with that reason (on `job` and `cronjob` that name is the JobSpec's). Distinct from the JobSpec-level `activeDeadlineSeconds` below: this one bounds a single pod, that one the whole job. | additive |
 | `dnsPolicy`, `dnsConfig` | enum, object | `ClusterFirstWithHostNet`/`ClusterFirst`/`Default`/`None`; `dnsConfig` = `nameservers` (≤3 plain IPv4/IPv6 literals — a zone-scoped address such as `fe80::1%eth0` is rejected, matching upstream's `net.ParseIP`-based check, which has no notion of a zone), `searches` (≤32 entries whose joined length, separators included, is ≤2048 characters — the `resolv.conf` search-line limit, so 32 individually valid domains can still be refused), `options[]{name,value}`. `None` requires at least one nameserver. | additive |
 | `nodeSelector`, `nodeName`, `schedulerName`, `priorityClassName`, `preemptionPolicy`, `runtimeClassName`, `schedulingGates[]{name}`, `schedulingGroup{podGroupName}` | scheduling | Placement fields; gate names must be unique. `nodeName` is a DNS-1123 subdomain (a Node is an ordinary object, so an invalid value is refused at admission, not merely unmatched). `schedulerName` is deliberately *not* validated: upstream constrains its form nowhere, so an arbitrary string is a legal document and rejecting one here would refuse work a cluster accepts. | additive |

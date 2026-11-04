@@ -444,3 +444,44 @@ func checkResizePolicyRestart(ps *corev1.PodSpec) error {
 	}
 	return check("containers", ps.Containers)
 }
+
+// defaultTerminationGracePeriodSeconds is the value the API server sets on a
+// pod that authors none (SetDefaults_PodSpec in k8s.io/kubernetes
+// pkg/apis/core/v1/defaults.go), before validation runs.
+const defaultTerminationGracePeriodSeconds int64 = 30
+
+// checkLifecycleSleep refuses a postStart or preStop sleep longer than the
+// pod's terminationGracePeriodSeconds (30 when unauthored) — upstream's
+// validateSleepAction, which compares `sleep.Seconds > gracePeriod`, so a sleep
+// equal to the grace period is admitted. It runs on the assembled pod spec so
+// the main container, every sidecar and every native sidecar are covered by one
+// check (go-kure/launcher#1228). A regular init container cannot carry a
+// lifecycle, so it has nothing to check.
+func checkLifecycleSleep(ps *corev1.PodSpec) error {
+	limit := defaultTerminationGracePeriodSeconds
+	if ps.TerminationGracePeriodSeconds != nil {
+		limit = *ps.TerminationGracePeriodSeconds
+	}
+	check := func(list string, containers []corev1.Container) error {
+		for _, c := range containers {
+			if c.Lifecycle == nil {
+				continue
+			}
+			for _, h := range []struct {
+				name    string
+				handler *corev1.LifecycleHandler
+			}{{"postStart", c.Lifecycle.PostStart}, {"preStop", c.Lifecycle.PreStop}} {
+				if h.handler == nil || h.handler.Sleep == nil || h.handler.Sleep.Seconds <= limit {
+					continue
+				}
+				return errors.Errorf("%s %q: lifecycle.%s.sleep.seconds: %d must not exceed terminationGracePeriodSeconds (%d); Kubernetes refuses the pod otherwise",
+					list, c.Name, h.name, h.handler.Sleep.Seconds, limit)
+			}
+		}
+		return nil
+	}
+	if err := check("initContainers", ps.InitContainers); err != nil {
+		return err
+	}
+	return check("containers", ps.Containers)
+}
