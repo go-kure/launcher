@@ -1304,12 +1304,12 @@ protocol were taken unchecked, and a non-list `ports`, an unknown key, a
 non-string name or a non-string protocol, which then read as `TCP`, was
 dropped). A port name must also be unique across the
 pod: the main container's ports (webservice's `http`, the `ports` list of
-statefulset, daemonset and deployment) and every
-sidecar's. The
+statefulset, daemonset, deployment, job and cronjob), every
+sidecar's and every native sidecar's (go-kure/launcher#1225). The
 API server checks names only per container and merely warns across them,
 while a Service selecting the name reaches only the first container that
-declares it, so a repeated name is refused, naming both containers. Init
-containers declare no ports, so they take no part. Closing the entry is behavior-changing under an
+declares it, so a repeated name is refused, naming both containers. A regular
+init container declares no ports, so it takes no part. Closing the entry is behavior-changing under an
 unchanged `launcher.gokure.dev/v1alpha1`: a document that authored any other
 key on an entry built before and errors now. It is taken on the same
 reasoning as the `volumeClaimTemplates` entry below — the key never reached
