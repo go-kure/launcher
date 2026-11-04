@@ -368,6 +368,7 @@ func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
 	}
 
 	c.Replicas = applyDefaultReplicas(c.Replicas, c.explicitReplicas, p.DefaultReplicas())
+	c.Resources.capPolicyRequestDefaults(p)
 	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
 		return err
 	}

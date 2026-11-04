@@ -270,6 +270,7 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 		return nil
 	}
 
+	c.Resources.capPolicyRequestDefaults(p)
 	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
 		return err
 	}

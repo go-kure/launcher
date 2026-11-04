@@ -2198,7 +2198,14 @@ tiers, in precedence order:
 3. **Intrinsic handler default** — `buildResourceRequirements` (`common.go`)
    fills anything still unset at `Generate()` time: 100m CPU request, 128Mi
    memory request, and a memory limit mirroring the (possibly just-defaulted)
-   memory request.
+   memory request. A defaulted request never exceeds the limit authored for the
+   same resource: it is the lower of the default and that limit, so
+   `limits.memory: 64Mi` with no request renders a 64Mi request, not 128Mi
+   (go-kure/launcher#1217; the apiserver refuses a request above its limit).
+   A limit at or above the default leaves the default request in place. The
+   same holds for a policy default request (tier 2): it is held to the authored
+   limit for that resource (`capPolicyRequestDefaults`, `resource_policy_defaults.go`),
+   and an authored request is never changed.
 
 `oam.Policy.MaxCPU()`/`MaxMemory()` are enforced against the *effective*
 value — what `Generate()` will actually emit, after all three tiers — not
