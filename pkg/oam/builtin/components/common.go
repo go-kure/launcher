@@ -4620,6 +4620,13 @@ func copyPtr[T any](p *T) *T {
 // so this is their only defaulting. Requests/Limits are deep-copied before
 // mutation so this never aliases the caller's maps (res is shared with the
 // ResourceRequirements still held by the container's Config).
+//
+// A defaulted request never exceeds the limit authored for the same resource
+// (go-kure/launcher#1217): it is the lower of the default and that limit.
+// Defaulting it to the plain default put a request above a limit lower than the
+// default, which the apiserver refuses; leaving it out would have moved the
+// request of every limit-only document that is valid today, since the
+// apiserver would copy the whole limit into it.
 func buildResourceRequirements(res ResourceRequirements) corev1.ResourceRequirements {
 	rr := res.ResourceRequirements
 	rr.Requests = rr.Requests.DeepCopy()
@@ -4627,12 +4634,8 @@ func buildResourceRequirements(res ResourceRequirements) corev1.ResourceRequirem
 	if rr.Requests == nil {
 		rr.Requests = corev1.ResourceList{}
 	}
-	if _, ok := rr.Requests[corev1.ResourceCPU]; !ok {
-		rr.Requests[corev1.ResourceCPU] = resource.MustParse("100m")
-	}
-	if _, ok := rr.Requests[corev1.ResourceMemory]; !ok {
-		rr.Requests[corev1.ResourceMemory] = resource.MustParse("128Mi")
-	}
+	defaultRequest(rr.Requests, rr.Limits, corev1.ResourceCPU, "100m")
+	defaultRequest(rr.Requests, rr.Limits, corev1.ResourceMemory, "128Mi")
 	if rr.Limits == nil {
 		rr.Limits = corev1.ResourceList{}
 	}
@@ -4640,6 +4643,19 @@ func buildResourceRequirements(res ResourceRequirements) corev1.ResourceRequirem
 		rr.Limits[corev1.ResourceMemory] = rr.Requests[corev1.ResourceMemory]
 	}
 	return rr
+}
+
+// defaultRequest sets requests[name] to the lower of dflt and limits[name] when
+// the author set no such request; see buildResourceRequirements.
+func defaultRequest(requests, limits corev1.ResourceList, name corev1.ResourceName, dflt string) {
+	if _, ok := requests[name]; ok {
+		return
+	}
+	q := resource.MustParse(dflt)
+	if limit, ok := limits[name]; ok && limit.Cmp(q) < 0 {
+		q = limit.DeepCopy()
+	}
+	requests[name] = q
 }
 
 func applyProbes(container *corev1.Container, probes ProbeConfig) {
