@@ -232,8 +232,10 @@ func podSpecDefaultedZeros(prefix string, ps *corev1.PodSpec) defaultedZeroField
 // ValidateImageRef: no untagged image and no :latest. So is the reference of
 // every image volume (validateImageVolumeRefs). A match expression of a label
 // selector is held to validateLabelSelector, in every selector the spec holds
-// (validatePodSpecLabelSelectors). The API's other value rules are left to the
-// API server.
+// (validatePodSpecLabelSelectors). The volumeMounts of every init and regular
+// container are held to the single-mount rules of an app.yaml mount
+// (validateTypedVolumeMounts). The API's other value rules are left to the API
+// server.
 func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec) error {
 	if ps.Containers == nil {
 		return errors.Errorf("%scontainers: required (the containers the pod runs)", prefix)
@@ -257,6 +259,9 @@ func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec) error {
 		}
 	}
 	if err := validateImageVolumeRefs(prefix, ps); err != nil {
+		return err
+	}
+	if err := validateTypedVolumeMounts(prefix, ps); err != nil {
 		return err
 	}
 	return validatePodSpecLabelSelectors(prefix, ps)
