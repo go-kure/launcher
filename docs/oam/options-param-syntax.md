@@ -81,7 +81,6 @@ spec:
     properties:
       image: "${image}"
       port: 8080
-      replicas: ${replicas}
       env: ${env}            # node substitution — resolved to a YAML list
       resources:
         requests:
@@ -150,7 +149,7 @@ env:
 **Scalar substitution** — when the placeholder is the entire YAML value for a scalar
 field, the resolver substitutes the typed value directly:
 - `image: "${image}"` → `image: "myregistry/app:v1.2.3"` (string)
-- `replicas: ${replicas}` → `replicas: 3` (integer, not string)
+- `minReplicas: ${replicas}` → `minReplicas: 3` (integer, not string)
 - The declared parameter `type` drives coercion; `type: integer` produces a YAML integer
 
 **Node substitution** — when the parameter type is `array` or `object`, the resolver
