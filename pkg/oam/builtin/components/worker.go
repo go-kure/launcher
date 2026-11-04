@@ -105,6 +105,9 @@ func (WorkerRule) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDeploymentSpec())
 	maps.Copy(m, schemaRoleObjectNames(false))
+	// The deployment member takes it as the deployment component does
+	// (go-kure/launcher#1216).
+	m[podMetadataProperty] = schemaPodMetadata("Deployment")
 	return m
 }
 
@@ -285,6 +288,11 @@ func parseWorker(props map[string]any) (workerOpinions, error) {
 		return out, err
 	}
 	if _, err := parseDeploymentSpec(props); err != nil {
+		return out, err
+	}
+	// The deployment member parses podMetadata again; reading it here keeps the
+	// refusal the rule's, in the order of the rest (go-kure/launcher#1216).
+	if _, err := parsePodMetadata(props, false); err != nil {
 		return out, err
 	}
 	return out, nil

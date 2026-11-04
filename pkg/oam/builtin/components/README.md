@@ -1760,7 +1760,9 @@ projecting their own API kind), and the two role-named kinds `webservice`
 unchanged, and so does the rest of `DeploymentSpec` below: it is parsed by
 `parseDeploymentSpec` (`deployment_spec.go`) into real `appsv1` types and
 written by its `apply` onto the built object, from one fragment all three
-handlers compose (go-kure/launcher#341).
+handlers compose (go-kure/launcher#341). The pod template's `podMetadata` is the
+same on all three (go-kure/launcher#1216; see "The pod template's labels and
+annotations").
 
 Sharing the fragment is the point rather than a convenience. These fields are
 properties of the API kind, not of the role a component plays, so a document
@@ -2052,7 +2054,9 @@ same-name sibling group can tell that a `service` member selects this
 Deployment's own pods, which the group's component-label policy already
 covers (see `pkg/oam` "Same-name sibling groups"). The labels it reports are the
 component's own and the ones `podMetadata.labels` adds
-(go-kure/launcher#1178), as the pod template carries them. `statefulset`, `daemonset`,
+(go-kure/launcher#1178), as the pod template carries them. The deployment member of a
+`webservice` or `worker` reports the same, authored `podMetadata.labels` included
+(go-kure/launcher#1216). `statefulset`, `daemonset`,
 `job` and `cronjob` do not have the method, deliberately (go-kure/launcher#794,
 item 3): its one reader is that group check, and `deployment` is the only pod
 kind a lowering rule emits into a group (`webservice`, `worker`). A rule that
@@ -13242,8 +13246,12 @@ to the two properties, so a kind added later cannot ship without them.
 whose spec holds a pod template the author does not write whole (`deployment`, `statefulset`,
 `daemonset`, `job` and `cronjob`) take a fourth property, `podMetadata`, for the pod template's
 own metadata (go-kure/launcher#1178). On a `cronjob` it is the pod template inside the job
-template, not the CronJob's or the job template's metadata. `webservice` and `worker` do not
-take it yet (go-kure/launcher#1216).
+template, not the CronJob's or the job template's metadata. `webservice` and `worker` take it
+too (go-kure/launcher#1216), with the same name and shape as `deployment`: the rule hands it to
+its deployment member, so it lands on that Deployment's pod template and nowhere else. The
+Service a `webservice` generates selects on the component's `app` label alone, so an authored
+label is on the pods and not in the Service's selector. A document moves a workload between
+`webservice`, `worker` and `deployment` without renaming it.
 
 ```yaml
 properties:

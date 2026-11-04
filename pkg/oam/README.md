@@ -2045,7 +2045,8 @@ them, unread by the engine, if it declares them or declares no schema.
 
 The two properties never reach a pod template. The pod template's labels and annotations are
 a handler's own property, `podMetadata`, on `deployment`, `statefulset`, `daemonset`, `job` and
-`cronjob` (go-kure/launcher#1178); the engine neither reads nor removes it. What it writes is
+`cronjob` (go-kure/launcher#1178) and on `webservice` and `worker`, which hand it to their
+deployment member (go-kure/launcher#1216); the engine neither reads nor removes it. What it writes is
 checked as any pod template is: `ReservedMetadataKeys` and the component label.
 
 ## Parsing

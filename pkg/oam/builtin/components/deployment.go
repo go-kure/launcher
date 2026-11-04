@@ -87,8 +87,9 @@ func (h *DeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
 		// The pod template's labels and annotations (go-kure/launcher#1178).
 		// Declared here and on the four other controller kinds, not in a
-		// shared fragment: webservice and worker copy those, and do not
-		// apply this property.
+		// shared fragment. webservice and worker declare it themselves, with
+		// this same entry, and forward it to their deployment member
+		// (go-kure/launcher#1216).
 		podMetadataProperty: schemaPodMetadata("Deployment"),
 	}
 	maps.Copy(m, schemaContainerFields())

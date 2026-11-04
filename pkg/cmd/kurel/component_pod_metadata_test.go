@@ -8,7 +8,8 @@ import (
 )
 
 // The pod template metadata an author sets with `podMetadata` on the five
-// controller kinds (go-kure/launcher#1178). The properties `labels` and
+// controller kinds (go-kure/launcher#1178) and on the webservice and worker
+// (go-kure/launcher#1216). The properties `labels` and
 // `annotations` of the same component stay on the object (component_object_
 // metadata_test.go); these tests hold that `podMetadata` reaches the pod
 // template, and only it.
@@ -27,6 +28,10 @@ var podMetadataKinds = []struct {
 	job       bool
 }{
 	{typ: "deployment", kind: "Deployment", template: []string{"spec", "template"}, selector: true},
+	// The webservice and worker lower to a deployment member and take the
+	// property as it does (go-kure/launcher#1216).
+	{typ: "webservice", kind: "Deployment", template: []string{"spec", "template"}, selector: true},
+	{typ: "worker", kind: "Deployment", template: []string{"spec", "template"}, selector: true},
 	{typ: "statefulset", kind: "StatefulSet", template: []string{"spec", "template"}, selector: true},
 	{typ: "daemonset", kind: "DaemonSet", template: []string{"spec", "template"}, selector: true},
 	{typ: "job", kind: "Job", template: []string{"spec", "template"}, job: true},
@@ -67,7 +72,7 @@ func kindDoc(t *testing.T, docs []map[string]any, kind string) map[string]any {
 	return nil
 }
 
-// Every one of the five kinds puts the authored labels and annotations on its
+// Every kind that takes it puts the authored labels and annotations on its
 // pod template beside its own, and nowhere else: the object, the selector and
 // the other objects are what the render without them gives.
 func TestPodMetadata_ReachesThePodTemplateOnly(t *testing.T) {
@@ -165,18 +170,36 @@ func TestPodMetadata_JobKeysAreOrdinaryElsewhere(t *testing.T) {
 	}
 }
 
-// The webservice and worker types do not take the property in this change
-// (go-kure/launcher#1216 follows up on them).
-func TestPodMetadata_NotTakenByWebserviceAndWorker(t *testing.T) {
+// A bad podMetadata on a webservice or a worker is refused by the role's own
+// parse, naming the property and the component, as the rest of the role's
+// properties are (go-kure/launcher#1216).
+func TestPodMetadata_RoleRefusalNamesTheProperty(t *testing.T) {
 	for _, typ := range []string{"webservice", "worker"} {
 		t.Run(typ, func(t *testing.T) {
 			_, err := renderLabelInvariantErr(t, labelInvariantApp("widget", typ, podMetadataProps(typ, map[string]any{
-				"labels": map[string]any{podMetadataLabelKey: podMetadataLabelValue},
+				"labels": map[string]any{"-bad": "x"},
 			}), "", nil))
-			if err == nil || !strings.Contains(err.Error(), "podMetadata") {
-				t.Fatalf("err = %v\nwant podMetadata refused as an unknown property", err)
+			if err == nil {
+				t.Fatal("want a key that is no valid label refused")
+			}
+			for _, want := range []string{"widget", `podMetadata.labels`} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v\nwant it to name %q", err, want)
+				}
 			}
 		})
+	}
+}
+
+// The Service a webservice generates selects on the component label alone, so an
+// authored label is on the pods and not in the Service's selector.
+func TestPodMetadata_WebserviceServiceSelectorUnchanged(t *testing.T) {
+	plain := kindDoc(t, renderLabelInvariant(t, labelInvariantApp("widget", "webservice", podMetadataProps("webservice", nil), "", nil)), "Service")
+	docs := renderLabelInvariant(t, labelInvariantApp("widget", "webservice", podMetadataProps("webservice", map[string]any{
+		"labels": map[string]any{podMetadataLabelKey: podMetadataLabelValue},
+	}), "", nil))
+	if got := kindDoc(t, docs, "Service"); !reflect.DeepEqual(got, plain) {
+		t.Errorf("the Service differs from the render without podMetadata:\n got %v\nwant %v", got, plain)
 	}
 }
 

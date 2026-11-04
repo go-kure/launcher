@@ -1001,6 +1001,22 @@
     "type": "boolean",
     "description": "Whether the deployment controller stops acting on template changes. Progress is not estimated while paused, which the API's own progressDeadlineSeconds documentation states. The API default is false."
   },
+  "podMetadata": {
+    "type": "object",
+    "description": "Labels and annotations of the Deployment's pod template, so of every pod it creates. They go on the pod template only, never on the object (use `labels` and `annotations` for that) and never in the selector. A change to either is a pod template change: the controller's update strategy decides whether it reaches existing pods (a CronJob only changes the Jobs it creates later; the API server refuses the change on a Job that is not suspended). Refused: a key or value that is no valid label or annotation, annotations over the size the API server accepts, `app` with another value than the component's, and the component label key with another value than the component's. A key the platform reserves is refused as on any pod template.",
+    "properties": {
+      "annotations": {
+        "type": "object",
+        "description": "Annotations for the pod template, as a map of strings.",
+        "additionalProperties": true
+      },
+      "labels": {
+        "type": "object",
+        "description": "Labels for the pod template, as a map of strings.",
+        "additionalProperties": true
+      }
+    }
+  },
   "podResources": {
     "type": "object",
     "description": "Pod-level compute resources shared by all containers (corev1.PodSpec.resources). Only cpu, memory and hugepages-\u003csize\u003e are valid here; requires the cluster's PodLevelResources feature gate. Distinct from the container-level `resources` property.",
