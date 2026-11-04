@@ -5339,8 +5339,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - an entry of `volumeMounts` whose `subPath` or `subPathExpr` is absolute or
     holds a `..` element (go-kure/launcher#1211): the operator copies the
     entry as written, and the API refuses it. Checked before the path. An
-    entry of `thanos.volumeMounts` with either field is refused below, as
-    not carried.
+    entry of `thanos.volumeMounts` with a nonempty `subPath` or `subPathExpr`
+    is refused below, as not carried.
   - an entry of `thanos.volumeMounts` at a path the operator mounts a
     volume at in the thanos-sidecar container: `/prometheus` where
     `objectStorageConfig` or `objectStorageConfigFile` is set, and
