@@ -78,6 +78,11 @@ func TestMountOptions_Refusals(t *testing.T) {
 	}{
 		{"subPath and subPathExpr", map[string]any{"subPath": "a", "subPathExpr": "b"}, nil,
 			[]string{"subPathExpr and subPath are mutually exclusive"}},
+		// The exclusion keeps its earlier message when the subPath is also bad.
+		{"bad subPath and subPathExpr", map[string]any{"subPath": "/abs", "subPathExpr": "b"}, nil,
+			[]string{"subPathExpr and subPath are mutually exclusive"}},
+		{"bad subPath and a wrong-typed subPathExpr", map[string]any{"subPath": "../x", "subPathExpr": 1}, nil,
+			[]string{".subPathExpr", "must be a string"}},
 		{"subPath absolute", map[string]any{"subPath": "/abs"}, nil,
 			[]string{".subPath", "must be a relative path", `"/abs"`}},
 		{"subPath backstep", map[string]any{"subPath": "a/../b"}, nil,

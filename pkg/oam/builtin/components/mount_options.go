@@ -70,9 +70,6 @@ func parseMountExtras(mm map[string]any, label string, vm *corev1.VolumeMount) e
 	if sp, present, err := parseStringField(mm, "subPath", label+".subPath"); err != nil {
 		return err
 	} else if present {
-		if err := checkDescendingPath(label+".subPath", sp); err != nil {
-			return err
-		}
 		vm.SubPath = sp
 	}
 	if sp, present, err := parseStringField(mm, "subPathExpr", label+".subPathExpr"); err != nil {
@@ -85,6 +82,13 @@ func parseMountExtras(mm map[string]any, label string, vm *corev1.VolumeMount) e
 			return err
 		}
 		vm.SubPathExpr = sp
+	}
+	// After subPathExpr is read, so a bad subPath beside a subPathExpr keeps the
+	// earlier exclusion and type diagnostics.
+	if vm.SubPath != "" {
+		if err := checkDescendingPath(label+".subPath", vm.SubPath); err != nil {
+			return err
+		}
 	}
 	if mp, present, err := parseRawStringField(mm, "mountPropagation", label+".mountPropagation"); err != nil {
 		return err
