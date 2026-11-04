@@ -27,7 +27,11 @@ import (
 // tests run each built-in rule repeatedly on identical inputs, and the whole
 // build twice, and require identical output. They catch state a rule keeps
 // between calls, the clock, randomness and map-order leaks into a slice. They
-// do not catch a read of something that never changes during a test run (an
+// also compare what the rule is handed (the element, the document, the
+// enclosing component and the capability bindings, not the name allocator)
+// before and after each call, which catches a rule that writes to its inputs
+// and returns the same result anyway. They do not catch a read of something
+// that never changes during a test run (an
 // environment variable, a file): `forbidigo` in .golangci.yml covers the
 // named symbols for that.
 //
@@ -42,13 +46,34 @@ import (
 // 64-key map, where p is close to 1.
 const purityRuns = 8
 
-// loweringCall performs one lowering with inputs built afresh, so one run
-// cannot change what the next run is given. The engine's own copy of a
-// component is shallow (its Properties are shared with the document), and this
-// test does not check that a rule leaves its inputs unchanged: a rule that
-// mutates them but returns the same result passes. That check is
-// go-kure/launcher#1214.
-type loweringCall func(t *testing.T) (oam.LoweringResult, error)
+// purityInput is one value a rule is handed by pointer or by reference, named
+// for the report.
+type purityInput struct {
+	name  string
+	value any
+}
+
+// loweringRun is one prepared lowering: the inputs the rule is handed and the
+// call that hands them over.
+type loweringRun struct {
+	inputs []purityInput
+	run    func() (oam.LoweringResult, error)
+}
+
+// loweringCall prepares one lowering with inputs built afresh, so one run
+// cannot change what the next run is given. The inputs it lists are compared
+// before and after run: the engine's own copy of a component is shallow (its
+// Properties are shared with the document), so a rule that writes to what it
+// is handed changes the document under every later rule while returning the
+// same result each time.
+type loweringCall func(t *testing.T) loweringRun
+
+// plainCall wraps a lowering that has no inputs to guard.
+func plainCall(f func(t *testing.T) (oam.LoweringResult, error)) loweringCall {
+	return func(t *testing.T) loweringRun {
+		return loweringRun{run: func() (oam.LoweringResult, error) { return f(t) }}
+	}
+}
 
 // checkLoweringPurity runs call purityRuns times, running between (another
 // rule, when given) after each run, and reports the first run whose result
@@ -58,9 +83,20 @@ type loweringCall func(t *testing.T) (oam.LoweringResult, error)
 func checkLoweringPurity(t *testing.T, r invariantReporter, label string, call loweringCall, between func()) {
 	t.Helper()
 	snapshot := func(run int) ([]string, bool) {
-		res, err := call(t)
+		lr := call(t)
+		before, incomplete := flattenInputs(lr.inputs)
+		if incomplete != "" {
+			r.Errorf("%s: run %d: inputs cannot be compared completely: %s", label, run, incomplete)
+			return nil, false
+		}
+		res, err := lr.run()
 		if err != nil {
 			t.Fatalf("%s: run %d: lowering failed: %v", label, run, err)
+		}
+		after, _ := flattenInputs(lr.inputs)
+		if diff := firstDifference(before, after); diff != "" {
+			r.Errorf("%s: run %d: the rule changed its input: %s", label, run, diff)
+			return nil, false
 		}
 		leaves, incomplete := flattenValue(res)
 		if incomplete != "" {
@@ -85,6 +121,30 @@ func checkLoweringPurity(t *testing.T, r invariantReporter, label string, call l
 			return
 		}
 	}
+}
+
+// flattenInputs lists the leaves of every input, each under its name, and says
+// why the listing is incomplete ("" when it is not).
+//
+// Two inputs are equal when they list the same leaves (flattenValue): maps by
+// key and value whatever their insertion order, slices by length and element in
+// order, pointers by what they point at. A slice's spare capacity, the identity
+// of a pointer and the identity of a func are not compared, so a rule that
+// appends beyond a slice's length within its capacity, swaps a pointer for a
+// copy that is equal, or replaces one func with another passes. State outside
+// the listed inputs is not seen either. The name allocator is not an input
+// here: allocating names is the one change a rule is meant to make.
+func flattenInputs(inputs []purityInput) (leaves []string, incomplete string) {
+	for _, in := range inputs {
+		got, why := flattenValue(in.value)
+		if incomplete == "" && why != "" {
+			incomplete = in.name + ": " + why
+		}
+		for _, l := range got {
+			leaves = append(leaves, in.name+strings.TrimPrefix(l, "$"))
+		}
+	}
+	return leaves, incomplete
 }
 
 // maxFlattenDepth bounds the traversal. A result nested deeper is reported as
@@ -406,12 +466,17 @@ func purityContext(doc *oam.Application, comp *oam.Component, trait string, inde
 
 // componentPurityCall builds a call for the component rule typ on its fixture.
 func componentPurityCall(typ string, rule oam.ComponentLoweringRule) loweringCall {
-	return func(t *testing.T) (oam.LoweringResult, error) {
+	return func(t *testing.T) loweringRun {
 		t.Helper()
 		name, props := componentLabelFixtures[typ].directly(t, "purity")
 		doc := parsePurityInput(t, name, typ, props, "", nil)
 		comp := &doc.Spec.Components[0]
-		return rule.LowerComponent(comp, purityContext(doc, comp, "", 0).WithCapabilities(profileCapabilities(t)))
+		caps := profileCapabilities(t)
+		lctx := purityContext(doc, comp, "", 0).WithCapabilities(caps)
+		return loweringRun{
+			inputs: []purityInput{{"element", comp}, {"document", doc}, {"capabilities", caps}},
+			run:    func() (oam.LoweringResult, error) { return rule.LowerComponent(comp, lctx) },
+		}
 	}
 }
 
@@ -465,7 +530,7 @@ func mergedTraitProps(t *testing.T, caps map[string]oam.CapabilityBinding, typ s
 // itself for a host that is a terminal handler's type. Origin.Rule, which the
 // engine stamps on emitted elements, is left empty: no built-in rule reads it.
 func traitPurityCall(typ string, rule oam.TraitLoweringRule) loweringCall {
-	return func(t *testing.T) (oam.LoweringResult, error) {
+	return func(t *testing.T) loweringRun {
 		t.Helper()
 		fx := traitLabelFixtures[typ]
 		host, hostProps := webserviceHost()
@@ -505,7 +570,12 @@ func traitPurityCall(typ string, rule oam.TraitLoweringRule) loweringCall {
 		idx := slices.IndexFunc(member.Traits, func(tr oam.Trait) bool { return tr.Type == typ })
 		resolved := member.Traits[idx]
 		resolved.Properties = mergedTraitProps(t, caps, typ, resolved.Properties)
-		return rule.LowerTrait(&resolved, lctx)
+		return loweringRun{
+			inputs: []purityInput{
+				{"element", &resolved}, {"document", hostDoc}, {"enclosing component", member}, {"capabilities", caps},
+			},
+			run: func() (oam.LoweringResult, error) { return rule.LowerTrait(&resolved, lctx) },
+		}
 	}
 }
 
@@ -535,7 +605,7 @@ func TestLoweringPurity_RulesAreDeterministic(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			other := calls[keys[(i+1)%len(keys)]]
 			between := func() {
-				if _, err := other(t); err != nil {
+				if _, err := other(t).run(); err != nil {
 					t.Fatalf("interleaved rule %s failed: %v", keys[(i+1)%len(keys)], err)
 				}
 			}
@@ -717,7 +787,7 @@ func TestLoweringPurity_CheckReportsImpureRules(t *testing.T) {
 				return rule.LowerComponent(comp, oam.LoweringContext{Namer: oam.NewNameAllocator()})
 			}
 			rec := &recordingReporter{}
-			checkLoweringPurity(t, rec, rule.ComponentType(), call, nil)
+			checkLoweringPurity(t, rec, rule.ComponentType(), plainCall(call), nil)
 			if len(rec.errs) == 0 {
 				t.Fatalf("an impure rule (%s) passed the purity check", rule.ComponentType())
 			}
@@ -808,7 +878,7 @@ func TestLoweringPurity_MapKeys(t *testing.T) {
 					Properties: map[string]any{"v": tc.flip(calls)}}}}, nil
 			}
 			rec := &recordingReporter{}
-			checkLoweringPurity(t, rec, "keys", call, nil)
+			checkLoweringPurity(t, rec, "keys", plainCall(call), nil)
 			switch {
 			case tc.wantErr == "" && len(rec.errs) != 0:
 				t.Fatalf("a pure rule was reported: %v", rec.errs)
@@ -816,6 +886,147 @@ func TestLoweringPurity_MapKeys(t *testing.T) {
 				t.Fatalf("want a report containing %q, got %v", tc.wantErr, rec.errs)
 			}
 		})
+	}
+}
+
+// changeRule applies change to what it is handed and returns the same result
+// every time, so only a comparison of its inputs can tell it from a pure rule.
+type changeRule struct {
+	change func(comp *oam.Component, trait *oam.Trait, lctx oam.LoweringContext)
+}
+
+func (changeRule) ComponentType() string { return "change" }
+func (changeRule) TraitType() string     { return "expose" }
+func (r changeRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
+	r.change(comp, nil, lctx)
+	return oam.LoweringResult{Components: []oam.Component{{Name: comp.Name, Type: "deployment"}}}, nil
+}
+func (r changeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.LoweringResult, error) {
+	r.change(nil, trait, lctx)
+	return oam.LoweringResult{Components: []oam.Component{{Name: "purity", Type: "deployment"}}}, nil
+}
+
+// changeComponentCall hands a changeRule a two-component document, one trait and
+// one capability, all built afresh.
+func changeComponentCall(rule changeRule) loweringCall {
+	return func(t *testing.T) loweringRun {
+		doc := &oam.Application{}
+		doc.Metadata.Name = "purity"
+		doc.Spec.Components = []oam.Component{
+			{Name: "purity", Type: "change",
+				Properties: map[string]any{"x": 1, "nested": map[string]any{"y": 1}},
+				Traits:     []oam.Trait{{Type: "t", Properties: map[string]any{"a": 1}}}},
+			{Name: "other", Type: "change", Properties: map[string]any{"z": 1}},
+		}
+		comp := &doc.Spec.Components[0]
+		caps := map[string]oam.CapabilityBinding{"cap": {Rendering: map[string]any{"r": 1}}}
+		lctx := purityContext(doc, comp, "", 0).WithCapabilities(caps)
+		return loweringRun{
+			inputs: []purityInput{{"element", comp}, {"document", doc}, {"capabilities", caps}},
+			run:    func() (oam.LoweringResult, error) { return rule.LowerComponent(comp, lctx) },
+		}
+	}
+}
+
+// TestLoweringPurity_ReportsRulesThatChangeTheirInputs: a rule that writes to an
+// input is impure even when its result never changes, and the result comparison
+// cannot see it. Each case that must be reported has a control that reads the
+// same input without writing to it.
+func TestLoweringPurity_ReportsRulesThatChangeTheirInputs(t *testing.T) {
+	type change = func(comp *oam.Component, trait *oam.Trait, lctx oam.LoweringContext)
+	for _, tc := range []struct {
+		name   string
+		change change
+		report bool
+	}{
+		{"element property", func(comp *oam.Component, _ *oam.Trait, _ oam.LoweringContext) {
+			comp.Properties["x"] = 2
+		}, true},
+		{"nested element property", func(comp *oam.Component, _ *oam.Trait, _ oam.LoweringContext) {
+			comp.Properties["nested"].(map[string]any)["y"] = 2
+		}, true},
+		{"element trait", func(comp *oam.Component, _ *oam.Trait, _ oam.LoweringContext) {
+			comp.Traits[0].Properties["a"] = 2
+		}, true},
+		{"another component of the document", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+			lctx.Document.Spec.Components[1].Properties["z"] = 2
+		}, true},
+		{"component list of the document", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+			lctx.Document.Spec.Components = append(lctx.Document.Spec.Components, oam.Component{Name: "extra"})
+		}, true},
+		{"capability rendering", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+			binding, _ := lctx.Capability("cap")
+			binding.Rendering["r"] = 2
+		}, true},
+		// Controls.
+		{"reads only", func(comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+			_ = comp.Properties["x"]
+			_ = lctx.Document.Spec.Components[1].Name
+			_, _ = lctx.Capability("cap")
+		}, false},
+		{"writes to a copy", func(comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+			props := maps.Clone(comp.Properties)
+			props["x"] = 2
+			binding, _ := lctx.Capability("cap")
+			rendering := maps.Clone(binding.Rendering)
+			rendering["r"] = 2
+		}, false},
+		{"allocates names", func(comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+			_, _ = lctx.Namer.Name(comp.Name, "svc", lctx.Origin)
+		}, false},
+	} {
+		t.Run("component/"+tc.name, func(t *testing.T) {
+			rec := &recordingReporter{}
+			checkLoweringPurity(t, rec, tc.name, changeComponentCall(changeRule{tc.change}), nil)
+			assertInputsReport(t, rec, tc.report)
+		})
+	}
+
+	// The trait position hands the rule a different set of inputs: the trait
+	// merged with its capability rendering, the host's member as the enclosing
+	// component, and the document as the host left it.
+	for _, tc := range []struct {
+		name   string
+		change change
+		report bool
+	}{
+		{"trait property", func(_ *oam.Component, trait *oam.Trait, _ oam.LoweringContext) {
+			trait.Properties["rules"].([]any)[0].(map[string]any)["host"] = "changed.example.com"
+		}, true},
+		{"enclosing component", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+			lctx.Component.Properties = map[string]any{"changed": true}
+		}, true},
+		{"document", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+			lctx.Document.Spec.Components[0].Name = "changed"
+		}, true},
+		{"capability rendering", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+			binding, ok := lctx.Capability("expose")
+			if !ok || binding.Rendering == nil {
+				t.Fatal("the test profile binds no expose rendering to change")
+			}
+			binding.Rendering["changed"] = true
+		}, true},
+		{"reads only", func(_ *oam.Component, trait *oam.Trait, lctx oam.LoweringContext) {
+			_ = trait.Properties["rules"]
+			_ = lctx.Component.Name
+			_, _ = lctx.Capability("expose")
+		}, false},
+	} {
+		t.Run("trait/"+tc.name, func(t *testing.T) {
+			rec := &recordingReporter{}
+			checkLoweringPurity(t, rec, tc.name, traitPurityCall("expose", changeRule{tc.change}), nil)
+			assertInputsReport(t, rec, tc.report)
+		})
+	}
+}
+
+func assertInputsReport(t *testing.T, rec *recordingReporter, report bool) {
+	t.Helper()
+	switch {
+	case report && (len(rec.errs) == 0 || !strings.Contains(rec.errs[0], "changed its input")):
+		t.Fatalf("a rule that changes its input was not reported as such: %v", rec.errs)
+	case !report && len(rec.errs) != 0:
+		t.Fatalf("a rule that leaves its inputs alone was reported: %v", rec.errs)
 	}
 }
 
@@ -827,7 +1038,7 @@ func TestLoweringPurity_PureRulePasses(t *testing.T) {
 			Properties: map[string]any{"keys": []any{"a", "b"}}}}}, nil
 	}
 	rec := &recordingReporter{}
-	checkLoweringPurity(t, rec, "pure", call, nil)
+	checkLoweringPurity(t, rec, "pure", plainCall(call), nil)
 	if len(rec.errs) != 0 {
 		t.Fatalf("a pure rule was reported: %v", rec.errs)
 	}
