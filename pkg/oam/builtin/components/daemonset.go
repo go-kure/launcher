@@ -281,7 +281,7 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforcePrivileged(c.SecurityContext, p.AllowPrivileged()); err != nil {
 		return err
 	}
-	if err := enforceHostPathVolumes(c.Volumes, p.AllowHostPathVolumes()); err != nil {
+	if err := enforceVolumeSourcePolicy("", c.Volumes, p); err != nil {
 		return err
 	}
 	if err := enforceHostNamespaces(c.PodSpec, p); err != nil {

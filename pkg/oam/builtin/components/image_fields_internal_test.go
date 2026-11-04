@@ -697,16 +697,28 @@ func TestImageFields_HeldOrListed(t *testing.T) {
 	}
 }
 
-// TestImageFields_WorkloadKindsTakeNoImageVolume: the components with a volume
-// schema of their own (webservice, worker, deployment, statefulset, daemonset,
-// job, cronjob) take their volumes through one parser, which has no image
-// volume: the only image volume a build can produce comes through a raw pod
-// spec.
-func TestImageFields_WorkloadKindsTakeNoImageVolume(t *testing.T) {
-	_, err := parseVolumes(map[string]any{"volumes": []any{map[string]any{
+// TestImageFields_WorkloadKindsTakeImageVolumeNested: the components with a
+// volume schema of their own (webservice, worker, deployment, statefulset,
+// daemonset, job, cronjob) take their volumes through one parser. It reads an
+// image volume only in its nested form (go-kure/launcher#1177), where the
+// reference is held to ValidateImageRef as the pod kind holds it
+// (validateImageVolumeRefs); the policy gates run in ApplyPolicy
+// (enforceVolumeSourcePolicy).
+func TestImageFields_WorkloadKindsTakeImageVolumeNested(t *testing.T) {
+	volume := func(source map[string]any) map[string]any {
+		return map[string]any{"volumes": []any{map[string]any{"name": "ext", "type": "image", "mountPath": "/ext", "image": source}}}
+	}
+	res, err := parseVolumes(volume(map[string]any{"reference": "registry.example/team/ext:1.0.0"}))
+	if err != nil || len(res.Volumes) != 1 || res.Volumes[0].Image == nil || res.Volumes[0].Image.Reference != "registry.example/team/ext:1.0.0" {
+		t.Errorf("nested image volume: volumes = %+v, err = %v", res.Volumes, err)
+	}
+	if _, err := parseVolumes(volume(map[string]any{"reference": "NOT A REF!"})); err == nil || !strings.Contains(err.Error(), `volume "ext": image: image.reference`) {
+		t.Errorf("invalid reference: err = %v, want a refusal naming image.reference", err)
+	}
+	_, err = parseVolumes(map[string]any{"volumes": []any{map[string]any{
 		"name": "ext", "type": "image", "mountPath": "/ext", "reference": "registry.example/team/ext:1.0.0",
 	}}})
-	if want := `volume "ext": unrecognized type "image"`; err == nil || err.Error() != want {
-		t.Errorf("err = %v, want %q", err, want)
+	if err == nil || !strings.Contains(err.Error(), `volume "ext": image`) {
+		t.Errorf("flat spelling: err = %v, want a refusal", err)
 	}
 }

@@ -2,6 +2,7 @@ package components
 
 import (
 	"encoding/json"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -182,6 +183,7 @@ var strictlyDecodedTypes = typesByName([]namedType{
 	{"corev1.PodSpec", reflect.TypeFor[corev1.PodSpec]()},
 	{"corev1.ReplicationControllerSpec", reflect.TypeFor[corev1.ReplicationControllerSpec]()},
 	{"corev1.ResourceQuotaSpec", reflect.TypeFor[corev1.ResourceQuotaSpec]()},
+	{"corev1.VolumeSource", reflect.TypeFor[corev1.VolumeSource]()},
 	{"discoveryv1.EndpointSlice", reflect.TypeFor[discoveryv1.EndpointSlice]()},
 	{"esv1.ClusterExternalSecretSpec", reflect.TypeFor[esv1.ClusterExternalSecretSpec]()},
 	{"esv1.ExternalSecretSpec", reflect.TypeFor[esv1.ExternalSecretSpec]()},
@@ -641,6 +643,18 @@ var labelSelectorTestParamRef = map[string]map[string]any{
 	"paramRef.selector": {"paramRef": map[string]any{"parameterNotFoundAction": "Deny"}},
 }
 
+// nestedVolumeConfig stands for a component whose properties are one nested
+// `volumes` entry (parseNestedVolume), so its row reads like a kind's. The
+// entry's own prefix is cut from the error, which then names the selector's
+// path as the other rows' errors do.
+func nestedVolumeConfig(c *oam.Component) (stack.ApplicationConfig, error) {
+	typ, _ := c.Properties["type"].(string)
+	if _, err := parseNestedVolume(c.Properties, "v", typ); err != nil {
+		return nil, errors.New(strings.TrimPrefix(err.Error(), `volume "v": `+typ+": "))
+	}
+	return nil, nil
+}
+
 // labelSelectorKinds lists every kind component whose type reaches a
 // metav1.LabelSelector.
 //
@@ -650,10 +664,17 @@ var labelSelectorTestParamRef = map[string]map[string]any{
 // linked module (TestCiliumBGPKinds_RequiredMatchCRD and its siblings). The
 // workload kinds and the claim templates decode no type: they parse a selector
 // by hand and refuse key, operator and values there (parseLabelSelectorOpts).
+// Their nested `volumes` entry is the exception, and its row decodes the volume
+// source itself (nestedVolumeConfig).
 // A node selector term (corev1.NodeSelectorTerm) and a quota's scope selector
 // (corev1.ScopeSelector) are other types, with other operators and validators
 // of their own in the API server.
 var labelSelectorKinds = []labelSelectorKind{
+	{
+		component: "volume-source", typ: "corev1.VolumeSource", config: nestedVolumeConfig,
+		base: map[string]any{"name": "v", "type": "projected", "mountPath": "/m"}, expressions: true,
+		pathBase: map[string]map[string]any{"ephemeral.volumeClaimTemplate.spec.selector": {"type": "ephemeral"}},
+	},
 	{
 		component: "networkpolicy", typ: "networkingv1.NetworkPolicySpec", config: kindConfig(&NetworkPolicyHandler{}),
 		base: map[string]any{}, expressions: true,

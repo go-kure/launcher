@@ -2612,7 +2612,15 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 		}
 		readOnly := roPtr != nil && *roPtr
 
-		switch volType {
+		switch volumeSourceKind(m, volType) {
+		case nestedCase:
+			// The nested form: the source is its upstream object, strictly decoded
+			// (go-kure/launcher#1177, volume_source.go).
+			vol, err := parseNestedVolume(m, volName, volType)
+			if err != nil {
+				return result, err
+			}
+			result.Volumes = append(result.Volumes, vol)
 		case "hostPath":
 			// Same typo-tolerance gap as every other per-type field set below:
 			// an unrecognized key (e.g. a typo'd field name) was previously
@@ -2643,7 +2651,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				},
 			})
 		case "emptyDir":
-			if err := rejectUnknownKeys(m, volumeKeys("name", "type", "mountPath", "readOnly", "sizeLimit"), fmt.Sprintf("volume %q: emptyDir", volName)); err != nil {
+			if err := rejectUnknownKeys(m, volumeKeys("name", "type", "mountPath", "readOnly", "sizeLimit", "emptyDir"), fmt.Sprintf("volume %q: emptyDir", volName)); err != nil {
 				return result, err
 			}
 			vol := corev1.Volume{
@@ -2749,7 +2757,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				VolumeMode:                volumeMode,
 			})
 		case "configMap":
-			if err := rejectUnknownKeys(m, volumeKeys("name", "type", "mountPath", "readOnly", "configMapName"), fmt.Sprintf("volume %q: configMap", volName)); err != nil {
+			if err := rejectUnknownKeys(m, volumeKeys("name", "type", "mountPath", "readOnly", "configMapName", "configMap"), fmt.Sprintf("volume %q: configMap", volName)); err != nil {
 				return result, err
 			}
 			cmName, present, err := parseStringField(m, "configMapName", fmt.Sprintf("volume %q: configMapName", volName))
@@ -2768,7 +2776,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				},
 			})
 		case "secret":
-			if err := rejectUnknownKeys(m, volumeKeys("name", "type", "mountPath", "readOnly", "secretName"), fmt.Sprintf("volume %q: secret", volName)); err != nil {
+			if err := rejectUnknownKeys(m, volumeKeys("name", "type", "mountPath", "readOnly", "secretName", "secret"), fmt.Sprintf("volume %q: secret", volName)); err != nil {
 				return result, err
 			}
 			secretName, present, err := parseStringField(m, "secretName", fmt.Sprintf("volume %q: secretName", volName))
@@ -2789,8 +2797,9 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			// (including type omitted entirely, volType == "") is clearly an
 			// authored volume, not an absent one — same silent-discard shape
 			// as this function's other findings this wave, so it is rejected
-			// here rather than falling through to "no volume, no mount".
-			return result, errors.Errorf("volume %q: unrecognized type %q", volName, volType)
+			// here rather than falling through to "no volume, no mount". A type that
+			// is an upstream source off the allow-list is refused with its reason.
+			return result, refusedVolumeSource(volName, volType)
 		}
 
 		if devicePresent {
