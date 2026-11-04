@@ -235,9 +235,10 @@ func podSpecDefaultedZeros(prefix string, ps *corev1.PodSpec) defaultedZeroField
 // (validatePodSpecLabelSelectors). The volumeMounts of every init and regular
 // container are held to the single-mount rules of an app.yaml mount
 // (validateTypedVolumeMounts). A lifecycle or probe on an init container that
-// is not restartable is refused (refuseRegularInitFields). The API's other
-// value rules are left to the API server.
-func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec) error {
+// is not restartable is refused (refuseRegularInitFields), and so is a
+// lifecycle sleep below zero or above the grace period (checkLifecycleSleep).
+// The API's other value rules are left to the API server.
+func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec, barePod bool) error {
 	if ps.Containers == nil {
 		return errors.Errorf("%scontainers: required (the containers the pod runs)", prefix)
 	}
@@ -266,6 +267,9 @@ func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec) error {
 		return err
 	}
 	if err := refuseRegularInitFields(prefix, ps); err != nil {
+		return err
+	}
+	if err := checkLifecycleSleep(prefix, ps, barePod); err != nil {
 		return err
 	}
 	return validatePodSpecLabelSelectors(prefix, ps)
@@ -307,7 +311,7 @@ func (h *PodHandler) ToApplicationConfig(component *oam.Component, namespace str
 		return nil, err
 	}
 	cfg := &PodConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
-	if err := validateAuthoredPodSpec("", &cfg.Spec); err != nil {
+	if err := validateAuthoredPodSpec("", &cfg.Spec, true); err != nil {
 		return nil, err
 	}
 	return cfg, nil
@@ -358,7 +362,7 @@ func (c *PodConfig) ApplyPolicy(p oam.Policy) error {
 // pods. The parse-time refusals the typed spec can show are repeated, since
 // the config is exported.
 func (c *PodConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if err := validateAuthoredPodSpec("", &c.Spec); err != nil {
+	if err := validateAuthoredPodSpec("", &c.Spec, true); err != nil {
 		return nil, err
 	}
 	pod := kubernetes.CreatePod(kindObjectName(c.ObjectName, app.Name), app.Namespace)

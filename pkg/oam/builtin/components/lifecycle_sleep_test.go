@@ -21,6 +21,7 @@ func sleepHook(hook string, seconds int) map[string]any {
 type sleepPath struct {
 	name      string
 	list      string
+	index     int
 	container string
 	// sidecarOnly marks a path only the kinds with a `sidecars` property take.
 	sidecarOnly bool
@@ -35,7 +36,7 @@ var sleepPaths = []sleepPath{
 		},
 	},
 	{
-		name: "sidecar", list: "containers", container: "side", sidecarOnly: true,
+		name: "sidecar", list: "containers", index: 1, container: "side", sidecarOnly: true,
 		props: func(base, lifecycle map[string]any) map[string]any {
 			return withProps(base, map[string]any{"sidecars": []any{
 				map[string]any{"name": "side", "image": "ghcr.io/org/side:v1", "lifecycle": lifecycle},
@@ -77,8 +78,8 @@ func TestLifecycleSleep_RefusedAboveGracePeriod(t *testing.T) {
 							base = withProps(base, map[string]any{"terminationGracePeriodSeconds": tc.grace})
 						}
 						err := generateErr(t, k.handler, k.name, p.props(base, sleepHook(hook, tc.sleep)))
-						want := fmt.Sprintf(`%s %q: lifecycle.%s.sleep.seconds: %d must not exceed terminationGracePeriodSeconds (%d)`,
-							p.list, p.container, hook, tc.sleep, tc.limit)
+						want := fmt.Sprintf(`%s[%d] %q: lifecycle.%s.sleep.seconds: %d must not exceed terminationGracePeriodSeconds (%d)`,
+							p.list, p.index, p.container, hook, tc.sleep, tc.limit)
 						assertErrorContains(t, err, want)
 					})
 				}

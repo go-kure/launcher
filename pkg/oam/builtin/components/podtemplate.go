@@ -98,7 +98,7 @@ type PodTemplateConfig struct {
 // template: the API server accepts it on a PodTemplate. The API's other value
 // rules are left to the API server.
 func (c *PodTemplateConfig) validate() error {
-	return validateAuthoredPodSpec("template.spec.", &c.Template.Spec)
+	return validateAuthoredPodSpec("template.spec.", &c.Template.Spec, false)
 }
 
 // ApplyPolicy holds the template's pod spec to the environment policy, through

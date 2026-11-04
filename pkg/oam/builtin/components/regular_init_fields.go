@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -50,23 +49,6 @@ func refuseRegularInitFields(prefix string, ps *corev1.PodSpec) error {
 				return errors.Errorf("%s: %s: not supported on an init container that is not restartable — %s",
 					fmt.Sprintf("%sinitContainers[%d] %q", prefix, i, ctr.Name), f.key, f.reason)
 			}
-		}
-	}
-	return nil
-}
-
-// validateManifestInitFields holds the pod spec of every typed workload object
-// of a manifests source to refuseRegularInitFields, whatever the environment
-// policy, and names the object in what it refuses. Which objects are read, and
-// which pass unread, is as for validateManifestMounts.
-func validateManifestInitFields(objs []client.Object) error {
-	for _, obj := range objs {
-		path, ps := renderedPodSpec(obj)
-		if ps == nil {
-			continue
-		}
-		if err := refuseRegularInitFields(path+".", ps); err != nil {
-			return errors.Wrapf(err, "manifest source: object %s", renderedObjectRef(obj))
 		}
 	}
 	return nil
