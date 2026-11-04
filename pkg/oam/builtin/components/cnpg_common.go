@@ -57,6 +57,54 @@ func requireCnpgClusterRef(name string) error {
 	return nil
 }
 
+// enforceVolumeSourcePolicy applies the environment policy gates that hold a
+// pod's volume sources: hostPath volumes, the storage maximum on a generic
+// ephemeral volume's claim, and the registry allowlist on an image volume's
+// reference. No other source the controller components admit (csi, projected,
+// downwardAPI, configMap, secret, emptyDir) has a gate. Both
+// enforcePodTemplatePolicy and the controller kinds' ApplyPolicy call it, so a
+// source is held the same wherever it is authored (go-kure/launcher#1177).
+// label prefixes each error as in enforcePodTemplatePolicy.
+func enforceVolumeSourcePolicy(label string, volumes []corev1.Volume, p oam.Policy) error {
+	at := func(err error) error {
+		if label == "" {
+			return err
+		}
+		return errors.Wrap(err, label)
+	}
+	if err := enforceHostPathVolumes(volumes, p.AllowHostPathVolumes()); err != nil {
+		return at(err)
+	}
+	// A generic ephemeral volume provisions a claim for every pod, so its
+	// storage request is capped as cnpg-cluster caps its ephemeralVolumeSource
+	// claim.
+	for _, v := range volumes {
+		if v.Ephemeral == nil || v.Ephemeral.VolumeClaimTemplate == nil {
+			continue
+		}
+		if q, ok := v.Ephemeral.VolumeClaimTemplate.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
+			where := fmt.Sprintf("volume %q ephemeral.volumeClaimTemplate.spec.resources.requests.storage", v.Name)
+			if err := enforceMaxStorageAt(q.String(), p.MaxStorageSize(), where); err != nil {
+				return at(err)
+			}
+		}
+	}
+	// An image volume mounts an OCI image the kubelet pulls as it pulls a
+	// container's, so its reference is held to the registry allowlist as an
+	// authored container image is, and read the same way (registryHost). A
+	// volume that names no reference names no image, and nothing is checked
+	// for it.
+	for _, v := range volumes {
+		if v.Image == nil || v.Image.Reference == "" {
+			continue
+		}
+		if err := enforceAllowedRegistries(v.Image.Reference, p.AllowedRegistries()); err != nil {
+			return at(errors.Wrap(err, fmt.Sprintf("volume %q image.reference", v.Name)))
+		}
+	}
+	return nil
+}
+
 // enforcePodTemplatePolicy applies the environment policy gates the workload
 // kinds apply to their pod to an operator CR's raw pod template, which the
 // operator copies into the pods it creates: host namespaces, hostPath volumes,
@@ -91,35 +139,8 @@ func enforcePodTemplatePolicy(label string, ps *corev1.PodSpec, p oam.Policy) er
 	if err := enforceHostNamespaces(cfg, p); err != nil {
 		return at(err)
 	}
-	if err := enforceHostPathVolumes(ps.Volumes, p.AllowHostPathVolumes()); err != nil {
-		return at(err)
-	}
-	// A generic ephemeral volume provisions a claim for every pod, so its
-	// storage request is capped as cnpg-cluster caps its ephemeralVolumeSource
-	// claim.
-	for _, v := range ps.Volumes {
-		if v.Ephemeral == nil || v.Ephemeral.VolumeClaimTemplate == nil {
-			continue
-		}
-		if q, ok := v.Ephemeral.VolumeClaimTemplate.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
-			where := fmt.Sprintf("volume %q ephemeral.volumeClaimTemplate.spec.resources.requests.storage", v.Name)
-			if err := enforceMaxStorageAt(q.String(), p.MaxStorageSize(), where); err != nil {
-				return at(err)
-			}
-		}
-	}
-	// An image volume mounts an OCI image the kubelet pulls as it pulls a
-	// container's, so its reference is held to the registry allowlist as an
-	// authored container image is, and read the same way (registryHost). A
-	// volume that names no reference names no image, and nothing is checked
-	// for it.
-	for _, v := range ps.Volumes {
-		if v.Image == nil || v.Image.Reference == "" {
-			continue
-		}
-		if err := enforceAllowedRegistries(v.Image.Reference, p.AllowedRegistries()); err != nil {
-			return at(errors.Wrap(err, fmt.Sprintf("volume %q image.reference", v.Name)))
-		}
+	if err := enforceVolumeSourcePolicy(label, ps.Volumes, p); err != nil {
+		return err
 	}
 	// The pod-level hostProcess and resources checks are enforcePodHostProcess
 	// and enforcePodResources, restated so their errors name the template's

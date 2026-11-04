@@ -1179,10 +1179,32 @@ is likewise required and must be absolute — a raw host filesystem path has
 no defined root to resolve a relative value against, and real admission
 (`validateHostPathVolumeSource`) rejects a relative one the same way;
 `configMap.configMapName` and `secret.secretName` are each required the same
-way as `pvc.size`; a fully-authored entry whose `type` matches none of the
-five recognized sources — including `type` omitted entirely — is rejected
-outright rather than silently producing no volume or mount for an entry the
-author clearly intended to add; each recognized type's own field set is
+way as `pvc.size`; since go-kure/launcher#1177 an entry can also author its
+source as the upstream object under a key named like its `type`: `projected`,
+`downwardAPI`, `csi`, `ephemeral` and `image` take only that nested form
+(`- {name: tok, type: projected, mountPath: /var/run/tok, projected: {sources: [...]}}`),
+and `configMap`, `secret` and `emptyDir` take it as well, for the fields their
+flat keys have no name for (`items`, `defaultMode`, `optional`, `medium`). The
+nested object is decoded strictly into the Kubernetes `VolumeSource`: an unknown
+field or a wrongly typed value at any depth is refused, a `null` key reads as
+absent, and a `0`, `false` or `""` that the API server would default is refused
+rather than dropped. A flat source key (`configMapName`, `secretName`,
+`sizeLimit`) and the nested object on one entry are refused, an `image`
+reference is checked by `ValidateImageRef`, and the label selectors of a
+`projected` cluster trust bundle and of an `ephemeral` claim template are held as
+the `pod` kind holds them. `hostPath` and `persistentVolumeClaim` stay on their
+flat routes (`type: hostPath`, `type: pvc`), which own the hostPath gate and the
+claim generation. Every other Kubernetes volume source (`nfs` and the removed
+in-tree plugins such as `gitRepo`, `iscsi` or `rbd`) is refused by name, because
+Pod Security `restricted` does not admit it. A fully-authored entry whose `type`
+matches none of the recognized sources — including `type` omitted entirely — is
+rejected outright rather than silently producing no volume or mount for an entry
+the author clearly intended to add. Every controller kind (`deployment`,
+`statefulset`, `daemonset`, `job`, `cronjob`, and so `webservice` and `worker`)
+applies the volume-source policy gates that `enforcePodTemplatePolicy` applies to
+an operator pod template (`enforceVolumeSourcePolicy`): the hostPath gate, the
+storage maximum on an `ephemeral` claim, and the registry allowlist on an
+`image` reference; each recognized type's own field set is
 closed the same way `securityContext` and its nested objects are elsewhere
 in this file — an unrecognized key on a `hostPath`, `emptyDir`, `pvc`,
 `configMap`, or `secret` entry (e.g. a typo'd `sizeLmit` instead of
@@ -6494,7 +6516,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   template delivery (`helmtemplate`), `passthrough` or a `manifests` source
   carries. The components with a volume schema of their own (`webservice`,
   `worker`, `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) take
-  no image volume: their `volumes` has no such type. With the container images these
+  an image volume only in the nested form of a `volumes` entry (`type: image`,
+  `image: {reference: ...}`, go-kure/launcher#1177), where the registry allowlist
+  holds it (`enforceVolumeSourcePolicy`) and `ValidateImageRef` holds its
+  reference when the component is read. With the container images these
   are every field of a pod spec that names an image the kubelet pulls today.
   A test walks the linked `k8s.io/api` type and fails on a field whose name
   holds `image`, or whose type is the image volume source, that is neither

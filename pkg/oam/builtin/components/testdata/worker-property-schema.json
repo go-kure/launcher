@@ -2263,9 +2263,39 @@
       "type": "object",
       "description": "A single volume and its mount.",
       "properties": {
+        "configMap": {
+          "type": "object",
+          "description": "The configMap volume source, as the Kubernetes VolumeSource field of that name. Read when type is configMap; an unknown field or a wrongly typed value is refused.",
+          "additionalProperties": true
+        },
+        "csi": {
+          "type": "object",
+          "description": "The csi volume source, as the Kubernetes VolumeSource field of that name. Read when type is csi; an unknown field or a wrongly typed value is refused.",
+          "additionalProperties": true
+        },
         "devicePath": {
           "type": "string",
           "description": "pvc only: path in the container where a volumeMode: Block claim appears as a raw block device. Authored instead of mountPath, and only together with volumeMode: Block."
+        },
+        "downwardAPI": {
+          "type": "object",
+          "description": "The downwardAPI volume source, as the Kubernetes VolumeSource field of that name. Read when type is downwardAPI; an unknown field or a wrongly typed value is refused.",
+          "additionalProperties": true
+        },
+        "emptyDir": {
+          "type": "object",
+          "description": "The emptyDir volume source, as the Kubernetes VolumeSource field of that name. Read when type is emptyDir; an unknown field or a wrongly typed value is refused.",
+          "additionalProperties": true
+        },
+        "ephemeral": {
+          "type": "object",
+          "description": "The ephemeral volume source, as the Kubernetes VolumeSource field of that name. Read when type is ephemeral; an unknown field or a wrongly typed value is refused.",
+          "additionalProperties": true
+        },
+        "image": {
+          "type": "object",
+          "description": "The image volume source, as the Kubernetes VolumeSource field of that name. Read when type is image; an unknown field or a wrongly typed value is refused.",
+          "additionalProperties": true
         },
         "mountPath": {
           "type": "string",
@@ -2285,6 +2315,11 @@
           "description": "Volume name.",
           "required": true
         },
+        "projected": {
+          "type": "object",
+          "description": "The projected volume source, as the Kubernetes VolumeSource field of that name. Read when type is projected; an unknown field or a wrongly typed value is refused.",
+          "additionalProperties": true
+        },
         "readOnly": {
           "type": "boolean",
           "description": "Mount the volume read-only."
@@ -2298,6 +2333,11 @@
             "Enabled"
           ]
         },
+        "secret": {
+          "type": "object",
+          "description": "The secret volume source, as the Kubernetes VolumeSource field of that name. Read when type is secret; an unknown field or a wrongly typed value is refused.",
+          "additionalProperties": true
+        },
         "subPath": {
           "type": "string",
           "description": "Sub-path within the volume to mount instead of its root."
@@ -2308,13 +2348,18 @@
         },
         "type": {
           "type": "string",
-          "description": "Volume source type.",
+          "description": "Volume source type. csi, downwardAPI, ephemeral, image and projected take the source in the object of the same name. configMap, secret and emptyDir take it flat or in that object.",
           "enum": [
             "hostPath",
             "emptyDir",
             "pvc",
             "configMap",
-            "secret"
+            "secret",
+            "csi",
+            "downwardAPI",
+            "ephemeral",
+            "image",
+            "projected"
           ]
         },
         "volumeMode": {

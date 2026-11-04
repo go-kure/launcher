@@ -527,7 +527,7 @@ func schemaProbes(reserved bool) oam.PropertySchema {
 func schemaVolumes() oam.PropertySchema {
 	props := map[string]oam.PropertySchema{
 		"name": {Type: oam.PropertyTypeString, Required: true, Description: "Volume name."},
-		"type": {Type: oam.PropertyTypeString, Enum: []any{"hostPath", "emptyDir", "pvc", "configMap", "secret"}, Description: "Volume source type."},
+		"type": {Type: oam.PropertyTypeString, Enum: []any{"hostPath", "emptyDir", "pvc", "configMap", "secret", "csi", "downwardAPI", "ephemeral", "image", "projected"}, Description: "Volume source type. csi, downwardAPI, ephemeral, image and projected take the source in the object of the same name. configMap, secret and emptyDir take it flat or in that object."},
 		// mountPath is not schema-Required: a volumeMode: Block pvc authors
 		// devicePath instead. The exclusive group below and parseVolumes
 		// both require exactly one.
@@ -539,6 +539,15 @@ func schemaVolumes() oam.PropertySchema {
 	// The four mount keys join the common fields (go-kure/launcher#1198). They
 	// belong to the mount, so they are refused beside devicePath.
 	maps.Copy(props, schemaMountExtras())
+	// The nested source objects (go-kure/launcher#1177): each is the upstream
+	// VolumeSource field of that name, strictly decoded.
+	for _, key := range []string{"configMap", "csi", "downwardAPI", "emptyDir", "ephemeral", "image", "projected", "secret"} {
+		props[key] = oam.PropertySchema{
+			Type:                 oam.PropertyTypeObject,
+			AdditionalProperties: true,
+			Description:          "The " + key + " volume source, as the Kubernetes VolumeSource field of that name. Read when type is " + key + "; an unknown field or a wrongly typed value is refused.",
+		}
+	}
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeArray,
 		Description: "Volumes to attach and mount into the container.",
