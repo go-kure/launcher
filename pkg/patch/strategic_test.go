@@ -1273,6 +1273,125 @@ func TestApplyStrategicMergePatch_NilPatchIsNoOp(t *testing.T) {
 	}
 }
 
+// nilContainerResource returns an object of the given kind and API version
+// whose untouched fields hold a nil []any and a nil map[string]any, at the top
+// of a section, nested in a map and nested in a list.
+func nilContainerResource(apiVersion, kind, section string) *unstructured.Unstructured {
+	var nilSlice []any
+	var nilMap map[string]any
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": apiVersion,
+		"kind":       kind,
+		"metadata":   map[string]any{"name": "test"},
+		section: map[string]any{
+			"list":   nilSlice,
+			"m":      nilMap,
+			"inMap":  map[string]any{"list": nilSlice, "m": nilMap},
+			"inList": []any{map[string]any{"list": nilSlice, "m": nilMap}},
+			"a":      "1",
+		},
+	}}
+}
+
+// TestApplyStrategicMergePatch_JSONMergeNormalizesNilContainersInResource checks
+// that the fallback reads a nil slice or map in the resource as an empty one, as
+// the typed path does, instead of serializing null (go-kure/launcher#1195).
+func TestApplyStrategicMergePatch_JSONMergeNormalizesNilContainersInResource(t *testing.T) {
+	for name, patch := range map[string]map[string]any{
+		"empty patch":          {},
+		"patch on other field": {"other": map[string]any{"x": "y"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resource := nilContainerResource("example.io/v1", "Widget", "spec")
+			if err := ApplyStrategicMergePatch(resource, patch, nil); err != nil {
+				t.Fatalf("ApplyStrategicMergePatch: %v", err)
+			}
+			got, err := json.Marshal(resource.Object["spec"])
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			want := `{"a":"1","inList":[{"list":[],"m":{}}],"inMap":{"list":[],"m":{}},"list":[],"m":{}}`
+			if string(got) != want {
+				t.Errorf("spec = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+// TestApplyStrategicMergePatch_JSONMergeMatchesTypedOnNilContainers checks that
+// the same untouched nil containers serialize the same on the fallback as on a
+// known kind (a ConfigMap, whose data and metadata.labels are free-form maps).
+func TestApplyStrategicMergePatch_JSONMergeMatchesTypedOnNilContainers(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+	var nilMap map[string]any
+	build := func(apiVersion, kind string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": apiVersion,
+			"kind":       kind,
+			"metadata":   map[string]any{"name": "test", "labels": nilMap},
+			"data":       nilMap,
+		}}
+	}
+	typed, fallback := build("v1", "ConfigMap"), build("v1", "ConfigMap")
+	for _, tc := range []struct {
+		name     string
+		resource *unstructured.Unstructured
+		lookup   KindLookup
+	}{{"typed", typed, lookup}, {"fallback", fallback, nil}} {
+		if err := ApplyStrategicMergePatch(tc.resource, map[string]any{}, tc.lookup); err != nil {
+			t.Fatalf("%s: ApplyStrategicMergePatch: %v", tc.name, err)
+		}
+	}
+	if !reflect.DeepEqual(typed.Object, fallback.Object) {
+		t.Errorf("fallback = %#v, typed = %#v, want them equal", fallback.Object, typed.Object)
+	}
+}
+
+// TestApplyStrategicMergePatch_JSONMergeResourceNilContainerDeletedByNil checks
+// that normalizing the resource leaves the RFC 7386 delete alone: an explicit nil
+// in the patch still removes a field whose resource value was a nil container.
+func TestApplyStrategicMergePatch_JSONMergeResourceNilContainerDeletedByNil(t *testing.T) {
+	resource := nilContainerResource("example.io/v1", "Widget", "spec")
+	if err := ApplyStrategicMergePatch(resource, map[string]any{"spec": map[string]any{"m": nil}}, nil); err != nil {
+		t.Fatalf("ApplyStrategicMergePatch: %v", err)
+	}
+	spec := resource.Object["spec"].(map[string]any)
+	if _, found := spec["m"]; found {
+		t.Errorf("m = %#v, want it deleted by the explicit nil", spec["m"])
+	}
+	if list, ok := spec["list"].([]any); !ok || list == nil || len(list) != 0 {
+		t.Errorf("list = %#v, want an empty, non-nil list", spec["list"])
+	}
+}
+
+// TestApplyStrategicMergePatch_JSONMergeResourceErrorLeavesResourceAlone checks
+// that a resource nested deeper than maxDepth, or containing itself, is an error
+// on the fallback, as on the typed path, and that the resource is left as it was.
+func TestApplyStrategicMergePatch_JSONMergeResourceErrorLeavesResourceAlone(t *testing.T) {
+	var nilSlice []any
+	self := map[string]any{"list": nilSlice}
+	self["self"] = self
+	for name, spec := range map[string]map[string]any{
+		"too deep":        deepMapWith(maxDepth, nilSlice),
+		"contains itself": self,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resource := widget()
+			resource.Object["spec"] = spec
+			before := resource.Object["spec"]
+			if err := ApplyStrategicMergePatch(resource, map[string]any{"a": "2"}, nil); err == nil {
+				t.Fatal("ApplyStrategicMergePatch: want an error")
+			}
+			if !reflect.DeepEqual(resource.Object["spec"], before) || len(resource.Object) != 4 {
+				t.Errorf("resource = %#v, want it unchanged", resource.Object)
+			}
+		})
+	}
+}
+
 // TestApplyStrategicMergePatch_JSONMergeDepthBound checks that the fallback has
 // the bound of the typed path: a patch whose deepest value sits at depth maxDepth
 // merges, and one level more is an error that leaves the resource as it was.
