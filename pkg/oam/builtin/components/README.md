@@ -2114,21 +2114,25 @@ component, since the count would be accepted and applied to nothing; set
 when a component lowering rule emits it, and an authored `null` is no value. Only
 the Deployment the HPA targets loses its count; the component's other objects are
 unchanged. Why: Kubernetes advises removing `spec.replicas` when an HPA manages a
-Deployment, because a manifest that keeps it makes every apply reset the count
-to that value, and the count flaps (Kubernetes documentation, "Horizontal Pod
+Deployment, because a manifest that keeps it can reset the count to that value
+on an apply (a server-side apply without force reports a conflict instead once
+the HPA owns the field), and the count flaps (Kubernetes documentation, "Horizontal Pod
 Autoscaling", section "Migrating Deployments and StatefulSets to horizontal
 autoscaling").
 
 Migrating an object that is already deployed with `spec.replicas`: the next apply
-omits the field. The Kubernetes documentation on server-side apply ("Transferring
-ownership") states that removing a field no other manager owns resets it to its
-default, and that an apply without force on a field another manager owns is
-rejected as a conflict. So once the HPA has written the count, an applier with
-force off (Flux's `spec.force` defaults to false) may report a conflict on the
-first apply, and one with force on may reset the count to the default of 1 for a
-moment. Kubernetes recommends removing the field before enabling the HPA for
-this reason; the same page notes the one-time drop to 1. Check the applier's
-behaviour on a non-production object first.
+omits the field. What that does depends on who owns the field at that moment
+(Kubernetes documentation, server-side apply, "Transferring ownership"). If the
+HPA has already written the count and so owns the field, omitting it only gives
+up the applier's share and the count is kept. If the HPA has not yet written it,
+for example because the scaler is added in the same change, the omission leaves
+no owner and the API server resets the field to its default of 1, which can
+briefly degrade a running workload. The documented ways around that are to keep
+the old `replicas` in the applied configuration until the HPA has written the
+count (the applier then gets a conflict, and the field is safe to remove), or
+to hand the field over first with a one-off apply under a temporary field
+manager. Where the applier cannot do either, apply the change once the HPA has
+scaled the workload.
 
 The guard reads a claim's **whole** access-mode set, not each mode on its own.
 `accessModes` requests a volume supporting *every* mode listed, so
