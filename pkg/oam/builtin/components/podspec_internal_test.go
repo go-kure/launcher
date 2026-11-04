@@ -106,10 +106,13 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		{"webservice", WebserviceRule{}.PropertySchema(), 20, deploymentSpecPropertyKeys, false},
 		{"worker", WorkerRule{}.PropertySchema(), 18, deploymentSpecPropertyKeys, false},
 		// 18 and 14: go-kure/launcher#690 removed `port` from both kinds.
-		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 20, statefulSetSpecPropertyKeys, false},
-		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 17, daemonSetSpecPropertyKeys, false},
-		{"cronjob", (&CronjobHandler{}).PropertySchema(), 24, jobSpecPropertyKeys, true},
-		{"job", (&JobHandler{}).PropertySchema(), 18, jobSpecPropertyKeys, true},
+		// Each of the five kinds below counts one more own key since
+		// go-kure/launcher#1178: `podMetadata`, in no shared list. The webservice
+		// and worker take none (go-kure/launcher#1216).
+		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 21, statefulSetSpecPropertyKeys, false},
+		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 18, daemonSetSpecPropertyKeys, false},
+		{"cronjob", (&CronjobHandler{}).PropertySchema(), 25, jobSpecPropertyKeys, true},
+		{"job", (&JobHandler{}).PropertySchema(), 19, jobSpecPropertyKeys, true},
 		// 17, not 14: go-kure/launcher#412 added affinity, tolerations and
 		// topologySpreadConstraints as own keys on this kind. Verified a real
 		// own-key increase and not the collision this guard exists to catch —
@@ -117,7 +120,7 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		// deploymentSpecPropertyKeys, which is exactly why the merged count
 		// rises by three rather than staying flat. 18 since go-kure/launcher#280
 		// added the main container's `ports`, likewise in neither shared list.
-		{"deployment", (&DeploymentHandler{}).PropertySchema(), 18, deploymentSpecPropertyKeys, false},
+		{"deployment", (&DeploymentHandler{}).PropertySchema(), 19, deploymentSpecPropertyKeys, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

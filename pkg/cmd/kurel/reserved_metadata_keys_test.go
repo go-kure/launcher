@@ -87,6 +87,31 @@ var reservedKeyCarriers = map[string]struct {
 `,
 		object: `Deployment "worker"`, what: "pod template annotation",
 	},
+	// `podMetadata` (go-kure/launcher#1178) is a way in too: the check reads the
+	// generated pod template, so it needs no rule of its own.
+	"a deployment's podMetadata label": {
+		component: `    - name: carrier
+      type: deployment
+      properties:
+        image: ghcr.io/example/web:v1.0.0
+        podMetadata:
+          labels:
+            %[1]s: a
+`,
+		object: `Deployment "carrier"`, what: "pod template label",
+	},
+	"a cronjob's podMetadata annotation": {
+		component: `    - name: carrier
+      type: cronjob
+      properties:
+        image: ghcr.io/example/web:v1.0.0
+        schedule: "0 2 * * *"
+        podMetadata:
+          annotations:
+            %[1]s: a
+`,
+		object: `CronJob "carrier"`, what: "pod template annotation",
+	},
 	"a manifests object's annotation": {
 		component: `    - name: carrier
       type: manifests

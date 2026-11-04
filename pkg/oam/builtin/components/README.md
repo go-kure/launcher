@@ -2009,7 +2009,9 @@ per-pod claims from `volumeClaimTemplates`, so the question differs.
 **`deployment` reports its pod template labels** (`PodTemplateLabels`), so a
 same-name sibling group can tell that a `service` member selects this
 Deployment's own pods, which the group's component-label policy already
-covers (see `pkg/oam` "Same-name sibling groups"). `statefulset`, `daemonset`,
+covers (see `pkg/oam` "Same-name sibling groups"). The labels it reports are the
+component's own and the ones `podMetadata.labels` adds
+(go-kure/launcher#1178), as the pod template carries them. `statefulset`, `daemonset`,
 `job` and `cronjob` do not have the method, deliberately (go-kure/launcher#794,
 item 3): its one reader is that group check, and `deployment` is the only pod
 kind a lowering rule emits into a group (`webservice`, `worker`). A rule that
@@ -13168,6 +13170,53 @@ it on the object through `kindObject`, the one helper every kind returns its obj
 `spec.timeout`). `TestObjectMetadata_EveryKindComponentTakesIt` holds every registered kind
 to the two properties, so a kind added later cannot ship without them.
 
+### The pod template's labels and annotations (`podMetadata`)
+
+`labels` and `annotations` above go on the object and never on a pod template. The five kinds
+whose spec holds a pod template the author does not write whole (`deployment`, `statefulset`,
+`daemonset`, `job` and `cronjob`) take a fourth property, `podMetadata`, for the pod template's
+own metadata (go-kure/launcher#1178). On a `cronjob` it is the pod template inside the job
+template, not the CronJob's or the job template's metadata. `webservice` and `worker` do not
+take it yet (go-kure/launcher#1216).
+
+```yaml
+properties:
+  image: ghcr.io/example/web:v1.0.0
+  podMetadata:
+    labels:
+      example.com/team: payments
+    annotations:
+      example.com/owner: payments team
+```
+
+- **What it does.** The kind writes its pod template labels first and the authored ones are added
+  beside them. A change to either map is a pod template change, so the controller's update
+  strategy decides whether it reaches the pods that exist (a rolling update replaces them,
+  `OnDelete` waits for a deletion, and a `cronjob` only changes the Jobs it creates later). A
+  `job` has no strategy: the API server refuses a change to the pod template of a Job that is
+  not suspended.
+- **What it never does.** It does not reach the object's metadata, the selector or any other
+  object. The selector is a map of its own (`appLabels`, `deploymentComponentLabels`), so an
+  authored label cannot change which pods a workload owns.
+- **Refused where the component is read.** A key beside `labels` and `annotations`; a label key
+  or value that is no valid label; a value that is no string; an annotation key that is no valid
+  annotation key; annotations over the size the API server accepts (counted again with the
+  annotations the kind sets); and, on `job` and `cronjob` only, the four labels the Job controller
+  owns (`batch.kubernetes.io/controller-uid`, `batch.kubernetes.io/job-name`, `controller-uid`,
+  `job-name`), since the API server generates the selector of a Job from them. That last refusal
+  can be loosened later without invalidating a document.
+- **Refused where the object is generated.** `app`, or any other key the kind sets, with another
+  value than the one the kind writes; writing the kind's own value is accepted.
+- **Checked as on any pod template.** A key the consumer reserves
+  (`TransformContext.ReservedMetadataKeys`) is refused, and the component label is stamped and
+  held, by the checks that already read every generated pod template. A kubernetes.io or
+  k8s.io key is not refused here: the API server and the Job controller own what they own.
+- **Traits.** The traits written so far change the pod spec only, so they leave the authored keys
+  as they are.
+
+The property is an addition to the document format: a document that wrote none is unchanged, and
+the keys refused above were not expressible before.
+
 ### A label selector's match expressions
 
 A kind component whose spec holds a Kubernetes label selector (`metav1.LabelSelector`) decodes
@@ -13550,7 +13599,9 @@ uses `appLabels`), and `appLabels` for `webservice`, `statefulset` and `daemonse
 return a fresh `{"app": <label value>}` map, per the ownership rule above, valued
 as [The `app` label](#the-app-label) describes). This is
 the one field the compiler cannot check: a selector that disagrees with the
-template labels compiles and is refused by the apiserver at apply time. `job` and
+template labels compiles and is refused by the apiserver at apply time. The labels an
+author adds with `podMetadata` go on the pod template only, so they cannot make the two
+disagree. `job` and
 `cronjob` are the deliberate exception — the Job controller fills `spec.selector`
 and its matching pod labels itself.
 

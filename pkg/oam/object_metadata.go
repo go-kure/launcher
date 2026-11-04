@@ -21,7 +21,9 @@ import (
 // (Component.ObjectMetadata) and puts them on its object (ObjectMetadata.ApplyTo).
 //
 // They go on the object's own metadata and nowhere else: a pod template the
-// object holds keeps the labels its kind gives it.
+// object holds keeps the labels its kind gives it. The metadata of that pod
+// template is a handler's own property where it takes one (`podMetadata`, on
+// deployment, statefulset, daemonset, job and cronjob; go-kure/launcher#1178).
 
 const (
 	// ObjectLabelsProperty is the property an author sets the labels of a kind
@@ -119,7 +121,7 @@ func annotationsSize(annotations map[string]string) int {
 var (
 	objectLabelsSchema = PropertySchema{
 		Type: PropertyTypeObject, AdditionalProperties: true,
-		Description: "Labels for the object this component generates, as a map of strings. They go on the object's own metadata only: a pod template the object holds is not labelled by them. Refused: a key or value that is no valid label, `app` with another value than the component's, and the component label key with another value than the component's. A label that names another object is written as authored and does not follow a rename of that object.",
+		Description: "Labels for the object this component generates, as a map of strings. They go on the object's own metadata only: a pod template the object holds is not labelled by them (a kind that takes `podMetadata` labels its pod template with that). Refused: a key or value that is no valid label, `app` with another value than the component's, and the component label key with another value than the component's. A label that names another object is written as authored and does not follow a rename of that object.",
 	}
 	objectAnnotationsSchema = PropertySchema{
 		Type: PropertyTypeObject, AdditionalProperties: true,

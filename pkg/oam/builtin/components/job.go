@@ -86,6 +86,7 @@ func (h *JobHandler) PropertySchema() map[string]oam.PropertySchema {
 		"affinity":                  schemaRawAffinity(),
 		"tolerations":               schemaTolerations(),
 		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
+		podMetadataProperty:         schemaPodMetadata("Job"),
 	}
 	maps.Copy(m, schemaJobSpec(false))
 	maps.Copy(m, schemaContainerFields())
@@ -267,6 +268,12 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 	}
 	config.PodSpec = podSpec
 
+	podMetadata, err := parsePodMetadata(props, true)
+	if err != nil {
+		return nil, err
+	}
+	config.PodMetadata = podMetadata
+
 	return config, nil
 }
 
@@ -278,8 +285,11 @@ type JobConfig struct {
 	ObjectName string
 	// Metadata is the labels and annotations authored for the Job
 	// (oam.Component.ObjectMetadata). They go on the Job's own metadata: its
-	// pod template keeps the labels of the kind.
-	Metadata      oam.ObjectMetadata
+	// pod template keeps the labels of the kind, with the ones PodMetadata adds.
+	Metadata oam.ObjectMetadata
+	// PodMetadata is the labels and annotations authored for the pod template
+	// (`podMetadata`).
+	PodMetadata   PodMetadata
 	Namespace     string
 	Image         string
 	RestartPolicy corev1.RestartPolicy
@@ -427,6 +437,9 @@ func (c *JobConfig) createJob(app *stack.Application) (*batchv1.Job, error) {
 	job.Labels = appLabels(app.Name)
 	job.Annotations = nil
 	job.Spec.Template.Labels = appLabels(app.Name)
+	if err := c.PodMetadata.applyTo(&job.Spec.Template); err != nil {
+		return nil, err
+	}
 	if c.Suspend != nil {
 		job.Spec.Suspend = copyPtr(c.Suspend)
 	}

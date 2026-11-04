@@ -2043,6 +2043,11 @@ maps of the object's own, and refuses a key the config set to another value. A t
 declares no object refuses the two properties if its schema does not declare them, and keeps
 them, unread by the engine, if it declares them or declares no schema.
 
+The two properties never reach a pod template. The pod template's labels and annotations are
+a handler's own property, `podMetadata`, on `deployment`, `statefulset`, `daemonset`, `job` and
+`cronjob` (go-kure/launcher#1178); the engine neither reads nor removes it. What it writes is
+checked as any pod template is: `ReservedMetadataKeys` and the component label.
+
 ## Parsing
 
 | Function | Purpose |

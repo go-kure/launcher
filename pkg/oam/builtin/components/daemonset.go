@@ -45,6 +45,7 @@ func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		// `tolerations` above.
 		"affinity":                  schemaRawAffinity(),
 		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
+		podMetadataProperty:         schemaPodMetadata("DaemonSet"),
 	}
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
@@ -190,6 +191,12 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 	}
 	config.PodSpec = podSpec
 
+	podMetadata, err := parsePodMetadata(props, false)
+	if err != nil {
+		return nil, err
+	}
+	config.PodMetadata = podMetadata
+
 	dsSpec, err := parseDaemonSetSpec(props)
 	if err != nil {
 		return nil, err
@@ -207,8 +214,12 @@ type DaemonsetConfig struct {
 	ObjectName string
 	// Metadata is the labels and annotations authored for the DaemonSet
 	// (oam.Component.ObjectMetadata). They go on the DaemonSet's own
-	// metadata: its pod template keeps the labels of the kind.
-	Metadata        oam.ObjectMetadata
+	// metadata: its pod template keeps the labels of the kind, with the ones
+	// PodMetadata adds.
+	Metadata oam.ObjectMetadata
+	// PodMetadata is the labels and annotations authored for the pod template
+	// (`podMetadata`). They never reach the selector.
+	PodMetadata     PodMetadata
 	Namespace       string
 	Image           string
 	Ports           []corev1.ContainerPort // the main container's ports; no Service
@@ -352,6 +363,9 @@ func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.Daemo
 	// labels explicitly.
 	ds.Spec.Selector = &metav1.LabelSelector{MatchLabels: appLabels(app.Name)}
 	ds.Spec.Template.Labels = appLabels(app.Name)
+	if err := c.PodMetadata.applyTo(&ds.Spec.Template); err != nil {
+		return nil, err
+	}
 
 	podSpec, err := buildPodSpec(podSpecInput{
 		Config:         c.PodSpec,
