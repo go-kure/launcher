@@ -20,29 +20,39 @@ const (
 	// SourceCapability is a value a ClusterProfile capability binding supplied;
 	// Source.Ref is the binding's key.
 	SourceCapability SourceKind = "capability"
-	// SourceLowered is a value of an element a lowering rule emitted; Source.Ref is
-	// the rule's identity (Origin.Rule). The report does not split what the rule
-	// copied from authored input from what it rendered.
-	SourceLowered SourceKind = "lowered"
+	// SourceCopied is a value of an element a lowering rule emitted that the rule
+	// received and passed on at the same path: the value its input held there.
+	// Source.Ref is the rule's identity (Origin.Rule), Source.From the kind the value
+	// had in the rule's input.
+	SourceCopied SourceKind = "copied"
+	// SourceRendered is a value of an element a lowering rule emitted that its input
+	// did not hold at that path: the rule built it. Source.Ref is the rule's identity.
+	SourceRendered SourceKind = "rendered"
 )
 
 // Source is the origin of one property value.
 type Source struct {
 	Kind SourceKind `json:"kind" yaml:"kind"`
-	// Ref names the lowering rule of a SourceLowered value, and the capability key
-	// that supplied a SourceCapability value. For a
+	// Ref names the lowering rule of a SourceCopied or SourceRendered value, and the
+	// capability key that supplied a SourceCapability value. For a
 	// value a component's nested filler supplied it is the capability the filler
 	// read, or the sorted keys joined by "," when it read several: the engine does
 	// not see which read produced which value.
 	Ref string `json:"ref,omitempty" yaml:"ref,omitempty"`
+	// From says, for a SourceCopied value, which kind the value had in the rule's
+	// input: SourceAuthored, SourceCapability or SourceRendered (a value an earlier
+	// rule built). A value copied through several rules carries the kind it had when
+	// it first entered them. Empty for every other kind.
+	From SourceKind `json:"from,omitempty" yaml:"from,omitempty"`
 	// Detail says, for a SourceCapability value whose profile went through
 	// EvaluateProfileWithProvenance, which step of the profile evaluation supplied
 	// it: "profile" (the profile document), "schema-default" (a CapabilityDefinition
 	// default) or "handler-default" (the trait handler's or lowering rule's
-	// ValidateAndApplyDefaults). Empty means not determined, never "profile": it is
+	// ValidateAndApplyDefaults). A SourceCopied value whose From is SourceCapability
+	// keeps the Detail it had. Empty means not determined, never "profile": it is
 	// empty for a profile evaluated with EvaluateProfile, for a binding built by
 	// hand, for a value a component's nested filler supplied, and for every kind
-	// but SourceCapability.
+	// but SourceCapability and the SourceCopied values taken from one.
 	Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
 }
 
@@ -646,14 +656,115 @@ func (r *ownerRecorder) authored(props map[string]any) {
 	})
 }
 
-// lowered records every leaf of props as the output of the lowering rule.
-func (r *ownerRecorder) lowered(props map[string]any, rule string) {
+// fromRule records every leaf of props, the output of the lowering rule, as copied
+// from in or rendered by the rule (ruleInput.attribute). in is nil for an element
+// whose input was not kept: every leaf is then rendered.
+func (r *ownerRecorder) fromRule(in *ruleInput, props map[string]any, rule string) {
 	if r == nil {
 		return
 	}
-	eachLeaf("", props, func(path string, _ any) {
-		r.entries[path] = Source{Kind: SourceLowered, Ref: rule}
+	for path, src := range in.attribute(props, rule) {
+		r.entries[path] = src
+	}
+}
+
+// ruleInput is what a lowering rule was handed, kept so the report can tell the
+// leaves the rule copied from the leaves it rendered. The engine builds it only when
+// a report is wanted (TransformContext.provenance is set), at the one place the rule
+// is called, and stores it on the element the rule emitted; every other path holds
+// nil and pays nothing.
+type ruleInput struct {
+	// index is a snapshot of the input's properties, taken before the rule ran.
+	index propIndex
+	// sources is the source of each leaf of those properties, by path.
+	sources map[string]Source
+}
+
+// newRuleInput snapshots props, whose leaves have the given sources.
+func newRuleInput(props map[string]any, sources map[string]Source) *ruleInput {
+	return &ruleInput{index: indexOf(props), sources: sources}
+}
+
+// ruleInputFor snapshots props, the properties of an element about to be handed to
+// a rule. origin and prior are the element's own: an element no rule emitted holds
+// authored leaves; one an earlier rule emitted holds what that rule's attribution
+// says (prior is nil when none was kept, and then every leaf is rendered).
+func ruleInputFor(props map[string]any, origin *Origin, prior *ruleInput) *ruleInput {
+	var sources map[string]Source
+	if origin != nil && origin.Rule != "" {
+		sources = prior.attribute(props, origin.Rule)
+	} else {
+		sources = map[string]Source{}
+		eachLeaf("", props, func(path string, _ any) {
+			sources[path] = Source{Kind: SourceAuthored}
+		})
+	}
+	return newRuleInput(props, sources)
+}
+
+// attribute returns the source of each leaf of out, the properties a rule emitted
+// under the identity rule. A leaf is copied when the input held the same value at the
+// same path (the comparison a nested filler's output gets, nestedFill), and then it
+// keeps what the input knew of it; any other leaf is rendered. A value the rule moved
+// to another path is rendered. A nil receiver renders every leaf.
+func (in *ruleInput) attribute(out map[string]any, rule string) map[string]Source {
+	res := map[string]Source{}
+	eachLeaf("", out, func(path string, v any) {
+		res[path] = in.sourceOf(path, v, rule)
 	})
+	return res
+}
+
+// sourceOf is the source of one emitted leaf: v at path.
+func (in *ruleInput) sourceOf(path string, v any, rule string) Source {
+	rendered := Source{Kind: SourceRendered, Ref: rule}
+	if in == nil || !in.index.holds(path, v) {
+		return rendered
+	}
+	from, ok := nearestSource(in.sources, path)
+	if !ok {
+		return rendered
+	}
+	src := Source{Kind: SourceCopied, Ref: rule, From: from.Kind, Detail: from.Detail}
+	if from.Kind == SourceCopied {
+		src.From = from.From
+	}
+	return src
+}
+
+// nearestSource is the source recorded for the leaf at path, or for its nearest
+// enclosing entry (an object a step recorded as one leaf). A value the rule gave back
+// as one leaf that its input held as several (a []any handed back as a []string) has
+// no entry of its own: the entries under it stand for it, when they all agree on kind,
+// From and Detail. Entries that disagree name no single source, so none is returned.
+func nearestSource(sources map[string]Source, path string) (Source, bool) {
+	if s, ok := sources[path]; ok {
+		return s, true
+	}
+	best, found := "", false
+	for q := range sources {
+		if q != "" && pathWithin(path, q) && (!found || len(q) > len(best)) {
+			best, found = q, true
+		}
+	}
+	if found {
+		return sources[best], true
+	}
+	var agreed Source
+	have := false
+	for q, s := range sources {
+		if path == "" || q == path || !pathWithin(q, path) {
+			continue
+		}
+		if !have {
+			agreed, have = s, true
+			continue
+		}
+		if s.Kind != agreed.Kind || s.From != agreed.From || s.Detail != agreed.Detail {
+			return Source{}, false
+		}
+	}
+	return agreed, have
 }
 
 // seedCapability records every leaf of a rendering, before its merge with the

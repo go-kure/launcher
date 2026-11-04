@@ -46,6 +46,11 @@ type Component struct {
 	Annotations map[string]string `yaml:"annotations,omitempty"`
 
 	origin *Origin
+	// ruleInput is what the component-position rule that emitted this component was
+	// handed, kept for the provenance report (ruleInput, provenance.go). Set by the
+	// engine only while a report is being recorded; nil otherwise, and for a
+	// component no component-position rule emitted.
+	ruleInput *ruleInput
 	// synthesized marks a component a lowering rule emitted rather than forwarded:
 	// its properties are the rule's own output, which may carry a PlatformReserved
 	// value the rule rendered from LoweringContext.Capability, so the D3 check on
@@ -121,6 +126,9 @@ type Trait struct {
 	Properties map[string]any `yaml:"properties"`
 
 	origin *Origin
+	// ruleInput is Component.ruleInput for a trait a trait-position rule emitted: the
+	// trait the rule was handed, with the capability rendering merged in.
+	ruleInput *ruleInput
 	// sealed marks a trait emitted by a lowering rule (D5): its properties are the
 	// rule's own deterministic output, so applyTraits must not merge a second
 	// ClusterProfile capability rendering into it — that would make the trait's
