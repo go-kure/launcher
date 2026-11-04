@@ -157,9 +157,11 @@ func TestScaler_OmittingReplicasKeepsTheComponentsOtherObjects(t *testing.T) {
 // The topology-spread trait derives its constraints from the generated
 // Deployment's replica count, which is unset under a scaler, so it applies none
 // there, even where an environment policy default of 3 would have given the
-// Deployment three replicas and main emitted the constraints. That loss is
-// tracked in go-kure/launcher#1196; the assertion below pins it until that
-// issue lands and must then change with it.
+// Deployment three replicas. On main that combination built the constraints
+// for the deployment kind and was refused for webservice and worker, whose own
+// spread default the trait then found already in place. The loss for the
+// deployment kind is tracked in go-kure/launcher#1196; the assertion below pins
+// it until that issue lands and must then change with it.
 func TestScaler_OutputIsIdenticalInBothOrdersWithTopologySpread(t *testing.T) {
 	spread := oam.Trait{Type: "topology-spread", Properties: map[string]any{}}
 	three := int32(3)
@@ -169,12 +171,6 @@ func TestScaler_OutputIsIdenticalInBothOrdersWithTopologySpread(t *testing.T) {
 			"policy default 3": &replicasPolicy{defaultReplicas: &three},
 		} {
 			t.Run(kind+"/"+policyName, func(t *testing.T) {
-				if policy != nil && kind != "deployment" {
-					// The webservice and worker kinds write their own spread at a
-					// count above one, which the topology-spread trait refuses on
-					// any component, scaled or not.
-					t.Skip("the kind's own spread default already applies at this count")
-				}
 				props := map[string]any{"image": "ghcr.io/org/app:v1"}
 				render := func(trs ...oam.Trait) (string, *appsv1.Deployment) {
 					cluster, err := transformCluster(t, kind, props, policy, trs...)
@@ -304,12 +300,10 @@ func TestScaler_PolicyDefaultAndCeilingSkipTheUnusedCount(t *testing.T) {
 
 	for _, kind := range []string{"deployment", "webservice", "worker"} {
 		t.Run(kind, func(t *testing.T) {
-			orders := map[string][]oam.Trait{"scaler only": {within}}
-			if kind == "deployment" {
-				// The role kinds write their own spread at a count above one,
-				// which the topology-spread trait refuses on any component.
-				orders["scaler first"] = []oam.Trait{within, spread}
-				orders["spread first"] = []oam.Trait{spread, within}
+			orders := map[string][]oam.Trait{
+				"scaler only":  {within},
+				"scaler first": {within, spread},
+				"spread first": {spread, within},
 			}
 			for name, trs := range orders {
 				t.Run(name, func(t *testing.T) {
