@@ -1205,34 +1205,6 @@ func TestApplyStrategicMergePatch_NilLookupFallsBackToJSONMerge(t *testing.T) {
 }
 
 // ===========================================================================
-// deepCopyMap nil path (83.3% -> higher)
-// ===========================================================================
-
-func TestDeepCopyMap_Nil(t *testing.T) {
-	result := deepCopyMap(nil)
-	if result != nil {
-		t.Error("expected nil for nil input")
-	}
-}
-
-func TestDeepCopyMap_WithSlice(t *testing.T) {
-	original := map[string]any{
-		"items": []any{"a", map[string]any{"nested": "val"}},
-	}
-	copied := deepCopyMap(original)
-
-	// Modify the copy
-	copiedItems := copied["items"].([]any)
-	copiedItems[0] = "modified"
-
-	// Original should be unchanged
-	originalItems := original["items"].([]any)
-	if originalItems[0] != "a" {
-		t.Error("original was mutated by modifying copy")
-	}
-}
-
-// ===========================================================================
 // LoadPatchableAppSet error paths (80% -> higher)
 // ===========================================================================
 

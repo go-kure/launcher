@@ -26,6 +26,12 @@ type StrategicPatch struct {
 // semantics (e.g. containers merged by name).
 // For unknown kinds (CRDs), it falls back to RFC 7386 JSON merge patch.
 // If lookup is nil, fallback is always used.
+// On an unknown kind a nil patch changes nothing; on a known kind the resource is
+// normalized as for any patch (see jsonTyped). On both paths, through chains of
+// map[string]any and []any, a nil one in the patch is an empty one, so only an
+// explicit nil value deletes a field, and a chain nested deeper than maxDepth or
+// containing itself is an error. Any other container type is left to
+// encoding/json: a nil map[string]string is null.
 func ApplyStrategicMergePatch(
 	resource *unstructured.Unstructured,
 	patch map[string]any,
@@ -41,7 +47,19 @@ func ApplyStrategicMergePatch(
 		}
 	}
 
-	return applyJSONMergePatch(resource, deepCopyMap(patch))
+	// On the fallback a nil patch changes nothing: marshalled as null it would
+	// replace the whole resource.
+	if patch == nil {
+		return nil
+	}
+	// A nil slice or map in the patch is an empty one, as on a known kind; only an
+	// explicit nil value is the null that deletes a field. The merge only reads the
+	// patch, so it is not copied unless it holds a nil container.
+	patch, err := normalizeNil(patch)
+	if err != nil {
+		return errors.Wrap(err, "failed to normalize patch for JSON merge patch")
+	}
+	return applyJSONMergePatch(resource, patch)
 }
 
 // applyTypedSMP applies a strategic merge patch using Go struct tags from the
@@ -318,32 +336,4 @@ func applyJSONMergePatch(resource *unstructured.Unstructured, patch map[string]a
 
 	resource.Object = merged
 	return nil
-}
-
-// deepCopyMap creates a deep copy of a map[string]interface{} to prevent
-// StrategicMergeMapPatch from mutating the original patch data.
-func deepCopyMap(m map[string]any) map[string]any {
-	if m == nil {
-		return nil
-	}
-	result := make(map[string]any, len(m))
-	for k, v := range m {
-		result[k] = deepCopyValue(v)
-	}
-	return result
-}
-
-func deepCopyValue(v any) any {
-	switch val := v.(type) {
-	case map[string]any:
-		return deepCopyMap(val)
-	case []any:
-		copied := make([]any, len(val))
-		for i, item := range val {
-			copied[i] = deepCopyValue(item)
-		}
-		return copied
-	default:
-		return v
-	}
 }
