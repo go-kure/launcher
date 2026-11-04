@@ -3377,6 +3377,36 @@ func checkPodPortNames(mainPorts []corev1.ContainerPort, initContainers []InitCo
 	return nil
 }
 
+// checkPodContainerNames refuses a container name that more than one container
+// of the pod uses: the main container (named after the component, mainName),
+// every initContainers entry and every sidecars entry, whether the repeat is
+// across the lists or within one. The API server refuses such a pod, so the
+// author would see the failure only at apply time (go-kure/launcher#1226). It
+// walks main, init containers, then sidecars, and the error names the entry
+// that repeats and the first one that used the name. A kind with no sidecars
+// (job, cronjob) passes nil. Name syntax is not checked here.
+func checkPodContainerNames(mainName string, inits []InitContainerConfig, sidecars []SidecarContainerConfig) error {
+	usedBy := map[string]string{mainName: fmt.Sprintf("the main container %q", mainName)}
+	check := func(container, name string) error {
+		if other, taken := usedBy[name]; taken {
+			return errors.Errorf("%s: container name %q is also used by %s; the API server refuses a pod whose containers share a name", container, name, other)
+		}
+		usedBy[name] = container
+		return nil
+	}
+	for i, ic := range inits {
+		if err := check(fmt.Sprintf("initContainers[%d] %q", i, ic.Name), ic.Name); err != nil {
+			return err
+		}
+	}
+	for i, sc := range sidecars {
+		if err := check(fmt.Sprintf("sidecars[%d] %q", i, sc.Name), sc.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // checkNamedPortsDeclared rejects a probe or lifecycle hook on a container that
 // addresses a named port the container does not itself declare. The kubelet
 // resolves a named httpGet/tcpSocket port only against the ports of the

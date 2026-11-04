@@ -249,6 +249,9 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
 		return nil, err
 	}
+	if err := checkPodContainerNames(component.Name, initContainers, sidecars); err != nil {
+		return nil, err
+	}
 	if err := checkPodPortNames(ports, initContainers, sidecars); err != nil {
 		return nil, err
 	}

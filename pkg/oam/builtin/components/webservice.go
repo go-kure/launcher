@@ -379,6 +379,9 @@ func parseWebservice(comp *oam.Component) (webserviceOpinions, error) {
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
 		return out, err
 	}
+	if err := checkPodContainerNames(comp.Name, initContainers, sidecars); err != nil {
+		return out, err
+	}
 	if err := checkPodPortNames(webserviceContainerPorts(out.port), initContainers, sidecars); err != nil {
 		return out, err
 	}

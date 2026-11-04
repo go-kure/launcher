@@ -56,7 +56,7 @@ func refusedKeyPaths(t *testing.T, tr *oam.Transformer, componentType string, pr
 	case "webservice":
 		_, direct = parseWebservice(comp())
 	case "worker":
-		_, direct = parseWorker(comp().Properties)
+		_, direct = parseWorker(comp().Name, comp().Properties)
 	default:
 		handlers := map[string]oam.ComponentHandler{
 			"deployment":            &DeploymentHandler{},

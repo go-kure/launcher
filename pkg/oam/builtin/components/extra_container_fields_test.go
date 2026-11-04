@@ -141,15 +141,15 @@ func TestSidecar_UnauthoredFieldsStayZero(t *testing.T) {
 // TestExtraContainer_NullFieldIsAbsent: an explicit null on any of the four is
 // absence, per the package-wide null contract, not an error and not a value.
 func TestExtraContainer_NullFieldIsAbsent(t *testing.T) {
-	entry := func() map[string]any {
-		return map[string]any{"name": "x", "image": "ghcr.io/org/x:v1", "workingDir": nil, "envFrom": nil}
+	entry := func(name string) map[string]any {
+		return map[string]any{"name": name, "image": "ghcr.io/org/x:v1", "workingDir": nil, "envFrom": nil}
 	}
-	sidecar := entry()
+	sidecar := entry("x")
 	sidecar["probes"] = nil
 	sidecar["lifecycle"] = nil
 	props := map[string]any{
 		"image":          "ghcr.io/org/app:v1",
-		"initContainers": []any{entry()},
+		"initContainers": []any{entry("init-x")},
 		"sidecars":       []any{sidecar},
 	}
 	ps := podTemplateSpec(t, generateKind(t, webserviceViaRule{}, "webservice", props))
