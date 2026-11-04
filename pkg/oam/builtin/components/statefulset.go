@@ -49,6 +49,7 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 		"affinity":                  schemaRawAffinity(),
 		"tolerations":               schemaTolerations(),
 		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
+		podMetadataProperty:         schemaPodMetadata("StatefulSet"),
 	}
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
@@ -287,6 +288,12 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	}
 	config.PodSpec = podSpec
 
+	podMetadata, err := parsePodMetadata(props, false)
+	if err != nil {
+		return nil, err
+	}
+	config.PodMetadata = podMetadata
+
 	stsSpec, err := parseStatefulSetSpec(props)
 	if err != nil {
 		return nil, err
@@ -305,8 +312,12 @@ type StatefulsetConfig struct {
 	ObjectName string
 	// Metadata is the labels and annotations authored for the StatefulSet
 	// (oam.Component.ObjectMetadata). They go on the StatefulSet's own
-	// metadata: its pod template keeps the labels of the kind.
-	Metadata             oam.ObjectMetadata
+	// metadata: its pod template keeps the labels of the kind, with the ones
+	// PodMetadata adds.
+	Metadata oam.ObjectMetadata
+	// PodMetadata is the labels and annotations authored for the pod template
+	// (`podMetadata`). They never reach the selector.
+	PodMetadata          PodMetadata
 	Namespace            string
 	Image                string
 	Replicas             int32
@@ -523,6 +534,9 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 	sts.Labels = appLabels(app.Name)
 	sts.Annotations = nil
 	sts.Spec.Template.Labels = appLabels(app.Name)
+	if err := c.PodMetadata.applyTo(&sts.Spec.Template); err != nil {
+		return nil, err
+	}
 	sts.Spec.Selector = &metav1.LabelSelector{MatchLabels: appLabels(app.Name)}
 	kubernetes.SetStatefulSetReplicas(sts, c.Replicas)
 	sts.Spec.ServiceName = c.ServiceName

@@ -111,6 +111,7 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 		"affinity":                  schemaRawAffinity(),
 		"tolerations":               schemaTolerations(),
 		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
+		podMetadataProperty:         schemaPodMetadata("CronJob's Job"),
 	}
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaJobSpec(false))
@@ -351,6 +352,12 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 	}
 	config.PodSpec = podSpec
 
+	podMetadata, err := parsePodMetadata(props, true)
+	if err != nil {
+		return nil, err
+	}
+	config.PodMetadata = podMetadata
+
 	return config, nil
 }
 
@@ -362,8 +369,13 @@ type CronjobConfig struct {
 	ObjectName string
 	// Metadata is the labels and annotations authored for the CronJob
 	// (oam.Component.ObjectMetadata). They go on the CronJob's own metadata:
-	// its pod template keeps the labels of the kind.
-	Metadata                   oam.ObjectMetadata
+	// its pod template keeps the labels of the kind, with the ones PodMetadata
+	// adds.
+	Metadata oam.ObjectMetadata
+	// PodMetadata is the labels and annotations authored for the pod template
+	// of the Jobs the CronJob creates (`podMetadata`); the CronJob's and the job
+	// template's own metadata are not it.
+	PodMetadata                PodMetadata
 	Namespace                  string
 	Image                      string
 	Schedule                   string
@@ -516,6 +528,9 @@ func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob,
 	cj.Annotations = nil
 	cj.Spec.JobTemplate.Labels = appLabels(app.Name)
 	cj.Spec.JobTemplate.Spec.Template.Labels = appLabels(app.Name)
+	if err := c.PodMetadata.applyTo(&cj.Spec.JobTemplate.Spec.Template); err != nil {
+		return nil, err
+	}
 	kubernetes.SetCronJobSuccessfulJobsHistoryLimit(cj, c.SuccessfulJobsHistoryLimit)
 	kubernetes.SetCronJobFailedJobsHistoryLimit(cj, c.FailedJobsHistoryLimit)
 	if c.ConcurrencyPolicy != nil {

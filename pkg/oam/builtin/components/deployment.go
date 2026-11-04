@@ -85,6 +85,11 @@ func (h *DeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 		"affinity":                  schemaRawAffinity(),
 		"tolerations":               schemaTolerations(),
 		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
+		// The pod template's labels and annotations (go-kure/launcher#1178).
+		// Declared here and on the four other controller kinds, not in a
+		// shared fragment: webservice and worker copy those, and do not
+		// apply this property.
+		podMetadataProperty: schemaPodMetadata("Deployment"),
 	}
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
@@ -254,6 +259,12 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.PodSpec = podSpec
 
+	podMetadata, err := parsePodMetadata(props, false)
+	if err != nil {
+		return nil, err
+	}
+	config.PodMetadata = podMetadata
+
 	// The raw corev1 scheduling shapes, which this kind publishes and the
 	// opinionated kinds do not — see scheduling.go's header for why the raw
 	// shapes and the four-key shorthand are not alternatives.
@@ -291,16 +302,20 @@ type DeploymentConfig struct {
 	ObjectName string
 	// Metadata is the labels and annotations authored for the Deployment
 	// (oam.Component.ObjectMetadata). They go on the Deployment's own
-	// metadata: its pod template keeps the labels of the kind.
-	Metadata  oam.ObjectMetadata
-	Namespace string
-	Image     string
-	Replicas  int32
-	Env       []corev1.EnvVar
-	EnvFrom   []corev1.EnvFromSource
-	Resources ResourceRequirements
-	Command   []string
-	Args      []string
+	// metadata: its pod template keeps the labels of the kind, with the ones
+	// PodMetadata adds.
+	Metadata oam.ObjectMetadata
+	// PodMetadata is the labels and annotations authored for the pod template
+	// (`podMetadata`). They never reach the selector.
+	PodMetadata PodMetadata
+	Namespace   string
+	Image       string
+	Replicas    int32
+	Env         []corev1.EnvVar
+	EnvFrom     []corev1.EnvFromSource
+	Resources   ResourceRequirements
+	Command     []string
+	Args        []string
 	// Ports are the main container's declared ports (parseContainerPorts).
 	Ports           []corev1.ContainerPort
 	Probes          ProbeConfig
@@ -337,12 +352,12 @@ func (c *DeploymentConfig) ServiceAccountName() (string, bool) {
 	return c.PodSpec.ServiceAccountName, true
 }
 
-// PodTemplateLabels returns the labels createDeployment puts on the pod template.
-// A sibling group reads it (pkg/oam podTemplateLabeler) to tell a `service`
-// member selecting this Deployment's pods, which the group's component-label
-// policy already covers.
+// PodTemplateLabels returns the labels createDeployment puts on the pod template,
+// the authored ones (PodMetadata) included. A sibling group reads it (pkg/oam
+// podTemplateLabeler) to tell a `service` member selecting this Deployment's
+// pods, which the group's component-label policy already covers.
 func (c *DeploymentConfig) PodTemplateLabels() map[string]string {
-	return deploymentComponentLabels(c.Name)
+	return c.PodMetadata.labelsWith(deploymentComponentLabels(c.Name))
 }
 
 // NonRWXClaim names the first claim that limits this Deployment to one pod
@@ -467,6 +482,9 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	// labels explicitly.
 	dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: deploymentComponentLabels(app.Name)}
 	dep.Spec.Template.Labels = deploymentComponentLabels(app.Name)
+	if err := c.PodMetadata.applyTo(&dep.Spec.Template); err != nil {
+		return nil, err
+	}
 	kubernetes.SetDeploymentReplicas(dep, c.Replicas)
 
 	if err := applyNonRWXConstraint(dep, app.Name, c.PVCs, c.Replicas, c.DeploymentSpec.Strategy); err != nil {
