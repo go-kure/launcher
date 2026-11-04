@@ -35,7 +35,8 @@ func TestWorkerRule_ComponentType(t *testing.T) {
 // securityContext.windowsOptions to every container, and an init container's
 // restartPolicy and restartPolicyRules, and later the exclusive groups of a
 // volume, an envFrom entry and a resourceClaims entry; go-kure/launcher#787 added deploymentObjectName and serviceAccountObjectName
-// (schemaRoleObjectNames).
+// (schemaRoleObjectNames); go-kure/launcher#1172 closed the volumeMounts item of
+// an init container and of a sidecar.
 func TestWorkerRule_PropertySchemaUnchanged(t *testing.T) {
 	want, err := os.ReadFile("testdata/worker-property-schema.json")
 	if err != nil {

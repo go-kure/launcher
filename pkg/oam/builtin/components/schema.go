@@ -553,8 +553,8 @@ func schemaVolumes() oam.PropertySchema {
 // closed key set (go-kure/launcher#321), pinned to initContainerPropertyKeys/
 // sidecarPropertyKeys by TestContainerEntrySchemaMatchesParser; the nested
 // fields reuse the main container's fragments, since each is read by the same
-// parser. A `volumeMounts` item stays open, as the `volumes` items do: its
-// parser reads name/mountPath/readOnly/subPath and rejects nothing else yet.
+// parser. A `volumeMounts` item is closed too (go-kure/launcher#1172): its
+// parser reads name/mountPath/readOnly/subPath and refuses every other key.
 func schemaContainerEntry() map[string]oam.PropertySchema {
 	return withContainerFields(map[string]oam.PropertySchema{
 		"name":            {Type: oam.PropertyTypeString, Required: true, Description: "Container name."},
@@ -570,9 +570,8 @@ func schemaContainerEntry() map[string]oam.PropertySchema {
 			Type:        oam.PropertyTypeArray,
 			Description: "Pod volumes to mount into this container, by the name of a `volumes` entry.",
 			Items: &oam.PropertySchema{
-				Type:                 oam.PropertyTypeObject,
-				AdditionalProperties: true,
-				Description:          "A single volume mount.",
+				Type:        oam.PropertyTypeObject,
+				Description: "A single volume mount.",
 				Properties: map[string]oam.PropertySchema{
 					"name":      {Type: oam.PropertyTypeString, Required: true, Description: "Name of the pod volume to mount."},
 					"mountPath": {Type: oam.PropertyTypeString, Required: true, Description: "Path in this container where the volume is mounted; unique within the container."},
