@@ -2281,9 +2281,7 @@ and by scope, whatever component or trait emits it.
     are read;
   - `job`, `cronjob`: `sidecars` (a plain sidecar keeps the Job's pod from completing;
     use an `initContainers` entry with `restartPolicy: Always` instead);
-  - all workloads: `ports` on a native sidecar (an `initContainers` entry with
-    `restartPolicy: Always`, which takes probes and lifecycle hooks;
-    go-kure/launcher#1225), the container fields `restartPolicy`
+  - all workloads: the container fields `restartPolicy`
     and `restartPolicyRules` on the main container and on a sidecar, `lifecycle.stopSignal`
     (alpha upstream) and a port's `hostPort` and `hostIP`, and the pod field
     `evictionResponders`. `imagePullPolicy`, `terminationMessagePath`,

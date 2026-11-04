@@ -173,11 +173,6 @@ func TestNativeSidecar_Refusals(t *testing.T) {
 			want: []string{`initContainers[0] "c"`, "restartPolicyRules", "Always"},
 		},
 		{
-			name:  "ports are not a native sidecar key",
-			entry: map[string]any{"restartPolicy": "Always", "ports": []any{map[string]any{"containerPort": 80}}},
-			want:  []string{`initContainers[0] "c"`, `unrecognized key "ports"`},
-		},
-		{
 			name: "a probe cannot name a port nothing declares",
 			entry: map[string]any{
 				"restartPolicy": "Always",

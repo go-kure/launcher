@@ -273,7 +273,7 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, vcts), initContainers, sidecars); err != nil {
 		return nil, err
 	}
-	if err := checkPodPortNames(config.Ports, sidecars); err != nil {
+	if err := checkPodPortNames(config.Ports, initContainers, sidecars); err != nil {
 		return nil, err
 	}
 	// Claim templates are left out on purpose: they are persistentVolumeClaim

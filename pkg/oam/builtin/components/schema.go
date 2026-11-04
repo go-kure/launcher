@@ -627,13 +627,15 @@ func schemaContainerEntry() map[string]oam.PropertySchema {
 }
 
 // schemaInitContainers describes the `initContainers` property. An init
-// container takes no `ports`; it takes its own restartPolicy and
-// restartPolicyRules (schemaInitContainerRestart). `probes` and `lifecycle`
-// are listed too, but parseInitContainers accepts them only with
-// `restartPolicy: Always` (restartableOnlyInitKeys), as Kubernetes does.
+// container takes its own restartPolicy and restartPolicyRules
+// (schemaInitContainerRestart). `ports`, `probes` and `lifecycle` are listed
+// too, but parseInitContainers accepts them only with `restartPolicy: Always`
+// (restartableOnlyInitKeys): Kubernetes forbids probes and hooks on a regular
+// init container, and a port on one would reach nothing.
 func schemaInitContainers() oam.PropertySchema {
 	props := schemaContainerEntry()
 	maps.Copy(props, schemaInitContainerRestart())
+	props["ports"] = schemaContainerPorts("Ports the native sidecar exposes; accepted only with restartPolicy: Always. A named port is what the entry's own probes and lifecycle hooks, and a Service's named targetPort, may address. Names and containerPort/protocol pairs must be unique; a name must also be unique across the pod's containers.")
 	props["probes"] = schemaProbes(false)
 	props["lifecycle"] = schemaLifecycle(false)
 	return oam.PropertySchema{
@@ -641,7 +643,7 @@ func schemaInitContainers() oam.PropertySchema {
 		Description: "Init containers start in order, before the main container. A regular one runs to completion first; one with restartPolicy: Always is a native sidecar that stays running for the pod's life.",
 		Items: &oam.PropertySchema{
 			Type:        oam.PropertyTypeObject,
-			Description: "A single init container definition. Probes and lifecycle hooks are accepted only with restartPolicy: Always; Kubernetes forbids them on a regular init container.",
+			Description: "A single init container definition. Ports, probes and lifecycle hooks are accepted only with restartPolicy: Always; Kubernetes forbids probes and hooks on a regular init container, and a port on one would reach nothing.",
 			Properties:  props,
 		},
 	}

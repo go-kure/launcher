@@ -248,6 +248,11 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, nil); err != nil {
 		return nil, err
 	}
+	// The main container and the (absent) sidecars declare no ports, so only
+	// two native sidecars can collide.
+	if err := checkPodPortNames(nil, initContainers, nil); err != nil {
+		return nil, err
+	}
 	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, nil); err != nil {
 		return nil, err
 	}

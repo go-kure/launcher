@@ -366,7 +366,7 @@
     "description": "Init containers start in order, before the main container. A regular one runs to completion first; one with restartPolicy: Always is a native sidecar that stays running for the pod's life.",
     "items": {
       "type": "object",
-      "description": "A single init container definition. Probes and lifecycle hooks are accepted only with restartPolicy: Always; Kubernetes forbids them on a regular init container.",
+      "description": "A single init container definition. Ports, probes and lifecycle hooks are accepted only with restartPolicy: Always; Kubernetes forbids probes and hooks on a regular init container, and a port on one would reach nothing.",
       "properties": {
         "args": {
           "type": "array",
@@ -595,6 +595,35 @@
           "type": "string",
           "description": "Container name.",
           "required": true
+        },
+        "ports": {
+          "type": "array",
+          "description": "Ports the native sidecar exposes; accepted only with restartPolicy: Always. A named port is what the entry's own probes and lifecycle hooks, and a Service's named targetPort, may address. Names and containerPort/protocol pairs must be unique; a name must also be unique across the pod's containers.",
+          "items": {
+            "type": "object",
+            "description": "One container port.",
+            "properties": {
+              "containerPort": {
+                "type": "integer",
+                "description": "Port number the container listens on, 1-65535.",
+                "required": true
+              },
+              "name": {
+                "type": "string",
+                "description": "Port name (an IANA service name: at most 15 lowercase alphanumerics and '-', with at least one letter)."
+              },
+              "protocol": {
+                "type": "string",
+                "description": "TCP, UDP or SCTP. Defaults to TCP.",
+                "default": "TCP",
+                "enum": [
+                  "TCP",
+                  "UDP",
+                  "SCTP"
+                ]
+              }
+            }
+          }
         },
         "probes": {
           "type": "object",

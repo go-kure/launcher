@@ -196,10 +196,10 @@ func TestExtraContainer_Errors(t *testing.T) {
 			want: []string{`initContainers[0] "c"`, "restartPolicyRules: not accepted with restartPolicy Always"},
 		},
 		{
-			name:  "init ports are not an init container key",
+			name:  "init ports need a restartable init container",
 			key:   "initContainers",
 			entry: map[string]any{"ports": []any{map[string]any{"containerPort": 80}}},
-			want:  []string{`initContainers[0] "c"`, `unrecognized key "ports"`},
+			want:  []string{`initContainers[0] "c"`, "ports: not supported on an init container that is not restartable", "restartPolicy: Always"},
 		},
 		{
 			name:  "sidecar unknown key",
@@ -319,7 +319,7 @@ func TestWorkloadKinds_ContainerEntrySchemaIsClosed(t *testing.T) {
 					}
 				}
 			}
-			check("initContainers", []string{"workingDir", "envFrom", "securityContext", "probes", "lifecycle"}, []string{"ports"})
+			check("initContainers", []string{"workingDir", "envFrom", "securityContext", "ports", "probes", "lifecycle"}, nil)
 			if sidecarKinds[k.name] {
 				check("sidecars", []string{"workingDir", "envFrom", "probes", "lifecycle", "ports", "securityContext"}, nil)
 			} else if _, ok := schema["sidecars"]; ok {
@@ -423,7 +423,6 @@ func TestContainerEntry_AuthoredCheckRejectsUndeclaredKeys(t *testing.T) {
 		name, list, key string
 		value           any
 	}{
-		{"init ports", "initContainers", "ports", []any{}},
 		{"init typo", "initContainers", "workDir", "/x"},
 		{"sidecar typo", "sidecars", "envfrom", []any{}},
 	} {
