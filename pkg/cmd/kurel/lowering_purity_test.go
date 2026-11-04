@@ -470,7 +470,12 @@ func componentPurityCall(typ string, rule oam.ComponentLoweringRule) loweringCal
 		t.Helper()
 		name, props := componentLabelFixtures[typ].directly(t, "purity")
 		doc := parsePurityInput(t, name, typ, props, "", nil)
-		comp := &doc.Spec.Components[0]
+		// The engine hands a rule a copy of the document's component
+		// (lowering.go: comp := doc.Spec.Components[i]): the two share their maps
+		// and slices but not their fields, so a rule that replaces a field of its
+		// element does not replace the document's.
+		element := doc.Spec.Components[0]
+		comp := &element
 		caps := profileCapabilities(t)
 		lctx := purityContext(doc, comp, "", 0).WithCapabilities(caps)
 		return loweringRun{
@@ -566,6 +571,8 @@ func traitPurityCall(typ string, rule oam.TraitLoweringRule) loweringCall {
 			}
 		}
 		lctx.Document = hostDoc
+		enclosing := *member // a copy, as the engine hands it (see componentPurityCall)
+		member = &enclosing
 		lctx.Component = member
 		idx := slices.IndexFunc(member.Traits, func(tr oam.Trait) bool { return tr.Type == typ })
 		resolved := member.Traits[idx]
@@ -918,7 +925,12 @@ func changeComponentCall(rule changeRule) loweringCall {
 				Traits:     []oam.Trait{{Type: "t", Properties: map[string]any{"a": 1}}}},
 			{Name: "other", Type: "change", Properties: map[string]any{"z": 1}},
 		}
-		comp := &doc.Spec.Components[0]
+		// The engine hands a rule a copy of the document's component
+		// (lowering.go: comp := doc.Spec.Components[i]): the two share their maps
+		// and slices but not their fields, so a rule that replaces a field of its
+		// element does not replace the document's.
+		element := doc.Spec.Components[0]
+		comp := &element
 		caps := map[string]oam.CapabilityBinding{"cap": {Rendering: map[string]any{"r": 1}}}
 		lctx := purityContext(doc, comp, "", 0).WithCapabilities(caps)
 		return loweringRun{
@@ -957,6 +969,14 @@ func TestLoweringPurity_ReportsRulesThatChangeTheirInputs(t *testing.T) {
 		{"capability rendering", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			binding, _ := lctx.Capability("cap")
 			binding.Rendering["r"] = 2
+		}, true},
+		// The element is a copy of the document's component: replacing its
+		// Properties leaves the document's map in place, and a write to that map
+		// is a change to the document even after the copy's key is deleted.
+		{"document map behind a replaced element field", func(comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+			comp.Properties = maps.Clone(comp.Properties)
+			lctx.Document.Spec.Components[0].Properties["scratch"] = true
+			delete(comp.Properties, "scratch")
 		}, true},
 		// Controls.
 		{"reads only", func(comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
@@ -998,6 +1018,16 @@ func TestLoweringPurity_ReportsRulesThatChangeTheirInputs(t *testing.T) {
 		}, true},
 		{"document", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			lctx.Document.Spec.Components[0].Name = "changed"
+		}, true},
+		{"document map behind a replaced enclosing field", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+			for i := range lctx.Document.Spec.Components {
+				c := &lctx.Document.Spec.Components[i]
+				if c.Name == lctx.Component.Name && c.Type == lctx.Component.Type && c.Properties != nil {
+					lctx.Component.Properties = maps.Clone(c.Properties)
+					c.Properties["scratch"] = true
+					delete(lctx.Component.Properties, "scratch")
+				}
+			}
 		}, true},
 		{"capability rendering", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			binding, ok := lctx.Capability("expose")
