@@ -171,6 +171,32 @@ func TestNativeSidecarPorts_NameUniqueAcrossThePod(t *testing.T) {
 	}
 }
 
+// TestNativeSidecarPorts_NameUniqueWithJobMainPorts: job and cronjob take
+// `ports` on the main container, so a native sidecar port named like one of
+// them is refused there too.
+func TestNativeSidecarPorts_NameUniqueWithJobMainPorts(t *testing.T) {
+	found := 0
+	for _, k := range workloadKinds {
+		if k.name != "job" && k.name != "cronjob" {
+			continue
+		}
+		found++
+		t.Run(k.name, func(t *testing.T) {
+			props := withProps(k.props, map[string]any{
+				"ports": []any{map[string]any{"name": "metrics", "containerPort": 9100}},
+				"initContainers": []any{
+					nativeSidecarWithPorts("proxy", map[string]any{"name": "metrics", "containerPort": 15000}),
+				},
+			})
+			_, err := k.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: k.name, Properties: props}, "default")
+			assertErrorContains(t, err, `initContainers[0] "proxy": ports[0].name: port name "metrics" is also declared by the main container`)
+		})
+	}
+	if found != 2 {
+		t.Fatalf("found %d of job and cronjob in workloadKinds, want 2", found)
+	}
+}
+
 // TestNativeSidecarPorts_DistinctNamesAccepted keeps what the check must not
 // refuse: distinct names across containers, and the same number in different
 // containers when unnamed.
