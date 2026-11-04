@@ -15,7 +15,9 @@ import (
 
 // This file holds the `podMetadata` property of the controller kind components
 // whose spec carries a pod template the author does not write whole: deployment,
-// statefulset, daemonset, job and cronjob (go-kure/launcher#1178). The labels and
+// statefulset, daemonset, job and cronjob (go-kure/launcher#1178), and the
+// property the webservice and worker rules hand to their deployment member
+// (go-kure/launcher#1216). The labels and
 // annotations of a component's object go on the object's own metadata
 // (oam.ObjectMetadata), and the pod template keeps the labels its kind gives it;
 // `podMetadata` is the one input that reaches the pod template's metadata.
