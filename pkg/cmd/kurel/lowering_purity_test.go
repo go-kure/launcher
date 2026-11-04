@@ -9,9 +9,12 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -124,7 +127,7 @@ func (f *flattener) walk(path string, v reflect.Value, depth int) {
 	leaf := func(format string, args ...any) {
 		typ := "nil"
 		if v.IsValid() {
-			typ = v.Type().String()
+			typ = typeID(v.Type())
 		}
 		f.out = append(f.out, path+" = "+typ+" "+fmt.Sprintf(format, args...))
 	}
@@ -164,7 +167,7 @@ func (f *flattener) walk(path string, v reflect.Value, depth int) {
 		}
 		if f.enter(v) {
 			defer delete(f.seen, keyOf(v))
-			f.out = append(f.out, path+" = "+v.Type().String())
+			f.out = append(f.out, path+" = "+typeID(v.Type()))
 			f.walk(path, v.Elem(), depth+1)
 		} else {
 			leaf("<cycle>")
@@ -213,7 +216,7 @@ func (f *flattener) walk(path string, v reflect.Value, depth int) {
 			f.walk(e.name, v.MapIndex(e.key), depth+1)
 		}
 	case reflect.Struct:
-		f.out = append(f.out, path+" = "+v.Type().String())
+		f.out = append(f.out, path+" = "+typeID(v.Type()))
 		for i := 0; i < v.NumField(); i++ {
 			f.walk(path+"."+v.Type().Field(i).Name, v.Field(i), depth+1)
 		}
@@ -227,7 +230,33 @@ func keyType(k reflect.Value) string {
 	if k.Kind() == reflect.Interface && !k.IsNil() {
 		k = k.Elem()
 	}
-	return k.Type().String()
+	return typeID(k.Type())
+}
+
+// typeIDs gives every reflect.Type seen so far a number. A reflect.Type is
+// unique per type within a process, so the number identifies the type itself.
+// reflect.Type.String() does not: it qualifies a name with the package name,
+// not the package path, so two types of the same name in packages that share a
+// name (core/v1 and meta/v1 both have ConditionStatus) print identically, and
+// so do unnamed types built from them. The numbers depend on the order types
+// are first seen, so an id is only ever compared with another id from the same
+// test process, never written to a fixture.
+var (
+	typeIDsMu sync.Mutex
+	typeIDs   = map[reflect.Type]int{}
+)
+
+// typeID names t with its readable form and its identity number: distinct types
+// get distinct ids within one process.
+func typeID(t reflect.Type) string {
+	typeIDsMu.Lock()
+	defer typeIDsMu.Unlock()
+	n, ok := typeIDs[t]
+	if !ok {
+		n = len(typeIDs)
+		typeIDs[t] = n
+	}
+	return fmt.Sprintf("%s#%d", t.String(), n)
 }
 
 // enter marks v (a pointer, map or non-empty slice) as on the current path and
@@ -564,6 +593,20 @@ func TestLoweringPurity_CheckReportsImpureRules(t *testing.T) {
 				return structA{1}
 			}
 			return structB{1}
+		}},
+		// Two types with the same package name, type name and underlying value.
+		shapeFlipRule{name: "pkgnameflip", calls: new(int), flip: func(n int) any {
+			if n%2 == 0 {
+				return corev1.ConditionTrue
+			}
+			return metav1.ConditionTrue
+		}},
+		// An empty slice has no element to tell the two apart, only its type.
+		shapeFlipRule{name: "anonstructflip", calls: new(int), flip: func(n int) any {
+			if n%2 == 0 {
+				return []struct{ S corev1.ConditionStatus }{}
+			}
+			return []struct{ S metav1.ConditionStatus }{}
 		}},
 		shapeFlipRule{name: "mapkeyflip", calls: new(int), flip: func(n int) any {
 			if n%2 == 0 {
