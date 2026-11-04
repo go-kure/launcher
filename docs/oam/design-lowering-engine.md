@@ -263,9 +263,18 @@ output to one defining `expose` alone.
 built-in rule eight times on identical inputs (with another rule run in between) and
 builds every `testdata` scenario and every component and trait fixture twice, and
 requires identical results. It catches state kept between calls, the clock, randomness
-and a slice filled from a map. `TestLoweringPurity_CheckReportsImpureRules` keeps the
-check honest with deliberately impure rule doubles (global state, clock, map order,
-reused storage, type and shape changes). A func value is compared by presence only.
+and a slice filled from a map. It also compares what the rule is handed (the element,
+the document, the enclosing component and the capability bindings, but not the name
+allocator, which a rule is meant to change) before and after each call, so a rule that
+writes to an input and returns the same result is reported
+(`TestLoweringPurity_ReportsRulesThatChangeTheirInputs`). Maps compare by key and value,
+slices by length and element, pointers by what they point at; a func value is compared by
+presence only, and spare slice capacity and pointer identity are not compared. A map key
+is named by its value, never through a `String` method, and a result the check cannot
+compare completely (a pointer or NaN key, nesting past the depth limit) is reported, not
+passed. `TestLoweringPurity_CheckReportsImpureRules` keeps the check honest with
+deliberately impure rule doubles (global state, clock, map order, reused storage, type and
+shape changes).
 The check cannot catch a read of something that does not change during a test run,
 such as an environment variable or a file, so
 `forbidigo` in `.golangci.yml` refuses the clock, environment, filesystem, network and
