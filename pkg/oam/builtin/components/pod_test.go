@@ -205,7 +205,8 @@ func TestPodHandler_EmptyRefusedFieldsAreUnset(t *testing.T) {
 // a non-zero value cannot be written as 0, since the type would omit it and
 // the default would apply. It is refused by path on each of the three probes
 // of init and regular containers. initialDelaySeconds, whose omitted value is
-// 0, is not.
+// 0, is not. The init container is restartable (a probe on a regular one is
+// refused outright, go-kure/launcher#1237), so it keeps this coverage.
 func TestPodHandler_RefusesProbeZeros(t *testing.T) {
 	defaults := map[string]string{"timeoutSeconds": "1", "periodSeconds": "10", "successThreshold": "1", "failureThreshold": "3"}
 	plain := map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3"}
@@ -215,6 +216,7 @@ func TestPodHandler_RefusesProbeZeros(t *testing.T) {
 		if list == "containers" {
 			return map[string]any{"containers": []any{ctr}}
 		}
+		ctr["restartPolicy"] = "Always"
 		return map[string]any{"containers": []any{plain}, list: []any{ctr}}
 	}
 	for _, list := range []string{"initContainers", "containers"} {

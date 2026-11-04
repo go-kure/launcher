@@ -234,8 +234,9 @@ func podSpecDefaultedZeros(prefix string, ps *corev1.PodSpec) defaultedZeroField
 // selector is held to validateLabelSelector, in every selector the spec holds
 // (validatePodSpecLabelSelectors). The volumeMounts of every init and regular
 // container are held to the single-mount rules of an app.yaml mount
-// (validateTypedVolumeMounts). The API's other value rules are left to the API
-// server.
+// (validateTypedVolumeMounts). A lifecycle or probe on an init container that
+// is not restartable is refused (refuseRegularInitFields). The API's other
+// value rules are left to the API server.
 func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec) error {
 	if ps.Containers == nil {
 		return errors.Errorf("%scontainers: required (the containers the pod runs)", prefix)
@@ -262,6 +263,9 @@ func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec) error {
 		return err
 	}
 	if err := validateTypedVolumeMounts(prefix, ps); err != nil {
+		return err
+	}
+	if err := refuseRegularInitFields(prefix, ps); err != nil {
 		return err
 	}
 	return validatePodSpecLabelSelectors(prefix, ps)
