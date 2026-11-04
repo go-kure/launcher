@@ -57,7 +57,7 @@ const controllerActiveDeadlineReason = "activeDeadlineSeconds: not supported —
 // The API's other value rules, restartPolicy among them, are left to the API
 // server.
 func validateControllerPodTemplate(t *corev1.PodTemplateSpec) error {
-	if err := validateAuthoredPodSpec("template.spec.", &t.Spec); err != nil {
+	if err := validateAuthoredPodSpec("template.spec.", &t.Spec, false); err != nil {
 		return err
 	}
 	if t.Spec.ActiveDeadlineSeconds != nil {

@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"maps"
 	"math"
 	"slices"
@@ -450,38 +451,59 @@ func checkResizePolicyRestart(ps *corev1.PodSpec) error {
 // pkg/apis/core/v1/defaults.go), before validation runs.
 const defaultTerminationGracePeriodSeconds int64 = 30
 
-// checkLifecycleSleep refuses a postStart or preStop sleep longer than the
-// pod's terminationGracePeriodSeconds (30 when unauthored) — upstream's
-// validateSleepAction, which compares `sleep.Seconds > gracePeriod`, so a sleep
-// equal to the grace period is admitted. It runs on the assembled pod spec so
-// the main container, every sidecar and every native sidecar are covered by one
-// check (go-kure/launcher#1228). A regular init container cannot carry a
-// lifecycle, so it has nothing to check.
-func checkLifecycleSleep(ps *corev1.PodSpec) error {
+// checkLifecycleSleep refuses a postStart or preStop sleep below zero or longer
+// than the pod's terminationGracePeriodSeconds (30 when unauthored) —
+// upstream's validateSleepAction, which refuses `sleep.Seconds < 0 ||
+// sleep.Seconds > gracePeriod`, so a sleep equal to the grace period is
+// admitted. It runs on a pod spec the app.yaml components assemble
+// (go-kure/launcher#1228) and on the typed pod specs of the pod, podtemplate,
+// replicaset, replicationcontroller and manifests readers
+// (go-kure/launcher#1236), so every kind is held to one rule. prefix is the pod
+// spec's path in the object, ending in a dot, or "" when the object is the pod
+// spec's own, as in validateTypedVolumeMounts. Upstream validates a lifecycle
+// on an init container only when it is restartable; a regular one is refused
+// outright by refuseRegularInitFields, so it is skipped here. barePod marks a
+// Pod object: Kubernetes defaults a negative terminationGracePeriodSeconds on a
+// Pod to 1 before validation (SetDefaults_Pod), and does not on a pod template,
+// so a bare Pod is held to that effective limit.
+func checkLifecycleSleep(prefix string, ps *corev1.PodSpec, barePod bool) error {
 	limit := defaultTerminationGracePeriodSeconds
 	if ps.TerminationGracePeriodSeconds != nil {
 		limit = *ps.TerminationGracePeriodSeconds
+		if barePod && limit < 0 {
+			limit = 1
+		}
 	}
-	check := func(list string, containers []corev1.Container) error {
-		for _, c := range containers {
+	check := func(list string, containers []corev1.Container, restartableOnly bool) error {
+		for i := range containers {
+			c := &containers[i]
 			if c.Lifecycle == nil {
+				continue
+			}
+			if restartableOnly && (c.RestartPolicy == nil || *c.RestartPolicy != corev1.ContainerRestartPolicyAlways) {
 				continue
 			}
 			for _, h := range []struct {
 				name    string
 				handler *corev1.LifecycleHandler
 			}{{"postStart", c.Lifecycle.PostStart}, {"preStop", c.Lifecycle.PreStop}} {
-				if h.handler == nil || h.handler.Sleep == nil || h.handler.Sleep.Seconds <= limit {
+				if h.handler == nil || h.handler.Sleep == nil {
 					continue
 				}
-				return errors.Errorf("%s %q: lifecycle.%s.sleep.seconds: %d must not exceed terminationGracePeriodSeconds (%d); Kubernetes refuses the pod otherwise",
-					list, c.Name, h.name, h.handler.Sleep.Seconds, limit)
+				seconds := h.handler.Sleep.Seconds
+				label := fmt.Sprintf("%s%s[%d] %q: lifecycle.%s.sleep.seconds: %d", prefix, list, i, c.Name, h.name, seconds)
+				switch {
+				case seconds < 0:
+					return errors.Errorf("%s must be non-negative; Kubernetes refuses the pod otherwise", label)
+				case seconds > limit:
+					return errors.Errorf("%s must not exceed terminationGracePeriodSeconds (%d); Kubernetes refuses the pod otherwise", label, limit)
+				}
 			}
 		}
 		return nil
 	}
-	if err := check("initContainers", ps.InitContainers); err != nil {
+	if err := check("initContainers", ps.InitContainers, true); err != nil {
 		return err
 	}
-	return check("containers", ps.Containers)
+	return check("containers", ps.Containers, false)
 }

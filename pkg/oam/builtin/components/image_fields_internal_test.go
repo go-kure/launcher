@@ -110,7 +110,7 @@ func podSpecTagRule(ps corev1.PodSpec) error {
 	if ps.Containers == nil {
 		ps.Containers = []corev1.Container{{Name: "app", Image: "registry.example/team/app:1.0.0"}}
 	}
-	return validateAuthoredPodSpec("", &ps)
+	return validateAuthoredPodSpec("", &ps, false)
 }
 
 // poolerTagRule is the cnpg-pooler kind's parse-time check on spec, for the

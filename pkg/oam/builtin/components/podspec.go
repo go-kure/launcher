@@ -1487,7 +1487,7 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 	if err := checkResizePolicyRestart(&ps); err != nil {
 		return corev1.PodSpec{}, err
 	}
-	if err := checkLifecycleSleep(&ps); err != nil {
+	if err := checkLifecycleSleep("", &ps, false); err != nil {
 		return corev1.PodSpec{}, err
 	}
 	if err := validateEffectiveRunAsUser(&ps); err != nil {
