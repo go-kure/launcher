@@ -908,6 +908,15 @@
                 "description": "Path in this container where the volume is mounted; unique within the container.",
                 "required": true
               },
+              "mountPropagation": {
+                "type": "string",
+                "description": "How mounts under this mount propagate between the host and the container. Bidirectional needs securityContext.privileged: true.",
+                "enum": [
+                  "None",
+                  "HostToContainer",
+                  "Bidirectional"
+                ]
+              },
               "name": {
                 "type": "string",
                 "description": "Name of the pod volume to mount.",
@@ -917,9 +926,22 @@
                 "type": "boolean",
                 "description": "Mount the volume read-only."
               },
+              "recursiveReadOnly": {
+                "type": "string",
+                "description": "Whether submounts are read-only too. IfPossible and Enabled need readOnly: true and a mountPropagation of None or none at all.",
+                "enum": [
+                  "Disabled",
+                  "IfPossible",
+                  "Enabled"
+                ]
+              },
               "subPath": {
                 "type": "string",
                 "description": "Sub-path within the volume to mount instead of its root."
+              },
+              "subPathExpr": {
+                "type": "string",
+                "description": "Sub-path within the volume, with $(VAR_NAME) expanded from the container's environment. Relative, no `..` element, and exclusive with subPath."
               }
             }
           }
@@ -2124,6 +2146,15 @@
                 "description": "Path in this container where the volume is mounted; unique within the container.",
                 "required": true
               },
+              "mountPropagation": {
+                "type": "string",
+                "description": "How mounts under this mount propagate between the host and the container. Bidirectional needs securityContext.privileged: true.",
+                "enum": [
+                  "None",
+                  "HostToContainer",
+                  "Bidirectional"
+                ]
+              },
               "name": {
                 "type": "string",
                 "description": "Name of the pod volume to mount.",
@@ -2133,9 +2164,22 @@
                 "type": "boolean",
                 "description": "Mount the volume read-only."
               },
+              "recursiveReadOnly": {
+                "type": "string",
+                "description": "Whether submounts are read-only too. IfPossible and Enabled need readOnly: true and a mountPropagation of None or none at all.",
+                "enum": [
+                  "Disabled",
+                  "IfPossible",
+                  "Enabled"
+                ]
+              },
               "subPath": {
                 "type": "string",
                 "description": "Sub-path within the volume to mount instead of its root."
+              },
+              "subPathExpr": {
+                "type": "string",
+                "description": "Sub-path within the volume, with $(VAR_NAME) expanded from the container's environment. Relative, no `..` element, and exclusive with subPath."
               }
             }
           }

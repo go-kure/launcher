@@ -3039,6 +3039,9 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
 		}
 		ic.SecurityContext = sc
+		if err := checkMountPropagationPrivileged(label, ic.VolumeMounts, sc); err != nil {
+			return nil, err
+		}
 		envFrom, err := parseEnvFrom(m)
 		if err != nil {
 			return nil, errors.Errorf("%s: %w", label, err)
@@ -3135,6 +3138,9 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 			return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
 		}
 		sc.SecurityContext = parsedSC
+		if err := checkMountPropagationPrivileged(label, sc.VolumeMounts, parsedSC); err != nil {
+			return nil, err
+		}
 		envFrom, err := parseEnvFrom(m)
 		if err != nil {
 			return nil, errors.Errorf("%s: %w", label, err)
@@ -3275,11 +3281,11 @@ func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount
 		}
 		mountLabel := fmt.Sprintf("%s: volumeMounts[%d]", prefix, i)
 		// Closed key set (go-kure/launcher#1172): the code below builds a
-		// VolumeMount from these four keys only. subPathExpr, mountPropagation
-		// and recursiveReadOnly were read by nothing and dropped in silence.
-		// The main container's volumes entry refuses them the same way
-		// (parseVolumes' per-type key sets).
-		if err := rejectUnknownKeys(mm, []string{"name", "mountPath", "readOnly", "subPath"}, mountLabel); err != nil {
+		// VolumeMount from these keys only. parseMountOptions reads the option
+		// keys (go-kure/launcher#1193). The main container's volumes entry
+		// does not read them yet and refuses them (parseVolumes' per-type key
+		// sets).
+		if err := rejectUnknownKeys(mm, append([]string{"name", "mountPath"}, mountOptionKeys...), mountLabel); err != nil {
 			return nil, err
 		}
 		n, err := requiredStringField(mm, "name", mountLabel)
@@ -3299,20 +3305,11 @@ func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount
 		}
 		seenMountPaths[mountPath] = true
 		vm := corev1.VolumeMount{Name: n, MountPath: mountPath}
-		// Same presence-then-type-check shape as parseVolumes' readOnly fix
-		// above — a present-but-wrong-type value (e.g. readOnly: "true") was
-		// silently treated as false/absent rather than rejected.
-		roPtr, err := parseBoolField(mm, "readOnly", fmt.Sprintf("%s: volumeMounts[%d].readOnly", prefix, i))
-		if err != nil {
+		// parseMountOptions keeps the presence-then-type-check shape of
+		// parseVolumes' readOnly fix above: a present-but-wrong-type value
+		// (e.g. readOnly: "true") is rejected, not read as false.
+		if err := parseMountOptions(mm, mountLabel, &vm); err != nil {
 			return nil, err
-		}
-		if roPtr != nil {
-			vm.ReadOnly = *roPtr
-		}
-		if sp, present, err := parseStringField(mm, "subPath", fmt.Sprintf("%s: volumeMounts[%d].subPath", prefix, i)); err != nil {
-			return nil, err
-		} else if present {
-			vm.SubPath = sp
 		}
 		out = append(out, vm)
 	}

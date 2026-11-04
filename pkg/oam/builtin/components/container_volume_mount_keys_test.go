@@ -15,6 +15,9 @@ import (
 // subPath and dropped every other key, so an authored subPathExpr,
 // mountPropagation or recursiveReadOnly built cleanly and reached no container.
 // The item is now a closed key set: those keys are refused by name.
+// go-kure/launcher#1193 then made subPathExpr, mountPropagation and
+// recursiveReadOnly real keys of that item (mount_options_test.go), so the
+// refusal table below keeps only the keys that stay unread.
 
 // mountEntryKinds returns the workload kinds that publish the given list key.
 func mountEntryKinds(listKey string) []string {
@@ -47,9 +50,6 @@ func TestContainerEntry_VolumeMountRefusesUnreadKeys(t *testing.T) {
 		key   string
 		value any
 	}{
-		{"subPathExpr", "$(POD_NAME)"},
-		{"mountPropagation", "HostToContainer"},
-		{"recursiveReadOnly", "Enabled"},
 		{"bindMountOptions", map[string]any{}},
 		{"readonly", true}, // a typo of readOnly
 	}
@@ -108,7 +108,8 @@ func TestContainerEntry_VolumeMountKeepsReadKeys(t *testing.T) {
 }
 
 // TestContainerEntry_VolumeMountItemSchemaIsClosed: the published item declares
-// exactly the four keys the parser reads and admits no others.
+// exactly the keys the parser reads (name, mountPath and mountOptionKeys) and
+// admits no others.
 func TestContainerEntry_VolumeMountItemSchemaIsClosed(t *testing.T) {
 	for _, k := range workloadKinds {
 		t.Run(k.name, func(t *testing.T) {
@@ -125,12 +126,13 @@ func TestContainerEntry_VolumeMountItemSchemaIsClosed(t *testing.T) {
 				if item.AdditionalProperties {
 					t.Errorf("%s: volumeMounts item is open, want closed", listKey)
 				}
-				if len(item.Properties) != 4 {
-					t.Errorf("%s: volumeMounts item declares %d keys, want name/mountPath/readOnly/subPath", listKey, len(item.Properties))
+				want := []string{"name", "mountPath", "readOnly", "subPath", "subPathExpr", "mountPropagation", "recursiveReadOnly"}
+				if len(item.Properties) != len(want) {
+					t.Errorf("%s: volumeMounts item declares %d keys, want %v", listKey, len(item.Properties), want)
 				}
-				for _, key := range []string{"subPathExpr", "mountPropagation", "recursiveReadOnly"} {
-					if _, declared := item.Properties[key]; declared {
-						t.Errorf("%s: volumeMounts item declares %q, which the parser does not read", listKey, key)
+				for _, key := range want {
+					if _, declared := item.Properties[key]; !declared {
+						t.Errorf("%s: volumeMounts item does not declare %q, which the parser reads", listKey, key)
 					}
 				}
 			}
