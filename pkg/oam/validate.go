@@ -352,7 +352,7 @@ func validateComponent(c *Component, index int, seenNames map[string]componentNa
 	}
 
 	for j, t := range c.Traits {
-		if err := validateTrait(&t, c.Name, c.Type, j, customTraitTypes, lowerableComponentTypes[c.Type]); err != nil {
+		if err := validateTrait(&t, c.Name, c.Type, c.Properties, j, customTraitTypes, lowerableComponentTypes[c.Type]); err != nil {
 			return err
 		}
 	}
@@ -370,7 +370,11 @@ func validateComponent(c *Component, index int, seenNames map[string]componentNa
 // re-runs this same check after the fixpoint settles, against the real terminal
 // component type, so deferring here does not skip the check — it moves it to where the
 // terminal type is known.
-func validateTrait(t *Trait, componentName, componentType string, index int, customTraitTypes map[string]bool, componentIsLowerable bool) error {
+//
+// A scaler is also refused on a component that authors `replicas`
+// (validateScalerReplicas), under the same deferral: the properties a lowering
+// rule emits are the ones the settled pass sees.
+func validateTrait(t *Trait, componentName, componentType string, componentProps map[string]any, index int, customTraitTypes map[string]bool, componentIsLowerable bool) error {
 	if t.Type == "" {
 		return oamValidationError("type", fmt.Sprintf("component %q trait[%d] missing type",
 			componentName, index))
@@ -397,6 +401,25 @@ func validateTrait(t *Trait, componentName, componentType string, index int, cus
 		}
 	}
 
+	return validateScalerReplicas(t, componentName, componentProps)
+}
+
+// validateScalerReplicas refuses a scaler trait on a component that authors
+// `replicas` (go-kure/launcher#1179). The HorizontalPodAutoscaler owns the
+// replica count of the Deployment it scales, so the scaler builds that
+// Deployment without spec.replicas; an authored count would be accepted and
+// applied to nothing, or, kept in the manifest, reset by every apply (the
+// Kubernetes documentation advises removing spec.replicas when an HPA is
+// enabled). An authored null is no count (the null contract).
+func validateScalerReplicas(t *Trait, componentName string, props map[string]any) error {
+	if t.Type != "scaler" {
+		return nil
+	}
+	if v, ok := props["replicas"]; ok && !isNullValue(v) {
+		return oamValidationError("properties.replicas", fmt.Sprintf(
+			"component %q sets replicas and has a scaler trait: the HorizontalPodAutoscaler owns the replica count, so the Deployment is built without spec.replicas; remove replicas and set minReplicas and maxReplicas on the scaler",
+			componentName))
+	}
 	return nil
 }
 

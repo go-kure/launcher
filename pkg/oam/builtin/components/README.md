@@ -2103,6 +2103,33 @@ Lifecycle). On
 `deployment` the combination was never accepted, because `scaler` was not
 admitted there: the trait is newly admitted with this safeguard in place.
 
+**Replicas under a `scaler`** (go-kure/launcher#1179). The HorizontalPodAutoscaler
+owns the replica count of the Deployment it scales, so with a `scaler` on a
+`deployment`, `webservice` or `worker` the Deployment is built **without
+`spec.replicas`**. That holds for the kind's default of 1 and for an
+EnvironmentPolicy `DefaultReplicas`, which no longer reach that Deployment. An
+authored `replicas` beside a `scaler` is refused at validation, naming the
+component, since the count would be accepted and applied to nothing; set
+`minReplicas` and `maxReplicas` on the trait instead. A property still counts
+when a component lowering rule emits it, and an authored `null` is no value. Only
+the Deployment the HPA targets loses its count; the component's other objects are
+unchanged. Why: Kubernetes advises removing `spec.replicas` when an HPA manages a
+Deployment, because a manifest that keeps it makes every apply reset the count
+to that value, and the count flaps (Kubernetes documentation, "Horizontal Pod
+Autoscaling", section "Migrating Deployments and StatefulSets to horizontal
+autoscaling").
+
+Migrating an object that is already deployed with `spec.replicas`: the next apply
+omits the field. The Kubernetes documentation on server-side apply ("Transferring
+ownership") states that removing a field no other manager owns resets it to its
+default, and that an apply without force on a field another manager owns is
+rejected as a conflict. So once the HPA has written the count, an applier with
+force off (Flux's `spec.force` defaults to false) may report a conflict on the
+first apply, and one with force on may reset the count to the default of 1 for a
+moment. Kubernetes recommends removing the field before enabling the HPA for
+this reason; the same page notes the one-time drop to 1. Check the applier's
+behaviour on a non-production object first.
+
 The guard reads a claim's **whole** access-mode set, not each mode on its own.
 `accessModes` requests a volume supporting *every* mode listed, so
 `[ReadWriteOnce, ReadWriteMany]` binds a volume many pods can mount read-write
