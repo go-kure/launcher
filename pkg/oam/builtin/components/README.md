@@ -2111,9 +2111,14 @@ EnvironmentPolicy `DefaultReplicas`, which no longer reach that Deployment. An
 authored `replicas` beside a `scaler` is refused at validation, naming the
 component, since the count would be accepted and applied to nothing; set
 `minReplicas` and `maxReplicas` on the trait instead. A property still counts
-when a component lowering rule emits it, and an authored `null` is no value. Only
-the Deployment the HPA targets loses its count; the component's other objects are
-unchanged. Why: Kubernetes advises removing `spec.replicas` when an HPA manages a
+when a component lowering rule emits it, and an authored `null` is no value. The
+omission is part of how the kind builds the Deployment, so it does not depend on
+the order the traits are declared in; the component's other objects are
+unchanged. The non-RWX replica check reads one pod under a `scaler`, since the
+held count is unused (the HPA-bound check on `maxReplicas` is the guard), and the
+claim's `Recreate` strategy still applies. The `topology-spread` trait reads the
+Deployment's replica count, which is unset here, so under a `scaler` it applies no
+constraints until go-kure/launcher#1196. Why: Kubernetes advises removing `spec.replicas` when an HPA manages a
 Deployment, because a manifest that keeps it can reset the count to that value
 on an apply (a server-side apply without force reports a conflict instead once
 the HPA owns the field), and the count flaps (Kubernetes documentation, "Horizontal Pod
@@ -2121,7 +2126,12 @@ Autoscaling", section "Migrating Deployments and StatefulSets to horizontal
 autoscaling").
 
 Migrating an object that is already deployed with `spec.replicas`: the next apply
-omits the field. What that does depends on who owns the field at that moment
+omits the field. With a client-side `kubectl apply`, a field present in the
+last-applied configuration and absent from the new one is deleted from the live
+object, which resets the count to the default of 1 even after the HPA has scaled
+the workload; remove `replicas` from the last-applied configuration first (or
+move to server-side apply). With server-side apply, what the omission does depends
+on who owns the field at that moment
 (Kubernetes documentation, server-side apply, "Transferring ownership"). If the
 HPA has already written the count and so owns the field, omitting it only gives
 up the applier's share and the count is kept. If the HPA has not yet written it,
