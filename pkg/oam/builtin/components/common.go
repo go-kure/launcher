@@ -172,8 +172,15 @@ func stringMapStrict(m map[string]any, label string) (map[string]string, error) 
 // memory specifically; which individual resource names were explicitly
 // authored (vs. left for policy to default) is read directly off map-key
 // presence in Requests/Limits — see applyDefaultQuantity's doc comment.
+//
+// NoCPULimit and NoMemoryLimit record that the author wrote `unlimited` as the
+// cpu or memory limit (go-kure/launcher#1181). They are not in Limits, which
+// holds quantities only: the policy limit default and the memory-limit mirror of
+// buildResourceRequirements read them to leave that limit out.
 type ResourceRequirements struct {
 	corev1.ResourceRequirements
+	NoCPULimit    bool
+	NoMemoryLimit bool
 }
 
 // ProbeConfig holds parsed probe configuration for a container.
@@ -901,7 +908,25 @@ func parseEnvFrom(props map[string]any) ([]corev1.EnvFromSource, error) {
 // by name, whatever its value (resourcesRejectedKeys, go-kure/launcher#790):
 // the schema does not declare it, so the document check refuses it too, and a
 // caller that drives Transform without that check had it dropped in silence.
+//
+// The string "unlimited" as the value of limits.cpu or limits.memory is the
+// author's opt-out of the default limit (go-kure/launcher#1181): it is read into
+// NoCPULimit / NoMemoryLimit, not into Limits, and parseResources is the parser
+// of the containers that have such a default. A resources object with none to
+// opt out of reads through parseResourcesWithoutDefaults, which refuses it.
 func parseResources(resources map[string]any) (ResourceRequirements, error) {
+	return parseResourcesAllowing(resources, true)
+}
+
+// parseResourcesWithoutDefaults parses a resources object like parseResources
+// for a consumer that applies no built-in request or limit default
+// (podResources, postgresql): `unlimited` has nothing to opt out of there, so it
+// is refused by name rather than accepted and ignored.
+func parseResourcesWithoutDefaults(resources map[string]any) (ResourceRequirements, error) {
+	return parseResourcesAllowing(resources, false)
+}
+
+func parseResourcesAllowing(resources map[string]any, allowUnlimited bool) (ResourceRequirements, error) {
 	var req ResourceRequirements
 	if err := refusedProperty(resources, resourcesRejectedKeys); err != nil {
 		return ResourceRequirements{}, err
@@ -913,6 +938,9 @@ func parseResources(resources map[string]any) (ResourceRequirements, error) {
 	if requests, present, err := parseObjectField(resources, "requests", "resources.requests"); err != nil {
 		return ResourceRequirements{}, err
 	} else if present {
+		if err := refuseUnlimited(requests, "requests", "a request has no unlimited form: omit it, or give a quantity"); err != nil {
+			return ResourceRequirements{}, err
+		}
 		rl, err := parseResourceList(requests)
 		if err != nil {
 			return ResourceRequirements{}, errors.Errorf("resources.requests: %w", err)
@@ -922,7 +950,17 @@ func parseResources(resources map[string]any) (ResourceRequirements, error) {
 	if limits, present, err := parseObjectField(resources, "limits", "resources.limits"); err != nil {
 		return ResourceRequirements{}, err
 	} else if present {
-		rl, err := parseResourceList(limits)
+		quantities := limits
+		if allowUnlimited {
+			var noCPU, noMemory bool
+			if quantities, noCPU, noMemory, err = takeUnlimitedLimits(limits); err != nil {
+				return ResourceRequirements{}, err
+			}
+			req.NoCPULimit, req.NoMemoryLimit = noCPU, noMemory
+		} else if err := refuseUnlimited(limits, "limits", "no intrinsic default to opt out of: this resources object gets no built-in request or limit"); err != nil {
+			return ResourceRequirements{}, err
+		}
+		rl, err := parseResourceList(quantities)
 		if err != nil {
 			return ResourceRequirements{}, errors.Errorf("resources.limits: %w", err)
 		}
@@ -932,6 +970,49 @@ func parseResources(resources map[string]any) (ResourceRequirements, error) {
 		return ResourceRequirements{}, err
 	}
 	return req, nil
+}
+
+// unlimitedLimit is the value of limits.cpu or limits.memory with which an
+// author opts out of the default limit (go-kure/launcher#1181). It is a string
+// no quantity parser accepts, so a document that spelled it was refused before:
+// null stays absence (an unauthored key the defaults fill), and 0 is a quantity.
+const unlimitedLimit = "unlimited"
+
+// refuseUnlimited refuses an `unlimited` value in m, the requests or limits map
+// of a resources object, naming the key and why it has no meaning there.
+func refuseUnlimited(m map[string]any, section, why string) error {
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		if v, ok := m[k].(string); ok && v == unlimitedLimit {
+			return errors.Errorf("resources.%s.%s: %q is not accepted here: %s", section, k, unlimitedLimit, why)
+		}
+	}
+	return nil
+}
+
+// takeUnlimitedLimits splits the `unlimited` entries out of a limits map: it
+// returns the map without them, and whether cpu and memory were opted out. An
+// `unlimited` under any other resource name is refused, because the defaults
+// cover cpu and memory only. A map with none is returned as it came.
+func takeUnlimitedLimits(limits map[string]any) (rest map[string]any, noCPU, noMemory bool, err error) {
+	rest = limits
+	for _, k := range slices.Sorted(maps.Keys(limits)) {
+		if v, ok := limits[k].(string); !ok || v != unlimitedLimit {
+			continue
+		}
+		switch corev1.ResourceName(k) {
+		case corev1.ResourceCPU:
+			noCPU = true
+		case corev1.ResourceMemory:
+			noMemory = true
+		default:
+			return nil, false, false, errors.Errorf("resources.limits.%s: %q is accepted only for cpu and memory, the resources with a default limit", k, unlimitedLimit)
+		}
+		if len(rest) == len(limits) {
+			rest = maps.Clone(limits)
+		}
+		delete(rest, k)
+	}
+	return rest, noCPU, noMemory, nil
 }
 
 // validateResourceRequestLimit applies the request/limit cross-check real
@@ -4639,7 +4720,7 @@ func buildResourceRequirements(res ResourceRequirements) corev1.ResourceRequirem
 	if rr.Limits == nil {
 		rr.Limits = corev1.ResourceList{}
 	}
-	if _, ok := rr.Limits[corev1.ResourceMemory]; !ok {
+	if _, ok := rr.Limits[corev1.ResourceMemory]; !ok && !res.NoMemoryLimit {
 		rr.Limits[corev1.ResourceMemory] = rr.Requests[corev1.ResourceMemory]
 	}
 	return rr

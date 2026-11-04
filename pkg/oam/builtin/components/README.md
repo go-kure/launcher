@@ -751,8 +751,10 @@ a container with no requests or limits. `requests`/`limits`
 accept `cpu`/`memory` (defaults 100m/128Mi — subject to the environment
 policy's `MaxCPU()`/`MaxMemory()` maxima the same as an authored value; see
 "Policy defaults & enforcement ordering" below) plus any other well-formed
-resource name (e.g. `ephemeral-storage`, `nvidia.com/gpu`) in the same map,
-each value authored as either a quantity string (`"500m"`, `"2Gi"`) or a bare
+resource name (e.g. `ephemeral-storage`, `nvidia.com/gpu`) in the same map.
+`limits.cpu` and `limits.memory` also accept the string `unlimited`, which
+omits that limit (see "Policy defaults & enforcement ordering" below). Each
+other value is authored as either a quantity string (`"500m"`, `"2Gi"`) or a bare
 YAML/JSON number (`1`, `0.5`) — both are valid `resource.Quantity` input
 (`Quantity.UnmarshalJSON` parses a bare numeric literal the same way it parses
 a quoted one), and both forms are also accepted by the published property
@@ -2159,6 +2161,19 @@ A container's effective cpu/memory requests and limits are assembled in three
 tiers, in precedence order:
 
 1. **Authored** — whatever the component's `resources` property set explicitly.
+   The string `unlimited` under `limits.cpu` or `limits.memory` is an authored
+   opt-out (go-kure/launcher#1181): the container gets no limit for that
+   resource, because neither a policy default limit (tier 2) nor, for memory,
+   the limit mirror (tier 3) is applied to it. It is accepted where a built-in
+   default exists to opt out of: the main container of the five controller
+   kinds, `webservice` and `worker`, and their `initContainers` and `sidecars`
+   entries. It is refused by name under `requests`, under `podResources` and on
+   `postgresql` ("no intrinsic default to opt out of"), under any resource name
+   other than cpu and memory, and, with the `resource-maximum` refusal class,
+   when the policy sets `MaxCPU()`/`MaxMemory()` for that resource: an absent
+   limit is no bound, so it is never read as under the maximum. `null` is still
+   absence, not an opt-out. A policy sub-option to accept `unlimited` as a
+   policy default is not provided.
 2. **Policy default** — `ApplyPolicy` fills any request/limit the author left
    unset from `oam.Policy.DefaultCPURequest()`/`DefaultMemoryRequest()`/
    `DefaultCPULimit()`/`DefaultMemoryLimit()` (`enforce.go`'s
@@ -2175,7 +2190,9 @@ tiers, in precedence order:
    A limit at or above the default leaves the default request in place. The
    same holds for a policy default request (tier 2): it is held to the authored
    limit for that resource (`capPolicyRequestDefaults`, `resource_policy_defaults.go`),
-   and an authored request is never changed.
+   and an authored request is never changed. Two
+   consequences are easy to miss: a policy `DefaultMemoryRequest()` flows into
+   the mirrored memory limit, and the handler never defaults a CPU limit.
 
 `oam.Policy.MaxCPU()`/`MaxMemory()` are enforced against the *effective*
 value — what `Generate()` will actually emit, after all three tiers — not

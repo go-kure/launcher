@@ -361,7 +361,7 @@
     "properties": {
       "limits": {
         "type": "object",
-        "description": "Maximum resources the container may use. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted.",
+        "description": "Maximum resources the container may use. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted. The string `unlimited` under cpu or memory opts out of the built-in limit and of a policy default limit; it is refused under requests, for postgresql and podResources, and where the policy sets a maximum for that resource.",
         "properties": {
           "cpu": {
             "type": "",

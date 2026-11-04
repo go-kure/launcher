@@ -184,7 +184,7 @@ func schemaResources(reserved bool) oam.PropertySchema {
 		Description:      "Compute resource requests and limits for the container.",
 		Properties: map[string]oam.PropertySchema{
 			"requests": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Minimum resources guaranteed to the container. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted.", Properties: quantity()},
-			"limits":   {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Maximum resources the container may use. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted.", Properties: quantity()},
+			"limits":   {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Maximum resources the container may use. Additional named resources (e.g. ephemeral-storage, nvidia.com/gpu) beyond cpu/memory are also accepted. The string `unlimited` under cpu or memory opts out of the built-in limit and of a policy default limit; it is refused under requests, for postgresql and podResources, and where the policy sets a maximum for that resource.", Properties: quantity()},
 		},
 	}
 }

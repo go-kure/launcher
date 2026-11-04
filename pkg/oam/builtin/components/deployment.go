@@ -366,10 +366,7 @@ func (c *DeploymentConfig) ApplyPolicy(p oam.Policy) error {
 	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest()); err != nil {
 		return err
 	}
-	if err := applyDefaultQuantity(&c.Resources.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
-		return err
-	}
-	if err := applyDefaultQuantity(&c.Resources.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
+	if err := c.Resources.applyPolicyLimitDefaults(p); err != nil {
 		return err
 	}
 

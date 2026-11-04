@@ -372,7 +372,7 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 		// Every name the shared parser admits (cpu, memory, ephemeral-storage,
 		// hugepages-<size>, qualified extended resources) is forwarded onto the
 		// Cluster's spec.resources by cnpgResourceList (go-kure/launcher#484).
-		r, err := parseResources(resources)
+		r, err := parseResourcesWithoutDefaults(resources)
 		if err != nil {
 			return nil, errors.Wrap(err, "invalid resources configuration")
 		}
