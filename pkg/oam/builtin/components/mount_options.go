@@ -27,8 +27,9 @@ var mountExtraKeys = []string{"subPath", "subPathExpr", "mountPropagation", "rec
 //   - recursiveReadOnly is Disabled, IfPossible or Enabled (:1486-1501), and
 //     Enabled or IfPossible need readOnly: true (:1490-1492) and a
 //     mountPropagation of None or none at all (:1493-1495);
+//   - subPath is relative and holds no ".." element (:3205-3207, :1421-1445);
 //   - subPath and subPathExpr are mutually exclusive (:3209-3212), and
-//     subPathExpr is relative and holds no ".." element (:3214, :1421-1430).
+//     subPathExpr is relative and holds no ".." element too (:3214).
 //
 // The one rule that needs the container is Bidirectional propagation, which
 // upstream allows on a privileged container only (:1474-1476). The caller
@@ -46,6 +47,21 @@ func parseMountOptions(mm map[string]any, label string, vm *corev1.VolumeMount) 
 	return parseMountExtras(mm, label, vm)
 }
 
+// checkDescendingPath refuses a path that is absolute or holds a ".." element,
+// as upstream validateLocalDescendingPath does for subPath and subPathExpr alike
+// (validation.go:1421-1445). field names the authored key, like
+// "initContainers[0] \"x\": volumeMounts[1].subPath". A caller passes a non-empty
+// value: upstream skips an empty one, and parseStringField reads it as absent.
+func checkDescendingPath(field, value string) error {
+	if path.IsAbs(value) {
+		return errors.Errorf("%s: must be a relative path, got %q", field, value)
+	}
+	if slices.Contains(strings.Split(value, "/"), "..") {
+		return errors.Errorf("%s: must not contain a '..' element, got %q", field, value)
+	}
+	return nil
+}
+
 // parseMountExtras reads the mountExtraKeys into vm. vm.ReadOnly must already
 // hold the mount's readOnly, because recursiveReadOnly is checked against it.
 // parseMountOptions and the `volumes` parser both end here, so the two read the
@@ -54,6 +70,9 @@ func parseMountExtras(mm map[string]any, label string, vm *corev1.VolumeMount) e
 	if sp, present, err := parseStringField(mm, "subPath", label+".subPath"); err != nil {
 		return err
 	} else if present {
+		if err := checkDescendingPath(label+".subPath", sp); err != nil {
+			return err
+		}
 		vm.SubPath = sp
 	}
 	if sp, present, err := parseStringField(mm, "subPathExpr", label+".subPathExpr"); err != nil {
@@ -62,11 +81,8 @@ func parseMountExtras(mm map[string]any, label string, vm *corev1.VolumeMount) e
 		if vm.SubPath != "" {
 			return errors.Errorf("%s: subPathExpr and subPath are mutually exclusive", label)
 		}
-		if path.IsAbs(sp) {
-			return errors.Errorf("%s.subPathExpr: must be a relative path, got %q", label, sp)
-		}
-		if slices.Contains(strings.Split(sp, "/"), "..") {
-			return errors.Errorf("%s.subPathExpr: must not contain a '..' element, got %q", label, sp)
+		if err := checkDescendingPath(label+".subPathExpr", sp); err != nil {
+			return err
 		}
 		vm.SubPathExpr = sp
 	}

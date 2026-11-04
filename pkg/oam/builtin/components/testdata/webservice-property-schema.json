@@ -937,7 +937,7 @@
               },
               "subPath": {
                 "type": "string",
-                "description": "Sub-path within the volume to mount instead of its root."
+                "description": "Sub-path within the volume to mount instead of its root. Relative, no `..` element."
               },
               "subPathExpr": {
                 "type": "string",
@@ -2175,7 +2175,7 @@
               },
               "subPath": {
                 "type": "string",
-                "description": "Sub-path within the volume to mount instead of its root."
+                "description": "Sub-path within the volume to mount instead of its root. Relative, no `..` element."
               },
               "subPathExpr": {
                 "type": "string",
@@ -2309,7 +2309,7 @@
         },
         "subPath": {
           "type": "string",
-          "description": "Sub-path within the volume to mount instead of its root."
+          "description": "Sub-path within the volume to mount instead of its root. Relative, no `..` element."
         },
         "subPathExpr": {
           "type": "string",
