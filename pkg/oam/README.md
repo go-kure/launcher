@@ -2099,6 +2099,16 @@ registry has the same shape and the same failure mode: `traitComponentRestrictio
 (which traits a component type accepts; today only `scaler` is restricted, to `webservice`,
 `worker` and `deployment`, the kinds that report a non-RWX claim to it).
 
+**A `scaler` refuses authored `replicas`** (go-kure/launcher#1179). The
+HorizontalPodAutoscaler owns the replica count, so the scaler builds the Deployment
+without `spec.replicas`, and `validateTrait` refuses a component that sets `replicas`
+beside a `scaler`, naming the component and pointing to `minReplicas`/`maxReplicas` on the
+scaler (`validateScalerReplicas`). An authored `null` is no value. The check runs on the
+properties a lowering rule emits too: while the component type is still lowerable
+`validateTrait` defers it, and `validateSettled` runs it on the lowered component. The
+omission and the migration of an already-deployed object are in the components README,
+"Replicas under a `scaler`".
+
 **Tiers are declared, never derived from a type** (go-kure/launcher#783).
 `ClassifyComponentWithDomain` returns the tier the component's `<domain>/tier` annotation
 names, or the empty tier when it carries none; a `placement` policy replaces it. A

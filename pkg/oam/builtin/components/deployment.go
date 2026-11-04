@@ -3,6 +3,7 @@ package components
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
@@ -151,6 +152,7 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.Replicas = replicas
 	config.explicitReplicas = replicasAuthored
+	config.scaled = slices.ContainsFunc(component.Traits, func(t oam.Trait) bool { return t.Type == "scaler" })
 
 	env, err := parseEnv(props)
 	if err != nil {
@@ -345,6 +347,12 @@ type DeploymentConfig struct {
 	// (see parseDeploymentSpec).
 	DeploymentSpec   DeploymentSpecConfig
 	explicitReplicas bool
+	// scaled is true when the settled component carries a scaler trait. The
+	// HorizontalPodAutoscaler then owns the replica count and the scaler builds
+	// this Deployment without spec.replicas (go-kure/launcher#1179), so the count
+	// held here is not what runs and the non-RWX replica check does not apply
+	// to it; the scaler's own maxReplicas check is the guard.
+	scaled bool
 }
 
 // ServiceAccountName implements oam.ServiceAccountNamer: the authored
@@ -486,7 +494,16 @@ func (c *DeploymentConfig) createDeployment(app *stack.Application) (*appsv1.Dep
 	}
 	kubernetes.SetDeploymentReplicas(dep, c.Replicas)
 
-	if err := applyNonRWXConstraint(dep, app.Name, c.PVCs, c.Replicas, c.DeploymentSpec.Strategy); err != nil {
+	// Under a scaler the HorizontalPodAutoscaler owns the count: the Deployment
+	// is built without spec.replicas, whichever order the traits are declared
+	// in (go-kure/launcher#1179). The held count is unused, so the replica half
+	// of the non-RWX constraint reads one pod; the strategy half still applies.
+	constraintReplicas := c.Replicas
+	if c.scaled {
+		dep.Spec.Replicas = nil
+		constraintReplicas = 1
+	}
+	if err := applyNonRWXConstraint(dep, app.Name, c.PVCs, constraintReplicas, c.DeploymentSpec.Strategy); err != nil {
 		return nil, err
 	}
 	// The authored strategy is applied after the non-RWX constraint, but the
