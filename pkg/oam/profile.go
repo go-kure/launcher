@@ -34,6 +34,24 @@ type ClusterProfileSpec struct {
 	// "fluxcd" by ParseClusterProfile. Reserved for future ArgoCD support.
 	GitopsEngine string                       `yaml:"gitopsEngine,omitempty" json:"gitopsEngine,omitempty"`
 	Capabilities map[string]CapabilityBinding `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+	// KubernetesVersion is the Kubernetes release the cluster runs, as "1.35",
+	// "v1.35" or "v1.35.2" (the form `helm template --kube-version` takes; the patch
+	// level is ignored). When set, a build refuses an authored field whose feature
+	// gate is off by default at that release (PropertySchema.Gate). Absent means
+	// unknown: nothing is checked, and the build is what it was before the field
+	// existed. See docs/oam/design-cluster-profile.md.
+	KubernetesVersion string `yaml:"kubernetesVersion,omitempty" json:"kubernetesVersion,omitempty"`
+}
+
+// TargetVersion returns the parsed spec.kubernetesVersion, and false when the
+// profile states none. A profile that came through ParseClusterProfile holds a
+// value that parses; one built by hand may not, and reports false.
+func (s ClusterProfileSpec) TargetVersion() (KubernetesVersion, bool) {
+	if s.KubernetesVersion == "" {
+		return KubernetesVersion{}, false
+	}
+	v, err := ParseKubernetesVersion(s.KubernetesVersion)
+	return v, err == nil
 }
 
 // CapabilityBinding holds the rendering values the platform injects into trait

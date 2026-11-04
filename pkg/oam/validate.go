@@ -473,6 +473,11 @@ func validateClusterProfile(profile *ClusterProfile) error {
 		return profileValidationError("spec.gitopsEngine",
 			fmt.Sprintf("unsupported gitopsEngine %q; supported values: fluxcd", profile.Spec.GitopsEngine))
 	}
+	if profile.Spec.KubernetesVersion != "" {
+		if _, err := ParseKubernetesVersion(profile.Spec.KubernetesVersion); err != nil {
+			return profileValidationError("spec.kubernetesVersion", "spec.kubernetesVersion: "+err.Error())
+		}
+	}
 	return nil
 }
 

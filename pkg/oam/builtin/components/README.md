@@ -698,7 +698,9 @@ silently ignored, since a typo such as `divisorr` would otherwise leave the
 divisor unset — Kubernetes treats a zero divisor as its default of 1,
 changing the emitted unit),
 `fileKeyRef` (`volumeName`/`path`/`key` required, `optional` accepted (same
-non-boolean rejection as above); corev1's `EnvFiles` feature; `volumeName`
+non-boolean rejection as above); corev1's `EnvFiles` feature (refused when the
+`ClusterProfile`'s `kubernetesVersion` is below 1.35, where the gate turns on by
+default); `volumeName`
 must be a valid DNS-1123 label and `key` a valid (relaxed) env var name,
 matching real admission's own `validateFileKeySelector`; `path` must be
 relative and must not contain a `..` backstep component, per this repo's own
@@ -1460,8 +1462,12 @@ An `initContainers` entry also reads its own `restartPolicy` and
   from Kubernetes 1.35. A cluster with the gate off drops them when it creates
   the pod, without an error, so the init container falls back to the pod's
   restart policy. `Always` is not tied to that gate: upstream validation
-  accepts it with the gate on or off. This package does not see the target
-  cluster's version, so that is a documented limit, not a check.
+  accepts it with the gate on or off. A build for a `ClusterProfile` that
+  states `spec.kubernetesVersion` below 1.35 refuses `restartPolicyRules`,
+  naming the gate and the version (go-kure/launcher#1183). The `Never` and
+  `OnFailure` values of `restartPolicy` are not checked: the gate covers only
+  those two values, and a property-level check would also refuse `Always`.
+  With no version stated, both stay a documented limit, not a check.
 
 On a `sidecars` entry neither key is read, and both are refused as unknown
 keys. At the top level neither is a container key either.
@@ -1614,7 +1620,22 @@ alone (DNS-1123 names, enums, IP literals, duplicate names, the cross-field
 exclusions listed below, and the `os.name` contract: a `windows` pod may not
 set the Linux-only pod and container fields, a `linux` pod may not set
 `windowsOptions`); checks needing cluster state (host ports under
-`hostNetwork`, feature gates, RuntimeClass existence) are left to the cluster.
+`hostNetwork`, RuntimeClass existence) are left to the cluster, and so are feature
+gates, with one exception: a `ClusterProfile` that states `spec.kubernetesVersion` has
+a property whose gate is off by default at that release refused (go-kure/launcher#1183):
+`hostnameOverride` below 1.35 (`HostnameOverride`) and `podResources` below 1.34
+(`PodLevelResources`), and a container's `env[].valueFrom.fileKeyRef` below 1.35
+(`EnvFiles`) and an init container's `restartPolicyRules` below 1.35
+(`ContainerRestartRules`), on the kinds whose schema declares them. The gate and the
+release are in the property's published schema (`gate`). With no version stated nothing
+is checked. Two limits: the `Never` and `OnFailure` values of an init container's
+`restartPolicy` share `ContainerRestartRules` and are not checked
+(go-kure/launcher#1230), and on the raw-PodSpec kinds (`pod` and the kinds that take a
+pod template) the check does not reach the gated paths under their open schemas:
+`env[].valueFrom.fileKeyRef` of `containers[]` and `initContainers[]`,
+`initContainers[].restartPolicyRules`, and `template.spec.hostnameOverride` and
+`template.spec.resources` of a pod template. Their schemas leave those objects open, and
+the check reads declared schema only (go-kure/launcher#1245).
 
 | Property | Type | Effect | Kind |
 |----------|------|--------|------|

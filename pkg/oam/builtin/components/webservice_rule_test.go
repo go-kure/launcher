@@ -36,7 +36,8 @@ func TestWebserviceRule_ComponentType(t *testing.T) {
 // go-kure/launcher#959 moved serviceObjectName to the DNS-1123 label rule, and
 // go-kure/launcher#1172 closed the volumeMounts item of an init container and
 // of a sidecar, and go-kure/launcher#1216 added podMetadata, the deployment's
-// own entry.
+// own entry, and go-kure/launcher#1183 added the gate of each property that
+// needs a Kubernetes feature gate.
 func TestWebserviceRule_PropertySchemaUnchanged(t *testing.T) {
 	want, err := os.ReadFile("testdata/webservice-property-schema.json")
 	if err != nil {

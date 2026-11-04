@@ -103,8 +103,8 @@ func (h *PodHandler) PropertySchema() map[string]oam.PropertySchema {
 		"hostUsers":                    boolean("Pod spec.hostUsers: false runs the pod in a user namespace of its own. The API server defaults it to true."),
 		"schedulingGates":              podListSchema("Pod spec.schedulingGates: gates that hold the pod unscheduled until each is removed.", "One gate: name.", "PodSchedulingGate"),
 		"resourceClaims":               podListSchema("Pod spec.resourceClaims: the ResourceClaims the pod's containers can consume.", "One claim: name and resourceClaimName or resourceClaimTemplateName.", "PodResourceClaim"),
-		"resources":                    podObjectSchema("Pod spec.resources: the cpu and memory the pod's containers share. Held to the environment policy's cpu and memory maxima.", "ResourceRequirements"),
-		"hostnameOverride":             str("Pod spec.hostnameOverride: the hostname the pod reports, replacing hostname, subdomain and setHostnameAsFQDN."),
+		"resources":                    gated("PodLevelResources", podObjectSchema("Pod spec.resources: the cpu and memory the pod's containers share. Held to the environment policy's cpu and memory maxima. Needs the cluster's PodLevelResources feature gate, on by default from Kubernetes 1.34.", "ResourceRequirements")),
+		"hostnameOverride":             gated("HostnameOverride", str("Pod spec.hostnameOverride: the hostname the pod reports, replacing hostname, subdomain and setHostnameAsFQDN. Needs the cluster's HostnameOverride feature gate, on by default from Kubernetes 1.35.")),
 		"schedulingGroup":              podObjectSchema("Pod spec.schedulingGroup: the scheduling group the pod belongs to (podGroupName).", "PodSchedulingGroup"),
 		"evictionResponders":           podListSchema("Pod spec.evictionResponders: the responders that act on an eviction request for the pod, at most ten.", "One responder: name and priority.", "EvictionResponder"),
 	}

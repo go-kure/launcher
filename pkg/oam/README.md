@@ -2055,7 +2055,7 @@ checked as any pod template is: `ReservedMetadataKeys` and the component label.
 |----------|---------|
 | `Parse` / `ParseMulti` / `MustParse` | Parse one / many Application documents. |
 | `ParsePackage` | Parse a `Package` (app + parameter schema). |
-| `ParseClusterProfile` | Parse a `ClusterProfile`. |
+| `ParseClusterProfile` | Parse a `ClusterProfile`. `spec.kubernetesVersion`, when set, must be `1.N`, `v1.N` or `v1.N.P`; see `ValidateAuthoredPropertiesForTarget`. |
 | `LoadCapabilityDefinitions` | Load `CapabilityDefinition`s for capability validation. |
 | `ParseWithExtraTraitTypes` | Parse allowing additional (custom) trait types. |
 | `ParseWithExtraTypes` | Parse allowing custom trait types **and** a `LowerableTypes` set — the document kinds, component types and trait types claimed by a transformer's registered lowering rules. |
@@ -2981,6 +2981,24 @@ capability rendering is resolved into it (see Lowering above). A value a lowerin
 recorded with `Component.RenderReserved` or `Trait.RenderReserved` is exempt while the
 key still holds it (see Lowering above).
 
+A schema field may also name a Kubernetes feature gate in `Gate` (published as `gate`):
+the field needs that gate on the cluster. A `ClusterProfile` that states
+`spec.kubernetesVersion` below the release where the gate is on by default has an authored
+value refused by `ValidateAuthoredPropertiesForTarget`, naming the property's path, the gate,
+that release and the profile's version; with no version nothing is checked. The gates are
+rows of one table in `featuregates.go` (name, first release with Default true, read from the
+Kubernetes feature gates reference), held to the schemas by tests in both directions: a `Gate`
+no row names, or a row no schema uses, fails (go-kure/launcher#1183). Only Kubernetes core
+properties of the built-in components carry one today: `EnvFiles`
+(`env[].valueFrom.fileKeyRef`), `ContainerRestartRules` (an init container's
+`restartPolicyRules`), `PodLevelResources` (`podResources`) and `HostnameOverride`
+(`hostnameOverride`). The check reads the declared schema, so it stops at an open object
+(`AdditionalProperties` with no `Properties`), so on the raw-PodSpec kinds (`pod` and the
+kinds that take a pod template) four paths are not reached: `env[].valueFrom.fileKeyRef` of
+`containers[]` and `initContainers[]`, `initContainers[].restartPolicyRules`, and
+`template.spec.hostnameOverride` and `template.spec.resources` of a pod template
+(go-kure/launcher#1245).
+
 Separately, `validateProperties` (`property_validate.go`) checks an EMITTED
 component/trait/policy's properties against its TARGET handler's declared schema —
 enforcing `Required`, `Type`/`Types`, `Enum`, and nested `Properties`/`Items`/
@@ -3100,6 +3118,14 @@ Nested `Required`, inside an object the author did write, is enforced
   required; neither the trait nor capability "certificate"'s rendering sets it`. A
   required key inside an array element is always checked as written, because a
   rendering never merges into a list.
+- `ValidateAuthoredPropertiesForTarget(app, capabilities, target)` is the capability
+  variant plus the feature-gate check (`PropertySchema.Gate`, above) for a cluster at
+  `target`, a `*KubernetesVersion` (`ClusterProfileSpec.TargetVersion` returns the
+  profile's). Everything the capability variant refuses is refused first. A nil `target`
+  is an unknown version, and the result is the capability variant's. `Transform` does not
+  read the version: the check only refuses, so an accepted document renders the same at
+  any version. `ParseKubernetesVersion` takes `1.35`, `v1.35` and `v1.35.2` (patch ignored)
+  and refuses anything else, a major other than 1 included.
 - `Transform` makes the same check itself on every trait's merged properties, at both
   merge sites (trait dispatch and the lowering fixpoint), whether or not a binding
   matched. This is new for a caller that runs `Transform` without the validator: a

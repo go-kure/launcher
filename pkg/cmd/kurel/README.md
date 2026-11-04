@@ -237,9 +237,13 @@ types. See the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oa
 Parsing and Lowering sections for the general mechanism.
 
 Once the application is parsed and the profile evaluated, `build` calls
-`ValidateAuthoredPropertiesWithCapabilities` with the evaluated bindings, so a
-component or trait property no handler declares is a build error naming the field
-and the allowed set, rather than being silently dropped (go-kure/launcher#408). The
+`ValidateAuthoredPropertiesForTarget` with the evaluated bindings and the profile's
+`spec.kubernetesVersion`, so a component or trait property no handler declares is a
+build error naming the field and the allowed set, rather than being silently dropped
+(go-kure/launcher#408). With a version set, a property whose Kubernetes feature gate
+is off by default at that release is refused too, naming the property, the gate, the
+release where it turns on and the profile's version (go-kure/launcher#1183); with no
+version nothing is checked, as before. The
 bindings are what let a trait leave a nested required key to the capability
 rendering (go-kure/launcher#765):
 
