@@ -201,7 +201,7 @@ reads it.
 | `helmchart` | HelmChart | Kind-named: the full Flux `HelmChartSpec`, a chart from an existing source. Not the composite removed under this name (go-kure/launcher#350); that is `helm`. Under a delivery whose groups wait for their Flux objects, a component of a later group making the source its `sourceRef` names is refused (go-kure/launcher#1088). |
 | `helmrelease` | HelmRelease | Kind-named: the full Flux `HelmReleaseSpec`, against an existing source, or an OCI chart helm-controller fetches itself (`chart.kind: OCIRepository`). Under a delivery whose groups wait for their Flux objects, a component of a later group making the source its `chartRef` or its chart template's `sourceRef` names is refused (go-kure/launcher#1088). Beside the Flux fields it takes launcher's own `endpoints` (the pods the chart renders), split off before the decode and never part of the emitted spec. |
 | `helmrepository` | HelmRepository | Kind-named: the full Flux `HelmRepositorySpec`, and nothing else. |
-| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`, `secretValues`, `scopeOverrides`, and `endpoints` (the pods the chart renders). What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. |
+| `helmtemplate` | rendered manifests | Kind-named client-side Helm render: `source.url`, `chart`, `version`, `values`, `secretValues`, `scopeOverrides`, and `endpoints` (the pods the chart renders). What `helm` lowers to under `delivery: template`, authorable directly. The source host and every rendered workload are checked against the environment policy — see below. The `volumeMounts` of every rendered workload are held to the `app.yaml` mount rules, whatever the policy (go-kure/launcher#1223). |
 | `horizontalpodautoscaler` | HorizontalPodAutoscaler | Kind-named HorizontalPodAutoscaler: the whole `HorizontalPodAutoscalerSpec`, strictly decoded; `scaleTargetRef` and `maxReplicas` are required. `maxReplicas` is held to the environment policy's replica maximum, no default filled; the target is the author's and is not checked — see below. |
 | `httproute` | HTTPRoute | Kind-named HTTPRoute: the whole `HTTPRouteSpec` (`parentRefs`, `useDefaultGateways`, `hostnames`, `rules`), strictly decoded. An authored object, not the `httproute` trait: no parent is synthesized from a capability, no NetworkPolicy allow rule is synthesized for it and no environment policy applies — see below. |
 | `imagepolicy` | ImagePolicy | Kind-named Flux ImagePolicy: the whole `ImagePolicySpec`, strictly decoded; `imageRepositoryRef` with its `name` and `policy` are required, and of a `semver` policy its `range`. The policy may name the ImageRepository of another namespace, and nothing gates it. The API's expression rules are not checked. No environment policy applies — see below. |
@@ -227,7 +227,7 @@ reads it.
 | `networkpolicy` | NetworkPolicy | Kind-named NetworkPolicy: the whole `NetworkPolicySpec` (`podSelector`, `ingress`, `egress`, `policyTypes`), strictly decoded. An authored object, not the `networkpolicy` trait: nothing scopes it to a component's pods, so an unwritten `podSelector` selects every pod of the namespace; no `policyTypes` are derived; a defective match expression of a selector is refused; no environment policy applies — see below. |
 | `oci` | OCIRepository, Kustomization | Sync manifests from an OCI artifact (Flux). |
 | `ocirepository` | OCIRepository | Kind-named: the full Flux `OCIRepositorySpec`, with no Kustomization (compare `oci`). |
-| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared; a built-in kind has the scope the Kubernetes API gives it, any other kind the scope an authored `clusterScoped` states, or else the one registered for it (namespaced when unknown); a list is rejected, a workload, claim or autoscaler is held to the environment policy, and a Secret is refused under a policy that forbids explicit secrets. |
+| `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared; a built-in kind has the scope the Kubernetes API gives it, any other kind the scope an authored `clusterScoped` states, or else the one registered for it (namespaced when unknown); a list is rejected, a workload, claim or autoscaler is held to the environment policy, and a Secret is refused under a policy that forbids explicit secrets. The `volumeMounts` of a workload are held to the `app.yaml` mount rules, whatever the policy (go-kure/launcher#1223). |
 | `persistentvolume` | PersistentVolume | Kind-named PersistentVolume: the whole `PersistentVolumeSpec`, its volume sources included, strictly decoded. Cluster-scoped. A `hostPath` or `local` source and `capacity.storage` are held to environment policy — see below. |
 | `persistentvolumeclaim` | PersistentVolumeClaim | Kind-named claim: `size`, `storageClassName`, `accessModes`, `volumeMode`, `selector`, `dataSourceRef`, `volumeName`, `volumeAttributesClassName`. A workload mounts it with a `pvc` volume's `claimName` — see below. |
 | `pod` | Pod | Kind-named bare Pod: the whole `PodSpec` less `ephemeralContainers`, `priority` and `overhead`, strictly decoded. Held to environment policy as a rendered Pod is; no default filled. The `volumeMounts` of every container and init container are held to the `app.yaml` mount rules (go-kure/launcher#1212). Carries the `app` label, so traits and Services select it — see below. |
@@ -1251,17 +1251,22 @@ in all four places (`initContainers`, `sidecars`, `volumes` and
 `volumeClaimTemplates`) by the helper that refuses it for `subPathExpr`, with
 the same wording, where the API server would refuse it later
 (go-kure/launcher#1199);
-the `pod`, `podtemplate`, `replicaset` and `replicationcontroller` kinds, and
-the workload objects of a `manifests` source (`inline` or `url`), read
+the `pod`, `podtemplate`, `replicaset` and `replicationcontroller` kinds, the
+workload objects of a `manifests` source (`inline` or `url`), the object of a
+`passthrough` component and the workloads a `helmtemplate` chart renders read
 `volumeMounts` as typed upstream mounts and hold those of every container and
 init container to the same rules, whatever the environment policy: `subPath`
 and `subPathExpr` are exclusive and relative with no `..` element,
 `mountPropagation` and `recursiveReadOnly` are one of their modes with the
 same preconditions, and `Bidirectional` needs `securityContext.privileged:
 true` on that container, with the error naming the container and the mount's
-position (go-kure/launcher#1212); `bindMountOptions`, the mount path, the
-volume a mount names and the rendered objects of `helmtemplate` and
-`passthrough` are not checked by that rule;
+position (go-kure/launcher#1212, go-kure/launcher#1223). A `passthrough`
+object is refused when the component is read; a chart is refused when it is
+rendered, and the refusal quotes the mount value even with `secretValues` set,
+as the environment policy check quotes what it refuses. A workload in an API
+version kure's scheme does not register is not read by this rule: the
+environment policy check refuses it as unreadable. `bindMountOptions`, the
+mount path and the volume a mount names are not checked by this rule;
 each entry also accepts its own `securityContext`, the identical field set
 and validation as the main container's own `securityContext` described
 below — see that prose for the field list rather than restating it here;
