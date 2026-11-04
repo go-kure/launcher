@@ -277,3 +277,71 @@ func TestScaler_NonRWXClaim_UnusedPolicyDefaultCountIsNotChecked(t *testing.T) {
 		})
 	}
 }
+
+// ceilingPolicy supplies a default replica count and a replica ceiling.
+type ceilingPolicy struct {
+	oam.NoopPolicy
+	defaultReplicas *int32
+	maxReplicas     *int32
+}
+
+func (p *ceilingPolicy) DefaultReplicas() *int32 { return p.defaultReplicas }
+func (p *ceilingPolicy) MaxReplicas() *int32     { return p.maxReplicas }
+
+// Under a scaler the Deployment's own count is unused, so the policy's replica
+// default and ceiling must not act on it: a default of 3 above a ceiling of 2
+// would otherwise refuse a scaler bounded 1 to 2 over a count no object carries.
+// The ceiling still holds on the scaler's own maxReplicas. The cases run the
+// whole transformer (ToApplicationConfig, then ApplyPolicy), so they prove the
+// scaler is known to the kind before its policy runs, in either trait order.
+func TestScaler_PolicyDefaultAndCeilingSkipTheUnusedCount(t *testing.T) {
+	three, two := int32(3), int32(2)
+	policy := &ceilingPolicy{defaultReplicas: &three, maxReplicas: &two}
+	spread := oam.Trait{Type: "topology-spread", Properties: map[string]any{}}
+	within := scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 2})
+	over := scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 3})
+	props := map[string]any{"image": "ghcr.io/org/app:v1"}
+
+	for _, kind := range []string{"deployment", "webservice", "worker"} {
+		t.Run(kind, func(t *testing.T) {
+			orders := map[string][]oam.Trait{"scaler only": {within}}
+			if kind == "deployment" {
+				// The role kinds write their own spread at a count above one,
+				// which the topology-spread trait refuses on any component.
+				orders["scaler first"] = []oam.Trait{within, spread}
+				orders["spread first"] = []oam.Trait{spread, within}
+			}
+			for name, trs := range orders {
+				t.Run(name, func(t *testing.T) {
+					cluster, err := transformCluster(t, kind, props, policy, trs...)
+					if err != nil {
+						t.Fatalf("a scaler bounded 1 to 2 under a ceiling of 2 was refused: %v", err)
+					}
+					if err := generateErr(cluster); err != nil {
+						t.Fatalf("generate: %v", err)
+					}
+					if dep := oneDeployment(t, cluster); dep.Spec.Replicas != nil {
+						t.Errorf("spec.replicas = %d, want it unset", *dep.Spec.Replicas)
+					}
+					hpas := generatedHPAs(t, cluster)
+					if len(hpas) != 1 || hpas[0].Spec.MaxReplicas != 2 {
+						t.Errorf("HPAs = %v, want one with maxReplicas 2", hpas)
+					}
+				})
+			}
+
+			// Control: the ceiling still holds on the scaler's own maximum.
+			err := transformOne(t, kind, props, policy, over)
+			if err == nil || !strings.Contains(err.Error(), "exceeds enforced maximum 2") {
+				t.Errorf("scaler maxReplicas 3 over a ceiling of 2: error = %v, want the replica-maximum refusal", err)
+			}
+
+			// Control: without a scaler the default count is the Deployment's
+			// own and the ceiling refuses it.
+			err = transformOne(t, kind, props, policy)
+			if err == nil || !strings.Contains(err.Error(), "exceeds enforced maximum 2") {
+				t.Errorf("no scaler, default 3 over a ceiling of 2: error = %v, want the replica-maximum refusal", err)
+			}
+		})
+	}
+}
