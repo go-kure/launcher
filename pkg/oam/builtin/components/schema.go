@@ -627,18 +627,21 @@ func schemaContainerEntry() map[string]oam.PropertySchema {
 }
 
 // schemaInitContainers describes the `initContainers` property. An init
-// container takes no `probes` or `lifecycle` — Kubernetes forbids both on one
-// (see initContainerRejectedKeys) — and no `ports`; it takes its own
-// restartPolicy and restartPolicyRules (schemaInitContainerRestart).
+// container takes no `ports`; it takes its own restartPolicy and
+// restartPolicyRules (schemaInitContainerRestart). `probes` and `lifecycle`
+// are listed too, but parseInitContainers accepts them only with
+// `restartPolicy: Always` (restartableOnlyInitKeys), as Kubernetes does.
 func schemaInitContainers() oam.PropertySchema {
 	props := schemaContainerEntry()
 	maps.Copy(props, schemaInitContainerRestart())
+	props["probes"] = schemaProbes(false)
+	props["lifecycle"] = schemaLifecycle(false)
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeArray,
-		Description: "Init containers run to completion, in order, before the main container starts.",
+		Description: "Init containers start in order, before the main container. A regular one runs to completion first; one with restartPolicy: Always is a native sidecar that stays running for the pod's life.",
 		Items: &oam.PropertySchema{
 			Type:        oam.PropertyTypeObject,
-			Description: "A single init container definition. Probes and lifecycle hooks are not accepted: Kubernetes forbids them on an init container.",
+			Description: "A single init container definition. Probes and lifecycle hooks are accepted only with restartPolicy: Always; Kubernetes forbids them on a regular init container.",
 			Properties:  props,
 		},
 	}

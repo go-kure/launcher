@@ -30,8 +30,7 @@ import (
 // The hint is a type's answer for its top-level keys. A field below the top
 // level, inside a property the type declares, is refused by the parser of that
 // property (resourcesRejectedKeys, podResourcesRejectedKeys,
-// affinityShorthandRejectedKeys below, initContainerRejectedKeys,
-// volumeClaimTemplateRejectedKeys); the document check appends the type's
+// affinityShorthandRejectedKeys below, volumeClaimTemplateRejectedKeys); the document check appends the type's
 // NestedUnsupportedFieldHint to its refusal of such a key
 // (refusedNestedKeyHint).
 
@@ -150,15 +149,12 @@ func reasonOnly(_, reason string) string { return reason }
 // containerNestedRefusals are the objects below the top level that every
 // workload type of refusedKeys declares and whose parser refuses keys by name,
 // keyed by the declared keys down to the object, joined with "." (array items
-// unnamed): the main container's `resources`, an init container entry, the
+// unnamed): the main container's `resources`, the
 // `resources` of an init container or a sidecar entry, and the pod's own
 // `podResources`. A type with no `sidecars` property never reaches that row.
 var containerNestedRefusals = map[string]nestedRefusal{
-	"resources":    {resourcesRejectedKeys, reasonOnly},
-	"podResources": {podResourcesRejectedKeys, reasonOnly},
-	"initContainers": {initContainerRejectedKeys, func(key, reason string) string {
-		return key + ": not supported on an init container — " + reason
-	}},
+	"resources":                {resourcesRejectedKeys, reasonOnly},
+	"podResources":             {podResourcesRejectedKeys, reasonOnly},
 	"initContainers.resources": {resourcesRejectedKeys, reasonOnly},
 	"sidecars.resources":       {resourcesRejectedKeys, reasonOnly},
 }

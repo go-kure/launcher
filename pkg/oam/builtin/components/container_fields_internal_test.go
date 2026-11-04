@@ -121,8 +121,8 @@ func TestContainerFieldKeysDoNotCollide(t *testing.T) {
 		if _, ok := podSpecRejectedKeys[k]; ok {
 			t.Errorf("container field %q is also a refused pod-level key", k)
 		}
-		if _, ok := initContainerRejectedKeys[k]; ok {
-			t.Errorf("container field %q is also a refused init container key", k)
+		if _, ok := restartableOnlyInitKeys[k]; ok {
+			t.Errorf("container field %q is also a restartable-only init container key", k)
 		}
 		for _, list := range [][]string{initContainerPropertyKeys, sidecarPropertyKeys} {
 			if n := len(slices.DeleteFunc(slices.Clone(list), func(s string) bool { return s != k })); n != 1 {

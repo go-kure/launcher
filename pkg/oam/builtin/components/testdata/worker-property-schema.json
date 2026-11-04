@@ -363,10 +363,10 @@
   },
   "initContainers": {
     "type": "array",
-    "description": "Init containers run to completion, in order, before the main container starts.",
+    "description": "Init containers start in order, before the main container. A regular one runs to completion first; one with restartPolicy: Always is a native sidecar that stays running for the pod's life.",
     "items": {
       "type": "object",
-      "description": "A single init container definition. Probes and lifecycle hooks are not accepted: Kubernetes forbids them on an init container.",
+      "description": "A single init container definition. Probes and lifecycle hooks are accepted only with restartPolicy: Always; Kubernetes forbids them on a regular init container.",
       "properties": {
         "args": {
           "type": "array",
@@ -575,14 +575,51 @@
             "Never"
           ]
         },
+        "lifecycle": {
+          "type": "object",
+          "description": "Lifecycle hooks run by the kubelet around container start/stop (exec, httpGet, or sleep).",
+          "properties": {
+            "postStart": {
+              "type": "object",
+              "description": "Executed immediately after the container is created.",
+              "additionalProperties": true
+            },
+            "preStop": {
+              "type": "object",
+              "description": "Executed immediately before the container is terminated.",
+              "additionalProperties": true
+            }
+          }
+        },
         "name": {
           "type": "string",
           "description": "Container name.",
           "required": true
         },
+        "probes": {
+          "type": "object",
+          "description": "Health probes for the container.",
+          "properties": {
+            "liveness": {
+              "type": "object",
+              "description": "Liveness probe determining when the container should be restarted.",
+              "additionalProperties": true
+            },
+            "readiness": {
+              "type": "object",
+              "description": "Readiness probe determining when the container can receive traffic.",
+              "additionalProperties": true
+            },
+            "startup": {
+              "type": "object",
+              "description": "Startup probe determining when the container has finished starting.",
+              "additionalProperties": true
+            }
+          }
+        },
         "resizePolicy": {
           "type": "array",
-          "description": "How the container reacts to an in-place resize of each resource. On an init container and on a pod whose restartPolicy is Never only NotRequired is accepted.",
+          "description": "How the container reacts to an in-place resize of each resource. On an init container that is not restartable (restartPolicy other than Always) and on a pod whose restartPolicy is Never only NotRequired is accepted.",
           "items": {
             "type": "object",
             "description": "The resize policy of one resource; a resource may be named once.",
@@ -662,8 +699,9 @@
         },
         "restartPolicy": {
           "type": "string",
-          "description": "The init container's own restart policy, overriding the pod's for this container. Always is not accepted: it makes the container a native sidecar, which this package does not model. Needs the cluster's ContainerRestartRules feature gate, on by default from Kubernetes 1.35.",
+          "description": "The init container's own restart policy, overriding the pod's for this container. Always makes the container a native sidecar: it runs for the life of the pod, alongside the main container, and takes probes and lifecycle hooks but no restartPolicyRules. Never and OnFailure need the cluster's ContainerRestartRules feature gate, on by default from Kubernetes 1.35.",
           "enum": [
+            "Always",
             "Never",
             "OnFailure"
           ]
@@ -1268,7 +1306,7 @@
   },
   "resizePolicy": {
     "type": "array",
-    "description": "How the container reacts to an in-place resize of each resource. On an init container and on a pod whose restartPolicy is Never only NotRequired is accepted.",
+    "description": "How the container reacts to an in-place resize of each resource. On an init container that is not restartable (restartPolicy other than Always) and on a pod whose restartPolicy is Never only NotRequired is accepted.",
     "items": {
       "type": "object",
       "description": "The resize policy of one resource; a resource may be named once.",
@@ -1861,7 +1899,7 @@
         },
         "resizePolicy": {
           "type": "array",
-          "description": "How the container reacts to an in-place resize of each resource. On an init container and on a pod whose restartPolicy is Never only NotRequired is accepted.",
+          "description": "How the container reacts to an in-place resize of each resource. On an init container that is not restartable (restartPolicy other than Always) and on a pod whose restartPolicy is Never only NotRequired is accepted.",
           "items": {
             "type": "object",
             "description": "The resize policy of one resource; a resource may be named once.",
