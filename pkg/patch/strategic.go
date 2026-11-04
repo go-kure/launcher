@@ -89,10 +89,17 @@ func applyTypedSMP(resource *unstructured.Unstructured, patch map[string]any, ty
 // 1e21 a whole number stays a float64; between 2^63 and 1e21 it is a json.Number
 // of plain digits, as is a plain integer of any size beyond the int64 range.
 // Those are the types its encoding decodes to.
-// A nil slice or map, at any depth, becomes an empty one, not null, which a merge
-// patch reads as a deletion; an explicit nil value stays nil. A document that
-// nests deeper than maxDepth, or contains itself, is an error. Normalizing twice
-// changes nothing.
+// A nil []any or map[string]any, at any depth through chains of those two types,
+// becomes an empty one, not null, which a merge patch reads as a deletion; an
+// explicit nil value stays nil, and so does a nil m itself. Any other container
+// type (an array, a typed slice or map, a pointer), and whatever it holds, is
+// left to encoding/json, so a nil []any inside one stays null. A chain of []any
+// and map[string]any that nests deeper than maxDepth, or contains itself, is an
+// error. Nesting through any other container type is bounded only by
+// encoding/json, which returns an error at its own limit, so a document nested
+// beyond maxDepth through such a type can pass once and come out as plain
+// []any and map[string]any. Normalizing twice changes nothing for a document
+// within maxDepth; beyond it, the second pass can return errTooDeep.
 func jsonTyped(m map[string]any) (map[string]any, error) {
 	m, err := normalizeNil(m)
 	if err != nil {
@@ -196,14 +203,16 @@ const maxNumberLiteral = 64
 // an exponent.
 var bigLimit = new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil)
 
-// maxDepth bounds how deep the nil scan and emptied walk, as encoding/json bounds the cycle
-// check of json.Marshal: a document that nests deeper, or that contains
-// itself, is an error, not a stack overflow.
+// maxDepth bounds how deep the nil scan and the emptied walk go through []any and
+// map[string]any, as encoding/json bounds the cycle check of json.Marshal: a
+// chain of those two types that nests deeper, or contains itself, is an error,
+// not a stack overflow. It does not bound any other container type.
 const maxDepth = 1000
 
-// normalizeNil returns m itself when it holds no nil []any or nil map[string]any,
-// and otherwise a copy in which each is an empty one. The scan only reads, so a
-// document without a nil container is not copied here. A nil m is returned as is.
+// normalizeNil returns m itself when it holds no nil []any or nil map[string]any
+// reachable through chains of those two types, and otherwise a copy in which each
+// is an empty one. The scan only reads, so a document without such a nil
+// container is not copied here. A nil m is returned as is, not emptied.
 func normalizeNil(m map[string]any) (map[string]any, error) {
 	if m == nil {
 		return nil, nil
@@ -220,8 +229,9 @@ func normalizeNil(m map[string]any) (map[string]any, error) {
 }
 
 // hasNilContainer reports whether v holds a nil []any or nil map[string]any at
-// any depth. A document nested deeper than maxDepth, or containing itself, is an
-// error.
+// any depth through chains of those two types; it does not look inside any other
+// container type. A chain nested deeper than maxDepth, or containing itself, is
+// an error.
 func hasNilContainer(v any, depth int) (bool, error) {
 	if depth > maxDepth {
 		return false, errTooDeep
@@ -252,7 +262,8 @@ func hasNilContainer(v any, depth int) (bool, error) {
 var errTooDeep = errors.New("the document is nested too deeply or contains itself")
 
 // emptied returns a copy of v in which a nil []any or nil map[string]any, at any
-// depth, is an empty one. Other values, an explicit nil among them, are kept.
+// depth through chains of those two types, is an empty one. Other values, an
+// explicit nil and any other container type among them, are kept as they are.
 func emptied(v any, depth int) (any, error) {
 	if depth > maxDepth {
 		return nil, errTooDeep
