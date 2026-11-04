@@ -1189,14 +1189,20 @@ nested object is decoded strictly into the Kubernetes `VolumeSource`: an unknown
 field or a wrongly typed value at any depth is refused, a `null` key reads as
 absent, and a `0`, `false` or `""` that the API server would default is refused
 rather than dropped. A flat source key (`configMapName`, `secretName`,
-`sizeLimit`) and the nested object on one entry are refused, an `image`
+`sizeLimit`) and the nested object on one entry are refused, a nested
+`configMap` needs its `name` and a nested `secret` its `secretName` (as the flat
+keys do), a `csi` source needs its `driver` and a `projected` `configMap` or
+`secret` source its `name`, an `image`
 reference is checked by `ValidateImageRef`, and the label selectors of a
 `projected` cluster trust bundle and of an `ephemeral` claim template are held as
 the `pod` kind holds them. `hostPath` and `persistentVolumeClaim` stay on their
 flat routes (`type: hostPath`, `type: pvc`), which own the hostPath gate and the
 claim generation. Every other Kubernetes volume source (`nfs` and the removed
 in-tree plugins such as `gitRepo`, `iscsi` or `rbd`) is refused by name, because
-Pod Security `restricted` does not admit it. A fully-authored entry whose `type`
+Pod Security `restricted` does not admit it. The other fields the API server
+requires inside a nested source (a `serviceAccountToken` `path`, a
+`clusterTrustBundle` `path`, a `downwardAPI` item's `path`) are not checked.
+A fully-authored entry whose `type`
 matches none of the recognized sources — including `type` omitted entirely — is
 rejected outright rather than silently producing no volume or mount for an entry
 the author clearly intended to add. Every controller kind (`deployment`,

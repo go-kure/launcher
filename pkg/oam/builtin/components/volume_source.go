@@ -153,6 +153,27 @@ func parseNestedVolume(m map[string]any, volName, volType string) (corev1.Volume
 	if err := validateVolumeSourceSelectors(spec); err != nil {
 		return corev1.Volume{}, errors.Wrap(err, label)
 	}
+	// The flat routes require the referenced name (configMapName, secretName);
+	// the API server refuses a volume without one, so the nested form does too.
+	if cm := spec.ConfigMap; cm != nil && cm.Name == "" {
+		return corev1.Volume{}, errors.Errorf("%s: name is required", label)
+	}
+	if s := spec.Secret; s != nil && s.SecretName == "" {
+		return corev1.Volume{}, errors.Errorf("%s: secretName is required", label)
+	}
+	if c := spec.CSI; c != nil && c.Driver == "" {
+		return corev1.Volume{}, errors.Errorf("%s: driver is required", label)
+	}
+	if p := spec.Projected; p != nil {
+		for i, source := range p.Sources {
+			if cm := source.ConfigMap; cm != nil && cm.Name == "" {
+				return corev1.Volume{}, errors.Errorf("%s: sources[%d].configMap: name is required", label, i)
+			}
+			if s := source.Secret; s != nil && s.Name == "" {
+				return corev1.Volume{}, errors.Errorf("%s: sources[%d].secret: name is required", label, i)
+			}
+		}
+	}
 	if es := spec.EmptyDir; es != nil && es.SizeLimit != nil && es.SizeLimit.Sign() < 0 {
 		return corev1.Volume{}, errors.Errorf("%s: sizeLimit must not be negative, got %q", label, es.SizeLimit.String())
 	}
