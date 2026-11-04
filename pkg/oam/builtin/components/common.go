@@ -287,8 +287,8 @@ var (
 // restartable one is a named-port target (go-kure/launcher#1225).
 var restartableOnlyInitKeys = map[string]string{
 	"ports":     "a regular init container has exited before the app containers start, so nothing can reach a port it declares; set restartPolicy: Always to make it a native sidecar, or declare the port on a sidecar instead",
-	"probes":    "Kubernetes forbids probes on an init container that is not restartable, which runs to completion before the app containers start; set restartPolicy: Always to make it a native sidecar, or author them on a sidecar instead",
-	"lifecycle": "Kubernetes forbids lifecycle hooks on an init container that is not restartable, which runs to completion before the app containers start; set restartPolicy: Always to make it a native sidecar, or author them on a sidecar instead",
+	"probes":    regularInitProbesReason + appYAMLSidecarTail,
+	"lifecycle": regularInitLifecycleReason + appYAMLSidecarTail,
 }
 
 // AffinityConfig holds parsed affinity/anti-affinity configuration from OAM properties.
