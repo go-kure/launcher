@@ -362,7 +362,7 @@ func TestInitContainerRestart_Refusals(t *testing.T) {
 		entry map[string]any
 		want  []string
 	}{
-		{"policy Always", map[string]any{"restartPolicy": "Always"}, []string{"restartPolicy: Always is not accepted on an init container", "author a sidecar instead"}},
+		{"policy Always with rules", map[string]any{"restartPolicy": "Always", "restartPolicyRules": []any{restartRule("In", 1)}}, []string{"restartPolicyRules: not accepted with restartPolicy Always"}},
 		{"policy unknown", map[string]any{"restartPolicy": "Sometimes"}, []string{`restartPolicy: invalid value "Sometimes"`, "Never", "OnFailure"}},
 		{"policy not a string", map[string]any{"restartPolicy": 1}, []string{"restartPolicy"}},
 		{"rules without a policy", map[string]any{"restartPolicyRules": []any{restartRule("In", 1)}}, []string{"restartPolicyRules: restartPolicy is required when restart rules are used"}},

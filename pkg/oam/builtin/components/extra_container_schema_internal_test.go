@@ -57,16 +57,19 @@ func TestContainerEntrySchemaMatchesParser(t *testing.T) {
 		})
 	}
 	initItem := schemaInitContainers().Items
-	for k := range initContainerRejectedKeys {
-		if _, ok := initItem.Properties[k]; ok {
-			t.Errorf("initContainers schema publishes rejected key %q", k)
+	for k := range restartableOnlyInitKeys {
+		if _, ok := initItem.Properties[k]; !ok {
+			t.Errorf("initContainers schema omits restartable-only key %q", k)
 		}
-		if slices.Contains(initContainerPropertyKeys, k) {
-			t.Errorf("initContainerPropertyKeys accepts rejected key %q", k)
+		if !slices.Contains(initContainerPropertyKeys, k) {
+			t.Errorf("initContainerPropertyKeys omits restartable-only key %q", k)
 		}
 		if !slices.Contains(sidecarPropertyKeys, k) {
-			t.Errorf("rejected init key %q is not a sidecar key either; the explanation would point authors at a sidecar that refuses it too", k)
+			t.Errorf("restartable-only init key %q is not a sidecar key either; the explanation would point authors at a sidecar that refuses it too", k)
 		}
+	}
+	if _, ok := initItem.Properties["ports"]; ok {
+		t.Error("initContainers schema publishes ports; version one of a native sidecar takes none (go-kure/launcher#1225)")
 	}
 }
 

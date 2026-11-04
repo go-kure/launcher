@@ -2280,9 +2280,10 @@ and by scope, whatever component or trait emits it.
   - `job`, `cronjob`: the raw `affinity`, `tolerations` and `topologySpreadConstraints`
     are read;
   - `job`, `cronjob`: `sidecars` (a plain sidecar keeps the Job's pod from completing;
-    it needs the restartable init container below);
-  - all workloads: `restartPolicy: Always` on an init container (a restartable init
-    container, which the package does not model), the container fields `restartPolicy`
+    use an `initContainers` entry with `restartPolicy: Always` instead);
+  - all workloads: `ports` on a native sidecar (an `initContainers` entry with
+    `restartPolicy: Always`, which takes probes and lifecycle hooks;
+    go-kure/launcher#1225), the container fields `restartPolicy`
     and `restartPolicyRules` on the main container and on a sidecar, `lifecycle.stopSignal`
     (alpha upstream) and a port's `hostPort` and `hostIP`, and the pod field
     `evictionResponders`. `imagePullPolicy`, `terminationMessagePath`,
@@ -2290,7 +2291,8 @@ and by scope, whatever component or trait emits it.
     `securityContext.windowsOptions` are read on the main container, on an init
     container and on a sidecar, with its strings held to upstream's rules there and
     at the pod level, and an init container reads its own `restartPolicy`
-    (`Never` or `OnFailure`) and `restartPolicyRules` (README "Container fields");
+    (`Never`, `OnFailure` or `Always`) and `restartPolicyRules` (not with `Always`;
+    README "Container fields");
   - `service`: a literal `clusterIP`, `clusterIPs` and `externalIPs`, which are
     refused. Every other `ServiceSpec` field is read: `type: ExternalName` with
     `externalName`, the traffic policies, session affinity, the IP families, the

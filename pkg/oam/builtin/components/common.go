@@ -210,6 +210,18 @@ type InitContainerConfig struct {
 	// restart policy and rules (parseInitContainerRestart); nil when unauthored.
 	RestartPolicy      *corev1.ContainerRestartPolicy
 	RestartPolicyRules []corev1.ContainerRestartRule
+	// Probes and Lifecycle are read only from a restartable entry (a native
+	// sidecar, go-kure/launcher#1180); see Restartable.
+	Probes    ProbeConfig
+	Lifecycle *corev1.Lifecycle
+}
+
+// Restartable reports whether the init container is a native sidecar: its own
+// restart policy is Always. Only such a container may carry probes, lifecycle
+// hooks and a RestartContainer resize policy (validateInitContainers in
+// k8s.io/kubernetes pkg/apis/core/validation/validation.go).
+func (ic InitContainerConfig) Restartable() bool {
+	return ic.RestartPolicy != nil && *ic.RestartPolicy == corev1.ContainerRestartPolicyAlways
 }
 
 // SidecarContainerConfig holds the parsed OAM fields for a sidecar container.
@@ -246,12 +258,14 @@ type SidecarContainerConfig struct {
 //
 // Both end with containerFieldKeys, the fields parseContainerFields reads for
 // every container of the pod (go-kure/launcher#790). An init entry also takes
-// its own restartPolicy and restartPolicyRules (parseInitContainerRestart).
+// its own restartPolicy and restartPolicyRules (parseInitContainerRestart), and
+// probes and lifecycle, which only a restartable entry may author
+// (restartableOnlyInitKeys, go-kure/launcher#1180). It takes no ports.
 var (
 	initContainerPropertyKeys = append([]string{
 		"name", "image", "command", "args", "env", "envFrom", "resources",
 		"volumeMounts", "volumeDevices", "securityContext", "workingDir",
-		"restartPolicy", "restartPolicyRules",
+		"restartPolicy", "restartPolicyRules", "probes", "lifecycle",
 	}, containerFieldKeys...)
 	sidecarPropertyKeys = append([]string{
 		"name", "image", "command", "args", "env", "envFrom", "resources",
@@ -259,16 +273,16 @@ var (
 	}, containerFieldKeys...)
 )
 
-// initContainerRejectedKeys names the keys a sidecar accepts that an init
-// container refuses with an explanation rather than a bare unrecognized-key
-// error. Kubernetes forbids both on a regular init container: it runs to
-// completion before any app container starts, so there is nothing for a
+// restartableOnlyInitKeys names the keys an init entry may author only with
+// `restartPolicy: Always`, each with the explanation its refusal carries.
+// Kubernetes forbids both on a regular init container: it runs to completion
+// before any app container starts, so there is nothing for a
 // readiness/liveness/startup probe to gate and no running container for a
-// postStart/preStop hook to wrap. Only a restartable (restartPolicy: Always)
-// init container may carry them, and this package does not model one.
-var initContainerRejectedKeys = map[string]string{
-	"probes":    "Kubernetes forbids probes on an init container, which runs to completion before the app containers start; author them on a sidecar instead",
-	"lifecycle": "Kubernetes forbids lifecycle hooks on an init container, which runs to completion before the app containers start; author them on a sidecar instead",
+// postStart/preStop hook to wrap. A restartable init container (a native
+// sidecar) keeps running and may carry them (go-kure/launcher#1180).
+var restartableOnlyInitKeys = map[string]string{
+	"probes":    "Kubernetes forbids probes on an init container that is not restartable, which runs to completion before the app containers start; set restartPolicy: Always to make it a native sidecar, or author them on a sidecar instead",
+	"lifecycle": "Kubernetes forbids lifecycle hooks on an init container that is not restartable, which runs to completion before the app containers start; set restartPolicy: Always to make it a native sidecar, or author them on a sidecar instead",
 }
 
 // AffinityConfig holds parsed affinity/anti-affinity configuration from OAM properties.
@@ -3089,10 +3103,16 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 		// first so an init-container probe or hook names the Kubernetes rule
 		// it breaks rather than reading as a typo. Sorted, like
 		// parseVolumeClaimTemplates' equivalent loop, so an entry authoring
-		// both reports the same one every run.
-		for _, k := range slices.Sorted(maps.Keys(initContainerRejectedKeys)) {
-			if _, present := m[k]; present {
-				return nil, errors.Errorf("%s: %s: not supported on an init container — %s", label, k, initContainerRejectedKeys[k])
+		// both reports the same one every run. A restartable entry (a native
+		// sidecar, go-kure/launcher#1180) takes both; whether it is one is read
+		// off the raw key here, and parseInitContainerRestart holds the value
+		// to its rules below.
+		restartable := authoredRestartable(m)
+		if !restartable {
+			for _, k := range slices.Sorted(maps.Keys(restartableOnlyInitKeys)) {
+				if _, present := m[k]; present {
+					return nil, errors.Errorf("%s: %s: not supported on an init container that is not restartable — %s", label, k, restartableOnlyInitKeys[k])
+				}
 			}
 		}
 		if err := rejectUnknownKeys(m, initContainerPropertyKeys, label); err != nil {
@@ -3161,15 +3181,38 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 		} else if present {
 			ic.WorkingDir = wd
 		}
-		if ic.Fields, err = parseContainerFields(m, true); err != nil {
+		if ic.Fields, err = parseContainerFields(m, !restartable); err != nil {
 			return nil, errors.Errorf("%s: %w", label, err)
 		}
 		if ic.RestartPolicy, ic.RestartPolicyRules, err = parseInitContainerRestart(m); err != nil {
 			return nil, errors.Errorf("%s: %w", label, err)
 		}
+		if ic.Restartable() {
+			// Read as a sidecar's are, but against no declared ports: a native
+			// sidecar takes no `ports` (go-kure/launcher#1225), so a probe or
+			// hook addressing a port by name has nothing to resolve against.
+			if ic.Probes, err = parseProbes(m, true, ""); err != nil {
+				return nil, errors.Errorf("%s: invalid probe configuration: %w", label, err)
+			}
+			if ic.Lifecycle, err = parseLifecycle(m, true, ""); err != nil {
+				return nil, errors.Errorf("%s: invalid lifecycle configuration: %w", label, err)
+			}
+			if err := checkNamedPortsDeclared(ic.Probes, ic.Lifecycle, nil, "this init container"); err != nil {
+				return nil, errors.Errorf("%s: %w", label, err)
+			}
+		}
 		out = append(out, ic)
 	}
 	return out, nil
+}
+
+// authoredRestartable reports whether an `initContainers` entry authors
+// `restartPolicy: Always`, which makes it a native sidecar. A value of another
+// type or spelling reads as not restartable here; parseInitContainerRestart
+// refuses it with its own message.
+func authoredRestartable(raw map[string]any) bool {
+	v, ok := raw["restartPolicy"].(string)
+	return ok && corev1.ContainerRestartPolicy(v) == corev1.ContainerRestartPolicyAlways
 }
 
 func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
@@ -3291,8 +3334,8 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 // warns across containers, and a Service selecting the port by name then
 // reaches only the first container that declares it (go-kure/launcher#660). A
 // name repeated within one container is parseContainerPorts' to refuse. Init
-// containers declare no ports here: initContainerPropertyKeys has no `ports`,
-// and this package does not model a restartable one (initContainerRejectedKeys).
+// containers, native sidecars included, declare no ports here:
+// initContainerPropertyKeys has no `ports` (go-kure/launcher#1225).
 func checkPodPortNames(mainPorts []corev1.ContainerPort, sidecars []SidecarContainerConfig) error {
 	declaredBy := map[string]string{}
 	for _, p := range mainPorts {
@@ -4895,6 +4938,13 @@ func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 	ic.Fields.apply(container)
 	container.RestartPolicy = ic.RestartPolicy
 	container.RestartPolicyRules = ic.RestartPolicyRules
+	// A probe and a hook are pointers into the config, with further pointers
+	// beneath them: copied, as buildSidecarContainer does. Both are nil unless
+	// the entry is restartable.
+	container.ReadinessProbe = ic.Probes.Readiness.DeepCopy()
+	container.LivenessProbe = ic.Probes.Liveness.DeepCopy()
+	container.StartupProbe = ic.Probes.Startup.DeepCopy()
+	container.Lifecycle = ic.Lifecycle.DeepCopy()
 	return container, nil
 }
 

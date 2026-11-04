@@ -1274,12 +1274,12 @@ and a `sidecars` entry those plus `ports`, `probes` and `lifecycle`, each
 parsed by the same parser as the main container's field of that name. Any
 other key is an error naming the entry — before that the parsers read the
 keys they knew and dropped the rest, so an authored `workingDir`, `envFrom`,
-`probes` or `lifecycle` built cleanly and reached no container. `probes` and
-`lifecycle` on an init container are refused with their own message rather
-than accepted: Kubernetes forbids both on an init container, which runs to
-completion before the app containers start, and this package does not model
-the restartable (`restartPolicy: Always`) init container that may carry them
-— author them on a sidecar. A sidecar's probe or hook may address a port by
+`probes` or `lifecycle` built cleanly and reached no container. An
+`initContainers` entry also takes `probes` and `lifecycle`, but only with
+`restartPolicy: Always` (a native sidecar, see below): Kubernetes forbids both
+on an init container that runs to completion before the app containers start,
+so on any other entry they are refused with their own message, which points at
+`restartPolicy: Always` or a `sidecars` entry. A sidecar's probe or hook may address a port by
 name only when that sidecar itself declares a `ports[]` entry of that name —
 the kubelet resolves a named port against the container's own ports, so an
 undeclared name would build and never resolve; unlike the main container,
@@ -1410,9 +1410,9 @@ as keys of each `initContainers` and `sidecars` entry. One parser
   - an unknown key, a missing key, a resource other than `cpu`/`memory`, an
     unknown restart policy and a repeated resource are each refused by entry
     (`resizePolicy[1].resourceName: "cpu" is named by an earlier entry; …`);
-  - `RestartContainer` is refused on an `initContainers` entry: Kubernetes
-    allows it only on a restartable init container, which this package does not
-    model. `NotRequired` is accepted there;
+  - `RestartContainer` is refused on an `initContainers` entry unless that
+    entry has `restartPolicy: Always`, as Kubernetes allows it only on a
+    restartable init container. `NotRequired` is accepted on any entry;
   - on a pod whose `restartPolicy` is `Never` — which only `job` and `cronjob`
     can author — every container's restart policy must be `NotRequired`. That
     check runs on the assembled pod spec (`checkResizePolicyRestart`), so it is
@@ -1425,22 +1425,29 @@ An `initContainers` entry also reads its own `restartPolicy` and
 `validateInitContainerRestartPolicy` and `validateContainerRestartPolicy`:
 
 - `restartPolicy` is `Never` or `OnFailure`, overriding the pod's restart
-  policy for that container. `Always` is refused with its reason: it makes the
-  init container restartable (a native sidecar), which this package does not
-  model, the same reason `probes` and `lifecycle` are refused on an init entry;
-  author a `sidecars` entry instead;
-- `restartPolicyRules` needs `restartPolicy` and holds at most 20 rules. A rule
+  policy for that container, or `Always`, which makes the entry a **native
+  sidecar** (go-kure/launcher#1180): it starts in list order like any init
+  container, but stays running for the life of the pod, alongside the main
+  container. Only such an entry takes `probes`, `lifecycle` and a
+  `RestartContainer` resize policy (the same parsers as a `sidecars` entry);
+  `restartPolicyRules` is refused beside `Always`, and `ports` are not read on
+  an init entry (go-kure/launcher#1225), so a probe or hook on a native
+  sidecar addresses its port by number, never by name. It needs a cluster with
+  sidecar container support. Built-in resource defaults apply to it; a
+  `policy`'s defaults are the main container's only;
+- `restartPolicyRules` needs `restartPolicy` (not `Always`) and holds at most 20 rules. A rule
   is a closed object: `action` is required and is `Restart` (upstream's
   `RestartAllContainers` needs a separate feature gate, and is refused), and
   `exitCodes` is required: a closed object whose `operator` is required and is
   `In` or `NotIn`, and whose optional `values` is a list of at most 255 int32
   exit codes, each once (the field is a set);
-- Kubernetes keeps either field on an init container only with the
-  `ContainerRestartRules` feature gate, on by default from Kubernetes 1.35. A
-  cluster with the gate off drops both fields when it creates the pod, without
-  an error, so the init container falls back to the pod's restart policy. This
-  package does not see the target cluster's version, so that is a documented
-  limit, not a check.
+- Kubernetes keeps `Never`, `OnFailure` and `restartPolicyRules` on an init
+  container only with the `ContainerRestartRules` feature gate, on by default
+  from Kubernetes 1.35. A cluster with the gate off drops them when it creates
+  the pod, without an error, so the init container falls back to the pod's
+  restart policy. `Always` is not tied to that gate: upstream validation
+  accepts it with the gate on or off. This package does not see the target
+  cluster's version, so that is a documented limit, not a check.
 
 On a `sidecars` entry neither key is read, and both are refused as unknown
 keys. At the top level neither is a container key either.
@@ -9398,8 +9405,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   container ports, and emits no Service (see "Main container ports"). No
   `sidecars` schema key (init containers only): a plain sidecar keeps running
   after the main container exits, so the Job's pod would never complete. The
-  container that fits is the restartable init container, which this package
-  does not model (see "Container fields"). Since go-kure/launcher#790 it
+  container that fits is the restartable init container, an `initContainers`
+  entry with `restartPolicy: Always` (see "Container fields"). Since go-kure/launcher#790 it
   publishes the raw `affinity`, `tolerations` and `topologySpreadConstraints`
   (see "Raw scheduling properties"), written onto the Job template's pod
   template.
@@ -12828,7 +12835,6 @@ The positions are:
 |----------|----|------|
 | a container's `resources`: the main container's, and an `initContainers` or `sidecars` entry's | every workload kind | `claims` |
 | the pod's `podResources` | every workload kind | `claims` (upstream validation forbids claims at pod level: "claims may not be set for Resources at pod-level") |
-| an `initContainers` entry | every workload kind | `probes`, `lifecycle` (see [Container fields](#container-fields)) |
 | the `affinity` shorthand | `webservice`, `worker` | `nodeAffinity`, `podAffinity`, `podAntiAffinity` |
 | a `volumeClaimTemplates` entry | `statefulset` | `volumeName`, `dataSource`, `volumeMount` |
 

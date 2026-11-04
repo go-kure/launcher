@@ -24,7 +24,7 @@ import (
 //
 // An init container's own `restartPolicy` and `restartPolicyRules` are read
 // apart from these, by parseInitContainerRestart: they are init-entry keys
-// only, and restartPolicy Always is refused there.
+// only; restartPolicy Always makes the init container a native sidecar.
 type ContainerFields struct {
 	ImagePullPolicy          corev1.PullPolicy
 	TerminationMessagePath   string
@@ -68,17 +68,19 @@ var (
 // pkg/apis/core/validation/validation.go): a rule needs the container's own
 // policy, a container takes at most 20 rules, a rule's action is Restart and
 // its exitCodes are required, with an operator of In or NotIn and at most 255
-// values. Upstream's Always is left out of initContainerRestartPolicies: it
-// makes the init container restartable (a native sidecar), which this package
-// does not model, and RestartAllContainers is left out of restartRuleActions:
-// it needs the RestartAllContainersOnContainerExits gate.
+// values. Always makes the init container restartable (a native sidecar) and
+// forbids rules, as upstream does without the RestartAllContainers action;
+// RestartAllContainers is left out of restartRuleActions: it needs the
+// RestartAllContainersOnContainerExits gate.
 const (
 	maxRestartPolicyRules   = 20
 	maxRestartRuleExitCodes = 255
 )
 
 var (
-	initContainerRestartPolicies = []corev1.ContainerRestartPolicy{corev1.ContainerRestartPolicyNever, corev1.ContainerRestartPolicyOnFailure}
+	initContainerRestartPolicies = []corev1.ContainerRestartPolicy{
+		corev1.ContainerRestartPolicyAlways, corev1.ContainerRestartPolicyNever, corev1.ContainerRestartPolicyOnFailure,
+	}
 
 	restartRuleActions = []corev1.ContainerRestartRuleAction{corev1.ContainerRestartRuleActionRestart}
 
@@ -131,7 +133,7 @@ func schemaContainerFields() map[string]oam.PropertySchema {
 		},
 		"resizePolicy": {
 			Type:        oam.PropertyTypeArray,
-			Description: "How the container reacts to an in-place resize of each resource. On an init container and on a pod whose restartPolicy is Never only NotRequired is accepted.",
+			Description: "How the container reacts to an in-place resize of each resource. On an init container that is not restartable (restartPolicy other than Always) and on a pod whose restartPolicy is Never only NotRequired is accepted.",
 			Items: &oam.PropertySchema{
 				Type:        oam.PropertyTypeObject,
 				Description: "The resize policy of one resource; a resource may be named once.",
@@ -171,8 +173,8 @@ func parseMainContainerFields(props map[string]any) (ContainerFields, error) {
 // initContainer applies the one rule that differs for an init container:
 // upstream refuses a resize restart policy of RestartContainer on an init
 // container that is not restartable ("must not be set to 'RestartContainer'
-// for non-sidecar initContainers", validateInitContainers), and this package
-// models no restartable one. The rule that depends on the pod's restart policy
+// for non-sidecar initContainers", validateInitContainers); the caller passes
+// true for an init entry without `restartPolicy: Always`. The rule that depends on the pod's restart policy
 // is buildPodSpec's to check (checkResizePolicyRestart): the kind decides that
 // policy, not the container.
 func parseContainerFields(raw map[string]any, initContainer bool) (ContainerFields, error) {
@@ -249,7 +251,7 @@ func parseContainerFields(raw map[string]any, initContainer bool) (ContainerFiel
 			return out, errors.Errorf("%s.restartPolicy: invalid value %q, must be one of %s", label, restart, joinValues(resizeRestartPolicies))
 		}
 		if initContainer && policy == corev1.RestartContainer {
-			return out, errors.Errorf("%s.restartPolicy: %s is not accepted on an init container; Kubernetes allows it only on a restartable one, which this package does not model", label, corev1.RestartContainer)
+			return out, errors.Errorf("%s.restartPolicy: %s is accepted on an init container only when it is restartable (restartPolicy: Always)", label, corev1.RestartContainer)
 		}
 		out.ResizePolicy = append(out.ResizePolicy, corev1.ContainerResizePolicy{ResourceName: name, RestartPolicy: policy})
 	}
@@ -259,8 +261,8 @@ func parseContainerFields(raw map[string]any, initContainer bool) (ContainerFiel
 // parseInitContainerRestart reads one `initContainers` entry's own
 // `restartPolicy` and `restartPolicyRules` (go-kure/launcher#790), held to the
 // upstream rules named above. Never and OnFailure override the pod's restart
-// policy for that container; Always is refused, as it makes the container a
-// native sidecar. Kubernetes accepts a policy other than Always on an init
+// policy for that container; Always makes it a native sidecar and takes no
+// rules. Kubernetes accepts a policy other than Always on an init
 // container only with the ContainerRestartRules feature gate, on by default
 // from 1.35; the cluster's version is not known here, so that is documented,
 // not checked. Errors name the field only; the caller adds the entry label.
@@ -270,9 +272,6 @@ func parseInitContainerRestart(raw map[string]any) (*corev1.ContainerRestartPoli
 		return nil, nil, err
 	} else if present {
 		p := corev1.ContainerRestartPolicy(v)
-		if p == corev1.ContainerRestartPolicyAlways {
-			return nil, nil, errors.Errorf("restartPolicy: %s is not accepted on an init container; it makes the container restartable (a native sidecar), which this package does not model; author a sidecar instead", p)
-		}
 		if !containsValue(initContainerRestartPolicies, p) {
 			return nil, nil, errors.Errorf("restartPolicy: invalid value %q, must be one of %s", v, joinValues(initContainerRestartPolicies))
 		}
@@ -288,6 +287,9 @@ func parseInitContainerRestart(raw map[string]any) (*corev1.ContainerRestartPoli
 	}
 	if policy == nil {
 		return nil, nil, errors.New("restartPolicyRules: restartPolicy is required when restart rules are used")
+	}
+	if *policy == corev1.ContainerRestartPolicyAlways {
+		return nil, nil, errors.Errorf("restartPolicyRules: not accepted with restartPolicy %s (a native sidecar)", *policy)
 	}
 	if len(entries) > maxRestartPolicyRules {
 		return nil, nil, errors.Errorf("restartPolicyRules: %d rules, Kubernetes accepts at most %d", len(entries), maxRestartPolicyRules)
@@ -376,7 +378,7 @@ func schemaInitContainerRestart() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"restartPolicy": {
 			Type: oam.PropertyTypeString, Enum: enumValues(initContainerRestartPolicies),
-			Description: "The init container's own restart policy, overriding the pod's for this container. Always is not accepted: it makes the container a native sidecar, which this package does not model. Needs the cluster's ContainerRestartRules feature gate, on by default from Kubernetes 1.35.",
+			Description: "The init container's own restart policy, overriding the pod's for this container. Always makes the container a native sidecar: it runs for the life of the pod, alongside the main container, and takes probes and lifecycle hooks but no restartPolicyRules. Never and OnFailure need the cluster's ContainerRestartRules feature gate, on by default from Kubernetes 1.35.",
 		},
 		"restartPolicyRules": {
 			Type:        oam.PropertyTypeArray,

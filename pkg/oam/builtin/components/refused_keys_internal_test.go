@@ -370,14 +370,6 @@ func TestRefusedKeys_InAnEntry(t *testing.T) {
 		if refusedKeyHint(componentType, "livenessProbe") == "" {
 			t.Fatalf("type %q has no top-level refusal of livenessProbe; pick another key for the control below", componentType)
 		}
-		for _, key := range slices.Sorted(maps.Keys(initContainerRejectedKeys)) {
-			t.Run(componentType+"/initContainers/"+key, func(t *testing.T) {
-				props := maps.Clone(refusedKeyBase[componentType])
-				props["initContainers"] = initEntry(key)
-				check(t, componentType, props, "properties.initContainers[0]", key,
-					key+": not supported on an init container — "+initContainerRejectedKeys[key])
-			})
-		}
 		t.Run(componentType+"/initContainers/livenessProbe", func(t *testing.T) {
 			props := maps.Clone(refusedKeyBase[componentType])
 			props["initContainers"] = initEntry("livenessProbe")
