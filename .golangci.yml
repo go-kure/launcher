@@ -26,7 +26,26 @@ linters:
     - whitespace
     # Optional linters (launcher-specific, not required by the downstream platform standard)
     - gosec
+    # Lowering purity (D5, docs/oam/design-lowering-engine.md): a lowering rule's
+    # output is a function of its four inputs, so rule code reads no clock,
+    # environment, file, network or randomness. Scoped by exclusions.rules below.
+    - forbidigo
   settings:
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: '^time\.(Now|Since|Until)$'
+          msg: a lowering rule must not read the clock
+        - pattern: '^os\.(Getenv|LookupEnv|Environ|ExpandEnv|Expand)$'
+          msg: a lowering rule must not read the environment
+        - pattern: '^os\.(ReadFile|Open|OpenFile|Stat|Lstat|ReadDir)$'
+          msg: a lowering rule must not read the filesystem
+        - pattern: '^net\.(Dial\w*|Listen\w*|Lookup\w*)$'
+          msg: a lowering rule must not use the network
+        - pattern: '^(net/)?http\.(Get|Head|Post|PostForm|NewRequest\w*|DefaultClient|DefaultTransport|Client|Transport)$'
+          msg: a lowering rule must not use the network
+        - pattern: '^((math|crypto)/)?rand(/v2)?\.'
+          msg: a lowering rule must not use randomness (math/rand, math/rand/v2, crypto/rand)
     errcheck:
       check-type-assertions: false
       check-blank: false
@@ -55,6 +74,21 @@ linters:
           - errcheck
           - gosec
         path: _test\.go
+      # forbidigo applies to lowering rule code only: the built-in component and
+      # trait packages and the engine's lowering*.go. kurel and pkg/io read files
+      # and the environment on purpose.
+      - linters:
+          - forbidigo
+        path-except: ^pkg/oam/(builtin/(components|traits)/|lowering[^/]*\.go$)
+      - linters:
+          - forbidigo
+        path: _test\.go
+      # Per-file exceptions, each with its reason:
+      # manifestsource.go fetches a manifest URL for the terminal manifests and crd
+      # handlers' Generate (parseManifestSource); no lowering rule calls it.
+      - linters:
+          - forbidigo
+        path: ^pkg/oam/builtin/components/manifestsource\.go$
     paths:
       - third_party$
       - builtin$

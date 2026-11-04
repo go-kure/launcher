@@ -259,6 +259,21 @@ the guard is removed (verified by hand) and passes with it in place, confirming 
 profile defining *both* `expose` and `ingress` capabilities produces byte-identical
 output to one defining `expose` alone.
 
+**Purity is checked two ways.** `pkg/cmd/kurel/lowering_purity_test.go` runs each
+built-in rule eight times on identical inputs (with another rule run in between) and
+builds every `testdata` scenario and every component and trait fixture twice, and
+requires identical results. It catches state kept between calls, the clock, randomness
+and a slice filled from a map. `TestLoweringPurity_CheckReportsImpureRules` keeps the
+check honest with deliberately impure rule doubles (global state, clock, map order,
+reused storage, type and shape changes). A func value is compared by presence only.
+The check cannot catch a read of something that does not change during a test run,
+such as an environment variable or a file, so
+`forbidigo` in `.golangci.yml` refuses the clock, environment, filesystem, network and
+random-number symbols in `pkg/oam/builtin/components`, `pkg/oam/builtin/traits` and
+`pkg/oam/lowering*.go` only. `manifestsource.go`, which fetches a manifest URL for the
+terminal `manifests` and `crd` handlers and is called by no lowering rule, is the one
+exempt file. A rule registered outside this repository is not covered by either check.
+
 ## D7 — recursion bound and provenance-first errors
 
 Both proposed defaults survived unchanged and ship as written. `MaxLoweringDepth = 9`
