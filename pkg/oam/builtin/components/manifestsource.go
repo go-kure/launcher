@@ -494,7 +494,9 @@ func enforceManifestPolicy(objs []client.Object, p oam.Policy) error {
 }
 
 // Generate resolves the source (cached) and applies the per-type process hook.
-// Once ApplyPolicy has supplied a policy it holds the objects it is about to
+// The volumeMounts of the workload objects it yields are held to the mount
+// rules whatever the policy (validateManifestMounts); that refusal is a plain
+// error, not a policy violation. Once ApplyPolicy has supplied a policy it holds the objects it is about to
 // emit to it, which is where the objects of a url source are first known. A
 // refusal here is the component's oam.ViolationError, as the transform reports
 // one from ApplyPolicy; a source that cannot be fetched or read keeps its own
@@ -502,6 +504,9 @@ func enforceManifestPolicy(objs []client.Object, p oam.Policy) error {
 func (c *manifestConfig) Generate(_ *stack.Application) ([]*client.Object, error) {
 	objs, err := c.objects()
 	if err != nil {
+		return nil, err
+	}
+	if err := validateManifestMounts(objs); err != nil {
 		return nil, err
 	}
 	if c.policy != nil {

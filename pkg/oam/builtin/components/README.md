@@ -213,7 +213,7 @@ reads it.
 | `job` | Job | Run-to-completion workload; the same JobSpec fields as `cronjob`'s job template, plus its own `suspend` and the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `limitrange` | LimitRange | Kind-named LimitRange: the whole `LimitRangeSpec` (`limits`, required), strictly decoded — see below. |
 | `listenerset` | ListenerSet | Kind-named Gateway API ListenerSet: the whole `ListenerSetSpec`, strictly decoded; `parentRef` with its `name` and at least one of `listeners`, each with its `name`, `port` and `protocol`, are required. No capability is required and no environment policy applies — see below. |
-| `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. Every object is checked against the environment policy — see below. |
+| `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. Every object is checked against the environment policy — see below. The `volumeMounts` of every container and init container of a Pod, PodTemplate, ReplicationController, Deployment, StatefulSet, DaemonSet, ReplicaSet, Job or CronJob are held to the `app.yaml` mount rules, whatever the policy (go-kure/launcher#1212). |
 | `metallb-bfdprofile` | BFDProfile | Kind-named MetalLB BFD profile: the whole `BFDProfileSpec` (`receiveInterval`, `transmitInterval`, `echoInterval`, `detectMultiplier`, `echoMode`, `passiveMode` and `minimumTtl`, none required), strictly decoded. It is the timers of the BFD session of the BGP peers that name it, and so how fast the loss of such a peer is noticed. Namespaced; no environment policy applies and no capability is required — see below. |
 | `metallb-bgpadvertisement` | BGPAdvertisement | Kind-named MetalLB advertisement over BGP: the whole `BGPAdvertisementSpec` (`ipAddressPools`, `ipAddressPoolSelectors`, `peers`, `nodeSelectors`, `serviceSelectors`, `aggregationLength`, `aggregationLengthV6`, `localPref` and `communities`, none required), strictly decoded. It says which pools' addresses MetalLB announces to which BGP peers, for which Services, and with which route attributes; one that authors nothing limits none of them. `serviceSelectors` is refused beside an aggregation length other than 32 (IPv4) or 128 (IPv6), the CRD's expression rule. Namespaced; no environment policy applies and no capability is required — see below. |
 | `metallb-bgppeer` | BGPPeer | Kind-named MetalLB BGP peer, at `metallb.io/v1beta2`: the whole `BGPPeerSpec` (`myASN`, required; the peer's AS number, its address or interface, its port and timers, `nodeSelectors`, `password`, `passwordSecret`, `bfdProfile` and the switches of the session), strictly decoded. It is a router the cluster's nodes hold a BGP session with, and so one MetalLB announces addresses to. A `connectTime` outside 1 to 65535 seconds, or not a whole number of seconds read in whole milliseconds, is refused, the CRD's two expression rules on a create, and so is a `peerPort: 0`. A `password` written into the object is refused under an environment policy that forbids explicit secrets. Namespaced; no capability is required — see below. |
@@ -230,7 +230,7 @@ reads it.
 | `passthrough` | any (verbatim) | Emit **one** arbitrary object as-declared; a built-in kind has the scope the Kubernetes API gives it, any other kind the scope an authored `clusterScoped` states, or else the one registered for it (namespaced when unknown); a list is rejected, a workload, claim or autoscaler is held to the environment policy, and a Secret is refused under a policy that forbids explicit secrets. |
 | `persistentvolume` | PersistentVolume | Kind-named PersistentVolume: the whole `PersistentVolumeSpec`, its volume sources included, strictly decoded. Cluster-scoped. A `hostPath` or `local` source and `capacity.storage` are held to environment policy — see below. |
 | `persistentvolumeclaim` | PersistentVolumeClaim | Kind-named claim: `size`, `storageClassName`, `accessModes`, `volumeMode`, `selector`, `dataSourceRef`, `volumeName`, `volumeAttributesClassName`. A workload mounts it with a `pvc` volume's `claimName` — see below. |
-| `pod` | Pod | Kind-named bare Pod: the whole `PodSpec` less `ephemeralContainers`, `priority` and `overhead`, strictly decoded. Held to environment policy as a rendered Pod is; no default filled. Carries the `app` label, so traits and Services select it — see below. |
+| `pod` | Pod | Kind-named bare Pod: the whole `PodSpec` less `ephemeralContainers`, `priority` and `overhead`, strictly decoded. Held to environment policy as a rendered Pod is; no default filled. The `volumeMounts` of every container and init container are held to the `app.yaml` mount rules (go-kure/launcher#1212). Carries the `app` label, so traits and Services select it — see below. |
 | `poddisruptionbudget` | PodDisruptionBudget | Kind-named PodDisruptionBudget: the whole `PodDisruptionBudgetSpec` (`minAvailable`, `maxUnavailable`, `selector`, `unhealthyPodEvictionPolicy`), strictly decoded; no top-level field is required and the `selector` is the author's, a defective match expression of it refused. No environment policy applies — see below. |
 | `podmonitor` | PodMonitor | Kind-named Prometheus operator PodMonitor: the whole `PodMonitorSpec`, strictly decoded; `selector` is required. The selector is the author's. No environment policy applies and no capability is required — see below. |
 | `podtemplate` | PodTemplate | Kind-named PodTemplate: its one field, `template`, strictly decoded into `PodTemplateSpec`. The pod spec is held to what the `pod` kind holds its own to and to environment policy; `activeDeadlineSeconds` is allowed, no default filled. Stored, not run: no `app` label and not a trait target — see below. |
@@ -1249,6 +1249,17 @@ in all four places (`initContainers`, `sidecars`, `volumes` and
 `volumeClaimTemplates`) by the helper that refuses it for `subPathExpr`, with
 the same wording, where the API server would refuse it later
 (go-kure/launcher#1199);
+the `pod`, `podtemplate`, `replicaset` and `replicationcontroller` kinds, and
+the workload objects of a `manifests` source (`inline` or `url`), read
+`volumeMounts` as typed upstream mounts and hold those of every container and
+init container to the same rules, whatever the environment policy: `subPath`
+and `subPathExpr` are exclusive and relative with no `..` element,
+`mountPropagation` and `recursiveReadOnly` are one of their modes with the
+same preconditions, and `Bidirectional` needs `securityContext.privileged:
+true` on that container, with the error naming the container and the mount's
+position (go-kure/launcher#1212); `bindMountOptions`, the mount path, the
+volume a mount names and the rendered objects of `helmtemplate` and
+`passthrough` are not checked by that rule;
 each entry also accepts its own `securityContext`, the identical field set
 and validation as the main container's own `securityContext` described
 below — see that prose for the field list rather than restating it here;
