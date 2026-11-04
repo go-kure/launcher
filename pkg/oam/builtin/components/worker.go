@@ -234,7 +234,8 @@ func parseWorker(props map[string]any) (workerOpinions, error) {
 	if _, err := parseLifecycle(props, false, ""); err != nil {
 		return out, errors.Wrap(err, "invalid lifecycle configuration")
 	}
-	if _, err := parseSecurityContext(props); err != nil {
+	securityContext, err := parseSecurityContext(props)
+	if err != nil {
 		return out, errors.Wrap(err, "invalid securityContext configuration")
 	}
 	if _, _, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
@@ -246,6 +247,9 @@ func parseWorker(props map[string]any) (workerOpinions, error) {
 
 	parsed, err := parseVolumes(props)
 	if err != nil {
+		return out, err
+	}
+	if err := checkMainContainerMountPropagation(parsed.Mounts, securityContext); err != nil {
 		return out, err
 	}
 	initContainers, err := parseInitContainers(props)

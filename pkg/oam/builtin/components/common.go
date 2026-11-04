@@ -2617,7 +2617,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			// Same typo-tolerance gap as every other per-type field set below:
 			// an unrecognized key (e.g. a typo'd field name) was previously
 			// silently ignored rather than rejected.
-			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "readOnly", "path"}, fmt.Sprintf("volume %q: hostPath", volName)); err != nil {
+			if err := rejectUnknownKeys(m, volumeKeys("name", "type", "mountPath", "readOnly", "path"), fmt.Sprintf("volume %q: hostPath", volName)); err != nil {
 				return result, err
 			}
 			path, present, err := parseStringField(m, "path", fmt.Sprintf("volume %q: hostPath.path", volName))
@@ -2643,7 +2643,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				},
 			})
 		case "emptyDir":
-			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "readOnly", "sizeLimit"}, fmt.Sprintf("volume %q: emptyDir", volName)); err != nil {
+			if err := rejectUnknownKeys(m, volumeKeys("name", "type", "mountPath", "readOnly", "sizeLimit"), fmt.Sprintf("volume %q: emptyDir", volName)); err != nil {
 				return result, err
 			}
 			vol := corev1.Volume{
@@ -2668,7 +2668,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 			}
 			result.Volumes = append(result.Volumes, vol)
 		case "pvc":
-			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "devicePath", "volumeMode", "readOnly", "size", "storageClass", "accessModes", "claimName", claimObjectNameProperty}, fmt.Sprintf("volume %q: pvc", volName)); err != nil {
+			if err := rejectUnknownKeys(m, volumeKeys("name", "type", "mountPath", "devicePath", "volumeMode", "readOnly", "size", "storageClass", "accessModes", "claimName", claimObjectNameProperty), fmt.Sprintf("volume %q: pvc", volName)); err != nil {
 				return result, err
 			}
 			var volumeMode corev1.PersistentVolumeMode
@@ -2749,7 +2749,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				VolumeMode:                volumeMode,
 			})
 		case "configMap":
-			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "readOnly", "configMapName"}, fmt.Sprintf("volume %q: configMap", volName)); err != nil {
+			if err := rejectUnknownKeys(m, volumeKeys("name", "type", "mountPath", "readOnly", "configMapName"), fmt.Sprintf("volume %q: configMap", volName)); err != nil {
 				return result, err
 			}
 			cmName, present, err := parseStringField(m, "configMapName", fmt.Sprintf("volume %q: configMapName", volName))
@@ -2768,7 +2768,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				},
 			})
 		case "secret":
-			if err := rejectUnknownKeys(m, []string{"name", "type", "mountPath", "readOnly", "secretName"}, fmt.Sprintf("volume %q: secret", volName)); err != nil {
+			if err := rejectUnknownKeys(m, volumeKeys("name", "type", "mountPath", "readOnly", "secretName"), fmt.Sprintf("volume %q: secret", volName)); err != nil {
 				return result, err
 			}
 			secretName, present, err := parseStringField(m, "secretName", fmt.Sprintf("volume %q: secretName", volName))
@@ -2795,17 +2795,36 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 
 		if devicePresent {
 			// readOnly stays on the pod volume's claim source above; a
-			// VolumeDevice has no readOnly of its own.
+			// VolumeDevice has no readOnly of its own. The four mount keys
+			// have no device to land on (go-kure/launcher#1198).
+			if err := refuseMountKeysOnDevice(m, mountExtraKeys, fmt.Sprintf("volume %q", volName)); err != nil {
+				return result, err
+			}
 			result.Devices = append(result.Devices, corev1.VolumeDevice{Name: volName, DevicePath: devicePath})
 			continue
 		}
-		result.Mounts = append(result.Mounts, corev1.VolumeMount{
+		vm := corev1.VolumeMount{
 			Name:      volName,
 			MountPath: mountPath,
 			ReadOnly:  readOnly,
-		})
+		}
+		// readOnly was read above, per volume type. parseMountExtras reads the
+		// other four keys and checks recursiveReadOnly against that result
+		// (go-kure/launcher#1198).
+		if err := parseMountExtras(m, fmt.Sprintf("volume %q", volName), &vm); err != nil {
+			return result, err
+		}
+		result.Mounts = append(result.Mounts, vm)
 	}
 	return result, nil
+}
+
+// volumeKeys returns the accepted key set of one `volumes` entry of a given
+// type: the keys that type reads, plus the mount keys every entry shares
+// (go-kure/launcher#1198). readOnly is in keys already, since each type reads
+// it for itself.
+func volumeKeys(keys ...string) []string {
+	return append(keys, mountExtraKeys...)
 }
 
 // parseClaimReference reads a pvc volume that authors claimName: it mounts an
@@ -4839,6 +4858,11 @@ type VolumeClaimTemplate struct {
 	// container as a raw block device. Exactly one of MountPath and
 	// DevicePath is set (go-kure/launcher#385).
 	DevicePath string
+	// MountOptions carries the mount keys of a template that has a MountPath
+	// (readOnly, subPath, subPathExpr, mountPropagation, recursiveReadOnly;
+	// go-kure/launcher#1198). Only those fields are set. Name and MountPath
+	// stay in the fields above, and claimTemplateMountsAndDevices joins them.
+	MountOptions corev1.VolumeMount
 	// Spec carries the rest of the corev1.PersistentVolumeClaimSpec
 	// projection (volumeclaim_spec.go); the five fields above predate it and
 	// keep their own shorthand spellings.
@@ -4971,6 +4995,16 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		// An empty path beside the other counts as authored, as in parseVolumes.
 		if bothAuthored(m, "mountPath", "devicePath") {
 			return nil, errors.Errorf("%s: mountPath and devicePath are mutually exclusive; author mountPath for a filesystem claim or devicePath for a volumeMode: Block claim", entryLabel)
+		}
+		// The mount keys belong to a filesystem mount. A devicePath claim is a
+		// raw block device with no mount, so it refuses all five
+		// (go-kure/launcher#1198).
+		if vct.DevicePath != "" {
+			if err := refuseMountKeysOnDevice(m, mountOptionKeys, entryLabel); err != nil {
+				return nil, err
+			}
+		} else if err := parseMountOptions(m, entryLabel, &vct.MountOptions); err != nil {
+			return nil, err
 		}
 		// sizeAuthored comes from parseStringField's `present`, which is false
 		// for an empty string (common.go, parseStringField): `size: ""` is not

@@ -1205,8 +1205,18 @@ is `None`, `HostToContainer` or `Bidirectional`, and `Bidirectional` needs
 `Disabled`, `IfPossible` or `Enabled`, and the last two need `readOnly: true`
 and a `mountPropagation` of `None` or none at all; `subPath` and `subPathExpr`
 are mutually exclusive, and `subPathExpr` is a relative path with no `..`
-element. The main container's `volumes` entry does not read these keys yet and
-still refuses them;
+element. The main container reads the same keys since go-kure/launcher#1198: a
+`volumes` entry of any type and a `volumeClaimTemplates` entry with a `mountPath`
+take `subPath`, `subPathExpr`, `mountPropagation` and `recursiveReadOnly`, and a
+claim template takes `readOnly` too. A `volumes` entry keeps its own per-type
+`readOnly`, and `recursiveReadOnly` is checked against it. A `devicePath` entry
+is a raw block device with no mount, so it refuses the four keys. The two
+places differ on `readOnly`: a `volumes` entry with `devicePath` still accepts
+it, because it sets the claim source and did so before, and a claim template
+with `devicePath` refuses it, because it never had that key. `Bidirectional` needs
+`securityContext.privileged: true` on the main container, and every workload
+kind checks it. The main container does not yet refuse an absolute or `..`
+`subPath`: the API server does, with a later error (go-kure/launcher#1199);
 each entry also accepts its own `securityContext`, the identical field set
 and validation as the main container's own `securityContext` described
 below — see that prose for the field list rather than restating it here;

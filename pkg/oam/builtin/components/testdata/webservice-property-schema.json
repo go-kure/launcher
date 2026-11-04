@@ -2280,6 +2280,15 @@
           "type": "string",
           "description": "Path where the volume is mounted in the container. Required on every volume except a pvc with volumeMode: Block, which authors devicePath instead."
         },
+        "mountPropagation": {
+          "type": "string",
+          "description": "How mounts under this mount propagate between the host and the container. Bidirectional needs securityContext.privileged: true.",
+          "enum": [
+            "None",
+            "HostToContainer",
+            "Bidirectional"
+          ]
+        },
         "name": {
           "type": "string",
           "description": "Volume name.",
@@ -2288,6 +2297,23 @@
         "readOnly": {
           "type": "boolean",
           "description": "Mount the volume read-only."
+        },
+        "recursiveReadOnly": {
+          "type": "string",
+          "description": "Whether submounts are read-only too. IfPossible and Enabled need readOnly: true and a mountPropagation of None or none at all.",
+          "enum": [
+            "Disabled",
+            "IfPossible",
+            "Enabled"
+          ]
+        },
+        "subPath": {
+          "type": "string",
+          "description": "Sub-path within the volume to mount instead of its root."
+        },
+        "subPathExpr": {
+          "type": "string",
+          "description": "Sub-path within the volume, with $(VAR_NAME) expanded from the container's environment. Relative, no `..` element, and exclusive with subPath."
         },
         "type": {
           "type": "string",

@@ -238,6 +238,9 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	if err := checkClaimTemplateCollisions(vcts, parsed.Volumes, mainMounts); err != nil {
 		return nil, err
 	}
+	if err := checkMainContainerMountPropagation(mainMounts, securityContext); err != nil {
+		return nil, err
+	}
 
 	initContainers, err := parseInitContainers(props)
 	if err != nil {
@@ -445,7 +448,9 @@ func claimTemplateMountsAndDevices(vcts []VolumeClaimTemplate) ([]corev1.VolumeM
 			devices = append(devices, corev1.VolumeDevice{Name: vct.Name, DevicePath: vct.DevicePath})
 			continue
 		}
-		mounts = append(mounts, corev1.VolumeMount{Name: vct.Name, MountPath: vct.MountPath})
+		vm := vct.MountOptions
+		vm.Name, vm.MountPath = vct.Name, vct.MountPath
+		mounts = append(mounts, vm)
 	}
 	return mounts, devices
 }
