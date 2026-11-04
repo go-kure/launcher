@@ -507,17 +507,20 @@ func profileCapabilities(t *testing.T) map[string]oam.CapabilityBinding {
 // mergedTraitProps returns the trait properties the engine hands a rule: the
 // capability's rendering as defaults under the authored values (resolveCapability
 // in pkg/oam/transform.go, which the engine runs before LowerTrait and which is
-// not exported). The rendering comes from the evaluated profile, not from a copy
-// here. The merge is the top-level overlay only, which equals the engine's
-// recursive merge as long as the authored properties share no key with the
-// rendering; that is checked, so a fixture that grows an overlapping key fails
-// instead of drifting from the engine.
+// not exported). The rendering comes from the evaluated profile. The engine
+// deep-copies it (copyRendering) before the merge, so the trait's maps are not
+// the capability's, and the copy here is deep too; a trait with no rendering
+// keeps its authored map, as the engine returns it unchanged. The merge is the
+// top-level overlay only, which equals the engine's recursive merge as long as
+// the authored properties share no key with the rendering; that is checked, so
+// a fixture that grows an overlapping key fails instead of drifting from the
+// engine.
 func mergedTraitProps(t *testing.T, caps map[string]oam.CapabilityBinding, typ string, authored map[string]any) map[string]any {
 	t.Helper()
-	merged := maps.Clone(caps[typ].Rendering)
-	if merged == nil {
+	if len(caps[typ].Rendering) == 0 {
 		return authored
 	}
+	merged := deepCopyProps(caps[typ].Rendering)
 	for k, v := range authored {
 		if _, overlap := merged[k]; overlap {
 			t.Fatalf("trait %s fixture authors %q, which its capability rendering also sets: merge them as the engine does before comparing", typ, k)
@@ -525,6 +528,31 @@ func mergedTraitProps(t *testing.T, caps map[string]oam.CapabilityBinding, typ s
 		merged[k] = v
 	}
 	return merged
+}
+
+// deepCopyProps copies the maps and slices of a rendering, which holds only
+// those and scalars.
+func deepCopyProps(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = deepCopyValue(v)
+	}
+	return out
+}
+
+func deepCopyValue(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		return deepCopyProps(x)
+	case []any:
+		out := make([]any, len(x))
+		for i := range x {
+			out[i] = deepCopyValue(x[i])
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // traitPurityCall builds a call for the trait rule typ on its fixture. The
@@ -1041,6 +1069,21 @@ func TestLoweringPurity_ReportsRulesThatChangeTheirInputs(t *testing.T) {
 					delete(lctx.Component.Properties, "scratch")
 				}
 			}
+		}, true},
+		// The trait's maps are a deep copy of the rendering: a write to the
+		// capability's nested map stays there when the trait's copy is cleaned up.
+		{"capability nested rendering behind a trait copy", func(_ *oam.Component, trait *oam.Trait, lctx oam.LoweringContext) {
+			binding, _ := lctx.Capability("expose")
+			for k, v := range binding.Rendering {
+				nested, ok := v.(map[string]any)
+				theirs, mine := trait.Properties[k].(map[string]any)
+				if ok && mine {
+					nested["scratch"] = true
+					delete(theirs, "scratch")
+					return
+				}
+			}
+			t.Fatal("the expose rendering has no nested map the trait also carries")
 		}, true},
 		{"capability rendering", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			binding, ok := lctx.Capability("expose")
