@@ -142,18 +142,17 @@ func parseSecurityContextProperties(props map[string]any) (securityContextSpec, 
 	return spec, nil
 }
 
-// validateSecurityContextSpec rejects overrides that contradict the declared psaLevel.
-// readOnlyRootFilesystem is not among them: the Pod Security Standards restricted
-// profile does not constrain it, so readOnlyRootFilesystem: false opts a workload
-// out of the read-only default while keeping psaLevel restricted
-// (go-kure/launcher#998).
+// validateSecurityContextSpec rejects overrides that contradict the declared psaLevel
+// whatever the pod spec says. readOnlyRootFilesystem is not among them: the Pod
+// Security Standards restricted profile does not constrain it, so
+// readOnlyRootFilesystem: false opts a workload out of the read-only default while
+// keeping psaLevel restricted (go-kure/launcher#998). runAsNonRoot: false is not
+// among them either: a pod with hostUsers: false may set it at restricted, and the
+// pod spec is known only in applyToPodSpec (go-kure/launcher#1201).
 func validateSecurityContextSpec(spec securityContextSpec) error {
 	if spec.PSALevel == kubernetes.PSARestricted {
 		if spec.AllowPrivilegeEscalation != nil && *spec.AllowPrivilegeEscalation {
 			return errors.New("security-context: allowPrivilegeEscalation: true is incompatible with psaLevel restricted")
-		}
-		if spec.RunAsNonRoot != nil && !*spec.RunAsNonRoot {
-			return errors.New("security-context: runAsNonRoot: false is incompatible with psaLevel restricted")
 		}
 	}
 	return nil
@@ -254,15 +253,22 @@ func (s *securityContextSpec) podSpecProperties() []string {
 // readOnlyRootFilesystem, runAsUser/runAsGroup or fsGroup, so writing the
 // restricted Linux profile here would emit a workload Kubernetes refuses —
 // the component-side OS validation cannot see it, because it runs before this
-// decorator. Upstream Pod Security Admission takes the same route, skipping
-// the Linux-only controls for Windows pods. An override the author set
+// decorator. Upstream Pod Security Admission exempts a Windows pod from three
+// restricted controls only (checkPSALevel). An override the author set
 // explicitly that Windows forbids is an error rather than a silent drop.
+//
+// The runAsNonRoot: false property is refused at restricted unless the pod has
+// hostUsers: false (go-kure/launcher#1201). Nothing after this decorator sets
+// hostUsers: the pod-spec builder writes it when the component is built.
 func (s *securityContextSpec) applyToPodSpec(podSpec *corev1.PodSpec, where string) error {
 	windows := podSpec.OS != nil && podSpec.OS.Name == corev1.Windows
 	if windows {
 		if err := s.rejectWindowsIllegalOverrides(); err != nil {
 			return err
 		}
+	}
+	if s.PSALevel == kubernetes.PSARestricted && s.RunAsNonRoot != nil && !*s.RunAsNonRoot && !usesUserNamespace(podSpec) {
+		return errors.Errorf("security-context: %s: runAsNonRoot: false is incompatible with psaLevel restricted, unless the pod sets hostUsers: false", where)
 	}
 
 	authoredPod := podSpec.SecurityContext

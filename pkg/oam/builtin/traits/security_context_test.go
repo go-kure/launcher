@@ -307,7 +307,6 @@ func TestSecurityContextHandler_Error_RestrictedConflicts(t *testing.T) {
 		value bool
 	}{
 		{"allowPrivilegeEscalation", true},
-		{"runAsNonRoot", false},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
 			h := &traits.SecurityContextHandler{}

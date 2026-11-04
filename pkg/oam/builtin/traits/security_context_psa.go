@@ -68,6 +68,14 @@ var baselineSysctls = map[string]bool{
 	"net.ipv4.tcp_notsent_lowat":          true,
 }
 
+// usesUserNamespace reports whether the pod sets hostUsers: false, the one
+// condition under which Pod Security Admission applies its user-namespace
+// relaxations. checkPSALevel and the runAsNonRoot: false property check in
+// applyToPodSpec share it so they cannot disagree.
+func usesUserNamespace(podSpec *corev1.PodSpec) bool {
+	return podSpec.HostUsers != nil && !*podSpec.HostUsers
+}
+
 // checkPSALevel returns an error for the first securityContext field of
 // podSpec the declared level does not allow. The privileged level allows
 // everything. windows skips the three restricted controls Pod Security
@@ -83,7 +91,7 @@ func checkPSALevel(level kubernetes.PSALevel, podSpec *corev1.PodSpec, windows b
 		level:      level,
 		restricted: level == kubernetes.PSARestricted,
 		windows:    windows,
-		userNS:     podSpec.HostUsers != nil && !*podSpec.HostUsers,
+		userNS:     usesUserNamespace(podSpec),
 	}
 	pod := podSpec.SecurityContext
 	if pod == nil {
