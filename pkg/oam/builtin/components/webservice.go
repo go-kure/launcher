@@ -336,7 +336,8 @@ func parseWebservice(comp *oam.Component) (webserviceOpinions, error) {
 	if _, err := parseLifecycle(props, true, webservicePortName); err != nil {
 		return out, errors.Wrap(err, "invalid lifecycle configuration")
 	}
-	if _, err := parseSecurityContext(props); err != nil {
+	securityContext, err := parseSecurityContext(props)
+	if err != nil {
 		return out, errors.Wrap(err, "invalid securityContext configuration")
 	}
 	if _, _, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
@@ -348,6 +349,9 @@ func parseWebservice(comp *oam.Component) (webserviceOpinions, error) {
 
 	parsed, err := parseVolumes(props)
 	if err != nil {
+		return out, err
+	}
+	if err := checkMainContainerMountPropagation(parsed.Mounts, securityContext); err != nil {
 		return out, err
 	}
 	initContainers, err := parseInitContainers(props)

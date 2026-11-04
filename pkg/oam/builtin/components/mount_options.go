@@ -12,7 +12,12 @@ import (
 
 // mountOptionKeys are the VolumeMount keys parseMountOptions reads, beyond the
 // name and mountPath every mount carries (go-kure/launcher#1193).
-var mountOptionKeys = []string{"readOnly", "subPath", "subPathExpr", "mountPropagation", "recursiveReadOnly"}
+var mountOptionKeys = append([]string{"readOnly"}, mountExtraKeys...)
+
+// mountExtraKeys are the mountOptionKeys other than readOnly. A `volumes` entry
+// reads readOnly itself, per volume type (parseVolumes), and hands these four
+// to parseMountExtras (go-kure/launcher#1198).
+var mountExtraKeys = []string{"subPath", "subPathExpr", "mountPropagation", "recursiveReadOnly"}
 
 // parseMountOptions reads readOnly, subPath, subPathExpr, mountPropagation and
 // recursiveReadOnly from one authored mount into vm, and applies the rules
@@ -38,6 +43,14 @@ func parseMountOptions(mm map[string]any, label string, vm *corev1.VolumeMount) 
 	if roPtr != nil {
 		vm.ReadOnly = *roPtr
 	}
+	return parseMountExtras(mm, label, vm)
+}
+
+// parseMountExtras reads the mountExtraKeys into vm. vm.ReadOnly must already
+// hold the mount's readOnly, because recursiveReadOnly is checked against it.
+// parseMountOptions and the `volumes` parser both end here, so the two read the
+// four keys in one place.
+func parseMountExtras(mm map[string]any, label string, vm *corev1.VolumeMount) error {
 	if sp, present, err := parseStringField(mm, "subPath", label+".subPath"); err != nil {
 		return err
 	} else if present {
@@ -98,6 +111,35 @@ func checkMountPropagationPrivileged(label string, mounts []corev1.VolumeMount, 
 	for i, vm := range mounts {
 		if vm.MountPropagation != nil && *vm.MountPropagation == corev1.MountPropagationBidirectional && !privileged {
 			return errors.Errorf("%s: volumeMounts[%d].mountPropagation: Bidirectional is available only to a container with securityContext.privileged: true", label, i)
+		}
+	}
+	return nil
+}
+
+// checkMainContainerMountPropagation is checkMountPropagationPrivileged for the
+// main container, whose mounts come from `volumes` and `volumeClaimTemplates`
+// (go-kure/launcher#1198). Each kind calls it once, after it has parsed both
+// the securityContext and the mounts: parseVolumes runs apart from the
+// securityContext parse, so the check cannot live there. The error names the
+// mount, because the list holds claim-template mounts before `volumes` ones.
+func checkMainContainerMountPropagation(mounts []corev1.VolumeMount, sc *corev1.SecurityContext) error {
+	privileged := sc != nil && sc.Privileged != nil && *sc.Privileged
+	for _, vm := range mounts {
+		if vm.MountPropagation != nil && *vm.MountPropagation == corev1.MountPropagationBidirectional && !privileged {
+			return errors.Errorf("mount %q: mountPropagation: Bidirectional is available only to a container with securityContext.privileged: true", vm.Name)
+		}
+	}
+	return nil
+}
+
+// refuseMountKeysOnDevice refuses the keys in keys that a devicePath entry
+// authors: a volumeMode: Block claim reaches the container as a raw block
+// device, which has no mount to carry them (go-kure/launcher#1198). label names
+// the entry.
+func refuseMountKeysOnDevice(mm map[string]any, keys []string, label string) error {
+	for _, k := range keys {
+		if _, present := mm[k]; present {
+			return errors.Errorf("%s: %s is not valid with devicePath, because a raw block device has no mount", label, k)
 		}
 	}
 	return nil

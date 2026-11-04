@@ -29,10 +29,10 @@ import (
 
 // volumeClaimTemplatePropertyKeys is the accepted key set of one
 // `volumeClaimTemplates` entry, pinned by the schema/parser parity test.
-var volumeClaimTemplatePropertyKeys = []string{
+var volumeClaimTemplatePropertyKeys = append([]string{
 	"name", "size", "mountPath", "devicePath", "storageClass", "accessModes",
 	"selector", "resources", "volumeMode", "dataSourceRef", "volumeAttributesClassName",
-}
+}, mountOptionKeys...)
 
 // The nested key sets each parser below accepts, declared here rather than
 // inline at the rejectUnknownKeys call so the schema fragment can be pinned to

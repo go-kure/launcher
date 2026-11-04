@@ -525,6 +525,20 @@ func schemaProbes(reserved bool) oam.PropertySchema {
 // type-specific keys (path/size/configMapName/…) vary by `type`, so items stay
 // open beyond the common fields.
 func schemaVolumes() oam.PropertySchema {
+	props := map[string]oam.PropertySchema{
+		"name": {Type: oam.PropertyTypeString, Required: true, Description: "Volume name."},
+		"type": {Type: oam.PropertyTypeString, Enum: []any{"hostPath", "emptyDir", "pvc", "configMap", "secret"}, Description: "Volume source type."},
+		// mountPath is not schema-Required: a volumeMode: Block pvc authors
+		// devicePath instead. The exclusive group below and parseVolumes
+		// both require exactly one.
+		"mountPath":  {Type: oam.PropertyTypeString, Description: "Path where the volume is mounted in the container. Required on every volume except a pvc with volumeMode: Block, which authors devicePath instead."},
+		"devicePath": {Type: oam.PropertyTypeString, Description: "pvc only: path in the container where a volumeMode: Block claim appears as a raw block device. Authored instead of mountPath, and only together with volumeMode: Block."},
+		"volumeMode": {Type: oam.PropertyTypeString, Enum: []any{"Filesystem", "Block"}, Description: "pvc only: the claim's volumeMode. Filesystem (the apiserver default when omitted) pairs with mountPath; Block pairs with devicePath."},
+		"readOnly":   {Type: oam.PropertyTypeBoolean, Description: "Mount the volume read-only."},
+	}
+	// The four mount keys join the common fields (go-kure/launcher#1198). They
+	// belong to the mount, so they are refused beside devicePath.
+	maps.Copy(props, schemaMountExtras())
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeArray,
 		Description: "Volumes to attach and mount into the container.",
@@ -532,19 +546,21 @@ func schemaVolumes() oam.PropertySchema {
 			Type:                 oam.PropertyTypeObject,
 			AdditionalProperties: true,
 			Description:          "A single volume and its mount.",
-			Properties: map[string]oam.PropertySchema{
-				"name": {Type: oam.PropertyTypeString, Required: true, Description: "Volume name."},
-				"type": {Type: oam.PropertyTypeString, Enum: []any{"hostPath", "emptyDir", "pvc", "configMap", "secret"}, Description: "Volume source type."},
-				// mountPath is not schema-Required: a volumeMode: Block pvc authors
-				// devicePath instead. The exclusive group below and parseVolumes
-				// both require exactly one.
-				"mountPath":  {Type: oam.PropertyTypeString, Description: "Path where the volume is mounted in the container. Required on every volume except a pvc with volumeMode: Block, which authors devicePath instead."},
-				"devicePath": {Type: oam.PropertyTypeString, Description: "pvc only: path in the container where a volumeMode: Block claim appears as a raw block device. Authored instead of mountPath, and only together with volumeMode: Block."},
-				"volumeMode": {Type: oam.PropertyTypeString, Enum: []any{"Filesystem", "Block"}, Description: "pvc only: the claim's volumeMode. Filesystem (the apiserver default when omitted) pairs with mountPath; Block pairs with devicePath."},
-				"readOnly":   {Type: oam.PropertyTypeBoolean, Description: "Mount the volume read-only."},
-			},
-			Exclusive: []oam.ExclusiveGroup{{Keys: []string{"mountPath", "devicePath"}, Required: true}},
+			Properties:           props,
+			Exclusive:            []oam.ExclusiveGroup{{Keys: []string{"mountPath", "devicePath"}, Required: true}},
 		},
+	}
+}
+
+// schemaMountExtras declares the mountExtraKeys, the mount keys other than
+// readOnly. A `volumes` entry, a claim template and a `volumeMounts` item share
+// them, since parseMountExtras reads all three (go-kure/launcher#1193, go-kure/launcher#1198).
+func schemaMountExtras() map[string]oam.PropertySchema {
+	return map[string]oam.PropertySchema{
+		"subPath":           {Type: oam.PropertyTypeString, Description: "Sub-path within the volume to mount instead of its root."},
+		"subPathExpr":       {Type: oam.PropertyTypeString, Description: "Sub-path within the volume, with $(VAR_NAME) expanded from the container's environment. Relative, no `..` element, and exclusive with subPath."},
+		"mountPropagation":  {Type: oam.PropertyTypeString, Enum: []any{"None", "HostToContainer", "Bidirectional"}, Description: "How mounts under this mount propagate between the host and the container. Bidirectional needs securityContext.privileged: true."},
+		"recursiveReadOnly": {Type: oam.PropertyTypeString, Enum: []any{"Disabled", "IfPossible", "Enabled"}, Description: "Whether submounts are read-only too. IfPossible and Enabled need readOnly: true and a mountPropagation of None or none at all."},
 	}
 }
 
@@ -849,6 +865,10 @@ func schemaVolumeClaimTemplates() oam.PropertySchema {
 		"accessModes":  {Type: oam.PropertyTypeArray, Description: "Requested access modes for the volume.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: accessModesEnum(), Description: "A single access mode."}},
 	}
 	maps.Copy(props, schemaVolumeClaimSpec())
+	// The mount keys of a template with a mountPath (go-kure/launcher#1198).
+	// They are refused beside devicePath, which has no mount.
+	props["readOnly"] = oam.PropertySchema{Type: oam.PropertyTypeBoolean, Description: "Mount the claim read-only. Not a claim-spec field. Only with mountPath."}
+	maps.Copy(props, schemaMountExtras())
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeArray,
 		Description: "PersistentVolumeClaim templates provisioned per replica.",

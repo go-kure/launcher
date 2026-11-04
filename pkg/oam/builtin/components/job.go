@@ -233,6 +233,9 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 	}
 	config.Volumes = parsed.Volumes
 	config.VolumeMounts = parsed.Mounts
+	if err := checkMainContainerMountPropagation(parsed.Mounts, securityContext); err != nil {
+		return nil, err
+	}
 	config.VolumeDevices = parsed.Devices
 	config.PVCs = parsed.PVCs
 
