@@ -7,6 +7,7 @@ import (
 	"math"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -930,17 +931,20 @@ func TestLoweringPurity_MapKeys(t *testing.T) {
 // changeRule applies change to what it is handed and returns the same result
 // every time, so only a comparison of its inputs can tell it from a pure rule.
 type changeRule struct {
-	change func(comp *oam.Component, trait *oam.Trait, lctx oam.LoweringContext)
+	// t is the test that runs the rule: change reports a fixture that has drifted
+	// on it, never on a parent test, which a subtest goroutine may not fail.
+	t      testing.TB
+	change func(t testing.TB, comp *oam.Component, trait *oam.Trait, lctx oam.LoweringContext)
 }
 
 func (changeRule) ComponentType() string { return "change" }
 func (changeRule) TraitType() string     { return "expose" }
 func (r changeRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
-	r.change(comp, nil, lctx)
+	r.change(r.t, comp, nil, lctx)
 	return oam.LoweringResult{Components: []oam.Component{{Name: comp.Name, Type: "deployment"}}}, nil
 }
 func (r changeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.LoweringResult, error) {
-	r.change(nil, trait, lctx)
+	r.change(r.t, nil, trait, lctx)
 	return oam.LoweringResult{Components: []oam.Component{{Name: "purity", Type: "deployment"}}}, nil
 }
 
@@ -979,34 +983,34 @@ func changeComponentCall(rule changeRule) loweringCall {
 // cannot see it. Each case that must be reported has a control that reads the
 // same input without writing to it.
 func TestLoweringPurity_ReportsRulesThatChangeTheirInputs(t *testing.T) {
-	type change = func(comp *oam.Component, trait *oam.Trait, lctx oam.LoweringContext)
+	type change = func(t testing.TB, comp *oam.Component, trait *oam.Trait, lctx oam.LoweringContext)
 	for _, tc := range []struct {
 		name   string
 		change change
 		report bool
 	}{
-		{"element property", func(comp *oam.Component, _ *oam.Trait, _ oam.LoweringContext) {
+		{"element property", func(_ testing.TB, comp *oam.Component, _ *oam.Trait, _ oam.LoweringContext) {
 			comp.Properties["x"] = 2
 		}, true},
-		{"nested element property", func(comp *oam.Component, _ *oam.Trait, _ oam.LoweringContext) {
+		{"nested element property", func(_ testing.TB, comp *oam.Component, _ *oam.Trait, _ oam.LoweringContext) {
 			comp.Properties["nested"].(map[string]any)["y"] = 2
 		}, true},
-		{"element trait", func(comp *oam.Component, _ *oam.Trait, _ oam.LoweringContext) {
+		{"element trait", func(_ testing.TB, comp *oam.Component, _ *oam.Trait, _ oam.LoweringContext) {
 			comp.Traits[0].Properties["a"] = 2
 		}, true},
-		{"another component of the document", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+		{"another component of the document", func(_ testing.TB, _ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			lctx.Document.Spec.Components[1].Properties["z"] = 2
 		}, true},
-		{"component list of the document", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+		{"component list of the document", func(_ testing.TB, _ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			lctx.Document.Spec.Components = append(lctx.Document.Spec.Components, oam.Component{Name: "extra"})
 		}, true},
-		{"capability rendering", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+		{"capability rendering", func(_ testing.TB, _ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			binding, _ := lctx.Capability("cap")
 			binding.Rendering["r"] = 2
 		}, true},
 		// The element's trait slice is a copy too: replacing a trait's Properties
 		// leaves the document's map in place.
-		{"document trait map behind a replaced trait field", func(comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+		{"document trait map behind a replaced trait field", func(_ testing.TB, comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			comp.Traits[0].Properties = maps.Clone(comp.Traits[0].Properties)
 			lctx.Document.Spec.Components[0].Traits[0].Properties["scratch"] = true
 			delete(comp.Traits[0].Properties, "scratch")
@@ -1014,31 +1018,31 @@ func TestLoweringPurity_ReportsRulesThatChangeTheirInputs(t *testing.T) {
 		// The element is a copy of the document's component: replacing its
 		// Properties leaves the document's map in place, and a write to that map
 		// is a change to the document even after the copy's key is deleted.
-		{"document map behind a replaced element field", func(comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+		{"document map behind a replaced element field", func(_ testing.TB, comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			comp.Properties = maps.Clone(comp.Properties)
 			lctx.Document.Spec.Components[0].Properties["scratch"] = true
 			delete(comp.Properties, "scratch")
 		}, true},
 		// Controls.
-		{"reads only", func(comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+		{"reads only", func(_ testing.TB, comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			_ = comp.Properties["x"]
 			_ = lctx.Document.Spec.Components[1].Name
 			_, _ = lctx.Capability("cap")
 		}, false},
-		{"writes to a copy", func(comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+		{"writes to a copy", func(_ testing.TB, comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			props := maps.Clone(comp.Properties)
 			props["x"] = 2
 			binding, _ := lctx.Capability("cap")
 			rendering := maps.Clone(binding.Rendering)
 			rendering["r"] = 2
 		}, false},
-		{"allocates names", func(comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+		{"allocates names", func(_ testing.TB, comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			_, _ = lctx.Namer.Name(comp.Name, "svc", lctx.Origin)
 		}, false},
 	} {
 		t.Run("component/"+tc.name, func(t *testing.T) {
 			rec := &recordingReporter{}
-			checkLoweringPurity(t, rec, tc.name, changeComponentCall(changeRule{tc.change}), nil)
+			checkLoweringPurity(t, rec, tc.name, changeComponentCall(changeRule{t: t, change: tc.change}), nil)
 			assertInputsReport(t, rec, tc.report)
 		})
 	}
@@ -1051,16 +1055,16 @@ func TestLoweringPurity_ReportsRulesThatChangeTheirInputs(t *testing.T) {
 		change change
 		report bool
 	}{
-		{"trait property", func(_ *oam.Component, trait *oam.Trait, _ oam.LoweringContext) {
+		{"trait property", func(_ testing.TB, _ *oam.Component, trait *oam.Trait, _ oam.LoweringContext) {
 			trait.Properties["rules"].([]any)[0].(map[string]any)["host"] = "changed.example.com"
 		}, true},
-		{"enclosing component", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+		{"enclosing component", func(_ testing.TB, _ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			lctx.Component.Properties = map[string]any{"changed": true}
 		}, true},
-		{"document", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+		{"document", func(_ testing.TB, _ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			lctx.Document.Spec.Components[0].Name = "changed"
 		}, true},
-		{"document map behind a replaced enclosing field", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+		{"document map behind a replaced enclosing field", func(_ testing.TB, _ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			for i := range lctx.Document.Spec.Components {
 				c := &lctx.Document.Spec.Components[i]
 				if c.Name == lctx.Component.Name && c.Type == lctx.Component.Type && c.Properties != nil {
@@ -1072,27 +1076,9 @@ func TestLoweringPurity_ReportsRulesThatChangeTheirInputs(t *testing.T) {
 		}, true},
 		// The trait's maps are a deep copy of the rendering: a write to the
 		// capability's nested map stays there when the trait's copy is cleaned up.
-		{"capability nested rendering behind a trait copy", func(_ *oam.Component, trait *oam.Trait, lctx oam.LoweringContext) {
-			binding, _ := lctx.Capability("expose")
-			for k, v := range binding.Rendering {
-				nested, ok := v.(map[string]any)
-				theirs, mine := trait.Properties[k].(map[string]any)
-				if ok && mine {
-					nested["scratch"] = true
-					delete(theirs, "scratch")
-					return
-				}
-			}
-			t.Fatal("the expose rendering has no nested map the trait also carries")
-		}, true},
-		{"capability rendering", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
-			binding, ok := lctx.Capability("expose")
-			if !ok || binding.Rendering == nil {
-				t.Fatal("the test profile binds no expose rendering to change")
-			}
-			binding.Rendering["changed"] = true
-		}, true},
-		{"reads only", func(_ *oam.Component, trait *oam.Trait, lctx oam.LoweringContext) {
+		{"capability nested rendering behind a trait copy", changeNestedExposeRendering, true},
+		{"capability rendering", changeExposeRendering, true},
+		{"reads only", func(_ testing.TB, _ *oam.Component, trait *oam.Trait, lctx oam.LoweringContext) {
 			_ = trait.Properties["rules"]
 			_ = lctx.Component.Name
 			_, _ = lctx.Capability("expose")
@@ -1100,8 +1086,76 @@ func TestLoweringPurity_ReportsRulesThatChangeTheirInputs(t *testing.T) {
 	} {
 		t.Run("trait/"+tc.name, func(t *testing.T) {
 			rec := &recordingReporter{}
-			checkLoweringPurity(t, rec, tc.name, traitPurityCall("expose", changeRule{tc.change}), nil)
+			checkLoweringPurity(t, rec, tc.name, traitPurityCall("expose", changeRule{t: t, change: tc.change}), nil)
 			assertInputsReport(t, rec, tc.report)
+		})
+	}
+}
+
+// changeNestedExposeRendering writes to a nested map of the expose rendering that
+// the trait also carries a copy of, and cleans the copy up. t is the subtest that
+// runs the rule.
+func changeNestedExposeRendering(t testing.TB, _ *oam.Component, trait *oam.Trait, lctx oam.LoweringContext) {
+	binding, _ := lctx.Capability("expose")
+	for k, v := range binding.Rendering {
+		nested, ok := v.(map[string]any)
+		theirs, mine := trait.Properties[k].(map[string]any)
+		if ok && mine {
+			nested["scratch"] = true
+			delete(theirs, "scratch")
+			return
+		}
+	}
+	t.Fatal("the expose rendering has no nested map the trait also carries")
+}
+
+// changeExposeRendering writes to the expose rendering itself.
+func changeExposeRendering(t testing.TB, _ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+	binding, ok := lctx.Capability("expose")
+	if !ok || binding.Rendering == nil {
+		t.Fatal("the test profile binds no expose rendering to change")
+	}
+	binding.Rendering["changed"] = true
+}
+
+// driftT stands in for the test that runs a change closure: it keeps what the
+// closure reports and stops it as t.Fatal does.
+type driftT struct {
+	testing.TB
+	reported string
+}
+
+func (d *driftT) Helper() {}
+func (d *driftT) Fatal(args ...any) {
+	d.reported = fmt.Sprint(args...)
+	runtime.Goexit()
+}
+
+// TestLoweringPurity_FixtureDriftIsReportedOnTheCallersT: a change closure that
+// finds its fixture drifted reports it on the t it is handed, with its own
+// message. It must not use a parent test's t: FailNow from a subtest goroutine is
+// refused and replaces the message with "subtest may have called FailNow on a
+// parent test".
+func TestLoweringPurity_FixtureDriftIsReportedOnTheCallersT(t *testing.T) {
+	for name, change := range map[string]func(testing.TB, *oam.Component, *oam.Trait, oam.LoweringContext){
+		"the nested rendering is gone": changeNestedExposeRendering,
+		"the rendering is gone":        changeExposeRendering,
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := &driftT{TB: t}
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				// A context with no capability: the fixture the closure expects has drifted away.
+				change(d, nil, &oam.Trait{Properties: map[string]any{}}, oam.LoweringContext{})
+			}()
+			<-done
+			if d.reported == "" {
+				t.Fatal("the closure reported no fixture drift on the t it was handed")
+			}
+			if !strings.Contains(d.reported, "expose") {
+				t.Errorf("drift message = %q, want the closure's own", d.reported)
+			}
 		})
 	}
 }
