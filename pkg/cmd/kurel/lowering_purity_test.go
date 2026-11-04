@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"maps"
+	"math"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -61,11 +62,11 @@ func checkLoweringPurity(t *testing.T, r invariantReporter, label string, call l
 		if err != nil {
 			t.Fatalf("%s: run %d: lowering failed: %v", label, run, err)
 		}
-		leaves, complete := flattenValue(res)
-		if !complete {
-			r.Errorf("%s: run %d: result is nested too deep to compare completely", label, run)
+		leaves, incomplete := flattenValue(res)
+		if incomplete != "" {
+			r.Errorf("%s: run %d: result cannot be compared completely: %s", label, run, incomplete)
 		}
-		return leaves, complete
+		return leaves, incomplete == ""
 	}
 	first, ok := snapshot(1)
 	if !ok {
@@ -96,11 +97,18 @@ const maxFlattenDepth = 1000
 // []byte and a []int holding the same numbers differ. Maps are listed in key
 // order. A func value is listed as present or absent: two funcs cannot be
 // compared, so a post-policy step a rule attaches is checked for its count, not
-// its identity. complete is false when the traversal hit maxFlattenDepth.
-func flattenValue(v any) (leaves []string, complete bool) {
+// its identity.
+//
+// A map key is named by its value (keyName), read through the kind accessors
+// (Int, String, ...) and never through Interface(), so neither a String method
+// nor an unexported field changes what is compared. A result the traversal
+// cannot compare completely is never treated as equal: incomplete says why (the
+// first reason found), or is "" when the listing is complete. That is the case
+// past maxFlattenDepth and for a map key with no stable name.
+func flattenValue(v any) (leaves []string, incomplete string) {
 	f := &flattener{seen: map[flattenKey]bool{}}
 	f.walk("$", reflect.ValueOf(v), 0)
-	return f.out, !f.truncated
+	return f.out, f.incomplete
 }
 
 type flattenKey struct {
@@ -118,9 +126,16 @@ func keyOf(v reflect.Value) flattenKey {
 }
 
 type flattener struct {
-	out       []string
-	seen      map[flattenKey]bool // pointers, maps and slices on the current path
-	truncated bool
+	out        []string
+	seen       map[flattenKey]bool // pointers, maps and slices on the current path
+	incomplete string              // why the listing cannot be compared completely; "" when it can
+}
+
+// markIncomplete records the first reason the listing is incomplete.
+func (f *flattener) markIncomplete(format string, args ...any) {
+	if f.incomplete == "" {
+		f.incomplete = fmt.Sprintf(format, args...)
+	}
 }
 
 func (f *flattener) walk(path string, v reflect.Value, depth int) {
@@ -132,7 +147,7 @@ func (f *flattener) walk(path string, v reflect.Value, depth int) {
 		f.out = append(f.out, path+" = "+typ+" "+fmt.Sprintf(format, args...))
 	}
 	if depth > maxFlattenDepth {
-		f.truncated = true
+		f.markIncomplete("nested deeper than %d levels at %s", maxFlattenDepth, path)
 		return
 	}
 	switch v.Kind() {
@@ -208,7 +223,11 @@ func (f *flattener) walk(path string, v reflect.Value, depth int) {
 		}
 		entries := make([]entry, 0, v.Len())
 		for _, k := range v.MapKeys() {
-			entries = append(entries, entry{fmt.Sprintf("%s[%s(%v)]", path, keyType(k), k), k})
+			name, why := keyName(k)
+			if why != "" {
+				f.markIncomplete("map key at %s: %s", path, why)
+			}
+			entries = append(entries, entry{path + "[" + name + "]", k})
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
 		leaf("len %d", v.Len())
@@ -225,12 +244,84 @@ func (f *flattener) walk(path string, v reflect.Value, depth int) {
 	}
 }
 
-// keyType names the concrete type of a map key, looking through an interface key.
-func keyType(k reflect.Value) string {
-	if k.Kind() == reflect.Interface && !k.IsNil() {
+// keyName names a map key as "type(value)", looking through an interface key.
+// The value is read through the kind accessors, never through Interface() or
+// fmt, so a String method on the key type cannot make two keys print alike and
+// an unexported field is read like an exported one. why is "" when the name
+// identifies the key, and says so when it cannot: a pointer or channel is
+// identified by an address that differs between runs, and a NaN key cannot be
+// looked up again.
+func keyName(k reflect.Value) (name, why string) {
+	if k.Kind() == reflect.Interface {
+		if k.IsNil() {
+			return "nil", ""
+		}
 		k = k.Elem()
 	}
-	return typeID(k.Type())
+	enc, why := keyValue(k)
+	return typeID(k.Type()) + "(" + enc + ")", why
+}
+
+// keyValue encodes the value of a key of any kind keyName accepts. A struct or
+// array key is encoded field by field; a field of interface type carries its
+// concrete type.
+func keyValue(k reflect.Value) (enc, why string) {
+	switch k.Kind() {
+	case reflect.Bool:
+		return fmt.Sprintf("%t", k.Bool()), ""
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return fmt.Sprintf("%d", k.Int()), ""
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return fmt.Sprintf("%d", k.Uint()), ""
+	case reflect.Float32, reflect.Float64:
+		f := k.Float()
+		if math.IsNaN(f) {
+			return "", "a NaN key cannot be looked up again"
+		}
+		if f == 0 {
+			f = 0 // -0 and +0 are one map key, but print differently
+		}
+		return fmt.Sprintf("%v", f), ""
+	case reflect.Complex64, reflect.Complex128:
+		c := k.Complex()
+		re, im := real(c), imag(c)
+		if math.IsNaN(re) || math.IsNaN(im) {
+			return "", "a NaN key cannot be looked up again"
+		}
+		if re == 0 {
+			re = 0
+		}
+		if im == 0 {
+			im = 0
+		}
+		return fmt.Sprintf("(%v,%v)", re, im), ""
+	case reflect.String:
+		return fmt.Sprintf("%q", k.String()), ""
+	case reflect.Interface:
+		return keyName(k)
+	case reflect.Struct:
+		parts := make([]string, 0, k.NumField())
+		for i := 0; i < k.NumField(); i++ {
+			part, partWhy := keyValue(k.Field(i))
+			if why == "" {
+				why = partWhy
+			}
+			parts = append(parts, k.Type().Field(i).Name+"="+part)
+		}
+		return "{" + strings.Join(parts, ",") + "}", why
+	case reflect.Array:
+		parts := make([]string, 0, k.Len())
+		for i := 0; i < k.Len(); i++ {
+			part, partWhy := keyValue(k.Index(i))
+			if why == "" {
+				why = partWhy
+			}
+			parts = append(parts, part)
+		}
+		return "[" + strings.Join(parts, ",") + "]", why
+	default:
+		return "", fmt.Sprintf("a key of kind %s has no stable name", k.Kind())
+	}
 }
 
 // typeIDs gives every reflect.Type seen so far a number. A reflect.Type is
@@ -629,6 +720,100 @@ func TestLoweringPurity_CheckReportsImpureRules(t *testing.T) {
 			checkLoweringPurity(t, rec, rule.ComponentType(), call, nil)
 			if len(rec.errs) == 0 {
 				t.Fatalf("an impure rule (%s) passed the purity check", rule.ComponentType())
+			}
+		})
+	}
+}
+
+// constKey prints the same for every value, as a type with a lossy String
+// method would.
+type constKey string
+
+func (constKey) String() string { return "k" }
+
+// maskedKey hides its only field behind String.
+type maskedKey struct{ a int }
+
+func (maskedKey) String() string { return "k" }
+
+// hiddenKey has an unexported field and no String method.
+type hiddenKey struct {
+	a int
+	b string
+}
+
+// TestLoweringPurity_MapKeys checks that a map key is named by its value, never
+// through a String method, and that a key which has no stable name makes the
+// comparison incomplete instead of equal. Each case alternates the key a rule
+// returns between two values (flip is given the call number).
+func TestLoweringPurity_MapKeys(t *testing.T) {
+	negZero := math.Copysign(0, -1)
+	for _, tc := range []struct {
+		name    string
+		flip    func(n int) any
+		wantErr string // "" = the rule is pure and must pass
+	}{
+		{"String method hides the key", func(n int) any {
+			if n%2 == 0 {
+				return map[constKey]int{"a": 1}
+			}
+			return map[constKey]int{"b": 1}
+		}, "differs from run 1"},
+		{"String method on a struct key", func(n int) any {
+			return map[maskedKey]int{{a: n % 2}: 1}
+		}, "differs from run 1"},
+		{"unexported field of a struct key", func(n int) any {
+			return map[hiddenKey]int{{a: 1, b: string(rune('a' + n%2))}: 1}
+		}, "differs from run 1"},
+		{"array key", func(n int) any {
+			return map[[2]int]int{{1, n % 2}: 1}
+		}, "differs from run 1"},
+		{"pointer key", func(int) any {
+			return map[*int]int{new(int): 1}
+		}, "cannot be compared completely"},
+		{"NaN key", func(int) any {
+			return map[float64]int{math.NaN(): 1}
+		}, "cannot be compared completely"},
+		{"pointer inside an interface key", func(int) any {
+			return map[any]int{new(int): 1}
+		}, "cannot be compared completely"},
+		{"pointer inside a struct key", func(int) any {
+			return map[struct{ P *int }]int{{new(int)}: 1}
+		}, "cannot be compared completely"},
+		// Controls: none of these may be reported.
+		{"same String method, same key", func(int) any {
+			return map[constKey]int{"a": 1}
+		}, ""},
+		{"-0 and +0 are one key", func(n int) any {
+			if n%2 == 0 {
+				return map[float64]int{negZero: 1}
+			}
+			return map[float64]int{0: 1}
+		}, ""},
+		{"struct key with unexported fields", func(int) any {
+			return map[hiddenKey]int{{a: 1, b: "x"}: 1, {a: 2, b: "y"}: 2}
+		}, ""},
+		{"nil interface key", func(int) any {
+			return map[any]int{nil: 1, 1: 2}
+		}, ""},
+		{"array key, same value", func(int) any {
+			return map[[2]int]int{{1, 2}: 1}
+		}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			call := func(t *testing.T) (oam.LoweringResult, error) {
+				calls++
+				return oam.LoweringResult{Components: []oam.Component{{Name: "purity", Type: "deployment",
+					Properties: map[string]any{"v": tc.flip(calls)}}}}, nil
+			}
+			rec := &recordingReporter{}
+			checkLoweringPurity(t, rec, "keys", call, nil)
+			switch {
+			case tc.wantErr == "" && len(rec.errs) != 0:
+				t.Fatalf("a pure rule was reported: %v", rec.errs)
+			case tc.wantErr != "" && (len(rec.errs) == 0 || !strings.Contains(rec.errs[0], tc.wantErr)):
+				t.Fatalf("want a report containing %q, got %v", tc.wantErr, rec.errs)
 			}
 		})
 	}
