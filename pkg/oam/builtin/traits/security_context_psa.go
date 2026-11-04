@@ -70,9 +70,11 @@ var baselineSysctls = map[string]bool{
 
 // checkPSALevel returns an error for the first securityContext field of
 // podSpec the declared level does not allow. The privileged level allows
-// everything. windows skips the Linux-only rules, as Pod Security Admission
-// does for a Windows pod. A pod with hostUsers: false gets the user-namespace
-// relaxations in the header comment. where names the workload.
+// everything. windows skips the three restricted controls Pod Security
+// Admission exempts a Windows pod from (seccompProfile required, capabilities
+// including the add list, allowPrivilegeEscalation); every other control applies
+// to it. A pod with hostUsers: false gets the user-namespace relaxations in the
+// header comment. where names the workload.
 func checkPSALevel(level kubernetes.PSALevel, podSpec *corev1.PodSpec, windows bool, where string) error {
 	if level != kubernetes.PSABaseline && level != kubernetes.PSARestricted {
 		return nil
@@ -128,9 +130,6 @@ func (c psaCheck) pod(sc *corev1.PodSecurityContext, at string) error {
 	if c.restricted && !c.userNS && sc.RunAsNonRoot != nil && !*sc.RunAsNonRoot {
 		return c.notAllowed(at, "runAsNonRoot: false")
 	}
-	if c.windows {
-		return nil
-	}
 	if err := c.common(sc.SELinuxOptions, sc.SeccompProfile, sc.AppArmorProfile, at); err != nil {
 		return err
 	}
@@ -161,8 +160,10 @@ func (c psaCheck) common(se *corev1.SELinuxOptions, sec *corev1.SeccompProfile, 
 	}
 	// Both controls allow an unset profile, RuntimeDefault and Localhost, and
 	// nothing else: a value outside that set (Unconfined, or a string a manifest
-	// or chart carries that the API would not accept) is refused.
-	if sec != nil && sec.Type != corev1.SeccompProfileTypeRuntimeDefault && sec.Type != corev1.SeccompProfileTypeLocalhost {
+	// or chart carries that the API would not accept) is refused. The restricted
+	// seccomp control replaces the baseline one and exempts a Windows pod
+	// entirely, so a Windows pod at restricted is not checked here.
+	if sec != nil && !(c.restricted && c.windows) && sec.Type != corev1.SeccompProfileTypeRuntimeDefault && sec.Type != corev1.SeccompProfileTypeLocalhost {
 		return c.notAllowed(at, fmt.Sprintf("seccompProfile.type: %s", sec.Type))
 	}
 	if aa != nil && aa.Type != corev1.AppArmorProfileTypeRuntimeDefault && aa.Type != corev1.AppArmorProfileTypeLocalhost {
@@ -192,9 +193,6 @@ func (c psaCheck) container(sc *corev1.SecurityContext, pod *corev1.PodSecurityC
 			return c.required(at, "runAsNonRoot: true (on the container or the pod)")
 		}
 	}
-	if c.windows {
-		return nil
-	}
 	if err := c.common(sc.SELinuxOptions, sc.SeccompProfile, sc.AppArmorProfile, at); err != nil {
 		return err
 	}
@@ -202,7 +200,9 @@ func (c psaCheck) container(sc *corev1.SecurityContext, pod *corev1.PodSecurityC
 	if sc.ProcMount != nil && *sc.ProcMount != corev1.DefaultProcMount && (c.restricted || !c.userNS) {
 		return c.notAllowed(at, fmt.Sprintf("procMount: %s", *sc.ProcMount))
 	}
-	if sc.Capabilities != nil {
+	// The restricted capabilities control replaces the baseline one and exempts a
+	// Windows pod, so a Windows pod at restricted has no add-list check.
+	if sc.Capabilities != nil && !(c.restricted && c.windows) {
 		for _, cp := range sc.Capabilities.Add {
 			if !c.capabilityAllowed(cp) {
 				return c.notAllowed(at, fmt.Sprintf("capabilities.add: %s", cp))
@@ -214,6 +214,10 @@ func (c psaCheck) container(sc *corev1.SecurityContext, pod *corev1.PodSecurityC
 	}
 	if !c.userNS && sc.RunAsUser != nil && *sc.RunAsUser == 0 {
 		return c.notAllowed(at, "runAsUser: 0")
+	}
+	// The three remaining restricted controls exempt a Windows pod.
+	if c.windows {
+		return nil
 	}
 	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
 		return c.required(at, "allowPrivilegeEscalation: false")
