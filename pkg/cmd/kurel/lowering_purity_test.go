@@ -420,10 +420,13 @@ func TestLoweringPurity_RulesAreDeterministic(t *testing.T) {
 	}
 }
 
-// TestLoweringPurity_CoversEveryRule fails when a lowering rule is registered
-// on the built-in transformer that the test above does not run: a document,
-// raw or policy rule has no call here, and a component or trait rule has no
-// fixture. A new rule cannot join the registry without joining the check.
+// TestLoweringPurity_CoversEveryRule fails when a component, trait, document or
+// policy rule is registered on the built-in transformer that the checks above do
+// not run, and when a registered component or trait rule has no fixture to run
+// it on. A raw-document rule cannot be seen from here: LowerableTypes leaves
+// those out by design and no accessor lists them, so none is registered by
+// newBuiltinTransformer today (build.go) and a future one has to join this check
+// by hand.
 func TestLoweringPurity_CoversEveryRule(t *testing.T) {
 	lt := newBuiltinTransformer().LowerableTypes()
 	if len(lt.Kinds) != 0 || len(lt.PolicyTypes) != 0 {
@@ -432,9 +435,15 @@ func TestLoweringPurity_CoversEveryRule(t *testing.T) {
 	want := []string{}
 	for _, typ := range lt.ComponentTypes {
 		want = append(want, "component/"+typ)
+		if _, ok := componentLabelFixtures[typ]; !ok {
+			t.Errorf("component rule %q has no entry in componentLabelFixtures: add one so the purity check has an input for it", typ)
+		}
 	}
 	for _, typ := range lt.TraitTypes {
 		want = append(want, "trait/"+typ)
+		if _, ok := traitLabelFixtures[typ]; !ok {
+			t.Errorf("trait rule %q has no entry in traitLabelFixtures: add one so the purity check has an input for it", typ)
+		}
 	}
 	slices.Sort(want)
 	if got := slices.Sorted(maps.Keys(builtinPurityCalls())); !slices.Equal(got, want) {
@@ -442,7 +451,7 @@ func TestLoweringPurity_CoversEveryRule(t *testing.T) {
 	}
 }
 
-// Rule doubles that break the contract in the three ways the check exists for.
+// Rule doubles that break the contract in the ways the check exists for.
 // The check must report each, or it proves nothing about the real rules.
 
 var purityCounter int

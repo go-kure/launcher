@@ -272,7 +272,9 @@ such as an environment variable or a file, so
 random-number symbols in `pkg/oam/builtin/components`, `pkg/oam/builtin/traits` and
 `pkg/oam/lowering*.go` only. `manifestsource.go`, which fetches a manifest URL for the
 terminal `manifests` and `crd` handlers and is called by no lowering rule, is the one
-exempt file. A rule registered outside this repository is not covered by either check.
+exempt file. A rule registered outside this repository is not covered by either check,
+A raw-document rule escapes the coverage test, because no accessor lists those, but the
+lint rule still covers one that lives in the scoped paths.
 
 ## D7 — recursion bound and provenance-first errors
 
