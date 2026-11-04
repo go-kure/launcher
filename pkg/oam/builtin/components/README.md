@@ -1275,10 +1275,12 @@ parsed by the same parser as the main container's field of that name. Any
 other key is an error naming the entry — before that the parsers read the
 keys they knew and dropped the rest, so an authored `workingDir`, `envFrom`,
 `probes` or `lifecycle` built cleanly and reached no container. An
-`initContainers` entry also takes `probes` and `lifecycle`, but only with
-`restartPolicy: Always` (a native sidecar, see below): Kubernetes forbids both
-on an init container that runs to completion before the app containers start,
-so on any other entry they are refused with their own message, which points at
+`initContainers` entry also takes `ports`, `probes` and `lifecycle`, but only with
+`restartPolicy: Always` (a native sidecar, see below): Kubernetes forbids
+probes and lifecycle hooks on an init container that runs to completion before
+the app containers start, and launcher refuses `ports` there too, since that
+container has exited before anything could reach a port it declares. On any
+other entry they are refused with their own message, which points at
 `restartPolicy: Always` or a `sidecars` entry. A sidecar's probe or hook may address a port by
 name only when that sidecar itself declares a `ports[]` entry of that name —
 the kubelet resolves a named port against the container's own ports, so an
@@ -1428,12 +1430,15 @@ An `initContainers` entry also reads its own `restartPolicy` and
   policy for that container, or `Always`, which makes the entry a **native
   sidecar** (go-kure/launcher#1180): it starts in list order like any init
   container, but stays running for the life of the pod, alongside the main
-  container. Only such an entry takes `probes`, `lifecycle` and a
+  container. Only such an entry takes `ports`, `probes`, `lifecycle` and a
   `RestartContainer` resize policy (the same parsers as a `sidecars` entry);
-  `restartPolicyRules` is refused beside `Always`, and `ports` are not read on
-  an init entry (go-kure/launcher#1225), so a probe or hook on a native
-  sidecar addresses its port by number, never by name. It needs a cluster with
-  sidecar container support. Built-in resource defaults apply to it; a
+  `restartPolicyRules` is refused beside `Always`. Its `ports` are read as a
+  `sidecars` entry's are (go-kure/launcher#1225), so a probe or hook may address
+  one by name and a consumer that generates Services can resolve a named
+  `targetPort` to it; a port name is unique across the whole pod, main
+  container, `sidecars` and native sidecars together. `ports` on any other
+  init entry is refused with the reason, since that container has exited before
+  anything could reach it. It needs a cluster with sidecar container support. Built-in resource defaults apply to it; a
   `policy`'s defaults are the main container's only;
 - `restartPolicyRules` needs `restartPolicy` (not `Always`) and holds at most 20 rules. A rule
   is a closed object: `action` is required and is `Restart` (upstream's

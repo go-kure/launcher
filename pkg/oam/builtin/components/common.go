@@ -210,8 +210,10 @@ type InitContainerConfig struct {
 	// restart policy and rules (parseInitContainerRestart); nil when unauthored.
 	RestartPolicy      *corev1.ContainerRestartPolicy
 	RestartPolicyRules []corev1.ContainerRestartRule
-	// Probes and Lifecycle are read only from a restartable entry (a native
-	// sidecar, go-kure/launcher#1180); see Restartable.
+	// Ports, Probes and Lifecycle are read only from a restartable entry (a
+	// native sidecar, go-kure/launcher#1180, go-kure/launcher#1225); see
+	// Restartable.
+	Ports     []corev1.ContainerPort
 	Probes    ProbeConfig
 	Lifecycle *corev1.Lifecycle
 }
@@ -259,13 +261,13 @@ type SidecarContainerConfig struct {
 // Both end with containerFieldKeys, the fields parseContainerFields reads for
 // every container of the pod (go-kure/launcher#790). An init entry also takes
 // its own restartPolicy and restartPolicyRules (parseInitContainerRestart), and
-// probes and lifecycle, which only a restartable entry may author
-// (restartableOnlyInitKeys, go-kure/launcher#1180). It takes no ports.
+// ports, probes and lifecycle, which only a restartable entry may author
+// (restartableOnlyInitKeys, go-kure/launcher#1180, go-kure/launcher#1225).
 var (
 	initContainerPropertyKeys = append([]string{
 		"name", "image", "command", "args", "env", "envFrom", "resources",
 		"volumeMounts", "volumeDevices", "securityContext", "workingDir",
-		"restartPolicy", "restartPolicyRules", "probes", "lifecycle",
+		"restartPolicy", "restartPolicyRules", "ports", "probes", "lifecycle",
 	}, containerFieldKeys...)
 	sidecarPropertyKeys = append([]string{
 		"name", "image", "command", "args", "env", "envFrom", "resources",
@@ -275,12 +277,16 @@ var (
 
 // restartableOnlyInitKeys names the keys an init entry may author only with
 // `restartPolicy: Always`, each with the explanation its refusal carries.
-// Kubernetes forbids both on a regular init container: it runs to completion
-// before any app container starts, so there is nothing for a
-// readiness/liveness/startup probe to gate and no running container for a
+// Kubernetes forbids probes and lifecycle on a regular init container: it
+// runs to completion before any app container starts, so there is nothing for
+// a readiness/liveness/startup probe to gate and no running container for a
 // postStart/preStop hook to wrap. A restartable init container (a native
-// sidecar) keeps running and may carry them (go-kure/launcher#1180).
+// sidecar) keeps running and may carry them (go-kure/launcher#1180). Ports are
+// not forbidden upstream, but on a regular init container they would be dead:
+// the container has exited before a Service could reach it, and only a
+// restartable one is a named-port target (go-kure/launcher#1225).
 var restartableOnlyInitKeys = map[string]string{
+	"ports":     "a regular init container has exited before the app containers start, so nothing can reach a port it declares; set restartPolicy: Always to make it a native sidecar, or declare the port on a sidecar instead",
 	"probes":    "Kubernetes forbids probes on an init container that is not restartable, which runs to completion before the app containers start; set restartPolicy: Always to make it a native sidecar, or author them on a sidecar instead",
 	"lifecycle": "Kubernetes forbids lifecycle hooks on an init container that is not restartable, which runs to completion before the app containers start; set restartPolicy: Always to make it a native sidecar, or author them on a sidecar instead",
 }
@@ -3188,16 +3194,19 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 			return nil, errors.Errorf("%s: %w", label, err)
 		}
 		if ic.Restartable() {
-			// Read as a sidecar's are, but against no declared ports: a native
-			// sidecar takes no `ports` (go-kure/launcher#1225), so a probe or
-			// hook addressing a port by name has nothing to resolve against.
+			// Read as a sidecar's are: its ports first (go-kure/launcher#1225),
+			// then the probes and hooks, which may address a name only against
+			// those ports.
+			if ic.Ports, err = parseContainerPorts(m); err != nil {
+				return nil, errors.Errorf("%s: %w", label, err)
+			}
 			if ic.Probes, err = parseProbes(m, true, ""); err != nil {
 				return nil, errors.Errorf("%s: invalid probe configuration: %w", label, err)
 			}
 			if ic.Lifecycle, err = parseLifecycle(m, true, ""); err != nil {
 				return nil, errors.Errorf("%s: invalid lifecycle configuration: %w", label, err)
 			}
-			if err := checkNamedPortsDeclared(ic.Probes, ic.Lifecycle, nil, "this init container"); err != nil {
+			if err := checkNamedPortsDeclared(ic.Probes, ic.Lifecycle, ic.Ports, "this init container"); err != nil {
 				return nil, errors.Errorf("%s: %w", label, err)
 			}
 		}
@@ -3329,23 +3338,22 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 }
 
 // checkPodPortNames refuses a port name that more than one container of the pod
-// declares: the main container (mainPorts, as the kind builds them) and every
-// sidecar. The API server checks names only within one container and merely
-// warns across containers, and a Service selecting the port by name then
-// reaches only the first container that declares it (go-kure/launcher#660). A
-// name repeated within one container is parseContainerPorts' to refuse. Init
-// containers, native sidecars included, declare no ports here:
-// initContainerPropertyKeys has no `ports` (go-kure/launcher#1225).
-func checkPodPortNames(mainPorts []corev1.ContainerPort, sidecars []SidecarContainerConfig) error {
+// declares: the main container (mainPorts, as the kind builds them), every
+// native sidecar among the init containers (the only init containers that
+// declare ports, go-kure/launcher#1225) and every sidecar. The API server
+// checks names only within one container and merely warns across containers,
+// and a Service selecting the port by name then reaches only the first
+// container that declares it (go-kure/launcher#660). A name repeated within one
+// container is parseContainerPorts' to refuse.
+func checkPodPortNames(mainPorts []corev1.ContainerPort, initContainers []InitContainerConfig, sidecars []SidecarContainerConfig) error {
 	declaredBy := map[string]string{}
 	for _, p := range mainPorts {
 		if p.Name != "" {
 			declaredBy[p.Name] = "the main container"
 		}
 	}
-	for i, sc := range sidecars {
-		container := fmt.Sprintf("sidecars[%d] %q", i, sc.Name)
-		for j, p := range sc.Ports {
+	claim := func(container string, ports []corev1.ContainerPort) error {
+		for j, p := range ports {
 			if p.Name == "" {
 				continue
 			}
@@ -3353,6 +3361,17 @@ func checkPodPortNames(mainPorts []corev1.ContainerPort, sidecars []SidecarConta
 				return errors.Errorf("%s: ports[%d].name: port name %q is also declared by %s; a port name must be unique within the pod, or a Service selecting it by name reaches only the first container that declares it", container, j, p.Name, other)
 			}
 			declaredBy[p.Name] = container
+		}
+		return nil
+	}
+	for i, ic := range initContainers {
+		if err := claim(fmt.Sprintf("initContainers[%d] %q", i, ic.Name), ic.Ports); err != nil {
+			return err
+		}
+	}
+	for i, sc := range sidecars {
+		if err := claim(fmt.Sprintf("sidecars[%d] %q", i, sc.Name), sc.Ports); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -4925,6 +4944,9 @@ func buildInitContainer(ic InitContainerConfig) (*corev1.Container, error) {
 	container.Resources = buildResourceRequirements(ic.Resources)
 	if ic.SecurityContext != nil {
 		kubernetes.SetContainerSecurityContext(container, *ic.SecurityContext)
+	}
+	for _, p := range ic.Ports {
+		kubernetes.AddContainerPort(container, p)
 	}
 	for _, env := range ic.Env {
 		kubernetes.AddContainerEnv(container, env)

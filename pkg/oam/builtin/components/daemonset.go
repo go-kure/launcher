@@ -178,7 +178,7 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
 		return nil, err
 	}
-	if err := checkPodPortNames(config.Ports, sidecars); err != nil {
+	if err := checkPodPortNames(config.Ports, initContainers, sidecars); err != nil {
 		return nil, err
 	}
 	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, sidecars); err != nil {

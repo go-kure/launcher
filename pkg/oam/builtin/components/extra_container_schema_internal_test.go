@@ -68,8 +68,8 @@ func TestContainerEntrySchemaMatchesParser(t *testing.T) {
 			t.Errorf("restartable-only init key %q is not a sidecar key either; the explanation would point authors at a sidecar that refuses it too", k)
 		}
 	}
-	if _, ok := initItem.Properties["ports"]; ok {
-		t.Error("initContainers schema publishes ports; version one of a native sidecar takes none (go-kure/launcher#1225)")
+	if _, ok := restartableOnlyInitKeys["ports"]; !ok {
+		t.Error("ports is not restartable-only: a regular init container exits before anything can reach a port it declares (go-kure/launcher#1225)")
 	}
 }
 
