@@ -474,7 +474,10 @@ func componentPurityCall(typ string, rule oam.ComponentLoweringRule) loweringCal
 		// (lowering.go: comp := doc.Spec.Components[i]): the two share their maps
 		// and slices but not their fields, so a rule that replaces a field of its
 		// element does not replace the document's.
+		// It also gets its own trait slice (forwardableTraits, lowering.go:1389),
+		// whose elements share their Properties maps with the document's.
 		element := doc.Spec.Components[0]
+		element.Traits = slices.Clone(element.Traits)
 		comp := &element
 		caps := profileCapabilities(t)
 		lctx := purityContext(doc, comp, "", 0).WithCapabilities(caps)
@@ -929,7 +932,10 @@ func changeComponentCall(rule changeRule) loweringCall {
 		// (lowering.go: comp := doc.Spec.Components[i]): the two share their maps
 		// and slices but not their fields, so a rule that replaces a field of its
 		// element does not replace the document's.
+		// It also gets its own trait slice (forwardableTraits, lowering.go:1389),
+		// whose elements share their Properties maps with the document's.
 		element := doc.Spec.Components[0]
+		element.Traits = slices.Clone(element.Traits)
 		comp := &element
 		caps := map[string]oam.CapabilityBinding{"cap": {Rendering: map[string]any{"r": 1}}}
 		lctx := purityContext(doc, comp, "", 0).WithCapabilities(caps)
@@ -969,6 +975,13 @@ func TestLoweringPurity_ReportsRulesThatChangeTheirInputs(t *testing.T) {
 		{"capability rendering", func(_ *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
 			binding, _ := lctx.Capability("cap")
 			binding.Rendering["r"] = 2
+		}, true},
+		// The element's trait slice is a copy too: replacing a trait's Properties
+		// leaves the document's map in place.
+		{"document trait map behind a replaced trait field", func(comp *oam.Component, _ *oam.Trait, lctx oam.LoweringContext) {
+			comp.Traits[0].Properties = maps.Clone(comp.Traits[0].Properties)
+			lctx.Document.Spec.Components[0].Traits[0].Properties["scratch"] = true
+			delete(comp.Traits[0].Properties, "scratch")
 		}, true},
 		// The element is a copy of the document's component: replacing its
 		// Properties leaves the document's map in place, and a write to that map
