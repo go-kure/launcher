@@ -554,7 +554,8 @@ func schemaVolumes() oam.PropertySchema {
 // sidecarPropertyKeys by TestContainerEntrySchemaMatchesParser; the nested
 // fields reuse the main container's fragments, since each is read by the same
 // parser. A `volumeMounts` item is closed too (go-kure/launcher#1172): its
-// parser reads name/mountPath/readOnly/subPath and refuses every other key.
+// parser reads name/mountPath and the keys of mountOptionKeys (go-kure/launcher#1193)
+// and refuses every other key.
 func schemaContainerEntry() map[string]oam.PropertySchema {
 	return withContainerFields(map[string]oam.PropertySchema{
 		"name":            {Type: oam.PropertyTypeString, Required: true, Description: "Container name."},
@@ -573,10 +574,13 @@ func schemaContainerEntry() map[string]oam.PropertySchema {
 				Type:        oam.PropertyTypeObject,
 				Description: "A single volume mount.",
 				Properties: map[string]oam.PropertySchema{
-					"name":      {Type: oam.PropertyTypeString, Required: true, Description: "Name of the pod volume to mount."},
-					"mountPath": {Type: oam.PropertyTypeString, Required: true, Description: "Path in this container where the volume is mounted; unique within the container."},
-					"readOnly":  {Type: oam.PropertyTypeBoolean, Description: "Mount the volume read-only."},
-					"subPath":   {Type: oam.PropertyTypeString, Description: "Sub-path within the volume to mount instead of its root."},
+					"name":              {Type: oam.PropertyTypeString, Required: true, Description: "Name of the pod volume to mount."},
+					"mountPath":         {Type: oam.PropertyTypeString, Required: true, Description: "Path in this container where the volume is mounted; unique within the container."},
+					"readOnly":          {Type: oam.PropertyTypeBoolean, Description: "Mount the volume read-only."},
+					"subPath":           {Type: oam.PropertyTypeString, Description: "Sub-path within the volume to mount instead of its root."},
+					"subPathExpr":       {Type: oam.PropertyTypeString, Description: "Sub-path within the volume, with $(VAR_NAME) expanded from the container's environment. Relative, no `..` element, and exclusive with subPath."},
+					"mountPropagation":  {Type: oam.PropertyTypeString, Enum: []any{"None", "HostToContainer", "Bidirectional"}, Description: "How mounts under this mount propagate between the host and the container. Bidirectional needs securityContext.privileged: true."},
+					"recursiveReadOnly": {Type: oam.PropertyTypeString, Enum: []any{"Disabled", "IfPossible", "Enabled"}, Description: "Whether submounts are read-only too. IfPossible and Enabled need readOnly: true and a mountPropagation of None or none at all."},
 				},
 			},
 		},

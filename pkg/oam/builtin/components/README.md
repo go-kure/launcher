@@ -1195,9 +1195,18 @@ present — same presence-then-type-check shape as `volumes.readOnly` above;
 mount list, the identical rule as `volumes`' duplicate-mountPath check
 above, since each `initContainers`/`sidecars` entry is its own container;
 a `volumeMounts` item is a **closed key set** (go-kure/launcher#1172): it accepts
-`name`, `mountPath`, `readOnly` and `subPath`. Any other key is refused, for
-example `subPathExpr`, `mountPropagation` or `recursiveReadOnly`. Earlier
-versions dropped these three keys without an error;
+`name`, `mountPath`, `readOnly`, `subPath`, `subPathExpr`, `mountPropagation`
+and `recursiveReadOnly`. Any other key is refused by name. Earlier versions
+dropped `subPathExpr`, `mountPropagation` and `recursiveReadOnly` without an
+error. Since go-kure/launcher#1193 one helper reads them and applies the rules
+that upstream `ValidateVolumeMounts` applies to one mount: `mountPropagation`
+is `None`, `HostToContainer` or `Bidirectional`, and `Bidirectional` needs
+`securityContext.privileged: true` on the same entry; `recursiveReadOnly` is
+`Disabled`, `IfPossible` or `Enabled`, and the last two need `readOnly: true`
+and a `mountPropagation` of `None` or none at all; `subPath` and `subPathExpr`
+are mutually exclusive, and `subPathExpr` is a relative path with no `..`
+element. The main container's `volumes` entry does not read these keys yet and
+still refuses them;
 each entry also accepts its own `securityContext`, the identical field set
 and validation as the main container's own `securityContext` described
 below — see that prose for the field list rather than restating it here;
