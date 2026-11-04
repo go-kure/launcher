@@ -189,7 +189,15 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	// own type. And it follows EvaluateProfile: a trait a capability binding matches is
 	// checked for nested Required on the properties the rendering merges into, so the
 	// evaluated bindings must exist (go-kure/launcher#765).
-	if err := transformer.ValidateAuthoredPropertiesWithCapabilities(app, evaluatedProfile.Spec.Capabilities); err != nil {
+	//
+	// The profile's kubernetesVersion, when it states one, makes the same pass refuse
+	// an authored field whose Kubernetes feature gate is off by default at that release
+	// (go-kure/launcher#1183). A profile without one is judged as before.
+	var target *oam.KubernetesVersion
+	if v, ok := evaluatedProfile.Spec.TargetVersion(); ok {
+		target = &v
+	}
+	if err := transformer.ValidateAuthoredPropertiesForTarget(app, evaluatedProfile.Spec.Capabilities, target); err != nil {
 		return errors.Wrapf(err, "validating application file %q", appPath)
 	}
 

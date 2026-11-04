@@ -30,6 +30,7 @@ metadata:
   name: <string>       # cluster identifier, e.g. "prod-eu-west"
 spec:
   gitopsEngine: fluxcd # optional; default "fluxcd". Names the engine whose delivery CRs built-in components emit.
+  kubernetesVersion: "1.35" # optional. The cluster's Kubernetes release; absent means unknown and nothing is checked.
   capabilities:
     <trait-type>:      # e.g. "expose", "certificate", "external-secret"
       rendering:       # values injected into trait properties at build time
@@ -42,8 +43,58 @@ spec:
 |---|---|---|
 | `metadata.name` | string | Identifies the cluster; referenced in build tooling |
 | `spec.gitopsEngine` | string | GitOps engine whose delivery CRs the built-in components emit. Accepted: `"fluxcd"` (default, optional). |
+| `spec.kubernetesVersion` | string | The Kubernetes release the cluster runs, optional: `1.35`, `v1.35` or `v1.35.2`, the forms `helm template --kube-version` takes; a patch level is read and ignored, and only major `1` is accepted. When set, `kurel build` refuses an authored property whose Kubernetes feature gate is off by default at that release (see "Target Kubernetes version" below). Absent means unknown: nothing is checked and the build is what it was before the field existed. A release newer than the `k8s.io/api` version launcher is built against is a valid target and reads as every known gate on. |
 | `spec.capabilities` | map | Keys are trait types; values are capability bindings |
 | `capabilities.<type>.rendering` | map | Platform values merged into trait properties before handler invocation, and into the listed properties of a component whose handler implements `ComponentCapabilityDefaults` (the `persistentvolumeclaim` kind reads `pvc`'s `storageClassName`). A value `ComponentCapabilityDefaults` fills into a component is validated against that component's own property schema; a component handler with no schema is refused unless the trait handler or rule registered for the capability's type validates the rendering, by implementing `ValidateAndApplyDefaults` or, for a type that is not built in, through a loaded `CapabilityDefinition` (go-kure/launcher#751, go-kure/launcher#772). A lowering rule may read a binding through `LoweringContext.Capability`: `webservice` and `worker` fill `pvc`'s `storageClassName` into the claims their `pvc` volumes describe (go-kure/launcher#746). A component handler may read one through `ComponentCapabilityFiller`: `statefulset` fills it into its `volumeClaimTemplates` entries (go-kure/launcher#761) |
+
+### Target Kubernetes version
+
+`spec.kubernetesVersion` tells a build which Kubernetes release the cluster runs, so a
+field the cluster cannot accept is refused at build time instead of at apply time
+(go-kure/launcher#1183). It is the same idea as `helm template --kube-version`, and the
+same string works in both.
+
+- **Absent means unknown.** Nothing is checked, the published schemas read as before, and
+  every existing document and profile builds exactly as it did. The check never changes
+  what an accepted document renders to: a document either builds as it always did or is
+  refused.
+- **A gated property is refused, never adapted.** Some properties are behind a Kubernetes
+  feature gate that is off by default on older releases. The schema names the gate
+  (`PropertySchema.Gate`, published as `gate`). When the profile's version is below the
+  release where the gate is on by default, an authored value is refused with the
+  property's path, the gate, that release and the profile's version. Falling back to
+  another shape (an image volume as an init container, say) needs a design per field and
+  is not done.
+- **The table.** `pkg/oam/featuregates.go` holds one row per gate: its name and the first
+  release where its Default is true, read from the Kubernetes feature gates reference. Two
+  tests keep it honest: every `Gate` a built-in schema carries names a row, and every row is
+  carried by at least one schema.
+
+  | Gate | On by default from | Properties |
+  |---|---|---|
+  | `EnvFiles` | 1.35 | `env[].valueFrom.fileKeyRef` |
+  | `ContainerRestartRules` | 1.35 | an init container's `restartPolicyRules` (its `restartPolicy` values `Never` and `OnFailure` share the gate and are not checked: `Always` is accepted at every version) |
+  | `PodLevelResources` | 1.34 | `podResources` (the pod kinds' `resources`) |
+  | `HostnameOverride` | 1.35 | `hostnameOverride` |
+
+- **Open schemas are not reached.** The check walks the declared schema, so it stops at an
+  object that declares no `Properties`. The raw-PodSpec kinds (`pod`, and the kinds that
+  take a pod template) leave their containers and template spec open, and these gated
+  paths are therefore not checked on them: `env[].valueFrom.fileKeyRef` of `containers[]`
+  and `initContainers[]`, `initContainers[].restartPolicyRules`, and
+  `template.spec.hostnameOverride` and `template.spec.resources` of a pod template.
+  Declaring them as nested `Properties` would make the validator type-check and null-strip
+  them, which changes what is accepted; the options are in go-kure/launcher#1245.
+- **Newer than launcher knows.** A release above the `k8s.io/api` version launcher is built
+  against is a valid target: a newer cluster is not wrong. The table then reads every gate
+  it knows as on, and says nothing about a gate it does not know.
+- **A cluster that changed a gate** against its default is not modelled: the profile says
+  the release, not the gate settings. Per-gate overrides are a follow-up
+  (go-kure/launcher#1231), as are version-dependent values (go-kure/launcher#1230) and
+  adapting instead of refusing (go-kure/launcher#1232).
+- **Where it runs.** `kurel build` reads the profile's version and passes it to
+  `ValidateAuthoredPropertiesForTarget`. A library caller passes the version to that method
+  itself; `ValidateAuthoredPropertiesWithCapabilities` takes none and checks no gate.
 
 ### Capability schema
 

@@ -284,6 +284,13 @@ builds. A vulnerability alert still proposes it: the shared preset's
 line, the `replace` still selects the build version and it fixes nothing: check
 the `replace` target, and move it, in step with kure's, to take the fix.
 
+**When `k8s.io/api` moves** (it arrives with a kure bump), re-read the feature gate
+lifecycle table in `pkg/oam/featuregates.go` against the Kubernetes feature gates
+reference (the Default column of each gate's version ranges): a gate that went stable
+or changed its default, or a new gated field, is a row to fix or add in the same
+change. The table's tests keep it and the schemas' `Gate` annotations in step with
+each other, not with upstream.
+
 ## Makefile Targets Reference
 
 ### Development

@@ -102,6 +102,17 @@ type PropertySchema struct {
 	// Required) is a schema error validatePropertyValue reports as soon as a value
 	// reaches the object.
 	Exclusive []ExclusiveGroup `json:"exclusive,omitempty" yaml:"exclusive,omitempty"`
+	// Gate names the Kubernetes feature gate (a row of the lifecycle table in
+	// featuregates.go) the property needs on the cluster. When the ClusterProfile
+	// states a target version (spec.kubernetesVersion) below the version where the
+	// gate is on by default, an authored value is refused
+	// (go-kure/launcher#1183); with no target version nothing is checked. Like
+	// PlatformReserved, only meaningful for handler properties: the two flat call
+	// sites reject the key at decode time (flatschema.go's key allow-sets).
+	//
+	// A consumer that predates Gate ignores it and accepts the value, as it did
+	// before the field existed; the field is additive for it.
+	Gate string `json:"gate,omitempty" yaml:"gate,omitempty"`
 }
 
 // ExclusiveGroup is one group of PropertySchema.Exclusive: keys of one object, at

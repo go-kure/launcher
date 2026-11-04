@@ -383,6 +383,7 @@ func schemaInitContainerRestart() map[string]oam.PropertySchema {
 		},
 		"restartPolicyRules": {
 			Type:        oam.PropertyTypeArray,
+			Gate:        "ContainerRestartRules",
 			Description: "Rules on the init container's exit code that decide whether it is restarted, checked in order; at most 20. They require restartPolicy.",
 			Items: &oam.PropertySchema{
 				Type:        oam.PropertyTypeObject,
