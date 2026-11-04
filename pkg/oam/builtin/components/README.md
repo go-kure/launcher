@@ -15,9 +15,9 @@ API has them, and the same value validation real admission applies (ADR-036 L1: 
 Container projection shared by every kind). Only genuine escape-hatch fields (`passthrough.object`,
 `manifests`/`crd` inline content) and key→value maps whose keys are data (`nodeSelector`,
 `resources.requests`/`limits`) stay open by design; the remaining open objects (`probes`,
-`lifecycle`, `volumes`, the `volumeMounts` items inside an `initContainers`/`sidecars`
-entry) are a known gap, not the target shape; the
-`volumeDevices` items beside them, and a sidecar's `ports` items (go-kure/launcher#660), are
+`lifecycle`, `volumes`) are a known gap, not the target shape; the
+`volumeMounts` and `volumeDevices` items inside an `initContainers`/`sidecars` entry
+(go-kure/launcher#1172 closed the first), and a sidecar's `ports` items (go-kure/launcher#660), are
 closed, and so is the four-key `affinity` shorthand: its schema declares the four keys and
 no other, and since go-kure/launcher#790 its parser refuses any other key too. The
 `initContainers`/`sidecars` entries themselves are closed (go-kure/launcher#321, see "Common
@@ -1194,6 +1194,10 @@ present — same presence-then-type-check shape as `volumes.readOnly` above;
 `volumeMounts[].mountPath` must also be unique within that entry's own
 mount list, the identical rule as `volumes`' duplicate-mountPath check
 above, since each `initContainers`/`sidecars` entry is its own container;
+a `volumeMounts` item is a **closed key set** (go-kure/launcher#1172): it accepts
+`name`, `mountPath`, `readOnly` and `subPath`. Any other key is refused, for
+example `subPathExpr`, `mountPropagation` or `recursiveReadOnly`. Earlier
+versions dropped these three keys without an error;
 each entry also accepts its own `securityContext`, the identical field set
 and validation as the main container's own `securityContext` described
 below — see that prose for the field list rather than restating it here;

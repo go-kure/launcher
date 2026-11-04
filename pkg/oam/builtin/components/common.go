@@ -3274,6 +3274,14 @@ func parseVolumeMountList(m map[string]any, prefix string) ([]corev1.VolumeMount
 			return nil, errors.Errorf("%s: volumeMounts[%d] expected object, got %T", prefix, i, v)
 		}
 		mountLabel := fmt.Sprintf("%s: volumeMounts[%d]", prefix, i)
+		// Closed key set (go-kure/launcher#1172): the code below builds a
+		// VolumeMount from these four keys only. subPathExpr, mountPropagation
+		// and recursiveReadOnly were read by nothing and dropped in silence.
+		// The main container's volumes entry refuses them the same way
+		// (parseVolumes' per-type key sets).
+		if err := rejectUnknownKeys(mm, []string{"name", "mountPath", "readOnly", "subPath"}, mountLabel); err != nil {
+			return nil, err
+		}
 		n, err := requiredStringField(mm, "name", mountLabel)
 		if err != nil {
 			return nil, err
