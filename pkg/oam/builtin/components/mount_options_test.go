@@ -78,6 +78,14 @@ func TestMountOptions_Refusals(t *testing.T) {
 	}{
 		{"subPath and subPathExpr", map[string]any{"subPath": "a", "subPathExpr": "b"}, nil,
 			[]string{"subPathExpr and subPath are mutually exclusive"}},
+		{"subPath absolute", map[string]any{"subPath": "/abs"}, nil,
+			[]string{".subPath", "must be a relative path", `"/abs"`}},
+		{"subPath backstep", map[string]any{"subPath": "a/../b"}, nil,
+			[]string{".subPath", "'..'", `"a/../b"`}},
+		{"subPath bare backstep", map[string]any{"subPath": ".."}, nil,
+			[]string{".subPath", "'..'"}},
+		{"subPath leading backstep", map[string]any{"subPath": "../x"}, nil,
+			[]string{".subPath", "'..'"}},
 		{"subPathExpr absolute", map[string]any{"subPathExpr": "/abs"}, nil,
 			[]string{".subPathExpr", "must be a relative path"}},
 		{"subPathExpr backstep", map[string]any{"subPathExpr": "a/../b"}, nil,
@@ -134,6 +142,34 @@ func TestMountOptions_Refusals(t *testing.T) {
 	}
 }
 
+// TestMountOptions_SubPathAndSubPathExprShareWording: both fields are checked by
+// one helper, so the same value gives the same message but for the field name
+// (upstream applies validateLocalDescendingPath to both, validation.go:3205-3214).
+func TestMountOptions_SubPathAndSubPathExprShareWording(t *testing.T) {
+	refusal := func(field, value string) string {
+		t.Helper()
+		h, base := kindProps(t, "deployment")
+		mount := map[string]any{"name": "data", "mountPath": "/data", field: value}
+		props := withProps(base, map[string]any{
+			"initContainers": []any{containerWithMount(mount, nil)},
+		})
+		_, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: "deployment", Properties: props}, "default")
+		if err == nil {
+			t.Fatalf("%s %q: expected an error, got none", field, value)
+		}
+		return err.Error()
+	}
+	for _, value := range []string{"/abs", "a/../b", "..", "../x"} {
+		t.Run(value, func(t *testing.T) {
+			got := refusal("subPath", value)
+			want := strings.Replace(refusal("subPathExpr", value), ".subPathExpr:", ".subPath:", 1)
+			if got != want {
+				t.Errorf("subPath message %q differs from the subPathExpr message %q", got, want)
+			}
+		})
+	}
+}
+
 // TestMountOptions_Accepts: the combinations upstream allows build cleanly.
 func TestMountOptions_Accepts(t *testing.T) {
 	cases := []struct {
@@ -146,6 +182,10 @@ func TestMountOptions_Accepts(t *testing.T) {
 		{"Enabled with readOnly and no propagation", map[string]any{"readOnly": true, "recursiveReadOnly": "Enabled"}, nil},
 		{"subPathExpr with a nested relative path", map[string]any{"subPathExpr": "a/$(POD_NAME)/b"}, nil},
 		{"a dotted name that is no backstep", map[string]any{"subPathExpr": "a..b/..c"}, nil},
+		{"subPath with a nested relative path", map[string]any{"subPath": "a/b"}, nil},
+		{"subPath that starts with a dot element", map[string]any{"subPath": "./a"}, nil},
+		{"a dotted subPath that is no backstep", map[string]any{"subPath": "a..b/..c"}, nil},
+		{"an empty subPath, which upstream skips", map[string]any{"subPath": ""}, nil},
 	}
 	for _, listKey := range []string{"initContainers", "sidecars"} {
 		for _, tc := range cases {

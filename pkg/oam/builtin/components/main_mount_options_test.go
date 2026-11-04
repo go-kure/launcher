@@ -96,6 +96,14 @@ var refusalCases = []struct {
 }{
 	{"subPath and subPathExpr", props{"subPath": "a", "subPathExpr": "b"}, nil,
 		[]string{"subPathExpr and subPath are mutually exclusive"}},
+	{"subPath absolute", props{"subPath": "/abs"}, nil,
+		[]string{".subPath", "must be a relative path", `"/abs"`}},
+	{"subPath backstep", props{"subPath": "a/../b"}, nil,
+		[]string{".subPath", "'..'", `"a/../b"`}},
+	{"subPath bare backstep", props{"subPath": ".."}, nil,
+		[]string{".subPath", "'..'"}},
+	{"subPath leading backstep", props{"subPath": "../x"}, nil,
+		[]string{".subPath", "'..'"}},
 	{"subPathExpr absolute", props{"subPathExpr": "/abs"}, nil,
 		[]string{".subPathExpr", "must be a relative path"}},
 	{"subPathExpr backstep", props{"subPathExpr": "a/../b"}, nil,
@@ -169,6 +177,32 @@ func TestMainMount_Refusals(t *testing.T) {
 				refuses(t, k.name, withProps(k.props, extra), append([]string{entryName(tc.name, `volume "data"`)}, tc.want...))
 			})
 		}
+	}
+}
+
+// TestMainMount_SubPathShapesUpstreamAccepts: a relative subPath that holds no
+// ".." element builds on a `volumes` entry and on a claim template, and an empty
+// one is absent, as upstream skips it (validation.go:3205). The refusals above
+// are the other half.
+func TestMainMount_SubPathShapesUpstreamAccepts(t *testing.T) {
+	dep, sts := workloadKinds[5], workloadKinds[2]
+	if dep.name != "deployment" || sts.name != "statefulset" {
+		t.Fatalf("workloadKinds order changed: %q, %q", dep.name, sts.name)
+	}
+	for _, sp := range []string{"a/b", "./a", "a..b/..c", ""} {
+		t.Run("volumes/"+sp, func(t *testing.T) {
+			p := withProps(dep.props, props{"volumes": []any{volumeEntry(props{"subPath": sp})}})
+			if _, err := dep.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: dep.name, Properties: p}, "default"); err != nil {
+				t.Errorf("subPath %q was refused: %v", sp, err)
+			}
+		})
+		t.Run("claim template/"+sp, func(t *testing.T) {
+			vct := props{"name": "data", "size": "1Gi", "mountPath": "/data", "subPath": sp}
+			p := withProps(sts.props, props{"volumeClaimTemplates": []any{vct}})
+			if _, err := sts.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: sts.name, Properties: p}, "default"); err != nil {
+				t.Errorf("subPath %q was refused: %v", sp, err)
+			}
+		})
 	}
 }
 
