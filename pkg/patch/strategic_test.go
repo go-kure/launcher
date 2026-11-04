@@ -1142,22 +1142,184 @@ func TestApplyStrategicMergePatch_TypedNilMapInPatchKeepsField(t *testing.T) {
 	}
 }
 
-// TestApplyStrategicMergePatch_JSONMergeNilMapStillDeletes checks that the JSON
-// merge fallback, which has no typed normalization, still reads a nil map in the
-// patch as null, a deletion.
-func TestApplyStrategicMergePatch_JSONMergeNilMapStillDeletes(t *testing.T) {
-	resource := &unstructured.Unstructured{Object: map[string]any{
+// widget returns a resource of a kind the lookup does not know, so that the JSON
+// merge fallback applies to it.
+func widget() *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "example.io/v1",
 		"kind":       "Widget",
 		"metadata":   map[string]any{"name": "test"},
-		"spec":       map[string]any{"a": "1"},
+		"spec": map[string]any{
+			"a":    "1",
+			"list": []any{"x"},
+			"m":    map[string]any{"k": "v"},
+		},
 	}}
+}
+
+// TestApplyStrategicMergePatch_JSONMergeNilMapKeepsField checks that the JSON
+// merge fallback reads a nil map in the patch as an empty one, as the typed path
+// does, so the field is kept and nothing is deleted.
+func TestApplyStrategicMergePatch_JSONMergeNilMapKeepsField(t *testing.T) {
 	var nilMap map[string]any
-	if err := ApplyStrategicMergePatch(resource, map[string]any{"spec": nilMap}, nil); err != nil {
+	for name, patch := range map[string]map[string]any{
+		"nested": {"spec": map[string]any{"m": nilMap}},
+		"parent": {"spec": nilMap},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resource := widget()
+			if err := ApplyStrategicMergePatch(resource, patch, nil); err != nil {
+				t.Fatalf("ApplyStrategicMergePatch: %v", err)
+			}
+			want := widget().Object
+			if !reflect.DeepEqual(resource.Object, want) {
+				t.Errorf("resource = %#v, want it unchanged: %#v", resource.Object, want)
+			}
+		})
+	}
+}
+
+// TestApplyStrategicMergePatch_JSONMergeNilSliceAndMapAlike checks that a nil
+// slice and a nil map in a patch are read alike on the fallback and on a known
+// kind: an empty one, never a deletion.
+func TestApplyStrategicMergePatch_JSONMergeNilSliceAndMapAlike(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+	var nilSlice []any
+	var nilMap map[string]any
+
+	fallback := widget()
+	if err := ApplyStrategicMergePatch(fallback, map[string]any{"spec": map[string]any{"list": nilSlice, "m": nilMap}}, nil); err != nil {
+		t.Fatalf("fallback: %v", err)
+	}
+	spec := fallback.Object["spec"].(map[string]any)
+	if list, ok := spec["list"].([]any); !ok || len(list) != 0 {
+		t.Errorf("fallback list = %#v, want an empty list", spec["list"])
+	}
+	if m, ok := spec["m"].(map[string]any); !ok || len(m) != 1 {
+		t.Errorf("fallback m = %#v, want the existing map kept", spec["m"])
+	}
+
+	typed := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "test", "labels": map[string]any{"k": "v"}},
+	}}
+	if err := ApplyStrategicMergePatch(typed, map[string]any{"metadata": map[string]any{"labels": nilMap}}, lookup); err != nil {
+		t.Fatalf("typed: %v", err)
+	}
+	if labels, ok := typed.Object["metadata"].(map[string]any)["labels"].(map[string]any); !ok || len(labels) != 1 {
+		t.Errorf("typed labels = %#v, want the existing labels kept", labels)
+	}
+}
+
+// TestApplyStrategicMergePatch_JSONMergeExplicitNilDeletes checks that on the
+// fallback only an explicit nil value deletes, as RFC 7386 says.
+func TestApplyStrategicMergePatch_JSONMergeExplicitNilDeletes(t *testing.T) {
+	resource := widget()
+	if err := ApplyStrategicMergePatch(resource, map[string]any{"spec": map[string]any{"m": nil}}, nil); err != nil {
 		t.Fatalf("ApplyStrategicMergePatch: %v", err)
 	}
-	if _, found := resource.Object["spec"]; found {
-		t.Errorf("spec = %v, want it deleted by the null", resource.Object["spec"])
+	spec := resource.Object["spec"].(map[string]any)
+	if _, found := spec["m"]; found {
+		t.Errorf("m = %#v, want it deleted by the explicit nil", spec["m"])
+	}
+	if spec["a"] != "1" {
+		t.Errorf("a = %#v, want it kept", spec["a"])
+	}
+}
+
+// TestApplyStrategicMergePatch_NilPatchIsNoOp checks that a nil patch adds
+// nothing to a resource, on the fallback as on a known kind: it used to leave a
+// custom resource with a nil object. A known kind still normalizes the resource
+// itself, as it does for any patch, so a nil map in it becomes an empty one; the
+// fallback leaves the resource untouched.
+func TestApplyStrategicMergePatch_NilPatchIsNoOp(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+	configMap := func(data map[string]any) func() *unstructured.Unstructured {
+		return func() *unstructured.Unstructured {
+			return &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"metadata":   map[string]any{"name": "test"},
+				"data":       data,
+			}}
+		}
+	}
+	var nilMap map[string]any
+	for name, tc := range map[string]struct {
+		lookup KindLookup
+		build  func() *unstructured.Unstructured
+		want   func() *unstructured.Unstructured
+	}{
+		"fallback":                      {nil, widget, widget},
+		"typed":                         {lookup, configMap(map[string]any{"k": "v"}), configMap(map[string]any{"k": "v"})},
+		"typed normalizes the resource": {lookup, configMap(nilMap), configMap(map[string]any{})},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resource := tc.build()
+			if err := ApplyStrategicMergePatch(resource, nil, tc.lookup); err != nil {
+				t.Fatalf("ApplyStrategicMergePatch: %v", err)
+			}
+			if want := tc.want().Object; !reflect.DeepEqual(resource.Object, want) {
+				t.Errorf("resource = %#v, want %#v", resource.Object, want)
+			}
+		})
+	}
+}
+
+// TestApplyStrategicMergePatch_JSONMergeDepthBound checks that the fallback has
+// the bound of the typed path: a patch whose deepest value sits at depth maxDepth
+// merges, and one level more is an error that leaves the resource as it was.
+func TestApplyStrategicMergePatch_JSONMergeDepthBound(t *testing.T) {
+	resource := widget()
+	if err := ApplyStrategicMergePatch(resource, map[string]any{"spec": deepMapWith(maxDepth-2, "x")}, nil); err != nil {
+		t.Errorf("a patch with its deepest value at depth %d: %v", maxDepth, err)
+	}
+	resource = widget()
+	if err := ApplyStrategicMergePatch(resource, map[string]any{"spec": deepMapWith(maxDepth-1, "x")}, nil); err == nil {
+		t.Errorf("a patch with its deepest value at depth %d: want an error", maxDepth+1)
+	}
+	if !reflect.DeepEqual(resource.Object, widget().Object) {
+		t.Errorf("resource = %#v, want it unchanged", resource.Object)
+	}
+}
+
+// TestApplyStrategicMergePatch_JSONMergeLeavesPatchAlone checks that the fallback
+// does not change the patch it is given, nil containers included.
+func TestApplyStrategicMergePatch_JSONMergeLeavesPatchAlone(t *testing.T) {
+	var nilSlice []any
+	var nilMap map[string]any
+	patch := map[string]any{"spec": map[string]any{"list": nilSlice, "m": nilMap, "a": "2"}}
+	if err := ApplyStrategicMergePatch(widget(), patch, nil); err != nil {
+		t.Fatalf("ApplyStrategicMergePatch: %v", err)
+	}
+	spec := patch["spec"].(map[string]any)
+	if list, _ := spec["list"].([]any); list != nil {
+		t.Errorf("list = %#v, want the nil slice as given", spec["list"])
+	}
+	if m, _ := spec["m"].(map[string]any); m != nil {
+		t.Errorf("m = %#v, want the nil map as given", spec["m"])
+	}
+}
+
+// TestApplyStrategicMergePatch_JSONMergeSelfContainingPatchIsAnError checks that
+// a patch that contains itself is an error on the fallback, not a stack overflow,
+// and leaves the resource as it was.
+func TestApplyStrategicMergePatch_JSONMergeSelfContainingPatchIsAnError(t *testing.T) {
+	patch := map[string]any{"spec": map[string]any{}}
+	patch["spec"].(map[string]any)["self"] = patch
+	resource := widget()
+	if err := ApplyStrategicMergePatch(resource, patch, nil); err == nil {
+		t.Fatal("ApplyStrategicMergePatch: want an error for a patch that contains itself")
+	}
+	if !reflect.DeepEqual(resource.Object, widget().Object) {
+		t.Errorf("resource = %#v, want it unchanged", resource.Object)
 	}
 }
 
@@ -1271,31 +1433,5 @@ func TestApplyStrategicMergePatch_TypedUnserializableLeavesResource(t *testing.T
 	}
 	if _, found := resource.Object["data"]; found {
 		t.Errorf("resource changed on error: %v", resource.Object)
-	}
-}
-
-func TestDeepCopyMap(t *testing.T) {
-	original := map[string]any{
-		"a": "hello",
-		"b": map[string]any{
-			"c": []any{int64(1), int64(2)},
-		},
-	}
-
-	copied := deepCopyMap(original)
-
-	// Mutate the copy
-	copied["a"] = "world"
-	innerCopy := copied["b"].(map[string]any)
-	innerCopy["c"] = []any{int64(3)}
-
-	// Original should be unchanged
-	if original["a"] != "hello" {
-		t.Error("original was mutated")
-	}
-	innerOrig := original["b"].(map[string]any)
-	origSlice := innerOrig["c"].([]any)
-	if len(origSlice) != 2 {
-		t.Error("original nested slice was mutated")
 	}
 }
