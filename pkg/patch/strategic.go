@@ -111,10 +111,13 @@ func applyTypedSMP(resource *unstructured.Unstructured, patch map[string]any, ty
 // becomes an empty one, not null, which a merge patch reads as a deletion; an
 // explicit nil value stays nil, and so does a nil m itself. Any other container
 // type (an array, a typed slice or map, a pointer), and whatever it holds, is
-// left to encoding/json, so a nil []any inside one stays null. A chain of []any
-// and map[string]any that nests deeper than maxDepth, or contains itself, is an
-// error. Nesting through any other container type is bounded only by
-// encoding/json, which returns an error at its own limit, so a document nested
+// left to encoding/json, so a nil []any inside one is written as encoding/json
+// writes that element: null for an ordinary element, nothing under an omitempty
+// tag, whatever a custom marshaler returns. A chain of []any and map[string]any
+// that nests deeper than maxDepth, or contains itself, is an error. Nesting
+// through any other container type is bounded only by encoding/json, which
+// limits the nesting of JSON objects and arrays (a pointer or interface adds
+// none) and returns an error at that limit, so a document nested
 // beyond maxDepth through such a type can pass once and come out as plain
 // []any and map[string]any. Normalizing twice changes nothing for a document
 // within maxDepth; beyond it, the second pass can return errTooDeep.
@@ -249,7 +252,8 @@ func normalizeNil(m map[string]any) (map[string]any, error) {
 // hasNilContainer reports whether v holds a nil []any or nil map[string]any at
 // any depth through chains of those two types; it does not look inside any other
 // container type. A chain nested deeper than maxDepth, or containing itself, is
-// an error.
+// an error on the branches the scan visits: it returns as soon as it finds a nil
+// container, and the walk of emptied that follows covers the whole document.
 func hasNilContainer(v any, depth int) (bool, error) {
 	if depth > maxDepth {
 		return false, errTooDeep
