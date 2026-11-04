@@ -246,6 +246,10 @@ func TestObjectName_TwoKindsShareAName(t *testing.T) {
 // last two cases build, one for each kind.
 func TestObjectName_ScalerTraitAndScalingKindsShareOneNameSpace(t *testing.T) {
 	web := componentLabelFixtures["webservice"]
+	// A scaler on a component that authors replicas is refused
+	// (go-kure/launcher#1179), so the component carries none.
+	webProps := maps.Clone(web.props)
+	delete(webProps, "replicas")
 	scaler := map[string]any{"minReplicas": 2, "maxReplicas": 3, "enablePDB": true}
 	cases := []struct {
 		name, typ, objectName string
@@ -273,7 +277,7 @@ func TestObjectName_ScalerTraitAndScalingKindsShareOneNameSpace(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			traitProps := maps.Clone(scaler)
 			maps.Copy(traitProps, tc.trait)
-			app := labelInvariantApp("web", "webservice", web.props, "scaler", traitProps)
+			app := labelInvariantApp("web", "webservice", webProps, "scaler", traitProps)
 			spec := app["spec"].(map[string]any)
 			kind := objectNameApp("scaling", tc.typ, componentLabelFixtures[tc.typ].props, tc.objectName)
 			spec["components"] = append(spec["components"].([]any), kind["spec"].(map[string]any)["components"].([]any)...)
