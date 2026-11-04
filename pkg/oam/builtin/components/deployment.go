@@ -382,7 +382,13 @@ func (c *DeploymentConfig) ApplyPolicy(p oam.Policy) error {
 		return nil
 	}
 
-	c.Replicas = applyDefaultReplicas(c.Replicas, c.explicitReplicas, p.DefaultReplicas())
+	// Under a scaler the HorizontalPodAutoscaler owns the count and this
+	// Deployment is built without spec.replicas (go-kure/launcher#1179), so the
+	// policy's default and ceiling have no count to act on. The scaler enforces
+	// the same ceiling on its own maxReplicas.
+	if !c.scaled {
+		c.Replicas = applyDefaultReplicas(c.Replicas, c.explicitReplicas, p.DefaultReplicas())
+	}
 	c.Resources.capPolicyRequestDefaults(p)
 	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
 		return err
@@ -394,8 +400,10 @@ func (c *DeploymentConfig) ApplyPolicy(p oam.Policy) error {
 		return err
 	}
 
-	if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
-		return err
+	if !c.scaled {
+		if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
+			return err
+		}
 	}
 	if err := enforceMaxResources(c.Resources, p.MaxCPU(), p.MaxMemory()); err != nil {
 		return err

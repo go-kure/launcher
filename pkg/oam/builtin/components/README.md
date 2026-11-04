@@ -2202,8 +2202,9 @@ admitted there: the trait is newly admitted with this safeguard in place.
 owns the replica count of the Deployment it scales, so with a `scaler` on a
 `deployment`, `webservice` or `worker` the Deployment is built **without
 `spec.replicas`**. That holds for the kind's default of 1 and for an
-EnvironmentPolicy `DefaultReplicas`, which no longer reach that Deployment. An
-authored `replicas` beside a `scaler` is refused at validation, naming the
+EnvironmentPolicy `DefaultReplicas`, which no longer reach that Deployment; the
+policy's `MaxReplicas` ceiling is not checked against that unused count either,
+and holds on the scaler's own `maxReplicas`. An authored `replicas` beside a `scaler` is refused at validation, naming the
 component, since the count would be accepted and applied to nothing; set
 `minReplicas` and `maxReplicas` on the trait instead. A property still counts
 when a component lowering rule emits it, and an authored `null` is no value. The
