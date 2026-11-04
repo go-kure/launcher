@@ -56,9 +56,8 @@ func claimProps(kind string, modes ...string) map[string]any {
 		vol["size"] = "1Gi"
 	}
 	return map[string]any{
-		"image":    "ghcr.io/org/app:v1",
-		"replicas": 1,
-		"volumes":  []any{vol},
+		"image":   "ghcr.io/org/app:v1",
+		"volumes": []any{vol},
 	}
 }
 
@@ -222,8 +221,7 @@ func TestScaler_NonRWXClaim_AcceptsSafeCombinations(t *testing.T) {
 // to name it.
 func TestScaler_NonRWXClaim_DeploymentNamesLaterClaim(t *testing.T) {
 	props := map[string]any{
-		"image":    "ghcr.io/org/app:v1",
-		"replicas": 1,
+		"image": "ghcr.io/org/app:v1",
 		"volumes": []any{
 			map[string]any{
 				"name": "shared", "type": "pvc", "mountPath": "/shared", "claimName": "shared",

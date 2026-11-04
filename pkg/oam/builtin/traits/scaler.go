@@ -3,6 +3,7 @@ package traits
 import (
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
+	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -59,7 +60,57 @@ func (h *ScalerHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 		config,
 	)
 	bundle.Applications = append(bundle.Applications, scalerApp)
+	if app.Config != nil {
+		app.Config = wrapIfAugmenter(
+			&scalerOwnedReplicasConfig{decoratorBase: decoratorBase{Inner: app.Config}, target: config.TargetName},
+			app.Config)
+	}
 	return nil
+}
+
+// scalerOwnedReplicasConfig wraps the scaled component's config and drops
+// spec.replicas from the Deployment the HorizontalPodAutoscaler scales.
+//
+// The HPA owns the replica count at runtime. A manifest that also sets it
+// instructs every apply to scale back to that value, which the Kubernetes
+// documentation warns causes thrashing, and with server-side apply the field
+// is one the applier and the HPA fight over (go-kure/launcher#1179). The count
+// the component would have written is the kind's default or an environment
+// policy default; the author cannot have written one, since a scaler on a
+// component with a `replicas` property is refused at validation
+// (validateScalerReplicas, pkg/oam/validate.go).
+type scalerOwnedReplicasConfig struct {
+	decoratorBase
+	// target is the name of the Deployment the HPA scales
+	// (oam.Trait.ComponentObjectName); "" on a trait applied outside a
+	// transform, which leaves the application's name.
+	target string
+}
+
+// Generate delegates to the inner config, then clears spec.replicas on the
+// typed Deployment the HPA targets. Another Deployment the component
+// generates, and an object that is not a typed Deployment, are left as they
+// are. A component that generates no such Deployment is no error: the scaler
+// restricts the component types it accepts (traitComponentRestrictions), and
+// a handler called directly on a stub config has none.
+func (c *scalerOwnedReplicasConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	objects, err := c.Inner.Generate(app)
+	if err != nil {
+		return nil, err
+	}
+	target := c.target
+	if target == "" {
+		target = app.Name
+	}
+	for _, objPtr := range objects {
+		if objPtr == nil {
+			continue
+		}
+		if dep, ok := (*objPtr).(*appsv1.Deployment); ok && dep != nil && dep.Name == target {
+			dep.Spec.Replicas = nil
+		}
+	}
+	return objects, nil
 }
 
 // resolveNames resolves the name of each object the trait generates
