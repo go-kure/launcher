@@ -617,6 +617,49 @@ metadata:
 	}
 }
 
+// TestApplyStrategicPatchesToDocument_FallbackBigIntegerWrittenAsNumber checks the
+// same on an unknown kind, which merges by JSON merge patch: an integer beyond
+// 2^53 and one beyond the int64 range keep their digits in the document
+// (go-kure/launcher#1205).
+func TestApplyStrategicPatchesToDocument_FallbackBigIntegerWrittenAsNumber(t *testing.T) {
+	docSet, err := LoadResourcesWithStructure(strings.NewReader(`apiVersion: example.io/v1
+kind: Widget
+metadata:
+  name: widget
+spec:
+  exact: 9007199254740993
+  big: 18446744073709551615
+`))
+	if err != nil {
+		t.Fatalf("LoadResourcesWithStructure: %v", err)
+	}
+	doc := docSet.Documents[0]
+
+	patches := []StrategicPatch{{Patch: map[string]any{
+		"spec": map[string]any{"other": "x"},
+	}}}
+	if err := doc.ApplyStrategicPatchesToDocument(patches, nil); err != nil {
+		t.Fatalf("ApplyStrategicPatchesToDocument: %v", err)
+	}
+
+	spec := doc.Resource.Object["spec"].(map[string]any)
+	if spec["exact"] != int64(9007199254740993) {
+		t.Errorf("exact = %v (%T), want int64 9007199254740993", spec["exact"], spec["exact"])
+	}
+	if spec["big"] != json.Number("18446744073709551615") {
+		t.Errorf("big = %v (%T), want json.Number 18446744073709551615", spec["big"], spec["big"])
+	}
+	out, err := yaml.Marshal(doc.Node)
+	if err != nil {
+		t.Fatalf("marshal node: %v", err)
+	}
+	for _, line := range []string{"exact: 9007199254740993\n", "big: 18446744073709551615\n"} {
+		if !strings.Contains(string(out), line) {
+			t.Errorf("document lacks %q:\n%s", line, out)
+		}
+	}
+}
+
 // TestApplyStrategicPatchesToDocument_BigIntegersKeepTheirDigits checks that an
 // integer beyond the uint64 range and one below the int64 range are written to
 // the YAML document with all their digits. A float64 would round them.
@@ -1397,6 +1440,86 @@ func TestApplyStrategicMergePatch_JSONMergeResourceErrorLeavesResourceAlone(t *t
 				t.Error("resource changed by the failed patch, want it unchanged")
 			}
 		})
+	}
+}
+
+// numberCase is a number as a resource or a patch may hold it.
+type numberCase struct {
+	name string
+	in   any
+}
+
+func numberCases() []numberCase {
+	return []numberCase{
+		{"int64", int64(80)},
+		{"float64 whole", float64(80)},
+		{"literal point", json.Number("80.0")},
+		{"literal exponent", json.Number("8e1")},
+		{"fraction", 0.5},
+		{"beyond 2^53", int64(9007199254740993)},
+		{"beyond 2^53 with a point", json.Number("9007199254740993.0")},
+		{"max int64", int64(math.MaxInt64)},
+		{"beyond int64", json.Number("9223372036854775808")},
+		{"below int64", json.Number("-9223372036854775809")},
+		{"1e21", json.Number("1e21")},
+		{"long literal", json.Number("1." + strings.Repeat("0", 68) + "5")},
+	}
+}
+
+// merged applies an empty-or-given patch to a copy of an object of the given
+// kind that holds in at metadata.annotations.n (in the resource) or in the patch,
+// and returns the number as it comes out.
+func mergedNumber(t *testing.T, apiVersion, kind string, lookup KindLookup, in any, inPatch bool) any {
+	t.Helper()
+	resource := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": apiVersion,
+		"kind":       kind,
+		"metadata":   map[string]any{"name": "test", "annotations": map[string]any{}},
+	}}
+	patch := map[string]any{}
+	if inPatch {
+		patch["metadata"] = map[string]any{"annotations": map[string]any{"n": in}}
+	} else {
+		resource.Object["metadata"].(map[string]any)["annotations"].(map[string]any)["n"] = in
+	}
+	if err := ApplyStrategicMergePatch(resource, patch, lookup); err != nil {
+		t.Fatalf("ApplyStrategicMergePatch(%v): %v", in, err)
+	}
+	return resource.Object["metadata"].(map[string]any)["annotations"].(map[string]any)["n"]
+}
+
+// TestApplyStrategicMergePatch_JSONMergeNumbersMatchKnownKind checks that the
+// fallback returns a number with the type and value a known kind gives it
+// (go-kure/launcher#1205): an int64 where a whole number fits, a json.Number with
+// its digits beyond that, a float64 for a fraction. A number held by the resource
+// and one set by the patch are alike.
+func TestApplyStrategicMergePatch_JSONMergeNumbersMatchKnownKind(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+	for _, where := range []struct {
+		name    string
+		inPatch bool
+	}{{"in the resource", false}, {"in the patch", true}} {
+		for _, tc := range numberCases() {
+			t.Run(where.name+"/"+tc.name, func(t *testing.T) {
+				want := mergedNumber(t, "v1", "ConfigMap", lookup, tc.in, where.inPatch)
+				got := mergedNumber(t, "example.io/v1", "Widget", nil, tc.in, where.inPatch)
+				if reflect.TypeOf(got) != reflect.TypeOf(want) || !reflect.DeepEqual(got, want) {
+					t.Errorf("fallback = %#v (%T), known kind = %#v (%T)", got, got, want, want)
+				}
+			})
+		}
+	}
+}
+
+// TestApplyStrategicMergePatch_JSONMergeKeepsExactIntegers checks the data loss
+// the type difference hid: an integer beyond 2^53 in an untouched field used to
+// come back as the nearest float64.
+func TestApplyStrategicMergePatch_JSONMergeKeepsExactIntegers(t *testing.T) {
+	if got := mergedNumber(t, "example.io/v1", "Widget", nil, int64(9007199254740993), false); got != int64(9007199254740993) {
+		t.Errorf("number = %#v (%T), want int64 9007199254740993", got, got)
 	}
 }
 
