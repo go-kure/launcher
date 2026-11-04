@@ -36,9 +36,9 @@ linters:
       forbid:
         - pattern: '^time\.(Now|Since|Until)$'
           msg: a lowering rule must not read the clock
-        - pattern: '^os\.(Getenv|LookupEnv|Environ|ExpandEnv|UserHomeDir|UserCacheDir|UserConfigDir|Getwd|Hostname|Executable|Args)$'
+        - pattern: '^os\.(Getenv|LookupEnv|Environ|ExpandEnv|UserHomeDir|TempDir|UserCacheDir|UserConfigDir|Getwd|Hostname|Executable|Args)$'
           msg: a lowering rule must not read the environment
-        - pattern: '^(os\.(ReadFile|Open|OpenFile|Stat|Lstat|ReadDir|DirFS)|((path/)?filepath|(io/)?ioutil)\.(Glob|Walk|WalkDir|ReadFile|ReadDir))$'
+        - pattern: '^(os\.(ReadFile|Open|OpenFile|Stat|Lstat|ReadDir|DirFS|Readlink)|((path/)?filepath|(io/)?ioutil)\.(Glob|Walk|WalkDir|ReadFile|ReadDir|EvalSymlinks))$'
           msg: a lowering rule must not read the filesystem
         - pattern: '^net\.(Dial\w*|Listen\w*|Lookup\w*|DefaultResolver|Resolver|Interface\w*)$'
           msg: a lowering rule must not use the network
