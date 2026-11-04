@@ -26,12 +26,13 @@ type StrategicPatch struct {
 // semantics (e.g. containers merged by name).
 // For unknown kinds (CRDs), it falls back to RFC 7386 JSON merge patch.
 // If lookup is nil, fallback is always used.
-// On an unknown kind a nil patch changes nothing; on a known kind the resource is
-// normalized as for any patch (see jsonTyped). On both paths, through chains of
-// map[string]any and []any, a nil one in the patch is an empty one, so only an
-// explicit nil value deletes a field, and a chain nested deeper than maxDepth or
-// containing itself is an error. Any other container type is left to
-// encoding/json: a nil map[string]string is null.
+// On an unknown kind a nil patch changes nothing, the resource included; on a
+// known kind the resource is normalized as for any patch (see jsonTyped). With a
+// patch, both paths read a nil one in the resource or in the patch, through
+// chains of map[string]any and []any, as an empty one, so only an explicit nil
+// value deletes a field, and a chain nested deeper than maxDepth or containing
+// itself is an error. Any other container type is left to encoding/json: a nil
+// map[string]string is null.
 func ApplyStrategicMergePatch(
 	resource *unstructured.Unstructured,
 	patch map[string]any,
@@ -318,7 +319,15 @@ func emptied(v any, depth int) (any, error) {
 // applyJSONMergePatch applies RFC 7386 JSON merge patch as a fallback for
 // CRDs that lack Go struct tags.
 func applyJSONMergePatch(resource *unstructured.Unstructured, patch map[string]any) error {
-	originalJSON, err := json.Marshal(resource.Object)
+	// A nil slice or map in the resource is an empty one, as on a known kind
+	// (jsonTyped), not the null that json.Marshal would write. The resource is
+	// only read here, so it is not copied unless it holds a nil container, and
+	// resource.Object is not assigned until the merge has succeeded.
+	normalized, err := normalizeNil(resource.Object)
+	if err != nil {
+		return errors.Wrap(err, "failed to normalize resource for JSON merge patch")
+	}
+	originalJSON, err := json.Marshal(normalized)
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal resource for JSON merge patch")
 	}
