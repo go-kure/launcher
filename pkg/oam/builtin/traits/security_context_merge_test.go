@@ -473,6 +473,100 @@ func TestSecurityContextMerge_LevelMatrix(t *testing.T) {
 	}
 }
 
+// A pod with hostUsers: false runs in a user namespace, and Pod Security
+// Admission (policy 1.35 and later) relaxes three controls for it: the baseline
+// procMount check, and the restricted runAsUser and runAsNonRoot checks. The
+// restricted procMount check overrides the baseline one and is not relaxed, and
+// no other control changes. A pod with hostUsers: true or unset gets none of it.
+// The restricted trait fills runAsNonRoot: true where the workload sets none, so
+// the relaxed cases author runAsNonRoot: false themselves.
+func TestSecurityContextMerge_HostUsersRelaxations(t *testing.T) {
+	withHostUsers := func(v *bool, mut func(*corev1.PodSpec)) func(*corev1.PodSpec) {
+		return func(p *corev1.PodSpec) {
+			p.HostUsers = v
+			mut(p)
+		}
+	}
+	containerSC := func(sc *corev1.SecurityContext) func(*corev1.PodSpec) {
+		return func(p *corev1.PodSpec) { p.Containers[0].SecurityContext = sc }
+	}
+	podSC := func(sc *corev1.PodSecurityContext) func(*corev1.PodSpec) {
+		return func(p *corev1.PodSpec) { p.SecurityContext = sc }
+	}
+	both := func(pod *corev1.PodSecurityContext, ct *corev1.SecurityContext) func(*corev1.PodSpec) {
+		return func(p *corev1.PodSpec) {
+			p.SecurityContext = pod
+			p.Containers[0].SecurityContext = ct
+		}
+	}
+	userNS, hostNS := bptr(false), bptr(true)
+	unmasked := corev1.UnmaskedProcMount
+	cases := []struct {
+		name        string
+		mut         func(*corev1.PodSpec)
+		baseline    bool // accepted at baseline
+		restricted  bool // accepted at restricted
+		wantMessage string
+	}{
+		{"hostUsers false, procMount Unmasked", withHostUsers(userNS, containerSC(&corev1.SecurityContext{ProcMount: &unmasked})), true, false, "procMount"},
+		{"hostUsers true, procMount Unmasked", withHostUsers(hostNS, containerSC(&corev1.SecurityContext{ProcMount: &unmasked})), false, false, "procMount"},
+		{"hostUsers false, init container procMount Unmasked", withHostUsers(userNS, func(p *corev1.PodSpec) {
+			p.InitContainers = []corev1.Container{{Name: "init", Image: "b", SecurityContext: &corev1.SecurityContext{ProcMount: &unmasked}}}
+		}), true, false, `init container "init"`},
+		{"hostUsers false, container runAsUser 0 and runAsNonRoot false", withHostUsers(userNS, containerSC(&corev1.SecurityContext{RunAsUser: i64ptr(0), RunAsNonRoot: bptr(false)})), true, true, ""},
+		{"hostUsers true, container runAsUser 0 and runAsNonRoot false", withHostUsers(hostNS, containerSC(&corev1.SecurityContext{RunAsUser: i64ptr(0), RunAsNonRoot: bptr(false)})), true, false, "runAsNonRoot"},
+		{"hostUsers false, pod runAsUser 0, container runAsNonRoot false", withHostUsers(userNS, both(
+			&corev1.PodSecurityContext{RunAsUser: i64ptr(0)}, &corev1.SecurityContext{RunAsNonRoot: bptr(false)})), true, true, ""},
+		{"hostUsers true, pod runAsUser 0, container runAsNonRoot false", withHostUsers(hostNS, both(
+			&corev1.PodSecurityContext{RunAsUser: i64ptr(0)}, &corev1.SecurityContext{RunAsNonRoot: bptr(false)})), true, false, "runAsUser"},
+		{"hostUsers false, container runAsNonRoot false", withHostUsers(userNS, containerSC(&corev1.SecurityContext{RunAsNonRoot: bptr(false)})), true, true, ""},
+		{"hostUsers false, pod runAsNonRoot false", withHostUsers(userNS, podSC(&corev1.PodSecurityContext{RunAsNonRoot: bptr(false)})), true, true, ""},
+		{"hostUsers true, pod runAsNonRoot false", withHostUsers(hostNS, podSC(&corev1.PodSecurityContext{RunAsNonRoot: bptr(false)})), true, false, "runAsNonRoot"},
+		// Nothing else is relaxed.
+		{"hostUsers false, privileged", withHostUsers(userNS, containerSC(&corev1.SecurityContext{Privileged: bptr(true), AllowPrivilegeEscalation: bptr(true)})), false, false, "securityContext.privileged: true"},
+		{"hostUsers false, SYS_ADMIN", withHostUsers(userNS, containerSC(&corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"SYS_ADMIN"}}})), false, false, "SYS_ADMIN"},
+		{"hostUsers false, CHOWN", withHostUsers(userNS, containerSC(&corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"CHOWN"}}})), true, false, "CHOWN"},
+		{"hostUsers false, seccomp Unconfined", withHostUsers(userNS, containerSC(&corev1.SecurityContext{SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}})), false, false, "Unconfined"},
+		{"hostUsers false, appArmor Unconfined", withHostUsers(userNS, containerSC(&corev1.SecurityContext{AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}})), false, false, "appArmorProfile"},
+		{"hostUsers false, hostProcess", withHostUsers(userNS, containerSC(&corev1.SecurityContext{WindowsOptions: &corev1.WindowsSecurityContextOptions{HostProcess: bptr(true)}})), false, false, "hostProcess"},
+		{"hostUsers false, allowPrivilegeEscalation true", withHostUsers(userNS, containerSC(&corev1.SecurityContext{AllowPrivilegeEscalation: bptr(true)})), true, false, "allowPrivilegeEscalation"},
+	}
+	for _, tc := range cases {
+		for _, level := range []struct {
+			name string
+			ok   bool
+		}{{"baseline", tc.baseline}, {"restricted", tc.restricted}, {"privileged", true}} {
+			t.Run(tc.name+"/"+level.name, func(t *testing.T) {
+				_, err := runSecurityContextTrait(authoredDeployment(tc.mut), map[string]any{"psaLevel": level.name})
+				switch {
+				case level.ok && err != nil:
+					t.Fatalf("expected the build to pass at %s, got: %v", level.name, err)
+				case !level.ok && err == nil:
+					t.Fatalf("expected a refusal at %s, got none", level.name)
+				case !level.ok && !strings.Contains(err.Error(), tc.wantMessage):
+					t.Errorf("error %q does not name %q", err, tc.wantMessage)
+				}
+			})
+		}
+	}
+}
+
+// The kubelet refuses UID 0 under runAsNonRoot: true in a user namespace too, so
+// the trait's contradiction check holds at every level whatever hostUsers says.
+func TestSecurityContextMerge_HostUsersKeepsTheUIDContradiction(t *testing.T) {
+	dep := func() *appsv1.Deployment {
+		return authoredDeployment(func(p *corev1.PodSpec) {
+			p.HostUsers = bptr(false)
+			p.Containers[0].SecurityContext = &corev1.SecurityContext{RunAsUser: i64ptr(0), RunAsNonRoot: bptr(true)}
+		})
+	}
+	for _, level := range []string{"baseline", "restricted", "privileged"} {
+		t.Run(level, func(t *testing.T) {
+			mustRefuse(t, dep(), map[string]any{"psaLevel": level}, "UID 0")
+		})
+	}
+}
+
 // The refusal names the level and the component, kind, name and container so a
 // chart or manifests user can tell what to change.
 func TestSecurityContextMerge_LevelRefusalNamesItsSource(t *testing.T) {
