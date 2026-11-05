@@ -41,16 +41,16 @@ require (
 	github.com/fluxcd/pkg/apis/meta v1.38.0
 	github.com/fluxcd/source-controller/api v1.10.1
 	github.com/fluxcd/source-watcher/api/v2 v2.3.1
-	github.com/go-kure/kure v0.2.0-beta.24
+	github.com/go-kure/kure v0.2.0-beta.25
 	github.com/google/go-containerregistry v0.22.1
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
-	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.94.2
+	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.95.0
 	github.com/prometheus/common v0.73.1
 	github.com/robfig/cron v1.2.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
-	go.universe.tf/metallb v0.16.1
+	go.universe.tf/metallb v0.16.2
 	golang.org/x/tools v0.52.0
 	gopkg.in/yaml.v3 v3.0.1
 	helm.sh/helm/v4 v4.3.1
@@ -197,7 +197,7 @@ require (
 	go.uber.org/dig v1.17.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
-	go.yaml.in/yaml/v2 v2.4.4 // indirect
+	go.yaml.in/yaml/v2 v2.4.5 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/crypto v0.58.0 // indirect

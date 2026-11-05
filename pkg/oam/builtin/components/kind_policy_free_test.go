@@ -3769,7 +3769,7 @@ func TestPolicyFreeKinds_AuthoredValuesArriveTyped(t *testing.T) {
 	if got := session; got.Password != esSentinel || got.PasswordSecret != (corev1.SecretReference{Name: "upstream-session", Namespace: "metallb-system"}) {
 		t.Errorf("password and its Secret = %q, %+v; want the authored ones", got.Password, got.PasswordSecret)
 	}
-	if got := session; !got.EnableGracefulRestart || !got.EBGPMultiHop || !got.DisableMP || !got.DualStackAddressFamily || len(got.NodeSelectors) != 1 {
+	if got := session; !got.EnableGracefulRestart || !got.EBGPMultiHop || !got.DisableMP || !got.DualStackAddressFamily || len(got.NodeSelectors) != 1 { //nolint:staticcheck // SA1019: metallb v0.16.2 deprecates disableMP, and the kind still writes it as authored.
 		t.Errorf("spec = %+v, want the four authored switches on and the one node selector", got)
 	}
 	// The API requires the peer's own AS number alone. The type holds the
