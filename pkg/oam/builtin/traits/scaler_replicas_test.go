@@ -2,6 +2,7 @@ package traits_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -154,14 +155,10 @@ func TestScaler_OmittingReplicasKeepsTheComponentsOtherObjects(t *testing.T) {
 // not depend on which of the scaler and topology-spread traits is declared
 // first: both orders build byte-identical objects, and spec.replicas is unset.
 //
-// The topology-spread trait derives its constraints from the generated
-// Deployment's replica count, which is unset under a scaler, so it applies none
-// there, even where an environment policy default of 3 would have given the
-// Deployment three replicas. On main that combination built the constraints
-// for the deployment kind and was refused for webservice and worker, whose own
-// spread default the trait then found already in place. The loss for the
-// deployment kind is tracked in go-kure/launcher#1196; the assertion below pins
-// it until that issue lands and must then change with it.
+// The topology-spread trait cannot read a count from the Deployment, which has
+// none under a scaler, so it spreads by the scaler's minReplicas (here 2: the
+// hostname constraint only), whatever an environment policy default of 3 would
+// have given the Deployment (go-kure/launcher#1196).
 func TestScaler_OutputIsIdenticalInBothOrdersWithTopologySpread(t *testing.T) {
 	spread := oam.Trait{Type: "topology-spread", Properties: map[string]any{}}
 	three := int32(3)
@@ -183,8 +180,18 @@ func TestScaler_OutputIsIdenticalInBothOrdersWithTopologySpread(t *testing.T) {
 					}
 					return string(out), oneDeployment(t, cluster)
 				}
-				scalerFirst, depA := render(scaledDeploymentTrait(), spread)
-				spreadFirst, depB := render(spread, scaledDeploymentTrait())
+				// webservice and worker synthesize their own topology-spread
+				// trait, and a second one is refused (the Deployment would carry
+				// constraints twice), so only the deployment kind authors it.
+				var scalerFirst, spreadFirst string
+				var depA, depB *appsv1.Deployment
+				if kind == "deployment" {
+					scalerFirst, depA = render(scaledDeploymentTrait(), spread)
+					spreadFirst, depB = render(spread, scaledDeploymentTrait())
+				} else {
+					scalerFirst, depA = render(scaledDeploymentTrait())
+					spreadFirst, depB = scalerFirst, depA
+				}
 				if scalerFirst != spreadFirst {
 					t.Errorf("output depends on trait order:\nscaler first:          %s\ntopology-spread first: %s", scalerFirst, spreadFirst)
 				}
@@ -192,8 +199,9 @@ func TestScaler_OutputIsIdenticalInBothOrdersWithTopologySpread(t *testing.T) {
 					if dep.Spec.Replicas != nil {
 						t.Errorf("spec.replicas = %d, want it unset", *dep.Spec.Replicas)
 					}
-					if n := len(dep.Spec.Template.Spec.TopologySpreadConstraints); n != 0 {
-						t.Errorf("%d spread constraints under a scaler, want none until go-kure/launcher#1196", n)
+					got := gotSpread(dep.Spec.Template.Spec.TopologySpreadConstraints)
+					if want := wantSpread(2); fmt.Sprint(got) != fmt.Sprint(want) {
+						t.Errorf("spread constraints = %v under a scaler with minReplicas 2, want %v", got, want)
 					}
 				}
 			})

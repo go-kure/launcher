@@ -766,8 +766,10 @@ therefore meets the "no merging" rule below exactly as it did before.
 | 3 or more | the above, plus `topology.kubernetes.io/zone`, `maxSkew: 1`, `ScheduleAnyway` |
 
 Under a `scaler` the Deployment is built without `spec.replicas`
-(go-kure/launcher#1179), so the trait reads an unset count and applies no
-constraints, in either trait order, until go-kure/launcher#1196.
+(go-kure/launcher#1179), so the trait counts the pods the scaler always keeps:
+the scaler's `minReplicas`, after the environment policy ran. The count is the
+same in either trait order. A `scaler` that scales another Deployment does not
+count. At a `minReplicas` of 1 the trait applies no constraints.
 
 Each constraint's `labelSelector` is a copy of the Deployment's own
 `spec.selector.matchLabels` (`app: <component>` for `deployment`, `webservice`

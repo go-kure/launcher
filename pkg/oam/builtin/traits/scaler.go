@@ -190,6 +190,17 @@ type nonRWXClaimer interface {
 	NonRWXClaim() string
 }
 
+// replicaScaler is implemented by the config of a scaler sub-application:
+// ScaledReplicas names the Deployment the HorizontalPodAutoscaler scales and
+// the minimum replica count it holds. A config that scales nothing returns ""
+// and 0, and a caller tests the returned value (go-kure/launcher#1196).
+// After the transform the scaler's config sits under the ownership wrapper, so
+// a caller reads it through oam.UnwrapConfig, not a type assertion on the
+// application's config.
+type replicaScaler interface {
+	ScaledReplicas() (target string, minReplicas int32)
+}
+
 // ScalerConfig implements stack.ApplicationConfig for scaler traits.
 type ScalerConfig struct {
 	componentName     string
@@ -223,6 +234,22 @@ type ScalerConfig struct {
 // ComponentName returns the OAM component this sub-app belongs to, for resource
 // provenance attribution.
 func (c *ScalerConfig) ComponentName() string { return c.componentName }
+
+// targetName is the name of the Deployment the HorizontalPodAutoscaler scales:
+// TargetName, else the component name.
+func (c *ScalerConfig) targetName() string {
+	if c.TargetName == "" {
+		return c.componentName
+	}
+	return c.TargetName
+}
+
+// ScaledReplicas implements replicaScaler: the Deployment the HPA scales and
+// its effective minReplicas, final once ApplyPolicy ran. A minimum of 0 is a
+// config built without ApplyPolicy and counts as no value.
+func (c *ScalerConfig) ScaledReplicas() (string, int32) {
+	return c.targetName(), c.MinReplicas
+}
 
 // ApplyPolicy fills minReplicas/maxReplicas from the policy defaults when the
 // trait omitted them, validates the effective values, and enforces the policy
@@ -299,11 +326,7 @@ func (c *ScalerConfig) buildHPA(app *stack.Application, labels map[string]string
 	hpa := kubernetes.CreateHorizontalPodAutoscaler(name, app.Namespace)
 	hpa.Labels = labels
 	hpa.Annotations = nil
-	target := c.TargetName
-	if target == "" {
-		target = c.componentName
-	}
-	kubernetes.SetHPAScaleTargetRef(hpa, "apps/v1", "Deployment", target)
+	kubernetes.SetHPAScaleTargetRef(hpa, "apps/v1", "Deployment", c.targetName())
 	kubernetes.SetHPAMinMaxReplicas(hpa, c.MinReplicas, c.MaxReplicas)
 	if c.CPUUtilization != nil {
 		kubernetes.AddHPACPUMetric(hpa, *c.CPUUtilization)
