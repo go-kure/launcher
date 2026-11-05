@@ -122,6 +122,7 @@ policy placement *policies.PlacementHandler
 trait certificate *traits.CertificateHandler
 trait cilium-networkpolicy *traits.CiliumNetworkPolicyHandler
 trait configmap *traits.ConfigMapHandler
+trait disruption *traits.DisruptionHandler
 trait external-secret *traits.ExternalSecretHandler
 trait force-replace *traits.ForceReplaceHandler
 trait httproute *traits.HTTPRouteHandler

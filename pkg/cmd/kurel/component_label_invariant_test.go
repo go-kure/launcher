@@ -874,6 +874,7 @@ var traitLabelFixtures = map[string]traitLabelFixture{
 	"force-replace":    {longHost: true},
 	"security-context": {props: map[string]any{"psaLevel": "restricted"}},
 	"topology-spread":  {host: "deployment", hostProps: workloadProps(map[string]any{"replicas": 3}), selectors: 3},
+	"disruption":       {props: map[string]any{"minAvailable": 1}, selectors: 3},
 }
 
 // TestComponentLabelInvariant_FixturesCoverRegistry: every registered component

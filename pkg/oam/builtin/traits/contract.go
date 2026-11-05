@@ -83,6 +83,11 @@ func (h *TopologySpreadHandler) ContractMetadata() oam.ContractMetadata {
 	return contract("topology-spread")
 }
 
+// ContractMetadata implements oam.ContractDescriber.
+func (h *DisruptionHandler) ContractMetadata() oam.ContractMetadata {
+	return contract("disruption")
+}
+
 // ContractMetadata implements oam.ContractDescriber. The "expose" capability is
 // required (CapabilityRequired): it chooses between the two targets.
 func (ExposeRule) ContractMetadata() oam.ContractMetadata { return contract("expose", "expose") }

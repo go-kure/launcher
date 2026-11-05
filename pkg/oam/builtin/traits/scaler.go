@@ -235,6 +235,10 @@ type ScalerConfig struct {
 // provenance attribution.
 func (c *ScalerConfig) ComponentName() string { return c.componentName }
 
+// GeneratesPDB reports whether the scaler also generates a PodDisruptionBudget
+// (enablePDB). The disruption trait reads it to refuse a second budget.
+func (c *ScalerConfig) GeneratesPDB() bool { return c.EnablePDB }
+
 // targetName is the name of the Deployment the HorizontalPodAutoscaler scales:
 // TargetName, else the component name.
 func (c *ScalerConfig) targetName() string {

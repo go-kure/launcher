@@ -171,12 +171,14 @@ var validTraitTypes = map[string]bool{
 	"prune-protection":     true,
 	"topology-spread":      true,
 	"force-replace":        true,
+	"disruption":           true,
 }
 
 // traitComponentRestrictions maps trait types to the component types they support.
 // Traits not listed here are allowed on any component type.
 var traitComponentRestrictions = map[string]map[string]bool{
-	"scaler": {"webservice": true, "worker": true, "deployment": true},
+	"scaler":     {"webservice": true, "worker": true, "deployment": true},
+	"disruption": {"webservice": true, "worker": true, "deployment": true, "statefulset": true},
 }
 
 // validate performs semantic validation on a parsed Application.
