@@ -1030,6 +1030,26 @@ func TestNearestSource(t *testing.T) {
 	}
 }
 
+// TestOwnerRecorder_SourceOfValueSplitsOnFrom: copied entries under one collection that
+// share Kind and Ref but came from different kinds (authored, rendered) are not one
+// source. Without the From comparison sourceOfValue returned the first entry it met, so
+// the answer followed map iteration order; with it, the call reports no source every
+// time, so one call fails deterministically on the old code.
+func TestOwnerRecorder_SourceOfValueSplitsOnFrom(t *testing.T) {
+	rec := &ownerRecorder{entries: map[string]Source{
+		"tags[0]": {Kind: SourceCopied, Ref: "component/web", From: SourceAuthored},
+		"tags[1]": {Kind: SourceCopied, Ref: "component/web", From: SourceRendered},
+	}}
+	if got, ok := rec.sourceOfValue("tags"); ok {
+		t.Errorf("sourceOfValue(tags) = %+v for copied entries that differ in From; want no source", got)
+	}
+
+	rec.entries["tags[1]"] = Source{Kind: SourceCopied, Ref: "component/web", From: SourceAuthored}
+	if got, ok := rec.sourceOfValue("tags"); !ok || got.From != SourceAuthored {
+		t.Errorf("sourceOfValue(tags) = %+v, %v for entries that agree; want the authored copy", got, ok)
+	}
+}
+
 // TestRuleInput_NilRecorderRecordsNothing: with no report wanted the recorder is nil
 // and attribution neither records nor allocates.
 func TestRuleInput_NilRecorderRecordsNothing(t *testing.T) {

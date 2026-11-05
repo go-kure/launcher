@@ -910,7 +910,7 @@ func (r *ownerRecorder) sourceOfValue(path string) (Source, bool) {
 		switch {
 		case !have:
 			one, have = s, true
-		case s.Kind != one.Kind || s.Ref != one.Ref:
+		case s.Kind != one.Kind || s.Ref != one.Ref || s.From != one.From:
 			return Source{}, false
 		case s.Detail != one.Detail:
 			one.Detail = ""
