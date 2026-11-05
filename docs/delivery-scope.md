@@ -320,7 +320,8 @@ Decided in the ticket:
 - **Shipped: `objectName` on every kind component** (`pkg/oam/object_name.go`,
   `pkg/oam/README.md` "`objectName`: the object of a kind component"). It names the
   component's one object and nothing else: labels, selectors and trait-derived names keep
-  the component name. The engine reads it and asks the hook under role `object`; a handler
+  the component name, except the endpoint selector of a `cnpg-cluster` or `cnpg-pooler`
+  component, which matches the pods the object owns and follows the object name. The engine reads it and asks the hook under role `object`; a handler
   opts in by declaring its object's kind and scope (`ComponentObjectProvider`), and a test
   walks the registry so that a new type either declares it or is listed as taking none.
   - Only for a component no rule emitted: on a member a component or trait lowering rule

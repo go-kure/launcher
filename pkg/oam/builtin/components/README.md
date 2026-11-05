@@ -13279,7 +13279,8 @@ a kind added since, in the kind's own file),
 reads it, and hands `ToApplicationConfig` the resolved name as `Component.ObjectName()`. A
 handler's config carries it as `ObjectName`, empty when it is the component's name, and
 `Generate` names the object with it. Everything else the handler writes keeps the component
-name: the `app` label and selectors, the pod template's labels, the main container's name.
+name: the `app` label and selectors, the pod template's labels, the main container's name;
+the one exception is the pod selector of a `cnpg-cluster` or `cnpg-pooler` endpoint, below.
 A handler's own check of the name (a Service's DNS-1123 label, a CloudNativePG Cluster's
 length, a CronJob's 52 characters, a Job's 63 and the room an Indexed job's last index
 needs) runs on the object name, since that is what the object carries.
