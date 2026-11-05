@@ -1354,7 +1354,7 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `volsync-replicationsource` | The `volsync` trait's ReplicationSource. It names the object alone: the trait's sub-application keeps `name`, else the default. Launcher writes no reference to the ReplicationSource by name. | `<sourcePVC>-backup`, shortened to 253 with `-backup` kept whole. | `name` | unless `name` is set |
 | `pooler` | The Pooler a `postgresql` component generates. | `<component>-pooler` | `poolerName` | unless `poolerName` is set |
 | `database` | Each Database a `postgresql` component generates, asked once per `databases` entry. | `<component>-<database name>` | `databases[].objectName` | unless that entry's `objectName` is set |
-| `object` | The one object of an authored kind component (`deployment`, `service`, `cnpg-cluster`, `helmrelease`, …). Not asked for a member a component or trait lowering rule emitted. | The component's name. | `objectName` | unless `objectName` is set |
+| `object` | The one object of an authored kind component (`deployment`, `service`, `cnpg-cluster`, `helmrelease`, …). Not asked for a member a component or trait lowering rule emitted. The endpoint selector of `cnpg-cluster` and `cnpg-pooler`, which matches the pods the object owns, is built from this name; every other generated label and selector keeps the component name. | The component's name. | `objectName` | unless `objectName` is set |
 | `helm-source` | The Flux source (HelmRepository, OCIRepository, GitRepository, Bucket) a `helm` component generates for an inline `source`, and the OCIRepository `oci` components of one artifact share. Not the source an `oci` component keeps to itself, which is the component's own (`oci-source`). | `<application>-source-<digest>`, the digest of the source's content. | `source.name`, beside an inline source | once per source, with no component; not for a source a component names with `source.name` |
 | `values-configmap` | The ConfigMap a `helm` component generates under `valuesMode: configMap`. | `<component>-values-<hash>`, the hash of the stored values. | `valuesConfigMapName` | unless `valuesConfigMapName` is set |
 | `values-secret` | The Secret a `helm` component generates for `secretValues`. | `<component>-secret-values-<hash>`, the hash of the stored values. | `valuesSecretName` | unless `valuesSecretName` is set |
@@ -1863,7 +1863,9 @@ characters, a Job's at most 63).
 
 It names the object alone. The component keeps its name everywhere else: the `app` label, the
 pod template's labels, the selectors, the component label, the main container, and every name
-a trait derives (`<component>-hpa`, a `configmap` trait's default).
+a trait derives (`<component>-hpa`, a `configmap` trait's default). The one exception is the
+endpoint selector of a `cnpg-cluster` or `cnpg-pooler` component: it matches the pods the
+object owns, so it is built from the object name.
 
 The engine reads the property, not the handler. A handler opts its type in by declaring its
 object's kind and scope (`ComponentObjectProvider.ComponentObject`); the engine adds
@@ -1932,7 +1934,8 @@ the hook's answer for `workload-deployment`, `workload-service`, `workload-servi
   the name it took.
 
 The labels, the selectors, the main container and every name a trait derives keep the
-component name, as for `objectName`.
+component name; `objectName` has the same rule, with the endpoint selector of a `cnpg-cluster` or
+`cnpg-pooler` component as its one exception (above).
 
 **A Service's name is its DNS name in the cluster, so a renamed Service is reached at another
 address. Launcher builds no such address: every address written with the component name (an

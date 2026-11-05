@@ -37,8 +37,10 @@ const (
 //     name (the author's, else the Naming hook's, else the component name),
 //     claims it, and removes the property before ToApplicationConfig, which
 //     reads the result from Component.ObjectName;
-//   - the handler names its object with that, and only its object: the labels
-//     and selectors it generates keep the component name.
+//   - the handler names its object with that. The labels and selectors it
+//     generates keep the component name, except the endpoint selector of
+//     cnpg-cluster and cnpg-pooler, which matches the pods the object owns and
+//     is built from the resolved name.
 //
 // On a type that does not implement it `objectName` is refused. It is also
 // refused, and the hook not asked, on a member a component or trait lowering
@@ -57,7 +59,7 @@ type ComponentObjectProvider interface {
 // the schema of every type that takes it (withObjectProperties).
 var objectNameSchema = PropertySchema{
 	Type:        PropertyTypeString,
-	Description: "The name of the object this component generates, in place of the component name. It names the object alone: labels, selectors and the names traits generate keep the component name. A reference another component writes to this object names it by this name.",
+	Description: "The name of the object this component generates, in place of the component name. The labels and selectors the component generates and the names traits generate keep the component name, except the endpoint selector of a cnpg-cluster or cnpg-pooler component, which matches the pods this object owns and uses this name. A reference another component writes to this object names it by this name.",
 }
 
 // ObjectName returns the name of the object a kind component generates: the
