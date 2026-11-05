@@ -259,6 +259,9 @@ func TestTransform_ResolvesAnAuthoredIdentity(t *testing.T) {
 		t.Run(ref, func(t *testing.T) {
 			tr, seen := declared(t)
 			app := makeApp("myapp", makeComponent("w", ref))
+			// declared() registers a lowering rule, so Transform validates the
+			// document as a lowered one: it needs its TypeMeta.
+			app.APIVersion, app.Kind = SupportedAPIVersion, "Application"
 			if _, err := tr.Transform(app, TransformContext{}); err != nil {
 				t.Fatalf("Transform: %v", err)
 			}
@@ -274,7 +277,9 @@ func TestTransform_ResolvesAnAuthoredIdentity(t *testing.T) {
 
 func TestTransform_RefusesAnUnresolvableIdentity(t *testing.T) {
 	tr, _ := declared(t)
-	_, err := tr.Transform(makeApp("myapp", makeComponent("w", "widget@v9")), TransformContext{})
+	app := makeApp("myapp", makeComponent("w", "widget@v9"))
+	app.APIVersion, app.Kind = SupportedAPIVersion, "Application"
+	_, err := tr.Transform(app, TransformContext{})
 	if !errors.Is(err, ErrTypeReferenceUnknown) {
 		t.Fatalf("Transform error = %v, want ErrTypeReferenceUnknown", err)
 	}
