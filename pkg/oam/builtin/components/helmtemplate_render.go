@@ -312,18 +312,24 @@ func (r *chartRender) render(renderFn renderChartFunc, componentType, name strin
 		return errors.Wrapf(err, "%s %q", componentType, name)
 	}
 	// The volumeMounts of a rendered workload are held to the rules of an
-	// app.yaml mount, policy or none, as those of the kind components are
-	// (go-kure/launcher#1223). Like the scope refusal above, this one is reported
-	// as it came even with secretValues set, quoting the mount value as the
-	// policy check quotes what it refuses, and nothing is kept of the render. So
-	// is a container name used twice in a rendered workload's pod
-	// (go-kure/launcher#1253), hook groups included.
+	// app.yaml mount, and its pod spec to the container name, lifecycle sleep and
+	// regular init container rules, policy or none, as those of the kind
+	// components are (go-kure/launcher#1223, go-kure/launcher#1253,
+	// go-kure/launcher#1238). Like the scope refusal above, these are reported as
+	// they came even with secretValues set, quoting the value as the policy
+	// check quotes what it refuses, and nothing is kept of the render. They run
+	// in the order the typed pod reader applies them (validateAuthoredPodSpec):
+	// container names, then mounts, then the pod rules, so every delivery path
+	// refuses an object with the same first error. Hook groups are included.
 	for _, g := range groups {
 		for _, obj := range g.Resources {
+			if err := validateObjectContainerNames(obj); err != nil {
+				return errors.Wrapf(err, "%s %q: rendered %s", componentType, name, renderedObjectRef(obj))
+			}
 			if err := validateObjectMounts(obj); err != nil {
 				return errors.Wrapf(err, "%s %q: rendered %s", componentType, name, renderedObjectRef(obj))
 			}
-			if err := validateObjectContainerNames(obj); err != nil {
+			if err := validateObjectPodRules(obj); err != nil {
 				return errors.Wrapf(err, "%s %q: rendered %s", componentType, name, renderedObjectRef(obj))
 			}
 		}

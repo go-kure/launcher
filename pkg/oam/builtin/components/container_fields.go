@@ -459,8 +459,9 @@ const defaultTerminationGracePeriodSeconds int64 = 30
 // admitted. It runs on a pod spec the app.yaml components assemble
 // (go-kure/launcher#1228) and on the typed pod specs of the pod, podtemplate,
 // replicaset, replicationcontroller and manifests readers
-// (go-kure/launcher#1236), so every kind is held to one rule. prefix is the pod
-// spec's path in the object, ending in a dot, or "" when the object is the pod
+// (go-kure/launcher#1236) and of the workloads a passthrough component holds
+// and a chart renders (go-kure/launcher#1238), so every kind is held to one
+// rule. prefix is the pod spec's path in the object, ending in a dot, or "" when the object is the pod
 // spec's own, as in validateTypedVolumeMounts. Upstream validates a lifecycle
 // on an init container only when it is restartable; a regular one is refused
 // outright by refuseRegularInitFields, so it is skipped here. barePod marks a
