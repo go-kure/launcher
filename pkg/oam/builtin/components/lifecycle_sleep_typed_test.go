@@ -128,7 +128,12 @@ func TestTypedLifecycleSleep_NegativeGraceOnABarePod(t *testing.T) {
 	for _, w := range ivWorkloads {
 		t.Run("manifests/"+w.kind, func(t *testing.T) {
 			build := func(seconds int) error {
-				spec := w.podSpec + strings.TrimPrefix(lsPlacements[0].spec(grace, lsHook("preStop", seconds)), htPlainPod)
+				// The placement's spec carries its own container list, so drop the one the
+				// workload's podSpec ends with and keep what precedes it (a Job's restartPolicy).
+				spec := strings.TrimSuffix(w.podSpec, htPlainPod) + lsPlacements[0].spec(grace, lsHook("preStop", seconds))
+				if n := strings.Count("\n"+spec, "\ncontainers:"); n != 1 {
+					t.Fatalf("the fixture holds %d containers keys, want 1:\n%s", n, spec)
+				}
 				_, err := mfTransform("manifests", mfInline(ptWorkload(w.kind, w.apiVersion, w.path, spec)), nil)
 				return err
 			}
