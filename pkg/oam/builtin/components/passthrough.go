@@ -469,7 +469,27 @@ func (c *PassthroughConfig) validated() (*unstructured.Unstructured, error) {
 		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
 	}
 
+	// A container name used twice in a workload's pod is refused, policy or none
+	// (go-kure/launcher#1253): the API server refuses such a pod.
+	if err := refuseWorkloadContainerNames(u); err != nil {
+		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
+	}
+
 	return u, nil
+}
+
+// refuseWorkloadContainerNames holds the pod spec of u, when u is a workload
+// kure's scheme registers, to checkPodSpecContainerNames. u is read typed, and a
+// workload that cannot be read passes, exactly as for refuseWorkloadMounts.
+func refuseWorkloadContainerNames(u *unstructured.Unstructured) error {
+	if !isWorkloadGVK(u.GroupVersionKind()) {
+		return nil
+	}
+	obj, err := policyObject(u)
+	if err == nil {
+		return validateObjectContainerNames(obj)
+	}
+	return nil
 }
 
 // refuseWorkloadMounts holds the pod spec of u, when u is a workload kure's

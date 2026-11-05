@@ -315,10 +315,15 @@ func (r *chartRender) render(renderFn renderChartFunc, componentType, name strin
 	// app.yaml mount, policy or none, as those of the kind components are
 	// (go-kure/launcher#1223). Like the scope refusal above, this one is reported
 	// as it came even with secretValues set, quoting the mount value as the
-	// policy check quotes what it refuses, and nothing is kept of the render.
+	// policy check quotes what it refuses, and nothing is kept of the render. So
+	// is a container name used twice in a rendered workload's pod
+	// (go-kure/launcher#1253), hook groups included.
 	for _, g := range groups {
 		for _, obj := range g.Resources {
 			if err := validateObjectMounts(obj); err != nil {
+				return errors.Wrapf(err, "%s %q: rendered %s", componentType, name, renderedObjectRef(obj))
+			}
+			if err := validateObjectContainerNames(obj); err != nil {
 				return errors.Wrapf(err, "%s %q: rendered %s", componentType, name, renderedObjectRef(obj))
 			}
 		}

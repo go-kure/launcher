@@ -229,7 +229,9 @@ func podSpecDefaultedZeros(prefix string, ps *corev1.PodSpec) defaultedZeroField
 // ephemeral containers, and the Priority and RuntimeClass admission controllers
 // set the other two. An empty ephemeralContainers or overhead carries nothing
 // and is read as unset. Every init and regular container's image is held to
-// ValidateImageRef: no untagged image and no :latest. So is the reference of
+// ValidateImageRef: no untagged image and no :latest. A container name used by
+// more than one init or regular container is refused, naming both entries
+// (checkPodSpecContainerNames, go-kure/launcher#1253). So is the reference of
 // every image volume (validateImageVolumeRefs). A match expression of a label
 // selector is held to validateLabelSelector, in every selector the spec holds
 // (validatePodSpecLabelSelectors). The volumeMounts of every init and regular
@@ -259,6 +261,9 @@ func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec, barePod bool) er
 		if err := ValidateImageRef(ctr.Image); err != nil {
 			return errors.Wrapf(err, "%scontainers[%d] %q", prefix, i, ctr.Name)
 		}
+	}
+	if err := checkPodSpecContainerNames(prefix, ps); err != nil {
+		return err
 	}
 	if err := validateImageVolumeRefs(prefix, ps); err != nil {
 		return err

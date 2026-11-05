@@ -3387,20 +3387,53 @@ func checkPodPortNames(mainPorts []corev1.ContainerPort, initContainers []InitCo
 // (job, cronjob) passes nil. Name syntax is not checked here.
 func checkPodContainerNames(mainName string, inits []InitContainerConfig, sidecars []SidecarContainerConfig) error {
 	usedBy := map[string]string{mainName: fmt.Sprintf("the main container %q", mainName)}
-	check := func(container, name string) error {
-		if other, taken := usedBy[name]; taken {
-			return errors.Errorf("%s: container name %q is also used by %s; the API server refuses a pod whose containers share a name", container, name, other)
-		}
-		usedBy[name] = container
-		return nil
-	}
 	for i, ic := range inits {
-		if err := check(fmt.Sprintf("initContainers[%d] %q", i, ic.Name), ic.Name); err != nil {
+		if err := claimContainerName(usedBy, fmt.Sprintf("initContainers[%d] %q", i, ic.Name), ic.Name); err != nil {
 			return err
 		}
 	}
 	for i, sc := range sidecars {
-		if err := check(fmt.Sprintf("sidecars[%d] %q", i, sc.Name), sc.Name); err != nil {
+		if err := claimContainerName(usedBy, fmt.Sprintf("sidecars[%d] %q", i, sc.Name), sc.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// claimContainerName records name as used by container in usedBy, or refuses
+// it when an earlier container already holds it. It is the one text both
+// container-name checks refuse with.
+func claimContainerName(usedBy map[string]string, container, name string) error {
+	if other, taken := usedBy[name]; taken {
+		return errors.Errorf("%s: container name %q is also used by %s; the API server refuses a pod whose containers share a name", container, name, other)
+	}
+	usedBy[name] = container
+	return nil
+}
+
+// checkPodSpecContainerNames is checkPodContainerNames for a pod spec as
+// authored (a raw pod kind, or an object of a manifests source, a passthrough
+// component or a chart's render): it refuses a name used by more than one entry
+// of initContainers and containers together, init containers first, and names
+// both entries. prefix is the spec's path, ending in a dot, or "" for the
+// spec's own fields. An entry with no name is not read: the API server refuses
+// it, and a typed spec cannot tell an absent name from an empty one. Ephemeral
+// containers are not read (go-kure/launcher#1253).
+func checkPodSpecContainerNames(prefix string, ps *corev1.PodSpec) error {
+	usedBy := map[string]string{}
+	for i, ctr := range ps.InitContainers {
+		if ctr.Name == "" {
+			continue
+		}
+		if err := claimContainerName(usedBy, fmt.Sprintf("%sinitContainers[%d] %q", prefix, i, ctr.Name), ctr.Name); err != nil {
+			return err
+		}
+	}
+	for i, ctr := range ps.Containers {
+		if ctr.Name == "" {
+			continue
+		}
+		if err := claimContainerName(usedBy, fmt.Sprintf("%scontainers[%d] %q", prefix, i, ctr.Name), ctr.Name); err != nil {
 			return err
 		}
 	}
