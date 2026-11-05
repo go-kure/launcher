@@ -73,13 +73,20 @@ func disruptionTrait(props map[string]any) oam.Trait {
 // they generate, or the first error from the transform or from a Generate.
 func disruptionBudgets(t *testing.T, comps ...oam.Component) ([]*policyv1.PodDisruptionBudget, error) {
 	t.Helper()
+	return budgetsWith(t, disruptionTransformer(), oam.TransformContext{}, comps...)
+}
+
+// budgetsWith is disruptionBudgets on a transformer and a transform context the
+// caller built: a profile's capabilities, or a lowering rule added to the registry.
+func budgetsWith(t *testing.T, tr *oam.Transformer, ctx oam.TransformContext, comps ...oam.Component) ([]*policyv1.PodDisruptionBudget, error) {
+	t.Helper()
 	app := &oam.Application{
 		APIVersion: oam.SupportedAPIVersion,
 		Kind:       "Application",
 		Metadata:   oam.Metadata{Name: "pkg", Namespace: "default"},
 		Spec:       oam.ApplicationSpec{Components: comps},
 	}
-	cluster, err := disruptionTransformer().Transform(app, oam.TransformContext{})
+	cluster, err := tr.Transform(app, ctx)
 	if err != nil {
 		return nil, err
 	}
