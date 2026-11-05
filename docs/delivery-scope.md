@@ -1911,8 +1911,8 @@ and by scope, whatever component or trait emits it.
     `alertmanagerConfiguration.global`) is refused where `version` is below that
     version, which the refusal names; the operator's version comparisons are vendored
     and each is held to the list. An unset `version` is judged against the operator
-    release launcher vendors (v0.94.1, default v0.34.0), as the deployed operator's
-    default is unknown at build time; at v0.34.0 no field is refused.
+    release launcher vendors (v0.95.0, default v0.34.2), as the deployed operator's
+    default is unknown at build time; at v0.34.2 no field is refused.
 - **Shipped: `thanosruler`, the ThanosRuler of the same API** (`thanosruler.go`, on
   what `monitoring_workload.go` shares): the strict projection of `ThanosRulerSpec`, built
   on `policyHeldKind`, namespaced, declaring its object and taking `objectName`. Launcher
@@ -1959,7 +1959,7 @@ and by scope, whatever component or trait emits it.
     nameserver, which the operator copies into the pods; and a name whose data volume or
     first rule ConfigMap volume is not a DNS-1123 label (no dot, at most 38 characters)
     are each refused. So is a field the operator reads only from some Thanos version on,
-    where `version` is below it, or the operator's default v0.42.4 where it is unset
+    where `version` is below it, or the operator's default v0.42.5 where it is unset
     (go-kure/launcher#976); `web-config` stays reserved whatever `version` names. Where
     the gates admit `azureAd` (0.31.0 on), an entry's `azureAd` with no authentication
     method, which the operator refuses whatever it drops, is refused, naming the methods

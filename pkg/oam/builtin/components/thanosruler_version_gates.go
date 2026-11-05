@@ -12,7 +12,7 @@ import (
 // The version gates of the thanosruler kind (go-kure/launcher#976; the class
 // is described in monitoring_version_gates.go): the fields of
 // monitoringv1.ThanosRulerSpec the Prometheus operator reads only from some
-// Thanos version on, at prometheus-operator v0.94.1.
+// Thanos version on, at prometheus-operator v0.95.0.
 //
 // TestThanosRulerVersionGates_MatchVendoredSource holds the table to the
 // operator's source: every comparison of a version in the operator's package
@@ -32,9 +32,7 @@ const (
 	thanosRulerFlagDropped        = "does not pass it to Thanos Ruler, and the ruler runs without it"
 	thanosRulerRefused            = "refuses the object at reconcile, and the ThanosRuler is not updated"
 	thanosRulerRemoteWriteDropped = "drops it from the remote write configuration, and the ruler writes without it"
-	thanosRulerRemoteWriteKept    = "logs that it ignores it, yet writes it into the remote write configuration all the same, for a Thanos that does not read it"
 	thanosRulerRemoteWriteNoAuth  = "drops it, and where that leaves azureAd with no authentication method refuses the object at reconcile"
-	thanosRulerRemoteWriteAzureAD = "logs that it ignores it, yet writes it into the remote write configuration all the same where a managed identity remains, for a Thanos that does not read it, and refuses the object at reconcile where no authentication method remains"
 	thanosRulerWebPlainHTTP       = "mounts no web configuration, and the web endpoint serves plain HTTP without the authored settings"
 )
 
@@ -77,17 +75,18 @@ var thanosRulerVersionGates = func() []idGate[monitoringv1.ThanosRulerSpec] {
 		// minRemoteWriteVersion, and the fields of an endpoint the operator
 		// resets below the Thanos version that reads them, or, for a managed
 		// identity without a client id, refuses (pkg/thanos/operator.go).
-		// The reset is of a copy of the entry (the loop ranges over
-		// tr.Spec.RemoteWrite by value): it drops only a field reached
-		// through a pointer, of tlsConfig, queueConfig or azureAd; a field of
-		// the entry itself is logged as ignored and written all the same.
+		// The reset acts on the entry itself (the loop takes a pointer to
+		// each entry of tr.Spec.RemoteWrite, as it has since v0.95.0; at
+		// v0.94.1 it ranged over copies, and a reset of a field of the entry
+		// itself was logged and written all the same), so every field is
+		// dropped from the configuration, azureAd as a whole included.
 		//
 		// The first gate missed is the one refused, so the gates of azureAd's
 		// methods precede azureAd's own, in the order the operator acts on
 		// them: a managed identity without a client id refused, then sdk and
 		// oauth dropped, which leaves the object refused where no method
-		// remains. azureAd itself is written, though ignored, where a managed
-		// identity survives. These gates, of remoteWrite and of azureAd, are
+		// remains, and azureAd itself dropped below 0.31.0. These gates, of
+		// remoteWrite and of azureAd, are
 		// held ahead of every other (refuseThanosRulerAtVersion), and a
 		// workloadIdentity, which the operator drops at every version, after
 		// them and ahead of the others (thanosRulerNeverReadFields).
@@ -101,16 +100,16 @@ var thanosRulerVersionGates = func() []idGate[monitoringv1.ThanosRulerSpec] {
 			}),
 		remoteWrite("azureAd.sdk", "0.36.0", thanosRulerRemoteWriteNoAuth, func(r *rw) bool { return r.AzureAD != nil && r.AzureAD.SDK != nil }),
 		remoteWrite("azureAd.oauth", "0.31.0", thanosRulerRemoteWriteNoAuth, func(r *rw) bool { return r.AzureAD != nil && r.AzureAD.OAuth != nil }),
-		remoteWrite("azureAd", "0.31.0", thanosRulerRemoteWriteAzureAD, func(r *rw) bool { return r.AzureAD != nil }),
+		remoteWrite("azureAd", "0.31.0", thanosRulerRemoteWriteDropped, func(r *rw) bool { return r.AzureAD != nil }),
 		remoteWrite("tlsConfig.minVersion", "0.28.0", thanosRulerRemoteWriteDropped, func(r *rw) bool { return r.TLSConfig != nil && r.TLSConfig.MinVersion != nil }),
 		remoteWrite("tlsConfig.maxVersion", "0.30.0", thanosRulerRemoteWriteDropped, func(r *rw) bool { return r.TLSConfig != nil && r.TLSConfig.MaxVersion != nil }),
-		remoteWrite("sendNativeHistograms", "0.30.0", thanosRulerRemoteWriteKept, func(r *rw) bool { return r.SendNativeHistograms != nil }),
+		remoteWrite("sendNativeHistograms", "0.30.0", thanosRulerRemoteWriteDropped, func(r *rw) bool { return r.SendNativeHistograms != nil }),
 		remoteWrite("queueConfig.sampleAgeLimit", "0.32.0", thanosRulerRemoteWriteDropped, func(r *rw) bool { return r.QueueConfig != nil && r.QueueConfig.SampleAgeLimit != nil }),
-		remoteWrite("noProxy", "0.32.0", thanosRulerRemoteWriteKept, func(r *rw) bool { return r.NoProxy != nil }),
-		remoteWrite("proxyFromEnvironment", "0.32.0", thanosRulerRemoteWriteKept, func(r *rw) bool { return r.ProxyFromEnvironment != nil }),
-		remoteWrite("proxyConnectHeader", "0.32.0", thanosRulerRemoteWriteKept, func(r *rw) bool { return r.ProxyConnectHeader != nil }),
-		remoteWrite("messageVersion", "0.37.0", thanosRulerRemoteWriteKept, func(r *rw) bool { return r.MessageVersion != nil }),
-		remoteWrite("roundRobinDNS", "0.38.0", thanosRulerRemoteWriteKept, func(r *rw) bool { return r.RoundRobinDNS != nil }),
+		remoteWrite("noProxy", "0.32.0", thanosRulerRemoteWriteDropped, func(r *rw) bool { return r.NoProxy != nil }),
+		remoteWrite("proxyFromEnvironment", "0.32.0", thanosRulerRemoteWriteDropped, func(r *rw) bool { return r.ProxyFromEnvironment != nil }),
+		remoteWrite("proxyConnectHeader", "0.32.0", thanosRulerRemoteWriteDropped, func(r *rw) bool { return r.ProxyConnectHeader != nil }),
+		remoteWrite("messageVersion", "0.37.0", thanosRulerRemoteWriteDropped, func(r *rw) bool { return r.MessageVersion != nil }),
+		remoteWrite("roundRobinDNS", "0.38.0", thanosRulerRemoteWriteDropped, func(r *rw) bool { return r.RoundRobinDNS != nil }),
 	}
 }()
 

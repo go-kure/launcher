@@ -263,6 +263,22 @@ func prometheusGateRows(t *testing.T, src *vendoredPromOp) []gateRow {
 		// (server/statefulset.go), so the field is read at every version.
 		not(cfg, cg+"appendRuntime", `!cg.WithMinimumVersion("2.53.0").IsCompatible()`,
 			"runtime.goGC is written to the configuration from 2.53.0 and passed as the GOGC variable of the container below it; read at every version"),
+		// logLevel is passed as the log.level flag below 3.15.0 and written to
+		// runtime.log_level from it, so the field is read at every version.
+		not(cfg, cg+"BuildCommonPrometheusArgs", `cpf.LogLevel != "" && !cg.WithMinimumVersion("3.15.0").IsCompatible()`,
+			"passes logLevel as the log.level flag below 3.15.0, where the configuration cannot hold it; read at every version"),
+		not(cfg, cg+"appendRuntime", `cg.WithMinimumVersion("3.15.0").IsCompatible()`,
+			"writes logLevel to runtime.log_level from 3.15.0 and passes it as the log.level flag below it; read at every version"),
+
+		// extraScrapeMetrics is a field of PrometheusSpec, PodMonitorSpec,
+		// ServiceMonitorSpec and ProbeSpec that no kind exposes yet
+		// (go-kure/launcher#1265): its gates join the table when it is.
+		not(cfg, cg+"addExtraScrapeMetrics", `return cg.WithMinimumVersion("3.10.0").AppendMapItem(cfg, "extra_scrape_metrics", *extraScrapeMetrics)`,
+			"the per-scrape extraScrapeMetrics of a ServiceMonitor, PodMonitor or Probe object, which this kind does not author"),
+		not(cfg, cg+"BuildCommonPrometheusArgs", `ptr.Deref(cpf.ExtraScrapeMetrics, false) && cg.Version().GTE(semver.MustParse("2.32.0")) && cg.Version().LT(semver.MustParse("3.10.0"))`,
+			"extraScrapeMetrics, which this kind does not expose yet (go-kure/launcher#1265)"),
+		not(cfg, cg+"appendExtraScrapeMetrics", `cg.Version().LT(semver.MustParse("3.10.0"))`,
+			"extraScrapeMetrics, which this kind does not expose yet (go-kure/launcher#1265)"),
 		gate(cfg, cg+"appendScrapeLimits", `cg.WithMinimumVersion("2.45.0").AppendMapItem(slice, "body_size_limit", cpf.BodySizeLimit)`, "bodySizeLimit"),
 		not(cfg, cg+"appendScrapeLimits", `cg.WithMinimumVersion("2.45.0").AppendMapItem(slice, "body_size_limit", cpf.EnforcedBodySizeLimit)`,
 			"the global form of enforcedBodySizeLimit, which every scrape configuration also takes from 2.28.0, where it is gated"),
@@ -866,7 +882,7 @@ func TestPrometheusVersionGates_Cases(t *testing.T) {
 		{"sampleLimit of 0 is written at no version", m{"sampleLimit": 0}, "version", "v2.44.0", ""},
 		{"keepDroppedTargets of 0 is written at no version", m{"keepDroppedTargets": 0}, "version", "v2.46.0", ""},
 		{"blockSize with object storage at the defaults", blockSize(m{}), "version", "",
-			"thanos.blockSize: read by the Prometheus operator only where it disables local compaction: with disableCompaction, or with Prometheus below 3.9.0 or Thanos below 0.42.0; at the operator's default version v3.14.0 and the operator's default Thanos version v0.42.4, with object storage set, it "},
+			"thanos.blockSize: read by the Prometheus operator only where it disables local compaction: with disableCompaction, or with Prometheus below 3.9.0 or Thanos below 0.42.0; at the operator's default version v3.14.0 and the operator's default Thanos version v0.42.5, with object storage set, it "},
 		{"blockSize with object storage at v3.9.0 and v0.42.0", blockSize(m{"version": "v0.42.0"}), "version", "v3.9.0", "at version v3.9.0 and thanos.version v0.42.0, with object storage set"},
 		{"blockSize with object storage below v3.9.0", blockSize(m{}), "version", "v3.8.1", ""},
 		{"blockSize with object storage below Thanos v0.42.0", blockSize(m{"version": "v0.41.0"}), "version", "v3.14.0", ""},

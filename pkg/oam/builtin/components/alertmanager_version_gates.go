@@ -7,7 +7,7 @@ import (
 // The version gates of the alertmanager kind (go-kure/launcher#935; the
 // class is described in monitoring_version_gates.go): the fields of
 // monitoringv1.AlertmanagerSpec the Prometheus operator reads only from some
-// Alertmanager version on, at prometheus-operator v0.94.1.
+// Alertmanager version on, at prometheus-operator v0.95.0.
 //
 // TestAlertmanagerVersionGates_MatchVendoredSource holds the table to the
 // operator's source: every comparison of the Alertmanager version in the
@@ -20,11 +20,11 @@ import (
 const (
 	// alertmanagerDefaultVersion is the version the operator configures for
 	// where version is unset (DefaultAlertmanagerVersion,
-	// pkg/operator/defaults.go at v0.94.1).
-	alertmanagerDefaultVersion = "v0.34.0"
+	// pkg/operator/defaults.go at v0.95.0).
+	alertmanagerDefaultVersion = "v0.34.2"
 	// alertmanagerMinimumVersion is the lowest version the operator builds
 	// the pods for; it refuses a version of a major above 0 too
-	// (provisionAlertmanagerConfiguration, pkg/alertmanager/operator.go).
+	// (getAlertmanagerVersion, pkg/alertmanager/operator.go).
 	alertmanagerMinimumVersion = "0.15.0"
 	// alertmanagerURLSchemeVersion is the least version whose Alertmanager
 	// exits on an externalUrl not of scheme http or https: the least
@@ -146,6 +146,14 @@ var alertmanagerVersionGates = []versionGate[monitoringv1.AlertmanagerSpec]{
 	{"alertmanagerConfiguration.global.telegram", "0.24.0", amGlobalCheckRef, func(s *monitoringv1.AlertmanagerSpec) bool {
 		g := alertmanagerGlobal(s)
 		return g != nil && g.TelegramConfig != nil
+	}},
+	{"alertmanagerConfiguration.global.telegram.botToken", "0.31.0", amGlobalCheckRef, func(s *monitoringv1.AlertmanagerSpec) bool {
+		g := alertmanagerGlobal(s)
+		return g != nil && g.TelegramConfig != nil && g.TelegramConfig.BotToken != nil
+	}},
+	{"alertmanagerConfiguration.global.telegram.botTokenFile", "0.31.0", amGlobalCheckRef, func(s *monitoringv1.AlertmanagerSpec) bool {
+		g := alertmanagerGlobal(s)
+		return g != nil && g.TelegramConfig != nil && g.TelegramConfig.BotTokenFile != nil
 	}},
 	{"alertmanagerConfiguration.global.webex", "0.25.0", amGlobalCheckRef, func(s *monitoringv1.AlertmanagerSpec) bool {
 		g := alertmanagerGlobal(s)
