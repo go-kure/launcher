@@ -54,6 +54,26 @@ func TestDisruption_ProfileRenderedPDBNameMustBeAString(t *testing.T) {
 	}
 }
 
+// A null is absence (oam.IsNullValue), typed or not: a rendering that carries one for
+// pdbName or the eviction policy keeps the default, and is not refused as a wrong type.
+func TestDisruption_ProfileRenderedTypedNullIsAbsent(t *testing.T) {
+	budget := disruptionTrait(map[string]any{"minAvailable": 1})
+	for _, key := range []string{"pdbName", "unhealthyPodEvictionPolicy"} {
+		for _, null := range []any{nil, []any(nil), map[string]any(nil)} {
+			ctx := oam.TransformContext{Capabilities: map[string]oam.CapabilityBinding{
+				"disruption": {Rendering: map[string]any{key: null}},
+			}}
+			pdbs, err := budgetsWith(t, disruptionTransformer(), ctx, disruptionComponent("app", "deployment", budget))
+			if err != nil {
+				t.Fatalf("%s: %#v: transform: %v", key, null, err)
+			}
+			if len(pdbs) != 1 || pdbs[0].Name != "app-pdb" {
+				t.Fatalf("%s: %#v: budgets = %v, want the one default app-pdb", key, null, pdbs)
+			}
+		}
+	}
+}
+
 // scaleLowering is a trait lowering rule that emits a scaler trait, as a
 // consumer's own rule would. The scaler it emits reaches the bundle like an
 // authored one.
