@@ -18,7 +18,8 @@ import (
 // The topology-spread trait applies launcher's default spread opinion — the
 // one webservice and worker apply from their `topologySpread` property — to
 // any Deployment a component generates. These tests pin the three properties
-// that make it usable as the target of a lowering rule: it reads the replica
+// that make it usable as the target of a lowering rule: it reads the matching
+// scaler's minReplicas when the Deployment is scaled, and otherwise the replica
 // count the Deployment actually carries (so after the environment policy), it
 // produces exactly what the role kinds produce, and it never merges with
 // constraints that are already there.
@@ -283,8 +284,8 @@ func transformedDeploymentCtx(t *testing.T, comp oam.Component, ctx oam.Transfor
 }
 
 // Without a scaler, the replica count the trait reads is the one the Deployment
-// carries after the environment policy ran, not the authored one. A document that authors no
-// replicas gets no spread without a policy and the full spread under a policy
+// carries after the environment policy ran, not the authored one. A document
+// that authors no replicas gets no spread without a policy and the full spread under a policy
 // defaulting to three: the policy step is the only difference between the two
 // runs, so this pair is what pins the ordering (policy at component
 // conversion, traits after, Generate last).
@@ -663,9 +664,11 @@ func TestTopologySpread_DecoratesManifestsDeployment(t *testing.T) {
 
 // A Deployment whose selector the trait cannot copy into a spread selector is
 // refused at every replica count, not only once the count reaches the tier
-// that emits constraints. The environment policy sets the count, so a check
-// gated on it would let one document build in one environment and fail in
-// another.
+// that emits constraints. The count can come from the environment policy, or
+// from the matching scaler's minReplicas under a scaler, so a check gated on it
+// would let one document build in one environment and fail in another. The
+// scaled case is pinned by
+// TestScalerSpread_RefusesNonMatchLabelsSelectorUnderAScalerAtMinOne.
 func TestTopologySpread_RefusesNonMatchLabelsSelectorAtAnyReplicas(t *testing.T) {
 	selectors := map[string]string{
 		"matchLabels plus matchExpressions": "  selector:\n    matchLabels:\n      app: web\n    matchExpressions:\n    - {key: tier, operator: In, values: [front]}\n",

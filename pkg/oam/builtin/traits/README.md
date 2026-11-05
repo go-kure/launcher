@@ -800,9 +800,10 @@ The trait is strict in five ways, each an error at build time:
 - **No merging.** A Deployment that already has `topologySpreadConstraints` is
   refused rather than merged, whatever put them there: the raw property on
   `deployment`, or the `topologySpread` default of `webservice`/`worker` at 2
-  or more replicas. Set `topologySpread: false` on a role kind to use the trait
-  instead. At one replica the role kinds produce no constraints, so there is
-  nothing to conflict with.
+  or more replicas (the `scaler`'s `minReplicas` when the component has one).
+  Set `topologySpread: false` on a role kind to use the trait instead. At one
+  replica, or a `minReplicas` of 1, the role kinds produce no constraints, so
+  there is nothing to conflict with.
 - **A typed Deployment is required.** The trait acts on the typed Deployment
   objects a component's `Generate` returns: the one `deployment`, `webservice`
   or `worker` builds, and any `apps/v1` Deployment in a `manifests` source or

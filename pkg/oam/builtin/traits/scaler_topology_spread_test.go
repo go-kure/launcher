@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -317,6 +318,88 @@ func TestScalerSpread_ASameNamedDeploymentInAnotherNamespaceIsNotScaled(t *testi
 		if got := gotSpread(dep.Spec.Template.Spec.TopologySpreadConstraints); fmt.Sprint(got) != fmt.Sprint(w) {
 			t.Errorf("Deployment %s/%s: spread constraints = %v, want %v", dep.Namespace, dep.Name, got, w)
 		}
+	}
+}
+
+// TestScalerSpread_RefusesNonMatchLabelsSelectorUnderAScalerAtMinOne: the
+// selector check runs before the count is consulted, also when the count is the
+// scaler's minReplicas. A scaler with a minimum of 1 makes the trait emit no
+// constraints, so a check gated on the count would let this document build
+// where a minimum of 2 or more refuses it. The manifests Deployment is named
+// after the scaled component and sits in its namespace, so the scaler matches
+// it. Two controls make the refusal the selector's: the same Deployment with a
+// matchLabels selector spreads by the scaler's minimum, which shows the scaler
+// matches, and builds without constraints at a minimum of 1.
+func TestScalerSpread_RefusesNonMatchLabelsSelectorUnderAScalerAtMinOne(t *testing.T) {
+	const matchLabels = "  selector:\n    matchLabels:\n      app: web\n"
+	const matchExpressions = "  selector:\n    matchExpressions:\n    - {key: app, operator: In, values: [web]}\n"
+	spread := oam.Trait{Type: "topology-spread", Properties: map[string]any{}}
+	// generate transforms the document and runs Generate on every application,
+	// which is where the trait refuses; it returns the first error.
+	generate := func(selector string, minReplicas int) (*appsv1.Deployment, error) {
+		inline := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n" + selector +
+			"  template:\n    metadata:\n      labels:\n        app: web\n" +
+			"    spec:\n      containers:\n      - name: web\n        image: ghcr.io/org/web:v1\n"
+		cluster, err := transformSpreadScalerIn(&traits.TopologySpreadHandler{}, nil, []oam.Component{
+			{Name: "web", Type: "deployment", Properties: map[string]any{"image": "ghcr.io/org/web:v1"},
+				Traits: []oam.Trait{scalerTrait(map[string]any{"minReplicas": minReplicas, "maxReplicas": 5})}},
+			{Name: "adopted", Type: "manifests", Properties: map[string]any{"inline": inline},
+				Traits: []oam.Trait{spread}},
+		})
+		if err != nil {
+			t.Fatalf("transform: %v", err)
+		}
+		var adopted *appsv1.Deployment
+		var walk func(node *stack.Node) error
+		walk = func(node *stack.Node) error {
+			if node == nil {
+				return nil
+			}
+			if node.Bundle != nil {
+				for _, a := range node.Bundle.Applications {
+					objs, err := a.Generate()
+					if err != nil {
+						return err
+					}
+					for _, o := range objs {
+						if dep, ok := (*o).(*appsv1.Deployment); ok && a.Name == "adopted" {
+							adopted = dep
+						}
+					}
+				}
+			}
+			for _, child := range node.Children {
+				if err := walk(child); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		// walk fills adopted, so it runs before adopted is read.
+		err = walk(cluster.Node)
+		return adopted, err
+	}
+
+	for _, minReplicas := range []int{1, 3} {
+		dep, err := generate(matchLabels, minReplicas)
+		if err != nil {
+			t.Fatalf("control (matchLabels selector, minimum %d): %v", minReplicas, err)
+		}
+		if dep == nil {
+			t.Fatalf("control (minimum %d): the adopted application generated no Deployment", minReplicas)
+		}
+		want := wantSpread(int32(minReplicas))
+		if got := gotSpread(dep.Spec.Template.Spec.TopologySpreadConstraints); fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("control (minimum %d): spread constraints = %v, want %v", minReplicas, got, want)
+		}
+	}
+
+	_, err := generate(matchExpressions, 1)
+	if err == nil {
+		t.Fatal("matchExpressions selector under a scaler with minReplicas 1: expected an error, got none")
+	}
+	if !strings.Contains(err.Error(), "matchLabels") {
+		t.Errorf("error should name the matchLabels requirement, got: %v", err)
 	}
 }
 
