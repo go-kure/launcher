@@ -27,6 +27,15 @@
 //	for _, r := range registry.TraitLoweringRules() {
 //		t.RegisterBuiltinTraitLowering(r)
 //	}
+//
+// Each built-in also has a type identity (README.md "Type identity"): a document
+// may author `deployment.apps@v1` or `webservice@v1` for the type registered as
+// `deployment` or `webservice`. DeclareTypes declares them on the transformer
+// once the registration above is done:
+//
+//	if err := registry.DeclareTypes(t); err != nil {
+//		return err
+//	}
 package registry
 
 import (

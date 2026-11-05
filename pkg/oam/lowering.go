@@ -909,6 +909,12 @@ type LowerableTypes struct {
 	ComponentTypes []string
 	TraitTypes     []string
 	PolicyTypes    []string
+
+	// identities is the type identities a Transformer declared (typeid.go), so that
+	// Parse accepts an authored `name@version` or qualified name as the type it
+	// resolves to. Set only by Transformer.LowerableTypes; nil, as in a literal, is
+	// today's behavior: a type is its plain name.
+	identities *typeIdentities
 }
 
 // LowerableTypes reports the type names claimed by rules registered on t, for callers
@@ -927,6 +933,7 @@ func (t *Transformer) LowerableTypes() LowerableTypes {
 		ComponentTypes: make([]string, 0, len(t.componentLoweringRules)),
 		TraitTypes:     make([]string, 0, len(t.traitLoweringRules)),
 		PolicyTypes:    make([]string, 0, len(t.policyLoweringRules)),
+		identities:     t.snapshotIdentities(),
 	}
 	for k := range t.docLoweringRules {
 		lt.Kinds = append(lt.Kinds, k)

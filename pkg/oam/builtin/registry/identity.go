@@ -62,6 +62,22 @@ func PolicyTypeIDs() map[string]oam.TypeID {
 	return ids
 }
 
+// DeclareTypes declares on t the identity of every built-in type: ComponentTypeIDs,
+// TraitTypeIDs and PolicyTypeIDs. Call it after t has registered the built-ins
+// (the recipe above); it is refused, and t left as it was for that position, for a
+// built-in type t does not hold, as when a consumer deleted one from the maps it
+// registered. A consumer that did declares what it kept, from the same maps with
+// its deletions made.
+func DeclareTypes(t *oam.Transformer) error {
+	if err := t.DeclareComponentTypes(ComponentTypeIDs()); err != nil {
+		return err
+	}
+	if err := t.DeclareTraitTypes(TraitTypeIDs()); err != nil {
+		return err
+	}
+	return t.DeclarePolicyTypes(PolicyTypeIDs())
+}
+
 func launcherTypeID(name string) oam.TypeID {
 	return oam.TypeID{Name: name + "." + LauncherDomain, Version: launcherVersion}
 }
