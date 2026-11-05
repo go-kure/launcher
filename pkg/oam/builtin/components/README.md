@@ -1315,7 +1315,11 @@ init container declares no ports, so it takes no part. A container name must be
 unique across the pod too: the main container (named after the component),
 every `initContainers` entry and every `sidecars` entry, and within each list.
 The API server refuses a pod whose containers share a name, so the document is
-refused when it is read, naming both entries (go-kure/launcher#1226). `job` and
+refused when it is read, naming both entries (go-kure/launcher#1226). A name in
+either list must also be a DNS-1123 label, as the main container's name is:
+lowercase alphanumerics and `-`, starting and ending with an alphanumeric, no
+dots, at most 63 characters. Any other is refused, naming the entry
+(go-kure/launcher#1254). `job` and
 `cronjob` take no `sidecars`, so their pod holds the main container and the
 `initContainers` entries. Closing the entry is behavior-changing under an
 unchanged `launcher.gokure.dev/v1alpha1`: a document that authored any other

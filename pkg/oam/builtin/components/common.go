@@ -2103,6 +2103,18 @@ func requiredStringField(raw map[string]any, key, label string) (string, error) 
 	return s, nil
 }
 
+// checkContainerNameLabel refuses an initContainers or sidecars name that is
+// not a DNS-1123 label, the rule the main container's name already meets
+// (buildMainContainer) and the API server holds every container to: without
+// it the document generated and failed at apply (go-kure/launcher#1254).
+// label names the entry, "initContainers[0]".
+func checkContainerNameLabel(label, name string) error {
+	if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
+		return errors.Errorf("%s: invalid container name %q: %s; a container name is a DNS-1123 label (lowercase alphanumerics and '-', no dots, at most 63 characters)", label, name, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 // parseObjectField mirrors parseStringField for object-typed fields — used
 // where a bare `v.(map[string]any), ok` type assertion would silently treat
 // a present-but-wrong-type value the same as absent. It also treats an
@@ -3104,6 +3116,9 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := checkContainerNameLabel(fmt.Sprintf("initContainers[%d]", i), ic.Name); err != nil {
+			return nil, err
+		}
 		label := fmt.Sprintf("initContainers[%d] %q", i, ic.Name)
 		// Closed key set (go-kure/launcher#321). The explained refusals run
 		// first so an init-container probe or hook names the Kubernetes rule
@@ -3234,6 +3249,9 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 		sc := SidecarContainerConfig{}
 		sc.Name, err = requiredStringField(m, "name", fmt.Sprintf("sidecars[%d]", i))
 		if err != nil {
+			return nil, err
+		}
+		if err := checkContainerNameLabel(fmt.Sprintf("sidecars[%d]", i), sc.Name); err != nil {
 			return nil, err
 		}
 		label := fmt.Sprintf("sidecars[%d] %q", i, sc.Name)
