@@ -33,6 +33,14 @@ import (
 // createApplications then applyTraits), and the decorator only sees the object
 // at Generate time. That is the same count the role kinds evaluate their own
 // opinion against.
+//
+// Under a scaler the HorizontalPodAutoscaler owns the count and the
+// Deployment has no spec.replicas (go-kure/launcher#1179). The count is then
+// the scaler's effective minReplicas, final after its policy ran: the pods
+// that always exist. The trait finds the scaler at Generate, among the
+// applications of the bundle it was applied to, so the order of the traits
+// does not matter. The scaler's config sits under the ownership wrapper by
+// then, so it is read through oam.UnwrapConfig (replicaScaler).
 type TopologySpreadHandler struct{}
 
 // CanHandle returns true for the "topology-spread" trait type.
@@ -70,7 +78,7 @@ func (h *TopologySpreadHandler) ValidateAndApplyDefaults(rendering map[string]an
 // by the time Apply runs, so they are let through. Apply cannot tell an
 // authored `scope` from one merged in from a rendering; a rendered one is
 // refused earlier, by ValidateAndApplyDefaults at profile evaluation.
-func (h *TopologySpreadHandler) Apply(trait *oam.Trait, app *stack.Application, _ *stack.Bundle) error {
+func (h *TopologySpreadHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *stack.Bundle) error {
 	if trait != nil {
 		// Sorted, so a trait with several keys always names the same one.
 		for _, key := range slices.Sorted(maps.Keys(trait.Properties)) {
@@ -80,7 +88,7 @@ func (h *TopologySpreadHandler) Apply(trait *oam.Trait, app *stack.Application, 
 		}
 	}
 	app.Config = wrapIfAugmenter(
-		&topologySpreadConfig{decoratorBase: decoratorBase{Inner: app.Config}},
+		&topologySpreadConfig{decoratorBase: decoratorBase{Inner: app.Config}, bundle: bundle},
 		app.Config)
 	return nil
 }
@@ -89,6 +97,41 @@ func (h *TopologySpreadHandler) Apply(trait *oam.Trait, app *stack.Application, 
 // topology spread constraints onto every Deployment its Generate returns.
 type topologySpreadConfig struct {
 	decoratorBase
+	// bundle is the bundle the trait was applied to. Generate reads the
+	// scaler among its applications; the pointer stays valid when the
+	// transform reorders the applications.
+	bundle *stack.Bundle
+}
+
+// scaledMinReplicas returns the effective minReplicas of the scaler that
+// scales dep, and whether there is one: an application of the bundle in the
+// namespace of dep whose config reports dep's name as its target and a minimum
+// above 0. The namespace of dep is its own when a manifests source or a chart
+// render set one, and the namespace of app otherwise. The scaler's
+// HorizontalPodAutoscaler lives in the namespace of the scaler's application
+// and finds its target there. The first such application in bundle order wins.
+// A scaler that scales another object does not count.
+func (c *topologySpreadConfig) scaledMinReplicas(app *stack.Application, dep *appsv1.Deployment) (int32, bool) {
+	if c.bundle == nil {
+		return 0, false
+	}
+	namespace := dep.Namespace
+	if namespace == "" {
+		namespace = app.Namespace
+	}
+	for _, a := range c.bundle.Applications {
+		if a == nil || a.Namespace != namespace {
+			continue
+		}
+		s, ok := oam.UnwrapConfig(a.Config).(replicaScaler)
+		if !ok {
+			continue
+		}
+		if target, minReplicas := s.ScaledReplicas(); target == dep.Name && minReplicas > 0 {
+			return minReplicas, true
+		}
+	}
+	return 0, false
 }
 
 // Generate delegates to the inner config, then applies the constraints to each
@@ -112,7 +155,8 @@ func (c *topologySpreadConfig) Generate(app *stack.Application) ([]*client.Objec
 			continue
 		}
 		found = true
-		if err := applyTopologySpread(dep); err != nil {
+		scaled, underScaler := c.scaledMinReplicas(app, dep)
+		if err := applyTopologySpread(dep, scaled, underScaler); err != nil {
 			return nil, err
 		}
 	}
@@ -123,7 +167,8 @@ func (c *topologySpreadConfig) Generate(app *stack.Application) ([]*client.Objec
 }
 
 // applyTopologySpread sets dep's pod-template topology spread constraints from
-// its own replica count and selector.
+// its replica count and selector. The count is its own spec.replicas, or
+// scaledMin, the minReplicas of the scaler that scales it, when underScaler.
 //
 // Constraints already on the pod template are refused rather than merged: they
 // come either from the component's raw `topologySpreadConstraints` or from a
@@ -139,7 +184,7 @@ func (c *topologySpreadConfig) Generate(app *stack.Application) ([]*client.Objec
 // before the replica count is consulted: the count comes from the environment
 // policy, and a check that only ran once constraints were due would let one
 // document build in one environment and fail in another.
-func applyTopologySpread(dep *appsv1.Deployment) error {
+func applyTopologySpread(dep *appsv1.Deployment, scaledMin int32, underScaler bool) error {
 	if n := len(dep.Spec.Template.Spec.TopologySpreadConstraints); n > 0 {
 		return errors.Errorf(
 			"topology-spread: Deployment %q already carries %d topologySpreadConstraints (authored on the component, or from its own topologySpread default); remove them, or set topologySpread: false, or drop the trait",
@@ -152,7 +197,12 @@ func applyTopologySpread(dep *appsv1.Deployment) error {
 			dep.Name)
 	}
 	replicas := int32(1) // the API default for an unset spec.replicas
-	if dep.Spec.Replicas != nil {
+	switch {
+	case underScaler:
+		// The HPA owns the count, so the Deployment's own is unset or unused:
+		// the scaler's minimum is the number of pods that always exist.
+		replicas = scaledMin
+	case dep.Spec.Replicas != nil:
 		replicas = *dep.Spec.Replicas
 	}
 	// BuildTopologySpreadConstraints copies the map it is given, so the

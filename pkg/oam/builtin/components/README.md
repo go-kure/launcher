@@ -2239,9 +2239,13 @@ omission is part of how the kind builds the Deployment, so it does not depend on
 the order the traits are declared in; the component's other objects are
 unchanged. The non-RWX replica check reads one pod under a `scaler`, since the
 held count is unused (the HPA-bound check on `maxReplicas` is the guard), and the
-claim's `Recreate` strategy still applies. The `topology-spread` trait reads the
-Deployment's replica count, which is unset here, so under a `scaler` it applies no
-constraints until go-kure/launcher#1196. Why: Kubernetes advises removing `spec.replicas` when an HPA manages a
+claim's `Recreate` strategy still applies. The `topology-spread` trait finds no count on
+the Deployment here, so under a `scaler` it counts the scaler's `minReplicas`
+instead (go-kure/launcher#1196). A `webservice` or `worker` already gets this
+spread from its own `topologySpread` default, so an authored `topology-spread`
+trait beside a `scaler` with a `minReplicas` of 2 or more is now refused, as it
+is without a scaler at 2 or more replicas. It was admitted before, because the
+default applied nothing under a `scaler`. Why: Kubernetes advises removing `spec.replicas` when an HPA manages a
 Deployment, because a manifest that keeps it can reset the count to that value
 on an apply (a server-side apply without force reports a conflict instead once
 the HPA owns the field), and the count flaps (Kubernetes documentation, "Horizontal Pod

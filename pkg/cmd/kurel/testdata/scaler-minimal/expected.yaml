@@ -31,6 +31,13 @@ spec:
             cpu: 100m
             memory: 128Mi
       serviceAccountName: api
+      topologySpreadConstraints:
+      - labelSelector:
+          matchLabels:
+            app: api
+        maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
 ---
 apiVersion: v1
 kind: Service
