@@ -4529,9 +4529,26 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `/etc/alertmanager/configmaps/<name>` for each entry of `secrets` and
     `configMaps` (:531-556, :575-692). The mounts of the web and cluster TLS
     credentials are left to the API, as their volumes are.
-  - an entry of `volumeMounts` whose `subPath` or `subPathExpr` is absolute or
-    holds a `..` element (go-kure/launcher#1211): the operator copies the
-    entry as written, and the API refuses it. Checked before the path.
+  - an entry of `volumeMounts` that breaks a rule of a mount
+    (go-kure/launcher#1211, go-kure/launcher#1227): a `subPath` beside a
+    `subPathExpr`, either one absolute or holding a `..` element, a
+    `mountPropagation` that is not `None`, `HostToContainer` or
+    `Bidirectional`, a `recursiveReadOnly` that is not `Disabled`,
+    `IfPossible` or `Enabled`, `Enabled` or `IfPossible` without
+    `readOnly: true` or beside a propagation other than `None`, and
+    `Bidirectional` where the alertmanager container is not privileged. The
+    operator copies the entry as written and merges into it the mount of a
+    listed `alertmanager` container at the same `mountPath`, so the entry is
+    judged as merged: that mount can supply `readOnly` or a propagation, and
+    only `securityContext.privileged: true` on that listed container makes the
+    container privileged. Checked before the path.
+  - an entry of `containers` or `initContainers` with a `volumeMounts` entry
+    that breaks the same rules, naming the container and the mount. An entry
+    named for a container the operator generates is merged into it, and the
+    merge can take `readOnly: true` from the operator's own mount at the path,
+    so such an entry is not refused for `recursiveReadOnly` without
+    `readOnly: true`; every other rule holds, and `Bidirectional` needs that
+    entry's own `securityContext.privileged: true`.
   - an entry of `volumeMounts` at the path of an earlier one written alike: the
     API compares mount paths as written and refuses two mounts at one path
     (`pkg/apis/core/validation/validation.go:3177-3227` at Kubernetes
@@ -5051,9 +5068,26 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     of each Secret key's volume above, and
     `/etc/thanos/rules/thanos-ruler-<name>-rulefiles-<n>` (:297-302, :394,
     :441-471, :601-626).
-  - an entry of `volumeMounts` whose `subPath` or `subPathExpr` is absolute or
-    holds a `..` element (go-kure/launcher#1211): the operator copies the
-    entry as written, and the API refuses it. Checked before the path.
+  - an entry of `volumeMounts` that breaks a rule of a mount
+    (go-kure/launcher#1211, go-kure/launcher#1227): a `subPath` beside a
+    `subPathExpr`, either one absolute or holding a `..` element, a
+    `mountPropagation` that is not `None`, `HostToContainer` or
+    `Bidirectional`, a `recursiveReadOnly` that is not `Disabled`,
+    `IfPossible` or `Enabled`, `Enabled` or `IfPossible` without
+    `readOnly: true` or beside a propagation other than `None`, and
+    `Bidirectional` where the thanos-ruler container is not privileged. The
+    operator copies the entry as written and merges into it the mount of a
+    listed `thanos-ruler` container at the same `mountPath`, so the entry is
+    judged as merged: that mount can supply `readOnly` or a propagation, and
+    only `securityContext.privileged: true` on that listed container makes the
+    container privileged. Checked before the path.
+  - an entry of `containers` or `initContainers` with a `volumeMounts` entry
+    that breaks the same rules, naming the container and the mount. An entry
+    named for a container the operator generates is merged into it, and the
+    merge can take `readOnly: true` from the operator's own mount at the path,
+    so such an entry is not refused for `recursiveReadOnly` without
+    `readOnly: true`; every other rule holds, and `Bidirectional` needs that
+    entry's own `securityContext.privileged: true`.
   - an entry of `volumeMounts` at the path of an earlier one written alike:
     the API refuses two mounts at one path. The message names both entries.
     As on `alertmanager`, a path written otherwise than another entry's, or
@@ -5465,11 +5499,28 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     for each entry of `secrets` and `configMaps`. The mounts of the web TLS
     credentials, under `/etc/prometheus/web_config/`, are left to the API,
     as their volumes are.
-  - an entry of `volumeMounts` whose `subPath` or `subPathExpr` is absolute or
-    holds a `..` element (go-kure/launcher#1211): the operator copies the
-    entry as written, and the API refuses it. Checked before the path. An
-    entry of `thanos.volumeMounts` with a nonempty `subPath` or `subPathExpr`
-    is refused below, as not carried.
+  - an entry of `volumeMounts` that breaks a rule of a mount
+    (go-kure/launcher#1211, go-kure/launcher#1227): a `subPath` beside a
+    `subPathExpr`, either one absolute or holding a `..` element, a
+    `mountPropagation` that is not `None`, `HostToContainer` or
+    `Bidirectional`, a `recursiveReadOnly` that is not `Disabled`,
+    `IfPossible` or `Enabled`, `Enabled` or `IfPossible` without
+    `readOnly: true` or beside a propagation other than `None`, and
+    `Bidirectional` where the prometheus container is not privileged. The
+    operator copies the entry as written and merges into it the mount of a
+    listed `prometheus` container at the same `mountPath`, so the entry is
+    judged as merged: that mount can supply `readOnly` or a propagation, and
+    only `securityContext.privileged: true` on that listed container makes the
+    container privileged. Checked before the path. An entry of
+    `thanos.volumeMounts` with a nonempty `subPath` or `subPathExpr` is
+    refused below, as not carried.
+  - an entry of `containers` or `initContainers` with a `volumeMounts` entry
+    that breaks the same rules, naming the container and the mount. An entry
+    named for a container the operator generates is merged into it, and the
+    merge can take `readOnly: true` from the operator's own mount at the path,
+    so such an entry is not refused for `recursiveReadOnly` without
+    `readOnly: true`; every other rule holds, and `Bidirectional` needs that
+    entry's own `securityContext.privileged: true`.
   - an entry of `thanos.volumeMounts` at a path the operator mounts a
     volume at in the thanos-sidecar container: `/prometheus` where
     `objectStorageConfig` or `objectStorageConfigFile` is set, and

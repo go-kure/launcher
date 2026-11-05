@@ -207,13 +207,72 @@ func refuseGeneratedVolumes(v operatorPodVolumes) error {
 // patterns are the paths it mounts a volume at whatever else the spec says,
 // each with what it is, worded to follow "is"; secrets and configMaps the
 // entries it mounts under root/secrets/<name> and root/configmaps/<name>.
+// container names the container, and patchMounts and privileged are what a
+// listed entry that patches it says of its mounts and its securityContext
+// (mainContainerPatch): the operator merges that patch into the container, so
+// the spec's entries are judged as merged (mergedMount), and the container is
+// privileged only where the patch says so, as the operator sets no privileged.
 type operatorContainerMounts struct {
 	field               string
+	container           string
 	generated           map[string]string
 	patterns            []reservedPattern
 	root                string
 	secrets, configMaps []string
 	mounts              []corev1.VolumeMount
+	patchMounts         []corev1.VolumeMount
+	privileged          bool
+}
+
+// privilegedRoute is the tail of the Bidirectional refusal: where the
+// container is named, it says which patch makes it privileged.
+func (m operatorContainerMounts) privilegedRoute() string {
+	if m.container == "" {
+		return ""
+	}
+	return fmt.Sprintf("; the Prometheus operator sets no privileged on the %s container, so list an entry of containers named %s with securityContext.privileged: true", m.container, m.container)
+}
+
+// mainContainerPatch returns the volumeMounts of the listed entry of
+// containers that patches the generated container name, and whether it says
+// securityContext.privileged: true. It returns nothing where no entry patches
+// it. The last entry of a name is the one the operator keeps (patchOf).
+func mainContainerPatch(containers []corev1.Container, name string) (mounts []corev1.VolumeMount, privileged bool) {
+	i := patchOf(containers, name)
+	if i < 0 {
+		return nil, false
+	}
+	sc := containers[i].SecurityContext
+	return containers[i].VolumeMounts, sc != nil && sc.Privileged != nil && *sc.Privileged
+}
+
+// mergedMount returns vm as the API sees it once the operator has merged the
+// patch of the container into it: a patch mount at the same mountPath is
+// merged into vm by that key, a field it sets over one of vm's and one it
+// leaves unset not (pkg/k8s/merge.go at prometheus-operator v0.94.1; the JSON
+// omitempty of the typed patch drops a false or empty field, so only what it
+// sets wins). The operator's own mounts set none of the fields these rules
+// read but readOnly and subPath, and are not folded in.
+func mergedMount(vm corev1.VolumeMount, patch []corev1.VolumeMount) corev1.VolumeMount {
+	for _, p := range patch {
+		if p.MountPath != vm.MountPath {
+			continue
+		}
+		vm.ReadOnly = vm.ReadOnly || p.ReadOnly
+		if p.SubPath != "" {
+			vm.SubPath = p.SubPath
+		}
+		if p.SubPathExpr != "" {
+			vm.SubPathExpr = p.SubPathExpr
+		}
+		if p.MountPropagation != nil {
+			vm.MountPropagation = p.MountPropagation
+		}
+		if p.RecursiveReadOnly != nil {
+			vm.RecursiveReadOnly = p.RecursiveReadOnly
+		}
+	}
+	return vm
 }
 
 // refuseGeneratedMounts refuses an entry of the field at a path the operator
@@ -237,9 +296,16 @@ type operatorContainerMounts struct {
 // operator's included, since the operator appends the spec's entries among
 // its own mounts. A hidden volume is not judged here.
 //
-// It refuses first, in each entry, a subPathExpr or a subPath that is absolute
-// or holds a ".." element (checkDescendingPath), as the API does: the operator
-// copies the entry as written.
+// It refuses first, in each entry, what every typed mount is refused for
+// (validateTypedMount): a subPathExpr beside a subPath, either one absolute or
+// with a ".." element, a mountPropagation or recursiveReadOnly that is no mode,
+// recursiveReadOnly Enabled or IfPossible without readOnly: true or beside a
+// propagation other than None; and a Bidirectional propagation on a container
+// that is not privileged. The operator copies the entry as written, and merges
+// into it the mount of the patch of the container at the same path
+// (mergedMount), which can supply readOnly, a propagation or a subPath, and
+// the container is privileged only where that patch says so
+// (go-kure/launcher#1227).
 func refuseGeneratedMounts(m operatorContainerMounts) error {
 	generated := make(map[string]string, len(m.generated))
 	maps.Copy(generated, m.generated)
@@ -252,15 +318,12 @@ func refuseGeneratedMounts(m operatorContainerMounts) error {
 	authored := make(map[string]int, len(m.mounts))
 	for i, vm := range m.mounts {
 		label := fmt.Sprintf("%s[%d]", m.field, i)
-		if vm.SubPathExpr != "" {
-			if err := checkDescendingPath(label+".subPathExpr", vm.SubPathExpr); err != nil {
-				return err
-			}
+		merged := mergedMount(vm, m.patchMounts)
+		if err := validateTypedMount(label, &merged); err != nil {
+			return err
 		}
-		if vm.SubPath != "" {
-			if err := checkDescendingPath(label+".subPath", vm.SubPath); err != nil {
-				return err
-			}
+		if mp := merged.MountPropagation; mp != nil && *mp == corev1.MountPropagationBidirectional && !m.privileged {
+			return errors.Errorf("%s.mountPropagation: Bidirectional is available only to a container with securityContext.privileged: true%s", label, m.privilegedRoute())
 		}
 		if what, ok := reservedAs(generated, m.patterns, vm.MountPath); ok {
 			return errors.Errorf("%s[%d] %q: the mount path is %s, and the API refuses a container with two mounts at one path; mount the volume elsewhere", m.field, i, vm.MountPath, what)
