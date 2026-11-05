@@ -99,8 +99,8 @@ func (h *DisruptionHandler) parseProperties(props map[string]any, app *stack.App
 
 	min, hasMin := props["minAvailable"]
 	max, hasMax := props["maxUnavailable"]
-	hasMin = hasMin && min != nil
-	hasMax = hasMax && max != nil
+	hasMin = hasMin && !oam.IsNullValue(min)
+	hasMax = hasMax && !oam.IsNullValue(max)
 	switch {
 	case hasMin && hasMax:
 		return nil, errors.Errorf("disruption: set minAvailable or maxUnavailable, not both")
@@ -120,7 +120,7 @@ func (h *DisruptionHandler) parseProperties(props map[string]any, app *stack.App
 		return nil, errors.Errorf("disruption: set minAvailable or maxUnavailable; the trait has no default budget")
 	}
 
-	if v, ok := props["unhealthyPodEvictionPolicy"]; ok && v != nil {
+	if v, ok := props["unhealthyPodEvictionPolicy"]; ok && !oam.IsNullValue(v) {
 		s, isString := v.(string)
 		policy := policyv1.UnhealthyPodEvictionPolicyType(s)
 		if !isString || (policy != policyv1.IfHealthyBudget && policy != policyv1.AlwaysAllow) {
@@ -129,7 +129,7 @@ func (h *DisruptionHandler) parseProperties(props map[string]any, app *stack.App
 		config.UnhealthyPodEvictionPolicy = &policy
 	}
 
-	if v, ok := props["pdbName"]; ok && v != nil {
+	if v, ok := props["pdbName"]; ok && !oam.IsNullValue(v) {
 		name, isString := v.(string)
 		if !isString {
 			return nil, errors.Errorf("pdbName must be a string, got %v", v)
