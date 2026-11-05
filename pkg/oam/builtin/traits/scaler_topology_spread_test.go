@@ -123,7 +123,7 @@ func scalerApplication(t *testing.T, cluster *stack.Cluster) *stack.Application 
 	return found
 }
 
-// wantSpread is the constraints the trait gives pods pods: BuildTopologySpreadConstraints,
+// wantSpread is the constraints for the requested pod count: BuildTopologySpreadConstraints,
 // reduced to what the assertion compares.
 func wantSpread(pods int32) []string {
 	switch {
