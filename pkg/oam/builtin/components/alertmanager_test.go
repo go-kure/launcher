@@ -26,6 +26,8 @@ var alertmanagerUnfixtured = map[string]string{
 	"tag":         "not in the schema; refused when not empty, and an empty one writes nothing (TestAlertmanager_DeprecatedImageFields)",
 	"sha":         "not in the schema; refused when not empty, and an empty one writes nothing (TestAlertmanager_DeprecatedImageFields)",
 	"hostNetwork": "true is refused under the policy the fixture is built under, and the type omits false (TestAlertmanager_HostNetwork)",
+
+	"alertmanagerConfigFileSystemMode": newInOperator095 + "; refused as an unsupported field (TestUnexposedUpstreamFields_AreRefusedAsUnsupported)",
 }
 
 // alertmanagerFull sets every other top-level field of the spec, inside

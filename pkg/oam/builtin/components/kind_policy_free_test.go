@@ -622,6 +622,9 @@ var policyFreeKinds = []policyFreeKind{
 		component: "metallb-bgpadvertisement", handler: &components.MetalLBBGPAdvertisementHandler{},
 		gvk: metallbv1beta1.GroupVersion.WithKind("BGPAdvertisement"),
 		typ: reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](), namespaced: true,
+		unfixtured: map[string]string{
+			"asPathPrepend": newInMetalLB0162 + "; refused as an unsupported field (TestUnexposedUpstreamFields_AreRefusedAsUnsupported)",
+		},
 		// No field is required: an advertisement that authors nothing is one.
 		minimal: map[string]any{},
 		// The API takes serviceSelectors only with one route per address, so the
@@ -701,6 +704,9 @@ var policyFreeKinds = []policyFreeKind{
 		component: "metallb-l2advertisement", handler: &components.MetalLBL2AdvertisementHandler{},
 		gvk: metallbv1beta1.GroupVersion.WithKind("L2Advertisement"),
 		typ: reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), namespaced: true,
+		unfixtured: map[string]string{
+			"preferredNodeSelectors": newInMetalLB0162 + "; refused as an unsupported field (TestUnexposedUpstreamFields_AreRefusedAsUnsupported)",
+		},
 		// No field is required: an advertisement that authors nothing is one.
 		minimal: map[string]any{},
 		full: map[string]any{
@@ -759,6 +765,9 @@ var policyFreeKinds = []policyFreeKind{
 		component: "podmonitor", handler: &components.PodMonitorHandler{},
 		gvk: monitoringv1.SchemeGroupVersion.WithKind("PodMonitor"),
 		typ: reflect.TypeFor[monitoringv1.PodMonitorSpec](), namespaced: true,
+		unfixtured: map[string]string{
+			"extraScrapeMetrics": newInOperator095 + "; refused as an unsupported field (TestUnexposedUpstreamFields_AreRefusedAsUnsupported)",
+		},
 		minimal: map[string]any{"selector": map[string]any{}},
 		full: monitoringScrapeFull(map[string]any{
 			"jobLabel":        "app.kubernetes.io/name",
@@ -811,6 +820,9 @@ var policyFreeKinds = []policyFreeKind{
 		component: "prometheus-probe", handler: &components.PrometheusProbeHandler{},
 		gvk: monitoringv1.SchemeGroupVersion.WithKind("Probe"),
 		typ: reflect.TypeFor[monitoringv1.ProbeSpec](), namespaced: true,
+		unfixtured: map[string]string{
+			"extraScrapeMetrics": newInOperator095 + "; refused as an unsupported field (TestUnexposedUpstreamFields_AreRefusedAsUnsupported)",
+		},
 		// The type always writes a prober, and the API refuses one with no url.
 		minimal: probeProperties(),
 		// The operator lets a Probe authenticate one way and reads one kind of
@@ -953,6 +965,9 @@ var policyFreeKinds = []policyFreeKind{
 		component: "servicemonitor", handler: &components.ServiceMonitorHandler{},
 		gvk: monitoringv1.SchemeGroupVersion.WithKind("ServiceMonitor"),
 		typ: reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), namespaced: true,
+		unfixtured: map[string]string{
+			"extraScrapeMetrics": newInOperator095 + "; refused as an unsupported field (TestUnexposedUpstreamFields_AreRefusedAsUnsupported)",
+		},
 		// The API requires both; an empty list and an empty selector are
 		// authored values.
 		minimal: map[string]any{"endpoints": []any{}, "selector": map[string]any{}},
