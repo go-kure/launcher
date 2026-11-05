@@ -1344,7 +1344,7 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `sub-application` | An application launcher adds beside a component's own: each one a trait creates, and the one holding each synthesized NetworkPolicy. It is no object. | What the trait or the synthesis names it (`<component>-scaler`, `<component>-rbac`, the policy's default name, …). | none | always |
 | `netpol-synth` | A synthesized NetworkPolicy. | `{owner}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`. | none, by design: a synthesized policy has no authored home | always |
 | `hpa` | The `scaler` trait's HorizontalPodAutoscaler. | `<component>-hpa` | `hpaName` | unless `hpaName` is set |
-| `pdb` | The `scaler` trait's PodDisruptionBudget. | `<component>-pdb` | `pdbName` | unless `pdbName` is set |
+| `pdb` | The PodDisruptionBudget of the `scaler` trait (with `enablePDB`) or of the `disruption` trait. | `<component>-pdb` | `pdbName` | unless `pdbName` is set |
 | `tls-secret` | The Secret of the TLS entry the `expose` trait manages on its Ingress (the `ingress` trait's platform-reserved `managedTLS`). cert-manager writes it; the Ingress's `tls[].secretName` is launcher's one reference to it and carries the resolved name. Not an `ingress` trait's own authored `tls[]` entries, used as written. | `<component>-tls`, shortened to 253 with `-tls` kept whole. | `secretName`, on `expose` | unless the expose trait's `secretName` is set |
 | `external-secret` | The Secret the `external-secret` trait's ExternalSecret produces. The ExternalSecret's `target.name`, and the `envFrom` and secret volume the trait adds to the workload, carry the resolved name; a reference the author wrote elsewhere does not follow it. | The trait's `secretName`, the ExternalSecret's own name. | `targetSecretName` | unless `targetSecretName` is set; not under `creationPolicy: Merge` or `None`, where the name refers to a Secret that exists apart and is used as written |
 | `rbac` | Each object of the `rbac` trait, asked once per object: the Role and the RoleBinding, and with `clusterWide` the ClusterRole and the ClusterRoleBinding. | The component's name. | `name` (one for all of them) | unless `name` is set |
@@ -2064,9 +2064,9 @@ checked as any pod template is: `ReservedMetadataKeys` and the component label.
 | `ParseWithExtraTypes` | Parse allowing custom trait types **and** a `LowerableTypes` set — the document kinds, component types and trait types claimed by a transformer's registered lowering rules. |
 
 Standalone parsing validates each trait's `type` against this package's own allowlist
-of built-in trait types (the `security-context`, `topology-spread` and `force-replace`
-traits are included, matching `SecurityContextHandler`, `TopologySpreadHandler` and
-`ForceReplaceHandler`);
+of built-in trait types (the `security-context`, `topology-spread`, `force-replace` and
+`disruption` traits are included, matching `SecurityContextHandler`,
+`TopologySpreadHandler`, `ForceReplaceHandler` and `DisruptionHandler`);
 `ParseWithExtraTraitTypes` widens that allowlist with caller-supplied custom types.
 `ParseWithExtraTypes` widens it further with `Transformer.LowerableTypes()`, so a
 document authored in types that only a lowering rule understands parses ahead of the

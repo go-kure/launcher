@@ -81,6 +81,7 @@ preflight reject every valid use of the trait.
 | `configmap` | ConfigMap (+ optional volume mount) | The `configmap` kind's twin: `data`, `binaryData` and `immutable` are parsed and the ConfigMap built by the kind's own code, so both build the same ConfigMap and refuse the same input; the trait adds only the ConfigMap's `name`, the owner's `app` label, namespace and bundle, and the mount (go-kure/launcher#741). `name`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or a `pod` component's Pod; a component that generates none of them is refused at generation, see [Pod-spec traits on a component without a workload](#pod-spec-traits-on-a-component-without-a-workload)), `data` (string values only), `binaryData` (base64; a key may not also appear in `data`), `immutable`. The `data` values and decoded `binaryData` values may total at most 1,048,576 bytes, the API server's ConfigMap limit; more is refused at build time. Keys must be valid ConfigMap keys (alphanumerics, `-`, `_`, `.`, at most 253 characters, not `.` or `..` or starting with `..`); an invalid key is refused at build time, the first in sorted order. **Pre-GA tightening** (go-kure/launcher#741): a number or boolean `data` value used to be stringified and is now refused, as the kind refuses it; quote it. |
 | `topology-spread` | (modifies the Deployment's PodSpec) | (no properties; an authored engine-owned `scope` is accepted; a capability rendering carries no keys). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source or a `helmtemplate` chart render), from its post-policy `spec.replicas`, or from the matching `scaler`'s `minReplicas` when the component carries one (the scaled Deployment has no `spec.replicas`): none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment (a `pod` component, for one: the trait is Deployment-only); a Deployment passed through as raw, unstructured output (`passthrough`) is not inspected (see below). |
 | `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`, `hpaName` and `pdbName` (optional; the objects' names, default `<component>-hpa` and `<component>-pdb`; `pdbName` without `enablePDB: true` names no object and is refused). Admitted on `webservice`, `worker` and `deployment` only. On any of them with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. The HPA owns the replica count, so the Deployment it scales is built without `spec.replicas`, and a component that authors `replicas` beside a `scaler` is refused (go-kure/launcher#1179); see the components README's "Replicas under a `scaler`". |
+| `disruption` | PodDisruptionBudget | `minAvailable` or `maxUnavailable` (exactly one, required, no default; a whole number from 0 or a percentage string from `"0%"` to `"100%"`), `unhealthyPodEvictionPolicy` (optional; `IfHealthyBudget` or `AlwaysAllow`), `pdbName` (optional; the object's name, default `<component>-pdb`). Any other key is refused. Admitted on `webservice`, `worker`, `deployment` and `statefulset` only. Selects the component's pods by the `app` label. Refused beside a `scaler` with `enablePDB: true` on the same component: see "The disruption trait" below (go-kure/launcher#1266). |
 
 ### Operational (FluxCD)
 | `type` | Effect | Key properties |
@@ -819,6 +820,46 @@ The trait is strict in five ways, each an error at build time:
   another whose policy raises the count. `deployment`, `webservice` and
   `worker` always select on `app: <component>`; a `manifests` Deployment can
   declare any selector, and is refused when it does not meet this rule.
+
+## The disruption trait
+
+`disruption` gives a workload a PodDisruptionBudget without an autoscaler. The
+`scaler` trait also generates one, but only with `enablePDB: true`, only beside
+its HorizontalPodAutoscaler, and only as `minAvailable: 50%`. `disruption` takes
+the budget from the author and works on `statefulset`, which `scaler` does not
+scale.
+
+```yaml
+traits:
+  - type: disruption
+    properties:
+      maxUnavailable: "25%"
+```
+
+- **The budget is a required choice.** Set `minAvailable` or `maxUnavailable`,
+  never both and never neither: there is no default, because a default would be
+  a silent decision about how many pods may go. Each takes a whole number from 0
+  or a percentage string from `"0%"` to `"100%"`. `maxUnavailable: 0` allows no
+  voluntary eviction.
+- **Strict properties.** `unhealthyPodEvictionPolicy` (`IfHealthyBudget` or
+  `AlwaysAllow`) and `pdbName` are the only others. An unknown key is refused by
+  name; the engine-owned keys pass.
+- **The selector** is the component's `app` label, the label the component
+  handlers stamp on the pod template, so it matches a Deployment, a StatefulSet
+  and the Deployment a `webservice` or `worker` lowers to. It is not
+  configurable.
+- **One budget per component.** A `scaler` with `enablePDB: true` and a
+  `disruption` trait on the same component both generate a PodDisruptionBudget,
+  so the component is refused: the error names `enablePDB` and `disruption` and
+  says to drop one. A `scaler` without `enablePDB` beside `disruption` is the
+  usual HPA-plus-budget case and is allowed. The check runs when the budget is
+  generated, when every application and every merged property is final. A
+  consumer decorator that wraps the scaler's config without implementing
+  `oam.ConfigWrapper` hides `enablePDB` from it; the conflict is then not seen
+  and both budgets are emitted when their names differ.
+- **Not covered.** DaemonSet, Job and CronJob are refused as host components, and
+  one budget across several components is not expressible. The scaler's fixed
+  50% budget is unchanged.
 
 ## Decorator forwarding for layout-augmenting components
 
