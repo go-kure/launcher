@@ -37,7 +37,8 @@ func TestWorkerRule_ComponentType(t *testing.T) {
 // volume, an envFrom entry and a resourceClaims entry; go-kure/launcher#787 added deploymentObjectName and serviceAccountObjectName
 // (schemaRoleObjectNames); go-kure/launcher#1172 closed the volumeMounts item of
 // an init container and of a sidecar; go-kure/launcher#1183 added the gate of
-// each property that needs a Kubernetes feature gate.
+// each property that needs a Kubernetes feature gate, and go-kure/launcher#1230
+// the gate of each enum value that needs one (an init container's restartPolicy).
 func TestWorkerRule_PropertySchemaUnchanged(t *testing.T) {
 	want, err := os.ReadFile("testdata/worker-property-schema.json")
 	if err != nil {

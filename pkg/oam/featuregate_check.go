@@ -129,6 +129,22 @@ func checkGatedValue(field PropertySchema, value any, path string, target Kubern
 	if err := checkGatedPaths(field.GatedPaths, value, path, target); err != nil {
 		return err
 	}
+	if len(field.ValueGates) > 0 {
+		if s, ok := value.(string); ok {
+			if gate, gated := field.ValueGates[s]; gated {
+				on, err := gateEnabled(gate, target, nil)
+				if err != nil {
+					return err
+				}
+				if !on {
+					g, _ := lookupFeatureGate(gate)
+					return errors.Errorf("%s: value %q requires the Kubernetes feature gate %s, which is on by default from %s, "+
+						"and the ClusterProfile's kubernetesVersion is %s; use another value or raise spec.kubernetesVersion",
+						path, s, g.Name, g.OnByDefault, target)
+				}
+			}
+		}
+	}
 	if obj, ok := asObjectValue(value); ok && len(field.Properties) > 0 {
 		return checkGatedProperties(field.Properties, obj, path, target)
 	}

@@ -736,7 +736,11 @@
             "Always",
             "Never",
             "OnFailure"
-          ]
+          ],
+          "valueGates": {
+            "Never": "ContainerRestartRules",
+            "OnFailure": "ContainerRestartRules"
+          }
         },
         "restartPolicyRules": {
           "type": "array",

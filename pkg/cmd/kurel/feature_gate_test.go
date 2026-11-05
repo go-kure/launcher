@@ -3,6 +3,7 @@ package kurel
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -36,6 +37,23 @@ func TestFeatureGates_TableAndSchemasAgree(t *testing.T) {
 			used[gate] = true
 			if _, ok := oam.FeatureGateOnByDefault(gate); !ok {
 				t.Errorf("%s: GatedPaths %q names gate %q, which names no row of the lifecycle table", path, p, gate)
+			}
+		}
+		// A per-value gate (PropertySchema.ValueGates) names a row too, and must sit on
+		// a value the property's Enum lists (go-kure/launcher#1230).
+		for value, gate := range node.ValueGates {
+			used[gate] = true
+			if _, ok := oam.FeatureGateOnByDefault(gate); !ok {
+				t.Errorf("%s: ValueGates[%q] names gate %q, which is no row of the lifecycle table", path, value, gate)
+			}
+			listed := false
+			for _, e := range node.Enum {
+				if e == value {
+					listed = true
+				}
+			}
+			if !listed {
+				t.Errorf("%s: ValueGates names %q, which the property's Enum does not list", path, value)
 			}
 		}
 		for _, k := range sortedSchemaKeys(node.Properties) {
@@ -84,6 +102,19 @@ type gateCase struct {
 	gate  string
 	field string // the path the refusal names
 	props string
+	// value is set for a per-value gate (PropertySchema.ValueGates): the refusal then
+	// names the authored value as well.
+	value string
+	// kinds are the component types that take the property; nil means gatedKinds.
+	kinds []string
+}
+
+// takes reports whether a component of the kind accepts the case's property.
+func (c gateCase) takes(kind string) bool {
+	if c.kinds == nil {
+		return slices.Contains(gatedKinds, kind)
+	}
+	return slices.Contains(c.kinds, kind)
 }
 
 var gateCases = []gateCase{
@@ -131,6 +162,65 @@ var gateCases = []gateCase{
         hostnameOverride: web.example.com
 `,
 	},
+
+	// Per-value gates (PropertySchema.ValueGates, go-kure/launcher#1230): the
+	// property is accepted at every release, one of its values is not. The
+	// init container's value sits inside an array item, so these also prove the
+	// gate walk descends into items.
+	{
+		name: "initContainer restartPolicy Never", gate: "ContainerRestartRules", field: "initContainers[0].restartPolicy", value: "Never",
+		props: `
+        initContainers:
+          - name: migrate
+            image: ghcr.io/example/migrate:v1.0.0
+            restartPolicy: Never
+`,
+	},
+	{
+		name: "initContainer restartPolicy OnFailure", gate: "ContainerRestartRules", field: "initContainers[0].restartPolicy", value: "OnFailure",
+		props: `
+        initContainers:
+          - name: migrate
+            image: ghcr.io/example/migrate:v1.0.0
+            restartPolicy: OnFailure
+`,
+	},
+	{
+		name: "trafficDistribution PreferSameZone", gate: "PreferSameTrafficDistribution", field: "trafficDistribution", value: "PreferSameZone",
+		kinds: []string{"service"},
+		props: `
+        trafficDistribution: PreferSameZone
+`,
+	},
+	{
+		name: "trafficDistribution PreferSameNode", gate: "PreferSameTrafficDistribution", field: "trafficDistribution", value: "PreferSameNode",
+		kinds: []string{"service"},
+		props: `
+        trafficDistribution: PreferSameNode
+`,
+	},
+}
+
+// ungatedValueCases author a value of a per-value-gated property that no gate
+// stands behind: it is accepted at every release, with or without a version.
+// Always makes an init container a native sidecar, which the cluster accepts with
+// the gate on or off; PreferClose is the older name of PreferSameZone.
+var ungatedValueCases = []gateCase{
+	{
+		name: "initContainer restartPolicy Always", field: "initContainers[0].restartPolicy",
+		props: `
+        initContainers:
+          - name: proxy
+            image: ghcr.io/example/proxy:v1.0.0
+            restartPolicy: Always
+`,
+	},
+	{
+		name: "trafficDistribution PreferClose", field: "trafficDistribution", kinds: []string{"service"},
+		props: `
+        trafficDistribution: PreferClose
+`,
+	},
 }
 
 // gatedKinds are the component types that take every gated property above; a
@@ -147,8 +237,16 @@ spec:
   components:
     - name: web
       type: %s
-      properties:
-        image: ghcr.io/example/web:v1.0.0%s`, kind, props)
+      properties:%s%s`, kind, gateBase(kind), props)
+}
+
+// gateBase is the one property a component of the kind needs besides the gated one
+// under test: a workload takes an image, a service takes a port.
+func gateBase(kind string) string {
+	if kind == "service" {
+		return "\n        ports:\n          - port: 80"
+	}
+	return "\n        image: ghcr.io/example/web:v1.0.0"
 }
 
 // validateForTarget runs the authored-property validation of appYAML for target
@@ -172,8 +270,11 @@ func validateForTarget(t *testing.T, appYAML string, target *oam.KubernetesVersi
 // that the table is right: TestFeatureGateTable_PinnedToUpstream (pkg/oam) pins
 // each row's release to upstream.
 func TestFeatureGates_RefusedBelowAcceptedAtAndAbove(t *testing.T) {
-	for _, kind := range gatedKinds {
+	for _, kind := range append(slices.Clone(gatedKinds), "service") {
 		for _, c := range gateCases {
+			if !c.takes(kind) {
+				continue
+			}
 			t.Run(kind+"/"+c.name, func(t *testing.T) {
 				on, ok := oam.FeatureGateOnByDefault(c.gate)
 				if !ok {
@@ -195,10 +296,38 @@ func TestFeatureGates_RefusedBelowAcceptedAtAndAbove(t *testing.T) {
 				if err == nil {
 					t.Fatalf("at %s: want %s refused", below, c.field)
 				}
-				for _, want := range []string{c.field, c.gate, "from " + on.String(), "kubernetesVersion is " + below.String()} {
+				wants := []string{c.field, c.gate, "from " + on.String(), "kubernetesVersion is " + below.String()}
+				if c.value != "" {
+					wants = append(wants, fmt.Sprintf("value %q", c.value))
+				}
+				for _, want := range wants {
 					if !strings.Contains(err.Error(), want) {
 						t.Errorf("at %s: error %q does not name %q", below, err, want)
 					}
+				}
+			})
+		}
+	}
+}
+
+// TestFeatureGates_UngatedValuesOfAGatedPropertyPass: a per-value gate refuses its
+// own values only. The sibling values of the same property, Always on an init
+// container and PreferClose on a Service, are accepted at a release below every
+// gate the table holds (go-kure/launcher#1230).
+func TestFeatureGates_UngatedValuesOfAGatedPropertyPass(t *testing.T) {
+	old := oam.KubernetesVersion{Major: 1, Minor: 1}
+	for _, kind := range append(slices.Clone(gatedKinds), "service") {
+		for _, c := range ungatedValueCases {
+			if !c.takes(kind) {
+				continue
+			}
+			t.Run(kind+"/"+c.name, func(t *testing.T) {
+				doc := gateAppYAML(kind, c.props)
+				if err := validateForTarget(t, doc, &old); err != nil {
+					t.Errorf("at %s: want accepted, got %v", old, err)
+				}
+				if err := validateForTarget(t, doc, nil); err != nil {
+					t.Errorf("no version stated: want accepted, got %v", err)
 				}
 			})
 		}

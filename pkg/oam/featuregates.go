@@ -95,6 +95,9 @@ var featureGates = []featureGate{
 	{Name: "PodLevelResources", OnByDefault: KubernetesVersion{1, 34}, Source: featureGateSource},
 	// Alpha 1.34, beta 1.35 to 1.36, stable 1.37.
 	{Name: "HostnameOverride", OnByDefault: KubernetesVersion{1, 35}, Source: featureGateSource},
+	// Alpha 1.33, beta 1.34, stable 1.35. Gates two Service trafficDistribution
+	// values, not a whole field (PropertySchema.ValueGates, go-kure/launcher#1230).
+	{Name: "PreferSameTrafficDistribution", OnByDefault: KubernetesVersion{1, 34}, Source: featureGateSource},
 }
 
 // FeatureGateNames returns the gates the lifecycle table knows, in table order. A

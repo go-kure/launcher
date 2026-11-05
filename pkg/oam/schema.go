@@ -129,6 +129,21 @@ type PropertySchema struct {
 	// A consumer that predates GatedPaths ignores it and accepts the value, as it did
 	// before the field existed; the field is additive for it.
 	GatedPaths map[string]string `json:"gatedPaths,omitempty" yaml:"gatedPaths,omitempty"`
+
+	// ValueGates names, per Enum value, the Kubernetes feature gate (a row of the
+	// lifecycle table in featuregates.go) that value alone needs on the cluster: the
+	// property is accepted at every release, but an authored value listed here is
+	// refused below the release where its gate is on by default, exactly as Gate
+	// refuses the whole property (go-kure/launcher#1230). A key must be an Enum
+	// value and a gate must name a row of the table; a handler's schema that breaks
+	// either is a launcher defect, reported by the gate pass and the schema tests.
+	// Meaningful on a Type==string node with an Enum, and only for handler
+	// properties: the two flat call sites reject the key at decode time, as they do
+	// Gate (flatschema.go's key allow-sets leave it out).
+	//
+	// A consumer that predates ValueGates ignores it and accepts the value, as it
+	// did before the field existed; the field is additive for it.
+	ValueGates map[string]string `json:"valueGates,omitempty" yaml:"valueGates,omitempty"`
 }
 
 // ExclusiveGroup is one group of PropertySchema.Exclusive: keys of one object, at

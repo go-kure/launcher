@@ -124,7 +124,9 @@ var (
 		corev1.ServiceInternalTrafficPolicyLocal,
 	}
 	// serviceTrafficDistributions are the three values validateServiceTrafficDistribution
-	// accepts since PreferSameTrafficDistribution was locked on (Kubernetes 1.35).
+	// accepts. PreferSameZone and PreferSameNode need the PreferSameTrafficDistribution
+	// feature gate, on by default from Kubernetes 1.34 and locked on in 1.35; the
+	// schema names that gate per value (serviceTrafficDistributionGates).
 	serviceTrafficDistributions = []string{
 		corev1.ServiceTrafficDistributionPreferClose,
 		corev1.ServiceTrafficDistributionPreferSameZone,
@@ -142,6 +144,15 @@ var (
 		corev1.IPFamilyPolicyRequireDualStack,
 	}
 )
+
+// serviceTrafficDistributionGates names the feature gate behind each
+// trafficDistribution value that has one (go-kure/launcher#1230).
+func serviceTrafficDistributionGates() map[string]string {
+	return map[string]string{
+		corev1.ServiceTrafficDistributionPreferSameZone: "PreferSameTrafficDistribution",
+		corev1.ServiceTrafficDistributionPreferSameNode: "PreferSameTrafficDistribution",
+	}
+}
 
 // schemaServiceSpec publishes the keys parseServiceSpec reads
 // (serviceSpecPropertyKeys).
@@ -164,7 +175,8 @@ func schemaServiceSpec() map[string]oam.PropertySchema {
 		"trafficDistribution": {
 			Type:        oam.PropertyTypeString,
 			Enum:        enumValues(serviceTrafficDistributions),
-			Description: "Preference for which endpoints receive traffic: PreferSameZone, PreferSameNode, or PreferClose (the deprecated name of PreferSameZone). Unset, traffic is spread over all endpoints.",
+			ValueGates:  serviceTrafficDistributionGates(),
+			Description: "Preference for which endpoints receive traffic: PreferSameZone, PreferSameNode, or PreferClose (the deprecated name of PreferSameZone). PreferSameZone and PreferSameNode need the cluster's PreferSameTrafficDistribution feature gate, on by default from Kubernetes 1.34; PreferClose does not. Unset, traffic is spread over all endpoints.",
 		},
 		"sessionAffinity": {
 			Type:        oam.PropertyTypeString,

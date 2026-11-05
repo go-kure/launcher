@@ -140,6 +140,8 @@ func TestFeatureGateTable_PinnedToUpstream(t *testing.T) {
 		{"ContainerRestartRules", KubernetesVersion{1, 35}}, // Alpha 1.34 (false), Beta 1.35 (true)
 		{"PodLevelResources", KubernetesVersion{1, 34}},     // Alpha 1.32-1.33 (false), Beta 1.34 (true)
 		{"HostnameOverride", KubernetesVersion{1, 35}},      // Alpha 1.34 (false), Beta 1.35-1.36 (true), Stable 1.37
+		// Alpha 1.33 (false), Beta 1.34 (true), Stable 1.35; page source rows 1412-1414.
+		{"PreferSameTrafficDistribution", KubernetesVersion{1, 34}},
 	} {
 		below := KubernetesVersion{c.on.Major, c.on.Minor - 1}
 		above := KubernetesVersion{c.on.Major, c.on.Minor + 1}
@@ -154,7 +156,7 @@ func TestFeatureGateTable_PinnedToUpstream(t *testing.T) {
 		}
 	}
 	// The pinned set is the table's set: a row added to the table needs a pin here.
-	pinned := []string{"EnvFiles", "ContainerRestartRules", "PodLevelResources", "HostnameOverride"}
+	pinned := []string{"EnvFiles", "ContainerRestartRules", "PodLevelResources", "HostnameOverride", "PreferSameTrafficDistribution"}
 	got := FeatureGateNames()
 	slices.Sort(got)
 	slices.Sort(pinned)
@@ -222,6 +224,84 @@ func TestClusterProfile_KubernetesVersion(t *testing.T) {
 	if _, err := ParseClusterProfile([]byte(strings.Replace(profileWithVersion, "kubernetesVersion: %s", "kubernetesVersoin: \"1.35\"", 1))); err == nil {
 		t.Error("a misspelt spec field must still be refused")
 	}
+}
+
+// valueGatedPolicyHandler is a terminal policy handler whose one string property
+// takes two values and gates only "on" (PropertySchema.ValueGates).
+type valueGatedPolicyHandler struct{ gate string }
+
+func (h valueGatedPolicyHandler) CanHandle(policyType string) bool {
+	return policyType == "value-gated-policy"
+}
+func (h valueGatedPolicyHandler) Apply(*ApplicationPolicy, []string, *PolicyResult) error {
+	return nil
+}
+func (h valueGatedPolicyHandler) PropertySchema() map[string]PropertySchema {
+	return map[string]PropertySchema{"flag": {
+		Type:       PropertyTypeString,
+		Enum:       []any{"on", "off"},
+		ValueGates: map[string]string{"on": h.gate},
+	}}
+}
+
+// TestValidateAuthoredPropertiesForTarget_ValueGates: a value named in
+// PropertySchema.ValueGates is refused below its gate's release and a sibling value
+// of the same property is not (go-kure/launcher#1230); the refusal names the path,
+// the value, the gate and both releases. A gate the table lacks is an error when the
+// gated value is authored, and a value of the wrong shape is left to the authored
+// validation.
+func TestValidateAuthoredPropertiesForTarget_ValueGates(t *testing.T) {
+	newApp := func(flag any) *Application {
+		app := makeApp("gates")
+		app.Spec.Policies = []ApplicationPolicy{{Name: "p", Type: "value-gated-policy", Properties: map[string]any{"flag": flag}}}
+		return app
+	}
+	newTransformer := func(gate string) *Transformer {
+		tr := NewTransformer(nil, nil)
+		tr.RegisterPolicy("value-gated-policy", valueGatedPolicyHandler{gate: gate})
+		return tr
+	}
+
+	t.Run("gated value below the release", func(t *testing.T) {
+		_, err := newTransformer("EnvFiles").ValidateAuthoredPropertiesForTarget(newApp("on"), nil, &KubernetesVersion{1, 34})
+		if err == nil {
+			t.Fatal("a value gated on EnvFiles must be refused at 1.34")
+		}
+		for _, want := range []string{`policy "p" (type "value-gated-policy")`, ".flag", `value "on"`, "EnvFiles", "from 1.35", "kubernetesVersion is 1.34"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not name %q", err, want)
+			}
+		}
+	})
+	t.Run("gated value at the release and with no version", func(t *testing.T) {
+		tr := newTransformer("EnvFiles")
+		if _, err := tr.ValidateAuthoredPropertiesForTarget(newApp("on"), nil, &KubernetesVersion{1, 35}); err != nil {
+			t.Errorf("at 1.35: want accepted, got %v", err)
+		}
+		if _, err := tr.ValidateAuthoredPropertiesForTarget(newApp("on"), nil, nil); err != nil {
+			t.Errorf("no version stated: want accepted, got %v", err)
+		}
+	})
+	t.Run("sibling value is never refused", func(t *testing.T) {
+		if _, err := newTransformer("EnvFiles").ValidateAuthoredPropertiesForTarget(newApp("off"), nil, &KubernetesVersion{1, 1}); err != nil {
+			t.Errorf("an ungated value must pass any version, got %v", err)
+		}
+	})
+	t.Run("unknown gate", func(t *testing.T) {
+		tr := newTransformer("NoSuchGate")
+		_, err := tr.ValidateAuthoredPropertiesForTarget(newApp("on"), nil, &KubernetesVersion{1, 40})
+		if err == nil || !strings.Contains(err.Error(), "NoSuchGate") {
+			t.Errorf("a value gate the table lacks must be an error naming it, got %v", err)
+		}
+		if _, err := tr.ValidateAuthoredPropertiesForTarget(newApp("on"), nil, nil); err != nil {
+			t.Errorf("no version stated: nothing is consulted, got %v", err)
+		}
+	})
+	t.Run("wrong shape is not this pass's business", func(t *testing.T) {
+		if _, err := newTransformer("EnvFiles").ValidateAuthoredPropertiesForTarget(newApp(7), nil, &KubernetesVersion{1, 34}); err != nil && strings.Contains(err.Error(), "EnvFiles") {
+			t.Errorf("a non-string value must not trip a value gate, got %v", err)
+		}
+	})
 }
 
 // gatedPolicySchema is the schema the two policy fakes below publish: one string

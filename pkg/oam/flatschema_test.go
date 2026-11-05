@@ -42,6 +42,8 @@ func TestParsePackage_RejectsRichParamFields(t *testing.T) {
 		"additionalProperties-true":  `additionalProperties: true`,
 		"exclusive-empty":            `exclusive: []`,
 		"gatedPaths-empty":           `gatedPaths: {}`,
+		"valueGates":                 `valueGates: {dev: SomeGate}`,
+		"valueGates-empty":           `valueGates: {}`,
 	}
 	for name, extra := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -155,6 +157,8 @@ func TestLoadCapabilityDefinitions_RejectsRichPropFields(t *testing.T) {
 		"additionalProperties-true":  `        additionalProperties: true`,
 		"exclusive-empty":            `        exclusive: []`,
 		"gatedPaths-empty":           `        gatedPaths: {}`,
+		"valueGates":                 `        valueGates: {a: SomeGate}`,
+		"valueGates-empty":           `        valueGates: {}`,
 	}
 	for name, extra := range cases {
 		t.Run(name, func(t *testing.T) {

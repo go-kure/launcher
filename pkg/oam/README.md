@@ -3118,6 +3118,19 @@ nodes carry `GatedPaths` (published as `gatedPaths`) instead: gate-relative path
 read by the gate check alone, so property validation and what a document is accepted as do
 not change (go-kure/launcher#1245). A consumer that predates `gatedPaths` ignores it.
 
+A gate may also cover single values of an enum property: `ValueGates` (published as
+`valueGates`) maps an `Enum` value to the gate that value alone needs, and the property is
+accepted at every version for its other values. An authored value listed there is refused
+below the gate's release with the same fields plus the value
+(`value "Never" requires the Kubernetes feature gate ContainerRestartRules, ...`). A key
+that is not an `Enum` value, or a gate no row names, fails the schema tests. Like `Gate`,
+the key is rejected at the two flat call sites, so it is absent from their allow-sets
+(go-kure/launcher#1230). Two properties carry it today: an init container's
+`restartPolicy` (`Never` and `OnFailure`, `ContainerRestartRules`) and `service`'s
+`trafficDistribution` (`PreferSameZone` and `PreferSameNode`, `PreferSameTrafficDistribution`).
+`GatedPaths` names a field, not a value, so the raw-PodSpec kinds do not check the values
+of a container's `restartPolicy`.
+
 Separately, `validateProperties` (`property_validate.go`) checks an EMITTED
 component/trait/policy's properties against its TARGET handler's declared schema —
 enforcing `Required`, `Type`/`Types`, `Enum`, and nested `Properties`/`Items`/
