@@ -464,7 +464,7 @@ func alertmanagerRefusals(notA string) []struct {
 		{"one empty feature flag before the operator passes them", map[string]any{"version": "v0.26.0", "enableFeatures": []any{""}},
 			`enableFeatures: read by the Prometheus operator only for Alertmanager 0.27.0 and later; at version v0.26.0`},
 		{"a feature flag no version takes", map[string]any{"enableFeatures": []any{"no-such-feature"}},
-			`enableFeatures: not a feature flag of Alertmanager 0.34, at the operator's default version v0.34.0: the Prometheus operator passes the list joined with "," as --enable-feature, and Alertmanager exits at startup on an element it does not take, an empty one included; it takes alert-names-in-metrics, auto-gomemlimit, classic-mode, event-recorder, group-key-in-metrics, receiver-name-in-metrics, utf8-strict-mode`},
+			`enableFeatures: not a feature flag of Alertmanager 0.34, at the operator's default version v0.34.2: the Prometheus operator passes the list joined with "," as --enable-feature, and Alertmanager exits at startup on an element it does not take, an empty one included; it takes alert-names-in-metrics, auto-gomemlimit, classic-mode, event-recorder, group-key-in-metrics, receiver-name-in-metrics, utf8-strict-mode`},
 		{"a feature flag dropped at 0.33", map[string]any{"version": "v0.33.0", "enableFeatures": []any{"auto-gomaxprocs"}},
 			`enableFeatures: not a feature flag of Alertmanager 0.33, at version v0.33.0`},
 		{"a feature flag added after the version", map[string]any{"version": "v0.32.3", "enableFeatures": []any{"event-recorder"}},
@@ -490,7 +490,7 @@ func alertmanagerRefusals(notA string) []struct {
 		// Alertmanager exits on an element no reference lies in whatever the
 		// kubelet expands a reference in another element to.
 		{"an unknown feature flag beside a reference", map[string]any{"enableFeatures": []any{"no-such-feature", "$(AM_FEATURE)"}},
-			`enableFeatures: not a feature flag of Alertmanager 0.34, at the operator's default version v0.34.0`},
+			`enableFeatures: not a feature flag of Alertmanager 0.34, at the operator's default version v0.34.2`},
 		{"an unknown feature flag after a reference of a name with a comma", map[string]any{"enableFeatures": []any{"$(A,B)", "no-such-feature"}},
 			`enableFeatures: not a feature flag of Alertmanager 0.34`},
 		{"an empty feature flag beside a reference", map[string]any{"enableFeatures": []any{"", "$(AM_FEATURE)"}},
@@ -1254,7 +1254,7 @@ func TestAlertmanager_OperatorRunsIt(t *testing.T) {
 		"the Service's port name with a Service of its own": {"portName": "tcp-mesh", "serviceName": "alerts"},
 		"an invalid port name written nowhere":              {"portName": "alertmanager-web", "listenLocal": true, "serviceName": "alerts"},
 		// Feature flags of the version Alertmanager runs (go-kure/launcher#950),
-		// unversioned the operator's default v0.34.0; the operator joins the
+		// unversioned the operator's default v0.34.2; the operator joins the
 		// list with "," and Alertmanager splits it. Above the table's last
 		// minor no name is refused.
 		"feature flags of the operator's default":   {"enableFeatures": []any{"event-recorder", "group-key-in-metrics"}},

@@ -18,7 +18,7 @@ import (
 // pkg/alertmanager in the excerpt, which
 // scripts/vendor-prometheus-operator-gates.sh vendors whole, its tests aside.
 // The test walks each one, so a comparison in any file of the package is
-// classified or fails. At v0.94.1 the pods (statefulset.go), the
+// classified or fails. At v0.95.0 the pods (statefulset.go), the
 // configuration the operator generates (amcfg.go) and the reconcile
 // (operator.go) compare the version; collector.go and types.go do not.
 func alertmanagerGateFiles(t *testing.T, src *vendoredPromOp) []string {
@@ -85,10 +85,12 @@ var alertmanagerGateRows = func() []gateRow {
 		not(amcfg, "getEnforcer", `&otherNamespaceEnforcer{ alertmanagerNamespace: amNamespace, namespaceEnforcer: namespaceEnforcer{ matchersV2Allowed: amVersion.GTE(semver.MustParse("0.22.0")), }, }`, enforcerSyntax),
 		not(amcfg, "getEnforcer", `&namespaceEnforcer{ matchersV2Allowed: amVersion.GTE(semver.MustParse("0.22.0")), }`, enforcerSyntax),
 
-		{file: op, fn: "(*Operator).provisionAlertmanagerConfiguration", cond: `version.LT(semver.MustParse("0.15.0")) || version.Major > 0`, floor: true},
+		{file: op, fn: "getAlertmanagerVersion", cond: `version.LT(semver.MustParse("0.15.0")) || version.Major > 0`, floor: true},
 
 		gate(amcfg, "(*ConfigBuilder).checkGlobalSMTPConfig", `sc.ForceImplicitTLS != nil && cb.amVersion.LT(semver.MustParse("0.31.0"))`, g+"smtp.forceImplicitTLS"),
 		gate(amcfg, "(*ConfigBuilder).checkGlobalTelegramConfig", `cb.amVersion.LT(semver.MustParse("0.24.0"))`, g+"telegram"),
+		gate(amcfg, "(*ConfigBuilder).checkGlobalTelegramConfig", `tc.BotToken != nil && cb.amVersion.LT(semver.MustParse("0.31.0"))`, g+"telegram.botToken"),
+		gate(amcfg, "(*ConfigBuilder).checkGlobalTelegramConfig", `tc.BotTokenFile != nil && cb.amVersion.LT(semver.MustParse("0.31.0"))`, g+"telegram.botTokenFile"),
 		gate(amcfg, "(*ConfigBuilder).checkGlobalJiraConfig", `cb.amVersion.LT(semver.MustParse("0.28.0"))`, g+"jira"),
 		gate(amcfg, "(*ConfigBuilder).checkGlobalRocketChatConfig", `cb.amVersion.LT(semver.MustParse("0.28.0"))`, g+"rocketChat"),
 		gate(amcfg, "(*ConfigBuilder).checkGlobalWebexConfig", `cb.amVersion.LT(semver.MustParse("0.25.0"))`, g+"webex"),
@@ -156,7 +158,7 @@ var alertmanagerGateFuncs = func() map[string]string {
 	for _, fn := range []string{
 		"checkRoute", "checkHTTPConfig", "checkOpsGenieResponder", "checkDiscordConfigs", "checkRocketChatConfigs", "checkSlackConfigs",
 		"checkWebhookConfigs", "checkWebexConfigs", "checkEmailConfigs", "checkSnsConfigs", "checkTelegramConfigs", "checkMSTeamsConfigs",
-		"checkMSTeamsV2Configs", "checkInhibitRules",
+		"checkMSTeamsV2Configs", "checkInhibitRules", "checkPushoverConfigs",
 	} {
 		funcs[op+fn] = object
 	}
@@ -219,6 +221,8 @@ func alertmanagerGateFixtures() map[string]map[string]any {
 		"alertmanagerConfiguration.global.httpConfig.oauth2":               oauth2(nil),
 		"alertmanagerConfiguration.global.httpConfig.followRedirects":      http(map[string]any{"followRedirects": true}),
 		"alertmanagerConfiguration.global.telegram":                        global(map[string]any{"telegram": map[string]any{"apiURL": "https://api.telegram.org"}}),
+		"alertmanagerConfiguration.global.telegram.botToken":               global(map[string]any{"telegram": map[string]any{"botToken": ref("telegram", "token")}}),
+		"alertmanagerConfiguration.global.telegram.botTokenFile":           global(map[string]any{"telegram": map[string]any{"botTokenFile": "/etc/alertmanager/telegram/token"}}),
 		"alertmanagerConfiguration.global.webex":                           global(map[string]any{"webex": map[string]any{"apiURL": "https://webexapis.com/v1/messages"}}),
 		"alertmanagerConfiguration.global.httpConfig.enableHttp2":          http(map[string]any{"enableHttp2": true}),
 		"alertmanagerConfiguration.global.httpConfig.tlsConfig.minVersion": http(map[string]any{"tlsConfig": map[string]any{"minVersion": "TLS12"}}),

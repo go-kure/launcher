@@ -4365,8 +4365,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - a field the operator reads only from some Alertmanager version on, where
     `version` is below that version. An unset `version` (which is required
     only where the image is named) is judged against the operator release
-    launcher vendors (v0.94.1, default v0.34.0): the deployed operator's
-    default is unknown at build time, and at v0.34.0 no field below is
+    launcher vendors (v0.95.0, default v0.34.2): the deployed operator's
+    default is unknown at build time, and at v0.34.2 no field below is
     refused. Below its version the operator leaves the flag off the
     container, the TLS or HTTP configuration out of the web server, the gossip
     TLS configuration off the cluster, or the field out of the global
@@ -4387,11 +4387,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     and `httpConfig.oauth2.proxyUrl`, `noProxy` and `proxyConnectHeader`
     (0.25.0); `httpConfig.proxyFromEnvironment` set to true,
     `httpConfig.noProxy` and `httpConfig.proxyConnectHeader` (0.26.0); `jira`,
-    `rocketChat` and `smtp.tlsConfig` (0.28.0); `smtp.forceImplicitTLS`
-    (0.31.0); `mattermost` (0.32.0).
+    `rocketChat` and `smtp.tlsConfig` (0.28.0); `smtp.forceImplicitTLS`,
+    `telegram.botToken` and `telegram.botTokenFile` (0.31.0); `mattermost`
+    (0.32.0).
     `TestAlertmanagerVersionGates_MatchVendoredSource` parses every version
     comparison of the operator's package `pkg/alertmanager` (every Go file of
-    it, its tests aside; at v0.94.1 the comparisons are in `statefulset.go`,
+    it, its tests aside; at v0.95.0 the comparisons are in `statefulset.go`,
     `amcfg.go` and `operator.go`) and holds each to this list, or to the
     reason it gates no field of this kind (the configuration of a receiver, a
     route or a configSecret Secret); the files, with the operator's
@@ -4402,7 +4403,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `mise run vendor-prometheus-operator-gates <tag>` re-fetches them for the
     tag `go.mod` links.
   - an `enableFeatures` Alertmanager exits on at startup, at `version` (unset,
-    the operator's default v0.34.0). The operator passes the list from 0.27.0
+    the operator's default v0.34.2). The operator passes the list from 0.27.0
     on, joined with `,`, as `--enable-feature` (statefulset.go:311-315), and
     Alertmanager splits it on `,` and exits on an element that is not a feature
     flag of its version (`featurecontrol/featurecontrol.go:135-180`,
@@ -4531,7 +4532,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `cluster.tls-config` 0.24.0, `web.config.file` 0.22.0, `web.get-concurrency`
     and `web.timeout` 0.17.0, `log.format` 0.16.0, the `limits` flags 0.28.0),
     and always where `version` is unset: the operator then runs its default
-    version, v0.34.0 (`DefaultAlertmanagerVersion`, pkg/operator/defaults.go:25),
+    version, v0.34.2 (`DefaultAlertmanagerVersion`, pkg/operator/defaults.go:25),
     above every one of them, and no flag is generated only up to a version. Not
     `dispatch.start-delay`: the operator leaves its own out where an argument
     names it.
@@ -5036,19 +5037,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - a field the operator reads only from some Thanos version on, where
     `version` is below that version (go-kure/launcher#976). An unset
     `version` is judged against the operator release launcher vendors
-    (v0.94.1, default v0.42.4), at which no field below is refused; one the
+    (v0.95.0, default v0.42.5), at which no field below is refused; one the
     operator cannot parse is left to it, as below. Below its version the
     operator leaves the flag off the thanos-ruler container, serves the web
     endpoint over plain HTTP without the web configuration, or refuses the
     object at reconcile. Of a remote write entry it logs every such field as
-    ignored, but resets a copy of the entry, so only a field reached through
-    one of its pointers is dropped: `tlsConfig.minVersion`,
-    `tlsConfig.maxVersion`, `queueConfig.sampleAgeLimit`, and the `azureAd`
-    methods `sdk` and `oauth`. The entry's own fields are written all the
-    same, for a Thanos that does not read them. `azureAd` among them is
-    written only where a managed identity survives: an `azureAd` left with
-    no method by a dropped `sdk` or `oauth` is refused at reconcile, and
-    the refusal names it
+    ignored and drops it from the configuration: `tlsConfig.minVersion`,
+    `tlsConfig.maxVersion`, `queueConfig.sampleAgeLimit`, the entry's own
+    fields (`sendNativeHistograms`, `noProxy`, `proxyFromEnvironment`,
+    `proxyConnectHeader`, `messageVersion`, `roundRobinDNS`), `azureAd` as a
+    whole, and its methods `sdk` and `oauth`. (Up to v0.94.1 the operator
+    reset a copy of the entry, and wrote the entry's own fields all the
+    same.) An `azureAd` left with no method by a dropped `sdk` or `oauth` is
+    refused at reconcile, and the refusal names it
     (`ruleQueryOffset: read by the Prometheus operator only for
     Thanos 0.38.0 and later; at version v0.37.0 it does not pass it to
     Thanos Ruler, and the ruler runs without it; raise version to 0.38.0 or
@@ -5649,7 +5650,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     set one, or leave azureAd unset`).
   - a field the operator reads only from some Prometheus version on, where
     `version` is below that version. An unset `version` is judged against
-    the operator release launcher vendors (v0.94.1, default v3.14.0), at
+    the operator release launcher vendors (v0.95.0, default v3.14.0), at
     which no field below is refused; an unparsable one is left to the
     operator. Below its version the operator leaves the flag off the
     container, the setting out of the configuration or of the scrape
@@ -5791,7 +5792,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `replacement` of `service.$1` is only to be left unset.
   - a field of `thanos` the operator reads only from some Thanos version on,
     where `thanos.version` is below it; unset, the operator's default
-    v0.42.4, at which none is refused (an empty `thanos.version` is not
+    v0.42.5, at which none is refused (an empty `thanos.version` is not
     unset to the operator, which cannot parse it, and is left to it): `getConfigTimeout` and
     `getConfigInterval` (0.29.0), `grpcServerTlsConfig.minVersion` (0.37.0),
     `grpcServerTlsConfig.cipherSuites` and `curves` (0.42.0). Below it the

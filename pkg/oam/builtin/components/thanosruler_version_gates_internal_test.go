@@ -106,12 +106,13 @@ var thanosRulerIgnoredLog = regexp.MustCompile(`^ignoring "([^"]+)" not supporte
 
 // TestThanosRulerRemoteWriteTexts_MatchVendoredSource holds the text of each
 // remote write field's gate to how the operator resets the field
-// (pkg/thanos/operator.go): its loop ranges over tr.Spec.RemoteWrite by
-// value, so a reset of a field of the entry itself (&rw.Field) acts on the
-// copy and the field is written all the same, while a reset through one of
-// its pointers (&rw.AzureAD.OAuth) drops the field. A dropped method of
-// azureAd leaves the object refused where none remains, and azureAd itself,
-// written all the same, is refused where no method survives.
+// (pkg/thanos/operator.go): its loop takes a pointer to each entry of
+// tr.Spec.RemoteWrite (rw := &tr.Spec.RemoteWrite[i]), so every reset, of a
+// field of the entry itself (&rw.Field) or through one of its pointers
+// (&rw.AzureAD.OAuth), drops the field from the configuration. A dropped
+// method of azureAd leaves the object refused where none remains. Up to
+// prometheus-operator v0.94.1 the loop ranged over the entries by value, and
+// a reset of a field of the entry itself acted on the copy.
 //
 // A field the operator ignores at every version, with minimum version
 // "none", is held to thanosRulerNeverReadFields instead, in either form the
@@ -125,23 +126,14 @@ func TestThanosRulerRemoteWriteTexts_MatchVendoredSource(t *testing.T) {
 	if file == nil {
 		t.Fatalf("the excerpt holds no %s", op)
 	}
-	byValue := false
+	byPointer := false
 	want, never := map[string]string{}, map[string]string{}
-	// text is what the operator does with the field at path, cleared through
-	// x: an identifier for a field of the entry itself (rw), nil through one
-	// of its pointers.
-	text := func(path string, x *ast.Ident) string {
-		method := slices.ContainsFunc(thanosRulerAzureADMethods, func(m string) bool { return path == "remoteWrite[].azureAd."+m })
-		switch {
-		case x != nil && x.Name == "rw" && path == "remoteWrite[].azureAd":
-			return thanosRulerRemoteWriteAzureAD
-		case x != nil && x.Name == "rw":
-			return thanosRulerRemoteWriteKept
-		case method:
+	// text is what the operator does with the field at path, cleared.
+	text := func(path string) string {
+		if slices.ContainsFunc(thanosRulerAzureADMethods, func(m string) bool { return path == "remoteWrite[].azureAd."+m }) {
 			return thanosRulerRemoteWriteNoAuth
-		default:
-			return thanosRulerRemoteWriteDropped
 		}
+		return thanosRulerRemoteWriteDropped
 	}
 	fieldPath := func(name string) string {
 		return "remoteWrite[]." + strings.Replace(name, "azureAD", "azureAd", 1)
@@ -151,8 +143,8 @@ func TestThanosRulerRemoteWriteTexts_MatchVendoredSource(t *testing.T) {
 	// of them, and the walk is in source order.
 	minimum := ""
 	ast.Inspect(file, func(n ast.Node) bool {
-		if r, ok := n.(*ast.RangeStmt); ok && r.Value != nil && src.text(r.Value) == "rw" {
-			byValue = src.text(r.X) == "tr.Spec.RemoteWrite" && r.Tok == token.DEFINE
+		if a, ok := n.(*ast.AssignStmt); ok && a.Tok == token.DEFINE && len(a.Lhs) == 1 && len(a.Rhs) == 1 && src.text(a.Lhs[0]) == "rw" {
+			byPointer = src.text(a.Rhs[0]) == "&tr.Spec.RemoteWrite[i]"
 		}
 		if a, ok := n.(*ast.AssignStmt); ok && len(a.Lhs) == 1 && src.text(a.Lhs[0]) == "reset" {
 			fn, isCall := a.Rhs[0].(*ast.CallExpr)
@@ -185,8 +177,7 @@ func TestThanosRulerRemoteWriteTexts_MatchVendoredSource(t *testing.T) {
 					t.Errorf("%s: %s is logged as ignored at every version, and the next statement does not clear rw.%s", src.fset.Position(s.Pos()), path, name)
 					continue
 				}
-				x, _ := sel.X.(*ast.Ident)
-				never[path] = text(path, x)
+				never[path] = text(path)
 			}
 			return true
 		}
@@ -207,23 +198,22 @@ func TestThanosRulerRemoteWriteTexts_MatchVendoredSource(t *testing.T) {
 			t.Errorf("%s: reset is not called with a field name and the address of a field", src.fset.Position(call.Pos()))
 			return true
 		}
-		sel, isSel := addr.X.(*ast.SelectorExpr)
+		_, isSel := addr.X.(*ast.SelectorExpr)
 		name, err := strconv.Unquote(lit.Value)
 		if !isSel || err != nil {
 			t.Errorf("%s: reset is not called with a field name and the address of a field", src.fset.Position(call.Pos()))
 			return true
 		}
 		path := fieldPath(name)
-		x, _ := sel.X.(*ast.Ident)
 		if minimum == "none" {
-			never[path] = text(path, x)
+			never[path] = text(path)
 		} else {
-			want[path] = text(path, x)
+			want[path] = text(path)
 		}
 		return true
 	})
-	if !byValue {
-		t.Fatalf("%s: no loop ranges over tr.Spec.RemoteWrite by value into rw; the texts of the remote write gates rest on that copy", op)
+	if !byPointer {
+		t.Fatalf("%s: rw is not a pointer to an entry of tr.Spec.RemoteWrite (rw := &tr.Spec.RemoteWrite[i]); the texts of the remote write gates rest on that pointer", op)
 	}
 	if len(never) == 0 {
 		t.Errorf("%s: no field is ignored at every version; the walk reads neither form", op)
