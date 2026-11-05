@@ -60,12 +60,13 @@ func TestContainerNames_Refused(t *testing.T) {
 	}
 }
 
-// TestContainerNames_Accepted: distinct names, in any list, are accepted, and so
-// is a name that differs only in case (a different string to the API server).
+// TestContainerNames_Accepted: distinct names, in any list, are accepted. A name
+// that differs from another only in case is no case: a container name is a
+// DNS-1123 label, which has no upper case (go-kure/launcher#1254).
 func TestContainerNames_Accepted(t *testing.T) {
 	for _, k := range workloadKinds {
 		t.Run(k.name, func(t *testing.T) {
-			extra := map[string]any{"initContainers": []any{cnEntry("migrate"), cnEntry("App")}}
+			extra := map[string]any{"initContainers": []any{cnEntry("migrate"), cnEntry("app-init")}}
 			if sidecarKinds[k.name] {
 				extra["sidecars"] = []any{cnEntry("proxy"), cnEntry("logs")}
 			}
