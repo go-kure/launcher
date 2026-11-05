@@ -36,10 +36,12 @@ import (
 
 func sortedKeys[V any](m map[string]V) []string { return slices.Sorted(maps.Keys(m)) }
 
-func keySet[V any](ms ...map[string]V) []string {
+// union returns the sorted, de-duplicated keys of several key lists; the
+// handler and lowering-rule maps of a position have different value types.
+func union(lists ...[]string) []string {
 	all := map[string]struct{}{}
-	for _, m := range ms {
-		for k := range m {
+	for _, l := range lists {
+		for _, k := range l {
 			all[k] = struct{}{}
 		}
 	}
@@ -53,9 +55,9 @@ func TestTypeIDs_CoverEveryRegisteredType(t *testing.T) {
 		want []string
 		got  map[string]oam.TypeID
 	}{
-		"component": {keySet(registry.ComponentHandlers(), registry.ComponentLoweringRules()), registry.ComponentTypeIDs()},
-		"trait":     {keySet(registry.TraitHandlers(), registry.TraitLoweringRules()), registry.TraitTypeIDs()},
-		"policy":    {keySet(registry.PolicyHandlers()), registry.PolicyTypeIDs()},
+		"component": {union(sortedKeys(registry.ComponentHandlers()), sortedKeys(registry.ComponentLoweringRules())), registry.ComponentTypeIDs()},
+		"trait":     {union(sortedKeys(registry.TraitHandlers()), sortedKeys(registry.TraitLoweringRules())), registry.TraitTypeIDs()},
+		"policy":    {sortedKeys(registry.PolicyHandlers()), registry.PolicyTypeIDs()},
 	} {
 		if len(tc.want) == 0 {
 			t.Fatalf("%s: the registry holds no type", position)
