@@ -260,6 +260,8 @@ var alertmanagerRequiredText = requiredFields(map[string]string{ //nolint:gosec 
 // the module's source.
 var alertmanagerRulesLeft = map[string]string{
 	"updateStrategy": "!(self.type != 'RollingUpdate' && has(self.rollingUpdate)) (rollingUpdate requires type to be RollingUpdate)",
+
+	"alertmanagerConfiguration.global.telegram": "!has(self.botToken) || !has(self.botTokenFile) (botToken and botTokenFile are mutually exclusive.)",
 }
 
 // validateAlertmanager refuses, with or without an environment policy, the

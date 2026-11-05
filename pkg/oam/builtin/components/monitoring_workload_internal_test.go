@@ -222,6 +222,7 @@ var monitoringWorkloadKinds = []monitoringWorkloadKind{
 			"alertmanagerConfiguration.global.httpConfig.oauth2.tokenUrl": "the URL tokens are fetched from; the client's secret is the key of a Secret (clientSecret)",
 			"alertmanagerConfiguration.global.smtp.authUsername":          "a user name; the password is the key of a Secret (authPassword)",
 			"alertmanagerConfiguration.global.smtp.authIdentity":          "the identity of PLAIN authentication, a name; the password is the key of a Secret (authPassword)",
+			"alertmanagerConfiguration.global.telegram.botTokenFile":      keyPathField,
 			"clusterTLS.server.keyFile":                                   keyPathField,
 			"web.tlsConfig.keyFile":                                       keyPathField,
 			"clusterTLS.server.clientAuthType":                            authTypeField,
