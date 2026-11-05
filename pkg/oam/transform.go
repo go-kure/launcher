@@ -265,6 +265,11 @@ type Transformer struct {
 	// document may be authored under a consumer's own API group, which the
 	// in-transform path (single-group by construction) never sees.
 	rawDocLoweringRules map[rawDocRuleKey]RawDocumentLoweringRule
+
+	// Type identities (typeid_transformer.go), one index per position. nil until
+	// the position's types are declared; every handler and rule stays keyed by
+	// its plain type name above.
+	componentTypes, traitTypes, policyTypes *typeIndex
 }
 
 // NewTransformer creates a Transformer pre-loaded with component and trait handlers.
@@ -693,6 +698,13 @@ func (t *Transformer) componentEndpoints(comp *Component, application string, na
 	if comp == nil {
 		return nil, nil
 	}
+	// An authored identity is looked up by the plain name it is registered under,
+	// and the handler is handed the component under that name, as the transform does.
+	if key, ok := t.componentKey(comp.Type); ok && key != comp.Type {
+		resolved := *comp
+		resolved.Type = key
+		comp = &resolved
+	}
 	// A type is a rule or a handler, never both (RegisterComponent,
 	// RegisterComponentLowering), so this is never a choice.
 	handler := t.findComponentHandler(comp.Type)
@@ -822,6 +834,14 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 	if err := t.Seal(); err != nil {
 		return nil, nil, err
 	}
+	// An authored type that is a declared identity (DeclareComponentTypes) becomes
+	// the plain name its handler is registered under, once, before anything
+	// dispatches on it. app is the caller's: resolveTypes copies what it rewrites.
+	resolved, resolveErr := t.resolveTypes(app)
+	if resolveErr != nil {
+		return nil, nil, resolveErr
+	}
+	app = resolved
 	if ctx.Policy == nil {
 		ctx.Policy = &NoopPolicy{}
 	}
