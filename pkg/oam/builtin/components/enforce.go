@@ -357,6 +357,28 @@ func applyDefaultReplicas(current int32, explicit bool, dflt *int32) int32 {
 	return *dflt
 }
 
+// applyReportedReplicas is applyDefaultReplicas that also reports the default to
+// log, as the value at path, when it applies (go-kure/launcher#1234).
+func applyReportedReplicas(log *oam.PolicyDefaultLog, path string, current int32, explicit bool, dflt *int32) int32 {
+	if !explicit && dflt != nil {
+		log.ReportPolicyDefault(path, "DefaultReplicas", "")
+	}
+	return applyDefaultReplicas(current, explicit, dflt)
+}
+
+// applyReportedQuantity is applyDefaultQuantity that also reports the default to
+// log, as the value at path from the Policy accessor, when it fills the entry.
+func applyReportedQuantity(log *oam.PolicyDefaultLog, path, accessor string, rl *corev1.ResourceList, name corev1.ResourceName, dflt string) error {
+	_, authored := (*rl)[name]
+	if err := applyDefaultQuantity(rl, name, dflt); err != nil {
+		return err
+	}
+	if !authored && dflt != "" {
+		log.ReportPolicyDefault(path, accessor, "")
+	}
+	return nil
+}
+
 // quantityString returns the string form of rl[name], or "" if rl is nil or
 // name is absent — bridging corev1.ResourceList (the real
 // map[ResourceName]resource.Quantity type ResourceRequirements now embeds) to
@@ -434,19 +456,31 @@ func enforceMaxResources(res ResourceRequirements, maxCPU, maxMemory string) err
 // applyPolicyLimitDefaults applies the policy's default cpu and memory limits
 // (tier 2) to the limits the author left unmentioned, skipping a resource the
 // author opted out of with `unlimited` (tier 1, go-kure/launcher#1181). The
-// opt-out also stops buildResourceRequirements' memory-limit mirror.
-func (r *ResourceRequirements) applyPolicyLimitDefaults(p oam.Policy) error {
+// opt-out also stops buildResourceRequirements' memory-limit mirror. Each limit it
+// fills is reported to log under the property path the author would have written.
+func (r *ResourceRequirements) applyPolicyLimitDefaults(p oam.Policy, log *oam.PolicyDefaultLog) error {
 	if !r.NoCPULimit {
-		if err := applyDefaultQuantity(&r.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
+		if err := applyReportedQuantity(log, "resources.limits.cpu", "DefaultCPULimit", &r.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
 			return err
 		}
 	}
 	if !r.NoMemoryLimit {
-		if err := applyDefaultQuantity(&r.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
+		if err := applyReportedQuantity(log, "resources.limits.memory", "DefaultMemoryLimit", &r.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// applyPolicyRequestDefaults applies the policy's default cpu and memory requests
+// to the requests the author left unmentioned: first capPolicyRequestDefaults, then
+// the defaults themselves. Each value it sets is reported to log.
+func (r *ResourceRequirements) applyPolicyRequestDefaults(p oam.Policy, log *oam.PolicyDefaultLog) error {
+	r.capPolicyRequestDefaults(p, log)
+	if err := applyReportedQuantity(log, "resources.requests.cpu", "DefaultCPURequest", &r.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
+		return err
+	}
+	return applyReportedQuantity(log, "resources.requests.memory", "DefaultMemoryRequest", &r.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest())
 }
 
 // applyDefaultQuantity sets (*rl)[name] = dflt when rl has no entry for name

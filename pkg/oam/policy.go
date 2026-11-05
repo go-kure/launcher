@@ -1,6 +1,10 @@
 package oam
 
-import "k8s.io/apimachinery/pkg/runtime/schema"
+import (
+	"slices"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
 
 // Policy provides environment-level constraints and defaults for OAM component
 // and trait handlers. Handlers call its methods; they must not type-assert. A
@@ -122,6 +126,57 @@ type ObjectKindPolicy interface {
 // group member's: the transform fails (go-kure/launcher#752).
 type Enforceable interface {
 	ApplyPolicy(policy Policy) error
+}
+
+// PolicyDefault is one value that a config's ApplyPolicy took from a Default*
+// accessor of the Policy because the author left it out.
+type PolicyDefault struct {
+	// Path is the property path the author would have written for the value, for
+	// example "replicas" or "resources.requests.cpu". The properties the handler
+	// received do not hold it.
+	Path string
+	// Accessor is the name of the Policy method that supplied the value, for
+	// example "DefaultReplicas".
+	Accessor string
+	// Detail is the Source.Detail of the report entry: empty, or DetailCappedToLimit.
+	Detail string
+}
+
+// PolicyDefaultReporter is an optional interface of an Enforceable config: the
+// defaults its ApplyPolicy applied. The runtime reads it right after ApplyPolicy
+// and TransformWithProvenance reports each as SourcePolicy under the owner of the
+// properties the config was built from. A config that does not implement it
+// reports nothing, and the transform's output never depends on it.
+//
+// A value is reported only where ApplyPolicy applied the default: a value the
+// author wrote, a limit the author opted out of with `unlimited`, and a count a
+// scaler owns are not.
+type PolicyDefaultReporter interface {
+	PolicyDefaults() []PolicyDefault
+}
+
+// PolicyDefaultLog is the list a config embeds to implement PolicyDefaultReporter.
+// The zero value is empty and ready to use.
+type PolicyDefaultLog struct {
+	defaults []PolicyDefault
+}
+
+// ReportPolicyDefault records that a default was applied at path. A path reported
+// again replaces its earlier report, so ApplyPolicy may run more than once.
+func (l *PolicyDefaultLog) ReportPolicyDefault(path, accessor, detail string) {
+	d := PolicyDefault{Path: path, Accessor: accessor, Detail: detail}
+	for i := range l.defaults {
+		if l.defaults[i].Path == path {
+			l.defaults[i] = d
+			return
+		}
+	}
+	l.defaults = append(l.defaults, d)
+}
+
+// PolicyDefaults returns the defaults reported so far, in the order reported.
+func (l *PolicyDefaultLog) PolicyDefaults() []PolicyDefault {
+	return slices.Clone(l.defaults)
 }
 
 // NoopPolicy satisfies Policy with zero values:

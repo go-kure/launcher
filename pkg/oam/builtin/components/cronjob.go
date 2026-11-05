@@ -372,6 +372,8 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 // CronjobConfig implements stack.ApplicationConfig for cronjob components.
 type CronjobConfig struct {
 	Name string
+	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
+	oam.PolicyDefaultLog
 	// ObjectName names the CronJob (oam.Component.ObjectName); its labels and
 	// main container keep Name. Empty for the application's name.
 	ObjectName string
@@ -449,14 +451,10 @@ func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
 		return nil
 	}
 
-	c.Resources.capPolicyRequestDefaults(p)
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
+	if err := c.Resources.applyPolicyRequestDefaults(p, &c.PolicyDefaultLog); err != nil {
 		return err
 	}
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest()); err != nil {
-		return err
-	}
-	if err := c.Resources.applyPolicyLimitDefaults(p); err != nil {
+	if err := c.Resources.applyPolicyLimitDefaults(p, &c.PolicyDefaultLog); err != nil {
 		return err
 	}
 

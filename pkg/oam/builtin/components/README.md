@@ -2323,7 +2323,12 @@ tiers, in precedence order:
    `DefaultCPULimit()`/`DefaultMemoryLimit()` (`enforce.go`'s
    `applyDefaultQuantity`). A negative policy default fails the build, as a
    negative authored quantity does, since Kubernetes would refuse it at apply;
-   zero is accepted.
+   zero is accepted. Each default that fills a value is reported to the
+   provenance report as a `policy` entry (`oam.PolicyDefaultReporter`: the
+   workload kinds, `cnpg-cluster`, `persistentvolumeclaim` and the `pvc` trait
+   embed an `oam.PolicyDefaultLog`; the `scaler` trait implements the interface
+   itself, so that its config stays comparable); a request lowered to the
+   authored limit (tier 3 below) carries the detail `capped-to-limit`.
 3. **Intrinsic handler default** — `buildResourceRequirements` (`common.go`)
    fills anything still unset at `Generate()` time: 100m CPU request, 128Mi
    memory request, and a memory limit mirroring the (possibly just-defaulted)

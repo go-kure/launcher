@@ -309,6 +309,8 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 // StatefulsetConfig implements stack.ApplicationConfig for statefulset components.
 type StatefulsetConfig struct {
 	Name string
+	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
+	oam.PolicyDefaultLog
 	// ObjectName names the StatefulSet (oam.Component.ObjectName), and with it
 	// the pods and volume claims the controller names after it; its labels,
 	// selector and main container keep Name. Empty for the application's name.
@@ -370,15 +372,11 @@ func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
 		return nil
 	}
 
-	c.Replicas = applyDefaultReplicas(c.Replicas, c.explicitReplicas, p.DefaultReplicas())
-	c.Resources.capPolicyRequestDefaults(p)
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
+	c.Replicas = applyReportedReplicas(&c.PolicyDefaultLog, "replicas", c.Replicas, c.explicitReplicas, p.DefaultReplicas())
+	if err := c.Resources.applyPolicyRequestDefaults(p, &c.PolicyDefaultLog); err != nil {
 		return err
 	}
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest()); err != nil {
-		return err
-	}
-	if err := c.Resources.applyPolicyLimitDefaults(p); err != nil {
+	if err := c.Resources.applyPolicyLimitDefaults(p, &c.PolicyDefaultLog); err != nil {
 		return err
 	}
 

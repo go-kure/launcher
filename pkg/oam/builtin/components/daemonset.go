@@ -212,6 +212,8 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 // DaemonsetConfig implements stack.ApplicationConfig for daemonset components.
 type DaemonsetConfig struct {
 	Name string
+	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
+	oam.PolicyDefaultLog
 	// ObjectName names the DaemonSet (oam.Component.ObjectName); its labels,
 	// selector and main container keep Name. Empty for the application's name.
 	ObjectName string
@@ -273,14 +275,10 @@ func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 		return nil
 	}
 
-	c.Resources.capPolicyRequestDefaults(p)
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
+	if err := c.Resources.applyPolicyRequestDefaults(p, &c.PolicyDefaultLog); err != nil {
 		return err
 	}
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest()); err != nil {
-		return err
-	}
-	if err := c.Resources.applyPolicyLimitDefaults(p); err != nil {
+	if err := c.Resources.applyPolicyLimitDefaults(p, &c.PolicyDefaultLog); err != nil {
 		return err
 	}
 

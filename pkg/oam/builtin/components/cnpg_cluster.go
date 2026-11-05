@@ -626,6 +626,8 @@ type CnpgClusterConfig struct {
 	Metadata  oam.ObjectMetadata
 	Namespace string
 	Spec      cnpgv1.ClusterSpec
+	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
+	oam.PolicyDefaultLog
 
 	explicitInstances   bool
 	explicitStorageSize bool
@@ -664,7 +666,7 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 	if c.Spec.Instances > math.MaxInt32 || c.Spec.Instances < math.MinInt32 {
 		return errors.Errorf("instances %d is out of range", c.Spec.Instances)
 	}
-	instances := applyDefaultReplicas(int32(c.Spec.Instances), c.explicitInstances, p.DefaultReplicas()) //nolint:gosec // range checked above
+	instances := applyReportedReplicas(&c.PolicyDefaultLog, "instances", int32(c.Spec.Instances), c.explicitInstances, p.DefaultReplicas()) //nolint:gosec // range checked above
 	// An authored count was checked at parse time; a policy default below the
 	// CRD's minimum is refused the same way rather than emitted.
 	if instances < 1 {
@@ -674,16 +676,16 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 		return errors.Errorf("instances: must be >= 1, got %d", instances)
 	}
 	c.Spec.Instances = int(instances)
-	if err := applyDefaultQuantity(&c.Spec.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
+	if err := applyReportedQuantity(&c.PolicyDefaultLog, "resources.requests.cpu", "DefaultCPURequest", &c.Spec.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
 		return err
 	}
-	if err := applyDefaultQuantity(&c.Spec.Resources.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest()); err != nil {
+	if err := applyReportedQuantity(&c.PolicyDefaultLog, "resources.requests.memory", "DefaultMemoryRequest", &c.Spec.Resources.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest()); err != nil {
 		return err
 	}
-	if err := applyDefaultQuantity(&c.Spec.Resources.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
+	if err := applyReportedQuantity(&c.PolicyDefaultLog, "resources.limits.cpu", "DefaultCPULimit", &c.Spec.Resources.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
 		return err
 	}
-	if err := applyDefaultQuantity(&c.Spec.Resources.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
+	if err := applyReportedQuantity(&c.PolicyDefaultLog, "resources.limits.memory", "DefaultMemoryLimit", &c.Spec.Resources.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
 		return err
 	}
 	// storage.size precedence: authored (either spelling) > policy default.
@@ -703,6 +705,7 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 			return errors.Errorf("policy default for storage.size: quantity must be positive, got %q", dflt)
 		}
 		c.Spec.StorageConfiguration.Size = dflt
+		c.ReportPolicyDefault("storage.size", "DefaultStorageSize", "")
 	}
 
 	if maxInstances := p.MaxReplicas(); maxInstances != nil && instances > *maxInstances {
