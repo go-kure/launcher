@@ -1475,10 +1475,11 @@ An `initContainers` entry also reads its own `restartPolicy` and
   restart policy. `Always` is not tied to that gate: upstream validation
   accepts it with the gate on or off. A build for a `ClusterProfile` that
   states `spec.kubernetesVersion` below 1.35 refuses `restartPolicyRules`,
-  naming the gate and the version (go-kure/launcher#1183). The `Never` and
-  `OnFailure` values of `restartPolicy` are not checked: the gate covers only
-  those two values, and a property-level check would also refuse `Always`.
-  With no version stated, both stay a documented limit, not a check.
+  naming the gate and the version (go-kure/launcher#1183). The same build
+  refuses the `Never` and `OnFailure` values of `restartPolicy` below 1.35,
+  naming the value, the gate and the version; the schema names the gate per
+  value (`valueGates`), so `Always` is accepted at every version
+  (go-kure/launcher#1230). With no version stated nothing is checked.
 
 On a `sidecars` entry neither key is read, and both are refused as unknown
 keys. At the top level neither is a container key either.
@@ -1639,9 +1640,11 @@ a property whose gate is off by default at that release refused (go-kure/launche
 (`EnvFiles`) and an init container's `restartPolicyRules` below 1.35
 (`ContainerRestartRules`), on the kinds whose schema declares them. The gate and the
 release are in the property's published schema (`gate`). With no version stated nothing
-is checked. One limit: the `Never` and `OnFailure` values of an init container's
-`restartPolicy` share `ContainerRestartRules` and are not checked
-(go-kure/launcher#1230). The raw-PodSpec kinds (`pod` and the kinds that take a pod
+is checked. The `Never` and `OnFailure` values of an init container's `restartPolicy`
+are refused below 1.35 by the same gate, and `service`'s `trafficDistribution` values
+`PreferSameZone` and `PreferSameNode` below 1.34 (`PreferSameTrafficDistribution`); the
+other values are accepted at every version, and the gate is named per value in the
+schema (`valueGates`, go-kure/launcher#1230). The raw-PodSpec kinds (`pod` and the kinds that take a pod
 template: `podtemplate`, `replicaset`, `replicationcontroller`) leave their containers and
 template spec open, as does the `template` of `cnpg-pooler` (go-kure/launcher#1321), and the check reads declared schema, so their open nodes name the
 gated paths in `gatedPaths` instead: `env[].valueFrom.fileKeyRef` and `restartPolicyRules` of `containers[]` and
@@ -1650,7 +1653,9 @@ gated paths in `gatedPaths` instead: `env[].valueFrom.fileKeyRef` and `restartPo
 same way, naming the authored path (go-kure/launcher#1245). Field names match
 case-insensitively, as in the decode, so a key spelled in another case is refused too and
 is named as written; property validation does not read `gatedPaths`, so what a document is
-accepted as does not change.
+accepted as does not change. One limit: `gatedPaths` names a field, not a value, so the
+`Never` and `OnFailure` values of a `restartPolicy` on those kinds are not checked
+(go-kure/launcher#1230).
 
 | Property | Type | Effect | Kind |
 |----------|------|--------|------|
@@ -6281,7 +6286,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     |----------|-------|
     | `externalTrafficPolicy` | `Cluster` or `Local`. Only with `type` `NodePort` or `LoadBalancer`. |
     | `internalTrafficPolicy` | `Cluster` or `Local`. |
-    | `trafficDistribution` | `PreferSameZone`, `PreferSameNode`, or `PreferClose` (the deprecated name of `PreferSameZone`). |
+    | `trafficDistribution` | `PreferSameZone`, `PreferSameNode`, or `PreferClose` (the deprecated name of `PreferSameZone`). `PreferSameZone` and `PreferSameNode` need the `PreferSameTrafficDistribution` feature gate, on by default from Kubernetes 1.34: a build for a `ClusterProfile` whose `spec.kubernetesVersion` is below 1.34 refuses them (go-kure/launcher#1230). |
     | `sessionAffinity` | `None` or `ClientIP`. |
     | `sessionAffinityConfig` | Only with `sessionAffinity: ClientIP`. `clientIP.timeoutSeconds` is required once the key is authored (launcher's own: the API server would default it), 1-86400. |
     | `publishNotReadyAddresses` | A boolean; written only when `true`. |

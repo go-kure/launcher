@@ -265,8 +265,10 @@ func parseContainerFields(raw map[string]any, initContainer bool) (ContainerFiel
 // policy for that container; Always makes it a native sidecar and takes no
 // rules. Kubernetes accepts a policy other than Always on an init
 // container only with the ContainerRestartRules feature gate, on by default
-// from 1.35; the cluster's version is not known here, so that is documented,
-// not checked. Errors name the field only; the caller adds the entry label.
+// from 1.35; the cluster's version is not known here, so the schema names the
+// gate per value (ValueGates) and the build-time gate pass checks it against the
+// ClusterProfile's version. Errors name the field only; the caller adds the entry
+// label.
 func parseInitContainerRestart(raw map[string]any) (*corev1.ContainerRestartPolicy, []corev1.ContainerRestartRule, error) {
 	var policy *corev1.ContainerRestartPolicy
 	if v, present, err := parseRawStringField(raw, "restartPolicy", "restartPolicy"); err != nil {
@@ -379,6 +381,10 @@ func schemaInitContainerRestart() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"restartPolicy": {
 			Type: oam.PropertyTypeString, Enum: enumValues(initContainerRestartPolicies),
+			ValueGates: map[string]string{
+				string(corev1.ContainerRestartPolicyNever):     "ContainerRestartRules",
+				string(corev1.ContainerRestartPolicyOnFailure): "ContainerRestartRules",
+			},
 			Description: "The init container's own restart policy, overriding the pod's for this container. Always makes the container a native sidecar: it runs for the life of the pod, alongside the main container, and takes probes and lifecycle hooks but no restartPolicyRules. Never and OnFailure need the cluster's ContainerRestartRules feature gate, on by default from Kubernetes 1.35.",
 		},
 		"restartPolicyRules": {

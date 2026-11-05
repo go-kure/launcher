@@ -73,9 +73,14 @@ same string works in both.
   | Gate | On by default from | Properties |
   |---|---|---|
   | `EnvFiles` | 1.35 | `env[].valueFrom.fileKeyRef` |
-  | `ContainerRestartRules` | 1.35 | `restartPolicyRules` (an init container's on the workload kinds; any container's on the raw-PodSpec kinds below) (its `restartPolicy` values `Never` and `OnFailure` share the gate and are not checked: `Always` is accepted at every version) |
+  | `ContainerRestartRules` | 1.35 | `restartPolicyRules` (an init container's on the workload kinds; any container's on the raw-PodSpec kinds below), and on the workload kinds the values `Never` and `OnFailure` of an init container's `restartPolicy` (`Always` is accepted at every version; the raw-PodSpec kinds do not check the `restartPolicy` values) |
   | `PodLevelResources` | 1.34 | `podResources` (the pod kinds' `resources`) |
   | `HostnameOverride` | 1.35 | `hostnameOverride` |
+  | `PreferSameTrafficDistribution` | 1.34 | the values `PreferSameZone` and `PreferSameNode` of `service`'s `trafficDistribution` (`PreferClose` is accepted at every version) |
+
+  A gate that covers single values of an enum is named per value (`PropertySchema.ValueGates`,
+  published as `valueGates`); the refusal then names the value as well
+  (go-kure/launcher#1230).
 
 - **Open schemas name their gated paths.** The check walks the declared schema, so it stops
   at an object that declares no `Properties`. The raw-PodSpec kinds (`pod`, and the kinds
@@ -101,8 +106,9 @@ same string works in both.
   it knows as on, and says nothing about a gate it does not know.
 - **A cluster that changed a gate** against its default is not modelled: the profile says
   the release, not the gate settings. Per-gate overrides are a follow-up
-  (go-kure/launcher#1231), as are version-dependent values (go-kure/launcher#1230) and
-  adapting instead of refusing (go-kure/launcher#1232).
+  (go-kure/launcher#1231), as are version-dependent bounds such as a Service name rule
+  (go-kure/launcher#1230, second change) and adapting instead of refusing
+  (go-kure/launcher#1232).
 - **Where it runs.** `kurel build` reads the profile's version and passes it to
   `ValidateAuthoredPropertiesForTarget`. A library caller passes the version to that method
   itself; `ValidateAuthoredPropertiesWithCapabilities` takes none and checks no gate.
