@@ -2249,6 +2249,43 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 | `webservice` |
 | `worker` |
 
+## Type identity
+
+A type (a component, trait or policy type, or a configuration-defined model) is identified by
+`name@version`, lowercase. The registry is keyed by that pair, and each handler, lowering rule and
+model declares its name and version when it registers (go-kure/launcher#1258).
+
+### Grammar
+
+| Part | Rule |
+|---|---|
+| `name` | lowercase letters, digits and hyphens, starting with a letter. A dot appears only in the domain. |
+| Kubernetes kind | `kind.group@<API version>`, the core group with no group part: `deployment.apps@v1`, `service@v1`. |
+| Any other type or model | `<name>.<domain>@v<semver>`: `cnpg-cluster.launcher.gokure.dev@v1`. |
+| `version` | `v<major>`, `v<major>.<minor>` or `v<major>.<minor>.<patch>`. A short version is exact: `v2` is `v2.0.0`. |
+
+The domain of launcher's own types is `launcher.gokure.dev`. A consumer or a configuration-defined
+model uses a domain it owns. The `<family>.v<N>` successor spelling (`webservice.v2`) is retired:
+a successor is the same name at a new version. Every version ever published stays registered.
+
+`ValidateTypeIdentity` checks one identity against the grammar. `ResolveTypeReference` resolves
+the string an application authors to one registered identity.
+
+### Resolution
+
+An application may write a short name, with or without a version. The reference resolves, and the
+result records the exact version it resolved to, only when all of these hold:
+
+1. A short name resolves only when exactly one registered type claims it. A type claims its
+   leading name segment (`cnpg-cluster`) and its Kubernetes kind (`deployment`).
+2. No short name may equal another type's qualified name. Registration refuses it.
+3. A short name may carry a version: `webapp@v1.1`.
+4. An omitted version resolves only when exactly one version of the type is registered.
+   Otherwise the reference is refused and names the versions that exist.
+
+Every short name in the type allowlists above stays valid: it is the unique alias of the built-in
+that registered it.
+
 ## Transform & extension
 
 `NewTransformer(...)` builds a transformer from maps of component/trait handlers, and
