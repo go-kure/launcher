@@ -462,16 +462,21 @@ func (c *PassthroughConfig) validated() (*unstructured.Unstructured, error) {
 		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
 	}
 
-	// The volumeMounts of a workload are held to the rules of an app.yaml mount,
-	// policy or none, as those of the kind components are (go-kure/launcher#1212,
-	// go-kure/launcher#1223).
-	if err := refuseWorkloadMounts(u); err != nil {
+	// A container name used twice in a workload's pod is refused, policy or none
+	// (go-kure/launcher#1253): the API server refuses such a pod. It runs first,
+	// in the order the typed pod reader applies the checks
+	// (validateAuthoredPodSpec), so every delivery path refuses an object with
+	// the same first error.
+	if err := refuseWorkloadContainerNames(u); err != nil {
 		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
 	}
 
-	// A container name used twice in a workload's pod is refused, policy or none
-	// (go-kure/launcher#1253): the API server refuses such a pod.
-	if err := refuseWorkloadContainerNames(u); err != nil {
+	// The volumeMounts of a workload are held to the rules of an app.yaml mount,
+	// and its pod spec to the lifecycle sleep and regular init container rules,
+	// policy or none, as those of the kind components are (go-kure/launcher#1212,
+	// go-kure/launcher#1223, go-kure/launcher#1236, go-kure/launcher#1237,
+	// go-kure/launcher#1238).
+	if err := refuseWorkloadPodRules(u); err != nil {
 		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
 	}
 
@@ -480,7 +485,7 @@ func (c *PassthroughConfig) validated() (*unstructured.Unstructured, error) {
 
 // refuseWorkloadContainerNames holds the pod spec of u, when u is a workload
 // kure's scheme registers, to checkPodSpecContainerNames. u is read typed, and a
-// workload that cannot be read passes, exactly as for refuseWorkloadMounts.
+// workload that cannot be read passes, exactly as for refuseWorkloadPodRules.
 func refuseWorkloadContainerNames(u *unstructured.Unstructured) error {
 	if !isWorkloadGVK(u.GroupVersionKind()) {
 		return nil
@@ -492,26 +497,29 @@ func refuseWorkloadContainerNames(u *unstructured.Unstructured) error {
 	return nil
 }
 
-// refuseWorkloadMounts holds the pod spec of u, when u is a workload kure's
-// scheme registers, to validateTypedVolumeMounts. u is authored as a map, so
-// the rule reads it typed by way of policyObject, as the policy check does;
-// validated has already refused a workload that sets a field its type does not
-// declare, so that view loses nothing the rule reads. A kind that is no
-// workload is not read. A workload that cannot be read (an API version the
-// scheme does not register, or a document that does not decode as its kind)
-// passes here, and is the policy check's to refuse as unreadable, which every
-// transform runs. go-kure/launcher#1223.
-func refuseWorkloadMounts(u *unstructured.Unstructured) error {
+// refuseWorkloadPodRules holds the pod spec of u, when u is a workload kure's
+// scheme registers, to validateObjectMounts and then validateObjectPodRules. u
+// is authored as a map, so the rules read it typed by way of policyObject, as
+// the policy check does; validated has already refused a workload that sets a
+// field its type does not declare, so that view loses nothing the rules read. A
+// kind that is no workload is not read. A workload that cannot be read (an API
+// version the scheme does not register, or a document that does not decode as
+// its kind) passes here, and is the policy check's to refuse as unreadable,
+// which every transform runs. go-kure/launcher#1223, go-kure/launcher#1238.
+func refuseWorkloadPodRules(u *unstructured.Unstructured) error {
 	if !isWorkloadGVK(u.GroupVersionKind()) {
 		return nil
 	}
-	// policyObject's error is the policy check's refusal to make, not this
-	// rule's: an object it cannot read has no pod spec here to hold.
+	// policyObject's error is the policy check's refusal to make, not these
+	// rules': an object it cannot read has no pod spec here to hold.
 	obj, err := policyObject(u)
-	if err == nil {
-		return validateObjectMounts(obj)
+	if err != nil {
+		return nil
 	}
-	return nil
+	if err := validateObjectMounts(obj); err != nil {
+		return err
+	}
+	return validateObjectPodRules(obj)
 }
 
 // refuseRepeatedKeys refuses an object that holds a key twice in one JSON object, at

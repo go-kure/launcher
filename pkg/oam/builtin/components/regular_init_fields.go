@@ -25,7 +25,8 @@ const (
 // completion before the app containers start, and validates them on a
 // restartable one (a native sidecar). It is the typed counterpart of the
 // app.yaml parser's restartableOnlyInitKeys refusal, for the pod specs the
-// typed readers hold (go-kure/launcher#1237). Ports and resizePolicy are not
+// typed readers hold (go-kure/launcher#1237), and for the workloads a
+// passthrough component holds and a chart renders (go-kure/launcher#1238). Ports and resizePolicy are not
 // read: upstream does not forbid them. prefix is the pod spec's path in the
 // object, ending in a dot, or "" when the object is the pod spec's own, as in
 // validateTypedVolumeMounts.
