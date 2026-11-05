@@ -150,7 +150,7 @@ func TestTypeIDs_MatchTheLinkedAPIPackages(t *testing.T) {
 		"role":                           {rbacv1.SchemeGroupVersion.Group, rbacv1.SchemeGroupVersion.Version},
 		"validatingwebhookconfiguration": {admissionregistrationv1.SchemeGroupVersion.Group, admissionregistrationv1.SchemeGroupVersion.Version},
 		"apiservice":                     {apiregistrationv1.SchemeGroupVersion.Group, apiregistrationv1.SchemeGroupVersion.Version},
-		"gateway":                        {gatewayv1.SchemeGroupVersion.Group, gatewayv1.SchemeGroupVersion.Version},
+		"gateway":                        {gatewayv1.GroupVersion.Group, gatewayv1.GroupVersion.Version},
 		"issuer":                         {certv1.SchemeGroupVersion.Group, certv1.SchemeGroupVersion.Version},
 		"externalsecret":                 {esv1.SchemeGroupVersion.Group, esv1.SchemeGroupVersion.Version},
 		"prometheus":                     {monitoringv1.SchemeGroupVersion.Group, monitoringv1.SchemeGroupVersion.Version},

@@ -71,10 +71,10 @@ func ValidateTypeIdentity(s string) (TypeID, error) {
 		return TypeID{}, fmt.Errorf("%w %q: want name@version", ErrTypeIdentityInvalid, s)
 	}
 	if err := validateTypeName(name); err != nil {
-		return TypeID{}, fmt.Errorf("%w %q: %v", ErrTypeIdentityInvalid, s, err)
+		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, s, err)
 	}
 	if _, err := normalizeTypeVersion(version); err != nil {
-		return TypeID{}, fmt.Errorf("%w %q: %v", ErrTypeIdentityInvalid, s, err)
+		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, s, err)
 	}
 	return TypeID{Name: name, Version: version}, nil
 }
@@ -205,7 +205,7 @@ func versionLess(a, b string) bool {
 func (r *TypeRegistry) Resolve(ref string) (TypeID, error) {
 	name, version, hasVersion := strings.Cut(ref, "@")
 	if err := validateTypeName(name); err != nil {
-		return TypeID{}, fmt.Errorf("%w %q: %v", ErrTypeIdentityInvalid, ref, err)
+		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, ref, err)
 	}
 	if hasVersion && version == "" {
 		return TypeID{}, fmt.Errorf("%w %q: empty version", ErrTypeIdentityInvalid, ref)
@@ -225,7 +225,7 @@ func (r *TypeRegistry) Resolve(ref string) (TypeID, error) {
 	}
 	key, err := normalizeTypeVersion(version)
 	if err != nil {
-		return TypeID{}, fmt.Errorf("%w %q: %v", ErrTypeIdentityInvalid, ref, err)
+		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, ref, err)
 	}
 	if id, ok := byVersion[key]; ok {
 		return id, nil
