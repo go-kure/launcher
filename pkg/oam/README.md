@@ -2283,6 +2283,28 @@ result records the exact version it resolved to, only when all of these hold:
 Every short name in the type allowlists above stays valid: it is the unique alias of the built-in
 that registered it.
 
+### Declaring and resolving
+
+A handler or lowering rule stays registered under its plain name; its identity is declared beside it,
+keyed by that name. `registry.DeclareTypes(t)` (`pkg/oam/builtin/registry`) declares every built-in's:
+a Kubernetes kind component (`deployment`, `tlsroute`) is that kind's identity, every other built-in
+(`webservice`, `cnpg-cluster`, each trait and policy) is `<name>.launcher.gokure.dev@v1`. A consumer
+declares its own types with `DeclareComponentTypes`, `DeclareTraitTypes` and `DeclarePolicyTypes`.
+A declaration is refused whole, leaving the transformer as it was, when a name has no handler or
+rule, an identity is invalid, or two conflict (rules 1 to 4).
+
+| Call | Does |
+|---|---|
+| `Transformer.ResolveComponentType(ref)` (also `ResolveTraitType`, `ResolvePolicyType`) | Resolves an authored type to its declared identity, or refuses it. |
+| `Transformer.ComponentHandlerFor(ref)`, `ComponentLoweringRuleFor(ref)` | The handler or rule of the type a reference names. Use them instead of indexing by `Component.Type`. |
+| `Transformer.ResolveTypes(app)` | The application with every component, trait and policy type rewritten to its plain registered name, as a copy; `Transform` runs it first. |
+| `ParseWithExtraTypes(..., t.LowerableTypes())` | Validates an authored identity as the type it resolves to; the parsed `Type` keeps the authored text. |
+
+A plain name nobody declared an identity for behaves as before. A reference with a version that does
+not resolve is refused in the resolver's words, naming the versions that exist, before any handler
+runs. `Parse` and `ParseWithExtraTraitTypes` know no identity: use `ParseWithExtraTypes` with the
+transformer's `LowerableTypes()`, as `kurel build` does.
+
 ## Transform & extension
 
 `NewTransformer(...)` builds a transformer from maps of component/trait handlers, and

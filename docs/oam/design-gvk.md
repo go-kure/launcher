@@ -137,14 +137,16 @@ the fact. The covenant below prevents that.
 3. **Shadowed types stay compatible supersets.** Where a name is defined on both sides, the
    downstream implementation must remain a compatible superset of launcher's — accepting
    everything launcher accepts, with the same meaning — or be renamed on the downstream side.
-4. **Family reservation.** Some dialects spell a successor implementation as
-   `<family>.v<N>` (e.g. `webservice.v2`), with a bare name equivalent to `.v1` and the dot
-   reserved exclusively for that generation marker. A reservation under this covenant covers
-   the **whole family**: reserving `backup` also reserves `backup.v2`, `backup.v3`, and so on.
-   An upstreamed name follows the same upstream-or-rename discipline at each generation it
-   reaches. Note that launcher does not itself enforce a type-name grammar today — type names
-   are allowlist-checked, not pattern-checked (`pkg/oam/validate.go`) — so this convention
-   binds naming *choices*, not the parser.
+4. **Family reservation.** A successor implementation is the same name at a new version
+   (`webservice@v2`, the type identity in `pkg/oam/README.md` "Type identity"); the older
+   `<family>.v<N>` spelling (`webservice.v2`) is retired. A reservation under this covenant
+   covers the **whole family**: reserving `backup` also reserves every version of it
+   (`backup@v1`, `backup@v2`, …), and a dialect still spelling a successor `backup.v2` is
+   covered the same way. An upstreamed name follows the same upstream-or-rename discipline at
+   each version it reaches. Launcher checks the grammar of a type *identity*
+   (`ValidateTypeIdentity`), but a plain type name is still allowlist-checked, not
+   pattern-checked (`pkg/oam/validate.go`), so this convention binds naming *choices* for the
+   plain name, not the parser.
 
 **Current inventory**
 

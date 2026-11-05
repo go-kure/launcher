@@ -366,6 +366,12 @@ func newBuiltinTransformer() *oam.Transformer {
 	for _, r := range builtinTraitLoweringRules() {
 		t.RegisterBuiltinTraitLowering(r)
 	}
+	// Every registered type is also known by its identity (`deployment.apps@v1`,
+	// `webservice@v1`); a failure here is a defect in the built-in declarations,
+	// which TestTypeIDs_* hold to.
+	if err := registry.DeclareTypes(t); err != nil {
+		panic(fmt.Sprintf("kurel: declaring the built-in type identities: %v", err))
+	}
 	return t
 }
 

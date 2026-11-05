@@ -246,6 +246,13 @@ func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, 
 		return oamValidationError("spec.components", "spec.components must contain at least one component")
 	}
 
+	// An authored type identity is validated as the plain type it resolves to; app
+	// itself is never changed, the Transformer resolves it again on entry.
+	app, err := lowerable.identities.resolve(app)
+	if err != nil {
+		return oamValidationError("type", err.Error())
+	}
+
 	lowerableComponentTypes := toTypeSet(lowerable.ComponentTypes)
 	allTraitTypes := mergeTypeSets(customTraitTypes, lowerable.TraitTypes)
 
