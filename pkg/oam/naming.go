@@ -33,7 +33,7 @@ const (
 	NameRoleNetpolSynth NameRole = "netpol-synth"
 	// NameRoleHPA is the scaler trait's HorizontalPodAutoscaler.
 	NameRoleHPA NameRole = "hpa"
-	// NameRolePDB is the scaler trait's PodDisruptionBudget.
+	// NameRolePDB is the scaler or disruption trait's PodDisruptionBudget.
 	NameRolePDB NameRole = "pdb"
 	// NameRoleTLSSecret is the Secret of the TLS entry the expose trait manages
 	// on its Ingress: cert-manager's ingress-shim writes it, and the Ingress's

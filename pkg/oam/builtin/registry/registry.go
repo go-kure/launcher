@@ -205,6 +205,7 @@ func TraitHandlers() map[string]oam.TraitHandler {
 		"force-replace":        &traits.ForceReplaceHandler{},
 		"security-context":     &traits.SecurityContextHandler{},
 		"topology-spread":      &traits.TopologySpreadHandler{},
+		"disruption":           &traits.DisruptionHandler{},
 	}
 }
 
