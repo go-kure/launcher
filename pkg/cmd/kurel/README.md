@@ -84,7 +84,8 @@ the `job` component — a run-to-completion workload sharing the whole
 JobSpec-level surface with `cronjob`'s job template — and the
 `security-context` trait were added in this release. The `topology-spread`
 trait (launcher's default spread constraints on any typed Deployment a
-component generates, from its post-policy replica count) is registered the
+component generates, from its post-policy replica count, or the matching
+`scaler`'s `minReplicas` under a `scaler`) is registered the
 same way. The `force-replace` trait (opt-in: it lets the delivering engine
 replace an object on an immutable-field change, e.g. so a `job`
 can be updated in place) is registered in both `builtinTraitHandlers()` and

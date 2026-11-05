@@ -20,8 +20,9 @@ import (
 // or nowhere.
 //
 // worker's topology-spread opinion is evaluated at Generate: WorkerRule
-// (worker.go) lowers it into a topology-spread trait, which reads the
-// Deployment's spec.replicas (topologyspread.go -> BuildTopologySpreadConstraints).
+// (worker.go) lowers it into a topology-spread trait, which, for a worker with
+// no scaler, reads the Deployment's spec.replicas (topologyspread.go ->
+// BuildTopologySpreadConstraints).
 // By then ApplyPolicy has already run — transform.go calls it on the config
 // ToApplicationConfig returned — and ApplyPolicy substitutes the environment
 // policy's DefaultReplicas for a document that authored none (deployment.go ->
@@ -43,8 +44,8 @@ import (
 // spread and no spread, which is the property actually worth pinning.
 
 // workerSchedulingDoc is a worker component that authors neither `replicas` nor
-// `topologySpread`, so the topology-spread opinion is on by default and the
-// replica count is whatever the policy makes it — the shape in which the
+// `topologySpread` and has no scaler, so the topology-spread opinion is on by
+// default and the replica count is whatever the policy makes it — the shape in which the
 // coupling is observable.
 func workerSchedulingDoc() *oam.Component {
 	return &oam.Component{

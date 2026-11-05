@@ -1837,7 +1837,8 @@ The default topology-spread opinion is still available on `deployment`, as an
 explicit opt-in rather than a kind default: the `topology-spread` trait (see
 the trait handlers README) applies the same
 `BuildTopologySpreadConstraints` the role kinds use, exported for that reason,
-from the Deployment's post-policy replica count. It refuses a Deployment that
+from the Deployment's post-policy replica count, or from the matching `scaler`'s
+`minReplicas` when the component carries one (see below). It refuses a Deployment that
 already carries raw `topologySpreadConstraints`, so the two never merge.
 
 #### Main container ports

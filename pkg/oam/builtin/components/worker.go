@@ -41,7 +41,8 @@ import (
 //   - `topologySpread`: removed. Unless it was explicitly false, the rule
 //     attaches a `topology-spread` trait instead — the trait that applies the
 //     same default constraints (BuildTopologySpreadConstraints) to the same
-//     post-policy replica count and the same selector.
+//     post-policy replica count, or the matching scaler's minReplicas under a
+//     scaler, and the same selector.
 //
 // Keys worker does not declare are dropped rather than forwarded: worker's
 // parse never read them, while `deployment` would honor two of them
