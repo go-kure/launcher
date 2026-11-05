@@ -863,6 +863,9 @@ var labelSelectorKinds = []labelSelectorKind{
 	{
 		component: "metallb-l2advertisement", typ: "metallbv1beta1.L2AdvertisementSpec", config: kindConfig(&MetalLBL2AdvertisementHandler{}),
 		base: map[string]any{},
+		excluded: map[string]string{
+			"preferredNodeSelectors[].preference": "preferredNodeSelectors is not published and the document check refuses it as an unsupported field (go-kure/launcher#1265, TestUnexposedUpstreamFields_AreRefusedAsUnsupported)",
+		},
 		crds: crdFileVersion(metallbModulePath, metallbCRDDir+"/metallb.io_l2advertisements.yaml", metallbVersion),
 	},
 	{
