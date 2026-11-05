@@ -41,6 +41,19 @@ func TestDisruption_ProfileRenderedEnablePDB(t *testing.T) {
 	})
 }
 
+// A profile rendering reaches parseProperties without the authored validator, so a
+// pdbName of the wrong type is refused there instead of falling back to the default name.
+func TestDisruption_ProfileRenderedPDBNameMustBeAString(t *testing.T) {
+	budget := disruptionTrait(map[string]any{"minAvailable": 1})
+	for _, v := range []any{123, true, []any{"a"}} {
+		ctx := oam.TransformContext{Capabilities: map[string]oam.CapabilityBinding{
+			"disruption": {Rendering: map[string]any{"pdbName": v}},
+		}}
+		_, err := budgetsWith(t, disruptionTransformer(), ctx, disruptionComponent("app", "deployment", budget))
+		wantRefused(t, err, "pdbName", "string")
+	}
+}
+
 // scaleLowering is a trait lowering rule that emits a scaler trait, as a
 // consumer's own rule would. The scaler it emits reaches the bundle like an
 // authored one.

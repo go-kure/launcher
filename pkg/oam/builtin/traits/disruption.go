@@ -129,7 +129,11 @@ func (h *DisruptionHandler) parseProperties(props map[string]any, app *stack.App
 		config.UnhealthyPodEvictionPolicy = &policy
 	}
 
-	if name, ok := props["pdbName"].(string); ok {
+	if v, ok := props["pdbName"]; ok && v != nil {
+		name, isString := v.(string)
+		if !isString {
+			return nil, errors.Errorf("pdbName must be a string, got %v", v)
+		}
 		if err := checkAuthoredObjectName("pdbName", "the PodDisruptionBudget", name); err != nil {
 			return nil, err
 		}
