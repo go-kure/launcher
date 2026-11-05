@@ -75,7 +75,8 @@ when there is more than one instance, for example — is not computed by the kin
 It is carried by a **trait applied after policy**, which reads the generated
 object and sets the field. go-kure/launcher#540 set the precedent: its
 `topology-spread` trait applies launcher's default spread opinion from a
-Deployment's post-policy replica count, so a document or a lowering rule can ask
+Deployment's post-policy replica count (or, under a `scaler`, the scaler's
+`minReplicas`), so a document or a lowering rule can ask
 for that opinion explicitly while the `deployment` kind itself carries none. The
 trait is attached by the semantic component's rule, not by the kind, so an
 author of the kind component gets exactly what they wrote.

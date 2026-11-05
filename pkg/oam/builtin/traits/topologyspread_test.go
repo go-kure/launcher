@@ -281,8 +281,8 @@ func transformedDeploymentCtx(t *testing.T, comp oam.Component, ctx oam.Transfor
 	return nil, nil, nil
 }
 
-// The replica count the trait reads is the one the Deployment carries after
-// the environment policy ran, not the authored one. A document that authors no
+// Without a scaler, the replica count the trait reads is the one the Deployment
+// carries after the environment policy ran, not the authored one. A document that authors no
 // replicas gets no spread without a policy and the full spread under a policy
 // defaulting to three: the policy step is the only difference between the two
 // runs, so this pair is what pins the ordering (policy at component

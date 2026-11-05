@@ -182,8 +182,9 @@ func (c *topologySpreadConfig) Generate(app *stack.Application) ([]*client.Objec
 // matchExpressions cannot be expressed through that helper without widening
 // it, so it is refused rather than approximated. The selector is checked
 // before the replica count is consulted: the count comes from the environment
-// policy, and a check that only ran once constraints were due would let one
-// document build in one environment and fail in another.
+// policy, or from the scaler's minReplicas when one matches, and a check that
+// only ran once constraints were due would let one document build in one
+// environment and fail in another.
 func applyTopologySpread(dep *appsv1.Deployment, scaledMin int32, underScaler bool) error {
 	if n := len(dep.Spec.Template.Spec.TopologySpreadConstraints); n > 0 {
 		return errors.Errorf(
