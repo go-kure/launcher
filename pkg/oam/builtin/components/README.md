@@ -13604,7 +13604,7 @@ tests only and each checked against its git blob id by `TestVendoredCRDs_MatchSo
 also holds each directory to the tag of the module `go.mod` links:
 
 - the seven `monitoring.coreos.com` CRDs of the monitoring kinds, from
-  `example/prometheus-operator-crd/` of prometheus-operator `v0.94.2`, beside the operator
+  `example/prometheus-operator-crd/` of prometheus-operator `v0.95.0`, beside the operator
   excerpt in `testdata/upstream/prometheus-operator/` (`scripts/vendor-prometheus-operator-gates.sh`);
 - the CRDs of the fourteen Flux kinds, from `config/crd/bases/` of each controller's repository
   at the tag of its API module (`api/v1.7.1` of helm-controller, `api/v1.10.1` of

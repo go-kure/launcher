@@ -2,38 +2,38 @@
 # Licensed under the Apache License, Version 2.0 (each Go file carries its header; each CRD is generated from the project's types);
 # LICENSE is the project's copy of the licence and NOTICE its notice file, at the same tag.
 # The components tests check each file against its git blob id below.
-tag v0.94.2
-tag-object 2ea17f5f5ee2ca41cea921bf69011f49a2ea2351
+tag v0.95.0
+tag-object 8f118f301c75cbdf0f43de1e3e7ea2e0acf5ba95
 licence LICENSE 74e6ec6963979ae506d5a6b1d59adb7f3bdaf045
 notice NOTICE e520005cdda30b725b5534ce120ee905fd40b55a
-file pkg/alertmanager/amcfg.go 4414ca0c9f6824ae0b6c4bfcf743a27eaeeca079
+file pkg/alertmanager/amcfg.go 9c671771ddf65232f3843abd2b2a7ab8c388c467
 file pkg/alertmanager/collector.go 281c6e9634631ed1bb13cff343901aeb36ca41f9
-file pkg/alertmanager/operator.go c1948d6106bba7ddae97e5084ecde59b15710b87
-file pkg/alertmanager/statefulset.go 2fb9bed3fc1f1ca90ab424bf67d2ed601a3aff4f
-file pkg/alertmanager/types.go dd38ccb5ea8ff9b647e874b3c8a75277fa1f0d24
+file pkg/alertmanager/operator.go 9e499e388d07612c08ea218471f77946248a7fde
+file pkg/alertmanager/statefulset.go cac343e548224c5c55f6a0a8fa99d9a34296636e
+file pkg/alertmanager/types.go fe3b6405de4813853f5c08ec44822e3313016f1e
 file pkg/prometheus/applyconfiguration.go 5d9dd11b79f0e3e415d88b7a4d36a323eed9f5d5
 file pkg/prometheus/collector.go 58f8b979e3222168099c42ebc815bb72770343cb
-file pkg/prometheus/common.go 8b31f07885216d61882234fcfda9ef15fdc149cc
+file pkg/prometheus/common.go b08739fb5cc8850391d0199112ddb582ca118db0
 file pkg/prometheus/operator.go 22a2af060c66175b41eeaededacb9643965376a5
-file pkg/prometheus/promcfg.go 9a0ca9be8855b8da499f97f2ab332b8419eac5a1
-file pkg/prometheus/resource_selector.go c3b6d798e2b87dbb0ba41f1ea247ab502cea6072
+file pkg/prometheus/promcfg.go 7d3b2d6606064cba7e0ddf902f71dd6c88eae36c
+file pkg/prometheus/resource_selector.go 5721225febcb1db5df74b13c8781337c5edfabbb
 file pkg/prometheus/store.go 530dbd02f8a08ac9b6e22ac4e92a55ba07e79471
 file pkg/prometheus/test_utils.go d01f133473f602a252c79ac1636f3eec59508363
-file pkg/prometheus/server/operator.go de3a426ee1fe0dc1a495b5afdae58e0a29374677
-file pkg/prometheus/server/rules.go 5ee727447752bd2a88b5150cca0089f7d2e2846f
+file pkg/prometheus/server/operator.go 5fd945a03507e6ee45034d2adc8e4b5a21efa2ff
+file pkg/prometheus/server/rules.go d8e72e478fd02fc9a51c83400dfe0e98b27fd2cb
 file pkg/prometheus/server/statefulset.go 3db33231f19b5c3e4b335231984125002f37db5e
 file pkg/prometheus/server/thanos_sidecar_config.go e5e971d9d89f53277fc868bc693ca7a0e8c3d2ae
 file pkg/prometheus/validation/validator.go 1ba146d433875baf7be6ba6b365690b0b2600d3a
 file pkg/thanos/collector.go 4b55a3df4edbd47c39ff67b7426a7c0af3708686
-file pkg/thanos/operator.go 2305867c39f8f213ac04efdde1535e4ec4b24e4a
+file pkg/thanos/operator.go 77c4e94248ed111b6e20c2eaa71d49ad707efe60
 file pkg/thanos/rules.go f7e29b44f089e3c2b3fadde2adcf2f25a4f8ef82
-file pkg/thanos/statefulset.go fe5093cde242423a83aad03456d6ebf189775378
-file pkg/operator/defaults.go e0a4d715bd29b7467658f3a9cff464c507501a87
+file pkg/thanos/statefulset.go 4466c6a93034a9a54f5c934a058b2fefae1ef778
+file pkg/operator/defaults.go f6162d09bbabbe68aac05fd7c2d27d4efeac1973
 file pkg/operator/validations.go 7811b1a21bdb283ec265a5ffe7f40fe571e6b93b
-file example/prometheus-operator-crd/monitoring.coreos.com_alertmanagers.yaml a3d95d77e07deb84dd79ac4f097e56748a85abb2
-file example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml 65b5c43752e43aaab2e199e1412208910225c1ac
-file example/prometheus-operator-crd/monitoring.coreos.com_probes.yaml fb66c0195b8a9e808deb714ef7bc8fe95999224a
-file example/prometheus-operator-crd/monitoring.coreos.com_prometheuses.yaml 9a491b67d2262b073522acbb4194134b5fcdf39c
-file example/prometheus-operator-crd/monitoring.coreos.com_prometheusrules.yaml 66527eaa35950c4cc2723defd0730ded823dd877
-file example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml e9b38f05d3e8a57b1ced6205d3dfb813f7ece7be
-file example/prometheus-operator-crd/monitoring.coreos.com_thanosrulers.yaml b45cac8ece9e2a4c45d21501e978c5c50b001486
+file example/prometheus-operator-crd/monitoring.coreos.com_alertmanagers.yaml 230236d0223a7dec8c95a3f81e88fd4514f84209
+file example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml 054e886010d16f674e08c91e1010d5c155c08d64
+file example/prometheus-operator-crd/monitoring.coreos.com_probes.yaml 78933022237d926d4863850cd0a2c816a31e14dd
+file example/prometheus-operator-crd/monitoring.coreos.com_prometheuses.yaml 130501cf9feb33369beda37753783b75c6de3f13
+file example/prometheus-operator-crd/monitoring.coreos.com_prometheusrules.yaml a2aad334b8615545c7fc601caf75baaeecb959a0
+file example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml 27a343450cf92385eca3a4874fedd5bb176212fe
+file example/prometheus-operator-crd/monitoring.coreos.com_thanosrulers.yaml a8486402940a5f188a724b0974e7b8297b6664dd
