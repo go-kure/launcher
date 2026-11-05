@@ -1487,6 +1487,12 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 	if err := checkResizePolicyRestart(&ps); err != nil {
 		return corev1.PodSpec{}, err
 	}
+	// The parser refuses a lifecycle or probe on a regular init container
+	// (restartableOnlyInitKeys); a config built directly in Go does not pass
+	// through it, and buildInitContainer copies both whatever the restart policy.
+	if err := refuseRegularInitFields("", &ps); err != nil {
+		return corev1.PodSpec{}, err
+	}
 	if err := checkLifecycleSleep("", &ps, false); err != nil {
 		return corev1.PodSpec{}, err
 	}
