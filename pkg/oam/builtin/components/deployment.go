@@ -303,6 +303,8 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 // DeploymentConfig implements stack.ApplicationConfig for deployment components.
 type DeploymentConfig struct {
 	Name string
+	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
+	oam.PolicyDefaultLog
 	// ObjectName names the Deployment (oam.Component.ObjectName); its labels,
 	// selector and main container keep Name. Empty for the application's name.
 	ObjectName string
@@ -390,16 +392,12 @@ func (c *DeploymentConfig) ApplyPolicy(p oam.Policy) error {
 	// policy's default and ceiling have no count to act on. The scaler enforces
 	// the same ceiling on its own maxReplicas.
 	if !c.scaled {
-		c.Replicas = applyDefaultReplicas(c.Replicas, c.explicitReplicas, p.DefaultReplicas())
+		c.Replicas = applyReportedReplicas(&c.PolicyDefaultLog, "replicas", c.Replicas, c.explicitReplicas, p.DefaultReplicas())
 	}
-	c.Resources.capPolicyRequestDefaults(p)
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
+	if err := c.Resources.applyPolicyRequestDefaults(p, &c.PolicyDefaultLog); err != nil {
 		return err
 	}
-	if err := applyDefaultQuantity(&c.Resources.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest()); err != nil {
-		return err
-	}
-	if err := c.Resources.applyPolicyLimitDefaults(p); err != nil {
+	if err := c.Resources.applyPolicyLimitDefaults(p, &c.PolicyDefaultLog); err != nil {
 		return err
 	}
 

@@ -1196,6 +1196,7 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
 				return nil, NewViolationError(component.Name, err)
 			}
+			recordPolicyDefaults(rec, config)
 		}
 
 		// The steps a lowering rule attached (Component.AfterPolicy) run on the
@@ -1811,6 +1812,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 					if err := enforceable.ApplyPolicy(ctx.Policy); err != nil {
 						return nil, NewViolationError(entry.component.Name, err)
 					}
+					recordPolicyDefaults(rec, newApp.Config)
 					recordRenames(origins, before, newApp)
 					// The policy runs after the trait's check, so it is held to the
 					// same names (go-kure/launcher#752).

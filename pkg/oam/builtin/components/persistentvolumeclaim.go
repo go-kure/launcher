@@ -94,12 +94,14 @@ type PersistentVolumeClaimConfig struct {
 	// names the claim by ObjectName or after the Application. Claim.Size is "" until a policy
 	// default fills an unauthored size.
 	Claim PVCConfig
+	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
+	oam.PolicyDefaultLog
 }
 
 // ApplyPolicy fills an unauthored size from the policy's storage default and
 // enforces the policy's maximum.
 func (c *PersistentVolumeClaimConfig) ApplyPolicy(p oam.Policy) error {
-	return ApplyClaimPolicy(&c.Claim, p)
+	return ApplyReportedClaimPolicy(&c.Claim, p, &c.PolicyDefaultLog)
 }
 
 // Generate creates the PersistentVolumeClaim, named and labelled after the
@@ -182,8 +184,19 @@ func ParseClaimProperties(props map[string]any) (PVCConfig, error) {
 // default; with neither, the size is refused. A nil policy means no default
 // and no cap.
 func ApplyClaimPolicy(claim *PVCConfig, p oam.Policy) error {
+	return ApplyReportedClaimPolicy(claim, p, &oam.PolicyDefaultLog{})
+}
+
+// ApplyReportedClaimPolicy is ApplyClaimPolicy that also reports a size filled
+// from the policy default to log, as the value at `size` from DefaultStorageSize.
+// A config that embeds an oam.PolicyDefaultLog passes it here so the engine's
+// provenance report carries the default.
+func ApplyReportedClaimPolicy(claim *PVCConfig, p oam.Policy, log *oam.PolicyDefaultLog) error {
 	if p != nil && claim.Size == "" {
 		claim.Size = p.DefaultStorageSize()
+		if claim.Size != "" {
+			log.ReportPolicyDefault("size", "DefaultStorageSize", "")
+		}
 	}
 	if err := validateClaimSize(claim.Size); err != nil {
 		return err

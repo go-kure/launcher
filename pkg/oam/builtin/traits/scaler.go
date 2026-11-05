@@ -226,6 +226,12 @@ type ScalerConfig struct {
 	explicitMinReplicas bool
 	explicitMaxReplicas bool
 
+	// minFromPolicy and maxFromPolicy record that ApplyPolicy filled the bound
+	// from the policy default. Plain fields rather than an oam.PolicyDefaultLog,
+	// so the exported ScalerConfig stays comparable.
+	minFromPolicy bool
+	maxFromPolicy bool
+
 	// nonRWXClaim is the component's single-pod claim (see nonRWXClaimer),
 	// captured at Apply; "" when the component has none.
 	nonRWXClaim string
@@ -255,12 +261,27 @@ func (c *ScalerConfig) ScaledReplicas() (string, int32) {
 	return c.targetName(), c.MinReplicas
 }
 
+// PolicyDefaults implements oam.PolicyDefaultReporter: the bounds ApplyPolicy
+// filled from the policy defaults, at the paths the author would have written.
+func (c *ScalerConfig) PolicyDefaults() []oam.PolicyDefault {
+	var out []oam.PolicyDefault
+	if c.minFromPolicy {
+		out = append(out, oam.PolicyDefault{Path: "minReplicas", Accessor: "DefaultScalerMinReplicas"})
+	}
+	if c.maxFromPolicy {
+		out = append(out, oam.PolicyDefault{Path: "maxReplicas", Accessor: "DefaultScalerMaxReplicas"})
+	}
+	return out
+}
+
 // ApplyPolicy fills minReplicas/maxReplicas from the policy defaults when the
 // trait omitted them, validates the effective values, and enforces the policy
 // replica ceiling. Precedence: authored > policy default > (error, no handler
 // default for scaler bounds). A nil policy means no defaults and no caps.
 func (c *ScalerConfig) ApplyPolicy(p oam.Policy) error {
 	if p != nil {
+		c.minFromPolicy = !c.explicitMinReplicas && p.DefaultScalerMinReplicas() != nil
+		c.maxFromPolicy = !c.explicitMaxReplicas && p.DefaultScalerMaxReplicas() != nil
 		c.MinReplicas = applyDefaultReplicas(c.MinReplicas, c.explicitMinReplicas, p.DefaultScalerMinReplicas())
 		c.MaxReplicas = applyDefaultReplicas(c.MaxReplicas, c.explicitMaxReplicas, p.DefaultScalerMaxReplicas())
 	}

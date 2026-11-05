@@ -28,13 +28,20 @@ const (
 	// SourceRendered is a value of an element a lowering rule emitted that its input
 	// did not hold at that path: the rule built it. Source.Ref is the rule's identity.
 	SourceRendered SourceKind = "rendered"
+	// SourcePolicy is a value the environment policy supplied because the properties
+	// held none: a Default* accessor of Policy that a handler applied. Source.Ref is
+	// the accessor's name (DefaultReplicas, DefaultCPURequest, ...); the policy has no
+	// identity of its own to name. The path is the one the author would have written,
+	// so it is not in the properties the handler received.
+	SourcePolicy SourceKind = "policy"
 )
 
 // Source is the origin of one property value.
 type Source struct {
 	Kind SourceKind `json:"kind" yaml:"kind"`
-	// Ref names the lowering rule of a SourceCopied or SourceRendered value, and the
-	// capability key that supplied a SourceCapability value. For a
+	// Ref names the lowering rule of a SourceCopied or SourceRendered value, the
+	// capability key that supplied a SourceCapability value, and the Policy accessor
+	// that supplied a SourcePolicy value. For a
 	// value a component's nested filler supplied it is the capability the filler
 	// read, or the sorted keys joined by "," when it read several: the engine does
 	// not see which read produced which value.
@@ -42,17 +49,19 @@ type Source struct {
 	// From says, for a SourceCopied value, which kind the value had in the rule's
 	// input: SourceAuthored, SourceCapability or SourceRendered (a value an earlier
 	// rule built). A value copied through several rules carries the kind it had when
-	// it first entered them. Empty for every other kind.
+	// it first entered them. Empty for every other kind, a SourcePolicy included.
 	From SourceKind `json:"from,omitempty" yaml:"from,omitempty"`
 	// Detail says, for a SourceCapability value whose profile went through
 	// EvaluateProfileWithProvenance, which step of the profile evaluation supplied
 	// it: "profile" (the profile document), "schema-default" (a CapabilityDefinition
 	// default) or "handler-default" (the trait handler's or lowering rule's
 	// ValidateAndApplyDefaults). A SourceCopied value whose From is SourceCapability
-	// keeps the Detail it had. Empty means not determined, never "profile": it is
+	// keeps the Detail it had. For a SourcePolicy value it is "capped-to-limit" when
+	// the value is the author's limit, which the policy's request default would have
+	// exceeded, and empty otherwise. Empty means not determined, never "profile": it is
 	// empty for a profile evaluated with EvaluateProfile, for a binding built by
 	// hand, for a value a component's nested filler supplied, and for every kind
-	// but SourceCapability and the SourceCopied values taken from one.
+	// but SourceCapability, the SourceCopied values taken from one, and SourcePolicy.
 	Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
 }
 
@@ -61,6 +70,10 @@ const (
 	detailProfile        = "profile"
 	detailSchemaDefault  = "schema-default"
 	detailHandlerDefault = "handler-default"
+	// DetailCappedToLimit is the Detail of a SourcePolicy value that is the author's
+	// limit: the policy's request default was above it (a request above its limit is
+	// refused by the API server), so the request was fixed at the limit.
+	DetailCappedToLimit = "capped-to-limit"
 )
 
 // PropertySource is the source of one leaf property of a component or a trait.
@@ -86,8 +99,10 @@ type PropertySource struct {
 // property of its components and traits, as TransformWithProvenance computed it.
 //
 // An entry exists for each leaf that holds a value: an empty object or an empty
-// list is its own leaf, and a null is none. The winner is reported, never a
-// source it shadowed. Entries are sorted by (Component, Member, Trait,
+// list is its own leaf, and a null is none. The one exception is a value the
+// environment policy supplied (SourcePolicy): its entry is at the path the author
+// would have written, which the properties do not hold. The winner is reported,
+// never a source it shadowed. Entries are sorted by (Component, Member, Trait,
 // TraitIndex, Path).
 type Provenance struct {
 	// Application is metadata.name of the Application that was transformed.
@@ -100,8 +115,10 @@ type Provenance struct {
 // cluster and the PolicyResult are exactly those TransformWithPolicy returns;
 // TransformWithPolicy and Transform record nothing and pay nothing for the report.
 //
-// Values from a policy are not in the report: no policy writes a value into a
-// property map. See the package README for what the report does not cover.
+// A default the environment policy supplied is in the report as SourcePolicy when
+// the handler that applied it reports it (PolicyDefaultReporter). No policy writes a
+// value into a property map, so the entry addresses a path the properties do not
+// hold. See the package README for what the report does not cover.
 func (t *Transformer) TransformWithProvenance(app *Application, ctx TransformContext) (*stack.Cluster, *PolicyResult, *Provenance, error) {
 	rec := newProvenanceRecorder()
 	ctx.provenance = rec
@@ -808,6 +825,34 @@ func stampFor(detail map[string]string, path string) string {
 		}
 	}
 	return detail[best]
+}
+
+// policy records a default the config's ApplyPolicy applied at path: the value is
+// the policy's, and the properties do not hold it. The site decided that the
+// author left it out, so it replaces whatever is recorded at path. Two writers of
+// one path on one owner are last-wins with the same source: the scaler and the
+// pvc trait each append one sub-application, and a second trait of a type is
+// another owner (its TraitIndex).
+func (r *ownerRecorder) policy(path, accessor, detail string) {
+	if r == nil {
+		return
+	}
+	r.entries[path] = Source{Kind: SourcePolicy, Ref: accessor, Detail: detail}
+}
+
+// recordPolicyDefaults reads the defaults a config's ApplyPolicy just applied
+// into rec. It reads only: the config and the transform's output are unchanged.
+func recordPolicyDefaults(rec *ownerRecorder, config any) {
+	if rec == nil {
+		return
+	}
+	reporter, ok := config.(PolicyDefaultReporter)
+	if !ok {
+		return
+	}
+	for _, d := range reporter.PolicyDefaults() {
+		rec.policy(d.Path, d.Accessor, d.Detail)
+	}
 }
 
 // replace records the leaves of v, which now stand at path, as src. Whatever was

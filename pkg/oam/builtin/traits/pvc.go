@@ -107,6 +107,8 @@ type PVCTraitConfig struct {
 	// parses them. Claim.Size is "" until a policy default fills an
 	// unauthored size.
 	Claim components.PVCConfig
+	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
+	oam.PolicyDefaultLog
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource
@@ -117,7 +119,7 @@ func (c *PVCTraitConfig) ComponentName() string { return c.componentName }
 // policy default, and the effective size must be positive and within the
 // policy maximum. A nil policy means no default and no cap.
 func (c *PVCTraitConfig) ApplyPolicy(p oam.Policy) error {
-	if err := components.ApplyClaimPolicy(&c.Claim, p); err != nil {
+	if err := components.ApplyReportedClaimPolicy(&c.Claim, p, &c.PolicyDefaultLog); err != nil {
 		return errors.Wrapf(err, "PVC %q", c.Name)
 	}
 	return nil
