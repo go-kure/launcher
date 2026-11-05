@@ -140,9 +140,9 @@ func (h *ThanosRulerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"ruleConcurrentEval":  number("ruleConcurrentEval: how many rules may be evaluated at once. At least 1. Refused below Thanos v0.37.0, where the operator drops it."),
 		"ruleGracePeriod":     text("ruleGracePeriod: the least time between an alert and the restored for state, for alerts with a longer for. Refused below Thanos v0.30.0, where the operator drops it." + duration),
 		"retention":           text("retention: how long Thanos Ruler keeps its data. Unset, the API fills 24h; an empty one is refused, since the API server would replace it. No effect with remoteWrite, where the ruler keeps none." + duration),
-		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (thanos-ruler, config-reloader) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. A name of a listed init container is refused. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
+		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (thanos-ruler, config-reloader) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. A name of a listed init container is refused. The volumeMounts of an entry follow the rules of a mount: subPath and subPathExpr are exclusive, relative and hold no '..' element; mountPropagation and recursiveReadOnly take their API values; recursiveReadOnly Enabled or IfPossible needs readOnly: true and a propagation of None or none; Bidirectional needs the entry's own securityContext.privileged: true. A patch of a container the operator generates may leave readOnly to the operator's own mount at the path. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
 			"One container."+core+"Container in the Kubernetes API reference."),
-		"initContainers": objects("initContainers: further init containers of the pods. The operator generates none and adds each entry as written, so each must name an image. Held to the EnvironmentPolicy as containers are, a name listed once as there and never a container's (thanos-ruler, config-reloader or a listed one).",
+		"initContainers": objects("initContainers: further init containers of the pods. The operator generates none and adds each entry as written, so each must name an image. Held to the EnvironmentPolicy as containers are, a name listed once as there and never a container's (thanos-ruler, config-reloader or a listed one), and its volumeMounts under the rules of a mount as there.",
 			"One container."+core+"Container in the Kubernetes API reference."),
 		"tracingConfig":     object("tracingConfig: the Secret key that holds the tracing configuration. Experimental upstream. tracingConfigFile takes precedence." + secretKey),
 		"tracingConfigFile": text("tracingConfigFile: the path, in the thanos-ruler container, of the tracing configuration file. Experimental upstream. Takes precedence over tracingConfig."),
@@ -517,14 +517,18 @@ func refuseGeneratedThanosRulerMounts(ruleFiles string, spec *monitoringv1.Thano
 			generated["/etc/thanos/config/"+name] = "a path the Prometheus operator mounts a Secret key of the spec at in the thanos-ruler container"
 		}
 	}
+	patchMounts, privileged := mainContainerPatch(spec.Containers, "thanos-ruler")
 	return refuseGeneratedMounts(operatorContainerMounts{
 		field:     "volumeMounts",
+		container: "thanos-ruler",
 		generated: generated,
 		patterns: []reservedPattern{{
 			regexp.MustCompile("^" + regexp.QuoteMeta("/etc/thanos/rules/"+ruleFiles) + thanosRulerRuleFileNumber),
 			"the path the Prometheus operator mounts the volume of a rule ConfigMap it generates at",
 		}},
-		mounts: spec.VolumeMounts,
+		mounts:      spec.VolumeMounts,
+		patchMounts: patchMounts,
+		privileged:  privileged,
 	})
 }
 

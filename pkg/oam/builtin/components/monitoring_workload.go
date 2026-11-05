@@ -168,7 +168,12 @@ type monitoringWorkload struct {
 // written, and one that names no image is refused, since no pod runs it. A
 // container whose ports, as the pods run them, name two ports alike is
 // refused (refuseDuplicatePortNames), since the API refuses two ports of one
-// name. An image volume that names no image is not checked. The blocks of
+// name. The volumeMounts of a listed container are held to the rules of a
+// typed mount (validateTypedMountWith) and Bidirectional to the entry's own
+// privileged, with the readOnly clause of recursiveReadOnly waived for a patch
+// of a container the operator generates, whose merge can take readOnly from
+// the operator's own mount (go-kure/launcher#1227). An image volume that names
+// no image is not checked. The blocks of
 // resources are checked as the operator runs them: a patch merged in one (mergedPatches) is not checked alone, and a
 // block that names no memory request is checked with the request the
 // operator fills (memoryRequests), which satisfies the API's rule that
@@ -201,6 +206,23 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 				return errors.Errorf("%s: names no image, and the Prometheus operator merges no entry of %s into a container of its own; name an image", where, list.name)
 			case !slices.Contains(w.generated[list.name], c.Name):
 				return errors.Errorf("%s: names no image, and the Prometheus operator generates no container of that name to merge it into; name an image, or the container it patches (%s)", where, strings.Join(w.generated[list.name], ", "))
+			}
+			// The mounts of the entry are held to the single-mount rules every
+			// typed pod reader applies (validateTypedMount), and to the
+			// privileged-container rule for Bidirectional, on the entry's own
+			// securityContext: the operator sets no privileged anywhere, so a
+			// merged container is privileged only if the patch says so. A
+			// patch of a container the operator generates may get readOnly
+			// from the operator's own mount at the path in the merge
+			// (readOnlyMayCome), go-kure/launcher#1227.
+			patch := slices.Contains(w.generated[list.name], c.Name)
+			for j := range c.VolumeMounts {
+				if err := validateTypedMountWith(fmt.Sprintf("%s: volumeMounts[%d]", where, j), &c.VolumeMounts[j], patch); err != nil {
+					return err
+				}
+			}
+			if err := checkMountPropagationPrivileged(where, c.VolumeMounts, c.SecurityContext); err != nil {
+				return err
 			}
 			// A patch of a container the operator gives no ports keeps its
 			// ports as listed: the merge takes the patch's list whole where

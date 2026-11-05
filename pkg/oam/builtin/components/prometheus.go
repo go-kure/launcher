@@ -171,9 +171,9 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"podManagementPolicy": text("podManagementPolicy: how the StatefulSets create and delete pods when they scale: Parallel, the operator's default, or OrderedReady. Changing it recreates the StatefulSets."),
 		"updateStrategy":      object("updateStrategy: how the StatefulSets replace their pods on a change: type (RollingUpdate, the default, or OnDelete) and rollingUpdate with maxUnavailable. The API refuses rollingUpdate with another type than RollingUpdate; launcher does not check that rule." + decoded + "StatefulSetUpdateStrategy in its API reference."),
 		"enableServiceLinks":  flag("enableServiceLinks: whether the Services of the namespace are injected into the pods' environment variables."),
-		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (prometheus, config-reloader, and thanos-sidecar where thanos is set) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. A name of an init container, generated (init-config-reloader) or listed, is refused. The operator merges a patch's ports into those it gives that container (prometheus: the web port under portName at 9090/TCP; config-reloader: reloader-web at 8080/TCP; thanos-sidecar: http at 10902 and grpc at 10901) by number: in the patch's order, a port is merged into the first port of its number, the operator's or one the patch added before it, and takes the name and protocol it names; a port of another number is added. Where the operator gives the container no port (prometheus under listenLocal, and config-reloader under listenLocal with the HTTP reloadStrategy), the patch's ports are taken as listed. A container whose ports, merged so or as an added entry lists them, name two ports alike is refused, since the API refuses it. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
+		"containers": objects("containers: further containers of the pods, and patches of the ones the operator generates: an entry that shares its name with a container the operator generates (prometheus, config-reloader, and thanos-sidecar where thanos is set) is merged into it. Each is held to the EnvironmentPolicy as a pod's containers are: the registry of an authored image, cpu and memory maxima, privilege and capabilities. A patch may name no image; any other entry must name one. A name may be listed once: the operator runs only the last entry of a name. A name of an init container, generated (init-config-reloader) or listed, is refused. The operator merges a patch's ports into those it gives that container (prometheus: the web port under portName at 9090/TCP; config-reloader: reloader-web at 8080/TCP; thanos-sidecar: http at 10902 and grpc at 10901) by number: in the patch's order, a port is merged into the first port of its number, the operator's or one the patch added before it, and takes the name and protocol it names; a port of another number is added. Where the operator gives the container no port (prometheus under listenLocal, and config-reloader under listenLocal with the HTTP reloadStrategy), the patch's ports are taken as listed. A container whose ports, merged so or as an added entry lists them, name two ports alike is refused, since the API refuses it. The volumeMounts of an entry follow the rules of a mount: subPath and subPathExpr are exclusive, relative and hold no '..' element; mountPropagation and recursiveReadOnly take their API values; recursiveReadOnly Enabled or IfPossible needs readOnly: true and a propagation of None or none; Bidirectional needs the entry's own securityContext.privileged: true. A patch of a container the operator generates may leave readOnly to the operator's own mount at the path. Under a policy with allowed registries, config-reloader must be patched with an image from one of them: unpatched, it runs the image of the operator's own configuration, which the allowlist cannot hold.",
 			"One container."+core+"Container in the Kubernetes API reference."),
-		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates: an entry named init-config-reloader is merged into it. Held to the EnvironmentPolicy as containers are, a name listed once as there and never a container's (prometheus, config-reloader, thanos-sidecar where thanos is set, or a listed one), and its ports as there (a patch's merged into reloader-init at 8081/TCP). A patch may name no image; any other entry must name one. Under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader is.",
+		"initContainers": objects("initContainers: further init containers of the pods, and patches of the one the operator generates: an entry named init-config-reloader is merged into it. Held to the EnvironmentPolicy as containers are, a name listed once as there and never a container's (prometheus, config-reloader, thanos-sidecar where thanos is set, or a listed one), its ports as there (a patch's merged into reloader-init at 8081/TCP), and its volumeMounts under the rules of a mount as there. A patch may name no image; any other entry must name one. Under a policy with allowed registries, init-config-reloader must be patched with an image from one of them, as config-reloader is.",
 			"One container."+core+"Container in the Kubernetes API reference."),
 		"additionalScrapeConfigs":     object("additionalScrapeConfigs: the Secret key that holds further scrape configurations, appended to the ones the operator generates as they are." + secretKey),
 		"apiserverConfig":             object("apiserverConfig: the Kubernetes API server Prometheus discovers targets from, and how it authenticates. Unset, the cluster Prometheus runs in, with the pod's service account. The deprecated bearerToken is refused under an EnvironmentPolicy that forbids explicit secrets; every other credential is the key of a Secret or the path of a file in the container." + decoded + "APIServerConfig in its API reference."),
@@ -1279,14 +1279,18 @@ func validatePrometheusName(name, componentName string, spec *monitoringv1.Prome
 	}); err != nil {
 		return err
 	}
+	patchMounts, privileged := mainContainerPatch(spec.Containers, "prometheus")
 	if err := refuseGeneratedMounts(operatorContainerMounts{
-		field:      "volumeMounts",
-		generated:  mounts,
-		patterns:   []reservedPattern{{ruleMount, "the path the Prometheus operator mounts a rule ConfigMap at"}},
-		root:       "/etc/prometheus",
-		secrets:    spec.Secrets,
-		configMaps: spec.ConfigMaps,
-		mounts:     spec.VolumeMounts,
+		field:       "volumeMounts",
+		container:   "prometheus",
+		generated:   mounts,
+		patterns:    []reservedPattern{{ruleMount, "the path the Prometheus operator mounts a rule ConfigMap at"}},
+		root:        "/etc/prometheus",
+		secrets:     spec.Secrets,
+		configMaps:  spec.ConfigMaps,
+		mounts:      spec.VolumeMounts,
+		patchMounts: patchMounts,
+		privileged:  privileged,
 	}); err != nil {
 		return err
 	}

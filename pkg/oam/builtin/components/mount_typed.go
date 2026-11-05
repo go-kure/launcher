@@ -66,6 +66,20 @@ func validateContainerMounts(label string, ctr *corev1.Container) error {
 // diagnostic from either. label names the mount, like
 // `containers[0] "app": volumeMounts[1]`.
 func validateTypedMount(label string, vm *corev1.VolumeMount) error {
+	return validateTypedMountWith(label, vm, false)
+}
+
+// validateTypedMountWith is validateTypedMount for a mount that may be merged
+// into one of the same path before the API sees it. readOnlyMayCome marks a
+// mount that is a patch of a container the Prometheus operator generates: the
+// merge can take readOnly: true from the operator's own mount at that path, so
+// the clause that recursiveReadOnly Enabled or IfPossible needs readOnly: true
+// is not applied to the patch alone (go-kure/launcher#1227). Every other rule
+// is applied to the mount as written: the operator sets no mountPropagation or
+// recursiveReadOnly on any mount of its own, so a patch's value of either
+// reaches the API as written. A subPath the operator sets on a mount of its
+// own is not modelled.
+func validateTypedMountWith(label string, vm *corev1.VolumeMount, readOnlyMayCome bool) error {
 	if vm.SubPathExpr != "" {
 		if vm.SubPath != "" {
 			return errors.Errorf("%s: subPathExpr and subPath are mutually exclusive", label)
@@ -90,7 +104,7 @@ func validateTypedMount(label string, vm *corev1.VolumeMount) error {
 		switch *rro {
 		case corev1.RecursiveReadOnlyDisabled:
 		case corev1.RecursiveReadOnlyEnabled, corev1.RecursiveReadOnlyIfPossible:
-			if !vm.ReadOnly {
+			if !vm.ReadOnly && !readOnlyMayCome {
 				return errors.Errorf("%s.recursiveReadOnly: %s needs readOnly: true", label, *rro)
 			}
 			if vm.MountPropagation != nil && *vm.MountPropagation != corev1.MountPropagationNone {
