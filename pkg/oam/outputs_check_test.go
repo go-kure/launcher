@@ -224,3 +224,107 @@ func TestOutputCheck_ProviderErrorFailsTheBuild(t *testing.T) {
 		}
 	}
 }
+
+// mutatingOutputRule is a rule whose Outputs rewrites the component it is
+// handed, in every layer a copy of the struct alone would share, and whose
+// lowering records what it then sees. The probe must hand Outputs a copy no
+// write reaches the build through.
+type mutatingOutputRule struct {
+	seen *[]string
+}
+
+func (r mutatingOutputRule) ComponentType() string { return "db" }
+
+func (r mutatingOutputRule) Outputs(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
+	c.Properties["k"] = "mutated"
+	c.Properties["nested"].(map[string]any)["x"] = "mutated"
+	c.Properties["list"].([]any)[0] = "mutated"
+	c.Annotations["a"] = "mutated"
+	return declareResolved(outputClusterKind)(c, lctx)
+}
+
+func (r mutatingOutputRule) LowerComponent(c *Component, lctx LoweringContext) (LoweringResult, error) {
+	*r.seen = []string{
+		c.Properties["k"].(string),
+		c.Properties["nested"].(map[string]any)["x"].(string),
+		c.Properties["list"].([]any)[0].(string),
+		c.Annotations["a"],
+	}
+	return loweringOutputRule{kinds: []schema.GroupKind{outputClusterKind}}.LowerComponent(c, lctx)
+}
+
+// What a provider writes to the component it is asked about stays in the
+// query: the lowering sees the component as the document has it.
+func TestOutputCheck_ProviderMutationDoesNotReachTheBuild(t *testing.T) {
+	var seen []string
+	tr := NewTransformer(map[string]ComponentHandler{"kind-a": &pipelineComponentHandler{typ: "kind-a"}}, nil)
+	tr.RegisterComponentLowering(mutatingOutputRule{seen: &seen})
+	app := terminalApp(Component{
+		Name: "pg", Type: "db",
+		Properties: map[string]any{
+			"k":      "orig",
+			"nested": map[string]any{"x": "orig"},
+			"list":   []any{"orig"},
+		},
+		Annotations: map[string]string{"a": "orig"},
+	})
+	if _, err := tr.Transform(app, TransformContext{}); err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	want := []string{"orig", "orig", "orig", "orig"}
+	if len(seen) != 4 || seen[0] != want[0] || seen[1] != want[1] || seen[2] != want[2] || seen[3] != want[3] {
+		t.Errorf("the lowering saw %v, want %v: the provider's writes reached the build", seen, want)
+	}
+	if app.Spec.Components[0].Properties["k"] != "orig" {
+		t.Errorf("the document's component changed: %v", app.Spec.Components[0].Properties)
+	}
+}
+
+// retainingOutputRule keeps the slice it returned and rewrites it while it
+// lowers, to the name the lowering gave: a declaration made wrong at query time
+// would then read as right. The check holds the declarations as they were
+// answered.
+type retainingOutputRule struct {
+	retained *[]OutputDecl
+}
+
+func (r retainingOutputRule) ComponentType() string { return "db" }
+
+func (r retainingOutputRule) Outputs(c *Component, _ LoweringContext) ([]OutputDecl, error) {
+	decls := []OutputDecl{{Key: "cluster", Role: NameRolePostgresqlCluster, Kind: outputClusterKind, Default: c.Name + "-cluster", Name: "wrong"}}
+	*r.retained = decls
+	return decls, nil
+}
+
+func (r retainingOutputRule) LowerComponent(c *Component, lctx LoweringContext) (LoweringResult, error) {
+	res, err := loweringOutputRule{kinds: []schema.GroupKind{outputClusterKind}}.LowerComponent(c, lctx)
+	if err == nil && len(*r.retained) > 0 {
+		(*r.retained)[0].Name = c.Name + "-cluster"
+	}
+	return res, err
+}
+
+func TestOutputCheck_RewrittenDeclarationStillFails(t *testing.T) {
+	var retained []OutputDecl
+	tr := NewTransformer(map[string]ComponentHandler{"kind-a": &pipelineComponentHandler{typ: "kind-a"}}, nil)
+	tr.RegisterComponentLowering(retainingOutputRule{retained: &retained})
+	_, err := tr.Transform(terminalApp(Component{Name: "pg", Type: "db"}), TransformContext{})
+	if err == nil || !strings.Contains(err.Error(), `"wrong"`) {
+		t.Fatalf("Transform = %v; want the mismatch between the declared %q and the lowered name", err, "wrong")
+	}
+}
+
+// A derivation that yields no name is a defect of the provider, refused where
+// the declarations are answered: neither build check holds a derived output.
+func TestResolveOutputs_RefusesAnEmptyDerivedName(t *testing.T) {
+	for _, derived := range []string{"", "  "} {
+		decls := []OutputDecl{
+			{Key: "cluster", Role: NameRolePostgresqlCluster, Kind: outputClusterKind, Default: "pg", Name: "pg"},
+			{Key: "secret", Kind: outputSecretKind, From: "cluster", Derive: func(string) string { return derived }},
+		}
+		_, err := resolveOutputs(decls)
+		if err == nil || !strings.Contains(err.Error(), `output "secret"`) || !strings.Contains(err.Error(), "no name") {
+			t.Errorf("a derivation yielding %q: err = %v, want one naming the output and that it has no name", derived, err)
+		}
+	}
+}
