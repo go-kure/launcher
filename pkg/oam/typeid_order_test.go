@@ -9,32 +9,36 @@ import (
 // The order of type versions (go-kure/launcher#1288): major, then alpha < beta
 // < GA, then the number after the stage (alpha and beta) or minor and patch
 // (GA). These tests pin the order as a strict weak ordering, so a sort of the
-// versions of one type gives one result whatever order they arrive in.
+// distinct versions of one type gives one result whatever order they arrive in.
+// Register refuses two spellings of one version (v2, v2.0.0), and a sort keeps
+// such spellings, which neither is less than the other, in their input order.
 
 // mixedVersions is the issue's set, in the order the comparator must give.
 var mixedVersions = []string{"v1alpha1", "v1beta1", "v1", "v2beta1", "v2", "v10beta1", "v10"}
 
 func TestVersionLess_Table(t *testing.T) {
 	for name, tc := range map[string]struct{ lesser, greater string }{
-		"api versions compare their major numerically":   {"v2beta1", "v10beta1"},
-		"a semver after a beta of a larger major":        {"v2.0.0", "v10beta1"},
-		"a beta of a larger major is after v2.0.0":       {"v2.0.0", "v10.0.0"},
-		"a beta is before the semver of a larger major":  {"v1beta1", "v10.0.0"},
-		"a beta of one major is before v2.0.0":           {"v1beta1", "v2.0.0"},
-		"alpha before beta":                              {"v1alpha1", "v1beta1"},
-		"alpha number is numeric":                        {"v1alpha2", "v1alpha10"},
-		"beta before GA of the same major":               {"v1beta1", "v1"},
-		"alpha before GA of the same major":              {"v1alpha1", "v1"},
-		"GA before the alpha of the next major":          {"v1.5.0", "v2alpha1"},
-		"a higher alpha number, same major, before beta": {"v1alpha2", "v1beta1"},
-		"minor is numeric":                               {"v1.2", "v1.10"},
-		"patch is numeric":                               {"v1.0.2", "v1.0.10"},
-		"major zero is before major one":                 {"v0.9.0", "v1alpha1"},
-		"a long number is numeric":                       {"v9", "v99999999999999999999"},
-		"a long minor is numeric":                        {"v1.9", "v1.99999999999999999999"},
-		"an invalid version is after every valid one":    {"v10", "x"},
-		"an empty version is after every valid one":      {"v10", ""},
-		"invalid versions sort by their text":            {"", "x"},
+		"api versions compare their major numerically":    {"v2beta1", "v10beta1"},
+		"a semver is before the beta of a larger major":   {"v2.0.0", "v10beta1"},
+		"a semver is before the semver of a larger major": {"v2.0.0", "v10.0.0"},
+		"a beta is before the semver of a larger major":   {"v1beta1", "v10.0.0"},
+		"a beta of one major is before v2.0.0":            {"v1beta1", "v2.0.0"},
+		"alpha before beta":                               {"v1alpha1", "v1beta1"},
+		"alpha number is numeric":                         {"v1alpha2", "v1alpha10"},
+		"beta before GA of the same major":                {"v1beta1", "v1"},
+		"alpha before GA of the same major":               {"v1alpha1", "v1"},
+		"GA before the alpha of the next major":           {"v1.5.0", "v2alpha1"},
+		"a higher alpha number, same major, before beta":  {"v1alpha2", "v1beta1"},
+		"minor is numeric":                                {"v1.2", "v1.10"},
+		"patch is numeric":                                {"v1.0.2", "v1.0.10"},
+		"major zero is before major one":                  {"v0.9.0", "v1alpha1"},
+		// A text compare puts the 21-digit number first, a number longer than an
+		// int must still compare by value.
+		"a major longer than an int compares by length": {"v99999999999999999999", "v100000000000000000000"},
+		"a minor longer than an int compares by length": {"v1.99999999999999999999", "v1.100000000000000000000"},
+		"an invalid version is after every valid one":   {"v10", "x"},
+		"an empty version is after every valid one":     {"v10", ""},
+		"invalid versions sort by their text":           {"", "x"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if !versionLess(tc.lesser, tc.greater) {
