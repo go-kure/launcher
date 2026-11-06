@@ -695,49 +695,11 @@ func (t *Transformer) ComponentEndpointsNamed(application string, comp *Componen
 }
 
 func (t *Transformer) componentEndpoints(comp *Component, application string, naming func(NameRequest) (string, bool)) ([]netpol.Endpoint, error) {
-	if comp == nil {
-		return nil, nil
-	}
-	// An authored identity is looked up by the plain name it is registered under,
-	// and the handler is handed the component under that name, as the transform does.
-	// A type that does not resolve (unknown, ambiguous, or an identity that names
-	// nothing) has no provider: Transform refuses it, so nothing answers for it here.
-	key, ok := t.componentKey(comp.Type)
-	if !ok {
-		return nil, nil
-	}
-	if key != comp.Type {
-		resolved := *comp
-		resolved.Type = key
-		comp = &resolved
-	}
-	// A type is a rule or a handler, never both (RegisterComponent,
-	// RegisterComponentLowering), so this is never a choice.
-	handler := t.findComponentHandler(comp.Type)
-	var provider any = handler
-	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
-		provider = rule
-	} else if declaresEndpoints(handler) {
-		// As the transform does before ToApplicationConfig: a kind component's
-		// endpoint that selects by its object's name selects by the name the object
-		// gets (Component.ObjectName). Nothing is claimed. A handler that declares
-		// no endpoints is not asked for a name: the answer is (nil, nil) whatever
-		// its component holds.
-		named, err := withObjectName(*comp, handler, "", "", &nameResolver{hook: naming, application: application})
-		if err != nil {
-			return nil, errors.Wrapf(err, "component %q", comp.Name)
-		}
-		// Its `labels` and `annotations` are read off it too, so the handler is
-		// handed the properties it is handed in the transform. There is no
-		// component label key here to hold the labels to.
-		named, err = withObjectMetadata(named, handler, "")
-		if err != nil {
-			return nil, errors.Wrapf(err, "component %q", comp.Name)
-		}
-		comp = &named
+	provider, comp, ok, err := t.queryProvider(comp, application, naming, declaresEndpoints)
+	if err != nil || !ok {
+		return nil, err
 	}
 	var eps []netpol.Endpoint
-	var err error
 	if named, ok := provider.(NamedEndpointProvider); ok {
 		// A fresh allocator per call: what a name is resolved to is asked here,
 		// nothing is claimed.
@@ -761,6 +723,56 @@ func (t *Transformer) componentEndpoints(comp *Component, application string, na
 		return nil, errors.Wrapf(err, "component %q", comp.Name)
 	}
 	return eps, nil
+}
+
+// queryProvider finds what answers a query about comp: its ComponentLoweringRule,
+// or its handler when no rule claims the type, and the component as that provider
+// is handed it. ok is false when there is nothing to ask: comp is nil, or its type
+// does not resolve. declares says whether a handler is one the query reads from;
+// only then is the object's name resolved on the component, as the transform does
+// before ToApplicationConfig. Nothing is claimed.
+func (t *Transformer) queryProvider(comp *Component, application string, naming func(NameRequest) (string, bool), declares func(ComponentHandler) bool) (provider any, out *Component, ok bool, err error) {
+	if comp == nil {
+		return nil, nil, false, nil
+	}
+	// An authored identity is looked up by the plain name it is registered under,
+	// and the handler is handed the component under that name, as the transform does.
+	// A type that does not resolve (unknown, ambiguous, or an identity that names
+	// nothing) has no provider: Transform refuses it, so nothing answers for it here.
+	key, resolves := t.componentKey(comp.Type)
+	if !resolves {
+		return nil, nil, false, nil
+	}
+	if key != comp.Type {
+		resolved := *comp
+		resolved.Type = key
+		comp = &resolved
+	}
+	// A type is a rule or a handler, never both (RegisterComponent,
+	// RegisterComponentLowering), so this is never a choice.
+	handler := t.findComponentHandler(comp.Type)
+	provider = handler
+	if rule, isRule := t.componentLoweringRules[comp.Type]; isRule {
+		provider = rule
+	} else if declares(handler) {
+		// As the transform does before ToApplicationConfig: a kind component's
+		// object name is what its handler is given (Component.ObjectName). Nothing
+		// is claimed. A handler that declares nothing is not asked for a name: the
+		// answer is (nil, nil) whatever its component holds.
+		named, nameErr := withObjectName(*comp, handler, "", "", &nameResolver{hook: naming, application: application})
+		if nameErr != nil {
+			return nil, nil, false, errors.Wrapf(nameErr, "component %q", comp.Name)
+		}
+		// Its `labels` and `annotations` are read off it too, so the handler is
+		// handed the properties it is handed in the transform. There is no
+		// component label key here to hold the labels to.
+		named, nameErr = withObjectMetadata(named, handler, "")
+		if nameErr != nil {
+			return nil, nil, false, errors.Wrapf(nameErr, "component %q", comp.Name)
+		}
+		comp = &named
+	}
+	return provider, comp, true, nil
 }
 
 // declaresEndpoints reports whether handler is one componentEndpoints reads
