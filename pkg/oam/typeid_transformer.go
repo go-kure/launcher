@@ -194,8 +194,21 @@ func (t *Transformer) ComponentLoweringRuleFor(ref string) (ComponentLoweringRul
 	return r, ok
 }
 
-// resolveRef returns the plain type name an authored reference is registered
-// under, and whether that is a change. A reference that resolves is resolved
+// typeForm is the text a resolved type reference is rewritten to.
+type typeForm int
+
+const (
+	// byKey is the plain name the handler or rule is registered under: what the
+	// engine dispatches on.
+	byKey typeForm = iota
+	// byIdentity is the declared identity, `name@version`: text Transform resolves
+	// again to the same type, so a result fed back to it still resolves.
+	byIdentity
+)
+
+// resolveRef returns the text an authored reference is rewritten to (the plain
+// name it is registered under, or its identity, per form), and whether that is a
+// change. A reference that resolves is resolved
 // first, so a name more than one type or version claims is refused as ambiguous
 // even when a handler is registered under it. An empty type and a plain name, one
 // without a version, that no declared identity names or that is not a valid
@@ -203,7 +216,7 @@ func (t *Transformer) ComponentLoweringRuleFor(ref string) (ComponentLoweringRul
 // unchanged, so the refusal the later stage gives them (the allowlist, "no handler")
 // stays what it was. A reference with a version, which can only be an identity,
 // that does not resolve is refused here in the resolver's words.
-func resolveRef(ix *typeIndex, ref string) (string, bool, error) {
+func resolveRef(ix *typeIndex, ref string, form typeForm) (string, bool, error) {
 	if ref == "" {
 		return ref, false, nil
 	}
@@ -215,8 +228,11 @@ func resolveRef(ix *typeIndex, ref string) (string, bool, error) {
 		}
 		return "", false, err
 	}
-	key := ix.keys[id]
-	return key, key != ref, nil
+	out := ix.keys[id]
+	if form == byIdentity {
+		out = id.String()
+	}
+	return out, out != ref, nil
 }
 
 // typeIdentities is what resolving an application's authored type references
@@ -247,10 +263,10 @@ func (t *Transformer) snapshotIdentities() *typeIdentities {
 // resolving, and always when no type identity was declared; otherwise a copy that
 // shares everything but the types it rewrote, and never changes app.
 func (t *Transformer) resolveTypes(app *Application) (*Application, error) {
-	return t.identities().resolve(app)
+	return t.identities().resolve(app, byKey)
 }
 
-func (ids *typeIdentities) resolve(app *Application) (*Application, error) {
+func (ids *typeIdentities) resolve(app *Application, form typeForm) (*Application, error) {
 	if ids == nil || (ids.components == nil && ids.traits == nil && ids.policies == nil) {
 		return app, nil
 	}
@@ -265,7 +281,7 @@ func (ids *typeIdentities) resolve(app *Application) (*Application, error) {
 	}
 	for i := range app.Spec.Components {
 		c := &app.Spec.Components[i]
-		key, changed, err := resolveRef(ids.components, c.Type)
+		key, changed, err := resolveRef(ids.components, c.Type, form)
 		if err != nil {
 			return nil, errors.Errorf("component %q: %w", c.Name, err)
 		}
@@ -274,7 +290,7 @@ func (ids *typeIdentities) resolve(app *Application) (*Application, error) {
 			out.Spec.Components[i].Type = key
 		}
 		for j := range c.Traits {
-			key, changed, err := resolveRef(ids.traits, c.Traits[j].Type)
+			key, changed, err := resolveRef(ids.traits, c.Traits[j].Type, form)
 			if err != nil {
 				return nil, errors.Errorf("component %q trait[%d]: %w", c.Name, j, err)
 			}
@@ -288,7 +304,7 @@ func (ids *typeIdentities) resolve(app *Application) (*Application, error) {
 	}
 	for i := range app.Spec.Policies {
 		p := &app.Spec.Policies[i]
-		key, changed, err := resolveRef(ids.policies, p.Type)
+		key, changed, err := resolveRef(ids.policies, p.Type, form)
 		if err != nil {
 			return nil, errors.Errorf("policy %q: %w", p.Name, err)
 		}
@@ -304,10 +320,13 @@ func (ids *typeIdentities) resolve(app *Application) (*Application, error) {
 }
 
 // ResolveTypes is the type resolution Transform and TransformWithPolicy run
-// first: app with every component, trait and policy type resolved to the plain
-// name it is registered under, as a copy when anything changed. A caller that
-// reads Component.Type itself, rather than going through a handler lookup,
-// resolves first.
+// first, with each declared type written as its identity (`name@version`, the
+// version as declared) rather than the plain name the engine dispatches on: app
+// with every component, trait and policy type that a declaration names resolved,
+// as a copy when anything changed. A type nobody declared an identity for stays
+// as written. A caller that reads Component.Type itself, rather than going through
+// a handler lookup, resolves first. The result is valid input to Transform, which
+// resolves an identity again to the same type.
 func (t *Transformer) ResolveTypes(app *Application) (*Application, error) {
-	return t.resolveTypes(app)
+	return t.identities().resolve(app, byIdentity)
 }

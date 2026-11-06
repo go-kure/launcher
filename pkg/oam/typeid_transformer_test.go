@@ -215,14 +215,14 @@ func TestResolveTypes_RewritesOnACopy(t *testing.T) {
 		}
 	}
 	types = append(types, "policy:"+got.Spec.Policies[0].Type)
-	if want := "widget trait:sticky trait:sticky gadget widget policy:placement"; strings.Join(types, " ") != want {
+	if want := "widget.acme.example@v1 trait:sticky.acme.example@v1 trait:sticky.acme.example@v1 gadget.acme.example@v1.2 widget.acme.example@v1 policy:placement.acme.example@v1"; strings.Join(types, " ") != want {
 		t.Errorf("resolved types = %q, want %q", strings.Join(types, " "), want)
 	}
 }
 
 func TestResolveTypes_ReturnsTheSameApplicationWhenNothingChanges(t *testing.T) {
 	tr, _ := declared(t)
-	plain := &Application{Spec: ApplicationSpec{Components: []Component{{Name: "a", Type: "widget", Traits: []Trait{{Type: "sticky"}}}, {Name: "x", Type: "unknown"}}}}
+	plain := &Application{Spec: ApplicationSpec{Components: []Component{{Name: "a", Type: "widget.acme.example@v1", Traits: []Trait{{Type: "sticky.acme.example@v1"}}}, {Name: "x", Type: "unknown"}}}}
 	if got, err := tr.ResolveTypes(plain); err != nil || got != plain {
 		t.Errorf("a document of plain names was copied or refused: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestAmbiguousShortNameIsNotDispatchedByPlainKey(t *testing.T) {
 func TestResolveTypes_PlainNamesNobodyDeclaredPassThrough(t *testing.T) {
 	tr, _ := declared(t)
 	app := &Application{Spec: ApplicationSpec{Components: []Component{
-		{Name: "a", Type: "widget", Traits: []Trait{{Type: "custom_metrics"}, {Type: "Unknown-Trait"}, {Type: "nothing"}}},
+		{Name: "a", Type: "unknown", Traits: []Trait{{Type: "custom_metrics"}, {Type: "Unknown-Trait"}, {Type: "nothing"}}},
 	}, Policies: []ApplicationPolicy{{Name: "p", Type: "custom_policy"}}}}
 	got, err := tr.ResolveTypes(app)
 	if err != nil || got != app {
@@ -359,5 +359,37 @@ func TestTransform_RefusalIsAValidationError(t *testing.T) {
 	}
 	if !errors.Is(err, ErrTypeReferenceUnknown) {
 		t.Errorf("errors.Is(err, ErrTypeReferenceUnknown) is false for %v", err)
+	}
+}
+
+// ResolveTypes writes a declared type as its identity, so its result is valid input
+// to Transform even where the plain key behind the identity is an ambiguous short
+// name (widget-v2 is the key of widget.acme.example@v2, and widget names two versions).
+func TestResolveTypes_ResultIsValidTransformInput(t *testing.T) {
+	seen := &[]string{}
+	tr := NewTransformer(map[string]ComponentHandler{
+		"widget":    &recordingComponentHandler{typ: "widget", seen: seen},
+		"widget-v2": &recordingComponentHandler{typ: "widget-v2", seen: seen},
+	}, nil)
+	if err := tr.DeclareComponentTypes(map[string]TypeID{
+		"widget":    mustID(t, "widget.acme.example@v1"),
+		"widget-v2": mustID(t, "widget.acme.example@v2"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	app := makeApp("myapp", makeComponent("a", "widget@v1"), makeComponent("b", "widget@v2"))
+	app.APIVersion, app.Kind = SupportedAPIVersion, "Application"
+	got, err := tr.ResolveTypes(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, b := got.Spec.Components[0].Type, got.Spec.Components[1].Type; a != "widget.acme.example@v1" || b != "widget.acme.example@v2" {
+		t.Fatalf("ResolveTypes types = %q, %q; want the two identities", a, b)
+	}
+	if _, err := tr.Transform(got, TransformContext{}); err != nil {
+		t.Fatalf("Transform of the ResolveTypes result: %v", err)
+	}
+	if strings.Join(*seen, " ") != "widget widget-v2" {
+		t.Errorf("handlers saw types %v, want [widget widget-v2]", *seen)
 	}
 }

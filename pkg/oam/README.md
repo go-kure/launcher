@@ -2297,7 +2297,7 @@ rule, an identity is invalid, or two conflict (rules 1 to 4).
 |---|---|
 | `Transformer.ResolveComponentType(ref)` (also `ResolveTraitType`, `ResolvePolicyType`) | Resolves an authored type to its declared identity, or refuses it. |
 | `Transformer.ComponentHandlerFor(ref)`, `ComponentLoweringRuleFor(ref)` | The handler or rule of the type a reference names. Use them instead of indexing by `Component.Type`. |
-| `Transformer.ResolveTypes(app)` | The application with every component, trait and policy type rewritten to its plain registered name, as a copy; `Transform` runs it first. |
+| `Transformer.ResolveTypes(app)` | The application with every component, trait and policy type that a declaration names written as its identity (`name@version`), as a copy; a type nobody declared stays as written. The result is valid input to `Transform`, which runs the same resolution first and dispatches on the plain registered name. |
 | `ParseWithExtraTypes(..., t.LowerableTypes())` | Validates an authored identity as the type it resolves to; the parsed `Type` keeps the authored text. |
 
 A plain name that no declared identity names, or that is not a valid identity at all (a custom trait
@@ -2307,9 +2307,10 @@ type or version claims is refused as ambiguous even when a handler is registered
 name. A reference with a version that does not resolve is refused in the resolver's words, naming
 the versions that exist, before any handler runs; `Transform` returns that refusal as a
 `ValidationError` (as `Parse` does) and `errors.Is` still matches `ErrTypeReferenceUnknown` and
-`ErrTypeReferenceAmbiguous`. `ResolveTypes` returns the plain registered names, so feeding its result
-back to `Transform` fails when such a name is itself ambiguous. `Parse` and `ParseWithExtraTraitTypes` know no identity: use `ParseWithExtraTypes` with the
-transformer's `LowerableTypes()`, as `kurel build` does.
+`ErrTypeReferenceAmbiguous`. `ResolveTypes` writes each declared type as its identity, not as the
+plain registered name, so feeding its result back to `Transform` resolves to the same type even where
+a plain name is ambiguous. `Parse` and `ParseWithExtraTraitTypes` know no identity: use
+`ParseWithExtraTypes` with the transformer's `LowerableTypes()`, as `kurel build` does.
 
 ## Transform & extension
 
