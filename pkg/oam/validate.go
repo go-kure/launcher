@@ -250,7 +250,7 @@ func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, 
 
 	// An authored type identity is validated as the plain type it resolves to; app
 	// itself is never changed, the Transformer resolves it again on entry.
-	app, err := lowerable.identities.resolve(app)
+	app, err := lowerable.identities.resolve(app, byKey)
 	if err != nil {
 		return typeValidationError(err)
 	}
