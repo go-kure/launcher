@@ -564,5 +564,30 @@ func TestLookupsAgreeWithTransform(t *testing.T) {
 				t.Errorf("ComponentEndpoints(%q) = %v, %v; want an answer = %v", ref, eps, err, ok)
 			}
 		})
+		if ref == "" {
+			continue
+		}
+		// The authored checks resolve like ResolveTypes: they refuse what it refuses, as a
+		// ValidationError, and pass a plain name nobody declared on to the later stage.
+		t.Run("validate/"+ref, func(t *testing.T) {
+			app := makeApp("myapp", makeComponent("w", ref))
+			app.APIVersion, app.Kind = SupportedAPIVersion, "Application"
+			err := tr.ValidateAuthoredProperties(app)
+			if (err != nil) != resolveRefuses[ref] {
+				t.Fatalf("ValidateAuthoredProperties(%q) error = %v, want a refusal = %v", ref, err, resolveRefuses[ref])
+			}
+			var ve *kureerrors.ValidationError
+			if err != nil && !errors.As(err, &ve) {
+				t.Errorf("ValidateAuthoredProperties(%q) error %T is not a *ValidationError: %v", ref, err, err)
+			}
+		})
+		// Parse accepts the reference exactly when Transform does: the rule-backed family
+		// claims its keys as lowerable types, so a reference that resolves to one is accepted.
+		t.Run("parse/"+ref, func(t *testing.T) {
+			_, err := ParseWithExtraTypes(identityDoc(ref, ""), nil, rules.LowerableTypes())
+			if (err == nil) != ok {
+				t.Errorf("ParseWithExtraTypes(%q) error = %v, want success = %v", ref, err, ok)
+			}
+		})
 	}
 }
