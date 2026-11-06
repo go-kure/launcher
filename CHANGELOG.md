@@ -1,6 +1,168 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.4] - 2026-11-06
+
+### Added
+
+- Let a handler declare how readiness is judged for its resources
+- Endpoints carry a name and a protocol
+- Workloads report an endpoint per container port
+- Chart components declare their endpoints
+- Report which source supplied each trait and component property
+- Attribute lowered elements
+- Attribute profile-time defaults
+- Declare readiness for the postgresql built-in
+- Report where each route of each routing trait lands
+- Split lowered provenance into copied and rendered
+
+### Build
+
+- Pin github.com/go-kure/kure to v0.2.0-beta.24
+- Update dependency syft to v1.56.0
+- Update dependency goreleaser to v2.20.0
+- Forbid os.TempDir, os.Readlink and filepath.EvalSymlinks in lowering rules
+- Pin github.com/go-kure/kure to v0.2.0-beta.25
+- Refresh the vendored prometheus-operator excerpt to v0.95.0
+- Update dependency syft to v1.57.0
+- Update dependency yq to v4.54.2
+
+### CI
+
+- The CRD vendor scripts and the changelog scrub match the forbidden-terms guard's identifier segments
+- Drop the review triggers from the claude workflow
+- Raise the per-binary test timeout to 10m
+- Skip the coverage comment on fork PRs
+
+### Changed
+
+- Split TransformWithPolicy at the NetworkPolicy synthesis point
+
+### Document Format
+
+- Schema-check CapabilityDefinition in cluster.yaml profiles
+- App.yaml chart endpoints are refused beside targetNamespace
+- App.yaml targetNamespace is matched whatever its case
+- App.yaml targetNamespace beside endpoints is read as the decode reads it
+- App.yaml chart endpoints are refused beside kubeConfig
+- Reject unread app.yaml init-container and sidecar volumeMounts keys
+- Accept subPathExpr, mountPropagation and recursiveReadOnly in app.yaml init-container and sidecar volumeMounts
+- Read mount options on the main container for app.yaml volumes and volumeClaimTemplates
+- Read a null mount key beside devicePath as absent
+- Refuse an absolute or ".." subPath in app.yaml volumes, volumeClaimTemplates, initContainers and sidecars
+- Keep the subPath and subPathExpr exclusion message ahead of the subPath check
+- Accept projected, downwardAPI, csi, ephemeral and image volume sources in app.yaml controller components
+- Require a name on nested configMap and secret volume sources and a driver on csi in app.yaml
+- Add podMetadata to app.yaml workload components
+- Default an app.yaml request no higher than its authored limit
+- Accept an unlimited cpu or memory limit in app.yaml resources
+- Apply the volumeMount rules in pod, podtemplate, replicaset, replicationcontroller and manifests documents
+- Accept native sidecar init containers in app.yaml
+- Accept podMetadata on webservice and worker in app.yaml
+- Apply the volumeMount rules to passthrough and helmtemplate workload objects
+- Refuse an absolute or ".." subPath or subPathExpr in app.yaml volumeMounts of alertmanager, prometheus and thanosruler
+- Qualify the not carried refusal of thanos.volumeMounts as nonempty
+- Accept ports on a native sidecar init container in app.yaml
+- Refuse a lifecycle sleep longer than the pod grace period in app.yaml
+- Check job and cronjob main-container ports against native sidecar port names
+- Say that native sidecars and job and cronjob ports share the pod's port-name space
+- Refuse replicas beside a scaler in app.yaml and build the Deployment without it
+- Drop replicas beside the scaler in the parameter-syntax guide
+- Refuse lifecycle and probes on a regular init container in typed pod specs
+- Refuse a lifecycle sleep longer than the pod grace period in typed pod specs
+- Refuse lifecycle and probes on a regular init container built directly
+- Refuse a feature-gated property below the ClusterProfile's kubernetesVersion
+- Refuse a container name used twice in one pod of app.yaml
+- App.yaml topology-spread count follows scaler minReplicas
+
+### Documentation
+
+- Name how the workload endpoint selector value is derived
+- Note the coverage comment skips fork PRs
+- Name the definition step in the provenance detail table
+- Name the defined pointer type in the provenance limit paragraph
+- State that generated objects own their slices, maps and pointers
+- Describe how passthrough shapes numbers and refuses non-JSON values
+- Say the emitted object is the authored document in JSON types
+- Qualify where the nil-container rule applies
+- Scope the nesting limit and nil rule to the two decoded types
+- Qualify three comments in the typed strategic merge
+- Correct the replicas migration note for a scaler
+
+### Fixed
+
+- Copy typed leaves in provenance snapshots and tighten its tests
+- Copy collections holding nulls in provenance snapshots and pin owner identity in tests
+- Add default cases to the snapshot copy switches
+- Keep profile stamps through plain evaluation and typed-fill normalization
+- Keep typed-collection origins and bound the leaf walk on cyclic values
+- Key the cycle guards by address and length
+- Keep the origin of a typed collection nested in a partly normalized one
+- Keep the origin of an unchanged NaN in the provenance report
+- Compare provenance values in one canonical form
+- Keep the capability of a re-shaped value and match NaN map keys
+- Keep a failed NaN-key candidate out of the visited set
+- See in-place changes through pointers and struct fields in the provenance report
+- Report routes to another Service of the routing component
+- Keep a route to another Service of its component unchecked
+- Own a self-named route by the component that declares its Service
+- Keep a defined pointer type in the provenance snapshot
+- Attribute a routing trait's own-Service ports to the Service's owner
+- Copy config slices, maps and pointers into generated objects
+- Copy the ingress annotations when no platform annotations apply
+- Copy the external-secret template data and find tags
+- Give each container and the pod its own security context
+- Emit JSON-typed values so the object can be deep-copied
+- Name the kinds that never serialize and json.Number in the shape comment
+- Refuse a key given twice in an authored JSON value
+- Correct the repeated-key docs and pin two walker cases
+- Give the typed strategic merge result JSON types
+- Read numbers as text in the repeated-key check
+- Keep the digits of a decimal a float64 would round
+- Give an authored json.Number the type its text has
+- Refuse a passthrough value that cannot be written as JSON
+- Read an empty json.Number as zero
+- Merge the security-context trait into authored security contexts
+- Refuse contradictions the security-context merge introduces
+- Keep exact digits and empty containers in typed strategic merge
+- Bound number literals and document the nil rule and repeated-key path
+- Read a nil map in a JSON merge patch as an empty one
+- Relax the PSA check for a pod with hostUsers false
+- Check a Windows pod against every PSA control it is not exempt from
+- Allow the runAsNonRoot property at restricted when the pod has hostUsers false
+- Read nil containers in the resource as empty on the JSON merge fallback
+- Return the number types of a known kind from the JSON merge fallback
+- Omit a scaled Deployment's replicas in the kind, in either trait order
+- Skip the unused replica default and ceiling for a scaled Deployment
+- Treat copied entries of different origin as different sources
+- Spread topology by a scaler's minReplicas
+- Hold the monitoring version gates to prometheus-operator v0.95.0
+
+### Testing
+
+- Give each readiness stub its own copy of the expected slice
+- Pin the fork guard on the coverage comment step
+- Load the CRD harness inputs once per test binary
+- Skip the allocation count under the race detector
+- Cover the number text length and exponent bounds
+- Compare the resource to an independent copy after a fallback error
+- Prove that lowering is a pure function of its inputs
+- Identify types by identity in the purity comparator
+- Name purity map keys by value and report unnameable ones as incomplete
+- Report a lowering rule that changes its inputs
+- Hand the purity fixtures a copy of the component, as the engine does
+- Give the component fixtures their own trait slice, as the engine does
+- Deep-copy the capability rendering in the trait fixture, as the engine does
+- Report purity fixture drift on the subtest's own t
+- Pin the scaled Deployment's explicit replicas against the policy ceiling
+- Pin the policy request cap for a scaled Deployment
+- Run the scaled trait-order cases for webservice and worker too
+- Build the bare-Pod grace-period manifests fixture with one containers key
+- Fix a repeated word in a spread test helper comment
+- Classify the seven fields the new pins add and no kind publishes
+- Answer the selector, credential and rule checks for the new pins
+- List the keys the new pins make required and refuse their omission
+
 ## [0.2.0-beta.3] - 2026-10-30
 
 ### Added
