@@ -107,7 +107,7 @@ func TestSiblingGroup_AuthoredDuplicateStillRefused(t *testing.T) {
 		Component{Name: "web", Type: "a", Properties: map[string]any{}},
 		Component{Name: "web", Type: "b", Properties: map[string]any{}},
 	)
-	err := validateWithExtraTypes(doc, nil, map[string]bool{"a": true, "b": true}, LowerableTypes{})
+	err := validateWithExtraTypes(doc, nil, map[string]bool{"a": true, "b": true}, nil, LowerableTypes{})
 	if err == nil || !strings.Contains(err.Error(), `duplicate component name "web"`) {
 		t.Fatalf("authored duplicate: err = %v, want a duplicate component name refusal", err)
 	}

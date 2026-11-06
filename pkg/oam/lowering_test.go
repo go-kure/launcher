@@ -1384,6 +1384,7 @@ func (r forwardingPoliciesDocRule) LowerDocument(doc *Application, lctx Lowering
 func TestLower_DocumentRule_ForwardedPolicy_KeepsEmptyRule(t *testing.T) {
 	tr := NewTransformer(nil, nil)
 	tr.RegisterDocumentLowering(forwardingPoliciesDocRule{kind: "Wrapper"})
+	tr.RegisterPolicy("widget-policy", &stubPolicyHandler{typ: "widget-policy"})
 
 	app := &Application{
 		APIVersion: SupportedAPIVersion,
@@ -1989,6 +1990,7 @@ func TestLower_PolicyRule_SeesPreRoundComponentSnapshot(t *testing.T) {
 	tr := NewTransformer(nil, nil)
 	tr.RegisterComponentLowering(addsSiblingComponentRule{})
 	tr.RegisterPolicyLowering(policySnapshotRule{seen: &seen})
+	tr.RegisterPolicy("noop-settled", &stubPolicyHandler{typ: "noop-settled"})
 
 	app := &Application{
 		APIVersion: SupportedAPIVersion,

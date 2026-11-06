@@ -2061,7 +2061,7 @@ checked as any pod template is: `ReservedMetadataKeys` and the component label.
 | `ParseClusterProfile` | Parse a `ClusterProfile`. `spec.kubernetesVersion`, when set, must be `1.N`, `v1.N` or `v1.N.P`; see `ValidateAuthoredPropertiesForTarget`. |
 | `LoadCapabilityDefinitions` | Load `CapabilityDefinition`s for capability validation. |
 | `ParseWithExtraTraitTypes` | Parse allowing additional (custom) trait types. |
-| `ParseWithExtraTypes` | Parse allowing custom trait types **and** a `LowerableTypes` set — the document kinds, component types and trait types claimed by a transformer's registered lowering rules. |
+| `ParseWithExtraTypes` | Parse allowing custom trait types **and** a `LowerableTypes` set — the document kinds, component types, trait types and policy types claimed by a transformer's registered lowering rules, and the policy types it has a handler for. |
 
 Standalone parsing validates each trait's `type` against this package's own allowlist
 of built-in trait types (the `security-context`, `topology-spread`, `force-replace` and
@@ -2074,6 +2074,21 @@ transform that will lower them away. The widening is additive and per position: 
 empty `LowerableTypes` is exactly the strict behaviour, a name claimed for one position
 never admits it at another, and decoding stays strict (`KnownFields(true)`), so a kind
 carrying its own authored fields still belongs to the raw lowering entry point.
+
+A policy `type` is checked the same way. Standalone parsing accepts `dependency` and
+`placement` (the built-in handlers) and `app-dependency`, `health-checks` and
+`reconciliation`, the delivery types that launcher has no handler for and that a
+consumer's own handler answers; any other policy type is refused, with the supported
+types listed. The last three stay accepted so that a document naming one reaches the
+`no handler for policy type` refusal at build, which says why, and not a parse error.
+A policy type of a consumer's own handler parses when the caller passes it as
+`LowerableTypes.PolicyTypes`, or passes `Transformer.LowerableTypes()` of a transformer
+that registered the handler with `RegisterPolicy`. The check after lowering reads the
+registered handlers the same way. An authored identity (`name@version`) is checked as
+the plain type it resolves to. A `name@version` that no declaration resolves is refused,
+unless the caller claimed that literal text (in `LowerableTypes.PolicyTypes`, or as the
+name of a handler it registered): where no policy identity is declared, a literal name is
+kept as written.
 
 **Every namespace is a DNS-1123 label** (at most 63 characters, no dots), the rule the
 apiserver applies. Parsing refuses any other `metadata.namespace`, `LowerRaws` refuses it

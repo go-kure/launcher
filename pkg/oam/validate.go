@@ -174,6 +174,25 @@ var validTraitTypes = map[string]bool{
 	"disruption":           true,
 }
 
+// validPolicyTypes is the set of policy types a document may name without any caller
+// widening it: the built-in handlers' types (dependency, placement) and the delivery
+// types (deliveryPolicyTypes, transform.go).
+//
+// health-checks and reconciliation stay admitted although launcher has no handler for
+// them, as app-dependency does: a consumer that delivers through Flux registers its
+// own, and without one the build refuses the policy with a "no handler for policy
+// type" error that says so. Refusing them at parse would replace that message.
+//
+// pkg/oam cannot import the registry, so the built-in half is a copy; a test in
+// pkg/cmd/kurel holds every registered policy handler's type to this set.
+var validPolicyTypes = map[string]bool{
+	"app-dependency": true,
+	"dependency":     true,
+	"health-checks":  true,
+	"placement":      true,
+	"reconciliation": true,
+}
+
 // traitComponentRestrictions maps trait types to the component types they support.
 // Traits not listed here are allowed on any component type.
 var traitComponentRestrictions = map[string]map[string]bool{
@@ -183,13 +202,13 @@ var traitComponentRestrictions = map[string]map[string]bool{
 
 // validate performs semantic validation on a parsed Application.
 func validate(app *Application) error {
-	return validateWithExtraTypes(app, nil, nil, LowerableTypes{})
+	return validateWithExtraTypes(app, nil, nil, nil, LowerableTypes{})
 }
 
 // validateWithCustomTraits is like validate but also accepts custom trait type names
 // derived from CapabilityDefinition files supplied via --capability-def.
 func validateWithCustomTraits(app *Application, customTraitTypes map[string]bool) error {
-	return validateWithExtraTypes(app, customTraitTypes, nil, LowerableTypes{})
+	return validateWithExtraTypes(app, customTraitTypes, nil, nil, LowerableTypes{})
 }
 
 // validateWithExtraTypes is validateWithCustomTraits widened with a LowerableTypes
@@ -205,9 +224,9 @@ func validateWithCustomTraits(app *Application, customTraitTypes map[string]bool
 // at-least-one-component requirement) still applies to a document whose kind or types
 // are admitted this way.
 //
-// lowerable.PolicyTypes is deliberately not consulted here: policy types carry no
-// allowlist at all (see validateApplicationPolicy), so there is nothing to widen.
-// It exists on LowerableTypes for callers that inspect a Transformer's claims.
+// A policy type is checked against validPolicyTypes the same way, widened by
+// lowerable.PolicyTypes and customPolicyTypes. Both are accepted in the same
+// position and nothing else: a policy type never admits a component or trait type.
 //
 // customComponentTypes is a SEPARATE type-acceptance channel from
 // lowerable.ComponentTypes: it widens which component type names are accepted, exactly
@@ -218,7 +237,13 @@ func validateWithCustomTraits(app *Application, customTraitTypes map[string]bool
 // incorrectly skip that restriction recheck for a component that is done lowering;
 // customComponentTypes exists so a caller can accept such a type without also
 // suppressing the recheck.
-func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, customComponentTypes map[string]bool, lowerable LowerableTypes) error {
+//
+// customPolicyTypes is the policy counterpart: the policy types a registered handler
+// answers for (validateSettled's t.policyHandlers). A policy type has no
+// trait/component restriction to defer, so it is one set with lowerable.PolicyTypes
+// in effect; it stays a separate argument so the settled-document check, which passes
+// an empty LowerableTypes, can still accept a handler-backed type.
+func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, customComponentTypes map[string]bool, customPolicyTypes map[string]bool, lowerable LowerableTypes) error {
 	if app.APIVersion != SupportedAPIVersion {
 		return oamValidationError("apiVersion", fmt.Sprintf("unsupported apiVersion %q, expected %q",
 			app.APIVersion, SupportedAPIVersion))
@@ -265,9 +290,10 @@ func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, 
 		}
 	}
 
+	allPolicyTypes := mergeTypeSets(customPolicyTypes, lowerable.PolicyTypes)
 	seenPolicyNames := make(map[string]bool)
 	for i, p := range app.Spec.Policies {
-		if err := validateApplicationPolicy(&p, i, seenPolicyNames); err != nil {
+		if err := validateApplicationPolicy(&p, i, seenPolicyNames, allPolicyTypes); err != nil {
 			return err
 		}
 	}
@@ -432,10 +458,11 @@ func validateScalerReplicas(t *Trait, componentName string, props map[string]any
 	return nil
 }
 
-// validateApplicationPolicy checks that an application policy entry has a non-empty name and type.
-// Policy types are open-ended in Phase 1 — no allowlist, no semantic interpretation
-// of policy properties. See design-kurel-package.md §4.4.
-func validateApplicationPolicy(p *ApplicationPolicy, index int, seenNames map[string]bool) error {
+// validateApplicationPolicy checks that an application policy entry has a valid name and
+// a known type: one of validPolicyTypes or one in extraTypes (a registered handler's, or
+// one a lowering rule claims). There is no semantic interpretation of policy
+// properties. See design-kurel-package.md §4.4.
+func validateApplicationPolicy(p *ApplicationPolicy, index int, seenNames map[string]bool, extraTypes map[string]bool) error {
 	if p.Name == "" {
 		return oamValidationError("name", fmt.Sprintf("spec.policies[%d].name is required", index))
 	}
@@ -451,6 +478,10 @@ func validateApplicationPolicy(p *ApplicationPolicy, index int, seenNames map[st
 
 	if p.Type == "" {
 		return oamValidationError("type", fmt.Sprintf("policy %q missing type", p.Name))
+	}
+
+	if !validPolicyTypes[p.Type] && !extraTypes[p.Type] {
+		return errors.NewValidationError("type", p.Type, p.Name, supportedPolicyTypes())
 	}
 
 	return nil
@@ -641,6 +672,15 @@ func packageValidationError(field, message string) *errors.ValidationError {
 func supportedComponentTypes() []string {
 	types := make([]string, 0, len(validComponentTypes))
 	for t := range validComponentTypes {
+		types = append(types, t)
+	}
+	slices.Sort(types)
+	return types
+}
+
+func supportedPolicyTypes() []string {
+	types := make([]string, 0, len(validPolicyTypes))
+	for t := range validPolicyTypes {
 		types = append(types, t)
 	}
 	slices.Sort(types)

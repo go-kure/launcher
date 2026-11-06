@@ -146,7 +146,8 @@ spec:
       enforced:
         maxReplicas: 5
 `
-	app, err := Parse([]byte(input))
+	// env-policy is a consumer's own policy type: the caller claims it.
+	app, err := ParseWithExtraTypes([]byte(input), nil, LowerableTypes{PolicyTypes: []string{"env-policy"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

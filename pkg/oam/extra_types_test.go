@@ -84,33 +84,6 @@ func TestParseWithExtraTypes_PositionIsolation(t *testing.T) {
 	}
 }
 
-// TestParseWithExtraTypes_PolicyTypeNeedsNoWidening documents why
-// validateWithExtraTypes never reads lowerable.PolicyTypes: policy types have no
-// allowlist to widen. An arbitrary policy type parses with an EMPTY LowerableTypes,
-// and naming it in PolicyTypes changes nothing.
-func TestParseWithExtraTypes_PolicyTypeNeedsNoWidening(t *testing.T) {
-	const doc = `apiVersion: launcher.gokure.dev/v1alpha1
-kind: Application
-metadata:
-  name: myapp
-spec:
-  components:
-    - name: web
-      type: webservice
-      properties:
-        image: nginx
-  policies:
-    - name: ordering
-      type: staged-rollout
-`
-	if _, err := ParseWithExtraTypes([]byte(doc), nil, LowerableTypes{}); err != nil {
-		t.Fatalf("expected an unclaimed policy type to parse (policy types are open-ended), got: %v", err)
-	}
-	if _, err := ParseWithExtraTypes([]byte(doc), nil, LowerableTypes{PolicyTypes: []string{"staged-rollout"}}); err != nil {
-		t.Fatalf("expected claiming the policy type to change nothing, got: %v", err)
-	}
-}
-
 // --- C4b: additive, not a replacement --------------------------------------
 
 // TestParseWithExtraTypes_CapabilityAndLoweringTraitTypesCombine proves the two trait
@@ -166,7 +139,7 @@ func TestParseWithExtraTypes_LeavesCallerTraitSetUnmodified(t *testing.T) {
 		},
 	}
 
-	if err := validateWithExtraTypes(app, base, nil, LowerableTypes{TraitTypes: []string{"expose-plus"}}); err != nil {
+	if err := validateWithExtraTypes(app, base, nil, nil, LowerableTypes{TraitTypes: []string{"expose-plus"}}); err != nil {
 		t.Fatalf("validateWithExtraTypes: %v", err)
 	}
 	if len(base) != 1 || !base["site-mesh"] {
