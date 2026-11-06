@@ -512,10 +512,11 @@ func TestLookupsAgreeWithTransform(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// The rule-backed family: the same names, a rule each.
-	rules := NewTransformer(nil, nil)
+	// The rule-backed family: the same names, a rule each. A rule lowers its component
+	// into the terminal `sink`, so Transform runs the rule and then a handler.
+	rules := NewTransformer(map[string]ComponentHandler{"sink": newHandler("sink")}, nil)
 	for _, k := range []string{"widget", "widget-v2", "plain", "lit@v1"} {
-		rules.RegisterComponentLowering(stubEndpointRule{typeName: k, eps: []netpol.Endpoint{validEndpoint()}})
+		rules.RegisterComponentLowering(sinkEndpointRule{typeName: k, eps: []netpol.Endpoint{validEndpoint()}})
 	}
 	if err := rules.DeclareComponentTypes(map[string]TypeID{
 		"widget":    mustID(t, "widget.acme.example@v1"),
@@ -562,6 +563,18 @@ func TestLookupsAgreeWithTransform(t *testing.T) {
 			eps, err := rules.ComponentEndpoints(&Component{Name: "x", Type: ref})
 			if err != nil || (len(eps) == 1) != ok {
 				t.Errorf("ComponentEndpoints(%q) = %v, %v; want an answer = %v", ref, eps, err, ok)
+			}
+			eps, err = rules.ComponentEndpointsNamed("app", &Component{Name: "x", Type: ref}, nil)
+			if err != nil || (len(eps) == 1) != ok {
+				t.Errorf("ComponentEndpointsNamed(%q) = %v, %v; want an answer = %v", ref, eps, err, ok)
+			}
+			if ref == "" {
+				return
+			}
+			app := makeApp("myapp", makeComponent("w", ref))
+			app.APIVersion, app.Kind = SupportedAPIVersion, "Application"
+			if _, terr := rules.Transform(app, TransformContext{}); (terr == nil) != ok {
+				t.Errorf("Transform(%q) error = %v, want success = %v", ref, terr, ok)
 			}
 		})
 		if ref == "" {
