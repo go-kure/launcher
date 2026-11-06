@@ -1146,6 +1146,19 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 		}
 		component = named
+		// A handler that declares outputs is held to them here, where the name the
+		// transform gave its object is known (go-kure/launcher#1259). The query
+		// runs on a copy and its own allocator, as ComponentOutputsNamed does.
+		if p, ok := handler.(OutputProvider); ok {
+			probe := component
+			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming)
+			if err == nil {
+				err = checkHandlerOutputs(&component, decls, outs)
+			}
+			if err != nil {
+				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
+			}
+		}
 		// The same for the object's labels and annotations (go-kure/launcher#790).
 		labelled, err := withObjectMetadata(component, handler, ctx.componentLabelKey())
 		if err != nil {

@@ -243,6 +243,20 @@ func (l LoweringContext) lowerName(base, suffix string, spec NameSpec, documentO
 	return l.lowerDefault(def, spec, documentOwned)
 }
 
+// documentName is the name of the document the context lowers, as the Naming
+// hook is asked it (NameRequest.Application): the one a query was made under,
+// else the document's own, else the one the origin names.
+func (l LoweringContext) documentName() string {
+	application := l.application
+	if application == "" {
+		application = l.Origin.Document
+		if l.Document != nil {
+			application = l.Document.Metadata.Name
+		}
+	}
+	return application
+}
+
 // lowerDefault resolves spec with def as its default and returns the name with
 // what the transform needs to claim it: lowerName past the building of the
 // default, and the whole of it for a name whose default is not built from a
@@ -254,13 +268,7 @@ func (l LoweringContext) lowerDefault(def string, spec NameSpec, documentOwned b
 	fluxScoped := spec.FluxScoped
 	spec.Default, spec.Namespace, spec.FluxScoped = def, "", false
 
-	application := l.application
-	if application == "" {
-		application = l.Origin.Document
-		if l.Document != nil {
-			application = l.Document.Metadata.Name
-		}
-	}
+	application := l.documentName()
 	// lowered: never the owner of a name resolved after lowering, whatever else
 	// the two share.
 	owner := nameOwner{role: spec.Role, def: def, lowered: true}

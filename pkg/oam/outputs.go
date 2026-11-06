@@ -105,19 +105,82 @@ func (t *Transformer) componentOutputs(comp *Component, application string, nami
 	if !ok {
 		return nil, nil
 	}
-	// A fresh allocator per call: what a name is resolved to is asked here,
-	// nothing is claimed.
+	_, outs, err := outputsOf(p, comp, application, naming)
+	return outs, err
+}
+
+// outputsOf asks p for comp's outputs on a fresh allocator: what a name is
+// resolved to is asked here, nothing is claimed. It returns the declarations
+// as the provider wrote them and the answers they resolve to.
+func outputsOf(p OutputProvider, comp *Component, application string, naming func(NameRequest) (string, bool)) ([]OutputDecl, []Output, error) {
 	namer := NewNameAllocator()
 	namer.hook = naming
 	decls, err := p.Outputs(comp, LoweringContext{Component: comp, Namer: namer, application: application})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	outs, err := resolveOutputs(decls)
 	if err != nil {
-		return nil, errors.Wrapf(err, "component %q", comp.Name)
+		return nil, nil, errors.Wrapf(err, "component %q", comp.Name)
 	}
-	return outs, nil
+	return decls, outs, nil
+}
+
+// checkRuleOutputs holds the outputs a lowering rule declared for component
+// against the names the rule resolved when it lowered it (claims, the lowered
+// names that call added to its allocator). Each allocated output must find
+// exactly one claim of its component, role, kind and default, made by a
+// lowering rule, and that claim must carry the declared name. Kind tells
+// apart two names a rule resolves under one role and default (a ConfigMap and
+// a Secret answered differently by the hook). A derived output claims nothing:
+// it is the derivation of its parent, which was held.
+func checkRuleOutputs(component string, decls []OutputDecl, outs []Output, claims []loweredName) error {
+	for _, d := range decls {
+		if d.From != "" || d.Derive != nil {
+			continue
+		}
+		var matched []loweredName
+		for _, c := range claims {
+			o := c.claim.owner
+			if o.lowered && o.component == component && o.role == d.Role && o.def == d.Default &&
+				c.group == d.Kind.Group && c.kind == d.Kind.Kind {
+				matched = append(matched, c)
+			}
+		}
+		switch {
+		case len(matched) == 0:
+			return errors.Errorf("output %q of component %q declares the %s name %q, but the lowering resolved none for role %q and default %q",
+				d.Key, component, d.Kind, d.Name, d.Role, d.Default)
+		case len(matched) > 1:
+			return errors.Errorf("output %q of component %q declares the %s name %q, but the lowering resolved %d names for role %q and default %q, so the output names no one of them",
+				d.Key, component, d.Kind, d.Name, len(matched), d.Role, d.Default)
+		case matched[0].name != d.Name:
+			return errors.Errorf("output %q of component %q declares the %s name %q, but the lowering named the object %q",
+				d.Key, component, d.Kind, d.Name, matched[0].name)
+		}
+	}
+	return nil
+}
+
+// checkHandlerOutputs holds the outputs a handler declared for comp against
+// the object name the transform resolved for comp (Component.ObjectName). A
+// handler's object is the one the engine names after the component, so only
+// the role object can be held.
+func checkHandlerOutputs(comp *Component, decls []OutputDecl, outs []Output) error {
+	for _, d := range decls {
+		if d.From != "" || d.Derive != nil {
+			continue
+		}
+		if d.Role != NameRoleObject {
+			return errors.Errorf("output %q of component %q is declared under role %q: a handler declares the one object it names after the component, role %q",
+				d.Key, comp.Name, d.Role, NameRoleObject)
+		}
+		if d.Name != comp.ObjectName() {
+			return errors.Errorf("output %q of component %q declares the %s name %q, but the transform named the object %q",
+				d.Key, comp.Name, d.Kind, d.Name, comp.ObjectName())
+		}
+	}
+	return nil
 }
 
 // resolveOutputs checks decls and answers them: every key is one identifier and
