@@ -2303,9 +2303,15 @@ rule, an identity is invalid, or two conflict (rules 1 to 4).
 | `Transformer.ResolveTypes(app)` | The application with every component, trait and policy type rewritten to its plain registered name, as a copy; `Transform` runs it first. |
 | `ParseWithExtraTypes(..., t.LowerableTypes())` | Validates an authored identity as the type it resolves to; the parsed `Type` keeps the authored text. |
 
-A plain name nobody declared an identity for behaves as before. A reference with a version that does
-not resolve is refused in the resolver's words, naming the versions that exist, before any handler
-runs. `Parse` and `ParseWithExtraTraitTypes` know no identity: use `ParseWithExtraTypes` with the
+A plain name that no declared identity names, or that is not a valid identity at all (a custom trait
+such as `custom_metrics`), behaves as before: it passes through to the allowlist or the "no handler"
+refusal. A name that a declared identity claims resolves first, so a short name that more than one
+type or version claims is refused as ambiguous even when a handler is registered under that plain
+name. A reference with a version that does not resolve is refused in the resolver's words, naming
+the versions that exist, before any handler runs; `Transform` returns that refusal as a
+`ValidationError` (as `Parse` does) and `errors.Is` still matches `ErrTypeReferenceUnknown` and
+`ErrTypeReferenceAmbiguous`. `ResolveTypes` returns the plain registered names, so feeding its result
+back to `Transform` fails when such a name is itself ambiguous. `Parse` and `ParseWithExtraTraitTypes` know no identity: use `ParseWithExtraTypes` with the
 transformer's `LowerableTypes()`, as `kurel build` does.
 
 ## Transform & extension

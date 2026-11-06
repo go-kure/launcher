@@ -839,7 +839,7 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 	// dispatches on it. app is the caller's: resolveTypes copies what it rewrites.
 	resolved, resolveErr := t.resolveTypes(app)
 	if resolveErr != nil {
-		return nil, nil, resolveErr
+		return nil, nil, typeValidationError(resolveErr)
 	}
 	app = resolved
 	if ctx.Policy == nil {
