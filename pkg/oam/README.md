@@ -2281,7 +2281,9 @@ result records the exact version it resolved to, only when all of these hold:
 2. No short name may equal another type's qualified name. Registration refuses it.
 3. A short name may carry a version: `webapp@v1.1`.
 4. An omitted version resolves only when exactly one version of the type is registered.
-   Otherwise the reference is refused and names the versions that exist.
+   Otherwise the reference is refused and names the versions that exist, in version order:
+   by major, then alpha before beta before GA, then the number after the stage, so `v1alpha1`,
+   `v1beta1`, `v1`, `v2beta1`, `v2`, `v10`. `TypeRegistry.IDs` lists a name's versions in the same order.
 
 Every short name in the type allowlists above stays valid: it is the unique alias of the built-in
 that registered it.
