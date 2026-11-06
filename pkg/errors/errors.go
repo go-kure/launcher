@@ -15,7 +15,11 @@ type ValidationError struct {
 	Value       string   // the rejected value (enum errors)
 	ValidValues []string // valid options (enum errors)
 	Message     string   // custom message (non-enum errors)
+	Cause       error    // the error this one reports, when a caller matches it with errors.Is
 }
+
+// Unwrap returns Cause, so errors.Is and errors.As see through the validation error.
+func (e *ValidationError) Unwrap() error { return e.Cause }
 
 func (e *ValidationError) Error() string {
 	if e.Message != "" {

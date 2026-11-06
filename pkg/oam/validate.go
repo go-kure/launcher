@@ -250,7 +250,7 @@ func validateWithExtraTypes(app *Application, customTraitTypes map[string]bool, 
 	// itself is never changed, the Transformer resolves it again on entry.
 	app, err := lowerable.identities.resolve(app)
 	if err != nil {
-		return oamValidationError("type", err.Error())
+		return typeValidationError(err)
 	}
 
 	lowerableComponentTypes := toTypeSet(lowerable.ComponentTypes)
@@ -610,6 +610,14 @@ func oamValidationError(field, message string) *errors.ValidationError {
 		Component: "application",
 		Message:   message,
 	}
+}
+
+// typeValidationError reports a type reference that did not resolve, keeping the
+// resolver's error as the Cause so errors.Is(err, ErrTypeReferenceUnknown) holds.
+func typeValidationError(cause error) *errors.ValidationError {
+	ve := oamValidationError("type", cause.Error())
+	ve.Cause = cause
+	return ve
 }
 
 func profileValidationError(field, message string) *errors.ValidationError {
