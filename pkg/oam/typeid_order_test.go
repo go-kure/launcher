@@ -10,8 +10,8 @@ import (
 // < GA, then the number after the stage (alpha and beta) or minor and patch
 // (GA). These tests pin the order as a strict weak ordering, so a sort of the
 // distinct versions of one type gives one result whatever order they arrive in.
-// Register refuses two spellings of one version (v2, v2.0.0), and a sort keeps
-// such spellings, which neither is less than the other, in their input order.
+// Register refuses two spellings of one version (v2, v2.0.0), and neither is
+// less than the other.
 
 // mixedVersions is the issue's set, in the order the comparator must give.
 var mixedVersions = []string{"v1alpha1", "v1beta1", "v1", "v2beta1", "v2", "v10beta1", "v10"}
