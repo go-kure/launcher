@@ -155,48 +155,16 @@ func roleClaims(comp *oam.Component, depProps map[string]any, lctx oam.LoweringC
 	platformRead := false
 	rewritten := make([]any, len(vols))
 	// The claims are the component's own, whatever context the rule was handed.
-	lctx.Component = comp
-	if lctx.Namer == nil {
-		// A webservice or worker rule driven directly, outside the engine, keeps
-		// working as before, as nameRoleMember does: no Naming hook is asked, the
-		// name is the author's or the default, and no transform follows to claim
-		// it. An allocator of this call's own only holds its volumes' claims
-		// apart.
-		lctx.Namer = oam.NewNameAllocator()
-	}
+	lctx = claimNamingContext(comp, lctx)
 	for i, v := range vols {
 		rewritten[i] = v
-		m, ok := nullElem(v).(map[string]any)
-		if !ok || m["type"] != "pvc" {
+		m, volName, generates := generatedClaimVolume(v)
+		if !generates {
 			continue
 		}
-		if _, ref := authoredValue(m, "claimName"); ref {
-			continue
-		}
-		volName, _ := m["name"].(string)
-		spec := oam.NameSpec{Role: oam.NameRoleWorkloadVolumeClaim, Kind: coreKind("PersistentVolumeClaim")}
-		property := fmt.Sprintf("volumes[%d].%s", i, claimObjectNameProperty)
-		authored, named, err := parseRawStringField(m, claimObjectNameProperty, property)
+		claim, _, err := roleClaimName(comp, lctx, i, m, volName)
 		if err != nil {
 			return nil, err
-		}
-		if named {
-			spec.Property, spec.Authored = property, authored
-		}
-		// Kubernetes PersistentVolumeClaim names must be DNS-1123 subdomains.
-		// The characters of the default are checked on the name as built, before
-		// shortening can replace an invalid one by the digest; only the length
-		// may be over. An authored name stands in for a default that cannot be
-		// built (LoweringContext.ResolveName).
-		claimBase, claimSuffix := escapeForPVCQualification(comp.Name), escapeForPVCQualification(volName)
-		if errs := oam.SubdomainSyntaxErrors(claimBase + "-" + claimSuffix); len(errs) > 0 && !named {
-			return nil, errors.Errorf("PVC name %q is not a valid DNS-1123 subdomain: %s", claimBase+"-"+claimSuffix, strings.Join(errs, "; "))
-		}
-		// A default over 253 characters is shortened by the one rule: the
-		// escaped component is cut, the escaped volume kept whole.
-		claim, err := lctx.ResolveName(claimBase, claimSuffix, spec)
-		if err != nil {
-			return nil, errors.Wrapf(err, "volume %q: naming the PersistentVolumeClaim", volName)
 		}
 		props := map[string]any{"name": claim, "size": m["size"]}
 		if !platformRead {
@@ -230,6 +198,103 @@ func roleClaims(comp *oam.Component, depProps map[string]any, lctx oam.LoweringC
 		depProps["volumes"] = rewritten
 	}
 	return traits, nil
+}
+
+// claimNamingContext is lctx as the claims of comp are named under: the
+// component's own, whatever context the rule was handed, and with a Namer.
+func claimNamingContext(comp *oam.Component, lctx oam.LoweringContext) oam.LoweringContext {
+	lctx.Component = comp
+	if lctx.Namer == nil {
+		// A webservice or worker rule driven directly, outside the engine, keeps
+		// working as before, as nameRoleMember does: no Naming hook is asked, the
+		// name is the author's or the default, and no transform follows to claim
+		// it. An allocator of this call's own only holds its volumes' claims
+		// apart.
+		lctx.Namer = oam.NewNameAllocator()
+	}
+	return lctx
+}
+
+// generatedClaimVolume reports whether volume v of a role component's `volumes`
+// generates a claim, a `pvc` volume that references none by claimName, and
+// returns it as a map with its name.
+func generatedClaimVolume(v any) (m map[string]any, name string, generates bool) {
+	m, ok := nullElem(v).(map[string]any)
+	if !ok || m["type"] != "pvc" {
+		return nil, "", false
+	}
+	if _, ref := authoredValue(m, "claimName"); ref {
+		return nil, "", false
+	}
+	name, _ = m["name"].(string)
+	return m, name, true
+}
+
+// roleClaimName resolves the name of the claim volume i of comp generates (m,
+// named volName; lctx from claimNamingContext) and returns it with the default
+// it was resolved against. It reads no capability: roleClaims and the outputs
+// query (roleClaimOutputs) name a claim here, by one code path.
+func roleClaimName(comp *oam.Component, lctx oam.LoweringContext, i int, m map[string]any, volName string) (name, def string, err error) {
+	spec := oam.NameSpec{Role: oam.NameRoleWorkloadVolumeClaim, Kind: coreKind("PersistentVolumeClaim")}
+	property := fmt.Sprintf("volumes[%d].%s", i, claimObjectNameProperty)
+	authored, named, err := parseRawStringField(m, claimObjectNameProperty, property)
+	if err != nil {
+		return "", "", err
+	}
+	if named {
+		spec.Property, spec.Authored = property, authored
+	}
+	// Kubernetes PersistentVolumeClaim names must be DNS-1123 subdomains.
+	// The characters of the default are checked on the name as built, before
+	// shortening can replace an invalid one by the digest; only the length
+	// may be over. An authored name stands in for a default that cannot be
+	// built (LoweringContext.ResolveName).
+	claimBase, claimSuffix := escapeForPVCQualification(comp.Name), escapeForPVCQualification(volName)
+	if errs := oam.SubdomainSyntaxErrors(claimBase + "-" + claimSuffix); len(errs) > 0 && !named {
+		return "", "", errors.Errorf("PVC name %q is not a valid DNS-1123 subdomain: %s", claimBase+"-"+claimSuffix, strings.Join(errs, "; "))
+	}
+	// A default over 253 characters is shortened by the one rule: the
+	// escaped component is cut, the escaped volume kept whole.
+	name, err = lctx.ResolveName(claimBase, claimSuffix, spec)
+	if err != nil {
+		return "", "", errors.Wrapf(err, "volume %q: naming the PersistentVolumeClaim", volName)
+	}
+	// The default the name was resolved against, as ResolveName builds it: an
+	// authored name stands in for one that cannot be built.
+	if def, err = oam.GeneratedName(claimBase, claimSuffix); err != nil {
+		def = claimBase + "-" + claimSuffix
+	}
+	return name, def, nil
+}
+
+// roleClaimOutputs declares, for the volumes in props, one output per claim the
+// component generates, in volume order, under the key "claim_<volume>" (a
+// volume name is a DNS label; its hyphens become underscores, so the key stays
+// one identifier). It names each claim as roleClaims does and reads no
+// capability.
+func roleClaimOutputs(comp *oam.Component, props map[string]any, lctx oam.LoweringContext) ([]oam.OutputDecl, error) {
+	vols, ok := props["volumes"].([]any)
+	if !ok {
+		return nil, nil
+	}
+	lctx = claimNamingContext(comp, lctx)
+	var decls []oam.OutputDecl
+	for i, v := range vols {
+		m, volName, generates := generatedClaimVolume(v)
+		if !generates {
+			continue
+		}
+		name, def, err := roleClaimName(comp, lctx, i, m, volName)
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, oam.OutputDecl{
+			Key:  outputKeyClaimPrefix + strings.ReplaceAll(volName, "-", "_"),
+			Role: oam.NameRoleWorkloadVolumeClaim, Kind: coreKind("PersistentVolumeClaim"),
+			Default: def, Name: name,
+		})
+	}
+	return decls, nil
 }
 
 // capabilityStorageClass returns the storageClassName the ClusterProfile `pvc`
