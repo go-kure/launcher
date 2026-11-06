@@ -1456,7 +1456,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			var declared []OutputDecl
 			var answered []Output
 			if p, ok := rule.(OutputProvider); ok && namer != nil {
-				probe := comp
+				probe := probeCopy(comp)
 				var err error
 				if declared, answered, err = outputsOf(p, &probe, lctx.documentName(), namer.hook); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)

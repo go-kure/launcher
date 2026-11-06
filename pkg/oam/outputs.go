@@ -1,6 +1,8 @@
 package oam
 
 import (
+	"maps"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -119,11 +121,60 @@ func outputsOf(p OutputProvider, comp *Component, application string, naming fun
 	if err != nil {
 		return nil, nil, err
 	}
+	// The provider may keep the slice it returned; the check holds the
+	// declarations as they were answered.
+	decls = slices.Clone(decls)
 	outs, err := resolveOutputs(decls)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "component %q", comp.Name)
 	}
 	return decls, outs, nil
+}
+
+// probeCopy returns a copy of comp a provider can be asked about without a
+// write reaching the component the build uses: the properties of the component
+// and of its traits, and its annotations, are copied down through their maps
+// and slices. Values of another type are shared.
+func probeCopy(comp Component) Component {
+	comp.Properties = copyProbeValue(comp.Properties).(map[string]any)
+	comp.Annotations = maps.Clone(comp.Annotations)
+	if comp.Traits != nil {
+		traits := make([]Trait, len(comp.Traits))
+		for i, t := range comp.Traits {
+			t.Properties = copyProbeValue(t.Properties).(map[string]any)
+			traits[i] = t
+		}
+		comp.Traits = traits
+	}
+	return comp
+}
+
+func copyProbeValue(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		if x == nil {
+			return x
+		}
+		c := make(map[string]any, len(x))
+		for k, e := range x {
+			c[k] = copyProbeValue(e)
+		}
+		return c
+	case []any:
+		if x == nil {
+			return x
+		}
+		c := make([]any, len(x))
+		for i, e := range x {
+			c[i] = copyProbeValue(e)
+		}
+		return c
+	case []string:
+		return slices.Clone(x)
+	case map[string]string:
+		return maps.Clone(x)
+	}
+	return v
 }
 
 // checkRuleOutputs holds the outputs a lowering rule declared for component
@@ -213,6 +264,9 @@ func resolveOutputs(decls []OutputDecl) ([]Output, error) {
 				return nil, errors.Errorf("output %q derives from %q and has no derivation", d.Key, d.From)
 			}
 			name = d.Derive(parent)
+			if strings.TrimSpace(name) == "" {
+				return nil, errors.Errorf("output %q derives from %q and the derivation gives it no name", d.Key, d.From)
+			}
 		case strings.TrimSpace(name) == "":
 			return nil, errors.Errorf("output %q has no name", d.Key)
 		}

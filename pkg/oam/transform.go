@@ -1150,7 +1150,7 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// transform gave its object is known (go-kure/launcher#1259). The query
 		// runs on a copy and its own allocator, as ComponentOutputsNamed does.
 		if p, ok := handler.(OutputProvider); ok {
-			probe := component
+			probe := probeCopy(component)
 			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming)
 			if err == nil {
 				err = checkHandlerOutputs(&component, decls, outs)
