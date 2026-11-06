@@ -623,6 +623,10 @@ func (c *PostgresqlConfig) clusterSpec() (cnpgv1.ClusterSpec, error) {
 		spec.Bootstrap = &cnpgv1.BootstrapConfiguration{
 			PgBaseBackup: &cnpgv1.BootstrapPgBaseBackup{Source: c.BootstrapPgBasebackupSource},
 		}
+	case c.BootstrapInitdbDatabase != "":
+		spec.Bootstrap = &cnpgv1.BootstrapConfiguration{
+			InitDB: &cnpgv1.BootstrapInitDB{Database: c.BootstrapInitdbDatabase, Owner: c.BootstrapInitdbOwner},
+		}
 	}
 
 	for _, ec := range c.ExternalClusters {

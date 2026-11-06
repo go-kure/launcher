@@ -11794,7 +11794,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   component's Cluster instead (`clusterObjectName`) creates a new Cluster and
   prunes the original with its data unless it is protected. It is not
   combined with
-  `bootstrap.pg_basebackup` (`recovery: not with bootstrap.pg_basebackup …`).
+  `bootstrap.pg_basebackup` (`recovery: not with bootstrap.pg_basebackup …`)
+  or `bootstrap.initdb` (`recovery: not with bootstrap.initdb …`).
   - `recovery.source` (required) is where the backups are read from:
     `serverName` (required, not empty), the folder the source cluster wrote
     within the store (its `backup.serverName`, else its Cluster's name), and
@@ -11855,6 +11856,23 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     component, the store waits for its Pooler, Databases and ScheduledBackups too
     (go-kure/launcher#1041). Where it does not, nothing is ordered, and the
     store is applied with the Cluster.
+  - **`bootstrap`** is declared key by key (go-kure/launcher#1269), and a key
+    under it that the component does not read is refused naming it
+    (`bootstrap: unrecognized key "…"`), where it used to be dropped. It reads
+    `initdb` and `pg_basebackup`, at most one of them and neither with
+    `recovery`, and refuses the former `bootstrap.recovery` with its
+    replacement. `bootstrap.initdb` creates the Cluster with an application
+    database and its owner in place of the operator's default, `app`: both
+    `database` and `owner` are required, not empty (the CloudNativePG webhook
+    refuses one without the other), and they are written to the Cluster's
+    `spec.bootstrap.initdb`. Any other CloudNativePG initdb key (`secret`,
+    `encoding`, `postInitSQL`, `import`, …) is refused
+    (`bootstrap.initdb: unrecognized key "…"`), never dropped; each can be
+    modelled later. The owner's connection Secret is the operator's, named
+    after the Cluster, and this component creates none. A bootstrap is read
+    only when the Cluster is created; set on a component whose Cluster exists
+    already, it changes nothing. `cnpg-cluster` takes the whole CloudNativePG
+    `bootstrap.initdb`, strictly decoded.
   **Behavior-changing**: the former `bootstrap.recovery` is refused, whatever
   its value (`bootstrap.recovery: moved to recovery (…)`), and so is an
   external cluster's in-tree `barmanObjectStore`
@@ -11893,7 +11911,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (`bootstrap.pg_basebackup.source: required (…)`, or `must not be empty
     (…)` for an authored `""`). `recovery`, which replaced
     `bootstrap.recovery`, is refused without its `source` likewise
-    (`recovery.source: required (…)`).
+    (`recovery.source: required (…)`). `bootstrap.initdb` is built from
+    `database` and `owner` together, so the block without either is refused
+    by that field's name (`bootstrap.initdb.owner: required (…)`).
   - `replication.synchronous`: built from `method`, so the block without one
     is refused (`replication.synchronous.method: required (any or first)`),
     after a wrongly typed `number` or `dataDurability`, which is still

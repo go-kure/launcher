@@ -268,7 +268,7 @@ func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 		"monitoring":        openObj("Monitoring settings, including the PodMonitor toggle and custom queries."),
 		"pooler":            openObj("PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters, image). image is the PgBouncer image, by tag or digest; when omitted the operator chooses it, which a policy registry allowlist refuses."),
 		"poolerName":        {Type: oam.PropertyTypeString, Description: "Name of the generated Pooler, used as written (default: the component name followed by -pooler); a DNS-1123 label, since CloudNativePG names the Pooler's Service after it (one starting with a digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36). Only with pooler.enabled: true."},
-		"bootstrap":         openObj("Cluster bootstrap by pg_basebackup: pg_basebackup.source names the externalClusters entry the cluster is copied from. A recovery from an object store is recovery."),
+		"bootstrap":         schemaPostgresqlBootstrap(),
 		"recovery":          schemaPostgresqlRecovery(),
 		"replication":       openObj("Synchronous replication settings (method, number, dataDurability)."),
 		"postgresql":        openObj("PostgreSQL server settings, including the parameters map."),
@@ -519,6 +519,11 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 		if err := refusedProperty(bootstrap, postgresqlRecoveryRefusedKeys); err != nil {
 			return nil, err
 		}
+		// Every key under bootstrap is read or refused, never dropped
+		// (go-kure/launcher#1269).
+		if err := rejectUnknownKeys(bootstrap, postgresqlBootstrapKeys, "bootstrap"); err != nil {
+			return nil, err
+		}
 		pgbb, hasPgBasebackup, err := parseObjectField(bootstrap, "pg_basebackup", "bootstrap.pg_basebackup")
 		if err != nil {
 			return nil, err
@@ -528,12 +533,35 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 				return nil, err
 			}
 		}
+		initdb, hasInitdb, err := parseObjectField(bootstrap, "initdb", "bootstrap.initdb")
+		if err != nil {
+			return nil, err
+		}
+		if hasInitdb {
+			if err := rejectUnknownKeys(initdb, postgresqlInitdbKeys, "bootstrap.initdb"); err != nil {
+				return nil, err
+			}
+			if config.BootstrapInitdbDatabase, err = bootstrapInitdbName(initdb, "database", "the database the cluster is created with"); err != nil {
+				return nil, err
+			}
+			if config.BootstrapInitdbOwner, err = bootstrapInitdbName(initdb, "owner", "the role that owns it"); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if config.Recovery, err = parsePostgresqlRecovery(props); err != nil {
 		return nil, err
 	}
 	if config.Recovery != nil && config.BootstrapPgBasebackupSource != "" {
 		return nil, errors.New("recovery: not with bootstrap.pg_basebackup (each bootstraps the Cluster); remove one of them")
+	}
+	if config.BootstrapInitdbDatabase != "" {
+		if config.Recovery != nil {
+			return nil, errors.New("recovery: not with bootstrap.initdb (each bootstraps the Cluster); remove one of them")
+		}
+		if config.BootstrapPgBasebackupSource != "" {
+			return nil, errors.New("bootstrap.initdb: not with bootstrap.pg_basebackup (each bootstraps the Cluster); remove one of them")
+		}
 	}
 
 	ecList, _, err := parseObjectListField(props, "externalClusters", "externalClusters")
@@ -997,7 +1025,12 @@ type PostgresqlConfig struct {
 	Recovery *PostgresqlRecovery
 
 	BootstrapPgBasebackupSource string
-	ExternalClusters            []ExternalCluster
+	// BootstrapInitdbDatabase and BootstrapInitdbOwner are bootstrap.initdb's
+	// database and owner; both are set or both are empty, as CloudNativePG's
+	// webhook requires.
+	BootstrapInitdbDatabase string
+	BootstrapInitdbOwner    string
+	ExternalClusters        []ExternalCluster
 
 	SynchronousMethod         string
 	SynchronousNumber         int32
@@ -1040,6 +1073,62 @@ func bootstrapSource(block map[string]any, path, role string) (string, error) {
 		return "", errors.Errorf("%s: must not be empty (%s)", path, role)
 	}
 	return source, nil
+}
+
+// schemaPostgresqlBootstrap declares `bootstrap`, key by key
+// (go-kure/launcher#1269): initdb creates the Cluster with a named application
+// database and owner, pg_basebackup copies it from another cluster. A recovery
+// from an object store is `recovery`.
+func schemaPostgresqlBootstrap() oam.PropertySchema {
+	return oam.PropertySchema{
+		Type:        oam.PropertyTypeObject,
+		Description: "How the Cluster is created: initdb or pg_basebackup, at most one, and not with recovery. A bootstrap is read only when the Cluster is created; set on a component whose Cluster exists already, it changes nothing. A key not listed here is refused.",
+		Properties: map[string]oam.PropertySchema{
+			"initdb": {
+				Type:        oam.PropertyTypeObject,
+				Description: "Create the Cluster with an application database and its owner, in place of the operator's default, app. Both keys together; any other CloudNativePG initdb key is refused.",
+				Properties: map[string]oam.PropertySchema{
+					"database": {Type: oam.PropertyTypeString, Required: true, Description: "Required, not empty. The name of the application database."},
+					"owner":    {Type: oam.PropertyTypeString, Required: true, Description: "Required, not empty. The role that owns the application database."},
+				},
+			},
+			"pg_basebackup": {
+				Type:        oam.PropertyTypeObject,
+				Description: "Copy the Cluster from another cluster with pg_basebackup.",
+				Properties: map[string]oam.PropertySchema{
+					"source": {Type: oam.PropertyTypeString, Required: true, Description: "Required, not empty. The name of the externalClusters entry the cluster is copied from."},
+				},
+			},
+		},
+	}
+}
+
+// postgresqlBootstrapKeys are the keys the postgresql component reads under
+// bootstrap; `recovery` is refused with its replacement before this check.
+var postgresqlBootstrapKeys = []string{"initdb", "pg_basebackup"}
+
+// postgresqlInitdbKeys are the keys read under bootstrap.initdb. CloudNativePG's
+// BootstrapInitDB has many more (secret, encoding, postInitSQL, import, …); each
+// stays refused until it is modelled, never dropped.
+var postgresqlInitdbKeys = []string{"database", "owner"}
+
+// bootstrapInitdbName reads a required name of bootstrap.initdb. CloudNativePG's
+// webhook refuses one of database and owner without the other, and both fields
+// are omitted from the Cluster when empty, so an absent or empty one is refused
+// here naming it. what says what the name is.
+func bootstrapInitdbName(block map[string]any, key, what string) (string, error) {
+	path := "bootstrap.initdb." + key
+	v, present, err := parseRawStringField(block, key, path)
+	if err != nil {
+		return "", err
+	}
+	if !present {
+		return "", errors.Errorf("%s: required (%s)", path, what)
+	}
+	if v == "" {
+		return "", errors.Errorf("%s: must not be empty (%s)", path, what)
+	}
+	return v, nil
 }
 
 // postgresqlPoolerNotEnabled refuses a pooler setting authored beside an
