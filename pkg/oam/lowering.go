@@ -1448,9 +1448,32 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				compInput = ruleInputFor(comp.Properties, comp.origin, comp.ruleInput)
 			}
 			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, Origin: compOrigin, Namer: namer}
+			// What the rule declares as outputs is asked before it runs, on an
+			// allocator of its own and a copy of comp, so nothing the rule does to
+			// either moves the answer. It is held against the names the rule resolves,
+			// below (go-kure/launcher#1259).
+			compName := comp.Name
+			var declared []OutputDecl
+			var answered []Output
+			if p, ok := rule.(OutputProvider); ok && namer != nil {
+				probe := comp
+				var err error
+				if declared, answered, err = outputsOf(p, &probe, lctx.documentName(), namer.hook); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", compOrigin)
+				}
+			}
+			resolvedBefore := 0
+			if namer != nil {
+				resolvedBefore = len(namer.lowered)
+			}
 			result, err := rule.LowerComponent(&comp, lctx)
 			if err != nil {
 				return false, steps, errors.Wrapf(err, "%s", compOrigin)
+			}
+			if declared != nil {
+				if err := checkRuleOutputs(compName, declared, answered, namer.lowered[resolvedBefore:]); err != nil {
+					return false, steps, errors.Wrapf(err, "%s", compOrigin)
+				}
 			}
 			if err := validatePositionResult(PositionComponent, compOrigin, result); err != nil {
 				return false, steps, err
