@@ -40,13 +40,21 @@ func objectOutputs(comp *oam.Component, handler oam.ComponentObjectProvider) []o
 	return []oam.OutputDecl{{Key: outputKeyObject, Role: oam.NameRoleObject, Kind: kind, Default: comp.Name, Name: comp.ObjectName()}}
 }
 
-// Outputs implements oam.OutputProvider: the ConfigMap, under "object".
+// Outputs implements oam.OutputProvider: the ConfigMap, under "object". It
+// answers only for properties the component's own parse accepts.
 func (h *ConfigMapHandler) Outputs(comp *oam.Component, _ oam.LoweringContext) ([]oam.OutputDecl, error) {
+	if _, err := parseConfigMap(comp); err != nil {
+		return nil, err
+	}
 	return objectOutputs(comp, h), nil
 }
 
-// Outputs implements oam.OutputProvider: the Secret, under "object".
+// Outputs implements oam.OutputProvider: the Secret, under "object". It
+// answers only for properties the component's own parse accepts.
 func (h *SecretHandler) Outputs(comp *oam.Component, _ oam.LoweringContext) ([]oam.OutputDecl, error) {
+	if _, err := ParseSecretProperties(comp.Properties); err != nil {
+		return nil, err
+	}
 	return objectOutputs(comp, h), nil
 }
 
