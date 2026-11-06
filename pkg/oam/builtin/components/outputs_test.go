@@ -191,3 +191,138 @@ func TestBuiltinOutputs_BuildAgreesWithTheDeclaration(t *testing.T) {
 		})
 	}
 }
+
+// roleProps is a role component's properties: the image, and a data volume
+// that generates a claim beside a shared one that references an existing claim.
+func roleProps(extra map[string]any) map[string]any {
+	props := map[string]any{
+		"image": "nginx:1",
+		"volumes": []any{
+			map[string]any{"name": "data-1", "type": "pvc", "mountPath": "/data", "size": "1Gi"},
+			map[string]any{"name": "shared", "type": "pvc", "mountPath": "/shared", "claimName": "existing"},
+			map[string]any{"name": "tmp", "type": "emptyDir", "mountPath": "/tmp"},
+		},
+	}
+	for k, v := range extra {
+		props[k] = v
+	}
+	return props
+}
+
+// A webservice declares its Deployment, its Service, its ServiceAccount and the
+// claim each generating volume gets. A volume that references a claim, and one
+// that is no pvc, declare nothing.
+func TestBuiltinOutputs_WebserviceDeclaresItsObjects(t *testing.T) {
+	tr := outputsTransformer()
+	comp := &oam.Component{Name: "web", Type: "webservice", Properties: roleProps(nil)}
+
+	got, err := tr.ComponentOutputs(comp)
+	if err != nil {
+		t.Fatalf("ComponentOutputs: %v", err)
+	}
+	m := outputsByKey(t, got)
+	want := map[string]oam.Output{
+		"deployment":     {Key: "deployment", Kind: schema.GroupKind{Group: "apps", Kind: "Deployment"}, Name: "web"},
+		"service":        {Key: "service", Kind: schema.GroupKind{Kind: "Service"}, Name: "web"},
+		"serviceaccount": {Key: "serviceaccount", Kind: schema.GroupKind{Kind: "ServiceAccount"}, Name: "web"},
+		"claim_data_1":   {Key: "claim_data_1", Kind: schema.GroupKind{Kind: "PersistentVolumeClaim"}, Name: "web-data--1"},
+	}
+	if !reflect.DeepEqual(m, want) {
+		t.Errorf("outputs = %v\nwant     %v", m, want)
+	}
+}
+
+// The authored object names, the Naming hook and serviceAccountName each decide
+// the output as they decide the object.
+func TestBuiltinOutputs_WebserviceNamesFollowTheBuild(t *testing.T) {
+	tr := outputsTransformer()
+	comp := &oam.Component{Name: "web", Type: "webservice", Properties: roleProps(map[string]any{
+		"deploymentObjectName": "web-deploy",
+		"serviceObjectName":    "web-svc",
+		"serviceAccountName":   "existing-sa",
+		"volumes": []any{
+			map[string]any{"name": "data-1", "type": "pvc", "mountPath": "/data", "size": "1Gi", "claimObjectName": "web-data"},
+		},
+	})}
+	got, err := tr.ComponentOutputs(comp)
+	if err != nil {
+		t.Fatalf("ComponentOutputs: %v", err)
+	}
+	m := outputsByKey(t, got)
+	if m["deployment"].Name != "web-deploy" || m["service"].Name != "web-svc" || m["claim_data_1"].Name != "web-data" {
+		t.Errorf("authored names: %v", got)
+	}
+	if _, has := m["serviceaccount"]; has {
+		t.Errorf("serviceAccountName names an existing account, yet a serviceaccount output is declared: %v", got)
+	}
+
+	hooked := &oam.Component{Name: "web", Type: "webservice", Properties: roleProps(nil)}
+	got, err = tr.ComponentOutputsNamed("shop", hooked, func(r oam.NameRequest) (string, bool) { return "h-" + r.Default, true })
+	if err != nil {
+		t.Fatalf("ComponentOutputsNamed: %v", err)
+	}
+	m = outputsByKey(t, got)
+	if m["deployment"].Name != "h-web" || m["service"].Name != "h-web" || m["serviceaccount"].Name != "h-web" || m["claim_data_1"].Name != "h-web-data--1" {
+		t.Errorf("hooked names: %v", got)
+	}
+}
+
+// A worker is a webservice without the Service.
+func TestBuiltinOutputs_WorkerDeclaresNoService(t *testing.T) {
+	tr := outputsTransformer()
+	got, err := tr.ComponentOutputs(&oam.Component{Name: "jobs", Type: "worker", Properties: roleProps(nil)})
+	if err != nil {
+		t.Fatalf("ComponentOutputs: %v", err)
+	}
+	m := outputsByKey(t, got)
+	if _, has := m["service"]; has || len(m) != 3 {
+		t.Errorf("a worker declares %v, want deployment, serviceaccount and claim_data_1", got)
+	}
+	// The claim's default escapes the volume name's hyphen (escapeForPVCQualification).
+	if m["claim_data_1"].Name != "jobs-data--1" {
+		t.Errorf("claim_data_1 = %v, want jobs-data--1", m["claim_data_1"])
+	}
+}
+
+// Both refuse what the lowering refuses, and a serviceAccountObjectName beside
+// serviceAccountName is the same refusal.
+func TestBuiltinOutputs_RoleRulesRefuseWhatTheLoweringRefuses(t *testing.T) {
+	tr := outputsTransformer()
+	if _, err := tr.ComponentOutputs(&oam.Component{Name: "web", Type: "webservice", Properties: map[string]any{}}); err == nil || !strings.Contains(err.Error(), "image") {
+		t.Errorf("a webservice without an image: err = %v, want one naming image", err)
+	}
+	both := &oam.Component{Name: "web", Type: "webservice", Properties: roleProps(map[string]any{
+		"serviceAccountName": "sa", "serviceAccountObjectName": "other",
+	})}
+	if _, err := tr.ComponentOutputs(both); err == nil || !strings.Contains(err.Error(), "serviceAccountName") {
+		t.Errorf("serviceAccountName beside serviceAccountObjectName: err = %v, want the refusal", err)
+	}
+}
+
+// A build of a webservice and a worker under the hook, authored names and a
+// generated claim passes the check inside Transform.
+func TestBuiltinOutputs_RoleBuildAgreesWithTheDeclaration(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		typ    string
+		props  map[string]any
+		naming func(oam.NameRequest) (string, bool)
+	}{
+		{"webservice defaults", "webservice", roleProps(nil), nil},
+		{"webservice hooked", "webservice", roleProps(nil), func(r oam.NameRequest) (string, bool) { return "h-" + r.Default, true }},
+		{"webservice authored", "webservice", roleProps(map[string]any{"deploymentObjectName": "d", "serviceObjectName": "s", "serviceAccountObjectName": "a"}), nil},
+		{"worker defaults", "worker", roleProps(nil), nil},
+		{"worker hooked", "worker", roleProps(nil), func(r oam.NameRequest) (string, bool) { return "h-" + r.Default, true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app := &oam.Application{
+				APIVersion: oam.SupportedAPIVersion, Kind: "Application",
+				Metadata: oam.Metadata{Name: "shop", Namespace: "demo"},
+				Spec:     oam.ApplicationSpec{Components: []oam.Component{{Name: "app", Type: tc.typ, Properties: tc.props}}},
+			}
+			if _, err := outputsTransformer().Transform(app, oam.TransformContext{Namespace: "demo", Naming: tc.naming}); err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+		})
+	}
+}
