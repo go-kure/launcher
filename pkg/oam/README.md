@@ -2288,6 +2288,11 @@ result records the exact version it resolved to, only when all of these hold:
 Every short name in the type allowlists above stays valid: it is the unique alias of the built-in
 that registered it.
 
+| Call | Does |
+|---|---|
+| `TypeRegistry.Resolve(ref)` | Resolves `name` or `name@version` against the identities registered in that registry (rules 1 to 4), or refuses it. The result is the registered identity, so it carries the exact version. |
+| `ResolveTypeReference(ref, registered)` | The same rule against a flat list of identities, such as `TypeRegistry.IDs` or a caller's own set. It refuses the list itself when two entries conflict. |
+
 ### Declaring and resolving
 
 A handler or lowering rule stays registered under its plain name; its identity is declared beside it,
@@ -2314,7 +2319,13 @@ the versions that exist, before any handler runs. That refusal applies in a posi
 traits, policies) where a type is declared; where nothing is declared, a type is its registered
 name, `@` included, and the lookups and `Transform` dispatch on it as before. `Transform` returns
 that refusal as a `ValidationError` (as `Parse` does) and `errors.Is` still matches `ErrTypeReferenceUnknown` and
-`ErrTypeReferenceAmbiguous`. `ResolveTypes` writes each declared type as its identity, not as the
+`ErrTypeReferenceAmbiguous`. So does `ResolveTypes`, and so do the authored checks: the same
+`ValidationError`, with the resolver's error as its `Cause`. `ResolveTypes` returned the resolver's
+error unwrapped before; a caller that matched it with `errors.Is` is unaffected, and one that
+compared it with `==` or type-asserted it must use `errors.Is` or `errors.As`. The authored checks
+(`ValidateAuthoredProperties*`) do not judge whether a type exists: a plain type that nobody
+declares and no handler or rule claims passes them, in every position, and `Parse`'s allowlist or
+`Transform` refuses it. `ResolveTypes` writes each declared type as its identity, not as the
 plain registered name, so feeding its result back to `Transform` resolves to the same type even where
 a plain name is ambiguous. `Parse` and `ParseWithExtraTraitTypes` know no identity: use
 `ParseWithExtraTypes` with the transformer's `LowerableTypes()`, as `kurel build` does.

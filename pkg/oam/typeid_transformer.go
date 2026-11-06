@@ -340,6 +340,14 @@ func (ids *typeIdentities) resolve(app *Application, form typeForm) (*Applicatio
 // as written. A caller that reads Component.Type itself, rather than going through
 // a handler lookup, resolves first. The result is valid input to Transform, which
 // resolves an identity again to the same type.
+//
+// A reference that does not resolve is a ValidationError whose Cause is the
+// resolver's error, as Parse and Transform return it, so errors.Is still matches
+// ErrTypeReferenceUnknown and ErrTypeReferenceAmbiguous.
 func (t *Transformer) ResolveTypes(app *Application) (*Application, error) {
-	return t.identities().resolve(app, byIdentity)
+	resolved, err := t.identities().resolve(app, byIdentity)
+	if err != nil {
+		return nil, typeValidationError(err)
+	}
+	return resolved, nil
 }
