@@ -83,6 +83,26 @@ func TestPostgresql_BootstrapInitdbRefusals(t *testing.T) {
 	}
 }
 
+// A key under bootstrap.pg_basebackup other than source was dropped before; it
+// is refused naming it, and source alone still reads.
+func TestPostgresql_BootstrapPgBasebackupUnknownKeyIsRefused(t *testing.T) {
+	_, err := postgresqlConfigFor(t, map[string]any{
+		"bootstrap": map[string]any{"pg_basebackup": map[string]any{"source": "src", "database": "orders"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `bootstrap.pg_basebackup: unrecognized key "database"`) {
+		t.Errorf("err = %v, want it to name the key database", err)
+	}
+	cfg, err := postgresqlConfigFor(t, map[string]any{
+		"bootstrap": map[string]any{"pg_basebackup": map[string]any{"source": "src"}},
+	})
+	if err != nil {
+		t.Fatalf("source alone was refused: %v", err)
+	}
+	if cfg.BootstrapPgBasebackupSource != "src" {
+		t.Errorf("source = %q, want src", cfg.BootstrapPgBasebackupSource)
+	}
+}
+
 // A null initdb is absence, as for every other optional block.
 func TestPostgresql_BootstrapInitdbNullIsAbsence(t *testing.T) {
 	cfg, err := postgresqlConfigFor(t, map[string]any{"bootstrap": map[string]any{"initdb": nil, "pg_basebackup": map[string]any{"source": "src"}}})
