@@ -89,7 +89,7 @@ func TestUnexposedUpstreamFields_AreRefusedAsUnsupported(t *testing.T) {
 			app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{{
 				Name: "main", Type: tt.component, Properties: map[string]any{tt.field: tt.value},
 			}}}}
-			err := oam.NewTransformer(map[string]oam.ComponentHandler{tt.component: tt.handler}, nil).ValidateAuthoredProperties(app)
+			_, err := oam.NewTransformer(map[string]oam.ComponentHandler{tt.component: tt.handler}, nil).ValidateAuthoredProperties(app)
 			if want := `unsupported field "` + tt.field + `"`; err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("err = %v, want one mentioning %s", err, want)
 			}

@@ -272,7 +272,7 @@ func TestValidateAuthoredPropertiesForTarget_Policies(t *testing.T) {
 		t.Run(name+"/below the release", func(t *testing.T) {
 			tr := NewTransformer(nil, nil)
 			register(tr, "EnvFiles")
-			err := tr.ValidateAuthoredPropertiesForTarget(newApp(), nil, &KubernetesVersion{1, 34})
+			_, err := tr.ValidateAuthoredPropertiesForTarget(newApp(), nil, &KubernetesVersion{1, 34})
 			if err == nil {
 				t.Fatal("a policy property gated on EnvFiles must be refused at 1.34")
 			}
@@ -286,10 +286,10 @@ func TestValidateAuthoredPropertiesForTarget_Policies(t *testing.T) {
 		t.Run(name+"/at the release and with no version", func(t *testing.T) {
 			tr := NewTransformer(nil, nil)
 			register(tr, "EnvFiles")
-			if err := tr.ValidateAuthoredPropertiesForTarget(newApp(), nil, &KubernetesVersion{1, 35}); err != nil {
+			if _, err := tr.ValidateAuthoredPropertiesForTarget(newApp(), nil, &KubernetesVersion{1, 35}); err != nil {
 				t.Errorf("at 1.35: want accepted, got %v", err)
 			}
-			if err := tr.ValidateAuthoredPropertiesForTarget(newApp(), nil, nil); err != nil {
+			if _, err := tr.ValidateAuthoredPropertiesForTarget(newApp(), nil, nil); err != nil {
 				t.Errorf("no version stated: want accepted, got %v", err)
 			}
 		})
@@ -297,11 +297,11 @@ func TestValidateAuthoredPropertiesForTarget_Policies(t *testing.T) {
 		t.Run(name+"/unknown gate", func(t *testing.T) {
 			tr := NewTransformer(nil, nil)
 			register(tr, "NoSuchGate")
-			err := tr.ValidateAuthoredPropertiesForTarget(newApp(), nil, &KubernetesVersion{1, 40})
+			_, err := tr.ValidateAuthoredPropertiesForTarget(newApp(), nil, &KubernetesVersion{1, 40})
 			if err == nil || !strings.Contains(err.Error(), "NoSuchGate") {
 				t.Errorf("an unknown gate on a policy must be an error naming it, got %v", err)
 			}
-			if err := tr.ValidateAuthoredPropertiesForTarget(newApp(), nil, nil); err != nil {
+			if _, err := tr.ValidateAuthoredPropertiesForTarget(newApp(), nil, nil); err != nil {
 				t.Errorf("no version stated: no gate is consulted, got %v", err)
 			}
 		})

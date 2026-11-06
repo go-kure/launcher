@@ -52,7 +52,7 @@ func TestNetworkPolicyPortSchema_UnsupportedKeyRejectedAtSchemaLayer(t *testing.
 		},
 	}
 
-	err := tr.ValidateAuthoredProperties(app)
+	_, err := tr.ValidateAuthoredProperties(app)
 	if err == nil {
 		t.Fatal("a mistyped 'protcol' key must be rejected, not silently admitted")
 	}
@@ -99,7 +99,7 @@ func TestNetworkPolicyPortSchema_KnownKeysStillAccepted(t *testing.T) {
 		},
 	}
 
-	if err := tr.ValidateAuthoredProperties(app); err != nil {
+	if _, err := tr.ValidateAuthoredProperties(app); err != nil {
 		t.Fatalf("a document using only the declared port/protocol keys must be accepted, got: %v", err)
 	}
 }

@@ -476,7 +476,9 @@ for example — and must not copy capability rendering into its output: a value 
 `ErrPlatformReserved`. The shape of a trait the rule writes is checked by neither
 `LowerRaws` nor `Transform`, which enforces only its platform-reserved keys: as for
 any authored document, the consumer runs `ValidateAuthoredProperties` on each parsed
-output document, after parameter substitution, before `Transform`. Before go-kure/launcher#357,
+output document, after parameter substitution, before `Transform`, and `Transform`s the
+document that call returns (a validated copy; the validator never edits its argument).
+Before go-kure/launcher#357,
 `LowerRaws` ran the whole fixpoint itself and sealed the traits it produced, but the
 seal is an unexported field that the caller's `yaml.Marshal` → parse round-trip drops,
 so `Transform` re-rendered those traits as authored anyway; running round 0 only makes

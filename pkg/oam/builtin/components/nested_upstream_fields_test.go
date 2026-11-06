@@ -423,7 +423,7 @@ func TestInitContainerRestart_AuthoredCheckAccepts(t *testing.T) {
 		"name": "init", "image": "ghcr.io/org/init:v1",
 		"restartPolicy": "OnFailure", "restartPolicyRules": []any{restartRule("In", 1)},
 	}}})
-	if err := authoredTransformer().ValidateAuthoredProperties(app); err != nil {
+	if _, err := authoredTransformer().ValidateAuthoredProperties(app); err != nil {
 		t.Fatalf("restartPolicy and restartPolicyRules on an init entry must be accepted, got: %v", err)
 	}
 }

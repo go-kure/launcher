@@ -102,12 +102,12 @@ func TestBuiltinStringProperties_RejectNonStringOnAuthoredPath(t *testing.T) {
 			checked++
 			want := fmt.Sprintf("properties.%s: expected string, got int", key)
 
-			err := transformer.ValidateAuthoredProperties(build(map[string]any{key: 123}))
+			_, err := transformer.ValidateAuthoredProperties(build(map[string]any{key: 123}))
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("%s: authored %s: 123 was not rejected as a non-string\n got: %v\nwant substring: %s", where, key, err, want)
 			}
 
-			err = transformer.ValidateAuthoredProperties(build(map[string]any{key: "x"}))
+			_, err = transformer.ValidateAuthoredProperties(build(map[string]any{key: "x"}))
 			if err != nil && strings.Contains(err.Error(), "properties."+key+": expected string") {
 				t.Errorf("%s: control: authored %s: \"x\" was rejected as a non-string: %v", where, key, err)
 			}

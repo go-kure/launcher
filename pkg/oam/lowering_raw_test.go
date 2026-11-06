@@ -894,7 +894,7 @@ func TestLowerRaws_EmittedTraitShapeIsCheckedByValidateAuthoredProperties(t *tes
 		t.Fatalf("Transform now shape-checks trait properties; update the raw-rule contract docs: %v", err)
 	}
 
-	err = tr.ValidateAuthoredProperties(parseLoweredOutput(t, tr, out[0]))
+	_, err = tr.ValidateAuthoredProperties(parseLoweredOutput(t, tr, out[0]))
 	if err == nil {
 		t.Fatal("expected ValidateAuthoredProperties to reject the string enablePDB a raw rule wrote")
 	}

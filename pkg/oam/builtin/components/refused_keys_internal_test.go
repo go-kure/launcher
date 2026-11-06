@@ -75,7 +75,7 @@ func refusedKeyPaths(t *testing.T, tr *oam.Transformer, componentType string, pr
 		}
 		_, direct = h.ToApplicationConfig(comp(), "ns")
 	}
-	document = tr.ValidateAuthoredProperties(&oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{*comp()}}})
+	_, document = tr.ValidateAuthoredProperties(&oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{*comp()}}})
 	return direct, document
 }
 

@@ -794,11 +794,12 @@ func TestJobHandler_PodFailurePolicy_StatusDefaultsToTrue(t *testing.T) {
 			app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{
 				{Name: "batch", Type: "job", Properties: props},
 			}}}
-			if err := tr.ValidateAuthoredProperties(app); err != nil {
+			validated, err := tr.ValidateAuthoredProperties(app)
+			if err != nil {
 				t.Fatalf("ValidateAuthoredProperties refused a pattern without status: %v", err)
 			}
 
-			job, _ := generateJob(t, app.Spec.Components[0].Properties)
+			job, _ := generateJob(t, validated.Spec.Components[0].Properties)
 			pfp := job.Spec.PodFailurePolicy
 			if pfp == nil || len(pfp.Rules) != 1 || len(pfp.Rules[0].OnPodConditions) != 1 {
 				t.Fatalf("PodFailurePolicy = %+v, want one rule with one pattern", pfp)

@@ -217,7 +217,7 @@ func TestDeploymentHandler_PortsSchemaAgreesWithParser(t *testing.T) {
 			app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{
 				{Name: "web", Type: "deployment", Properties: props},
 			}}}
-			schemaErr := tr.ValidateAuthoredProperties(app)
+			_, schemaErr := tr.ValidateAuthoredProperties(app)
 			parseErr := deploymentConvertErr(props)
 			if (schemaErr == nil) != (parseErr == nil) {
 				t.Errorf("schema error = %v, parser error = %v; they must agree", schemaErr, parseErr)

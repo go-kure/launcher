@@ -51,9 +51,10 @@ var (
 // before any handler — on a one-component Application carrying props.
 func htAuthoredErr(props map[string]any) error {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"helmtemplate": &components.HelmTemplateHandler{}}, nil)
-	return tr.ValidateAuthoredProperties(&oam.Application{Spec: oam.ApplicationSpec{
+	_, err := tr.ValidateAuthoredProperties(&oam.Application{Spec: oam.ApplicationSpec{
 		Components: []oam.Component{{Name: "web", Type: "helmtemplate", Properties: props}},
 	}})
+	return err
 }
 
 func TestHelmTemplateHandler_CanHandle(t *testing.T) {

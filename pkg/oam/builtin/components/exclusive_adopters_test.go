@@ -170,10 +170,11 @@ func (s exclusiveSite) transform(props map[string]any) error {
 		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
 		Spec:       oam.ApplicationSpec{Components: []oam.Component{{Name: "app", Type: s.compType, Properties: props}}},
 	}
-	if err := tr.ValidateAuthoredProperties(app); err != nil {
+	validated, err := tr.ValidateAuthoredProperties(app)
+	if err != nil {
 		return err
 	}
-	_, err := tr.Transform(app, oam.TransformContext{Namespace: "default"})
+	_, err = tr.Transform(validated, oam.TransformContext{Namespace: "default"})
 	return err
 }
 

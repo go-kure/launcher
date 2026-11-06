@@ -451,10 +451,11 @@ func TestReservedMetadataKeys_EveryCarrier(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parsing: %v\n%s", err, doc)
 		}
-		if err := transformer.ValidateAuthoredProperties(app); err != nil {
+		validated, err := transformer.ValidateAuthoredProperties(app)
+		if err != nil {
 			t.Fatalf("validating: %v", err)
 		}
-		cluster, err := transformer.Transform(app, oam.TransformContext{
+		cluster, err := transformer.Transform(validated, oam.TransformContext{
 			Domain:               kurelDomain,
 			ReservedMetadataKeys: []string{"platform.example/", "example.org/tenant"},
 			Capabilities: map[string]oam.CapabilityBinding{"expose": {Rendering: map[string]any{
@@ -575,10 +576,11 @@ func TestReservedMetadataKeys_NullEntryIsAbsent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parsing: %v\n%s", err, doc)
 		}
-		if err := transformer.ValidateAuthoredProperties(app); err != nil {
+		validated, err := transformer.ValidateAuthoredProperties(app)
+		if err != nil {
 			t.Fatalf("validating: %v", err)
 		}
-		cluster, err := transformer.Transform(app, oam.TransformContext{
+		cluster, err := transformer.Transform(validated, oam.TransformContext{
 			Domain:               kurelDomain,
 			ReservedMetadataKeys: []string{"platform.example/"},
 		})

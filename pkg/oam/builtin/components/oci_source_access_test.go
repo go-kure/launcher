@@ -97,10 +97,11 @@ func TestOCIRule_SourceAccess_AuthoredPipeline(t *testing.T) {
 		tr.RegisterComponentLowering(components.OCIRule{})
 		comp := oam.Component{Name: "checkout", Type: "oci", Properties: props}
 		app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{comp}}}
-		if err := tr.ValidateAuthoredProperties(app); err != nil {
+		validated, err := tr.ValidateAuthoredProperties(app)
+		if err != nil {
 			return err
 		}
-		_, err := ociViaRule{}.ToApplicationConfig(&comp, "checkout")
+		_, err = ociViaRule{}.ToApplicationConfig(&validated.Spec.Components[0], "checkout")
 		return err
 	}
 	valid := validOCIProps()

@@ -152,7 +152,8 @@ func validateForTarget(t *testing.T, appYAML string, target *oam.KubernetesVersi
 	if err != nil {
 		t.Fatalf("parsing: %v", err)
 	}
-	return transformer.ValidateAuthoredPropertiesForTarget(app, nil, target)
+	_, err = transformer.ValidateAuthoredPropertiesForTarget(app, nil, target)
+	return err
 }
 
 // TestFeatureGates_RefusedBelowAcceptedAtAndAbove: each gated property is

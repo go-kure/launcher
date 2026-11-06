@@ -228,10 +228,11 @@ func transformedDeploymentCtx(t *testing.T, comp oam.Component, ctx oam.Transfor
 		Spec:       oam.ApplicationSpec{Components: []oam.Component{comp}},
 	}
 	tr := topologySpreadTransformer()
-	if err := tr.ValidateAuthoredProperties(app); err != nil {
+	validated, err := tr.ValidateAuthoredProperties(app)
+	if err != nil {
 		return nil, nil, err
 	}
-	cluster, result, err := tr.TransformWithPolicy(app, ctx)
+	cluster, result, err := tr.TransformWithPolicy(validated, ctx)
 	if err != nil {
 		return nil, nil, err
 	}

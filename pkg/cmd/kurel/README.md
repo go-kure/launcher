@@ -251,7 +251,10 @@ build error naming the field and the allowed set, rather than being silently dro
 (go-kure/launcher#408). With a version set, a property whose Kubernetes feature gate
 is off by default at that release is refused too, naming the property, the gate, the
 release where it turns on and the profile's version (go-kure/launcher#1183); with no
-version nothing is checked, as before. The
+version nothing is checked, as before. The call returns the document it validated, a
+copy with each explicit nested `null` stripped and each value normalized, and `build`
+transforms that copy; the parsed application is never edited
+(go-kure/launcher#1282). The
 bindings are what let a trait leave a nested required key to the capability
 rendering (go-kure/launcher#765):
 

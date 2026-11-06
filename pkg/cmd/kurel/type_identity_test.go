@@ -73,8 +73,8 @@ func TestBuiltinTransformer_AuthoredPropertiesAreCheckedUnderAnIdentity(t *testi
 			app.Spec.Components[0].Type = ref
 			tr := newBuiltinTransformer()
 			for name, validate := range map[string]func() error{
-				"ValidateAuthoredProperties": func() error { return tr.ValidateAuthoredProperties(app) },
-				"ForTarget":                  func() error { return tr.ValidateAuthoredPropertiesForTarget(app, nil, nil) },
+				"ValidateAuthoredProperties": func() error { _, err := tr.ValidateAuthoredProperties(app); return err },
+				"ForTarget":                  func() error { _, err := tr.ValidateAuthoredPropertiesForTarget(app, nil, nil); return err },
 			} {
 				err := validate()
 				if err == nil || !strings.Contains(err.Error(), `unsupported field "bogus"`) {
@@ -95,8 +95,8 @@ func TestBuiltinTransformer_AuthoredPropertiesRefuseAnUnresolvedIdentity(t *test
 	app := webserviceApp(map[string]any{"image": "nginx:1"})
 	app.Spec.Components[0].Type = "webservice@v9"
 	for name, validate := range map[string]func() error{
-		"ValidateAuthoredProperties": func() error { return tr.ValidateAuthoredProperties(app) },
-		"ForTarget":                  func() error { return tr.ValidateAuthoredPropertiesForTarget(app, nil, nil) },
+		"ValidateAuthoredProperties": func() error { _, err := tr.ValidateAuthoredProperties(app); return err },
+		"ForTarget":                  func() error { _, err := tr.ValidateAuthoredPropertiesForTarget(app, nil, nil); return err },
 	} {
 		if err := validate(); !stderrors.Is(err, oam.ErrTypeReferenceUnknown) {
 			t.Errorf("%s: error %v, want ErrTypeReferenceUnknown", name, err)

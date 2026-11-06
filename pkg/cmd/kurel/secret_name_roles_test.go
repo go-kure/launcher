@@ -66,11 +66,12 @@ func secretRolesErr(t *testing.T, appYAML string, ctx oam.TransformContext) erro
 	if err != nil {
 		return err
 	}
-	if err := transformer.ValidateAuthoredProperties(app); err != nil {
+	validated, err := transformer.ValidateAuthoredProperties(app)
+	if err != nil {
 		return err
 	}
 	ctx.Domain = kurelDomain
-	cluster, err := transformer.Transform(app, ctx)
+	cluster, err := transformer.Transform(validated, ctx)
 	if err != nil {
 		return err
 	}

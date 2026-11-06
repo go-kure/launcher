@@ -29,10 +29,11 @@ func buildWebservice(t *testing.T, props map[string]any) (*webserviceViaRuleConf
 	}, nil)
 	comp := oam.Component{Name: "app", Type: "webservice", Properties: props}
 	app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{comp}}}
-	if err := tr.ValidateAuthoredProperties(app); err != nil {
+	validated, err := tr.ValidateAuthoredProperties(app)
+	if err != nil {
 		return nil, err
 	}
-	cfg, err := webserviceViaRule{}.ToApplicationConfig(&comp, "default")
+	cfg, err := webserviceViaRule{}.ToApplicationConfig(&validated.Spec.Components[0], "default")
 	if err != nil {
 		return nil, err
 	}

@@ -19,44 +19,39 @@ import (
 // A nil target is an unknown version: no gate is consulted, and the result is the
 // capability variant's, so a document built without a version is judged as it was
 // before the version existed. The gate pass reads the document and changes nothing.
-func (t *Transformer) ValidateAuthoredPropertiesForTarget(app *Application, capabilities map[string]CapabilityBinding, target *KubernetesVersion) error {
-	if app == nil {
-		return nil
-	}
+// Like ValidateAuthoredProperties it returns the validated copy and never edits app.
+func (t *Transformer) ValidateAuthoredPropertiesForTarget(app *Application, capabilities map[string]CapabilityBinding, target *KubernetesVersion) (*Application, error) {
 	// The gate pass below looks schemas up by plain type name, so it reads the
 	// resolved document too (a declared type identity becomes its plain name).
-	app, err := t.resolveAuthoredTypes(app)
-	if err != nil {
-		return err
-	}
-	if err := t.validateResolvedAuthored(app, capabilities); err != nil {
-		return err
+	own, resolved, err := t.validateAuthoredCopy(app, capabilities)
+	if err != nil || own == nil {
+		return nil, err
 	}
 	if target == nil {
-		return nil
+		return own, nil
 	}
-	for i := range app.Spec.Components {
-		comp := &app.Spec.Components[i]
+	for i := range resolved.Spec.Components {
+		comp := &resolved.Spec.Components[i]
 		path := fmt.Sprintf("component %q (type %q): properties", comp.Name, comp.Type)
 		if err := checkGatedProperties(t.componentSchemaOf(comp.Type), comp.Properties, path, *target); err != nil {
-			return err
+			return nil, err
 		}
 		for j := range comp.Traits {
 			trait := &comp.Traits[j]
 			path := fmt.Sprintf("component %q: trait %q: properties", comp.Name, trait.Type)
 			if err := checkGatedProperties(t.traitSchemaOf(trait.Type), trait.Properties, path, *target); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
-	for i := range app.Spec.Policies {
-		pol := &app.Spec.Policies[i]
+	for i := range resolved.Spec.Policies {
+		pol := &resolved.Spec.Policies[i]
 		path := fmt.Sprintf("policy %q (type %q): properties", pol.Name, pol.Type)
 		if err := checkGatedProperties(t.policySchemaOf(pol.Type), pol.Properties, path, *target); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return own, nil
 }
 
 // componentSchemaOf returns the property schema the authored validation checks a

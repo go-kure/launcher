@@ -411,7 +411,7 @@ func TestContainerEntry_AuthoredCheckAcceptsTheFullSurface(t *testing.T) {
 		"initContainers": []any{common("init")},
 		"sidecars":       []any{sidecar},
 	})
-	if err := authoredTransformer().ValidateAuthoredProperties(app); err != nil {
+	if _, err := authoredTransformer().ValidateAuthoredProperties(app); err != nil {
 		t.Fatalf("a document using only declared entry keys must be accepted, got: %v", err)
 	}
 }
@@ -429,7 +429,7 @@ func TestContainerEntry_AuthoredCheckRejectsUndeclaredKeys(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			entry := map[string]any{"name": "c", "image": "ghcr.io/org/c:v1", tc.key: tc.value}
 			app := authoredApp(map[string]any{"image": "ghcr.io/org/app:v1", tc.list: []any{entry}})
-			err := authoredTransformer().ValidateAuthoredProperties(app)
+			_, err := authoredTransformer().ValidateAuthoredProperties(app)
 			if err == nil {
 				t.Fatalf("undeclared %s key %q must be rejected", tc.list, tc.key)
 			}

@@ -125,7 +125,7 @@ func TestKindPorts_NoPortProperty(t *testing.T) {
 			app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{
 				{Name: "app", Type: k.typ, Properties: k.props(map[string]any{"port": 8080})},
 			}}}
-			if err := tr.ValidateAuthoredProperties(app); err == nil || !strings.Contains(err.Error(), `"port"`) {
+			if _, err := tr.ValidateAuthoredProperties(app); err == nil || !strings.Contains(err.Error(), `"port"`) {
 				t.Errorf("error = %v, want an unknown-property refusal naming \"port\"", err)
 			}
 		})
@@ -264,7 +264,7 @@ func TestKindPorts_SchemaAgreesWithParser(t *testing.T) {
 				app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{
 					{Name: "app", Type: k.typ, Properties: props},
 				}}}
-				schemaErr := tr.ValidateAuthoredProperties(app)
+				_, schemaErr := tr.ValidateAuthoredProperties(app)
 				parseErr := k.convertErr(props)
 				if (schemaErr == nil) != (parseErr == nil) {
 					t.Errorf("schema error = %v, parser error = %v; they must agree", schemaErr, parseErr)

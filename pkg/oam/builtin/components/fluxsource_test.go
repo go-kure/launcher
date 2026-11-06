@@ -648,7 +648,7 @@ func TestHelmChart_CompositeKeyHint(t *testing.T) {
 				Metadata: oam.Metadata{Name: "shop", Namespace: "shop"},
 				Spec:     oam.ApplicationSpec{Components: []oam.Component{{Name: "chart", Type: "helmchart", Properties: props()}}},
 			}
-			authored := tr.ValidateAuthoredProperties(app)
+			_, authored := tr.ValidateAuthoredProperties(app)
 			if authored == nil || !strings.Contains(authored.Error(), `unsupported field "`+tc.key+`"`) {
 				t.Fatalf("ValidateAuthoredProperties: error = %v, want the unsupported-field error", authored)
 			}

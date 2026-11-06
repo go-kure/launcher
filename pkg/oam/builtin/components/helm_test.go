@@ -862,12 +862,13 @@ func TestHelmRule_InlineBucketProviderEnum(t *testing.T) {
 	validate := func(provider string) error {
 		tr := oam.NewTransformer(nil, nil)
 		tr.RegisterComponentLowering(components.HelmRule{})
-		return tr.ValidateAuthoredProperties(&oam.Application{Spec: oam.ApplicationSpec{
+		_, err := tr.ValidateAuthoredProperties(&oam.Application{Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{Name: "web", Type: "helm", Properties: map[string]any{
 				"chart":  "charts/a",
 				"source": map[string]any{"kind": "Bucket", "endpoint": "minio.example.com", "bucketName": "charts", "provider": provider},
 			}}},
 		}})
+		return err
 	}
 	for _, p := range []string{"generic", "aws", "gcp", "azure"} {
 		if err := validate(p); err != nil {
