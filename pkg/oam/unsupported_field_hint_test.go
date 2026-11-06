@@ -133,7 +133,7 @@ func TestValidateAuthoredProperties_UnsupportedFieldHintPositions(t *testing.T) 
 			{"with capabilities", bindings},
 		} {
 			t.Run(tc.name+", "+path.name, func(t *testing.T) {
-				err := newTransformer().ValidateAuthoredPropertiesWithCapabilities(tc.app, path.bindings)
+				_, err := newTransformer().ValidateAuthoredPropertiesWithCapabilities(tc.app, path.bindings)
 				if err == nil {
 					t.Fatal("the document was accepted, want it refused")
 				}
@@ -297,7 +297,7 @@ func TestValidateAuthoredProperties_NestedUnsupportedFieldHint(t *testing.T) {
 			{"with capabilities", map[string]CapabilityBinding{"unrelated": {}}},
 		} {
 			t.Run(tc.name+", "+path.name, func(t *testing.T) {
-				err := newTransformer().ValidateAuthoredPropertiesWithCapabilities(tc.app, path.bindings)
+				_, err := newTransformer().ValidateAuthoredPropertiesWithCapabilities(tc.app, path.bindings)
 				if err == nil {
 					t.Fatal("the document was accepted, want it refused")
 				}

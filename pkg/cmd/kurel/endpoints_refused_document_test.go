@@ -33,10 +33,11 @@ func buildRefusal(t *testing.T, appYAML string, hook func(oam.NameRequest) (stri
 	if err != nil {
 		t.Fatalf("parsing: %v", err)
 	}
-	if err := transformer.ValidateAuthoredProperties(app); err != nil {
+	validated, err := transformer.ValidateAuthoredProperties(app)
+	if err != nil {
 		return "validation", err
 	}
-	cluster, err := transformer.Transform(app, oam.TransformContext{Domain: kurelDomain, Naming: hook})
+	cluster, err := transformer.Transform(validated, oam.TransformContext{Domain: kurelDomain, Naming: hook})
 	if err != nil {
 		return "transform", err
 	}

@@ -149,7 +149,7 @@ func TestValidateAuthoredProperties_RejectsNestedReservedNull(t *testing.T) {
 	tr := nestedReservedTransformer()
 
 	app := appWithTrait("nested-reserved", map[string]any{"config": map[string]any{"locked": nil}})
-	err := tr.ValidateAuthoredProperties(app)
+	_, err := tr.ValidateAuthoredProperties(app)
 	expectReservedRefusal(t, err, `properties.config: "locked" is platform-reserved`)
 	if _, present := app.Spec.Components[0].Traits[0].Properties["config"].(map[string]any)["locked"]; !present {
 		t.Error("the refused document must be left as authored, with its null still present")
@@ -170,7 +170,7 @@ func TestValidateAuthoredProperties_KeepsTransformsExemptions(t *testing.T) {
 		return app
 	}
 	tr := nestedReservedTransformer()
-	if err := tr.ValidateAuthoredProperties(newDoc()); err != nil {
+	if _, err := tr.ValidateAuthoredProperties(newDoc()); err != nil {
 		t.Fatalf("expected synthesized elements to be exempt, got: %v", err)
 	}
 	if _, err := tr.Transform(newDoc(), TransformContext{}); err != nil {
@@ -190,7 +190,7 @@ func TestValidateAuthoredProperties_ReservationErrorNamesStampedOrigin(t *testin
 	}
 	tr := nestedReservedTransformer()
 	tr.RegisterTraitLowering(nestedReservedWrapperRule{})
-	authoredErr := tr.ValidateAuthoredProperties(newDoc())
+	_, authoredErr := tr.ValidateAuthoredProperties(newDoc())
 	_, transformErr := tr.Transform(newDoc(), TransformContext{})
 	expectReservedRefusal(t, authoredErr, `in document "myapp" (kind "Wrapper")`)
 	expectReservedRefusal(t, transformErr, `in document "myapp" (kind "Wrapper")`)
@@ -226,7 +226,7 @@ func TestValidateAuthoredProperties_ReservationErrorMatchesTransform(t *testing.
 		for docName, newDoc := range docs {
 			t.Run(trName+"/"+docName, func(t *testing.T) {
 				tr := newTr()
-				authoredErr := tr.ValidateAuthoredProperties(newDoc())
+				_, authoredErr := tr.ValidateAuthoredProperties(newDoc())
 				_, transformErr := tr.Transform(newDoc(), TransformContext{})
 				expectReservedRefusal(t, authoredErr, `component "web"`)
 				expectReservedRefusal(t, transformErr, `component "web"`)

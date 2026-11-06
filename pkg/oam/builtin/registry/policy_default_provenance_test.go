@@ -52,10 +52,11 @@ func policyProvenanceFor(t *testing.T, p oam.Policy, comps ...oam.Component) (*o
 		Spec:       oam.ApplicationSpec{Components: comps},
 	}
 	tr := newTransformer()
-	if err := tr.ValidateAuthoredProperties(app); err != nil {
+	validated, err := tr.ValidateAuthoredProperties(app)
+	if err != nil {
 		t.Fatalf("ValidateAuthoredProperties: %v", err)
 	}
-	cluster, _, prov, err := tr.TransformWithProvenance(app, oam.TransformContext{Namespace: "default", Policy: p})
+	cluster, _, prov, err := tr.TransformWithProvenance(validated, oam.TransformContext{Namespace: "default", Policy: p})
 	if err != nil {
 		t.Fatalf("TransformWithProvenance: %v", err)
 	}

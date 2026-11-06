@@ -223,7 +223,7 @@ func TestRawSchedulingKinds_AuthoredCheck(t *testing.T) {
 				app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{{
 					Name: "app", Type: k.name, Properties: withProps(k.props, map[string]any{key: rawSchedulingValue(key)}),
 				}}}}
-				err := transformer.ValidateAuthoredProperties(app)
+				_, err := transformer.ValidateAuthoredProperties(app)
 				switch {
 				case published && err != nil:
 					t.Errorf("%s publishes %s, but the authored check refuses it: %v", k.name, key, err)

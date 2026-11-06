@@ -59,10 +59,11 @@ func transformWithBuiltins(t *testing.T, appYAML string) (*stack.Cluster, *oam.P
 	if err != nil {
 		t.Fatalf("parsing: %v", err)
 	}
-	if err := transformer.ValidateAuthoredProperties(app); err != nil {
+	validated, err := transformer.ValidateAuthoredProperties(app)
+	if err != nil {
 		t.Fatalf("validating: %v", err)
 	}
-	return transformer.TransformWithPolicy(app, oam.TransformContext{Domain: kurelDomain})
+	return transformer.TransformWithPolicy(validated, oam.TransformContext{Domain: kurelDomain})
 }
 
 // leafBundles returns every leaf bundle under node, keyed by name.

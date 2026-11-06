@@ -22,10 +22,11 @@ func collisionCheck(t *testing.T, appYAML string) ([]oam.GeneratedApplication, e
 	if err != nil {
 		t.Fatalf("parsing: %v", err)
 	}
-	if err := transformer.ValidateAuthoredProperties(app); err != nil {
+	validated, err := transformer.ValidateAuthoredProperties(app)
+	if err != nil {
 		t.Fatalf("validating: %v", err)
 	}
-	cluster, err := transformer.Transform(app, oam.TransformContext{Domain: kurelDomain})
+	cluster, err := transformer.Transform(validated, oam.TransformContext{Domain: kurelDomain})
 	if err != nil {
 		t.Fatalf("transforming: %v", err)
 	}
@@ -46,10 +47,11 @@ func transformRefusal(t *testing.T, appYAML string) error {
 	if err != nil {
 		t.Fatalf("parsing: %v", err)
 	}
-	if err := transformer.ValidateAuthoredProperties(app); err != nil {
+	validated, err := transformer.ValidateAuthoredProperties(app)
+	if err != nil {
 		t.Fatalf("validating: %v", err)
 	}
-	_, err = transformer.Transform(app, oam.TransformContext{Domain: kurelDomain})
+	_, err = transformer.Transform(validated, oam.TransformContext{Domain: kurelDomain})
 	return err
 }
 

@@ -71,10 +71,11 @@ func forcedVolumeWarnings(t *testing.T, appYAML string) []string {
 	if err != nil {
 		t.Fatalf("parsing: %v", err)
 	}
-	if err := transformer.ValidateAuthoredProperties(app); err != nil {
+	validated, err := transformer.ValidateAuthoredProperties(app)
+	if err != nil {
 		t.Fatalf("validating: %v", err)
 	}
-	cluster, err := transformer.Transform(app, oam.TransformContext{Domain: kurelDomain})
+	cluster, err := transformer.Transform(validated, oam.TransformContext{Domain: kurelDomain})
 	if err != nil {
 		t.Fatalf("transforming: %v", err)
 	}

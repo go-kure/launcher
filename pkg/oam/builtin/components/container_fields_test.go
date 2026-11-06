@@ -317,7 +317,7 @@ func TestContainerFields_AuthoredCheckAgreesWithParser(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(position+"/"+tc.name, func(t *testing.T) {
 				component := oam.Component{Name: "app", Type: "deployment", Properties: props(tc.fields)}
-				authoredErr := tr.ValidateAuthoredProperties(&oam.Application{
+				_, authoredErr := tr.ValidateAuthoredProperties(&oam.Application{
 					Spec: oam.ApplicationSpec{Components: []oam.Component{component}},
 				})
 				_, parseErr := h.ToApplicationConfig(&component, "default")
@@ -462,7 +462,7 @@ func TestContainerFields_AuthoredCheckAcceptsTheFullSurface(t *testing.T) {
 		"initContainers": []any{entry("init")},
 		"sidecars":       []any{entry("proxy")},
 	}))
-	if err := authoredTransformer().ValidateAuthoredProperties(app); err != nil {
+	if _, err := authoredTransformer().ValidateAuthoredProperties(app); err != nil {
 		t.Fatalf("a document using only the declared container fields must be accepted, got: %v", err)
 	}
 }
@@ -482,7 +482,7 @@ func TestContainerFields_AuthoredCheckRejectsUnreadContainerKeys(t *testing.T) {
 				} else {
 					props[list] = []any{map[string]any{"name": "c", "image": "ghcr.io/org/c:v1", key: "Always"}}
 				}
-				err := authoredTransformer().ValidateAuthoredProperties(authoredApp(props))
+				_, err := authoredTransformer().ValidateAuthoredProperties(authoredApp(props))
 				if err == nil {
 					t.Fatalf("undeclared key %q must be rejected", key)
 				}

@@ -50,10 +50,11 @@ spec:
 				t.Fatalf("parsing: %v", err)
 			}
 			app.Spec.Components[0].Properties["values"] = map[string]any{"n": json.Number("1e400")}
-			if err := transformer.ValidateAuthoredProperties(app); err != nil {
+			validated, err := transformer.ValidateAuthoredProperties(app)
+			if err != nil {
 				t.Fatalf("validating: %v", err)
 			}
-			cluster, err := transformer.Transform(app, oam.TransformContext{Domain: kurelDomain})
+			cluster, err := transformer.Transform(validated, oam.TransformContext{Domain: kurelDomain})
 			if err != nil {
 				t.Fatalf("transforming: %v", err)
 			}

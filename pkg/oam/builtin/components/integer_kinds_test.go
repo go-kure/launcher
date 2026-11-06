@@ -22,10 +22,11 @@ func validateThenRenderDeployment(t *testing.T, props map[string]any) (*appsv1.D
 	app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{
 		{Name: "app", Type: "webservice", Properties: props},
 	}}}
-	if err := tr.ValidateAuthoredProperties(app); err != nil {
+	validated, err := tr.ValidateAuthoredProperties(app)
+	if err != nil {
 		return nil, err
 	}
-	return renderDeployment(t, h, &app.Spec.Components[0]), nil
+	return renderDeployment(t, h, &validated.Spec.Components[0]), nil
 }
 
 // renderDeployment runs the handler alone. Validation normalizes the values it

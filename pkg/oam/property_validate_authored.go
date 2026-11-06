@@ -69,7 +69,15 @@ import (
 // variant: the rendering merges into nested objects (mergeRenderedProperties,
 // go-kure/launcher#750), and the variant accepts a partial nested override that
 // relies on it for a required sibling.
-func (t *Transformer) ValidateAuthoredProperties(app *Application) error {
+//
+// It returns the document it validated: a copy of app whose property trees carry
+// what validation settled on (a nested null stripped, a named scalar or a typed
+// collection normalized to the plain Go shape a handler reads). app itself is never
+// edited. Hand the returned document to Transform: Transform does not strip or
+// normalize authored properties itself, so the copy is the only form of the
+// document that has been through the strip (go-kure/launcher#635, go-kure/launcher#1282). On an
+// error the document is nil, and app is as it was authored.
+func (t *Transformer) ValidateAuthoredProperties(app *Application) (*Application, error) {
 	return t.ValidateAuthoredPropertiesWithCapabilities(app, nil)
 }
 
@@ -82,25 +90,62 @@ func (t *Transformer) ValidateAuthoredProperties(app *Application) error {
 // ValidateAuthoredProperties', and a trait no binding matches is refused for the
 // same nested key, though with several problems the nested Required one may be
 // reported after the others. Transform makes the same after-merge check itself, so
-// a nested key neither side supplies is refused there too.
-func (t *Transformer) ValidateAuthoredPropertiesWithCapabilities(app *Application, capabilities map[string]CapabilityBinding) error {
+// a nested key neither side supplies is refused there too. Like
+// ValidateAuthoredProperties it returns the validated copy and never edits app.
+func (t *Transformer) ValidateAuthoredPropertiesWithCapabilities(app *Application, capabilities map[string]CapabilityBinding) (*Application, error) {
+	own, _, err := t.validateAuthoredCopy(app, capabilities)
+	return own, err
+}
+
+// validateAuthoredCopy validates a private copy of app and returns it, with the same
+// copy resolved to plain type names. The two share their property maps, so what
+// validation writes into the resolved form lands in the copy, whose Type fields
+// stay as authored. app is not edited. A nil app is nil, nil, nil. On an error the
+// copy is not returned.
+func (t *Transformer) validateAuthoredCopy(app *Application, capabilities map[string]CapabilityBinding) (own, resolved *Application, err error) {
 	if app == nil {
-		return nil
+		return nil, nil, nil
 	}
-	resolved, err := t.resolveAuthoredTypes(app)
+	own = copyAuthoredDocument(app)
+	resolved, err = t.resolveAuthoredTypes(own)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	return t.validateResolvedAuthored(resolved, capabilities)
+	if err := t.validateResolvedAuthored(resolved, capabilities); err != nil {
+		return nil, nil, err
+	}
+	return own, resolved, nil
+}
+
+// copyAuthoredDocument returns app with its own component, trait and policy slices
+// and its own copy of every property tree (copyPropertyMap), which is everything
+// authored validation writes. Everything else is shared with app and only read.
+func copyAuthoredDocument(app *Application) *Application {
+	out := *app
+	out.Spec.Components = slices.Clone(app.Spec.Components)
+	for i := range out.Spec.Components {
+		comp := &out.Spec.Components[i]
+		comp.Properties = copyPropertyMap(comp.Properties)
+		comp.Traits = slices.Clone(comp.Traits)
+		for j := range comp.Traits {
+			comp.Traits[j].Properties = copyPropertyMap(comp.Traits[j].Properties)
+		}
+	}
+	out.Spec.Policies = slices.Clone(app.Spec.Policies)
+	for i := range out.Spec.Policies {
+		out.Spec.Policies[i].Properties = copyPropertyMap(out.Spec.Policies[i].Properties)
+	}
+	return &out
 }
 
 // resolveAuthoredTypes returns app with every declared type identity (configmap@v1)
 // replaced by the plain name its handler is registered under, as Transform does on
 // entry; the Type fields of app are not changed. The authored checks look handlers
 // up by that plain name, so they run on the result. The property maps are shared
-// with app, so the nested-null strip of ValidateAuthoredProperties applies to them
-// as it does to a plain-name component. A reference that does not resolve is a
-// ValidationError whose Cause is the resolver's error, so errors.Is sees through it.
+// with app, so validation writes into them as it does for a plain-name component:
+// the caller passes it a copy (validateAuthoredCopy). A reference that does not
+// resolve is a ValidationError whose Cause is the resolver's error, so errors.Is
+// sees through it.
 func (t *Transformer) resolveAuthoredTypes(app *Application) (*Application, error) {
 	resolved, err := t.resolveTypes(app)
 	if err != nil {

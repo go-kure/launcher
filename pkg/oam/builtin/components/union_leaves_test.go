@@ -54,10 +54,11 @@ func unionLeafApp(compType string, props map[string]any) *oam.Application {
 func unionLeafAuthored(compType string, props map[string]any) ([]client.Object, error) {
 	tr := unionLeafTransformer()
 	app := unionLeafApp(compType, props)
-	if err := tr.ValidateAuthoredProperties(app); err != nil {
+	validated, err := tr.ValidateAuthoredProperties(app)
+	if err != nil {
 		return nil, err
 	}
-	return unionLeafGenerate(tr, app)
+	return unionLeafGenerate(tr, validated)
 }
 
 // unionLeafEmitted has a lowering rule emit the same component, so the property

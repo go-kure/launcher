@@ -62,10 +62,11 @@ func npPortAuthored(port any) ([]client.Object, error) {
 		Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
 		Traits:     []oam.Trait{{Type: "networkpolicy", Properties: npPortTraitProps(port)}},
 	})
-	if err := tr.ValidateAuthoredProperties(app); err != nil {
+	validated, err := tr.ValidateAuthoredProperties(app)
+	if err != nil {
 		return nil, err
 	}
-	return npPortGenerate(tr, app)
+	return npPortGenerate(tr, validated)
 }
 
 func npPortEmitted(port any) ([]client.Object, error) {

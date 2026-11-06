@@ -2521,8 +2521,9 @@ checked on its own copy of its properties, so checking it cannot strip a reserve
 (go-kure/launcher#626). `Transform` does not
 shape-check trait properties either (it enforces only their platform-reserved keys): like
 any authored document, each parsed output document must go through
-`ValidateAuthoredProperties`, after parameter substitution, before `Transform` (see its
-paragraph under Property schemas below). Without it, a raw rule's `enablePDB: "true"` on
+`ValidateAuthoredProperties`, after parameter substitution, before `Transform`, which then
+takes the document the validator returned (see its paragraph under Property schemas
+below). Without it, a raw rule's `enablePDB: "true"` on
 a trait whose schema declares a boolean builds cleanly and is silently dropped. Before
 go-kure/launcher#357 `LowerRaws` schema-checked emitted traits itself; a caller that
 relied on that must now add the `ValidateAuthoredProperties` call.
@@ -3165,6 +3166,16 @@ first (after any parameter substitution, with the bindings `EvaluateProfile`
 returned) to get the same guarantee `kurel build` gives. `ValidateAuthoredProperties`
 is the same check for a caller with no profile.
 
+The validators return the document they validated, together with the error:
+`validated, err := tr.ValidateAuthoredProperties(app)`. It is a copy of `app` whose
+property trees carry the result of the check: an explicit nested `null` is stripped,
+and a named scalar or a typed collection is rewritten to the plain Go shape a handler
+reads. The `app` argument is never edited, for a plain type name and for a declared
+type identity alike (go-kure/launcher#1282). `Transform` strips and normalizes
+nothing itself, so **`Transform` the document the validator returned**, not `app`: a
+nested `null` in `app` still reaches the handler as `nil`. On an error the returned
+document is nil and `app` is as it was authored. A nil `app` returns nil and no error.
+
 Authored policies are checked the same way, after every component, in document order:
 against the `PolicyHandler` registered for the type, else the `PolicyLoweringRule`
 claiming it. The built-in policy handlers each declare a `PropertySchema`, so a
@@ -3199,7 +3210,8 @@ Nested `Required`, inside an object the author did write, is enforced
   variant plus the feature-gate check (`PropertySchema.Gate`, above) for a cluster at
   `target`, a `*KubernetesVersion` (`ClusterProfileSpec.TargetVersion` returns the
   profile's). Everything the capability variant refuses is refused first. A nil `target`
-  is an unknown version, and the result is the capability variant's. `Transform` does not
+  is an unknown version, and the result is the capability variant's, the validated copy
+  included. `Transform` does not
   read the version: the check only refuses, so an accepted document renders the same at
   any version. `ParseKubernetesVersion` takes `1.35`, `v1.35` and `v1.35.2` (patch ignored)
   and refuses anything else, a major other than 1 included.

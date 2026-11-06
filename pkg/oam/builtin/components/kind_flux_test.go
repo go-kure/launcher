@@ -456,7 +456,7 @@ func TestArtifactGenerator_ManagedNamespacesReasonAtAuthoredCheck(t *testing.T) 
 					Name: "gen", Type: "artifactgenerator", Properties: withProperty(artifactGeneratorMinimal(), tc.key, tc.value),
 				}}},
 			}
-			err := tr.ValidateAuthoredProperties(app)
+			_, err := tr.ValidateAuthoredProperties(app)
 			if err == nil || !strings.Contains(err.Error(), `unsupported field "`+tc.key+`"`) {
 				t.Fatalf("ValidateAuthoredProperties: error = %v, want the unsupported-field error", err)
 			}
@@ -1026,7 +1026,7 @@ func TestFluxNotificationKinds_RemovedKeyHint(t *testing.T) {
 				Metadata: oam.Metadata{Name: "shop", Namespace: "shop"},
 				Spec:     oam.ApplicationSpec{Components: []oam.Component{{Name: "notify", Type: tc.typ, Properties: props()}}},
 			}
-			authored := tr.ValidateAuthoredProperties(app)
+			_, authored := tr.ValidateAuthoredProperties(app)
 			if authored == nil || !strings.Contains(authored.Error(), `unsupported field "`+tc.key+`"`) {
 				t.Fatalf("ValidateAuthoredProperties: error = %v, want the unsupported-field error", authored)
 			}

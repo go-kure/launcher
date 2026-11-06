@@ -144,9 +144,9 @@ func TestValidateAuthoredPropertiesWithCapabilities_NestedRequired(t *testing.T)
 			app := issuerApp("issuer", tc.props)
 			var err error
 			if tc.plain {
-				err = tr.ValidateAuthoredProperties(app)
+				_, err = tr.ValidateAuthoredProperties(app)
 			} else {
-				err = tr.ValidateAuthoredPropertiesWithCapabilities(app, tc.caps)
+				_, err = tr.ValidateAuthoredPropertiesWithCapabilities(app, tc.caps)
 			}
 			if tc.wantNone {
 				if err != nil {
@@ -176,7 +176,7 @@ func TestValidateAuthoredPropertiesWithCapabilities_DoesNotMutateHandlerSchema(t
 	app := authoredApp("webservice", map[string]any{"image": "nginx"},
 		Trait{Type: "issuer", Properties: map[string]any{"secretName": "tls"}})
 	caps := issuerBinding("issuer", map[string]any{"issuerRef": map[string]any{"name": "ca"}})
-	if err := tr.ValidateAuthoredPropertiesWithCapabilities(app, caps); err != nil {
+	if _, err := tr.ValidateAuthoredPropertiesWithCapabilities(app, caps); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !shared["issuerRef"].Properties["name"].Required {

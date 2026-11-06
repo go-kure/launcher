@@ -100,10 +100,11 @@ func transformDocument(appData, profileData []byte, fluxNamespace string) (*stac
 	if err != nil {
 		return nil, err
 	}
-	if err := transformer.ValidateAuthoredPropertiesWithCapabilities(app, evaluated.Spec.Capabilities); err != nil {
+	validated, err := transformer.ValidateAuthoredPropertiesWithCapabilities(app, evaluated.Spec.Capabilities)
+	if err != nil {
 		return nil, err
 	}
-	return transformer.Transform(app, oam.TransformContext{
+	return transformer.Transform(validated, oam.TransformContext{
 		ClusterID:     "local",
 		Capabilities:  evaluated.Spec.Capabilities,
 		Domain:        kurelDomain,

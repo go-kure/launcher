@@ -403,10 +403,11 @@ func labelReachBuild(t *testing.T, object map[string]any) error {
 	if err != nil {
 		t.Fatalf("parsing: %v\n%s", err, doc)
 	}
-	if err := transformer.ValidateAuthoredProperties(app); err != nil {
+	validated, err := transformer.ValidateAuthoredProperties(app)
+	if err != nil {
 		t.Fatalf("validating: %v\n%s", err, doc)
 	}
-	cluster, err := transformer.Transform(app, oam.TransformContext{
+	cluster, err := transformer.Transform(validated, oam.TransformContext{
 		Domain:               kurelDomain,
 		ReservedMetadataKeys: []string{"platform.example/", "example.org/tenant"},
 	})

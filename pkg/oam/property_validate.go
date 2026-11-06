@@ -155,7 +155,8 @@ func validateObjectProperties(schema map[string]PropertySchema, exclusive []Excl
 		// (enforceAuthoredReservations at the start of every lowerDocumentBody round
 		// and before a document rule, lowerDocumentBody's pre-rule checks) and again
 		// in createApplications or applyTraits; ValidateAuthoredProperties, which
-		// strips a nested null here before Transform runs, checks the document first
+		// strips a nested null here, in the copy it returns for Transform to take
+		// (go-kure/launcher#1282), checks the document as authored first
 		// (enforceDocumentReservations, go-kure/launcher#635). A component or trait a rule emitted,
 		// whose properties are stripped here, is either synthesized and exempt, or —
 		// output of a rule whose input was not checked — checked by

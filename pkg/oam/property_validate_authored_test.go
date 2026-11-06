@@ -122,7 +122,7 @@ func TestValidateAuthoredProperties(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := newSchemaTransformer().ValidateAuthoredProperties(tc.app)
+			_, err := newSchemaTransformer().ValidateAuthoredProperties(tc.app)
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Fatalf("expected no error, got %v", err)
@@ -146,12 +146,12 @@ func TestValidateAuthoredProperties_ConsultsLoweringRuleSchemas(t *testing.T) {
 	tr.RegisterComponentLowering(schemaComponentLoweringRule{typ: "widget"})
 	tr.RegisterTraitLowering(schemaTraitLoweringRule{typ: "route"})
 
-	err := tr.ValidateAuthoredProperties(authoredApp("widget", map[string]any{"replicaz": 1}))
+	_, err := tr.ValidateAuthoredProperties(authoredApp("widget", map[string]any{"replicaz": 1}))
 	if err == nil || !strings.Contains(err.Error(), `unsupported field "replicaz"`) {
 		t.Errorf("component lowering rule schema not consulted: err = %v", err)
 	}
 
-	err = tr.ValidateAuthoredProperties(authoredApp("webservice", map[string]any{"image": "nginx"},
+	_, err = tr.ValidateAuthoredProperties(authoredApp("webservice", map[string]any{"image": "nginx"},
 		Trait{Type: "route", Properties: map[string]any{"hostnamez": []any{"a"}}}))
 	if err == nil || !strings.Contains(err.Error(), `unsupported field "hostnamez"`) {
 		t.Errorf("trait lowering rule schema not consulted: err = %v", err)
@@ -236,7 +236,7 @@ func TestValidateAuthoredProperties_Policies(t *testing.T) {
 			tr := newSchemaTransformer()
 			tr.RegisterPolicy("schemaless", &stubPolicyHandler{typ: "schemaless"})
 			tr.RegisterPolicyLowering(requiredSchemaPolicyLoweringRule{typ: "higher-dependency"})
-			err := tr.ValidateAuthoredProperties(tc.app)
+			_, err := tr.ValidateAuthoredProperties(tc.app)
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Fatalf("expected no error, got %v", err)
@@ -253,18 +253,25 @@ func TestValidateAuthoredProperties_Policies(t *testing.T) {
 // assigns props[key] rather than discarding validatePropertyValue's return: the
 // handler downstream must see the shape validation actually checked. A rule or a
 // decoder can hand over a typed slice, and asArrayValue normalizes it to []any —
-// dropping that would leave the handler reading the un-normalized original.
+// dropping that would leave the handler reading the un-normalized original. The
+// write-back lands in the copy the validator returns; the caller's document keeps
+// the typed slice (go-kure/launcher#1282).
 func TestValidateAuthoredProperties_WritesNormalizedValuesBack(t *testing.T) {
 	props := map[string]any{
 		"env": []map[string]any{{"name": "LOG_LEVEL", "value": "info"}},
 	}
 
-	if err := newSchemaTransformer().ValidateAuthoredProperties(authoredApp("rich", props)); err != nil {
+	validated, err := newSchemaTransformer().ValidateAuthoredProperties(authoredApp("rich", props))
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if _, ok := props["env"].([]any); !ok {
-		t.Errorf("env = %T, want []any — the normalized value was not written back", props["env"])
+	got := validated.Spec.Components[0].Properties["env"]
+	if _, ok := got.([]any); !ok {
+		t.Errorf("env = %T, want []any — the normalized value was not written back", got)
+	}
+	if _, ok := props["env"].([]map[string]any); !ok {
+		t.Errorf("the caller's env = %T, want the typed slice it passed in", props["env"])
 	}
 }
 
@@ -298,7 +305,7 @@ func TestValidateAuthoredProperties_EngineScopeIsAcceptedOnAnyTrait(t *testing.T
 	// The pvc handler declares size and accessModes, and no `scope`.
 	app := authoredApp("webservice", map[string]any{"image": "nginx"},
 		Trait{Type: "pvc", Properties: map[string]any{"size": "1Gi", "scope": "fast"}})
-	if err := newSchemaTransformer().ValidateAuthoredProperties(app); err != nil {
+	if _, err := newSchemaTransformer().ValidateAuthoredProperties(app); err != nil {
 		t.Errorf("engine-read `scope` must be accepted on a trait whose handler does not declare it, got: %v", err)
 	}
 
@@ -309,7 +316,7 @@ func TestValidateAuthoredProperties_EngineScopeIsAcceptedOnAnyTrait(t *testing.T
 	tr.RegisterTraitLowering(schemaTraitLoweringRule{typ: "route"})
 	app = authoredApp("webservice", map[string]any{"image": "nginx"},
 		Trait{Type: "route", Properties: map[string]any{"hostnames": []any{"a"}, "scope": "public"}})
-	if err := tr.ValidateAuthoredProperties(app); err != nil {
+	if _, err := tr.ValidateAuthoredProperties(app); err != nil {
 		t.Errorf("engine-read `scope` must be accepted on a lowering-rule trait, got: %v", err)
 	}
 
@@ -318,7 +325,7 @@ func TestValidateAuthoredProperties_EngineScopeIsAcceptedOnAnyTrait(t *testing.T
 	// this whole check exists to eliminate.
 	app = authoredApp("webservice", map[string]any{"image": "nginx"},
 		Trait{Type: "pvc", Properties: map[string]any{"size": "1Gi", "scope": 3}})
-	err := tr.ValidateAuthoredProperties(app)
+	_, err := tr.ValidateAuthoredProperties(app)
 	if err == nil || !strings.Contains(err.Error(), "expected string, got int") {
 		t.Errorf("a non-string `scope` must be rejected, got: %v", err)
 	}
@@ -327,7 +334,7 @@ func TestValidateAuthoredProperties_EngineScopeIsAcceptedOnAnyTrait(t *testing.T
 	// author to delete a property that is in fact legal.
 	app = authoredApp("webservice", map[string]any{"image": "nginx"},
 		Trait{Type: "pvc", Properties: map[string]any{"scop": "fast"}})
-	err = tr.ValidateAuthoredProperties(app)
+	_, err = tr.ValidateAuthoredProperties(app)
 	if err == nil || !strings.Contains(err.Error(), "allowed: accessModes, scope, size") {
 		t.Errorf("the allowed list must name `scope`, got: %v", err)
 	}
@@ -335,7 +342,7 @@ func TestValidateAuthoredProperties_EngineScopeIsAcceptedOnAnyTrait(t *testing.T
 	// Trait position only. Nothing reads a `scope` off a COMPONENT — the two
 	// resolveCapability call sites both take a Trait — so accepting it there would
 	// re-open the silent drop for a property that does nothing.
-	err = tr.ValidateAuthoredProperties(authoredApp("webservice", map[string]any{"image": "nginx", "scope": "fast"}))
+	_, err = tr.ValidateAuthoredProperties(authoredApp("webservice", map[string]any{"image": "nginx", "scope": "fast"}))
 	if err == nil || !strings.Contains(err.Error(), `unsupported field "scope"`) {
 		t.Errorf("`scope` is a trait-level property and must not be accepted on a component, got: %v", err)
 	}
@@ -355,7 +362,7 @@ func TestValidateAuthoredProperties_EngineScopeDoesNotMutateHandlerSchema(t *tes
 
 	app := authoredApp("webservice", map[string]any{"image": "nginx"},
 		Trait{Type: "pvc", Properties: map[string]any{"size": "1Gi", "scope": "fast"}})
-	if err := tr.ValidateAuthoredProperties(app); err != nil {
+	if _, err := tr.ValidateAuthoredProperties(app); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -419,7 +426,7 @@ func TestValidateAuthoredProperties_EngineScopeCheckedWithoutHandlerSchema(t *te
 			// Half one: the engine-owned key is still type-checked.
 			app := authoredApp("webservice", map[string]any{"image": "nginx"},
 				Trait{Type: traitType, Properties: map[string]any{"scope": 3}})
-			err := tr.ValidateAuthoredProperties(app)
+			_, err := tr.ValidateAuthoredProperties(app)
 			want := `component "web": trait "` + traitType + `": properties.scope: expected string, got int`
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("a non-string `scope` on a schema-less trait must be rejected with %q, got: %v", want, err)
@@ -429,7 +436,7 @@ func TestValidateAuthoredProperties_EngineScopeCheckedWithoutHandlerSchema(t *te
 			// check them against, so an undeclared key must not become an error here.
 			app = authoredApp("webservice", map[string]any{"image": "nginx"},
 				Trait{Type: traitType, Properties: map[string]any{"scope": "fast", "anything": 1, "nested": map[string]any{"x": true}}})
-			if err := tr.ValidateAuthoredProperties(app); err != nil {
+			if _, err := tr.ValidateAuthoredProperties(app); err != nil {
 				t.Errorf("handler-owned keys on a schema-less trait must stay accepted, got: %v", err)
 			}
 
@@ -437,7 +444,7 @@ func TestValidateAuthoredProperties_EngineScopeCheckedWithoutHandlerSchema(t *te
 			// a schema — it resolves the unscoped binding like omitting the key does.
 			app = authoredApp("webservice", map[string]any{"image": "nginx"},
 				Trait{Type: traitType, Properties: map[string]any{"scope": nil}})
-			if err := tr.ValidateAuthoredProperties(app); err != nil {
+			if _, err := tr.ValidateAuthoredProperties(app); err != nil {
 				t.Errorf("an explicit null `scope` must stay accepted, got: %v", err)
 			}
 		})

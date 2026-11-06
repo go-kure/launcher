@@ -264,7 +264,7 @@ func TestExclusive_Authored(t *testing.T) {
 				authoredApp("webservice", map[string]any{}, Trait{Type: "oneof", Properties: tc.props}),
 				authoredApp("webservice", map[string]any{}, Trait{Type: "oneof-rule", Properties: tc.props}),
 			} {
-				err := tr.ValidateAuthoredProperties(app)
+				_, err := tr.ValidateAuthoredProperties(app)
 				if tc.want == "" {
 					if err != nil {
 						t.Fatalf("unexpected error: %v", err)
@@ -329,7 +329,7 @@ func TestExclusive_AuthoredWithCapabilities(t *testing.T) {
 				caps = map[string]CapabilityBinding{"other": {Rendering: map[string]any{"source": map[string]any{"git": "repo"}}}}
 			}
 			app := authoredApp("webservice", map[string]any{}, Trait{Type: "oneof", Properties: tc.props})
-			err := tr.ValidateAuthoredPropertiesWithCapabilities(app, caps)
+			_, err := tr.ValidateAuthoredPropertiesWithCapabilities(app, caps)
 			if tc.want == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -355,7 +355,7 @@ func TestExclusive_DoesNotMutateHandlerSchema(t *testing.T) {
 	app := authoredApp("webservice", map[string]any{"image": "nginx"},
 		Trait{Type: "oneof", Properties: map[string]any{"source": map[string]any{"tag": "v1"}}})
 	caps := map[string]CapabilityBinding{"oneof": {Rendering: map[string]any{"source": map[string]any{"git": "repo"}}}}
-	if err := tr.ValidateAuthoredPropertiesWithCapabilities(app, caps); err != nil {
+	if _, err := tr.ValidateAuthoredPropertiesWithCapabilities(app, caps); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !shared["source"].Exclusive[0].Required {
@@ -518,10 +518,11 @@ func TestExclusive_ComponentCapabilityDefaults(t *testing.T) {
 			h := &oneOfDefaultsComponent{oneOfComponent: oneOfComponent{typ: "store"}}
 			tr := NewTransformer(map[string]ComponentHandler{"store": h}, nil)
 			app := storeApp(Component{Name: "data", Type: "store", Properties: tc.props})
-			if err := tr.ValidateAuthoredProperties(app); err != nil {
+			validated, err := tr.ValidateAuthoredProperties(app)
+			if err != nil {
 				t.Fatalf("ValidateAuthoredProperties: %v", err)
 			}
-			_, _, err := tr.TransformWithPolicy(app, TransformContext{Capabilities: caps})
+			_, _, err = tr.TransformWithPolicy(validated, TransformContext{Capabilities: caps})
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("TransformWithPolicy error = %v, want it to contain %q", err, tc.wantErr)
@@ -626,7 +627,8 @@ func TestExclusive_SchemaErrorsOnUnusedNodes(t *testing.T) {
 			tr := NewTransformer(map[string]ComponentHandler{"store": h}, nil)
 			props := map[string]any{}
 			maps.Copy(props, tc.props)
-			wantError(t, tr.ValidateAuthoredProperties(authoredApp("store", props)), tc.want)
+			_, err := tr.ValidateAuthoredProperties(authoredApp("store", props))
+			wantError(t, err, tc.want)
 			emitted := map[string]any{}
 			maps.Copy(emitted, tc.props)
 			wantError(t, validateTopLevelProperties(schema, oneOfTop(), emitted, "properties"), tc.want)
@@ -674,7 +676,8 @@ func TestExclusive_SchemaErrorsBeforeCapabilities(t *testing.T) {
 			)
 			app := authoredApp("webservice", map[string]any{}, Trait{Type: "oneof", Properties: map[string]any{"inline": "x", "source": tc.source}})
 			want := `properties.source: schema declares exclusive key "git" Required; a group's keys are optional, and the group's Required says one is set`
-			wantError(t, tr.ValidateAuthoredPropertiesWithCapabilities(app, caps), want)
+			_, err := tr.ValidateAuthoredPropertiesWithCapabilities(app, caps)
+			wantError(t, err, want)
 		})
 	}
 
@@ -686,7 +689,8 @@ func TestExclusive_SchemaErrorsBeforeCapabilities(t *testing.T) {
 		)
 		app := authoredApp("webservice", map[string]any{}, Trait{Type: "oneof", Properties: map[string]any{"inline": "x"}})
 		rendered := map[string]CapabilityBinding{"oneof": {Rendering: map[string]any{"source": map[string]any{}}}}
-		wantError(t, tr.ValidateAuthoredPropertiesWithCapabilities(app, rendered), want)
+		_, err := tr.ValidateAuthoredPropertiesWithCapabilities(app, rendered)
+		wantError(t, err, want)
 		// The merged properties' own check, which applyTraits and the lowering
 		// fixpoint run, reports it too.
 		schema := (&emptyObjectGroupTrait{}).PropertySchema()
@@ -727,7 +731,8 @@ func TestExclusive_SchemaErrorsBeforeCapabilities(t *testing.T) {
 		props := map[string]any{"inline": "x"}
 		rendered := map[string]CapabilityBinding{"oneof": {Rendering: map[string]any{"list": []any{"x"}}}}
 		app := authoredApp("webservice", map[string]any{}, Trait{Type: "oneof", Properties: props})
-		wantError(t, tr.ValidateAuthoredPropertiesWithCapabilities(app, rendered), want)
+		_, valErr := tr.ValidateAuthoredPropertiesWithCapabilities(app, rendered)
+		wantError(t, valErr, want)
 		built := storeApp(Component{Name: "web", Type: "webservice", Traits: []Trait{{Type: "oneof", Properties: props}}})
 		if _, err := tr.Transform(built, TransformContext{Capabilities: rendered}); err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("Transform error = %v, want it to contain %q", err, want)

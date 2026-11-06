@@ -572,7 +572,7 @@ func TestLookupsAgreeWithTransform(t *testing.T) {
 		t.Run("validate/"+ref, func(t *testing.T) {
 			app := makeApp("myapp", makeComponent("w", ref))
 			app.APIVersion, app.Kind = SupportedAPIVersion, "Application"
-			err := tr.ValidateAuthoredProperties(app)
+			_, err := tr.ValidateAuthoredProperties(app)
 			if (err != nil) != resolveRefuses[ref] {
 				t.Fatalf("ValidateAuthoredProperties(%q) error = %v, want a refusal = %v", ref, err, resolveRefuses[ref])
 			}
@@ -626,7 +626,7 @@ func TestUndeclaredPositionKeepsRegisteredNames(t *testing.T) {
 				if _, err := tr.ResolveTypes(app); err != nil {
 					t.Errorf("ResolveTypes(%q) = %v, want none", ref, err)
 				}
-				if err := tr.ValidateAuthoredProperties(app); err != nil {
+				if _, err := tr.ValidateAuthoredProperties(app); err != nil {
 					t.Errorf("ValidateAuthoredProperties(%q) = %v, want none", ref, err)
 				}
 			})

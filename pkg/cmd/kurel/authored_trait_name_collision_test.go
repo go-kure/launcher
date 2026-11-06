@@ -59,11 +59,12 @@ func transformErr(t *testing.T, appYAML string, ctx oam.TransformContext) error 
 	if err != nil {
 		t.Fatalf("parsing: %v", err)
 	}
-	if err := transformer.ValidateAuthoredProperties(app); err != nil {
+	validated, err := transformer.ValidateAuthoredProperties(app)
+	if err != nil {
 		t.Fatalf("validating: %v", err)
 	}
 	ctx.Domain = kurelDomain
-	_, err = transformer.Transform(app, ctx)
+	_, err = transformer.Transform(validated, ctx)
 	return err
 }
 

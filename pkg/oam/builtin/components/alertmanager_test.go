@@ -827,7 +827,8 @@ func TestAlertmanager_DeprecatedImageFields(t *testing.T) {
 	schema := h.PropertySchema()
 	authoredErr := func(props map[string]any) error {
 		app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{{Name: "main", Type: "alertmanager", Properties: props}}}}
-		return oam.NewTransformer(map[string]oam.ComponentHandler{"alertmanager": h}, nil).ValidateAuthoredProperties(app)
+		_, err := oam.NewTransformer(map[string]oam.ComponentHandler{"alertmanager": h}, nil).ValidateAuthoredProperties(app)
+		return err
 	}
 	if err := authoredErr(map[string]any{"image": amImage}); err != nil {
 		t.Fatalf("the authored check refuses a document with an image alone: %v", err)
