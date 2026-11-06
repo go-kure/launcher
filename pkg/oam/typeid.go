@@ -1,9 +1,9 @@
 package oam
 
 import (
+	"cmp"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -177,7 +177,9 @@ func (r *TypeRegistry) Register(id TypeID) error {
 	return nil
 }
 
-// IDs returns every registered identity, ordered by name and then version.
+// IDs returns every registered identity, ordered by name and then by version:
+// major, then alpha before beta before GA, then the number after the stage (see
+// versionLess).
 func (r *TypeRegistry) IDs() []TypeID {
 	var out []TypeID
 	for _, byVersion := range r.versions {
@@ -194,18 +196,66 @@ func (r *TypeRegistry) IDs() []TypeID {
 	return out
 }
 
-func versionLess(a, b string) bool {
-	ka, _ := normalizeTypeVersion(a)
-	kb, _ := normalizeTypeVersion(b)
-	pa, pb := strings.Split(strings.TrimPrefix(ka, "v"), "."), strings.Split(strings.TrimPrefix(kb, "v"), ".")
-	for i := 0; i < len(pa) && i < len(pb); i++ {
-		na, ea := strconv.Atoi(pa[i])
-		nb, eb := strconv.Atoi(pb[i])
-		if ea == nil && eb == nil && na != nb {
-			return na < nb
+// Stages of a version, in order: a Kubernetes alpha, a beta, and a v<semver>.
+const (
+	stageAlpha = iota
+	stageBeta
+	stageGA
+)
+
+// versionKey is the place of a version in the order of a type's versions
+// (go-kure/launcher#1288). The numbers are digit strings, which the grammar
+// writes without a leading zero, so they compare by length and then by text:
+// a number longer than an int still has its place. An invalid version has no
+// key; it is ordered after every valid one, by its text.
+type versionKey struct {
+	invalid bool
+	raw     string // the text, set only for an invalid version
+	major   string
+	stage   int
+	a, b    string // alpha and beta: the number after the stage, and "0"; GA: minor and patch
+}
+
+func parseVersionKey(v string) versionKey {
+	norm, err := normalizeTypeVersion(v)
+	if err != nil {
+		return versionKey{invalid: true, raw: v}
+	}
+	rest := strings.TrimPrefix(norm, "v")
+	if parts := strings.Split(rest, "."); len(parts) == 3 {
+		return versionKey{major: parts[0], stage: stageGA, a: parts[1], b: parts[2]}
+	}
+	for stage, word := range [...]string{stageAlpha: "alpha", stageBeta: "beta"} {
+		if major, n, ok := strings.Cut(rest, word); ok {
+			return versionKey{major: major, stage: stage, a: n, b: "0"}
 		}
 	}
-	return ka < kb
+	return versionKey{invalid: true, raw: v} // normalizeTypeVersion accepts nothing else
+}
+
+func compareNumbers(a, b string) int {
+	return cmp.Or(cmp.Compare(len(a), len(b)), strings.Compare(a, b))
+}
+
+// versionLess orders versions by major, then stage (alpha, beta, GA), then the
+// number after the stage (alpha, beta) or the minor and patch (GA). It is a
+// strict weak ordering: the comparison is lexicographic over a fixed list of
+// totally ordered parts, and two spellings of one version (v2, v2.0, v2.0.0)
+// are the same key, so neither is less.
+func versionLess(a, b string) bool {
+	ka, kb := parseVersionKey(a), parseVersionKey(b)
+	if ka.invalid || kb.invalid {
+		if ka.invalid && kb.invalid {
+			return ka.raw < kb.raw
+		}
+		return kb.invalid
+	}
+	return cmp.Or(
+		compareNumbers(ka.major, kb.major),
+		cmp.Compare(ka.stage, kb.stage),
+		compareNumbers(ka.a, kb.a),
+		compareNumbers(ka.b, kb.b),
+	) < 0
 }
 
 // Resolve resolves ref, `name` or `name@version`, to one registered identity.
