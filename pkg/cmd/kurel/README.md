@@ -110,6 +110,13 @@ registered in both `builtinTraitHandlers()` and `pkg/oam`'s trait allowlist;
 build each one, and the `pvc-volume-claimname` fixture mounts a
 `persistentvolumeclaim` through a `pvc` volume's `claimName`.
 
+`kurel build` also declares every built-in type's identity (`registry.DeclareTypes`), so a
+document may author `type: webservice@v1` or `type: deployment.apps@v1`. The build
+resolves the reference to the registered type before it validates and lowers the
+document, and the plain name (`webservice`) keeps working. A reference that names no
+registered type or version, such as `webservice@v9`, refuses the build with an error that
+names the registered version (`v1`).
+
 The kind components of go-kure/launcher#790 are registered the same way. Each
 but `secret` is built by the fixture named after it, `<type>-component`. The
 table has one row per type, in the order of the types; a new kind's row goes

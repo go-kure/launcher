@@ -8,12 +8,15 @@ directly, so that error wrapping is consistent and machine-inspectable.
 
 ## Structured error types
 
-`ValidationError` is returned when a semantic constraint is violated. It serves two
+`ValidationError` is returned when a semantic constraint is violated. It serves three
 shapes:
 
 - **Enum errors** (unknown value): populate `Value` + `ValidValues` via
   `NewValidationError(field, value, component, validValues)`.
 - **Custom-message errors** (missing field, bad format): populate `Message`.
+- **Wrapping errors**: `Cause` holds the error being reported and `Unwrap` returns it, so
+  `errors.Is` and `errors.As` see through the `ValidationError`. An unresolved type
+  reference, for example, matches `oam.ErrTypeReferenceUnknown`.
 
 `ParseError` is returned when a document fails YAML parsing; it carries `Kind`,
 `File`, `Line`, `Column`, and the wrapped cause (`NewParseError(...)`), and supports
@@ -51,7 +54,7 @@ unconditionally.
 
 | Symbol | Purpose |
 |--------|---------|
-| `ValidationError`, `NewValidationError` | Semantic constraint violations (enum or custom). |
+| `ValidationError`, `NewValidationError` | Semantic constraint violations (enum, custom, or wrapping a cause). |
 | `ParseError`, `NewParseError` | YAML parse failures with location. |
 | `PatchError`, `NewPatchError` | Patch operations (`pkg/patch`) that fail to apply. |
 | `New`, `Errorf` | Create plain/formatted errors. |
