@@ -3168,10 +3168,12 @@ is the same check for a caller with no profile.
 
 The validators return the document they validated, together with the error:
 `validated, err := tr.ValidateAuthoredProperties(app)`. It is a copy of `app` whose
-property trees carry the result of the check: an explicit nested `null` is stripped,
-and a named scalar or a typed collection is rewritten to the plain Go shape a handler
-reads. The `app` argument is never edited, for a plain type name and for a declared
-type identity alike (go-kure/launcher#1282). `Transform` strips and normalizes
+property trees carry the result of the check: under the schema-declared fields, an
+explicit nested `null` is stripped, and a named scalar or a typed collection is
+rewritten to the plain Go shape a handler reads. A key accepted through
+`AdditionalProperties` is left as authored, as before. The `app` argument is never
+edited, for a plain type name and for a declared type identity alike
+(go-kure/launcher#1282). `Transform` strips and normalizes
 nothing itself, so **`Transform` the document the validator returned**, not `app`: a
 nested `null` in `app` still reaches the handler as `nil`. On an error the returned
 document is nil and `app` is as it was authored. A nil `app` returns nil and no error.

@@ -252,9 +252,10 @@ build error naming the field and the allowed set, rather than being silently dro
 is off by default at that release is refused too, naming the property, the gate, the
 release where it turns on and the profile's version (go-kure/launcher#1183); with no
 version nothing is checked, as before. The call returns the document it validated, a
-copy with each explicit nested `null` stripped and each value normalized, and `build`
-transforms that copy; the parsed application is never edited
-(go-kure/launcher#1282). The
+copy with each explicit nested `null` stripped and each value normalized under the
+schema-declared fields, and `build` transforms that copy; the parsed application is
+never edited (go-kure/launcher#1282). A key accepted through `AdditionalProperties`
+is left as authored, as before. The
 bindings are what let a trait leave a nested required key to the capability
 rendering (go-kure/launcher#765):
 
