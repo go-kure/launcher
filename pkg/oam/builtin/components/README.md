@@ -11866,7 +11866,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     database and its owner in place of the operator's default, `app`: both
     `database` and `owner` are required, not empty (the CloudNativePG webhook
     refuses one without the other), and they are written to the Cluster's
-    `spec.bootstrap.initdb`. Any other CloudNativePG initdb key (`secret`,
+    `spec.bootstrap.initdb`. An empty `initdb` is refused the same way; to get
+    the operator's default (database `app`, owned by `app`), leave `bootstrap`
+    out. Any other CloudNativePG initdb key (`secret`,
     `encoding`, `postInitSQL`, `import`, …) is refused
     (`bootstrap.initdb: unrecognized key "…"`), never dropped; each can be
     modelled later. The owner's connection Secret is the operator's, named
