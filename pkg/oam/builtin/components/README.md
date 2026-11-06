@@ -11859,7 +11859,8 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - **`bootstrap`** is declared key by key (go-kure/launcher#1269), and a key
     under it that the component does not read is refused naming it
     (`bootstrap: unrecognized key "…"`), where it used to be dropped. It reads
-    `initdb` and `pg_basebackup`, at most one of them and neither with
+    `initdb` and `pg_basebackup` (whose `source` is its only key; another
+    was dropped before and is refused now), at most one of them and neither with
     `recovery`, and refuses the former `bootstrap.recovery` with its
     replacement. `bootstrap.initdb` creates the Cluster with an application
     database and its owner in place of the operator's default, `app`: both

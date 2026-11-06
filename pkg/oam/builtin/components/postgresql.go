@@ -529,6 +529,10 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 			return nil, err
 		}
 		if hasPgBasebackup {
+			// The block is read for its source only; any other key was dropped.
+			if err := rejectUnknownKeys(pgbb, []string{"source"}, "bootstrap.pg_basebackup"); err != nil {
+				return nil, err
+			}
 			if config.BootstrapPgBasebackupSource, err = bootstrapSource(pgbb, "bootstrap.pg_basebackup.source", "the externalClusters entry the cluster is copied from"); err != nil {
 				return nil, err
 			}
