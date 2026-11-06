@@ -34,6 +34,13 @@ const (
 	// identity of its own to name. The path is the one the author would have written,
 	// so it is not in the properties the handler received.
 	SourcePolicy SourceKind = "policy"
+	// SourceBuiltin is a value launcher's own code filled because nothing else held
+	// one: a default a handler or a step after the policy chose, as opposed to one the
+	// environment policy supplied (SourcePolicy). Source.Ref names the fill, for
+	// example "postgresql.enablePDB". The path is the one the author would have
+	// written, so it is not in the properties the handler received. It is not the
+	// "handler-default" Detail, which says a trait handler filled a capability rendering.
+	SourceBuiltin SourceKind = "builtin"
 )
 
 // Source is the origin of one property value.
@@ -41,7 +48,8 @@ type Source struct {
 	Kind SourceKind `json:"kind" yaml:"kind"`
 	// Ref names the lowering rule of a SourceCopied or SourceRendered value, the
 	// capability key that supplied a SourceCapability value, and the Policy accessor
-	// that supplied a SourcePolicy value. For a
+	// that supplied a SourcePolicy value, and the fill that produced a SourceBuiltin
+	// value. For a
 	// value a component's nested filler supplied it is the capability the filler
 	// read, or the sorted keys joined by "," when it read several: the engine does
 	// not see which read produced which value.
@@ -49,7 +57,8 @@ type Source struct {
 	// From says, for a SourceCopied value, which kind the value had in the rule's
 	// input: SourceAuthored, SourceCapability or SourceRendered (a value an earlier
 	// rule built). A value copied through several rules carries the kind it had when
-	// it first entered them. Empty for every other kind, a SourcePolicy included.
+	// it first entered them. Empty for every other kind, SourcePolicy and
+	// SourceBuiltin included.
 	From SourceKind `json:"from,omitempty" yaml:"from,omitempty"`
 	// Detail says, for a SourceCapability value whose profile went through
 	// EvaluateProfileWithProvenance, which step of the profile evaluation supplied
@@ -61,7 +70,8 @@ type Source struct {
 	// exceeded, and empty otherwise. Empty means not determined, never "profile": it is
 	// empty for a profile evaluated with EvaluateProfile, for a binding built by
 	// hand, for a value a component's nested filler supplied, and for every kind
-	// but SourceCapability, the SourceCopied values taken from one, and SourcePolicy.
+	// but SourceCapability, the SourceCopied values taken from one, and SourcePolicy;
+	// a SourceBuiltin value has none.
 	Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
 }
 
@@ -100,8 +110,9 @@ type PropertySource struct {
 //
 // An entry exists for each leaf that holds a value: an empty object or an empty
 // list is its own leaf, and a null is none. The one exception is a value the
-// environment policy supplied (SourcePolicy): its entry is at the path the author
-// would have written, which the properties do not hold. The winner is reported,
+// environment policy supplied (SourcePolicy) or launcher's own code filled
+// (SourceBuiltin): its entry is at the path the author would have written, which
+// the properties do not hold. The winner is reported,
 // never a source it shadowed. Entries are sorted by (Component, Member, Trait,
 // TraitIndex, Path).
 type Provenance struct {
@@ -116,9 +127,11 @@ type Provenance struct {
 // TransformWithPolicy and Transform record nothing and pay nothing for the report.
 //
 // A default the environment policy supplied is in the report as SourcePolicy when
-// the handler that applied it reports it (PolicyDefaultReporter). No policy writes a
-// value into a property map, so the entry addresses a path the properties do not
-// hold. See the package README for what the report does not cover.
+// the handler that applied it reports it (PolicyDefaultReporter), and a value a step
+// after the policy filled is in it as SourceBuiltin when the config reports it
+// (BuiltinDefaultReporter). Neither writes a value into a property map, so the entry
+// addresses a path the properties do not hold. See the package README for what the
+// report does not cover.
 func (t *Transformer) TransformWithProvenance(app *Application, ctx TransformContext) (*stack.Cluster, *PolicyResult, *Provenance, error) {
 	rec := newProvenanceRecorder()
 	ctx.provenance = rec
@@ -852,6 +865,31 @@ func recordPolicyDefaults(rec *ownerRecorder, config any) {
 	}
 	for _, d := range reporter.PolicyDefaults() {
 		rec.policy(d.Path, d.Accessor, d.Detail)
+	}
+}
+
+// builtin records a value launcher's own code filled at path: the properties do not
+// hold it, and ref names the fill. Like policy, it replaces whatever is recorded at
+// path, and two writers of one path on one owner are last-wins.
+func (r *ownerRecorder) builtin(path, ref string) {
+	if r == nil {
+		return
+	}
+	r.entries[path] = Source{Kind: SourceBuiltin, Ref: ref}
+}
+
+// recordBuiltinDefaults reads the values a config's post-policy steps filled into
+// rec. It reads only: the config and the transform's output are unchanged.
+func recordBuiltinDefaults(rec *ownerRecorder, config any) {
+	if rec == nil {
+		return
+	}
+	reporter, ok := config.(BuiltinDefaultReporter)
+	if !ok {
+		return
+	}
+	for _, d := range reporter.BuiltinDefaults() {
+		rec.builtin(d.Path, d.Ref)
 	}
 }
 

@@ -628,6 +628,9 @@ type CnpgClusterConfig struct {
 	Spec      cnpgv1.ClusterSpec
 	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
 	oam.PolicyDefaultLog
+	// BuiltinDefaultLog holds the values ApplyPostgresqlDefaults filled
+	// (oam.BuiltinDefaultReporter).
+	oam.BuiltinDefaultLog
 
 	explicitInstances   bool
 	explicitStorageSize bool
@@ -791,12 +794,17 @@ func (c *CnpgClusterConfig) ApplyPolicy(p oam.Policy) error {
 //     spelling is set after the policy (not authored, no policy default), and
 //     the policy maximum ApplyPolicy saw is enforced on it with postgresql's
 //     text. ApplyPolicy cannot: the fallback is not a value the kind knows.
+//
+// Each value it sets is reported (oam.BuiltinDefaultReporter) as a builtin fill at
+// the path the author would have written: "enablePDB" always, "storage.size" only
+// when the fallback is written.
 func (c *CnpgClusterConfig) ApplyPostgresqlDefaults() error {
 	if c.Spec.EnablePDB != nil {
 		return errors.New("enablePDB is already set; the postgresql defaults decide it from the instance count")
 	}
 	enablePDB := c.Spec.Instances > 1
 	c.Spec.EnablePDB = &enablePDB
+	c.ReportBuiltinDefault("enablePDB", "postgresql.enablePDB")
 
 	if size, _ := cnpgStorageRequest(&c.Spec.StorageConfiguration, "storage"); size == "" {
 		const fallback = "1Gi"
@@ -804,6 +812,7 @@ func (c *CnpgClusterConfig) ApplyPostgresqlDefaults() error {
 			return err
 		}
 		c.Spec.StorageConfiguration.Size = fallback
+		c.ReportBuiltinDefault("storage.size", "postgresql.storage.size")
 	}
 	return nil
 }
