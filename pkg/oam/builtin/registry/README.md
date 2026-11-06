@@ -14,6 +14,7 @@ library instead of keeping its own list. `kurel build` registers exactly these
 | `TraitHandlers()` | every trait of `pkg/oam/builtin/traits` | `RegisterBuiltinTrait` |
 | `TraitLoweringRules()` | `expose` | `RegisterBuiltinTraitLowering` |
 | `PolicyHandlers()` | `dependency`, `placement` | `RegisterPolicy` |
+| `ComponentTypeIDs()`, `TraitTypeIDs()`, `PolicyTypeIDs()` | the identity of every type in the maps above | `DeclareTypes` |
 
 Each function returns a new map on every call: a caller may delete, replace or add
 entries, and the change reaches no other caller. A type launcher adds later appears in the
@@ -45,6 +46,20 @@ them: a consumer that implements them registers its own.
 
 See "Registering the builtins" in [`pkg/oam`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)
 for the registration sequence.
+
+## Type identity
+
+Every built-in type has one identity, held by `ComponentTypeIDs()`, `TraitTypeIDs()` and
+`PolicyTypeIDs()`, each keyed by the type's plain name. A type named for its one Kubernetes
+kind has the identity `kind.group@<API version>`: `deployment` is `deployment.apps@v1`, and
+a core kind has no group (`configmap@v1`). Every other type is
+`<name>.launcher.gokure.dev@v1`, with the domain held in `LauncherDomain`.
+
+`DeclareTypes(t)` declares all three maps on a transformer. Call it after the registration
+sequence, so every type it names is registered. It returns an error when two types claim one
+identity. A document may then author a type as `name@version`, and the transformer resolves
+it to the registered type; the grammar and the resolution rule are in
+[`pkg/oam`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam).
 
 ## Tests
 
