@@ -591,3 +591,45 @@ func TestLookupsAgreeWithTransform(t *testing.T) {
 		})
 	}
 }
+
+// A position where nothing is declared behaves as it did before type identities: a
+// type is its registered name, a name with `@` included, and every lookup agrees with
+// Transform about it. It holds with nothing declared anywhere, and with another
+// position declared (traits here), where the engine still resolves the whole document.
+func TestUndeclaredPositionKeepsRegisteredNames(t *testing.T) {
+	seen := &[]string{}
+	handlers := func() map[string]ComponentHandler {
+		return map[string]ComponentHandler{
+			"plain":  &epHandler{recordingComponentHandler{typ: "plain", seen: seen}},
+			"lit@v1": &epHandler{recordingComponentHandler{typ: "lit@v1", seen: seen}},
+		}
+	}
+	bare := NewTransformer(handlers(), nil)
+	traitsOnly := NewTransformer(handlers(), map[string]TraitHandler{"scaler": &stubTraitHandler{typ: "scaler"}})
+	if err := traitsOnly.DeclareTraitTypes(map[string]TypeID{"scaler": mustID(t, "scaler.launcher.gokure.dev@v1")}); err != nil {
+		t.Fatal(err)
+	}
+	for name, tr := range map[string]*Transformer{"nothing declared": bare, "traits declared": traitsOnly} {
+		for _, ref := range []string{"plain", "lit@v1"} {
+			t.Run(name+"/"+ref, func(t *testing.T) {
+				if _, ok := tr.ComponentHandlerFor(ref); !ok {
+					t.Errorf("ComponentHandlerFor(%q) found no handler", ref)
+				}
+				if eps, err := tr.ComponentEndpoints(&Component{Name: "x", Type: ref}); err != nil || len(eps) != 1 {
+					t.Errorf("ComponentEndpoints(%q) = %v, %v; want the provider's endpoints", ref, eps, err)
+				}
+				app := makeApp("myapp", makeComponent("w", ref))
+				app.APIVersion, app.Kind = SupportedAPIVersion, "Application"
+				if _, err := tr.Transform(app, TransformContext{}); err != nil {
+					t.Errorf("Transform(%q) = %v, want success", ref, err)
+				}
+				if _, err := tr.ResolveTypes(app); err != nil {
+					t.Errorf("ResolveTypes(%q) = %v, want none", ref, err)
+				}
+				if err := tr.ValidateAuthoredProperties(app); err != nil {
+					t.Errorf("ValidateAuthoredProperties(%q) = %v, want none", ref, err)
+				}
+			})
+		}
+	}
+}

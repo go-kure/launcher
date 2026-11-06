@@ -72,6 +72,13 @@ func sortedTypeKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+// declares reports whether any type is declared in this position. A nil index, and
+// one built from an empty declaration, declare nothing: the position behaves as it
+// did before type identities, a type is its plain registered name.
+func (ix *typeIndex) declares() bool {
+	return ix != nil && len(ix.byKey) > 0
+}
+
 // resolve resolves ref to a declared identity. A nil index declares nothing.
 func (ix *typeIndex) resolve(ref string) (TypeID, error) {
 	if ix == nil {
@@ -164,10 +171,11 @@ func (t *Transformer) componentKey(ref string) (string, bool) {
 	if errors.Is(err, ErrTypeReferenceAmbiguous) {
 		return "", false
 	}
-	// A reference with a version can only be an identity, and Transform refuses one
-	// that does not resolve, so it never falls back to a handler registered under
-	// that text.
-	if !strings.Contains(ref, "@") && t.isComponentKey(ref) {
+	// Where a type is declared, a reference with a version can only be an identity,
+	// and Transform refuses one that does not resolve, so it never falls back to a
+	// handler registered under that text. Where nothing is declared a type is its
+	// registered name, `@` included, and Transform dispatches on it as it always did.
+	if t.isComponentKey(ref) && (!t.componentTypes.declares() || !strings.Contains(ref, "@")) {
 		return ref, true
 	}
 	return "", false
@@ -213,14 +221,16 @@ const (
 // name it is registered under, or its identity, per form), and whether that is a
 // change. A reference that resolves is resolved
 // first, so a name more than one type or version claims is refused as ambiguous
-// even when a handler is registered under it. An empty type and a plain name, one
+// even when a handler is registered under it. An empty type, any type in a position
+// where nothing is declared (its registered name stays what it is, `@` included),
+// and a plain name, one
 // without a version, that no declared identity names or that is not a valid
 // identity (a custom trait such as custom_metrics, or an unknown one) pass through
 // unchanged, so the refusal the later stage gives them (the allowlist, "no handler")
 // stays what it was. A reference with a version, which can only be an identity,
 // that does not resolve is refused here in the resolver's words.
 func resolveRef(ix *typeIndex, ref string, form typeForm) (string, bool, error) {
-	if ref == "" {
+	if ref == "" || !ix.declares() {
 		return ref, false, nil
 	}
 	id, err := ix.resolve(ref)
