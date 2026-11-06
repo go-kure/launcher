@@ -87,6 +87,32 @@ func (t *Transformer) ValidateAuthoredPropertiesWithCapabilities(app *Applicatio
 	if app == nil {
 		return nil
 	}
+	resolved, err := t.resolveAuthoredTypes(app)
+	if err != nil {
+		return err
+	}
+	return t.validateResolvedAuthored(resolved, capabilities)
+}
+
+// resolveAuthoredTypes returns app with every declared type identity (configmap@v1)
+// replaced by the plain name its handler is registered under, as Transform does on
+// entry; the Type fields of app are not changed. The authored checks look handlers
+// up by that plain name, so they run on the result. The property maps are shared
+// with app, so the nested-null strip of ValidateAuthoredProperties applies to them
+// as it does to a plain-name component. A reference that does not resolve is a
+// ValidationError whose Cause is the resolver's error, so errors.Is sees through it.
+func (t *Transformer) resolveAuthoredTypes(app *Application) (*Application, error) {
+	resolved, err := t.resolveTypes(app)
+	if err != nil {
+		return nil, typeValidationError(err)
+	}
+	return resolved, nil
+}
+
+// validateResolvedAuthored is the body ValidateAuthoredPropertiesWithCapabilities
+// and ValidateAuthoredPropertiesForTarget share, on an app resolveAuthoredTypes
+// has already resolved.
+func (t *Transformer) validateResolvedAuthored(app *Application, capabilities map[string]CapabilityBinding) error {
 	if err := t.enforceDocumentReservations(app); err != nil {
 		return err
 	}

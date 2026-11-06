@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -92,6 +93,9 @@ func TestParseWithExtraTypes_RefusesAnIdentityThatDoesNotResolve(t *testing.T) {
 			_, err := ParseWithExtraTypes(doc, nil, lowerable)
 			if err == nil || !strings.Contains(err.Error(), "v1") {
 				t.Fatalf("error %v, want a refusal naming the registered version v1", err)
+			}
+			if !errors.Is(err, ErrTypeReferenceUnknown) {
+				t.Errorf("error %v does not match ErrTypeReferenceUnknown", err)
 			}
 		})
 	}

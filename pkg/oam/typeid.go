@@ -73,7 +73,9 @@ func ValidateTypeIdentity(s string) (TypeID, error) {
 	if err := validateTypeName(name); err != nil {
 		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, s, err)
 	}
-	if _, err := normalizeTypeVersion(version); err != nil {
+	if key, err := normalizeTypeVersion(version); err != nil {
+		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, s, err)
+	} else if err := checkVersionForName(name, key); err != nil {
 		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, s, err)
 	}
 	return TypeID{Name: name, Version: version}, nil
@@ -94,6 +96,15 @@ func validateTypeName(name string) error {
 		if !re.MatchString(label) {
 			return fmt.Errorf("label %q is not lowercase letters, digits and hyphens (the first label starts with a letter)", label)
 		}
+	}
+	return nil
+}
+
+// checkVersionForName refuses an API version (v1beta1) on a launcher-domain
+// name: only a Kubernetes kind carries one, every other type carries v<semver>.
+func checkVersionForName(name, key string) error {
+	if strings.HasSuffix(name, ".launcher.gokure.dev") && apiVersionRe.MatchString(key) {
+		return fmt.Errorf("version %q is a Kubernetes API version, but a launcher type takes v<semver>", key)
 	}
 	return nil
 }
@@ -224,6 +235,9 @@ func (r *TypeRegistry) Resolve(ref string) (TypeID, error) {
 		}
 	}
 	key, err := normalizeTypeVersion(version)
+	if err == nil {
+		err = checkVersionForName(qualified, key)
+	}
 	if err != nil {
 		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, ref, err)
 	}

@@ -20,10 +20,19 @@ import (
 // capability variant's, so a document built without a version is judged as it was
 // before the version existed. The gate pass reads the document and changes nothing.
 func (t *Transformer) ValidateAuthoredPropertiesForTarget(app *Application, capabilities map[string]CapabilityBinding, target *KubernetesVersion) error {
-	if err := t.ValidateAuthoredPropertiesWithCapabilities(app, capabilities); err != nil {
+	if app == nil {
+		return nil
+	}
+	// The gate pass below looks schemas up by plain type name, so it reads the
+	// resolved document too (a declared type identity becomes its plain name).
+	app, err := t.resolveAuthoredTypes(app)
+	if err != nil {
 		return err
 	}
-	if app == nil || target == nil {
+	if err := t.validateResolvedAuthored(app, capabilities); err != nil {
+		return err
+	}
+	if target == nil {
 		return nil
 	}
 	for i := range app.Spec.Components {

@@ -63,6 +63,47 @@ spec:
 	}
 }
 
+// The authored-property check looks a handler up by the plain type name, so an
+// identity must be resolved first: an unknown property under configmap@v1 is
+// refused exactly as under configmap (go-kure/launcher#1258).
+func TestBuiltinTransformer_AuthoredPropertiesAreCheckedUnderAnIdentity(t *testing.T) {
+	for _, ref := range []string{"configmap", "configmap@v1"} {
+		t.Run(ref, func(t *testing.T) {
+			app := webserviceApp(map[string]any{"data": map[string]any{"a": "b"}, "bogus": 1})
+			app.Spec.Components[0].Type = ref
+			tr := newBuiltinTransformer()
+			for name, validate := range map[string]func() error{
+				"ValidateAuthoredProperties": func() error { return tr.ValidateAuthoredProperties(app) },
+				"ForTarget":                  func() error { return tr.ValidateAuthoredPropertiesForTarget(app, nil, nil) },
+			} {
+				err := validate()
+				if err == nil || !strings.Contains(err.Error(), `unsupported field "bogus"`) {
+					t.Errorf("%s with type %q: error %v, want an unsupported field refusal", name, ref, err)
+				}
+			}
+			if app.Spec.Components[0].Type != ref {
+				t.Errorf("the caller's component type changed to %q", app.Spec.Components[0].Type)
+			}
+		})
+	}
+}
+
+// An identity that does not resolve is refused by the authored-property check
+// with the resolver's error as the cause, on both entry points.
+func TestBuiltinTransformer_AuthoredPropertiesRefuseAnUnresolvedIdentity(t *testing.T) {
+	tr := newBuiltinTransformer()
+	app := webserviceApp(map[string]any{"image": "nginx:1"})
+	app.Spec.Components[0].Type = "webservice@v9"
+	for name, validate := range map[string]func() error{
+		"ValidateAuthoredProperties": func() error { return tr.ValidateAuthoredProperties(app) },
+		"ForTarget":                  func() error { return tr.ValidateAuthoredPropertiesForTarget(app, nil, nil) },
+	} {
+		if err := validate(); !stderrors.Is(err, oam.ErrTypeReferenceUnknown) {
+			t.Errorf("%s: error %v, want ErrTypeReferenceUnknown", name, err)
+		}
+	}
+}
+
 // Every built-in resolves by its identity to the type it is registered under,
 // in all three positions.
 func TestBuiltinTransformer_EveryTypeResolvesByItsIdentity(t *testing.T) {
