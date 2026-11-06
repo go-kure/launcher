@@ -1212,6 +1212,8 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 			}
 		}
+		// What those steps filled is read once they all ran, under the same owner.
+		recordBuiltinDefaults(rec, config)
 
 		// A config that rendered its chart for the policy knows its hook-group
 		// names now, and one the prefix resolved above makes too long is refused

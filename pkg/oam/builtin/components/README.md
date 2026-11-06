@@ -2328,7 +2328,11 @@ tiers, in precedence order:
    workload kinds, `cnpg-cluster`, `persistentvolumeclaim` and the `pvc` trait
    embed an `oam.PolicyDefaultLog`; the `scaler` trait implements the interface
    itself, so that its config stays comparable); a request lowered to the
-   authored limit (tier 3 below) carries the detail `capped-to-limit`.
+   authored limit (tier 3 below) carries the detail `capped-to-limit`. What
+   the postgresql defaults step fills after the policy (`enablePDB`, and the
+   `1Gi` `storage.size` fallback) is reported as a `builtin` entry
+   (`oam.BuiltinDefaultReporter`, embedded `oam.BuiltinDefaultLog` in
+   `cnpg-cluster`), not as `policy`.
 3. **Intrinsic handler default** — `buildResourceRequirements` (`common.go`)
    fills anything still unset at `Generate()` time: 100m CPU request, 128Mi
    memory request, and a memory limit mirroring the (possibly just-defaulted)

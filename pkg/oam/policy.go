@@ -179,6 +179,49 @@ func (l *PolicyDefaultLog) PolicyDefaults() []PolicyDefault {
 	return slices.Clone(l.defaults)
 }
 
+// BuiltinDefault is one value that launcher's own code filled after the policy
+// decided, because nothing else held one: not a Default* accessor of the Policy.
+type BuiltinDefault struct {
+	// Path is the property path the author would have written for the value, for
+	// example "enablePDB". The properties the handler received do not hold it.
+	Path string
+	// Ref names the fill, for example "postgresql.enablePDB".
+	Ref string
+}
+
+// BuiltinDefaultReporter is an optional interface of a config that a step after the
+// policy (Component.AfterPolicy) fills values on. The runtime reads it right after
+// those steps, and TransformWithProvenance reports each as SourceBuiltin under the
+// owner of the properties the config was built from. A config that does not
+// implement it reports nothing, and the transform's output never depends on it.
+type BuiltinDefaultReporter interface {
+	BuiltinDefaults() []BuiltinDefault
+}
+
+// BuiltinDefaultLog is the list a config embeds to implement BuiltinDefaultReporter.
+// The zero value is empty and ready to use.
+type BuiltinDefaultLog struct {
+	defaults []BuiltinDefault
+}
+
+// ReportBuiltinDefault records that launcher filled path. A path reported again
+// replaces its earlier report, so a step may run more than once.
+func (l *BuiltinDefaultLog) ReportBuiltinDefault(path, ref string) {
+	d := BuiltinDefault{Path: path, Ref: ref}
+	for i := range l.defaults {
+		if l.defaults[i].Path == path {
+			l.defaults[i] = d
+			return
+		}
+	}
+	l.defaults = append(l.defaults, d)
+}
+
+// BuiltinDefaults returns the fills reported so far, in the order reported.
+func (l *BuiltinDefaultLog) BuiltinDefaults() []BuiltinDefault {
+	return slices.Clone(l.defaults)
+}
+
 // NoopPolicy satisfies Policy with zero values:
 // no enforced limits, no defaults applied, security-sensitive boolean flags denied by default.
 // Security flags are plain bool; false means denied — this is intentional default-deny
