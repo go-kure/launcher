@@ -104,10 +104,12 @@ func (PostgresqlRule) UnsupportedFieldHint(key string) string {
 }
 
 // NestedUnsupportedFieldHint gives the document check's refusal of a key of
-// `backup`, of backup.objectStore or of recovery.source.objectStore the reason
-// the parser refuses it with.
+// `backup`, of `bootstrap`, of backup.objectStore or of
+// recovery.source.objectStore the reason the parser refuses it with.
 func (PostgresqlRule) NestedUnsupportedFieldHint(parents []string, key string) string {
 	switch path := strings.Join(parents, "."); path {
+	case "bootstrap":
+		return postgresqlRecoveryRefusedKeys[key]
 	case "backup":
 		return postgresqlBackupMovedKeys[key]
 	case "backup.objectStore", postgresqlRecoveryObjectStorePath:

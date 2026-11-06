@@ -2353,7 +2353,9 @@ and by scope, whatever component or trait emits it.
     barman-cloud plugin. `recovery.target` (point-in-time recovery: `time`, `lsn`, `xid`,
     `name`, `immediate`, with `backupID`, `timeline` and `exclusive`), `database`, `owner`
     and `secret` are the vendored type's; what CloudNativePG's webhook refuses without a
-    cluster is refused at build. Not with `bootstrap.pg_basebackup`.
+    cluster is refused at build. Not with `bootstrap.pg_basebackup` or `bootstrap.initdb`
+    (the latter reads `database` and `owner` only, both required; every other key under
+    `bootstrap` or `bootstrap.initdb` is refused, go-kure/launcher#1269).
   - A cluster that would archive its WAL into the folder it is recovered from is refused
     where launcher sees both stores; otherwise the plugin's own check applies.
   - Where the document orders its components, the Cluster is ordered after the inline

@@ -133,8 +133,36 @@
   },
   "bootstrap": {
     "type": "object",
-    "description": "Cluster bootstrap by pg_basebackup: pg_basebackup.source names the externalClusters entry the cluster is copied from. A recovery from an object store is recovery.",
-    "additionalProperties": true
+    "description": "How the Cluster is created: initdb or pg_basebackup, at most one, and not with recovery. A bootstrap is read only when the Cluster is created; set on a component whose Cluster exists already, it changes nothing. A key not listed here is refused.",
+    "properties": {
+      "initdb": {
+        "type": "object",
+        "description": "Create the Cluster with an application database and its owner, in place of the operator's default, app. Both keys together; any other CloudNativePG initdb key is refused.",
+        "properties": {
+          "database": {
+            "type": "string",
+            "description": "Required, not empty. The name of the application database.",
+            "required": true
+          },
+          "owner": {
+            "type": "string",
+            "description": "Required, not empty. The role that owns the application database.",
+            "required": true
+          }
+        }
+      },
+      "pg_basebackup": {
+        "type": "object",
+        "description": "Copy the Cluster from another cluster with pg_basebackup.",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Required, not empty. The name of the externalClusters entry the cluster is copied from.",
+            "required": true
+          }
+        }
+      }
+    }
   },
   "clusterObjectName": {
     "type": "string",

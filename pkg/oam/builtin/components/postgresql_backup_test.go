@@ -424,6 +424,8 @@ func TestPostgresqlBackup_UnsupportedFieldHints(t *testing.T) {
 		{[]string{"backup", "objectStore"}, "serverName", "backup.objectStore.serverName: not allowed (the ObjectStore CRD forbids it); use backup.serverName"},
 		{[]string{"backup", "objectStore"}, "azureCredentials", "backup.objectStore.azureCredentials: not supported"},
 		{[]string{"pooler"}, "destinationPath", ""},
+		{[]string{"bootstrap"}, "recovery", "bootstrap.recovery: moved to recovery"},
+		{[]string{"bootstrap"}, "initdbb", ""},
 	} {
 		var got string
 		if tc.parents == nil {
