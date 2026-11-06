@@ -1,10 +1,10 @@
 package oam
 
 import (
-	"errors"
-	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // typeIndex is the identity side of one position (components, traits or
@@ -37,13 +37,13 @@ func (ix *typeIndex) with(position string, ids map[string]TypeID, registered fun
 	}
 	for _, key := range sortedTypeKeys(ids) {
 		if !registered(key) {
-			return nil, fmt.Errorf("%w: no %s handler or lowering rule is registered for %q", ErrTypeRegistration, position, key)
+			return nil, errors.Errorf("%w: no %s handler or lowering rule is registered for %q", ErrTypeRegistration, position, key)
 		}
 		if prev, dup := out.byKey[key]; dup {
-			return nil, fmt.Errorf("%w: %s type %q is already declared as %s", ErrTypeRegistration, position, key, prev)
+			return nil, errors.Errorf("%w: %s type %q is already declared as %s", ErrTypeRegistration, position, key, prev)
 		}
 		if err := out.add(key, ids[key]); err != nil {
-			return nil, fmt.Errorf("%s type %q: %w", position, key, err)
+			return nil, errors.Errorf("%s type %q: %w", position, key, err)
 		}
 	}
 	return out, nil
@@ -75,7 +75,7 @@ func sortedTypeKeys[V any](m map[string]V) []string {
 // resolve resolves ref to a declared identity. A nil index declares nothing.
 func (ix *typeIndex) resolve(ref string) (TypeID, error) {
 	if ix == nil {
-		return TypeID{}, fmt.Errorf("%w %q: no types are declared", ErrTypeReferenceUnknown, ref)
+		return TypeID{}, errors.Errorf("%w %q: no types are declared", ErrTypeReferenceUnknown, ref)
 	}
 	return ix.reg.Resolve(ref)
 }
@@ -152,18 +152,22 @@ func (t *Transformer) ResolvePolicyType(ref string) (TypeID, error) {
 }
 
 // componentKey returns the plain type name an authored component type is
-// registered under, and whether there is one. A plain name registered as it is
-// stays itself, so a type nobody declared an identity for behaves as it always
-// did.
+// registered under, and whether there is one. A declared identity or short name
+// resolves first, so a name that more than one type or version claims has no key
+// even when a handler is registered under it. A plain name nobody declared an
+// identity for, registered as it is, stays itself and behaves as it always did.
 func (t *Transformer) componentKey(ref string) (string, bool) {
+	id, err := t.componentTypes.resolve(ref)
+	if err == nil {
+		return t.componentTypes.keys[id], true
+	}
+	if errors.Is(err, ErrTypeReferenceAmbiguous) {
+		return "", false
+	}
 	if t.isComponentKey(ref) {
 		return ref, true
 	}
-	id, err := t.componentTypes.resolve(ref)
-	if err != nil {
-		return "", false
-	}
-	return t.componentTypes.keys[id], true
+	return "", false
 }
 
 // ComponentHandlerFor returns the handler of the component type ref names, an
@@ -191,18 +195,22 @@ func (t *Transformer) ComponentLoweringRuleFor(ref string) (ComponentLoweringRul
 }
 
 // resolveRef returns the plain type name an authored reference is registered
-// under, and whether that is a change. A plain name registered as it is, an
-// empty type, and a plain unknown name pass through unchanged, so the refusal the
-// later stage gives them (the allowlist, "no handler") stays what it was. A
-// reference with a version, which can only be an identity, that does not resolve
-// is refused here in the resolver's words, as is an ambiguous one.
-func resolveRef(ix *typeIndex, registered func(string) bool, ref string) (string, bool, error) {
-	if ref == "" || registered(ref) {
+// under, and whether that is a change. A reference that resolves is resolved
+// first, so a name more than one type or version claims is refused as ambiguous
+// even when a handler is registered under it. An empty type and a plain name, one
+// without a version, that no declared identity names or that is not a valid
+// identity (a custom trait such as custom_metrics, or an unknown one) pass through
+// unchanged, so the refusal the later stage gives them (the allowlist, "no handler")
+// stays what it was. A reference with a version, which can only be an identity,
+// that does not resolve is refused here in the resolver's words.
+func resolveRef(ix *typeIndex, ref string) (string, bool, error) {
+	if ref == "" {
 		return ref, false, nil
 	}
 	id, err := ix.resolve(ref)
 	if err != nil {
-		if errors.Is(err, ErrTypeReferenceUnknown) && !strings.Contains(ref, "@") {
+		plain := !strings.Contains(ref, "@")
+		if plain && (errors.Is(err, ErrTypeReferenceUnknown) || errors.Is(err, ErrTypeIdentityInvalid)) {
 			return ref, false, nil
 		}
 		return "", false, err
@@ -212,41 +220,25 @@ func resolveRef(ix *typeIndex, registered func(string) bool, ref string) (string
 }
 
 // typeIdentities is what resolving an application's authored type references
-// reads: the declared identities of each position, and whether a plain name is
-// registered there. A Transformer reads its own (live), and LowerableTypes carries
-// a snapshot of them to Parse, which has no Transformer.
+// reads: the declared identities of each position. A Transformer reads its own
+// (live), and LowerableTypes carries a snapshot of them to Parse, which has no
+// Transformer.
 type typeIdentities struct {
-	components, traits, policies   *typeIndex
-	isComponent, isTrait, isPolicy func(string) bool
+	components, traits, policies *typeIndex
 }
 
 func (t *Transformer) identities() *typeIdentities {
-	return &typeIdentities{
-		components: t.componentTypes, traits: t.traitTypes, policies: t.policyTypes,
-		isComponent: t.isComponentKey, isTrait: t.isTraitKey, isPolicy: t.isPolicyKey,
-	}
+	return &typeIdentities{components: t.componentTypes, traits: t.traitTypes, policies: t.policyTypes}
 }
 
-// snapshotIdentities is identities frozen at this call: a type registered or
-// declared on t later does not reach the result. It is nil when nothing is declared.
+// snapshotIdentities is identities frozen at this call: a type declared on t later
+// does not reach the result (a declaration replaces the index, it does not change
+// it). It is nil when nothing is declared.
 func (t *Transformer) snapshotIdentities() *typeIdentities {
 	if t.componentTypes == nil && t.traitTypes == nil && t.policyTypes == nil {
 		return nil
 	}
-	// The registered names, copied: a name registered on t later is not in them.
-	set := func(a, b []string) func(string) bool {
-		names := map[string]bool{}
-		for _, n := range slices.Concat(a, b) {
-			names[n] = true
-		}
-		return func(name string) bool { return names[name] }
-	}
-	return &typeIdentities{
-		components: t.componentTypes, traits: t.traitTypes, policies: t.policyTypes,
-		isComponent: set(mapKeys(t.componentHandlers), mapKeys(t.componentLoweringRules)),
-		isTrait:     set(mapKeys(t.traitHandlers), mapKeys(t.traitLoweringRules)),
-		isPolicy:    set(mapKeys(t.policyHandlers), mapKeys(t.policyLoweringRules)),
-	}
+	return t.identities()
 }
 
 // resolveTypes returns app with every authored type reference resolved to the
@@ -273,18 +265,18 @@ func (ids *typeIdentities) resolve(app *Application) (*Application, error) {
 	}
 	for i := range app.Spec.Components {
 		c := &app.Spec.Components[i]
-		key, changed, err := resolveRef(ids.components, ids.isComponent, c.Type)
+		key, changed, err := resolveRef(ids.components, c.Type)
 		if err != nil {
-			return nil, fmt.Errorf("component %q: %w", c.Name, err)
+			return nil, errors.Errorf("component %q: %w", c.Name, err)
 		}
 		if changed {
 			own()
 			out.Spec.Components[i].Type = key
 		}
 		for j := range c.Traits {
-			key, changed, err := resolveRef(ids.traits, ids.isTrait, c.Traits[j].Type)
+			key, changed, err := resolveRef(ids.traits, c.Traits[j].Type)
 			if err != nil {
-				return nil, fmt.Errorf("component %q trait[%d]: %w", c.Name, j, err)
+				return nil, errors.Errorf("component %q trait[%d]: %w", c.Name, j, err)
 			}
 			if changed {
 				own()
@@ -296,9 +288,9 @@ func (ids *typeIdentities) resolve(app *Application) (*Application, error) {
 	}
 	for i := range app.Spec.Policies {
 		p := &app.Spec.Policies[i]
-		key, changed, err := resolveRef(ids.policies, ids.isPolicy, p.Type)
+		key, changed, err := resolveRef(ids.policies, p.Type)
 		if err != nil {
-			return nil, fmt.Errorf("policy %q: %w", p.Name, err)
+			return nil, errors.Errorf("policy %q: %w", p.Name, err)
 		}
 		if changed {
 			own()

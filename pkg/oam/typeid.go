@@ -1,12 +1,12 @@
 package oam
 
 import (
-	"errors"
-	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // Type identity (go-kure/launcher#1258): a component, trait or policy type, or
@@ -68,15 +68,15 @@ func (t TypeID) ShortName() string {
 func ValidateTypeIdentity(s string) (TypeID, error) {
 	name, version, ok := strings.Cut(s, "@")
 	if !ok || version == "" {
-		return TypeID{}, fmt.Errorf("%w %q: want name@version", ErrTypeIdentityInvalid, s)
+		return TypeID{}, errors.Errorf("%w %q: want name@version", ErrTypeIdentityInvalid, s)
 	}
 	if err := validateTypeName(name); err != nil {
-		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, s, err)
+		return TypeID{}, errors.Errorf("%w %q: %w", ErrTypeIdentityInvalid, s, err)
 	}
 	if key, err := normalizeTypeVersion(version); err != nil {
-		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, s, err)
+		return TypeID{}, errors.Errorf("%w %q: %w", ErrTypeIdentityInvalid, s, err)
 	} else if err := checkVersionForName(name, key); err != nil {
-		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, s, err)
+		return TypeID{}, errors.Errorf("%w %q: %w", ErrTypeIdentityInvalid, s, err)
 	}
 	return TypeID{Name: name, Version: version}, nil
 }
@@ -86,7 +86,7 @@ func validateTypeName(name string) error {
 		return errors.New("empty name")
 	}
 	if len(name) > maxTypeNameLen {
-		return fmt.Errorf("name longer than %d characters", maxTypeNameLen)
+		return errors.Errorf("name longer than %d characters", maxTypeNameLen)
 	}
 	for i, label := range strings.Split(name, ".") {
 		re := laterLabelRe
@@ -94,7 +94,7 @@ func validateTypeName(name string) error {
 			re = firstLabelRe
 		}
 		if !re.MatchString(label) {
-			return fmt.Errorf("label %q is not lowercase letters, digits and hyphens (the first label starts with a letter)", label)
+			return errors.Errorf("label %q is not lowercase letters, digits and hyphens (the first label starts with a letter)", label)
 		}
 	}
 	return nil
@@ -104,7 +104,7 @@ func validateTypeName(name string) error {
 // name: only a Kubernetes kind carries one, every other type carries v<semver>.
 func checkVersionForName(name, key string) error {
 	if strings.HasSuffix(name, ".launcher.gokure.dev") && apiVersionRe.MatchString(key) {
-		return fmt.Errorf("version %q is a Kubernetes API version, but a launcher type takes v<semver>", key)
+		return errors.Errorf("version %q is a Kubernetes API version, but a launcher type takes v<semver>", key)
 	}
 	return nil
 }
@@ -124,7 +124,7 @@ func normalizeTypeVersion(v string) (string, error) {
 	if apiVersionRe.MatchString(v) {
 		return v, nil
 	}
-	return "", fmt.Errorf("version %q is neither v<major>[.<minor>[.<patch>]] nor a Kubernetes API version", v)
+	return "", errors.Errorf("version %q is neither v<major>[.<minor>[.<patch>]] nor a Kubernetes API version", v)
 }
 
 // TypeRegistry holds the identities of one position (components, traits or
@@ -146,23 +146,23 @@ func NewTypeRegistry() *TypeRegistry {
 // that would equal the qualified name of another type, in either order.
 func (r *TypeRegistry) Register(id TypeID) error {
 	if _, err := ValidateTypeIdentity(id.String()); err != nil {
-		return fmt.Errorf("%w: %w", ErrTypeRegistration, err)
+		return errors.Errorf("%w: %w", ErrTypeRegistration, err)
 	}
 	key, _ := normalizeTypeVersion(id.Version)
 	if prev, dup := r.versions[id.Name][key]; dup {
-		return fmt.Errorf("%w: %s duplicates %s", ErrTypeRegistration, id, prev)
+		return errors.Errorf("%w: %s duplicates %s", ErrTypeRegistration, id, prev)
 	}
 	short := id.ShortName()
 	// A dotted name's short name must not be another type's qualified name; and a
 	// bare name (a core kind) must not already be the short name of another type.
 	if short != id.Name {
 		if _, taken := r.versions[short]; taken {
-			return fmt.Errorf("%w: short name %q of %s is the qualified name of another type", ErrTypeRegistration, short, id)
+			return errors.Errorf("%w: short name %q of %s is the qualified name of another type", ErrTypeRegistration, short, id)
 		}
 	} else {
 		for other := range r.shorts[short] {
 			if other != id.Name {
-				return fmt.Errorf("%w: the name %s is the short name of %s", ErrTypeRegistration, id, other)
+				return errors.Errorf("%w: the name %s is the short name of %s", ErrTypeRegistration, id, other)
 			}
 		}
 	}
@@ -216,10 +216,10 @@ func versionLess(a, b string) bool {
 func (r *TypeRegistry) Resolve(ref string) (TypeID, error) {
 	name, version, hasVersion := strings.Cut(ref, "@")
 	if err := validateTypeName(name); err != nil {
-		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, ref, err)
+		return TypeID{}, errors.Errorf("%w %q: %w", ErrTypeIdentityInvalid, ref, err)
 	}
 	if hasVersion && version == "" {
-		return TypeID{}, fmt.Errorf("%w %q: empty version", ErrTypeIdentityInvalid, ref)
+		return TypeID{}, errors.Errorf("%w %q: empty version", ErrTypeIdentityInvalid, ref)
 	}
 	qualified, err := r.resolveName(name, ref)
 	if err != nil {
@@ -228,7 +228,7 @@ func (r *TypeRegistry) Resolve(ref string) (TypeID, error) {
 	byVersion := r.versions[qualified]
 	if !hasVersion {
 		if len(byVersion) != 1 {
-			return TypeID{}, fmt.Errorf("%w %q: %d versions registered (%s), name one", ErrTypeReferenceAmbiguous, ref, len(byVersion), r.versionList(qualified))
+			return TypeID{}, errors.Errorf("%w %q: %d versions registered (%s), name one", ErrTypeReferenceAmbiguous, ref, len(byVersion), r.versionList(qualified))
 		}
 		for _, id := range byVersion {
 			return id, nil
@@ -239,12 +239,12 @@ func (r *TypeRegistry) Resolve(ref string) (TypeID, error) {
 		err = checkVersionForName(qualified, key)
 	}
 	if err != nil {
-		return TypeID{}, fmt.Errorf("%w %q: %w", ErrTypeIdentityInvalid, ref, err)
+		return TypeID{}, errors.Errorf("%w %q: %w", ErrTypeIdentityInvalid, ref, err)
 	}
 	if id, ok := byVersion[key]; ok {
 		return id, nil
 	}
-	return TypeID{}, fmt.Errorf("%w %q: %s has no version %s (registered: %s)", ErrTypeReferenceUnknown, ref, qualified, version, r.versionList(qualified))
+	return TypeID{}, errors.Errorf("%w %q: %s has no version %s (registered: %s)", ErrTypeReferenceUnknown, ref, qualified, version, r.versionList(qualified))
 }
 
 func (r *TypeRegistry) resolveName(name, ref string) (string, error) {
@@ -256,7 +256,7 @@ func (r *TypeRegistry) resolveName(name, ref string) (string, error) {
 	claimants := r.shorts[name]
 	switch len(claimants) {
 	case 0:
-		return "", fmt.Errorf("%w %q: no registered type is named %q", ErrTypeReferenceUnknown, ref, name)
+		return "", errors.Errorf("%w %q: no registered type is named %q", ErrTypeReferenceUnknown, ref, name)
 	case 1:
 		for q := range claimants {
 			return q, nil
@@ -267,7 +267,7 @@ func (r *TypeRegistry) resolveName(name, ref string) (string, error) {
 		names = append(names, q)
 	}
 	sort.Strings(names)
-	return "", fmt.Errorf("%w %q: the short name %q is claimed by %s, use a qualified name", ErrTypeReferenceAmbiguous, ref, name, strings.Join(names, ", "))
+	return "", errors.Errorf("%w %q: the short name %q is claimed by %s, use a qualified name", ErrTypeReferenceAmbiguous, ref, name, strings.Join(names, ", "))
 }
 
 func (r *TypeRegistry) versionList(name string) string {

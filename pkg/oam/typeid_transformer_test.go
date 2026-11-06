@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
+
+	kureerrors "github.com/go-kure/launcher/pkg/errors"
 )
 
 // recordingComponentHandler records the type of every component it is handed.
@@ -285,5 +287,77 @@ func TestTransform_RefusesAnUnresolvableIdentity(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `component "w"`) || !strings.Contains(err.Error(), "v1") {
 		t.Errorf("error %q does not name the component and the registered versions", err)
+	}
+}
+
+// twoVersions returns a transformer where one type is registered under two plain
+// names, one per version, so the short name `widget` names both versions and a
+// handler is registered under that plain name too.
+func twoVersions(t *testing.T) *Transformer {
+	t.Helper()
+	tr := NewTransformer(map[string]ComponentHandler{
+		"widget":    &stubComponentHandler{typ: "widget"},
+		"widget-v2": &stubComponentHandler{typ: "widget-v2"},
+	}, nil)
+	if err := tr.DeclareComponentTypes(map[string]TypeID{
+		"widget":    mustID(t, "widget.acme.example@v1"),
+		"widget-v2": mustID(t, "widget.acme.example@v2"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return tr
+}
+
+// A name more than one version claims is refused even when a handler is registered
+// under that plain name: the declared identities are read first, so the handler of
+// one version never answers for an author who did not choose it.
+func TestAmbiguousShortNameIsNotDispatchedByPlainKey(t *testing.T) {
+	tr := twoVersions(t)
+	if _, ok := tr.ComponentHandlerFor("widget"); ok {
+		t.Error("ComponentHandlerFor answered for an ambiguous short name")
+	}
+	if _, ok := tr.ComponentLoweringRuleFor("widget"); ok {
+		t.Error("ComponentLoweringRuleFor answered for an ambiguous short name")
+	}
+	if _, ok := tr.ComponentHandlerFor("widget@v2"); !ok {
+		t.Error("ComponentHandlerFor did not answer for widget@v2")
+	}
+	app := makeApp("myapp", makeComponent("w", "widget"))
+	app.APIVersion, app.Kind = SupportedAPIVersion, "Application"
+	if _, err := tr.ResolveTypes(app); !errors.Is(err, ErrTypeReferenceAmbiguous) {
+		t.Errorf("ResolveTypes error = %v, want ErrTypeReferenceAmbiguous", err)
+	}
+	if _, err := tr.Transform(app, TransformContext{}); !errors.Is(err, ErrTypeReferenceAmbiguous) {
+		t.Errorf("Transform error = %v, want ErrTypeReferenceAmbiguous", err)
+	}
+}
+
+// A plain name that is not a declared identity, or not a valid one at all (a custom
+// trait such as custom_metrics), passes through to the later refusal, the allowlist
+// or "no handler", instead of failing as a type reference.
+func TestResolveTypes_PlainNamesNobodyDeclaredPassThrough(t *testing.T) {
+	tr, _ := declared(t)
+	app := &Application{Spec: ApplicationSpec{Components: []Component{
+		{Name: "a", Type: "widget", Traits: []Trait{{Type: "custom_metrics"}, {Type: "Unknown-Trait"}, {Type: "nothing"}}},
+	}, Policies: []ApplicationPolicy{{Name: "p", Type: "custom_policy"}}}}
+	got, err := tr.ResolveTypes(app)
+	if err != nil || got != app {
+		t.Fatalf("ResolveTypes = %v, %v; want the same application and no error", got, err)
+	}
+}
+
+// A refused type reference in Transform is a ValidationError, as Parse gives it,
+// and the resolver's sentinel is still reachable through it.
+func TestTransform_RefusalIsAValidationError(t *testing.T) {
+	tr, _ := declared(t)
+	app := makeApp("myapp", makeComponent("w", "widget@v9"))
+	app.APIVersion, app.Kind = SupportedAPIVersion, "Application"
+	_, err := tr.Transform(app, TransformContext{})
+	var ve *kureerrors.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("Transform error %T is not a *ValidationError: %v", err, err)
+	}
+	if !errors.Is(err, ErrTypeReferenceUnknown) {
+		t.Errorf("errors.Is(err, ErrTypeReferenceUnknown) is false for %v", err)
 	}
 }
