@@ -194,9 +194,9 @@ func TestValidate_ScalerTraitOnStatefulset(t *testing.T) {
 	}
 }
 
-func TestValidate_PolicyOpenEndedType(t *testing.T) {
-	// Policy types are open-ended in Phase 1 — any non-empty type is accepted.
-	// Arbitrary types like env-policy, my-custom-policy, etc. must not be rejected.
+func TestValidate_PolicyCustomTypeNeedsAClaim(t *testing.T) {
+	// A policy type outside validPolicyTypes is accepted only when the caller names it
+	// (customPolicyTypes, here); with no claim the check refuses it.
 	app := &Application{
 		APIVersion: SupportedAPIVersion,
 		Kind:       "Application",
@@ -212,9 +212,15 @@ func TestValidate_PolicyOpenEndedType(t *testing.T) {
 		},
 	}
 
-	err := validate(app)
-	if err != nil {
-		t.Errorf("unexpected error for open-ended policy types: %v", err)
+	claimed := map[string]bool{"env-policy": true, "my-custom-policy-type": true}
+	if err := validateWithExtraTypes(app, nil, nil, claimed, LowerableTypes{}); err != nil {
+		t.Errorf("unexpected error for claimed policy types: %v", err)
+	}
+	if err := validate(app); err == nil {
+		t.Error("policy types nobody claimed were accepted")
+	}
+	if err := validateWithExtraTypes(app, nil, nil, map[string]bool{"env-policy": true}, LowerableTypes{}); err == nil {
+		t.Error("claiming one policy type opened the other")
 	}
 }
 
@@ -228,8 +234,8 @@ func TestValidate_PolicyDuplicateName(t *testing.T) {
 				{Name: "web", Type: "webservice", Properties: map[string]any{"image": "nginx:1.25"}},
 			},
 			Policies: []ApplicationPolicy{
-				{Name: "my-policy", Type: "env-policy"},
-				{Name: "my-policy", Type: "another-type"},
+				{Name: "my-policy", Type: "dependency"},
+				{Name: "my-policy", Type: "placement"},
 			},
 		},
 	}

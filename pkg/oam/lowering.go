@@ -910,6 +910,11 @@ type LowerableTypes struct {
 	TraitTypes     []string
 	PolicyTypes    []string
 
+	// policyHandlerTypes is the policy types a Transformer has a handler for. They are
+	// terminal, so unlike PolicyTypes they stay in the settled document; Parse accepts
+	// them as it accepts validPolicyTypes. Set only by Transformer.LowerableTypes.
+	policyHandlerTypes []string
+
 	// identities is the type identities a Transformer declared (typeid.go), so that
 	// Parse accepts an authored `name@version` or qualified name as the type it
 	// resolves to. Set only by Transformer.LowerableTypes; nil, as in a literal, is
@@ -946,6 +951,12 @@ func (t *Transformer) LowerableTypes() LowerableTypes {
 	}
 	for k := range t.policyLoweringRules {
 		lt.PolicyTypes = append(lt.PolicyTypes, k)
+	}
+	// A policy handler's type is terminal, not lowerable, so it is not in PolicyTypes
+	// (whose names must disappear); it is carried apart for Parse to accept.
+	lt.policyHandlerTypes = make([]string, 0, len(t.policyHandlers))
+	for k := range t.policyHandlers {
+		lt.policyHandlerTypes = append(lt.policyHandlerTypes, k)
 	}
 	return lt
 }
@@ -1088,6 +1099,13 @@ func (t *Transformer) validateSettled(doc *Application, allowedAPIVersion string
 	for name := range t.componentHandlers {
 		customComponentTypes[name] = true
 	}
+	// A registered PolicyHandler is a terminal policy type for the same reason, and goes
+	// the same way: through customPolicyTypes, so the empty LowerableTypes below still
+	// holds.
+	customPolicyTypes := make(map[string]bool, len(t.policyHandlers))
+	for name := range t.policyHandlers {
+		customPolicyTypes[name] = true
+	}
 	// Accept allowedAPIVersion as well as SupportedAPIVersion (checkLoweredAPIVersion),
 	// validating a shallow copy under SupportedAPIVersion so every other check runs
 	// unchanged — validateWithExtraTypes enforces SupportedAPIVersion because it also
@@ -1100,7 +1118,7 @@ func (t *Transformer) validateSettled(doc *Application, allowedAPIVersion string
 		normalized.APIVersion = SupportedAPIVersion
 		doc = &normalized
 	}
-	return validateWithExtraTypes(doc, customTraitTypes, customComponentTypes, LowerableTypes{})
+	return validateWithExtraTypes(doc, customTraitTypes, customComponentTypes, customPolicyTypes, LowerableTypes{})
 }
 
 // checkLoweredAPIVersion accepts a lowered document under SupportedAPIVersion or
