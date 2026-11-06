@@ -1319,7 +1319,8 @@ refused when it is read, naming both entries (go-kure/launcher#1226). A name in
 either list must also be a DNS-1123 label, as the main container's name is:
 lowercase alphanumerics and `-`, starting and ending with an alphanumeric, no
 dots, at most 63 characters. Any other is refused, naming the entry
-(go-kure/launcher#1254). `job` and
+(go-kure/launcher#1254), and again when the pod is generated, so a config built
+by hand or changed after it was read cannot emit one (go-kure/launcher#1278). `job` and
 `cronjob` take no `sidecars`, so their pod holds the main container and the
 `initContainers` entries. Closing the entry is behavior-changing under an
 unchanged `launcher.gokure.dev/v1alpha1`: a document that authored any other

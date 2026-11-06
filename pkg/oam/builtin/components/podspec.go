@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"math"
 	"net/netip"
 	"regexp"
@@ -1417,7 +1418,12 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 	// down: they carry the config's own Command slices and probe, lifecycle and
 	// security-context pointers, so each is deep-copied as it is appended.
 	ps := *in.Config.PodSpec.DeepCopy()
-	for _, ic := range in.InitContainers {
+	for i, ic := range in.InitContainers {
+		// The parser holds every name to a DNS-1123 label; a config built by hand, or
+		// changed after it was parsed, is held to it here (go-kure/launcher#1278).
+		if err := checkContainerNameLabel(fmt.Sprintf("initContainers[%d]", i), ic.Name); err != nil {
+			return corev1.PodSpec{}, err
+		}
 		initContainer, err := buildInitContainer(ic)
 		if err != nil {
 			return corev1.PodSpec{}, err
@@ -1428,7 +1434,10 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 		return corev1.PodSpec{}, errors.New("pod template requires a main container")
 	}
 	ps.Containers = append(ps.Containers, *in.MainContainer.DeepCopy())
-	for _, sc := range in.Sidecars {
+	for i, sc := range in.Sidecars {
+		if err := checkContainerNameLabel(fmt.Sprintf("sidecars[%d]", i), sc.Name); err != nil {
+			return corev1.PodSpec{}, err
+		}
 		sidecarContainer, err := buildSidecarContainer(sc)
 		if err != nil {
 			return corev1.PodSpec{}, err
