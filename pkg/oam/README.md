@@ -2305,8 +2305,10 @@ such as `custom_metrics`), behaves as before: it passes through to the allowlist
 refusal. A name that a declared identity claims resolves first, so a short name that more than one
 type or version claims is refused as ambiguous even when a handler is registered under that plain
 name. A reference with a version that does not resolve is refused in the resolver's words, naming
-the versions that exist, before any handler runs; `Transform` returns that refusal as a
-`ValidationError` (as `Parse` does) and `errors.Is` still matches `ErrTypeReferenceUnknown` and
+the versions that exist, before any handler runs. That refusal applies in a position (components,
+traits, policies) where a type is declared; where nothing is declared, a type is its registered
+name, `@` included, and the lookups and `Transform` dispatch on it as before. `Transform` returns
+that refusal as a `ValidationError` (as `Parse` does) and `errors.Is` still matches `ErrTypeReferenceUnknown` and
 `ErrTypeReferenceAmbiguous`. `ResolveTypes` writes each declared type as its identity, not as the
 plain registered name, so feeding its result back to `Transform` resolves to the same type even where
 a plain name is ambiguous. `Parse` and `ParseWithExtraTraitTypes` know no identity: use
