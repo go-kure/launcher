@@ -8,6 +8,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 
 	kureerrors "github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
 // recordingComponentHandler records the type of every component it is handed.
@@ -391,5 +392,72 @@ func TestResolveTypes_ResultIsValidTransformInput(t *testing.T) {
 	}
 	if strings.Join(*seen, " ") != "widget widget-v2" {
 		t.Errorf("handlers saw types %v, want [widget widget-v2]", *seen)
+	}
+}
+
+// ambiguousProviders returns a transformer where the short name `widget` names two
+// versions of one type and `gizmo` the same for a lowering rule, each registered
+// under two plain keys, as endpoint providers.
+func ambiguousProviders(t *testing.T) *Transformer {
+	t.Helper()
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponent("widget", &stubEndpointHandler{typeName: "widget", eps: []netpol.Endpoint{validEndpoint()}})
+	tr.RegisterComponent("widget-v2", &stubEndpointHandler{typeName: "widget-v2", eps: []netpol.Endpoint{validEndpoint()}})
+	tr.RegisterComponentLowering(stubEndpointRule{typeName: "gizmo", eps: []netpol.Endpoint{validEndpoint()}})
+	tr.RegisterComponentLowering(stubEndpointRule{typeName: "gizmo-v2", eps: []netpol.Endpoint{validEndpoint()}})
+	if err := tr.DeclareComponentTypes(map[string]TypeID{
+		"widget":    mustID(t, "widget.acme.example@v1"),
+		"widget-v2": mustID(t, "widget.acme.example@v2"),
+		"gizmo":     mustID(t, "gizmo.acme.example@v1"),
+		"gizmo-v2":  mustID(t, "gizmo.acme.example@v2"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return tr
+}
+
+// A reference the resolver refuses has no endpoint provider either: handler-backed
+// and rule-backed, an ambiguous short name answers nothing, as Transform refuses it.
+func TestComponentEndpoints_AmbiguousReferenceHasNoProvider(t *testing.T) {
+	tr := ambiguousProviders(t)
+	for _, ref := range []string{"widget", "gizmo"} {
+		if eps, err := tr.ComponentEndpoints(&Component{Name: "x", Type: ref}); eps != nil || err != nil {
+			t.Errorf("ComponentEndpoints(%q) = %v, %v; want nil, nil", ref, eps, err)
+		}
+		if eps, err := tr.ComponentEndpointsNamed("app", &Component{Name: "x", Type: ref}, nil); eps != nil || err != nil {
+			t.Errorf("ComponentEndpointsNamed(%q) = %v, %v; want nil, nil", ref, eps, err)
+		}
+	}
+	for _, ref := range []string{"widget@v2", "gizmo@v2", "widget.acme.example@v1"} {
+		if eps, err := tr.ComponentEndpoints(&Component{Name: "x", Type: ref}); err != nil || len(eps) != 1 {
+			t.Errorf("ComponentEndpoints(%q) = %v, %v; want one endpoint", ref, eps, err)
+		}
+	}
+	// The ambiguous rule-backed reference has no rule either (the lookup APIs agree with Transform).
+	if _, ok := tr.ComponentLoweringRuleFor("gizmo"); ok {
+		t.Error("ComponentLoweringRuleFor answered for an ambiguous short name")
+	}
+	if _, ok := tr.ComponentLoweringRuleFor("gizmo@v2"); !ok {
+		t.Error("ComponentLoweringRuleFor did not answer for gizmo@v2")
+	}
+}
+
+// A handler or rule registered under a key that contains `@` is not reachable by
+// that text once a reference with a version fails to resolve: Transform refuses it,
+// so ComponentHandlerFor, ComponentLoweringRuleFor and the endpoint lookup agree.
+func TestVersionedRefusalDoesNotFallBackToARegisteredKey(t *testing.T) {
+	tr, _ := declared(t)
+	tr.RegisterComponent("widget@v9", &stubEndpointHandler{typeName: "widget@v9", eps: []netpol.Endpoint{validEndpoint()}})
+	tr.RegisterComponentLowering(stubEndpointRule{typeName: "gadget@v9", eps: []netpol.Endpoint{validEndpoint()}})
+	for _, ref := range []string{"widget@v9", "gadget@v9"} {
+		if h, ok := tr.ComponentHandlerFor(ref); ok {
+			t.Errorf("ComponentHandlerFor(%q) = %v despite an unresolved version", ref, h)
+		}
+		if r, ok := tr.ComponentLoweringRuleFor(ref); ok {
+			t.Errorf("ComponentLoweringRuleFor(%q) = %v despite an unresolved version", ref, r)
+		}
+		if eps, err := tr.ComponentEndpoints(&Component{Name: "x", Type: ref}); eps != nil || err != nil {
+			t.Errorf("ComponentEndpoints(%q) = %v, %v; want nil, nil", ref, eps, err)
+		}
 	}
 }

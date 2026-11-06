@@ -700,7 +700,13 @@ func (t *Transformer) componentEndpoints(comp *Component, application string, na
 	}
 	// An authored identity is looked up by the plain name it is registered under,
 	// and the handler is handed the component under that name, as the transform does.
-	if key, ok := t.componentKey(comp.Type); ok && key != comp.Type {
+	// A type that does not resolve (unknown, ambiguous, or an identity that names
+	// nothing) has no provider: Transform refuses it, so nothing answers for it here.
+	key, ok := t.componentKey(comp.Type)
+	if !ok {
+		return nil, nil
+	}
+	if key != comp.Type {
 		resolved := *comp
 		resolved.Type = key
 		comp = &resolved
