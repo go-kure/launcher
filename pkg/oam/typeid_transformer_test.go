@@ -461,3 +461,108 @@ func TestVersionedRefusalDoesNotFallBackToARegisteredKey(t *testing.T) {
 		}
 	}
 }
+
+// epHandler is a recording component handler that is also an endpoint provider.
+type epHandler struct{ recordingComponentHandler }
+
+func (h *epHandler) Endpoints(_ *Component) ([]netpol.Endpoint, error) {
+	return []netpol.Endpoint{validEndpoint()}, nil
+}
+
+// Every lookup that takes a type reference answers for a reference exactly when
+// Transform accepts it: a reference that does not resolve (unknown, ambiguous, a
+// literal name@vN nobody declared) answers nothing, a plain registered name and a
+// resolving identity answer. The matrix is the four inputs of the review brief
+// (unresolved, ambiguous short name, plain registered key, literal name@vN with no
+// declaration) with the resolving forms beside them.
+func TestLookupsAgreeWithTransform(t *testing.T) {
+	want := map[string]bool{
+		"widget":                 false, // ambiguous short name: two versions are declared
+		"widget.acme.example":    false, // ambiguous: the qualified name without a version
+		"widget@v1":              true,
+		"widget@v2":              true,
+		"widget.acme.example@v2": true,
+		"widget@v9":              false, // a version nobody declared
+		"plain":                  true,  // a plain registered key, no identity declared
+		"plain@v1":               false, // a version on a name with no declaration
+		"lit@v1":                 false, // a literal registered key with `@`, no declaration
+		"nothing":                false, // unresolved, unregistered
+		"Widget":                 false, // not a valid identity, not registered
+		"":                       false,
+	}
+	// ResolveTypes refuses exactly the references that name a declared type
+	// ambiguously, or carry a version nothing declares. A plain name nobody declared
+	// passes through to the later refusal ("no handler") as it always did.
+	resolveRefuses := map[string]bool{
+		"widget": true, "widget.acme.example": true, "widget@v9": true, "plain@v1": true, "lit@v1": true,
+	}
+	seen := &[]string{}
+	newHandler := func(typ string) *epHandler {
+		return &epHandler{recordingComponentHandler{typ: typ, seen: seen}}
+	}
+	tr := NewTransformer(map[string]ComponentHandler{
+		"widget":    newHandler("widget"),
+		"widget-v2": newHandler("widget-v2"),
+		"plain":     newHandler("plain"),
+		"lit@v1":    newHandler("lit@v1"),
+	}, nil)
+	if err := tr.DeclareComponentTypes(map[string]TypeID{
+		"widget":    mustID(t, "widget.acme.example@v1"),
+		"widget-v2": mustID(t, "widget.acme.example@v2"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The rule-backed family: the same names, a rule each.
+	rules := NewTransformer(nil, nil)
+	for _, k := range []string{"widget", "widget-v2", "plain", "lit@v1"} {
+		rules.RegisterComponentLowering(stubEndpointRule{typeName: k, eps: []netpol.Endpoint{validEndpoint()}})
+	}
+	if err := rules.DeclareComponentTypes(map[string]TypeID{
+		"widget":    mustID(t, "widget.acme.example@v1"),
+		"widget-v2": mustID(t, "widget.acme.example@v2"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for ref, ok := range want {
+		t.Run("handler/"+ref, func(t *testing.T) {
+			if _, got := tr.ComponentHandlerFor(ref); got != ok {
+				t.Errorf("ComponentHandlerFor(%q) = %v, want %v", ref, got, ok)
+			}
+			if _, got := tr.ComponentLoweringRuleFor(ref); got {
+				t.Errorf("ComponentLoweringRuleFor(%q) answered for a handler type", ref)
+			}
+			eps, err := tr.ComponentEndpoints(&Component{Name: "x", Type: ref})
+			if err != nil || (len(eps) == 1) != ok {
+				t.Errorf("ComponentEndpoints(%q) = %v, %v; want an answer = %v", ref, eps, err, ok)
+			}
+			eps, err = tr.ComponentEndpointsNamed("app", &Component{Name: "x", Type: ref}, nil)
+			if err != nil || (len(eps) == 1) != ok {
+				t.Errorf("ComponentEndpointsNamed(%q) = %v, %v; want an answer = %v", ref, eps, err, ok)
+			}
+			if ref == "" {
+				return
+			}
+			app := makeApp("myapp", makeComponent("w", ref))
+			app.APIVersion, app.Kind = SupportedAPIVersion, "Application"
+			_, terr := tr.Transform(app, TransformContext{})
+			if (terr == nil) != ok {
+				t.Errorf("Transform(%q) error = %v, want success = %v", ref, terr, ok)
+			}
+			if _, verr := tr.ResolveTypes(app); (verr != nil) != resolveRefuses[ref] {
+				t.Errorf("ResolveTypes(%q) error = %v", ref, verr)
+			}
+		})
+		t.Run("rule/"+ref, func(t *testing.T) {
+			if _, got := rules.ComponentLoweringRuleFor(ref); got != ok {
+				t.Errorf("ComponentLoweringRuleFor(%q) = %v, want %v", ref, got, ok)
+			}
+			if _, got := rules.ComponentHandlerFor(ref); got {
+				t.Errorf("ComponentHandlerFor(%q) answered for a rule type", ref)
+			}
+			eps, err := rules.ComponentEndpoints(&Component{Name: "x", Type: ref})
+			if err != nil || (len(eps) == 1) != ok {
+				t.Errorf("ComponentEndpoints(%q) = %v, %v; want an answer = %v", ref, eps, err, ok)
+			}
+		})
+	}
+}
