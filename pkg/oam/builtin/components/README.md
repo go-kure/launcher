@@ -2553,6 +2553,32 @@ One shared schema and parser (`chartEndpoints`) serve the three types.
 - **No declaration** reports none, as before. A declaration is the only source: a workload
   type derives its endpoints from its container ports and takes no `endpoints` property.
 
+## Declared outputs
+
+`configmap`, `secret`, `postgresql`, `webservice` and `worker` implement `oam.OutputProvider`
+(go-kure/launcher#1259): the names of the objects a component generates, read through
+`Transformer.ComponentOutputs` before the document is built, and held by the build against
+the names it gives (see "Outputs" in `pkg/oam/README.md`). A name is the author's property,
+else the `Naming` hook's, else the default, resolved by the code that names the object in the
+lowering, so a query and a build cannot differ. A refused component answers no outputs and is
+refused in the lowering's own words. No other builtin declares any.
+
+| Type | Key | Object | Name |
+|---|---|---|---|
+| `configmap`, `secret` | `object` | the ConfigMap or Secret | `objectName`, else the component name |
+| `postgresql` | `cluster` | Cluster | `clusterObjectName`, else the component name |
+| `postgresql` | `app_secret` | Secret `<cluster>-app` | derived from `cluster`; **absent** when `recovery.secret.name` is set, because CloudNativePG then uses that Secret and generates none |
+| `postgresql` | `objectstore` | ObjectStore | present when `backup` is set; `backup.objectStoreObjectName`, else the component name |
+| `webservice`, `worker` | `deployment` | Deployment | `deploymentObjectName`, else the component name |
+| `webservice` | `service` | Service | `serviceObjectName`, else the component name |
+| `webservice`, `worker` | `serviceaccount` | ServiceAccount | `serviceAccountObjectName`, else the component name; **absent** when `serviceAccountName` names an existing account |
+| `webservice`, `worker` | `claim_<volume>` | PersistentVolumeClaim | one per `pvc` volume that sets no `claimName`: the volume's `claimObjectName`, else `<component>-<volume>` with each hyphen in either part written `--`; hyphens in the key become underscores |
+
+`app_secret` is the one derived output: the Secret is created by the operator, is not in the
+built application and is held by nothing. The inline object store of `recovery.source` is not
+declared. A claim's name is resolved without the ClusterProfile `pvc` capability, which
+chooses its storage class and no name, so the query records no consumed capability key.
+
 ## Per-type highlights
 
 Wrong-type handling for the optional top-level properties go-kure/launcher#405
