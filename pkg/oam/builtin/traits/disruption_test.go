@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/registry"
+	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
 // The disruption trait generates a PodDisruptionBudget for a workload without an
@@ -272,5 +273,71 @@ func TestDisruption_AndScalerPDB(t *testing.T) {
 		if len(pdbs) != 2 {
 			t.Fatalf("generated %d budgets, want 2: the limit changed", len(pdbs))
 		}
+	})
+}
+
+// A config built by hand, or changed after it was parsed, is checked at Generate with
+// the parser's own refusals, as the scaler's is (go-kure/launcher#1278): without it
+// the trait emits a PodDisruptionBudget the API server then refuses, or one that
+// protects nothing.
+func TestDisruptionConfig_Generate_RefusesWhatTheParserRefuses(t *testing.T) {
+	budget := func(v intstr.IntOrString) *intstr.IntOrString { return &v }
+	policy := func(s string) *policyv1.UnhealthyPodEvictionPolicyType {
+		p := policyv1.UnhealthyPodEvictionPolicyType(s)
+		return &p
+	}
+	cases := []struct {
+		name string
+		cfg  traits.DisruptionConfig
+		want []string
+	}{
+		{"neither budget", traits.DisruptionConfig{}, []string{"disruption: set minAvailable or maxUnavailable; the trait has no default budget"}},
+		{"both budgets", traits.DisruptionConfig{MinAvailable: budget(intstr.FromInt32(1)), MaxUnavailable: budget(intstr.FromInt32(1))},
+			[]string{"disruption: set minAvailable or maxUnavailable, not both"}},
+		{"percentage over 100", traits.DisruptionConfig{MinAvailable: budget(intstr.FromString("150%"))}, []string{"minAvailable", "150%"}},
+		{"not a percentage", traits.DisruptionConfig{MaxUnavailable: budget(intstr.FromString("half"))}, []string{"maxUnavailable", "half"}},
+		{"negative count", traits.DisruptionConfig{MaxUnavailable: budget(intstr.FromInt32(-1))}, []string{"maxUnavailable"}},
+		{"minAvailable type tag", traits.DisruptionConfig{MinAvailable: budget(intstr.IntOrString{Type: 2, IntVal: 1})}, []string{"minAvailable", "invalid IntOrString type"}},
+		{"maxUnavailable type tag", traits.DisruptionConfig{MaxUnavailable: budget(intstr.IntOrString{Type: 2, IntVal: 1})}, []string{"maxUnavailable", "invalid IntOrString type"}},
+		{"eviction policy", traits.DisruptionConfig{MinAvailable: budget(intstr.FromInt32(1)), UnhealthyPodEvictionPolicy: policy("Never")},
+			[]string{"unhealthyPodEvictionPolicy must be", "Never"}},
+		{"pdb name", traits.DisruptionConfig{MinAvailable: budget(intstr.FromInt32(1)), PDBName: "Not_A_Name"}, []string{"pdbName", "Not_A_Name"}},
+		// A config built by hand has no component name, so the default name it falls
+		// back to is "-pdb", which the API server refuses.
+		{"pdb name omitted, no component name", traits.DisruptionConfig{MinAvailable: budget(intstr.FromInt32(1))}, []string{"pdbName", "-pdb"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := c.cfg
+			_, err := cfg.Generate(newApp("app", "default"))
+			wantRefused(t, err, c.want...)
+		})
+	}
+
+	t.Run("a valid hand-built config generates", func(t *testing.T) {
+		cfg := traits.DisruptionConfig{
+			MinAvailable:               budget(intstr.FromString("50%")),
+			UnhealthyPodEvictionPolicy: policy(string(policyv1.AlwaysAllow)),
+			PDBName:                    "app-budget",
+		}
+		objs, err := cfg.Generate(newApp("app", "default"))
+		if err != nil || len(objs) != 1 {
+			t.Fatalf("Generate = %d objects, %v; want one PodDisruptionBudget", len(objs), err)
+		}
+	})
+
+	t.Run("a parsed config changed afterwards", func(t *testing.T) {
+		bundle := newBundle()
+		trait := &oam.Trait{Type: "disruption", Properties: map[string]any{"minAvailable": 1}}
+		if err := (&traits.DisruptionHandler{}).Apply(trait, newApp("app", "default"), bundle); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		cfg, ok := bundle.Applications[0].Config.(*traits.DisruptionConfig)
+		if !ok {
+			t.Fatalf("the sub-application config is %T, want *DisruptionConfig", bundle.Applications[0].Config)
+		}
+		cfg.MaxUnavailable = budget(intstr.FromInt32(1))
+		_, err := bundle.Applications[0].Generate()
+		wantRefused(t, err, "not both")
 	})
 }

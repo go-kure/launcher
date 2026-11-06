@@ -858,6 +858,14 @@ traits:
   consumer decorator that wraps the scaler's config without implementing
   `oam.ConfigWrapper` hides `enablePDB` from it; the conflict is then not seen
   and both budgets are emitted when their names differ.
+- **The config is checked again at generation** (go-kure/launcher#1278), as the
+  `scaler`'s is: a `DisruptionConfig` built by hand, or changed after it was
+  parsed, is refused for the same reasons and in the same words as the
+  properties (no budget, both budgets, a count or percentage out of range, an
+  unknown `unhealthyPodEvictionPolicy`, a `pdbName` that is not a DNS-1123
+  subdomain). The name checked is the one generation uses: `PDBName`, else the
+  default `<component>-pdb`. A config built by hand carries no component name,
+  so it must set `PDBName`: the default it would fall back to, `-pdb`, is refused.
 - **Not covered.** DaemonSet, Job and CronJob are refused as host components, and
   one budget across several components is not expressible. The scaler's fixed
   50% budget is unchanged.

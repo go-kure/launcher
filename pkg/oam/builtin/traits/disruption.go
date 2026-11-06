@@ -103,7 +103,7 @@ func (h *DisruptionHandler) parseProperties(props map[string]any, app *stack.App
 	hasMax = hasMax && !oam.IsNullValue(max)
 	switch {
 	case hasMin && hasMax:
-		return nil, errors.Errorf("disruption: set minAvailable or maxUnavailable, not both")
+		return nil, errBothBudgets()
 	case hasMin:
 		v, err := parseBudgetValue("minAvailable", min)
 		if err != nil {
@@ -117,14 +117,14 @@ func (h *DisruptionHandler) parseProperties(props map[string]any, app *stack.App
 		}
 		config.MaxUnavailable = &v
 	default:
-		return nil, errors.Errorf("disruption: set minAvailable or maxUnavailable; the trait has no default budget")
+		return nil, errNoBudget()
 	}
 
 	if v, ok := props["unhealthyPodEvictionPolicy"]; ok && !oam.IsNullValue(v) {
 		s, isString := v.(string)
 		policy := policyv1.UnhealthyPodEvictionPolicyType(s)
-		if !isString || (policy != policyv1.IfHealthyBudget && policy != policyv1.AlwaysAllow) {
-			return nil, errors.Errorf("unhealthyPodEvictionPolicy must be %q or %q, got %v", policyv1.IfHealthyBudget, policyv1.AlwaysAllow, v)
+		if !isString || checkEvictionPolicy(policy, v) != nil {
+			return nil, evictionPolicyError(v)
 		}
 		config.UnhealthyPodEvictionPolicy = &policy
 	}
@@ -146,12 +146,8 @@ func (h *DisruptionHandler) parseProperties(props map[string]any, app *stack.App
 // string of digits and a percent sign from 0% to 100%.
 func parseBudgetValue(key string, v any) (intstr.IntOrString, error) {
 	if s, ok := v.(string); ok {
-		digits, found := strings.CutSuffix(s, "%")
-		if !found || digits == "" || strings.IndexFunc(digits, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
-			return intstr.IntOrString{}, errors.Errorf("%s %q is neither a count nor a percentage: write a whole number, or a percentage such as \"25%%\"", key, s)
-		}
-		if pct, err := strconv.Atoi(digits); err != nil || pct > 100 {
-			return intstr.IntOrString{}, errors.Errorf("%s %q is not a percentage from 0%% to 100%%", key, s)
+		if err := checkBudgetPercentage(key, s); err != nil {
+			return intstr.IntOrString{}, err
 		}
 		return intstr.FromString(s), nil
 	}
@@ -160,6 +156,58 @@ func parseBudgetValue(key string, v any) (intstr.IntOrString, error) {
 		return intstr.IntOrString{}, errors.Errorf("%s: %w", key, err)
 	}
 	return intstr.FromInt32(int32(n)), nil //nolint:gosec // bounded to int32 by IntegerInRange
+}
+
+// checkBudgetPercentage refuses a budget string that is not a percentage from 0% to
+// 100%. parseBudgetValue and DisruptionConfig.validateEffective share it, so a
+// string the parser refuses is refused at Generate in the same words.
+func checkBudgetPercentage(key, s string) error {
+	digits, found := strings.CutSuffix(s, "%")
+	if !found || digits == "" || strings.IndexFunc(digits, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+		return errors.Errorf("%s %q is neither a count nor a percentage: write a whole number, or a percentage such as \"25%%\"", key, s)
+	}
+	if pct, err := strconv.Atoi(digits); err != nil || pct > 100 {
+		return errors.Errorf("%s %q is not a percentage from 0%% to 100%%", key, s)
+	}
+	return nil
+}
+
+// checkBudget is parseBudgetValue's check on a value already typed: a count from 0,
+// or a percentage string. A type tag that is neither intstr.Int nor intstr.String is
+// refused: the API cannot serialize it.
+func checkBudget(key string, v intstr.IntOrString) error {
+	switch v.Type {
+	case intstr.String:
+		return checkBudgetPercentage(key, v.StrVal)
+	case intstr.Int:
+		if _, err := oam.IntegerInRange(int64(v.IntVal), 0, math.MaxInt32); err != nil {
+			return errors.Errorf("%s: %w", key, err)
+		}
+		return nil
+	default:
+		return errors.Errorf("%s: invalid IntOrString type %d: write a whole number, or a percentage such as \"25%%\"", key, v.Type)
+	}
+}
+
+func errBothBudgets() error {
+	return errors.Errorf("disruption: set minAvailable or maxUnavailable, not both")
+}
+
+func errNoBudget() error {
+	return errors.Errorf("disruption: set minAvailable or maxUnavailable; the trait has no default budget")
+}
+
+// evictionPolicyError is the refusal for an unhealthyPodEvictionPolicy that is
+// neither IfHealthyBudget nor AlwaysAllow; got is the value as it was written.
+func evictionPolicyError(got any) error {
+	return errors.Errorf("unhealthyPodEvictionPolicy must be %q or %q, got %v", policyv1.IfHealthyBudget, policyv1.AlwaysAllow, got)
+}
+
+func checkEvictionPolicy(policy policyv1.UnhealthyPodEvictionPolicyType, got any) error {
+	if policy != policyv1.IfHealthyBudget && policy != policyv1.AlwaysAllow {
+		return evictionPolicyError(got)
+	}
+	return nil
 }
 
 // budgetOwner is implemented by the config of a sub-application that generates
@@ -219,16 +267,59 @@ func (c *DisruptionConfig) refuseScalerBudget(namespace string) error {
 	return nil
 }
 
+// validateEffective holds the config to the checks parseProperties makes on the
+// properties: exactly one budget, a count or a percentage in range, a known eviction
+// policy and a valid object name. Generate runs it so a config built by hand, or
+// changed after it was parsed, cannot emit a PodDisruptionBudget the API server
+// refuses or one that protects nothing, as ScalerConfig.validateEffective does for
+// the scaler. It shares the parser's helpers, so the two cannot disagree on a value
+// or on the words that refuse it.
+func (c *DisruptionConfig) validateEffective() error {
+	switch {
+	case c.MinAvailable != nil && c.MaxUnavailable != nil:
+		return errBothBudgets()
+	case c.MinAvailable != nil:
+		if err := checkBudget("minAvailable", *c.MinAvailable); err != nil {
+			return err
+		}
+	case c.MaxUnavailable != nil:
+		if err := checkBudget("maxUnavailable", *c.MaxUnavailable); err != nil {
+			return err
+		}
+	default:
+		return errNoBudget()
+	}
+	if c.UnhealthyPodEvictionPolicy != nil {
+		if err := checkEvictionPolicy(*c.UnhealthyPodEvictionPolicy, *c.UnhealthyPodEvictionPolicy); err != nil {
+			return err
+		}
+	}
+	// The name Generate will use is held to the rule an authored one meets: the one
+	// that was set, else the default. A config built by hand has no component name, so
+	// its default is "-pdb", which the API server refuses.
+	if err := checkAuthoredObjectName("pdbName", "the PodDisruptionBudget", c.effectiveName()); err != nil {
+		return err
+	}
+	return nil
+}
+
+// effectiveName is the PodDisruptionBudget name Generate uses: PDBName, else the default.
+func (c *DisruptionConfig) effectiveName() string {
+	if c.PDBName != "" {
+		return c.PDBName
+	}
+	return c.defaultPDBName()
+}
+
 // Generate creates the PodDisruptionBudget.
 func (c *DisruptionConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	if err := c.validateEffective(); err != nil {
+		return nil, err
+	}
 	if err := c.refuseScalerBudget(app.Namespace); err != nil {
 		return nil, err
 	}
-	name := c.PDBName
-	if name == "" {
-		name = c.defaultPDBName()
-	}
-	pdb := kubernetes.CreatePodDisruptionBudget(name, app.Namespace)
+	pdb := kubernetes.CreatePodDisruptionBudget(c.effectiveName(), app.Namespace)
 	pdb.Labels = componentLabels(c.componentName)
 	pdb.Annotations = nil
 	if c.MinAvailable != nil {
