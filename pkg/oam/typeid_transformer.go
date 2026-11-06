@@ -164,7 +164,10 @@ func (t *Transformer) componentKey(ref string) (string, bool) {
 	if errors.Is(err, ErrTypeReferenceAmbiguous) {
 		return "", false
 	}
-	if t.isComponentKey(ref) {
+	// A reference with a version can only be an identity, and Transform refuses one
+	// that does not resolve, so it never falls back to a handler registered under
+	// that text.
+	if !strings.Contains(ref, "@") && t.isComponentKey(ref) {
 		return ref, true
 	}
 	return "", false
