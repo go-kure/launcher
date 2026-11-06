@@ -27,17 +27,18 @@ import (
 // it explicitly. The trait takes no properties of its own; the engine-owned
 // ones every trait accepts (`scope`) are let through.
 //
-// The replica count is read from the generated Deployment's spec.replicas, so
-// it is the count after the environment policy ran: the transformer applies
-// the policy to the component config before any trait (pkg/oam transform.go,
-// createApplications then applyTraits), and the decorator only sees the object
-// at Generate time. That is the same count the role kinds evaluate their own
-// opinion against.
+// Without a matching scaler, the replica count is read from the generated
+// Deployment's spec.replicas, so it is the count after the environment policy
+// ran: the transformer applies the policy to the component config before any
+// trait (pkg/oam transform.go, createApplications then applyTraits), and the
+// decorator only sees the object at Generate time. That is the same count the
+// role kinds evaluate their own opinion against.
 //
-// Under a scaler the HorizontalPodAutoscaler owns the count and the
-// Deployment has no spec.replicas (go-kure/launcher#1179). The count is then
-// the scaler's effective minReplicas, final after its policy ran: the pods
-// that always exist. The trait finds the scaler at Generate, among the
+// Under a scaler the HorizontalPodAutoscaler owns the count and a
+// launcher-built Deployment has no spec.replicas (go-kure/launcher#1179); an
+// adopted one keeps its own, which is then ignored. The count is then the
+// scaler's effective minReplicas, final after its policy ran: the pods that
+// always exist. The trait finds the scaler at Generate, among the
 // applications of the bundle it was applied to, so the order of the traits
 // does not matter. The scaler's config sits under the ownership wrapper by
 // then, so it is read through oam.UnwrapConfig (replicaScaler).
