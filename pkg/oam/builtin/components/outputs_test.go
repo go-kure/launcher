@@ -163,9 +163,10 @@ func TestBuiltinOutputs_PostgresqlRefusesWhatTheLoweringRefuses(t *testing.T) {
 	}
 }
 
-// The check inside Transform holds what the components declare against what the
-// build names, so a build that succeeds under a hook, an authored name and a
-// backup is the proof that the prediction and the objects agree.
+// What the component declares is what the build generates: each queried output
+// names an object of its kind the build produced, under a hook, an authored name
+// and a backup. app_secret is the one output the build does not generate:
+// CloudNativePG does, from the Cluster.
 func TestBuiltinOutputs_BuildAgreesWithTheDeclaration(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -179,15 +180,12 @@ func TestBuiltinOutputs_BuildAgreesWithTheDeclaration(t *testing.T) {
 		{"recovery secret", map[string]any{"recovery": recoveryFrom("secret", map[string]any{"name": "creds"})}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tr := outputsTransformer()
 			app := &oam.Application{
 				APIVersion: oam.SupportedAPIVersion, Kind: "Application",
 				Metadata: oam.Metadata{Name: "shop", Namespace: "demo"},
 				Spec:     oam.ApplicationSpec{Components: []oam.Component{{Name: "db", Type: "postgresql", Properties: tc.props}}},
 			}
-			if _, err := tr.Transform(app, oam.TransformContext{Namespace: "demo", Naming: tc.naming}); err != nil {
-				t.Fatalf("Transform: %v", err)
-			}
+			requireOutputsBuilt(t, outputsTransformer(), app, tc.naming, "app_secret")
 		})
 	}
 }
@@ -299,8 +297,8 @@ func TestBuiltinOutputs_RoleRulesRefuseWhatTheLoweringRefuses(t *testing.T) {
 	}
 }
 
-// A build of a webservice and a worker under the hook, authored names and a
-// generated claim passes the check inside Transform.
+// What a webservice and a worker declare is what the build generates, under the
+// hook, authored names and a generated claim.
 func TestBuiltinOutputs_RoleBuildAgreesWithTheDeclaration(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -320,9 +318,109 @@ func TestBuiltinOutputs_RoleBuildAgreesWithTheDeclaration(t *testing.T) {
 				Metadata: oam.Metadata{Name: "shop", Namespace: "demo"},
 				Spec:     oam.ApplicationSpec{Components: []oam.Component{{Name: "app", Type: tc.typ, Properties: tc.props}}},
 			}
-			if _, err := outputsTransformer().Transform(app, oam.TransformContext{Namespace: "demo", Naming: tc.naming}); err != nil {
-				t.Fatalf("Transform: %v", err)
+			requireOutputsBuilt(t, outputsTransformer(), app, tc.naming)
+		})
+	}
+}
+
+// builtObject is a (kind, name) of an object the build generated.
+type builtObject struct{ kind, name string }
+
+// builtObjects transforms app and returns the kind and name of every object it
+// generated, read from the objects themselves.
+func builtObjects(t *testing.T, tr *oam.Transformer, app *oam.Application, naming func(oam.NameRequest) (string, bool)) map[builtObject]bool {
+	t.Helper()
+	cluster, err := tr.Transform(app, oam.TransformContext{Namespace: "demo", Naming: naming})
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	apps, err := oam.GenerateApplications(cluster)
+	if err != nil {
+		t.Fatalf("GenerateApplications: %v", err)
+	}
+	built := map[builtObject]bool{}
+	for _, a := range apps {
+		for _, o := range a.Objects {
+			obj := *o
+			kind := obj.GetObjectKind().GroupVersionKind().Kind
+			if kind == "" {
+				kind = reflect.TypeOf(obj).Elem().Name()
 			}
+			built[builtObject{kind, obj.GetName()}] = true
+		}
+	}
+	return built
+}
+
+// requireOutputsBuilt holds what the component declares, read through
+// ComponentOutputsNamed, against the objects the build generated: each output
+// but those in notBuilt names an object of its kind that exists. notBuilt are
+// outputs of objects another controller generates.
+func requireOutputsBuilt(t *testing.T, tr *oam.Transformer, app *oam.Application, naming func(oam.NameRequest) (string, bool), notBuilt ...string) {
+	t.Helper()
+	built := builtObjects(t, tr, app, naming)
+	comp := &app.Spec.Components[0]
+	outs, err := tr.ComponentOutputsNamed(app.Metadata.Name, comp, naming)
+	if err != nil {
+		t.Fatalf("ComponentOutputsNamed: %v", err)
+	}
+	if len(outs) == 0 {
+		t.Fatalf("the component declared no output: the comparison would be vacuous")
+	}
+	skip := map[string]bool{}
+	for _, k := range notBuilt {
+		skip[k] = true
+	}
+	for _, o := range outs {
+		if skip[o.Key] {
+			continue
+		}
+		if !built[builtObject{o.Kind.Kind, o.Name}] {
+			t.Errorf("output %q declares %s %q, but the build generated %v", o.Key, o.Kind.Kind, o.Name, built)
+		}
+	}
+}
+
+// A configmap and a secret answer only for a component their own parse
+// accepts, as every other builtin does.
+func TestBuiltinOutputs_KindComponentsRefuseWhatTheParseRefuses(t *testing.T) {
+	for _, tc := range []struct {
+		typ   string
+		props map[string]any
+		want  string
+	}{
+		{"configmap", map[string]any{"data": map[string]any{"x": 1}}, "data.x: must be a string"},
+		{"secret", map[string]any{"type": 42}, "type"},
+	} {
+		t.Run(tc.typ, func(t *testing.T) {
+			comp := &oam.Component{Name: "cfg", Type: tc.typ, Properties: tc.props}
+			if _, err := outputsTransformer().ComponentOutputs(comp); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ComponentOutputs = %v; want the parse error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// What a kind component declares is the object the build generates.
+func TestBuiltinOutputs_KindBuildGeneratesTheDeclaredObject(t *testing.T) {
+	for _, tc := range []struct {
+		typ    string
+		props  map[string]any
+		naming func(oam.NameRequest) (string, bool)
+	}{
+		{"configmap", map[string]any{"data": map[string]any{"a": "b"}}, nil},
+		{"configmap", map[string]any{"data": map[string]any{"a": "b"}}, hookNaming(oam.NameRoleObject)},
+		{"configmap", map[string]any{"objectName": "authored", "data": map[string]any{"a": "b"}}, nil},
+		{"secret", map[string]any{"stringData": map[string]any{"a": "b"}}, nil},
+		{"secret", map[string]any{"stringData": map[string]any{"a": "b"}}, hookNaming(oam.NameRoleObject)},
+	} {
+		t.Run(tc.typ, func(t *testing.T) {
+			app := &oam.Application{
+				APIVersion: oam.SupportedAPIVersion, Kind: "Application",
+				Metadata: oam.Metadata{Name: "shop", Namespace: "demo"},
+				Spec:     oam.ApplicationSpec{Components: []oam.Component{{Name: "cfg", Type: tc.typ, Properties: tc.props}}},
+			}
+			requireOutputsBuilt(t, outputsTransformer(), app, tc.naming)
 		})
 	}
 }
