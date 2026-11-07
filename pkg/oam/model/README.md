@@ -98,18 +98,29 @@ changes. No other library is available, so `math`, `sets` and the encoders are r
 The golden file pins what the environment holds. Some names in it start with `@`:
 `cel.@block`, `@in`, `@not_strictly_false` and `@sortByAssociatedKeys`. CEL source cannot spell
 an identifier with `@`, so a model cannot call them. Macros reach them. The function
-`__not_strictly_false__` can be spelled in source. It takes a bool and gives a bool, so it is
-reachable but inert.
+`__not_strictly_false__` is declared but disabled. The type checker refuses a call of it in
+source, and only the runtime binding of a macro uses it. The golden file marks it
+`[disabled]`, so a change of that state fails the test.
 
 A variable has a type from the input schema. `inputs.<name>` has the type of its schema. An
 `object` input is `map(string, dyn)` and a `types` union is `dyn`. A list inside an object
 input is therefore `dyn`. `self.name` and `self.application` are strings. `values.<name>` has
 the type of its expression. A value reads inputs and earlier values only.
 
+A comment in a hole runs from `//` to the end of the line, as in CEL. A `}` or a quote inside a
+comment does not close the hole and does not open a string. A comment with no newline after it
+runs to the end of the text, so the hole is not closed.
+
 An optional input has no default and is not required. It is null when absent. Test it with
 `inputs.x == null`. `has(inputs.x)` is refused, because an input is a variable and not a map
 field. A null input in an operator or a method call, such as `inputs.x + 'a'`, compiles and fails
 at run time.
+
+A value that is exactly one reference to an input or to an earlier value has the declared type
+of that reference. If the input is optional, the value is also nullable, so `values.x == null`
+compiles. Any other expression has the plain type that the checker reports and is not nullable,
+for example `inputs.tags + []`. A local name `values` in a `cel.bind` or a comprehension hides
+the model values inside its scope, as in CEL.
 
 Four rules keep an expression deterministic and bounded:
 
