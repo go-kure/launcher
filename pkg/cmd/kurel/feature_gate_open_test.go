@@ -648,9 +648,10 @@ func TestFeatureGates_OpenSchemasIntermediateCasingRefusedBelow(t *testing.T) {
 	requireCasingRefusedBelow(t, intermediateCasingCases)
 }
 
-// TestFeatureGates_OpenSchemasCasingAcceptedAtAndAbove: the control that the handler
-// builds every casing variant above, so a refusal below is the gate's and not the
-// decoder's: accepted with no version stated, at the gate's release, and above it.
+// TestFeatureGates_OpenSchemasCasingAcceptedAtAndAbove: the control that the pre-flight
+// validation accepts every casing variant above, so a refusal below is the gate's and
+// not the property validation's: accepted with no version stated, at the gate's
+// release, and above it.
 func TestFeatureGates_OpenSchemasCasingAcceptedAtAndAbove(t *testing.T) {
 	for _, c := range append(slices.Clone(leafCasingCases), intermediateCasingCases...) {
 		for _, kind := range c.kinds {
@@ -678,8 +679,8 @@ func TestFeatureGates_OpenSchemasCasingAcceptedAtAndAbove(t *testing.T) {
 // under two spellings, the gate checks every spelling, so it refuses below the gate
 // whichever one the decoder keeps. Neither spelling here is the canonical one, and in
 // the second case the spelling that sets the field sits beside a null one (a null is
-// absent). The document is built, not refused, with the duplicate (that is tracked
-// separately), so this test asserts only the gate's refusal.
+// absent). The pre-flight validation accepts the duplicate above the gate. The build
+// refuses it, so this test asserts only the gate's refusal.
 func TestFeatureGates_OpenSchemasDuplicateSpellingRefusedBelow(t *testing.T) {
 	on, ok := oam.FeatureGateOnByDefault("HostnameOverride")
 	if !ok {

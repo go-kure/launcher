@@ -481,7 +481,19 @@ func TestUnknownJSONFieldPath_FollowsFieldSelection(t *testing.T) {
 		unknownPathAgrees[selFoldClosed](t, map[string]any{"ALPHA": extra}, "")
 	})
 	t.Run("a shallower field wins a folded key", func(t *testing.T) {
-		unknownPathAgrees[selFoldDepth](t, map[string]any{"Beta": extra}, "Beta.extra")
+		// Which field a folded key Beta lands on depends on the decoder: the
+		// jsonv2-backed one prefers the shallower closed field, the v1 one the
+		// promoted free-form map declared first. Ask the decoder.
+		got := decodeLikeTheDecoder[selFoldDepth](t, map[string]any{"Beta": map[string]any{"name": "x"}})
+		onClosed, onOpen := got.Closed.Name == "x", got.Open["name"] == "x"
+		if onClosed == onOpen {
+			t.Fatalf("premise: the decoder filled Closed %q and Open %v, want exactly one of them", got.Closed.Name, got.Open)
+		}
+		wantBeta := ""
+		if onClosed {
+			wantBeta = "Beta.extra"
+		}
+		unknownPathAgrees[selFoldDepth](t, map[string]any{"Beta": extra}, wantBeta)
 		unknownPathAgrees[selFoldDepth](t, map[string]any{"beta": extra}, "")
 		unknownPathAgrees[selFoldDepth](t, map[string]any{"BETA": extra}, "BETA.extra")
 	})
@@ -489,7 +501,30 @@ func TestUnknownJSONFieldPath_FollowsFieldSelection(t *testing.T) {
 		unknownPathAgrees[selArray](t, map[string]any{"items": []any{map[string]any{"name": "ok"}, extra}}, "")
 		unknownPathAgrees[selArray](t, map[string]any{"items": []any{extra}}, "items[0].extra")
 	})
+	t.Run("a type embedded twice is explored once, so the field under it is walked", func(t *testing.T) {
+		// Both decoders reach selRepInner only through the first embedding of
+		// selRepShared, so the key inner fills one field and the walk descends into it.
+		got := decodeLikeTheDecoder[selRepTarget](t, map[string]any{"inner": map[string]any{"name": "x"}})
+		if got.selRepLeft.selRepShared.selRepInner.Inner.Name != "x" {
+			t.Fatalf("premise: the decoder filled the left Inner.Name %q, want x", got.selRepLeft.selRepShared.selRepInner.Inner.Name)
+		}
+		unknownPathAgrees[selRepTarget](t, map[string]any{"inner": extra}, "inner.extra")
+	})
 }
+
+// selRepTarget embeds selRepShared twice, through selRepLeft and selRepRight.
+type (
+	selRepInner struct {
+		Inner SelLeaf `json:"inner"`
+	}
+	selRepShared struct{ selRepInner }
+	selRepLeft   struct{ selRepShared }
+	selRepRight  struct{ selRepShared }
+	selRepTarget struct {
+		selRepLeft
+		selRepRight
+	}
+)
 
 // TestUnknownJSONFieldPath_AgreesWithDecoder: on a Flux spec type, a path is
 // found exactly when the strict decode reports an unknown field, and its last
@@ -617,6 +652,22 @@ func TestUnreachableJSONFields_FollowsDecoder(t *testing.T) {
 	agreesWithDecoder[reachBadEmbed](t, "value")
 	if _, _, err := builtin.DecodeStrictJSON[reachDiamond](map[string]any{"value": "x"}); err == nil {
 		t.Error("the ambiguous key decoded; the diamond fixture no longer shows the gap")
+	}
+}
+
+// TestUnreachableJSONFields_RepeatedEmbeddedType: a type embedded twice is explored
+// once by both decoders, so the key under it works through the first embedding and
+// the copy under the second is the unreachable one. The check probes encoding/json
+// itself for each copy (collectJSONFields keeps both), so it names that copy.
+func TestUnreachableJSONFields_RepeatedEmbeddedType(t *testing.T) {
+	filled := decodeLikeTheDecoder[foldRepTarget](t, map[string]any{"value": "x"})
+	if filled.foldRepLeft.foldRepShared.foldRepLeaf.Value != "x" || filled.foldRepRight.foldRepShared.foldRepLeaf.Value != "" {
+		t.Fatalf("premise: the decoder filled the left Value %q and the right Value %q, want x and empty",
+			filled.foldRepLeft.foldRepShared.foldRepLeaf.Value, filled.foldRepRight.foldRepShared.foldRepLeaf.Value)
+	}
+	want := []string{"foldRepRight.foldRepShared.foldRepLeaf.Value"}
+	if got := builtin.UnreachableJSONFields(reflect.TypeFor[foldRepTarget]()); !slices.Equal(got, want) {
+		t.Errorf("UnreachableJSONFields = %v, want %v", got, want)
 	}
 }
 

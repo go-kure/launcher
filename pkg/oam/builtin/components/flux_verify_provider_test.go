@@ -166,13 +166,18 @@ func TestFluxKinds_VerifyProviderDefault(t *testing.T) {
 				"the empty one first": {"Provider": "", "provider": "notation"},
 				"the empty one last":  {"Provider": "notation", "provider": ""},
 				"neither empty":       {"Provider": "cosign", "provider": "notation"},
+				// The decode's walk leaves a null alone, so this pair reaches
+				// the verify read, which refuses it (foldedKey).
+				"a null beside the empty one": {"Provider": nil, "provider": ""},
 			} {
 				t.Run("two spellings of the provider, "+name+", are refused", func(t *testing.T) {
 					verify["secretRef"] = secret()
 					_, err := kindConfig(t, k.handler, k.typ, "app", k.props(verify))
+					// The strict decode of the spec finds the pair first, under the
+					// handler's decode wrapper, so the sentence is read inside it.
 					want := path + ".provider: sets the same field as " + path + ".Provider"
-					if err == nil || !strings.HasPrefix(err.Error(), want) {
-						t.Errorf("ToApplicationConfig error = %v, want it to start with %q", err, want)
+					if err == nil || !strings.Contains(err.Error(), want) {
+						t.Errorf("ToApplicationConfig error = %v, want it to contain %q", err, want)
 					}
 				})
 			}

@@ -11,7 +11,9 @@ import (
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/go-kure/kure/pkg/stack"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin"
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 	"github.com/go-kure/launcher/pkg/oam/internal/requiredfields"
 )
@@ -333,13 +335,30 @@ func TestCiliumNetworkPolicyTrait_ReadsTypedCollections(t *testing.T) {
 	})
 }
 
+// wantCiliumTraitTwoSpellings checks err is the refusal of one field authored
+// under two spellings: the decode of the rule refuses it, under the trait's
+// decode wrapper, before the required list is read.
+func wantCiliumTraitTwoSpellings(t *testing.T, err error, later, earlier string) {
+	t.Helper()
+	want := "decode into api.Rule (a rejected field is not supported by the linked Cilium API version): " +
+		later + ": sets the same field as " + earlier + " (field names match case-insensitively, so one value would be dropped)"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want one mentioning %q", err, want)
+	}
+	var folded *builtin.FoldedFieldError
+	if !errors.As(err, &folded) || folded.Later != later || folded.Earlier != earlier {
+		t.Errorf("err = %v, want a *FoldedFieldError for (%q, %q)", err, later, earlier)
+	}
+}
+
 // TestCiliumNetworkPolicyTrait_EverySpellingIsHeldToTheList: field names match
-// case-insensitively in the decode, so a rule may write one field in two
-// spellings, of which the decode keeps one or merges both. The required check
-// cannot tell which, so each spelling is held to the list. Before, the check
-// read the first spelling only: `FROMENDPOINTS` here, complete, while the
-// policy was built from `FromEndpoints` and carried an `operator: ""` nobody
-// wrote.
+// case-insensitively in the decode, so a rule that writes one field in two
+// spellings has one value dropped or merged without a message. The decode
+// refuses such a rule, even when both spellings are complete (go-kure/launcher#1322).
+// Before, the required check held each spelling to the list instead, and a rule
+// whose two spellings were both complete built. The one-spelling rows still
+// reach the required check: `FROMENDPOINTS` alone, incomplete, is refused by its
+// path.
 func TestCiliumNetworkPolicyTrait_EverySpellingIsHeldToTheList(t *testing.T) {
 	expression := func(fields map[string]any) []any {
 		return []any{map[string]any{"matchExpressions": []any{fields}}}
@@ -353,37 +372,35 @@ func TestCiliumNetworkPolicyTrait_EverySpellingIsHeldToTheList(t *testing.T) {
 		}
 	}
 
+	// Keys sort with an upper-case letter first, so the lower-case spelling is
+	// the later one in the sentence.
 	t.Run("the spelling the decode keeps leaves the operator out", func(t *testing.T) {
 		_, err := buildCiliumTrait(trait(map[string]any{
 			"FROMENDPOINTS": expression(complete),
 			"FromEndpoints": expression(map[string]any{"key": "role"}),
 		}))
-		wantCiliumTraitRefusal(t, err, "ingress[0].FromEndpoints[0].matchExpressions[0].operator")
+		wantCiliumTraitTwoSpellings(t, err, "ingress[0].FromEndpoints", "ingress[0].FROMENDPOINTS")
 	})
 	t.Run("the other spelling leaves it out", func(t *testing.T) {
 		_, err := buildCiliumTrait(trait(map[string]any{
 			"FROMENDPOINTS": expression(map[string]any{"key": "role"}),
 			"FromEndpoints": expression(complete),
 		}))
-		wantCiliumTraitRefusal(t, err, "ingress[0].FROMENDPOINTS[0].matchExpressions[0].operator")
+		wantCiliumTraitTwoSpellings(t, err, "ingress[0].FromEndpoints", "ingress[0].FROMENDPOINTS")
 	})
-	// The decode merges the two spellings of a struct, so this policy would
-	// carry the mode. The spelling that leaves it out is refused all the same:
-	// the check does not follow the decode's choice, it holds each spelling.
 	t.Run("a struct in two spellings", func(t *testing.T) {
 		_, err := buildCiliumTrait(trait(map[string]any{
 			"AUTHENTICATION": map[string]any{},
 			"authentication": map[string]any{"mode": "required"},
 		}))
-		wantCiliumTraitRefusal(t, err, "ingress[0].AUTHENTICATION.mode")
+		wantCiliumTraitTwoSpellings(t, err, "ingress[0].authentication", "ingress[0].AUTHENTICATION")
 	})
 	t.Run("both spellings complete", func(t *testing.T) {
-		if _, err := buildCiliumTrait(trait(map[string]any{
+		_, err := buildCiliumTrait(trait(map[string]any{
 			"FROMENDPOINTS": expression(complete),
 			"FromEndpoints": expression(complete),
-		})); err != nil {
-			t.Fatalf("a trait whose two spellings both author the field is refused by the list: %v", err)
-		}
+		}))
+		wantCiliumTraitTwoSpellings(t, err, "ingress[0].FromEndpoints", "ingress[0].FROMENDPOINTS")
 	})
 	t.Run("one spelling, not the json name", func(t *testing.T) {
 		if _, err := buildCiliumTrait(trait(map[string]any{"FROMENDPOINTS": expression(complete)})); err != nil {

@@ -46,10 +46,12 @@ func effectiveFluxVerifyProvider(provider string) string {
 // while the API's enum refuses it as written. The properties are read in their
 // JSON form, as the decode reads them (numbers kept exact), so a typed map or a
 // named string type a caller builds them with is read as what it encodes. Keys
-// match case-insensitively, as the decode's do. Two keys of one object on the
-// way that fold together (`Provider` and `provider`) are refused, as the kinds'
-// decode refuses them elsewhere (kind_decode.go): the decode keeps one value
-// and drops the other, so the "" read here need not be the one the field ends
+// match case-insensitively, as the decode's do. Every caller has run the strict
+// decode first, and that decode refuses two keys of one object that fold
+// together and are both set (`Provider` and `provider`). One of the two may be
+// a null, which the decode leaves alone (a null is no value), so a pair with a
+// null spelling reaches this read, and foldedKey refuses it: the decode keeps
+// the other value, and the "" read here need not be the one the field ends
 // with.
 func refuseEmptyFluxVerifyProvider(authored map[string]any, path ...string) error {
 	raw, err := json.Marshal(authored)
@@ -89,6 +91,10 @@ func refuseEmptyFluxVerifyProvider(authored map[string]any, path ...string) erro
 
 // foldedKey returns the key of node that matches field case-insensitively, or
 // "" when none does, and refuses two that do. at is node's path, for the text.
+// The strict decode that runs before every caller refuses a pair of set values,
+// so this refusal is reached only for a pair in which one spelling is null: the
+// decode's walk skips a null, and the read here must not pick one spelling of
+// two.
 func foldedKey(node map[string]any, field string, at []string) (string, error) {
 	found := ""
 	for _, k := range slices.Sorted(maps.Keys(node)) {

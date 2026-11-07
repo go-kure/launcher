@@ -13346,6 +13346,39 @@ do not go through `parseObjectList` (`envFrom`, `httpHeaders`, `volumes`,
 `onPodConditions`, `volumeClaimTemplates`, `valuesFrom`, `scopeOverrides`) pass each
 element through `nullElem` first, for the same untyped refusal and message.
 
+## Two spellings of one field
+
+`encoding/json` matches field names ignoring case, so a property map that writes one field in
+two spellings (`suspend` and `Suspend`) would build with one value and drop the other without a
+message. Every kind that decodes through `builtin.DecodeStrictJSON` refuses such a map, at any
+depth, naming both keys: `<later>: sets the same field as <earlier> (field names match
+case-insensitively, so one value would be dropped)`. The later key is the lower-case spelling,
+because keys compare in sorted order. The refusal comes after the strict decode, so an unknown
+key or a wrong type is still the first error, and a null never forms a pair.
+
+`kurel build` reaches the decode only after the authored-property check, which holds each
+top-level key to the kind's schema by exact name. A top-level pair therefore stops earlier there:
+the spelling the schema does not declare is refused as `unsupported field "Suspend" (allowed: ...)`,
+and the "sets the same field" sentence is the refusal of a pair below the top level, inside an
+object the schema leaves open (`ref.branch` and `ref.Branch`). Both refusals are build errors.
+A caller that decodes without that check (a test, a library use) meets the sentence at the top
+level too.
+
+The kinds that go through `decodeKindSpec` and `cnpg-cluster` return that sentence alone, as
+they did when their own check found the pair. A kind that decodes by itself keeps the wrapper it
+adds to a decode error: `gitrepository: properties do not decode as a GitRepositorySpec: <sentence>`,
+`helmrelease: properties do not decode as a HelmReleaseSpec: <sentence>`, and the same for
+`bucket`, `helmchart`, `helmrepository`, `ocirepository`, `fluxcd-kustomization`, `helm` and
+`helmtemplate` below their guarded levels. Before, those documents built. The `cilium-networkpolicy`
+trait refuses a rule that writes one field in two spellings too, **even when both spellings are
+complete**: it used to hold each spelling to the required list and build. The `helmrelease` verify
+check still refuses a pair in which one spelling is null, which the decode lets through
+(`foldedKey`).
+
+The required-field check that `requiredfields` runs reads every spelling of a field, as before; the
+decode refuses a pair before it is reached on the paths above, and a path that does not decode
+through `DecodeStrictJSON` keeps its own reading.
+
 ## Conventions
 
 Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (access

@@ -5,6 +5,8 @@ import (
 	"cmp"
 	"encoding"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strconv"
@@ -53,6 +55,11 @@ func DecodeStrict[T any](src map[string]any) (*T, error) {
 // Known gap: encoding/json does not apply DisallowUnknownFields inside a type with
 // its own UnmarshalJSON, so unknown keys nested in such a field are still dropped.
 // Key matching is case-insensitive, as in encoding/json, and so is the owned split.
+// The tag options case:strict and case:ignore are not modelled. No type read here
+// carries them.
+// Two keys that encoding/json files under one field of T, such as url and URL, are
+// refused with a *FoldedFieldError (FoldedDuplicateFieldPath): the decoder would
+// keep one of the two values and drop the other without a message.
 //
 // A panic inside the decode is returned as an error: see decodeJSONRecovering.
 func DecodeStrictJSON[T any](src map[string]any, owned ...string) (*T, map[string]any, error) {
@@ -76,6 +83,10 @@ func DecodeStrictJSON[T any](src map[string]any, owned ...string) (*T, map[strin
 	var out T
 	if err := decodeJSONRecovering(dec, &out); err != nil {
 		return nil, nil, err
+	}
+	// After the decode, so an unknown key or a wrong type is reported first.
+	if later, earlier := foldedDuplicateInJSON[T](data); later != "" {
+		return nil, nil, SameFieldError(later, earlier)
 	}
 	return &out, split, nil
 }
@@ -171,12 +182,7 @@ func unknownJSONFieldPath(t reflect.Type, value any, shapes SelfDecodedShapes) (
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
-	pt := reflect.PointerTo(t)
-	named := func(name string) bool {
-		_, found := pt.MethodByName(name)
-		return found
-	}
-	if pt.Implements(reflect.TypeFor[json.Unmarshaler]()) || pt.Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) || named("UnmarshalJSONFrom") {
+	if decodesItself(t) {
 		shape, ok := shapes[t]
 		if !ok || shape == t {
 			return ""
@@ -197,9 +203,7 @@ func unknownJSONFieldPath(t reflect.Type, value any, shapes SelfDecodedShapes) (
 		}
 		slices.Sort(keys)
 		if t.Kind() == reflect.Struct {
-			var fields []jsonField
-			var hidden []string
-			collectJSONFields(t, nil, nil, "", &fields, &hidden)
+			fields := decoderFields(t)
 			for _, k := range keys {
 				if !decodesKey(t, k) {
 					return k
@@ -234,72 +238,233 @@ func unknownJSONFieldPath(t reflect.Type, value any, shapes SelfDecodedShapes) (
 	return ""
 }
 
-// jsonFieldType returns the type of the field of t that encoding/json fills
-// from key, selecting it the way the decoder does: the field keyed exactly
-// so, else the shallowest field whose key equals it ignoring case, and at one
-// depth the first in declaration order. That is the decoder's breadth-first
-// order. Only a field encoding/json keeps counts. Of several fields with one
-// key it keeps the dominant one (the shallowest, a tagged one before an
-// untagged one) or none, and which is asked of encoding/json itself
-// (encodesField). It reports false when that cannot be shown, so the caller
-// walks no field the decoder may not fill.
-func jsonFieldType(t reflect.Type, fields []jsonField, key string) (reflect.Type, bool) {
-	// kept is the one field keyed k that encoding/json keeps. ok is false when
-	// several fields are keyed k and none can be shown to be kept.
-	kept := func(k string) (f jsonField, ok bool) {
-		var same []jsonField
-		for _, o := range fields {
-			if o.key == k {
-				same = append(same, o)
-			}
-		}
-		if len(same) == 1 {
-			return same[0], true
-		}
-		for _, o := range same {
-			if encodesField(t, o.index) {
-				return o, true
-			}
-		}
-		return jsonField{}, false
-	}
+// decodesItself reports whether encoding/json hands the value of a t to t's own
+// code (UnmarshalJSON, UnmarshalText, or the json/v2 UnmarshalJSONFrom), which
+// then checks no key.
+func decodesItself(t reflect.Type) bool {
+	pt := reflect.PointerTo(t)
+	_, from := pt.MethodByName("UnmarshalJSONFrom")
+	return pt.Implements(reflect.TypeFor[json.Unmarshaler]()) || pt.Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) || from
+}
 
-	var folded []string
-	for _, f := range fields {
-		if f.key == key {
-			exact, ok := kept(key)
-			if !ok {
-				return nil, false
+// FoldedFieldError reports two keys of one authored object that encoding/json
+// files under one field of the decoded type, which it matches ignoring case, so
+// that one of the two values would be dropped. Later is the path of the key
+// that sorts after the other, Earlier the path of the other: dots between keys
+// and "[i]" for a list element, from the root of the decoded map.
+//
+// Its text is the one sentence every refusal of two spellings uses
+// (SameFieldError). A caller that must show that sentence alone finds the error
+// with errors.As and returns it unwrapped.
+type FoldedFieldError struct {
+	Later, Earlier string
+}
+
+// Error returns the sentence naming both paths.
+func (e *FoldedFieldError) Error() string {
+	return e.Later + ": sets the same field as " + e.Earlier + " (field names match case-insensitively, so one value would be dropped)"
+}
+
+// SameFieldError returns the *FoldedFieldError for the two paths. Every site
+// that refuses two spellings of one field builds the error here, so the text
+// has one source.
+func SameFieldError(later, earlier string) error {
+	return &FoldedFieldError{Later: later, Earlier: earlier}
+}
+
+// FoldedDuplicateFieldPath returns the paths of the first two keys of src that
+// DecodeStrictJSON[T] called with the same owned keys files under one field of
+// T, the later key first, or two empty strings when there is no such pair. It
+// is the walk DecodeStrictJSON runs after a decode that succeeded.
+//
+// Keys are visited in sorted order at each level, and a pair is reported when
+// its second key is reached, before the walk descends into that key's value.
+// Two keys form a pair only when encoding/json would fill the same field from
+// both (jsonFieldFor): two keys that name two fields of T, such as an exact Foo
+// and an exact foo, are no pair. A key authored as null never forms a pair,
+// because the package's null contract reads it as absent. The keys of a map
+// are data and are not compared, and the walk does not look inside a type that
+// decodes itself, an interface value or json.RawMessage, where the decoder
+// checks no key either. Where it cannot show which field a key fills, it
+// reports nothing.
+func FoldedDuplicateFieldPath[T any](src map[string]any, owned ...string) (later, earlier string) {
+	rest := make(map[string]any, len(src))
+	for k, v := range src {
+		if !isOwned(owned, k) {
+			rest[k] = v
+		}
+	}
+	data, err := json.Marshal(rest)
+	if err != nil {
+		return "", ""
+	}
+	return foldedDuplicateInJSON[T](data)
+}
+
+// foldedDuplicateInJSON is FoldedDuplicateFieldPath for the JSON text of an
+// authored map with its owned keys already split off.
+func foldedDuplicateInJSON[T any](data []byte) (later, earlier string) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var value any
+	if err := dec.Decode(&value); err != nil {
+		return "", ""
+	}
+	return foldedDuplicatePath(reflect.TypeFor[T](), value, "")
+}
+
+// foldedDuplicatePath is FoldedDuplicateFieldPath for one decoded JSON value,
+// the type it decodes into and the path it sits at. A panic from reflection
+// over an unusual type counts as nothing found.
+func foldedDuplicatePath(t reflect.Type, value any, path string) (later, earlier string) {
+	defer func() {
+		if recover() != nil {
+			later, earlier = "", ""
+		}
+	}()
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if decodesItself(t) {
+		return "", ""
+	}
+	child := func(k string) string {
+		if path == "" {
+			return k
+		}
+		return path + "." + k
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		keys := slices.Sorted(maps.Keys(v))
+		switch t.Kind() {
+		case reflect.Struct:
+			fields := decoderFields(t)
+			// filled maps the index of a field to the key that filled it first.
+			filled := map[string]string{}
+			for _, k := range keys {
+				if v[k] == nil {
+					continue
+				}
+				f, ok := jsonFieldFor(fields, k)
+				if !ok {
+					continue
+				}
+				id := fmt.Sprint(f.index)
+				if prev, dup := filled[id]; dup {
+					return child(k), child(prev)
+				}
+				filled[id] = k
+				if l, e := foldedDuplicatePath(t.FieldByIndex(f.index).Type, v[k], child(k)); l != "" {
+					return l, e
+				}
 			}
-			return t.FieldByIndex(exact.index).Type, true
+		case reflect.Map:
+			for _, k := range keys {
+				if l, e := foldedDuplicatePath(t.Elem(), v[k], child(k)); l != "" {
+					return l, e
+				}
+			}
+		default:
+			// Any other kind has no keys to compare.
 		}
-		if strings.EqualFold(f.key, key) && !slices.Contains(folded, f.key) {
-			folded = append(folded, f.key)
+	case []any:
+		if t.Kind() != reflect.Slice && t.Kind() != reflect.Array {
+			return "", ""
 		}
+		if t.Kind() == reflect.Array && len(v) > t.Len() {
+			// The decoder drops the elements a fixed array has no room for.
+			v = v[:t.Len()]
+		}
+		for i, item := range v {
+			if l, e := foldedDuplicatePath(t.Elem(), item, path+"["+strconv.Itoa(i)+"]"); l != "" {
+				return l, e
+			}
+		}
+	}
+	return "", ""
+}
+
+// jsonFieldType returns the type of the field of t that encoding/json fills
+// from key, selecting it the way the decoder does (jsonFieldFor). It reports
+// false when no field keeps that key.
+func jsonFieldType(t reflect.Type, fields []jsonField, key string) (reflect.Type, bool) {
+	f, ok := jsonFieldFor(fields, key)
+	if !ok {
+		return nil, false
+	}
+	return t.FieldByIndex(f.index).Type, true
+}
+
+// jsonFieldFor is jsonFieldType that returns the field itself, with its index
+// from the root of t, so a caller can tell whether two keys land on one field.
+//
+// It selects the field the way encoding/json's typeFields does, and by the same
+// structure alone: the field a name keeps (keptJSONField) when a field is keyed
+// exactly so, else, among the fields kept under the other names that equal the
+// key ignoring case, the first by foldedBefore. That order follows the
+// encoding/json the package is built with, which differs between the jsonv2-backed
+// decoder (shallowest first) and the v1 decoder (index order). A name that no
+// field keeps is skipped, so a key falls to the next name that matches it
+// ignoring case.
+func jsonFieldFor(fields []jsonField, key string) (jsonField, bool) {
+	if f, ok := keptJSONField(fields, key); ok {
+		return f, true
 	}
 	var first *jsonField
-	for _, k := range folded {
-		f, ok := kept(k)
+	for _, o := range fields {
+		if o.key == key || !strings.EqualFold(o.key, key) {
+			continue
+		}
+		f, ok := keptJSONField(fields, o.key)
 		if !ok {
-			return nil, false
+			continue
 		}
 		if first == nil || foldedBefore(f.index, first.index) {
 			first = &f
 		}
 	}
 	if first == nil {
-		return nil, false
+		return jsonField{}, false
 	}
-	return t.FieldByIndex(first.index).Type, true
+	return *first, true
 }
 
-// foldedBefore reports whether index a is visited before b in the decoder's
-// breadth-first order: a shallower field, then one declared earlier.
-func foldedBefore(a, b []int) bool {
-	if len(a) != len(b) {
-		return len(a) < len(b)
+// keptJSONField returns the one field encoding/json keeps among those keyed
+// exactly name, or false when it keeps none. It mirrors typeFields and
+// dominantField: the field at the least depth wins; at that depth a field whose
+// key comes from a json tag beats the untagged ones; and when more than one
+// field is left at that depth and tag state, encoding/json drops the name.
+// Nothing here depends on the field's type or on a method it has.
+func keptJSONField(fields []jsonField, name string) (jsonField, bool) {
+	var shallow []jsonField
+	for _, f := range fields {
+		if f.key != name {
+			continue
+		}
+		switch {
+		case len(shallow) == 0 || len(f.index) < len(shallow[0].index):
+			shallow = []jsonField{f}
+		case len(f.index) == len(shallow[0].index):
+			shallow = append(shallow, f)
+		}
 	}
-	return slices.Compare(a, b) < 0
+	if len(shallow) == 0 {
+		return jsonField{}, false
+	}
+	var tagged []jsonField
+	for _, f := range shallow {
+		if f.tagged {
+			tagged = append(tagged, f)
+		}
+	}
+	if len(tagged) > 0 {
+		shallow = tagged
+	}
+	if len(shallow) != 1 {
+		return jsonField{}, false
+	}
+	return shallow[0], true
 }
 
 // UnreachableJSONFields reports the fields of t (a struct, or a pointer to one),
@@ -354,25 +519,33 @@ func UnreachableJSONFields(t reflect.Type, owned ...string) []string {
 }
 
 // jsonField is a field encoding/json keys by name: its key, its reflect index from
-// the root, and its dotted Go path, the name it is reported by.
+// the root, its dotted Go path, the name it is reported by, and whether its key
+// comes from a json tag.
 type jsonField struct {
-	key   string
-	index []int
-	path  string
+	key    string
+	index  []int
+	path   string
+	tagged bool
 }
 
-// collectJSONFields gathers every keyed field of t and of the structs it embeds.
-// path holds only the current branch's embeddings, so a type that embeds itself
-// stops at the repeat while one embedded twice is walked on both branches.
-func collectJSONFields(t reflect.Type, path []reflect.Type, index []int, prefix string, fields *[]jsonField, hidden *[]string) {
-	if slices.Contains(path, t) {
-		return
-	}
-	path = append(path, t)
+// embeddedStruct is a struct embedded without a name, which encoding/json
+// explores for the fields it promotes: its type, its index from the root, and the
+// Go path that reports its fields.
+type embeddedStruct struct {
+	typ    reflect.Type
+	index  []int
+	prefix string
+}
+
+// scanStruct splits the fields of the struct type t, which sits at index from the
+// root, into the keyed fields it declares and the embedded structs to explore
+// next. Both drivers below use it, so they read a field the same way. hidden, when
+// not nil, collects the exported fields tagged `json:"-"`.
+func scanStruct(t reflect.Type, index []int, prefix string, hidden *[]string) (own []jsonField, embeds []embeddedStruct) {
 	for f := range t.Fields() {
 		tag := f.Tag.Get("json")
 		if tag == "-" {
-			if f.IsExported() {
+			if f.IsExported() && hidden != nil {
 				*hidden = append(*hidden, f.Name)
 			}
 			continue
@@ -389,11 +562,73 @@ func collectJSONFields(t reflect.Type, path []reflect.Type, index []int, prefix 
 		embedded := f.Anonymous && ft.Kind() == reflect.Struct
 		switch {
 		case embedded && name == "":
-			collectJSONFields(ft, path, idx, prefix+f.Name+".", fields, hidden)
+			embeds = append(embeds, embeddedStruct{typ: ft, index: idx, prefix: prefix + f.Name + "."})
 		case f.IsExported() || embedded:
-			*fields = append(*fields, jsonField{key: cmp.Or(name, f.Name), index: idx, path: prefix + f.Name})
+			own = append(own, jsonField{key: cmp.Or(name, f.Name), index: idx, path: prefix + f.Name, tagged: name != ""})
 		}
 	}
+	return own, embeds
+}
+
+// collectJSONFields gathers every keyed field of t and of the structs it embeds,
+// once for every way to reach it. path holds only the current branch's
+// embeddings, so a type that embeds itself stops at the repeat while one embedded
+// twice is walked on both branches. That is more than encoding/json explores, and
+// it is what UnreachableJSONFields wants: it probes the decoder for each copy and
+// names the one the decoder never reaches. A walk that must select the field a key
+// fills uses decoderFields.
+func collectJSONFields(t reflect.Type, path []reflect.Type, index []int, prefix string, fields *[]jsonField, hidden *[]string) {
+	if slices.Contains(path, t) {
+		return
+	}
+	path = append(path, t)
+	own, embeds := scanStruct(t, index, prefix, hidden)
+	*fields = append(*fields, own...)
+	for _, e := range embeds {
+		collectJSONFields(e.typ, path, e.index, e.prefix, fields, hidden)
+	}
+}
+
+// decoderFields gathers the keyed fields of the struct type t as encoding/json
+// discovers them, which both decoders do the same way: level by level, the
+// structs t embeds first, then the ones those embed. An embedded type is explored
+// once per level however many structs embed it, and never again at a deeper level
+// (typeFields' visited and nextCount in the v1 decoder; the seen set of
+// makeStructFields in json/v2). The keyed fields of a type that was reached more
+// than once at its level are listed twice, so that keptJSONField sees the
+// duplicate and drops the name, as the decoders do (the "multiple instances" copy
+// in typeFields, the repeated queue entry in json/v2). A type that embeds itself
+// stops at the repeat.
+func decoderFields(t reflect.Type) []jsonField {
+	var fields []jsonField
+	visited := map[reflect.Type]bool{}
+	reached := map[reflect.Type]int{t: 1}
+	current := []embeddedStruct{{typ: t}}
+	for len(current) > 0 {
+		var next []embeddedStruct
+		nextReached := map[reflect.Type]int{}
+		for _, e := range current {
+			if visited[e.typ] {
+				continue
+			}
+			visited[e.typ] = true
+			own, embeds := scanStruct(e.typ, e.index, e.prefix, nil)
+			for _, f := range own {
+				fields = append(fields, f)
+				if reached[e.typ] > 1 {
+					fields = append(fields, f)
+				}
+			}
+			for _, em := range embeds {
+				nextReached[em.typ]++
+				if nextReached[em.typ] == 1 {
+					next = append(next, em)
+				}
+			}
+		}
+		current, reached = next, nextReached
+	}
+	return fields
 }
 
 // hasRival reports whether another field's key equals f's ignoring case, the only

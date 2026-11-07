@@ -37,14 +37,49 @@ func decodeKindSpec[T any](props map[string]any, kind string) (*T, map[string]an
 	if err != nil {
 		return nil, nil, err
 	}
-	spec, _, err := builtin.DecodeStrictJSON[T](stripped)
+	spec, err := decodeStrippedAndRaw[T](stripped, raw, kind)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "properties do not decode into a %s", kind)
-	}
-	if _, _, err := builtin.DecodeStrictJSON[T](raw); err != nil {
-		return nil, nil, errors.Wrapf(err, "properties do not decode into a %s", kind)
+		return nil, nil, err
 	}
 	return spec, stripped, nil
+}
+
+// decodeStrippedAndRaw decodes stripped strictly into T, then raw, the same
+// properties with their null keys kept, for the unknown-field refusal only: a
+// null on a declared field decodes as a no-op, and a null array element was
+// refused by jsonProperties. Two spellings of one field are found after the
+// decode, so a pair in stripped would end the first step before raw is read
+// and hide an unknown key authored as null. That key comes first, as it did
+// before the pair was refused: when the first step finds a pair, raw is decoded
+// before the pair is returned.
+func decodeStrippedAndRaw[T any](stripped, raw map[string]any, kind string) (*T, error) {
+	spec, _, err := builtin.DecodeStrictJSON[T](stripped)
+	if err != nil {
+		var pair, rawPair *builtin.FoldedFieldError
+		if errors.As(err, &pair) {
+			if _, _, rawErr := builtin.DecodeStrictJSON[T](raw); rawErr != nil && !errors.As(rawErr, &rawPair) {
+				return nil, wrapKindDecode(rawErr, kind)
+			}
+		}
+		return nil, wrapKindDecode(err, kind)
+	}
+	if _, _, err := builtin.DecodeStrictJSON[T](raw); err != nil {
+		return nil, wrapKindDecode(err, kind)
+	}
+	return spec, nil
+}
+
+// wrapKindDecode is the error of a failed decode of a kind's properties: err
+// under "properties do not decode into a <kind>", except two spellings of one
+// field. That refusal keeps the bare sentence (builtin.SameFieldError) that the
+// guard of a kind (refuseUncarriedSpecValues) gave before the decoder found the
+// pair, so a kind's message does not change with the place that finds it.
+func wrapKindDecode(err error, kind string) error {
+	var folded *builtin.FoldedFieldError
+	if errors.As(err, &folded) {
+		return folded
+	}
+	return errors.Wrapf(err, "properties do not decode into a %s", kind)
 }
 
 // unknownKeyHint is a type's UnsupportedFieldHint for a decode error, which
@@ -145,7 +180,7 @@ func compareCarriedIn(authored, encoded any, path, field string, defaulted defau
 			if !present {
 				for _, prev := range unmatched {
 					if strings.EqualFold(prev, k) {
-						return errors.Errorf("%s: sets the same field as %s (field names match case-insensitively, so one value would be dropped)", child, join(path, prev))
+						return builtin.SameFieldError(child, join(path, prev))
 					}
 				}
 				unmatched = append(unmatched, k)
@@ -167,7 +202,7 @@ func compareCarriedIn(authored, encoded any, path, field string, defaulted defau
 				continue
 			}
 			if other, dup := claimed[ek]; dup {
-				return errors.Errorf("%s: sets the same field as %s (field names match case-insensitively, so one value would be dropped)", child, other)
+				return builtin.SameFieldError(child, other)
 			}
 			claimed[ek] = child
 			if err := compareCarriedIn(a[k], e[ek], child, join(field, ek), defaulted); err != nil {
@@ -204,7 +239,7 @@ func foldedDuplicateIn(authored any, path string) error {
 		for i, k := range keys {
 			for _, prev := range keys[:i] {
 				if strings.EqualFold(prev, k) {
-					return errors.Errorf("%s.%s: sets the same field as %s.%s (field names match case-insensitively, so one value would be dropped)", path, k, path, prev)
+					return builtin.SameFieldError(path+"."+k, path+"."+prev)
 				}
 			}
 			if err := foldedDuplicateIn(a[k], path+"."+k); err != nil {
