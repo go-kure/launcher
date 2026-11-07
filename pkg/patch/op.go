@@ -483,8 +483,9 @@ func convertValueForUnstructured(value any) any {
 
 // convertChecked is convertValueForUnstructured that also reports, in *collision, the first
 // mapping whose distinct non-string keys read the same after fmt.Sprint (`0x10` and `"16"`).
-// The converted value is still returned; one of the colliding entries is then lost, and the
-// choice is the same on every run. A loader returns the error instead of loading that value.
+// The converted value is still returned; one of the colliding entries is then lost. A loader
+// returns the error instead of loading that value; only convertValueForUnstructured, which
+// ignores the error, keeps the survivor.
 func convertChecked(value any, collision *error) any {
 	switch v := value.(type) {
 	case int:
@@ -511,24 +512,28 @@ func convertChecked(value any, collision *error) any {
 	case map[interface{}]interface{}:
 		// yaml.v3 decodes a mapping with a non-string key (`{123: hello}`) to this type,
 		// which DeepCopy refuses. Keys become strings via fmt.Sprint (a null key reads
-		// "<nil>"); values are converted recursively. Keys are visited in the order of
-		// their Go syntax, so a collision reads the same on every run.
-		keys := make([]any, 0, len(v))
-		for k := range v {
-			keys = append(keys, k)
+		// "<nil>"); values are converted recursively. The entries are taken from the range
+		// and not looked up again by key, because a NaN key never equals itself. They are
+		// visited in the order of their Go syntax, so the message of a collision is stable;
+		// the order of keys that print the same way (`int(1)` and `float64(1)`) is not
+		// defined, which is harmless because a loader refuses such a collision.
+		type entry struct{ key, val any }
+		entries := make([]entry, 0, len(v))
+		for k, val := range v {
+			entries = append(entries, entry{k, val})
 		}
-		sort.Slice(keys, func(i, j int) bool {
-			return fmt.Sprintf("%#v", keys[i]) < fmt.Sprintf("%#v", keys[j])
+		sort.SliceStable(entries, func(i, j int) bool {
+			return fmt.Sprintf("%#v", entries[i].key) < fmt.Sprintf("%#v", entries[j].key)
 		})
 		converted := make(map[string]any, len(v))
 		seen := make(map[string]any, len(v))
-		for _, k := range keys {
-			name := fmt.Sprint(k)
+		for _, e := range entries {
+			name := fmt.Sprint(e.key)
 			if first, dup := seen[name]; dup && *collision == nil {
-				*collision = fmt.Errorf("map keys %#v and %#v both read %q", first, k, name)
+				*collision = fmt.Errorf("map keys %#v and %#v both read %q", first, e.key, name)
 			}
-			seen[name] = k
-			converted[name] = convertChecked(v[k], collision)
+			seen[name] = e.key
+			converted[name] = convertChecked(e.val, collision)
 		}
 		return converted
 	case []any:
