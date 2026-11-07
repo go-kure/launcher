@@ -158,7 +158,16 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   without a version-string move or a deprecation period, and the PR description discloses
   any output change. From that release on, `docs/oam/design-gvk.md` § Document-Format
   Lifecycle applies: the additive/breaking test, and a breaking change moves the version
-  string
+  string.
+  CI enforces the scope (the `issue-refs` job, `make check-format-scope`,
+  `scripts/check-format-scope.sh`, go-kure/launcher#1279): a commit that changes a non-test
+  file of `pkg/oam/validate.go`, `types.go`, `capability.go`, `parser.go`, `package.go` or
+  `profile.go` must use `feat(format)`, `fix(format)`, `refactor(format)` or `docs(format)`
+  (the pattern `cliff.toml` groups by; a self-test fails if the two differ). When such a
+  change leaves the accepted format as it was (a comment, an error message), the commit body
+  carries `Format-Scope: none (<reason>)` and the reason must not be empty. The guard does
+  not see a change to a builtin trait or component property validator, nor a semantic change
+  inside a listed file that the path rule cannot tell apart; review is the backstop for both.
 
 ## Code Conventions
 
