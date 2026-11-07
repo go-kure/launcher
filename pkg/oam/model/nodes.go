@@ -121,16 +121,20 @@ func joinPath(path, name string) string {
 }
 
 // refuseDuplicateStringKeys fails on a mapping that decodes into a Go map with string
-// keys when two of its keys decode to the same string. yaml.v3 compares the scalar
-// value and the tag to find a duplicate, so `image` and `!!binary aW1hZ2U=` pass its
-// check. It then decodes both keys into the string `image`, and the later entry
-// replaces the earlier one. Keys that decode to different strings, such as `1` and
-// `01`, stay apart, as in the decoded map. A key that does not decode into a string is
-// left to yaml.v3.
+// keys when two of its keys decode to the same string. yaml.v3 compares the kind and
+// the value of two keys to find a duplicate, and it ignores the tag. So `image` and
+// `!!binary aW1hZ2U=` pass its check. It then decodes both keys into the string
+// `image`, and the later entry replaces the earlier one. Keys that decode to different
+// strings, such as `1` and `01`, stay apart, as in the decoded map. yaml.v3 skips a
+// null key of a string map, so this function skips it too. A key that does not decode
+// into a string is left to yaml.v3.
 func refuseDuplicateStringKeys(n *yaml.Node, path string) error {
 	seen := make(map[string]*yaml.Node, len(n.Content)/2)
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k := n.Content[i]
+		if k.Kind == yaml.ScalarNode && k.ShortTag() == "!!null" {
+			continue
+		}
 		var name string
 		if err := k.Decode(&name); err != nil {
 			continue
