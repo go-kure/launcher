@@ -224,14 +224,16 @@ Runs on main and `release/*` branches only (not PRs):
   repositories plus a check that the scope pattern equals the one `cliff.toml` groups by), then,
   on a pull request only, `scripts/check-format-scope.sh --commits <base.sha> --head <head.sha>`.
   A commit fails when it changes a non-test file of `pkg/oam/validate.go`, `types.go`,
-  `capability.go`, `parser.go`, `package.go` or `profile.go` and its subject does not start with
+  `capability.go`, `parser.go`, `package.go` or `profile.go`, or any non-test `.go` file under
+  `pkg/oam/builtin/` other than `contract.go`, `doc.go` and files under `testdata/`, and its
+  subject does not start with
   `feat(format)`, `fix(format)`, `refactor(format)` or `docs(format)`, followed by an optional `!`,
   a colon and a space (`cliff.toml` drops any other header from the changelog). A commit that
   leaves the accepted format as it was takes a body line `Format-Scope: none (<reason>)`, and the
   reason must not be empty. Renovate's and merge commits are skipped. In a shallow clone the guard
   exits 2 when the clone cuts history inside the range. `make check-format-scope` runs the same
-  check locally against `ISSUE_REFS_BASE` (default `origin/main`). It does not see a change to a
-  builtin trait or component property validator. Convention: `AGENTS.md` "Document-format changes"
+  check locally against `ISSUE_REFS_BASE` (default `origin/main`). Convention: `AGENTS.md`
+  "Document-format changes"
 - **Manifest schema validation** — `validate-manifests` builds a representative subset of
   `examples/*.yaml` via `kurel build` and validates the output against
   [fluxcd/flux-schema](https://github.com/fluxcd/flux-schema)'s `default` (embedded) catalog plus

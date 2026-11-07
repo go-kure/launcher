@@ -23,13 +23,14 @@
 #   pkg/oam/parser.go      the parse entry point
 #   pkg/oam/package.go     the kurel.yaml document type
 #   pkg/oam/profile.go     the cluster.yaml document type
-# A *_test.go file never counts. The repository holds no standalone schema files; the
-# document schemas are the Go types above.
+#   pkg/oam/builtin/       every .go file below it (the per-kind property validators)
+# Under pkg/oam/builtin/ a *_test.go file, a contract.go or doc.go file, and a file under
+# testdata/ never count. A *_test.go file never counts anywhere. The repository holds no
+# standalone schema files; the document schemas are the Go types above.
 #
-# Not caught: a change to a builtin trait or component property validator (the
-# per-kind property checks under pkg/oam/builtin/), and a change inside a listed file
-# that does not alter what is accepted but is not marked by the trailer. Reviewers
-# remain the backstop for both.
+# Not caught: a change inside a counted file that does not alter what is accepted but is
+# not marked by the trailer, and acceptance code outside this set (for example
+# pkg/oam/property_validate.go and pkg/oam/lowering.go). Reviewers remain the backstop.
 #
 # Skips merge commits and Renovate's commits (its email, as check-issue-refs.sh does).
 # In a shallow clone it exits 2 when a boundary commit lies inside the range, because
@@ -59,6 +60,12 @@ ACCEPT_PATHS=(
   pkg/oam/package.go
   pkg/oam/profile.go
 )
+
+# The builtin component, trait and policy handlers refuse and build in one method, and their
+# data tables refuse without building an error, so every non-test .go file under this prefix
+# counts too, except the file names below (contract metadata and the package comment).
+ACCEPT_PREFIX="pkg/oam/builtin/"
+ACCEPT_SKIP_NAMES=(contract.go doc.go)
 
 RENOVATE_EMAIL="renovate@whitesourcesoftware.com"
 
@@ -108,7 +115,22 @@ touched_acceptance() {
         printf '%s\n' "$path"
       fi
     done
+    if builtin_acceptance "$path"; then
+      printf '%s\n' "$path"
+    fi
   done <<<"$files"
+}
+
+# builtin_acceptance PATH: true for a non-test Go file under ACCEPT_PREFIX, other than a
+# skipped name or a file under testdata/.
+builtin_acceptance() {
+  local path="$1" skip
+  [[ "$path" == "$ACCEPT_PREFIX"* && "$path" == *.go && "$path" != *_test.go ]] || return 1
+  [[ "$path" != */testdata/* ]] || return 1
+  for skip in "${ACCEPT_SKIP_NAMES[@]}"; do
+    [[ "${path##*/}" != "$skip" ]] || return 1
+  done
+  return 0
 }
 
 # trailer_state BODY: "ok" for a Format-Scope trailer with a reason, "empty" for one
