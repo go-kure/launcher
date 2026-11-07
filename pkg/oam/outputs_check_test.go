@@ -314,6 +314,142 @@ func TestOutputCheck_RewrittenDeclarationStillFails(t *testing.T) {
 	}
 }
 
+// typedMutatingOutputRule rewrites values whose Go type is no map[string]any or
+// []any: collections a caller that builds a Component in Go may hold. The probe
+// copies every map and slice, whatever its type.
+type typedMutatingOutputRule struct {
+	seen *[]string
+}
+
+func (r typedMutatingOutputRule) ComponentType() string { return "db" }
+
+func (r typedMutatingOutputRule) Outputs(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
+	c.Properties["typed"].(map[string][]string)["k"][0] = "mutated"
+	c.Properties["rows"].([]map[string]any)[0]["x"] = "mutated"
+	return declareResolved(outputClusterKind)(c, lctx)
+}
+
+func (r typedMutatingOutputRule) LowerComponent(c *Component, lctx LoweringContext) (LoweringResult, error) {
+	*r.seen = []string{
+		c.Properties["typed"].(map[string][]string)["k"][0],
+		c.Properties["rows"].([]map[string]any)[0]["x"].(string),
+	}
+	return loweringOutputRule{kinds: []schema.GroupKind{outputClusterKind}}.LowerComponent(c, lctx)
+}
+
+func TestOutputCheck_ProviderMutationOfTypedCollectionsDoesNotReachTheBuild(t *testing.T) {
+	var seen []string
+	tr := NewTransformer(map[string]ComponentHandler{"kind-a": &pipelineComponentHandler{typ: "kind-a"}}, nil)
+	tr.RegisterComponentLowering(typedMutatingOutputRule{seen: &seen})
+	app := terminalApp(Component{
+		Name: "pg", Type: "db",
+		Properties: map[string]any{
+			"typed": map[string][]string{"k": {"orig"}},
+			"rows":  []map[string]any{{"x": "orig"}},
+		},
+	})
+	if _, err := tr.Transform(app, TransformContext{}); err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	if len(seen) != 2 || seen[0] != "orig" || seen[1] != "orig" {
+		t.Errorf("the lowering saw %v, want [orig orig]: the provider's writes reached the build", seen)
+	}
+}
+
+// A consumer queries the outputs of a component of its own document before it
+// builds: the query leaves that component as it was, for a rule as for a handler.
+func TestOutputCheck_QueryBeforeBuildLeavesTheDocumentAlone(t *testing.T) {
+	var seen []string
+	tr := NewTransformer(map[string]ComponentHandler{"kind-a": &pipelineComponentHandler{typ: "kind-a"}}, nil)
+	tr.RegisterComponentLowering(mutatingOutputRule{seen: &seen})
+	app := terminalApp(Component{
+		Name: "pg", Type: "db",
+		Properties: map[string]any{
+			"k":      "orig",
+			"nested": map[string]any{"x": "orig"},
+			"list":   []any{"orig"},
+		},
+		Annotations: map[string]string{"a": "orig"},
+	})
+	comp := &app.Spec.Components[0]
+	if _, err := tr.ComponentOutputs(comp); err != nil {
+		t.Fatalf("ComponentOutputs: %v", err)
+	}
+	if _, err := tr.ComponentOutputsNamed("app", comp, nil); err != nil {
+		t.Fatalf("ComponentOutputsNamed: %v", err)
+	}
+	got := []any{comp.Properties["k"], comp.Properties["nested"].(map[string]any)["x"], comp.Properties["list"].([]any)[0], comp.Annotations["a"]}
+	for i, v := range got {
+		if v != "orig" {
+			t.Errorf("after the query the component holds %v (value %d): the provider's writes reached the document", got, i)
+		}
+	}
+	if _, err := tr.Transform(app, TransformContext{}); err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	for i, v := range seen {
+		if v != "orig" {
+			t.Errorf("the lowering saw %v (value %d) after a query: the provider's writes reached the build", seen, i)
+		}
+	}
+}
+
+// strictOutputHandler is a kind-component handler whose Outputs reads its
+// properties the way its own parser does: any key it does not know is refused.
+// The labels and annotations of the object are not its properties.
+type strictOutputHandler struct {
+	objectOutputHandler
+	fail bool // Outputs fails whatever it is given
+}
+
+func (h *strictOutputHandler) Outputs(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
+	if h.fail {
+		return nil, errors.New("boom")
+	}
+	for k := range c.Properties {
+		return nil, errors.Errorf("unknown property %q", k)
+	}
+	return h.objectOutputHandler.Outputs(c, lctx)
+}
+
+// The query and the build hand a handler's Outputs the same properties: those
+// the handler is given, without the object's authored labels and annotations.
+func TestOutputCheck_HandlerSeesAuthoredMetadataAsTheBuildDoes(t *testing.T) {
+	tr := NewTransformer(map[string]ComponentHandler{"cfg": &strictOutputHandler{objectOutputHandler: objectOutputHandler{typ: "cfg"}}}, nil)
+	props := func() map[string]any {
+		return map[string]any{
+			ObjectLabelsProperty:      map[string]any{"team": "a"},
+			ObjectAnnotationsProperty: map[string]any{"note": "b"},
+		}
+	}
+	comp := Component{Name: "settings", Type: "cfg", Properties: props()}
+	if _, err := tr.ComponentOutputs(&comp); err != nil {
+		t.Fatalf("ComponentOutputs: %v", err)
+	}
+	app := func() *Application {
+		return terminalApp(Component{Name: "settings", Type: "cfg", Properties: props()})
+	}
+	_, e1 := tr.Transform(app(), TransformContext{})
+	_, _, e2 := tr.TransformWithPolicy(app(), TransformContext{})
+	_, _, _, e3 := tr.TransformWithProvenance(app(), TransformContext{})
+	for i, err := range []error{e1, e2, e3} {
+		if err != nil {
+			t.Errorf("entry point %d: %v: the query answers for the same component", i, err)
+		}
+	}
+}
+
+// Metadata is prepared before the output check runs, as in the query: a component
+// that has a bad labels value and a failing provider reports the labels.
+func TestOutputCheck_MetadataErrorComesBeforeAProviderFailure(t *testing.T) {
+	tr := NewTransformer(map[string]ComponentHandler{"cfg": &strictOutputHandler{objectOutputHandler: objectOutputHandler{typ: "cfg"}, fail: true}}, nil)
+	app := terminalApp(Component{Name: "settings", Type: "cfg", Properties: map[string]any{ObjectLabelsProperty: "not-a-map"}})
+	_, err := tr.Transform(app, TransformContext{})
+	if err == nil || !strings.Contains(err.Error(), ObjectLabelsProperty) || strings.Contains(err.Error(), "boom") {
+		t.Fatalf("Transform = %v; want the labels refusal, not the provider's failure", err)
+	}
+}
+
 // A derivation that yields no name is a defect of the provider, refused where
 // the declarations are answered: neither build check holds a derived output.
 func TestResolveOutputs_RefusesAnEmptyDerivedName(t *testing.T) {
