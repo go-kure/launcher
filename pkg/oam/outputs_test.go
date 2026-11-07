@@ -155,6 +155,49 @@ func TestComponentOutputs_RefusesBadDeclarations(t *testing.T) {
 	}
 }
 
+// An allocated declaration is held against the name the allocator gives, which
+// needs the role the name is resolved under and the default it falls back to. A
+// declaration the allocator would refuse (an unknown role, a role that names no
+// object, no default) is refused where it is answered, by the query as by the
+// build, with the output's key and what is wrong.
+func TestComponentOutputs_RefusesAnAllocatedDeclarationTheAllocatorWouldRefuse(t *testing.T) {
+	cases := []struct {
+		name string
+		decl OutputDecl
+		want []string
+	}{
+		{"unknown role", OutputDecl{Key: "a", Role: "nonsense", Kind: outputSecretKind, Default: "pg", Name: "pg"}, []string{`output "a"`, `"nonsense"`, "name role"}},
+		{"empty role", OutputDecl{Key: "a", Kind: outputSecretKind, Default: "pg", Name: "pg"}, []string{`output "a"`, "name role"}},
+		{"role that names no object", OutputDecl{Key: "a", Role: NameRoleBundle, Kind: outputSecretKind, Default: "pg", Name: "pg"}, []string{`output "a"`, `"` + string(NameRoleBundle) + `"`, "no object"}},
+		{"empty default", OutputDecl{Key: "a", Role: NameRoleObject, Kind: outputSecretKind, Name: "pg"}, []string{`output "a"`, "default"}},
+		{"blank default", OutputDecl{Key: "a", Role: NameRoleObject, Kind: outputSecretKind, Default: "  ", Name: "pg"}, []string{`output "a"`, "default"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := NewTransformer(nil, nil)
+			tr.RegisterComponentLowering(stubOutputRule{typeName: "db", decls: func(*Component, LoweringContext) ([]OutputDecl, error) {
+				return []OutputDecl{tc.decl}, nil
+			}})
+			_, err := tr.ComponentOutputs(&Component{Name: "pg", Type: "db"})
+			if err == nil {
+				t.Fatalf("ComponentOutputs admitted %+v", tc.decl)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("err = %v, want it to contain %q", err, w)
+				}
+			}
+		})
+	}
+
+	// A valid allocated declaration is still admitted.
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(stubOutputRule{typeName: "db", decls: clusterDecls})
+	if _, err := tr.ComponentOutputs(&Component{Name: "pg", Type: "db"}); err != nil {
+		t.Errorf("a valid declaration: %v", err)
+	}
+}
+
 // A key is one CEL identifier, so every shape a fixed key or a volume claim key
 // takes passes the check and a name with a hyphen does not.
 func TestValidOutputKey(t *testing.T) {
