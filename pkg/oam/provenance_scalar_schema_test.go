@@ -37,8 +37,9 @@ func (scalarSchemaComponent) PropertySchema() map[string]PropertySchema {
 
 // A rule that copies a value of a named scalar type into a target whose schema names
 // the scalar gave back a value that emission validation then unnamed. The report still
-// calls it copied, and calls it rendered only when the rule changed the value or its
-// numeric kind.
+// calls it copied, and calls it rendered only when the rule changed the value or turned
+// an integer into a float. A named int32 or int64 handed on in the other width is the
+// same integer, so it reads copied under either schema.
 func TestProvenance_NamedScalarStaysCopiedUnderItsSchema(t *testing.T) {
 	const big = provBig(1<<63 + 1)
 	cases := []struct {
@@ -57,9 +58,12 @@ func TestProvenance_NamedScalarStaysCopiedUnderItsSchema(t *testing.T) {
 		{"named unsigned above MaxInt under a number schema", "ratio", big, nil, SourceCopied},
 		{"named int32 under an integer schema", "count", provReplicas(3), nil, SourceCopied},
 		{"named int32 handed on as an int32", "ratio", provReplicas(3), int32(3), SourceCopied},
+		{"named int32 handed on as an int64 under a number schema", "ratio", provReplicas(3), int64(3), SourceCopied},
+		{"named int64 handed on as an int32 under a number schema", "ratio", provCount(3), int32(3), SourceCopied},
+		{"named int32 handed on as a named int64 under an integer schema", "count", provReplicas(3), provCount(3), SourceCopied},
+		{"named int32 handed on as a plain int64 under an integer schema", "count", provReplicas(3), int64(3), SourceCopied},
 
 		{"named int32 changed from 3 to 4", "ratio", provReplicas(3), provReplicas(4), SourceRendered},
-		{"named int32 changed to an int64", "ratio", provReplicas(3), int64(3), SourceRendered},
 		{"named int32 changed to a float64", "ratio", provReplicas(3), float64(3), SourceRendered},
 		{"named string changed", "mode", provMode("rolling"), provMode("recreate"), SourceRendered},
 		{"named bool changed", "on", provSwitch(true), provSwitch(false), SourceRendered},
@@ -139,7 +143,9 @@ func TestProvenance_ObjectOfAnIntegerAndANumberStaysCopied(t *testing.T) {
 }
 
 // A snapshot of a named scalar holds the unnamed value a later step gives back, in the
-// kind validation keeps for it, and not another value or another numeric kind.
+// kind validation keeps for it, and not another value or a float for an integer. A named
+// int32 or int64 holds the same integer in any of the integer widths; a plain int32 or
+// int64 keeps its width (go-kure/launcher#1308).
 func TestPropIndex_HoldsAnUnnamedFormOfANamedScalar(t *testing.T) {
 	cases := []struct {
 		name string
@@ -157,18 +163,20 @@ func TestPropIndex_HoldsAnUnnamedFormOfANamedScalar(t *testing.T) {
 		{"named int64 as an int64", provCount(3), int64(3), true},
 		{"named unsigned above MaxInt", provBig(1<<63 + 1), uint64(1<<63 + 1), true},
 		{"named int32 as itself", provReplicas(3), provReplicas(3), true},
+		{"named int32 as an int64", provReplicas(3), int64(3), true},
+		{"named int64 as an int32", provCount(3), int32(3), true},
 
 		{"named string, another string", provMode("x"), "y", false},
 		{"named bool, the other bool", provSwitch(true), false, false},
 		{"named float, another float", provRatio(0.5), 0.25, false},
 		{"named int32, another number", provReplicas(3), int32(4), false},
-		{"named int32 as an int64", provReplicas(3), int64(3), false},
 		{"named int32 as a float64", provReplicas(3), float64(3), false},
-		{"named int64 as an int32", provCount(3), int32(3), false},
 		{"named int64 as a float64", provCount(3), float64(3), false},
 		{"named unsigned above MaxInt, another one", provBig(1<<63 + 1), uint64(1<<63 + 3), false},
 		{"plain int32 as an int", int32(3), 3, false},
 		{"plain int as an int32", 3, int32(3), false},
+		{"plain int32 as an int64", int32(3), int64(3), false},
+		{"plain int64 as an int32", int64(3), int32(3), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -181,7 +189,7 @@ func TestPropIndex_HoldsAnUnnamedFormOfANamedScalar(t *testing.T) {
 
 // The comparison runs on the parent a collection is recorded under too, so it holds
 // per leaf: a list or an object with an integer leaf and a number leaf matches what
-// validation wrote for each, and no other width.
+// validation wrote for each, and no other value.
 func TestPropIndex_HoldsACollectionOfNamedScalarsLeafByLeaf(t *testing.T) {
 	obj := indexOf(map[string]any{"pair": map[string]any{"a": provReplicas(3), "b": provReplicas(3)}})
 	list := indexOf(map[string]any{"l": []any{provReplicas(1), provReplicas(1)}})
@@ -194,10 +202,10 @@ func TestPropIndex_HoldsACollectionOfNamedScalarsLeafByLeaf(t *testing.T) {
 	}{
 		{"object, integer and number leaf", obj, "pair", map[string]any{"a": 3, "b": int32(3)}, true},
 		{"object, number leaf changed", obj, "pair", map[string]any{"a": 3, "b": int32(4)}, false},
-		{"object, number leaf as an int64", obj, "pair", map[string]any{"a": 3, "b": int64(3)}, false},
+		{"object, number leaf as an int64", obj, "pair", map[string]any{"a": 3, "b": int64(3)}, true},
 		{"object, number leaf as a float64", obj, "pair", map[string]any{"a": 3, "b": float64(3)}, false},
 		{"list, int and int32", list, "l", []any{1, int32(1)}, true},
-		{"list, int and int64", list, "l", []any{1, int64(1)}, false},
+		{"list, int and int64", list, "l", []any{1, int64(1)}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
