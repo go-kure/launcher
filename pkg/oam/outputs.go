@@ -232,7 +232,7 @@ func resolveOutputs(decls []OutputDecl) ([]Output, error) {
 		if _, dup := names[d.Key]; dup {
 			return nil, errors.Errorf("output key %q declared twice", d.Key)
 		}
-		if d.Kind.Empty() {
+		if strings.TrimSpace(d.Kind.Kind) == "" {
 			return nil, errors.Errorf("output %q declares no kind", d.Key)
 		}
 		name := d.Name
