@@ -105,7 +105,10 @@ resolve() {
 # touched_acceptance COMMIT: prints each acceptance file COMMIT changes.
 touched_acceptance() {
   local commit="$1" files path accept
-  if ! files="$(git -C "$ROOT" diff-tree --root --no-commit-id -r --name-only "$commit")"; then
+  # -z prints each path raw and NUL-terminated, so core.quotePath cannot wrap a non-ASCII path in
+  # quotes and hide it from the prefix and suffix tests; tr turns the NULs into newlines, and
+  # pipefail keeps a git failure visible through the pipe.
+  if ! files="$(git -C "$ROOT" diff-tree -z --root --no-commit-id -r --name-only "$commit" | tr '\0' '\n')"; then
     echo "ERROR: cannot list the files of commit $commit in $ROOT" >&2
     exit 2
   fi

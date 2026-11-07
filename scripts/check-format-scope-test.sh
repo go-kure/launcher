@@ -96,6 +96,10 @@ expect "builtin trait schema" 1 "pkg/oam/builtin/traits/schema.go" $DEV pkg/oam/
 expect "builtin policy handler" 1 "pkg/oam/builtin/policies/placement.go" $DEV pkg/oam/builtin/policies/placement.go 'fix(oam): x'
 expect "builtin registry" 1 "pkg/oam/builtin/registry/registry.go" $DEV pkg/oam/builtin/registry/registry.go 'feat(registry): x'
 expect "builtin top-level handler" 1 "pkg/oam/builtin/networkpolicy.go" $DEV pkg/oam/builtin/networkpolicy.go 'fix(oam): x'
+# Git quotes a non-ASCII path in --name-only output unless the guard reads NUL-delimited paths;
+# pin core.quotePath=true so a caller's global setting cannot hide the case.
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotePath GIT_CONFIG_VALUE_0=true \
+  expect "builtin handler with a non-ASCII name" 1 "pkg/oam/builtin/components/café.go" $DEV pkg/oam/builtin/components/café.go 'fix(components): x'
 expect "builtin file with an empty trailer reason" 1 "Format-Scope" $DEV pkg/oam/builtin/components/typed_pod_rules.go $'fix(components): x\n\nFormat-Scope: none ()'
 
 # ── must pass ────────────────────────────────────────────────────────────────
