@@ -4,10 +4,11 @@ Validates the design set out in this project's OAM-levels research notes (decisi
 D1–D7). The mechanics below were first proven on a throwaway spike branch
 (`spike/oam-lowering-engine`, never merged, no PR); this document originally reported
 what running code found against each decision there. The production implementation
-this document now describes ships on `feat/oam-lowering-engine` (draft PR go-kure/launcher#274):
-`pkg/oam/lowering.go`, `pkg/oam/lowering_raw.go`, the `PlatformReserved`/
-`enforcePlatformReserved` enforcement, and `expose` as a registered `TraitLoweringRule`
-are all real code on this branch today, not spike-only prototypes. Where a spike-time
+this document now describes is on `main`. It first shipped on the branch
+`feat/oam-lowering-engine` (draft PR go-kure/launcher#274), and `kurel build` runs it today:
+`pkg/oam/lowering.go`, `pkg/oam/lowering_raw.go`, the `PlatformReserved` enforcement, and
+`expose` as a registered `TraitLoweringRule` are real code, not spike-only prototypes.
+Where a spike-time
 question was left open, the section below states how it was actually resolved, with a
 citation to the resolving code.
 
@@ -563,7 +564,7 @@ Pick the shape by asking these questions in order (go-kure/launcher#741):
    wired to it by name (a mount, `envFrom`, `valuesFrom`). Emit it as a **trait on that
    member**. Example: the claims `webservice` and `worker` synthesize from their `pvc`
    volumes as `pvc` traits on the `deployment` member (`roleClaims`). `helm`'s values
-   ConfigMap is planned to take this shape (go-kure/launcher#702).
+   ConfigMap takes this shape: a `configmap` trait on the release (go-kure/launcher#759).
 3. **Otherwise**, emit it as a **separately named kind component**. That covers an
    object that is shared or adopted across components, authored directly, or ordered
    or placed on its own. Examples: `helm`'s generated sources, shared per URL through

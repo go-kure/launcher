@@ -42,9 +42,10 @@ enforcement.
 
 ### Policy is launcher-native from day one
 
-`kurel build` will accept a `--policy` flag pointing to a policy document. This means the
-`oam.Policy` interface is a first-class launcher abstraction from Phase 1, not solely a
-downstream compatibility seam.
+The intended design is that `kurel build` accepts a `--policy` flag pointing to a policy
+document, which makes the `oam.Policy` interface a first-class launcher abstraction from
+Phase 1, not solely a downstream compatibility seam. **Not implemented:** `kurel build`
+defines no `--policy` flag today; a downstream runtime supplies its own `Policy`.
 
 When no policy is supplied, launcher passes `NoopPolicy` — a concrete type that satisfies
 `oam.Policy` with the following semantics:
