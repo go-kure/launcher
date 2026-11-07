@@ -14,9 +14,9 @@ consumer-owned group via `RawDocumentAPIVersioner` (see "Lowering entry points" 
 | Kind | Type | Purpose |
 |------|------|---------|
 | `Application` | `Application` | The app: `components[]` (each with `type` + `properties`) and `traits[]`. |
-| `Package` | `Package` | A parameterized, distributable unit: `app.yaml` + a `kurel.yaml` parameter schema (`ParameterDecl`). |
+| `Package` | `Package` | A package's `kurel.yaml` descriptor: the declarations of its build-time parameters (`ParameterDecl`). The application is the separate `app.yaml`. |
 | `ClusterProfile` | `ClusterProfile` | Platform choices (trait implementations, capabilities) supplied at build time. |
-| `CapabilityDefinition` | `CapabilityDefinition` | Declares a capability's rendering/property schema for validation. |
+| `CapabilityDefinition` | `CapabilityDefinition` | Declares the schema of a capability's rendering: the keys a `ClusterProfile` binding for it may hold. |
 
 ## Pipeline
 
@@ -2120,7 +2120,7 @@ checked as any pod template is: `ReservedMetadataKeys` and the component label.
 | Function | Purpose |
 |----------|---------|
 | `Parse` / `ParseMulti` / `MustParse` | Parse one / many Application documents. |
-| `ParsePackage` | Parse a `Package` (app + parameter schema). |
+| `ParsePackage` | Parse a `Package` (the `kurel.yaml` parameter declarations; the application is read separately). |
 | `ParseClusterProfile` | Parse a `ClusterProfile`. `spec.kubernetesVersion`, when set, must be `1.N`, `v1.N` or `v1.N.P`; see `ValidateAuthoredPropertiesForTarget`. |
 | `LoadCapabilityDefinitions` | Load `CapabilityDefinition`s for capability validation. |
 | `ParseWithExtraTraitTypes` | Parse allowing additional (custom) trait types. |
@@ -3855,7 +3855,7 @@ policy raised in a post-policy step: it is a `*ViolationError` now, with the sam
 
 Capability-aware traits (e.g. `expose`, `certificate`, `external-secret`) declare
 required platform inputs; the `ClusterProfile` provides them, and
-`CapabilityDefinition` rendering/property schemas validate custom capabilities
+`CapabilityDefinition` rendering schemas validate the bindings of custom capabilities
 (`--strict-capabilities` turns warnings into errors).
 
 `Transformer.CapabilityValidated(typeName)` reports whether `EvaluateProfile`

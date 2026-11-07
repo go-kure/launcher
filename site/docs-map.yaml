@@ -172,6 +172,7 @@ packages:
 # (README.md, examples/README.md, and design-capability-schema.md are deferred to
 # the content PR, where their repo-relative links are reworked for the site.)
 extra_mounts:
+  - {source: docs/oam/model-and-layers.md, target: concepts/oam-model.md, title: Model and Layers, weight: 5}
   - {source: docs/design.md, target: concepts/design.md, title: Design, weight: 10}
   - {source: docs/delivery-scope.md, target: concepts/delivery-scope.md, title: Delivery Scope, weight: 15}
   - {source: docs/oam/design-gvk.md, target: concepts/oam-gvk.md, title: API Group & GVK, weight: 20}
