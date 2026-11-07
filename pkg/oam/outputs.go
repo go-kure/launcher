@@ -107,7 +107,10 @@ func (t *Transformer) componentOutputs(comp *Component, application string, nami
 	if !ok {
 		return nil, nil
 	}
-	_, outs, err := outputsOf(p, comp, application, naming)
+	// The provider is asked about a copy: queryProvider hands back the caller's
+	// own component for a rule, and a write to it must not reach the document.
+	probe := probeCopy(*comp)
+	_, outs, err := outputsOf(p, &probe, application, naming)
 	return outs, err
 }
 
@@ -133,48 +136,21 @@ func outputsOf(p OutputProvider, comp *Component, application string, naming fun
 
 // probeCopy returns a copy of comp a provider can be asked about without a
 // write reaching the component the build uses: the properties of the component
-// and of its traits, and its annotations, are copied down through their maps
-// and slices. Values of another type are shared.
+// and of its traits, and its annotations, are copied down through every map,
+// slice and array in them, whatever its Go type (copyPropertyMap). Any other
+// value is shared.
 func probeCopy(comp Component) Component {
-	comp.Properties = copyProbeValue(comp.Properties).(map[string]any)
+	comp.Properties = copyPropertyMap(comp.Properties)
 	comp.Annotations = maps.Clone(comp.Annotations)
 	if comp.Traits != nil {
 		traits := make([]Trait, len(comp.Traits))
 		for i, t := range comp.Traits {
-			t.Properties = copyProbeValue(t.Properties).(map[string]any)
+			t.Properties = copyPropertyMap(t.Properties)
 			traits[i] = t
 		}
 		comp.Traits = traits
 	}
 	return comp
-}
-
-func copyProbeValue(v any) any {
-	switch x := v.(type) {
-	case map[string]any:
-		if x == nil {
-			return x
-		}
-		c := make(map[string]any, len(x))
-		for k, e := range x {
-			c[k] = copyProbeValue(e)
-		}
-		return c
-	case []any:
-		if x == nil {
-			return x
-		}
-		c := make([]any, len(x))
-		for i, e := range x {
-			c[i] = copyProbeValue(e)
-		}
-		return c
-	case []string:
-		return slices.Clone(x)
-	case map[string]string:
-		return maps.Clone(x)
-	}
-	return v
 }
 
 // checkRuleOutputs holds the outputs a lowering rule declared for component
