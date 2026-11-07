@@ -3129,7 +3129,7 @@ the key is rejected at the two flat call sites, so it is absent from their allow
 `restartPolicy` (`Never` and `OnFailure`, `ContainerRestartRules`) and `service`'s
 `trafficDistribution` (`PreferSameZone` and `PreferSameNode`, `PreferSameTrafficDistribution`).
 `GatedPaths` names a field, not a value, so the raw-PodSpec kinds do not check the values
-of a container's `restartPolicy`.
+of a container's `restartPolicy` (go-kure/launcher#1330).
 
 Separately, `validateProperties` (`property_validate.go`) checks an EMITTED
 component/trait/policy's properties against its TARGET handler's declared schema —

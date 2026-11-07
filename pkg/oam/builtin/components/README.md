@@ -1655,7 +1655,7 @@ case-insensitively, as in the decode, so a key spelled in another case is refuse
 is named as written; property validation does not read `gatedPaths`, so what a document is
 accepted as does not change. One limit: `gatedPaths` names a field, not a value, so the
 `Never` and `OnFailure` values of a `restartPolicy` on those kinds are not checked
-(go-kure/launcher#1230).
+(go-kure/launcher#1330).
 
 | Property | Type | Effect | Kind |
 |----------|------|--------|------|

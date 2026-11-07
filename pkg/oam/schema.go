@@ -136,7 +136,9 @@ type PropertySchema struct {
 	// refused below the release where its gate is on by default, exactly as Gate
 	// refuses the whole property (go-kure/launcher#1230). A key must be an Enum
 	// value and a gate must name a row of the table; a handler's schema that breaks
-	// either is a launcher defect, reported by the gate pass and the schema tests.
+	// either is a launcher defect. The schema tests report both; at run time the
+	// gate pass reports only an unknown gate, and only when an authored value
+	// reaches that key, and never checks a key against Enum.
 	// Meaningful on a Type==string node with an Enum, and only for handler
 	// properties: the two flat call sites reject the key at decode time, as they do
 	// Gate (flatschema.go's key allow-sets leave it out).

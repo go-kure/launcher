@@ -73,7 +73,7 @@ same string works in both.
   | Gate | On by default from | Properties |
   |---|---|---|
   | `EnvFiles` | 1.35 | `env[].valueFrom.fileKeyRef` |
-  | `ContainerRestartRules` | 1.35 | `restartPolicyRules` (an init container's on the workload kinds; any container's on the raw-PodSpec kinds below), and on the workload kinds the values `Never` and `OnFailure` of an init container's `restartPolicy` (`Always` is accepted at every version; the raw-PodSpec kinds do not check the `restartPolicy` values) |
+  | `ContainerRestartRules` | 1.35 | `restartPolicyRules` (an init container's on the workload kinds; any container's on the raw-PodSpec kinds below), and on the workload kinds the values `Never` and `OnFailure` of an init container's `restartPolicy` (`Always` is accepted at every version; the raw-PodSpec kinds do not check the `restartPolicy` values, go-kure/launcher#1330) |
   | `PodLevelResources` | 1.34 | `podResources` (the pod kinds' `resources`) |
   | `HostnameOverride` | 1.35 | `hostnameOverride` |
   | `PreferSameTrafficDistribution` | 1.34 | the values `PreferSameZone` and `PreferSameNode` of `service`'s `trafficDistribution` (`PreferClose` is accepted at every version) |
