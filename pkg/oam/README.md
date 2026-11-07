@@ -1879,6 +1879,14 @@ must equal the declared one; for a handler, which names one object, the declared
 whose query errs fails the build with its error: a malformed declaration is a defect of the
 provider, not a quiet empty list.
 
+A provider is asked about a copy of the component, in a query and in the build: what it writes
+to the properties, trait properties or annotations stays in the answer and never reaches the
+document or the lowering. For a handler of a kind component the query and the build give it
+the same component: its object's name resolved and its `labels` and `annotations` taken off
+its properties. The build prepares the metadata before it holds the outputs, so a component
+with both a refused `labels` or `annotations` value and a failing provider reports the
+metadata refusal.
+
 What a query answers is not the build's verdict on the document. It is given one component
 and answers only for one its type's own parse accepts, refusing another in the parse's
 words. It does not see what only the document shows (a name that is already another
