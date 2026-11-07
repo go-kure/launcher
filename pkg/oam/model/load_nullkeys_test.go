@@ -25,3 +25,25 @@ func TestLoad_KeepsNullKeysAndEmptyStringKey(t *testing.T) {
 		})
 	}
 }
+
+// yaml.v3 drops the whole entry of a null key in a map with string keys, so it never
+// decodes the value under that key. Load accepts a document whose only fault sits in
+// such a value, because the fault is not in the loaded model. The null-element walk
+// and the free-form key check once visited those values and refused the document.
+func TestLoad_SkipsValuesUnderNullKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  []byte
+	}{
+		{"null entry in a list under a null input key", withInputs(t, "  inputs:\n    null:\n      types: [string, null]\n    image:\n      type: string\n")},
+		{"null entry in a list under a tilde input key", withInputs(t, "  inputs:\n    ~:\n      types: [string, null]\n    image:\n      type: string\n")},
+		{"duplicate free-form keys under a null property key", replace(t, "        replicas: \"${inputs.replicas}\"\n", "        replicas: \"${inputs.replicas}\"\n        null: {1: a, 01: b}\n")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := loadNoPanic(tc.doc); err != nil {
+				t.Fatalf("a value under a null key was checked and refused: %v", err)
+			}
+		})
+	}
+}
