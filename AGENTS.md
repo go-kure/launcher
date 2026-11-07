@@ -376,6 +376,7 @@ map and run `bash site/scripts/gen-docs-tables.sh`.
 | `pkg/errors/` | `api-reference/errors` | — |
 | `pkg/patch/` | `api-reference/patch` | — |
 | `pkg/oam/` | `api-reference/oam` | — |
+| `pkg/oam/model/` | `api-reference/oam-models` | — |
 | `pkg/oam/builtin/components/` | `api-reference/oam-components` | — |
 | `pkg/oam/builtin/traits/` | `api-reference/oam-traits` | — |
 | `pkg/oam/builtin/policies/` | `api-reference/oam-policies` | — |
