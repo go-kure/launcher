@@ -221,6 +221,9 @@ func validateSchema(path string, s oam.PropertySchema) error {
 			return invalid(path, "type %q is not string, integer, boolean, number, array or object", t)
 		}
 	}
+	if err := validateUnion(path, s.Types); err != nil {
+		return err
+	}
 	keys := make([]string, 0, len(s.Properties))
 	for k := range s.Properties {
 		keys = append(keys, k)
@@ -233,6 +236,33 @@ func validateSchema(path string, s oam.PropertySchema) error {
 	}
 	if s.Items != nil {
 		return validateSchema(path+".items", *s.Items)
+	}
+	return nil
+}
+
+// validateUnion checks the shape of a types list the way pkg/oam does when a value
+// reaches the schema: at least two members, no member twice, and only scalar members.
+// An array or object member needs Properties or Items of its own, which a union cannot
+// carry. Without this check Load accepts a schema that rejects every value. An empty
+// list means the schema uses type, which the caller has already checked.
+func validateUnion(path string, types []oam.PropertyType) error {
+	if len(types) == 0 {
+		return nil
+	}
+	if len(types) < 2 {
+		return invalid(path, "types lists %d member, want at least two (use type for one)", len(types))
+	}
+	seen := make(map[oam.PropertyType]bool, len(types))
+	for _, t := range types {
+		switch t {
+		case oam.PropertyTypeString, oam.PropertyTypeInteger, oam.PropertyTypeNumber, oam.PropertyTypeBoolean:
+		default:
+			return invalid(path, "types member %q is not a scalar type (string, integer, number or boolean)", t)
+		}
+		if seen[t] {
+			return invalid(path, "types lists %q twice", t)
+		}
+		seen[t] = true
 	}
 	return nil
 }
