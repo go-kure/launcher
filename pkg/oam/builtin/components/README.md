@@ -4417,7 +4417,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - a field the operator reads only from some Alertmanager version on, where
     `version` is below that version. An unset `version` (which is required
     only where the image is named) is judged against the operator release
-    launcher vendors (v0.95.0, default v0.34.2): the deployed operator's
+    launcher vendors (v0.95.1, default v0.34.2): the deployed operator's
     default is unknown at build time, and at v0.34.2 no field below is
     refused. Below its version the operator leaves the flag off the
     container, the TLS or HTTP configuration out of the web server, the gossip
@@ -4444,7 +4444,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     (0.32.0).
     `TestAlertmanagerVersionGates_MatchVendoredSource` parses every version
     comparison of the operator's package `pkg/alertmanager` (every Go file of
-    it, its tests aside; at v0.95.0 the comparisons are in `statefulset.go`,
+    it, its tests aside; at v0.95.1 the comparisons are in `statefulset.go`,
     `amcfg.go` and `operator.go`) and holds each to this list, or to the
     reason it gates no field of this kind (the configuration of a receiver, a
     route or a configSecret Secret); the files, with the operator's
@@ -5123,7 +5123,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - a field the operator reads only from some Thanos version on, where
     `version` is below that version (go-kure/launcher#976). An unset
     `version` is judged against the operator release launcher vendors
-    (v0.95.0, default v0.42.5), at which no field below is refused; one the
+    (v0.95.1, default v0.42.5), at which no field below is refused; one the
     operator cannot parse is left to it, as below. Below its version the
     operator leaves the flag off the thanos-ruler container, serves the web
     endpoint over plain HTTP without the web configuration, or refuses the
@@ -5753,7 +5753,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     set one, or leave azureAd unset`).
   - a field the operator reads only from some Prometheus version on, where
     `version` is below that version. An unset `version` is judged against
-    the operator release launcher vendors (v0.95.0, default v3.14.0), at
+    the operator release launcher vendors (v0.95.1, default v3.14.0), at
     which no field below is refused; an unparsable one is left to the
     operator. Below its version the operator leaves the flag off the
     container, the setting out of the configuration or of the scrape
@@ -13741,7 +13741,7 @@ tests only and each checked against its git blob id by `TestVendoredCRDs_MatchSo
 also holds each directory to the tag of the module `go.mod` links:
 
 - the seven `monitoring.coreos.com` CRDs of the monitoring kinds, from
-  `example/prometheus-operator-crd/` of prometheus-operator `v0.95.0`, beside the operator
+  `example/prometheus-operator-crd/` of prometheus-operator `v0.95.1`, beside the operator
   excerpt in `testdata/upstream/prometheus-operator/` (`scripts/vendor-prometheus-operator-gates.sh`);
 - the CRDs of the fourteen Flux kinds, from `config/crd/bases/` of each controller's repository
   at the tag of its API module (`api/v1.7.1` of helm-controller, `api/v1.10.1` of

@@ -18,7 +18,7 @@ import (
 // pkg/alertmanager in the excerpt, which
 // scripts/vendor-prometheus-operator-gates.sh vendors whole, its tests aside.
 // The test walks each one, so a comparison in any file of the package is
-// classified or fails. At v0.95.0 the pods (statefulset.go), the
+// classified or fails. At v0.95.1 the pods (statefulset.go), the
 // configuration the operator generates (amcfg.go) and the reconcile
 // (operator.go) compare the version; collector.go and types.go do not.
 func alertmanagerGateFiles(t *testing.T, src *vendoredPromOp) []string {

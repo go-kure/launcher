@@ -7,7 +7,7 @@ import (
 // The version gates of the alertmanager kind (go-kure/launcher#935; the
 // class is described in monitoring_version_gates.go): the fields of
 // monitoringv1.AlertmanagerSpec the Prometheus operator reads only from some
-// Alertmanager version on, at prometheus-operator v0.95.0.
+// Alertmanager version on, at prometheus-operator v0.95.1.
 //
 // TestAlertmanagerVersionGates_MatchVendoredSource holds the table to the
 // operator's source: every comparison of the Alertmanager version in the
@@ -20,7 +20,7 @@ import (
 const (
 	// alertmanagerDefaultVersion is the version the operator configures for
 	// where version is unset (DefaultAlertmanagerVersion,
-	// pkg/operator/defaults.go at v0.95.0).
+	// pkg/operator/defaults.go at v0.95.1).
 	alertmanagerDefaultVersion = "v0.34.2"
 	// alertmanagerMinimumVersion is the lowest version the operator builds
 	// the pods for; it refuses a version of a major above 0 too
