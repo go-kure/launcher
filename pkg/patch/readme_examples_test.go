@@ -174,6 +174,89 @@ func TestReadme_ListSelectors(t *testing.T) {
 	})
 }
 
+func TestReadme_YAMLFormat(t *testing.T) {
+	t.Run("flat map", func(t *testing.T) {
+		obj := applyReadmePatch(t, readmeFence(t, "### YAML Format", "yaml", 0), nil)
+		readmeField(t, obj.Object, "3", "spec", "replicas")
+		readmeField(t, obj.Object, "production", "metadata", "labels", "env")
+	})
+	t.Run("targeted list", func(t *testing.T) {
+		obj := applyReadmePatch(t, readmeFence(t, "### YAML Format", "yaml", 1), nil)
+		readmeField(t, obj.Object, "3", "spec", "replicas")
+		readmeField(t, obj.Object, "production", "metadata", "labels", "env")
+		readmeField(t, readmeContainers(t, obj)[0], "nginx:1.27", "image")
+	})
+	t.Run("kind.name prefix is not a flat-map target", func(t *testing.T) {
+		specs, err := LoadPatchFile(strings.NewReader("deployment.myapp.spec.replicas: 3\n"))
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		resources, err := LoadResourcesFromMultiYAML(strings.NewReader(readmeDeployment))
+		if err != nil {
+			t.Fatalf("load the Deployment: %v", err)
+		}
+		_, err = NewPatchableAppSet(resources, specs)
+		if err == nil || !strings.Contains(err.Error(), "could not determine target resource") {
+			t.Errorf("err = %v, want one containing %q", err, "could not determine target resource")
+		}
+	})
+	t.Run("other top-level shape is refused", func(t *testing.T) {
+		_, err := LoadPatchFileWithVariables(strings.NewReader("just a scalar\n"), nil)
+		if err == nil || !strings.Contains(err.Error(), "unrecognized patch format") {
+			t.Errorf("err = %v, want one containing %q", err, "unrecognized patch format")
+		}
+	})
+	t.Run("unknown type is refused", func(t *testing.T) {
+		_, err := LoadPatchFileWithVariables(strings.NewReader("- target: deployment.myapp\n  type: merge\n  patch:\n    spec.replicas: 3\n"), nil)
+		if err == nil || !strings.Contains(err.Error(), "unknown patch type") {
+			t.Errorf("err = %v, want one containing %q", err, "unknown patch type")
+		}
+	})
+}
+
+// The Quick Start writes a patched file from a set built with the document layout, and
+// says WriteToFile fails on a set built without it.
+func TestReadme_QuickStartWriteToFile(t *testing.T) {
+	specs, err := LoadPatchFile(strings.NewReader(readmeFence(t, "### TOML Format", "toml", 0)))
+	if err != nil {
+		t.Fatalf("load the patch: %v", err)
+	}
+	out := t.TempDir() + "/output.yaml"
+
+	docs, err := LoadResourcesWithStructure(strings.NewReader(readmeDeployment))
+	if err != nil {
+		t.Fatalf("LoadResourcesWithStructure: %v", err)
+	}
+	set, err := NewPatchableAppSetWithStructure(docs, specs)
+	if err != nil {
+		t.Fatalf("NewPatchableAppSetWithStructure: %v", err)
+	}
+	if err := set.WriteToFile(out); err != nil {
+		t.Fatalf("WriteToFile: %v", err)
+	}
+	written, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	for _, want := range []string{"replicas: 3", "env: production", "image: nginx:1.27"} {
+		if !strings.Contains(string(written), want) {
+			t.Errorf("output lacks %q:\n%s", want, written)
+		}
+	}
+
+	resources, err := LoadResourcesFromMultiYAML(strings.NewReader(readmeDeployment))
+	if err != nil {
+		t.Fatalf("LoadResourcesFromMultiYAML: %v", err)
+	}
+	plain, err := NewPatchableAppSet(resources, specs)
+	if err != nil {
+		t.Fatalf("NewPatchableAppSet: %v", err)
+	}
+	if err := plain.WriteToFile(out); err == nil || !strings.Contains(err.Error(), "no document set available") {
+		t.Errorf("WriteToFile on a set without a document set: err = %v, want one containing %q", err, "no document set available")
+	}
+}
+
 // A line the TOML loader cannot split at a colon is refused, which is what the README
 // states and what its old `key = value` examples ran into.
 func TestReadme_TOMLLineWithoutAColonIsRefused(t *testing.T) {
