@@ -163,7 +163,8 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   `scripts/check-format-scope.sh`, go-kure/launcher#1279): a commit that changes a non-test
   file of `pkg/oam/validate.go`, `types.go`, `capability.go`, `parser.go`, `package.go` or
   `profile.go` must use `feat(format)`, `fix(format)`, `refactor(format)` or `docs(format)`
-  (the pattern `cliff.toml` groups by; a self-test fails if the two differ). When such a
+  followed by `: ` or `!: ` (the pattern `cliff.toml` groups by; a self-test fails if the two
+  differ, and `cliff.toml` drops a header without the colon). When such a
   change leaves the accepted format as it was (a comment, an error message), the commit body
   carries `Format-Scope: none (<reason>)` and the reason must not be empty. The guard does
   not see a change to a builtin trait or component property validator, nor a semantic change
