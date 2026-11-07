@@ -33,6 +33,9 @@ packages:
   - path: pkg/oam
     readme: pkg/oam/README.md
     mount: {target: api-reference/oam.md, title: OAM Model, weight: 20, group: OAM, desc: "OAM data model, parser, and transform pipeline"}
+  - path: pkg/oam/model
+    readme: pkg/oam/model/README.md
+    mount: {target: api-reference/oam-models.md, title: Component Models, weight: 21, group: OAM, desc: "Configuration-defined component models: document format and loader"}
   - path: pkg/oam/builtin/components
     readme: pkg/oam/builtin/components/README.md
     mount: {target: api-reference/oam-components.md, title: Component Handlers, weight: 22, group: OAM, desc: "Built-in component types (webservice, worker, cronjob, helm, helmrelease, helmtemplate, …)"}

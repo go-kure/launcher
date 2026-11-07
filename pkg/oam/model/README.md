@@ -1,0 +1,71 @@
+# OAM Component Models
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/go-kure/launcher/pkg/oam/model.svg)](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/model)
+
+Package `model` defines the document format of a configuration-defined component model
+(go-kure/launcher#1261). A model is a YAML document. It declares inputs, computes values with
+CEL, and lists the parts (components and traits) that a component of the model type expands to.
+A user can add a component type without writing Go.
+
+This release step covers the format only. `model.Load` decodes a document and checks its
+shape. It does not compile or run any expression. The CEL environment, the lowering rule
+and the engine hooks arrive in later steps of go-kure/launcher#1261. A document that loads
+today keeps its meaning then.
+
+## Document
+
+```yaml
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Model
+metadata:
+  name: webapp.acme.example   # <name>.<domain>
+  version: v2                 # v<major>[.<minor>[.<patch>]]
+spec:
+  celEnv: "1"
+  inputs:
+    image: {type: string, required: true}
+    replicas: {type: integer, default: 2}
+  values:
+    - name: full
+      expr: "${inputs.image + ':latest'}"
+  parts:
+    - id: app
+      type: deployment.apps@v1
+      properties:
+        replicas: "${inputs.replicas}"
+      traits:
+        - type: expose.launcher.gokure.dev@v1
+          properties: {port: 80}
+```
+
+| Field | Rule |
+|---|---|
+| `apiVersion`, `kind` | `launcher.gokure.dev/v1alpha1` and `Model`. |
+| `metadata.name` | `<name>.<domain>`. It must have a domain, so a model never takes the name of a Kubernetes kind. It follows the type identity grammar in `pkg/oam` (`oam.ValidateTypeIdentity`). |
+| `metadata.version` | `v<major>`, `v<major>.<minor>` or `v<major>.<minor>.<patch>`. A short version is exact: `v2` is `v2.0.0`. |
+| `spec.celEnv` | Required. It must be `"1"`. The value names a fixed set of CEL functions, so a model means the same later. |
+| `spec.inputs` | Map of input name to `oam.PropertySchema`. Each name is a CEL identifier. Each schema has a `type` or `types`. |
+| `spec.values` | Ordered list of `{name, expr}`. A value reads inputs and earlier values only. Each name is a CEL identifier and is unique. |
+| `spec.parts` | At least one part. A model that expands to nothing is an error. |
+| `parts[].id` | A CEL identifier, unique in the model. Other parts read `parts.<id>`. |
+| `parts[].type`, `traits[].type` | A full identity, `name@version`. A short name and a missing version are refused. |
+| `parts[].when` | Optional expression. The part is emitted only when it is true. |
+| `parts[].forEach` | Optional `{as, in}`. `in` is an expression that gives a list. `as` is the loop variable, a CEL identifier. |
+| `parts[].name`, `properties`, `annotations` | Optional. Strings may hold `${ }` expressions. |
+
+A string that is exactly one `${ expr }` keeps the CEL type of the result. A string with `${ }`
+inside is a string template. `$${` writes a literal `${`. Release one of the format does not
+compile these strings, so `Load` stores them as written.
+
+Loading is always strict. An unknown field fails with its name and line. There is no `extends`
+and no `patches`. A file with more than one YAML document is refused.
+
+## API
+
+| Call | Does |
+|---|---|
+| `model.Load(data)` | Decodes one document and checks it. A failure of a decoded document wraps `model.ErrInvalid` and names the field, for example `spec.parts[1].id`. A YAML, `apiVersion` or `kind` failure does not wrap it. |
+| `(*Model).Identity()` | The model identity as written in `metadata`. |
+| `(*Model).Key()` | The identity with the version in the canonical form (`name@v2.0.0`). The registry returns a version as it was registered, so compare and store this form (`oam.TypeID.Canonical`). |
+
+`Load` returns the first failure in document order.
