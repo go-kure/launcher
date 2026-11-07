@@ -23,20 +23,27 @@ Patches allow you to modify Kubernetes manifests without rewriting them. The sys
 
 ### TOML Format (`.kpatch`)
 
+The header `[kind.name]` names the resource. Each line under it is `path: value`, split at
+the first colon, so a value may contain colons (`nginx:1.27`). It is not TOML `key = value`:
+a line without a colon is refused.
+
 ```toml
-# Target a specific resource by kind and name
-[deployment.myapp.spec]
-replicas = 3
+# Target a resource by kind and name
+[deployment.myapp]
+spec.replicas: 3
+metadata.labels.env: production
 
-[deployment.myapp.spec.template.spec.containers.0]
-image = "${app.image}:${app.tag}"
-resources.requests.cpu = "200m"
-resources.requests.memory = "256Mi"
+# A section after the name maps to the Kubernetes path: "containers" on a
+# Deployment is spec.template.spec.containers. A last part of name=value
+# selects the list item with that name.
+[deployment.myapp.containers.name=myapp]
+image: nginx:1.27
+resources.requests.cpu: 200m
+resources.requests.memory: 256Mi
 
-# Append to a list with .-
-[deployment.myapp.spec.template.spec.containers.-]
-name = "sidecar"
-image = "envoy:latest"
+# A last part that is a number selects the list item by index.
+[deployment.myapp.containers.0]
+imagePullPolicy: Always
 ```
 
 ### YAML Format
@@ -78,42 +85,53 @@ err = patchSet.WriteToFile("output.yaml")
 
 ### Variable Substitution
 
-Patches support variable references that resolve against a parameter context:
+Patches support `${values.<key>}` and `${features.<flag>}` references that resolve against a
+`VariableContext`. A reference to a name the context does not hold is left as written, and
+with a nil context nothing is substituted.
 
 ```toml
-[deployment.myapp.spec.template.spec.containers.0]
-image = "${registry}/${image}:${tag}"
-replicas = "${replicas}"
+[deployment.myapp]
+spec.replicas: ${values.replicas}
+
+[deployment.myapp.containers.name=myapp]
+image: ${values.registry}/${values.image}:${values.tag}
 ```
 
 ```go
 varCtx := &patch.VariableContext{
-    Variables: map[string]interface{}{
+    Values: map[string]any{
         "registry": "docker.io",
         "image":    "myapp",
         "tag":      "v1.0.0",
         "replicas": 3,
     },
+    Features: map[string]bool{"debug": true},
 }
 specs, err := patch.LoadPatchFileWithVariables(file, varCtx)
 ```
 
 ### List Selectors
 
-Target specific items in lists using selectors:
+Target items in a list with the last part of a TOML header:
 
 ```toml
 # By index
-[deployment.myapp.spec.template.spec.containers.0]
-image = "updated:latest"
-
-# Append to list
-[deployment.myapp.spec.template.spec.containers.-]
-name = "new-container"
+[deployment.myapp.containers.0]
+image: updated:latest
 
 # By field value (name selector)
-[deployment.myapp.spec.template.spec.containers.{name=myapp}]
-image = "updated:latest"
+[deployment.myapp.containers.name=myapp]
+image: updated:latest
+```
+
+To append to a list, end the path with `[-]`. The value is a mapping, so use the YAML form:
+
+```yaml
+- target: deployment.myapp
+  patch:
+    spec.template.spec.containers[-]:
+      name: sidecar
+      image: envoy:v1.28
 ```
 
 ### Structure Preservation
