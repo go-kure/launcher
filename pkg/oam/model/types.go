@@ -8,8 +8,9 @@ import (
 const Kind = "Model"
 
 // CELEnvV1 is the only CEL environment a model may pin in release one. The value
-// names a fixed function set (the CEL standard library plus the strings, lists and
-// bindings extensions), so a model written today means the same later.
+// names a fixed function set: the CEL standard library plus the strings (version 5),
+// lists (version 3) and bindings (version 1) extensions of cel-go. A golden file pins
+// the function list, so a model written today means the same later.
 const CELEnvV1 = "1"
 
 // Model is one configuration-defined component model: a YAML document that
