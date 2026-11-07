@@ -58,9 +58,16 @@ func LoadResourcesWithStructure(r io.Reader) (*YAMLDocumentSet, error) {
 			return nil, fmt.Errorf("failed to parse document %d: %w", i, err)
 		}
 
-		// Also parse into unstructured for patching
+		// Also parse into unstructured for patching. This is a second parse, so that
+		// keepTimestampText does not retag the node kept for the write-back: a string tag
+		// on a plain timestamp makes the encoder quote it.
+		var rawNode yaml.Node
+		if err := yaml.Unmarshal([]byte(docContent), &rawNode); err != nil {
+			return nil, fmt.Errorf("failed to parse document %d into unstructured: %w", i, err)
+		}
+		keepTimestampText(&rawNode)
 		var raw map[string]any
-		if err := yaml.Unmarshal([]byte(docContent), &raw); err != nil {
+		if err := rawNode.Decode(&raw); err != nil {
 			return nil, fmt.Errorf("failed to parse document %d into unstructured: %w", i, err)
 		}
 

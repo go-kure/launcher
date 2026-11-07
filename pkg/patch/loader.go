@@ -77,6 +77,7 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 	if firstToken.Kind == yaml.DocumentNode && len(firstToken.Content) > 0 {
 		firstToken = *firstToken.Content[0]
 	}
+	keepTimestampText(&firstToken)
 
 	var patches []PatchSpec
 
@@ -265,8 +266,8 @@ func LoadTOMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 }
 
 // baseObject returns the object map of a base resource decoded by yaml.v3, with every
-// Go int turned into an int64. yaml.v3 decodes a YAML integer to int, and
-// Unstructured.DeepCopy panics on that type.
+// Go int turned into an int64, including the ints inside a map with non-string keys.
+// yaml.v3 decodes a YAML integer to int, and Unstructured.DeepCopy panics on that type.
 func baseObject(raw map[string]any) map[string]any {
 	if converted, ok := convertValueForUnstructured(raw).(map[string]any); ok {
 		return converted
@@ -274,16 +275,37 @@ func baseObject(raw map[string]any) map[string]any {
 	return raw
 }
 
+// keepTimestampText tags every plain timestamp scalar under n as a string, so that
+// decoding the node yields the text the author wrote. Without it yaml.v3 decodes
+// `2026-11-07` to a time.Time, which Unstructured.DeepCopy panics on and which
+// formatting would rewrite. A quoted timestamp already decodes as a string.
+func keepTimestampText(n *yaml.Node) {
+	if n == nil {
+		return
+	}
+	if n.Kind == yaml.ScalarNode && n.ShortTag() == "!!timestamp" {
+		n.Tag = "!!str"
+	}
+	for _, child := range n.Content {
+		keepTimestampText(child)
+	}
+}
+
 func LoadResourcesFromMultiYAML(r io.Reader) ([]*unstructured.Unstructured, error) {
 	dec := yaml.NewDecoder(r)
 	var resources []*unstructured.Unstructured
 	for {
-		var raw map[string]any
-		err := dec.Decode(&raw)
+		var node yaml.Node
+		err := dec.Decode(&node)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
+			return nil, fmt.Errorf("failed to decode resource document: %w", err)
+		}
+		keepTimestampText(&node)
+		var raw map[string]any
+		if err := node.Decode(&raw); err != nil {
 			return nil, fmt.Errorf("failed to decode resource document: %w", err)
 		}
 		if len(raw) > 0 {
