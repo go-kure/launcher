@@ -50,6 +50,11 @@ func refuseNullElements(n *yaml.Node, t reflect.Type, path string) error {
 		if n.Kind != yaml.MappingNode {
 			return nil
 		}
+		if t.Key().Kind() == reflect.String {
+			if err := refuseDuplicateStringKeys(n, path); err != nil {
+				return err
+			}
+		}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			if err := refuseNullElements(n.Content[i+1], t.Elem(), joinPath(path, n.Content[i].Value)); err != nil {
 				return err
@@ -113,6 +118,29 @@ func joinPath(path, name string) string {
 		return name
 	}
 	return path + "." + name
+}
+
+// refuseDuplicateStringKeys fails on a mapping that decodes into a Go map with string
+// keys when two of its keys decode to the same string. yaml.v3 compares the scalar
+// value and the tag to find a duplicate, so `image` and `!!binary aW1hZ2U=` pass its
+// check. It then decodes both keys into the string `image`, and the later entry
+// replaces the earlier one. Keys that decode to different strings, such as `1` and
+// `01`, stay apart, as in the decoded map. A key that does not decode into a string is
+// left to yaml.v3.
+func refuseDuplicateStringKeys(n *yaml.Node, path string) error {
+	seen := make(map[string]*yaml.Node, len(n.Content)/2)
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k := n.Content[i]
+		var name string
+		if err := k.Decode(&name); err != nil {
+			continue
+		}
+		if first, ok := seen[name]; ok {
+			return invalid(path, "line %d: duplicate mapping key %s, which decodes to %q (same as %s on line %d)", k.Line, k.Value, name, first.Value, first.Line)
+		}
+		seen[name] = k
+	}
+	return nil
 }
 
 // refuseDuplicateKeys fails on a mapping of free-form content that holds two keys

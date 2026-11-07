@@ -60,10 +60,17 @@ compile these strings, so `Load` stores them as written.
 Loading is always strict. An unknown field fails with its name and line. There is no `extends`
 and no `patches`. A file with more than one YAML document is refused. YAML anchors, aliases and
 merge keys (`<<`) are refused with their line, because they hide duplicate keys. Each entry of
-`types` must be a known type name, so `types: [""]` is refused. A null entry in a typed list
-(`types`, `values`, `parts`, `traits`, `exclusive`) is refused with its path, because YAML would
-drop it. In a free-form value, such as a `default`, the keys of a mapping must differ after YAML
+`types` must be a known type name, so `types: [""]` is refused. A union needs at least two
+different scalar types (`string`, `integer`, `number` or `boolean`), at every depth of a schema.
+So `types: [string]`, `types: [string, string]` and `types: [string, object]` are refused. These
+are the rules of the shared validator in `pkg/oam`, which rejects every value of such a schema.
+A null entry in a typed list (`types`, `values`, `parts`, `traits`, `exclusive`) is refused with
+its path, because YAML would drop it. In a free-form value, such as a `default`, the keys of a mapping must differ after YAML
 resolves them, so `{1: a, 01: b}`, `{true: a, True: b}` and `{0.0: a, -0.0: b}` are refused.
+In a map that `Load` decodes into Go strings, two keys that decode to the same string are also
+refused. These maps are the inputs, the `properties` of a schema, a part or a trait, and the
+annotations. For example, `image` and `!!binary aW1hZ2U=` are one key. Keys that decode to
+different strings, such as `1` and `01`, stay apart.
 
 ## API
 
