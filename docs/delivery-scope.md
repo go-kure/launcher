@@ -1,6 +1,7 @@
 # Launcher delivery scope: ordering, naming, Helm values and template security
 
-*Date: 2026-10-04 | Status: Design, tickets filed; §8 says which have shipped*
+*Date: 2026-10-04 | Status: a dated design record. A section marked **Shipped** states what the
+code does; one marked **Target** is not in the code; §8 says which tickets have shipped*
 
 This document records the target scope of the launcher library and `kurel` after a
 cross-library scope review of kure, launcher and a downstream cluster engine that consumes
@@ -14,9 +15,10 @@ go-kure/launcher#781 deleted with the `kurel` layer it described.
 **Tickets.** Each target names the go-kure/launcher issue that implements it; §8 lists them
 all. Each issue links back to this document.
 
-**Basis.** "Current" means `main` after v0.2.0-beta.1, with the tickets §8 marks shipped.
+**Basis.** "Current" means `main` after v0.2.0-beta.1, with the tickets §8 marks shipped;
+later changes may be missing, so read the code for them.
 Paths are relative to the repository root. Kure paths refer to the kure release `go.mod`
-pins, `v0.2.0-beta.16`. Everything here is
+pinned when this was written, `v0.2.0-beta.16`; the pin today is in `go.mod`. Everything here is
 pre-release: output, names and the library contract may change, and live-cluster upgrade
 effects are not a constraint. A section or
 row marked **Shipped** states what the code does since its ticket merged, in place of the

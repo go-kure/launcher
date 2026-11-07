@@ -238,7 +238,7 @@ test lists those by hand.
 Because a lowering rule may claim types the parser would otherwise reject, `build`
 constructs the transformer BEFORE parsing the Application: `newBuiltinTransformer()`
 runs first, and its `LowerableTypes()` (the kinds/component-types/trait-types claimed
-by its registered lowering rules — `worker`, `webservice`, `postgresql`, `helm` and
+by its registered lowering rules — `worker`, `webservice`, `postgresql`, `helm`, `oci` and
 `expose` today) is passed into
 `oam.ParseWithExtraTypes` alongside the `--capability-def`-supplied custom trait
 types. See the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s
@@ -246,9 +246,12 @@ Parsing and Lowering sections for the general mechanism.
 
 Once the application is parsed and the profile evaluated, `build` calls
 `ValidateAuthoredPropertiesForTarget` with the evaluated bindings and the profile's
-`spec.kubernetesVersion`, so a component or trait property no handler declares is a
-build error naming the field and the allowed set, rather than being silently dropped
-(go-kure/launcher#408). With a version set, a property whose Kubernetes feature gate
+`spec.kubernetesVersion`, so a component or trait property that neither its handler or
+lowering rule declares nor the engine reads itself (`scope` on a trait; `objectName`,
+`labels` and `annotations` on a component whose type declares an object) is a build
+error naming the field and the allowed set, rather than being silently dropped
+(go-kure/launcher#408). A type that declares no schema keeps its own properties
+unchecked. With a version set, a property whose Kubernetes feature gate
 is off by default at that release is refused too, naming the property, the gate, the
 release where it turns on and the profile's version (go-kure/launcher#1183); with no
 version nothing is checked, as before. The call returns the document it validated, a
