@@ -246,10 +246,19 @@ func (o *ownedConfig) checkAddedGenerators(l *layout.ManifestLayout, before layo
 	return nil
 }
 
-// recordEmitted adds obj to emitted, the objects one Generate returned, when the
-// policy has object kind rules: AugmentLayout reads them again (recheckEmitted).
+// readsEmittedAgain reports whether AugmentLayout reads the objects Generate
+// returned a second time (recheckEmitted): the policy has object kind rules, or
+// the wrapper holds Service names to a Kubernetes release. Either can be broken
+// by an augmenter that edits in place an object its Generate returned, a list
+// envelope's items included.
+func (o *ownedConfig) readsEmittedAgain() bool {
+	return o.kinds != nil || o.target != nil
+}
+
+// recordEmitted adds obj to emitted, the objects one Generate returned, when
+// AugmentLayout reads them again (readsEmittedAgain, recheckEmitted).
 func (o *ownedConfig) recordEmitted(emitted layoutResources, obj client.Object) {
-	if id, ok := resourceIdentity(obj); o.kinds != nil && ok {
+	if id, ok := resourceIdentity(obj); o.readsEmittedAgain() && ok {
 		emitted[id] = struct{}{}
 	}
 }
@@ -260,7 +269,7 @@ func (o *ownedConfig) recordEmitted(emitted layoutResources, obj client.Object) 
 // AugmentLayout that follows it therefore leaves only its own objects to be read
 // again: kure's walker generates an application and then augments its layout.
 func (o *ownedConfig) setEmitted(emitted layoutResources) {
-	if o.kinds == nil {
+	if !o.readsEmittedAgain() {
 		return
 	}
 	o.emittedMu.Lock()
@@ -268,13 +277,14 @@ func (o *ownedConfig) setEmitted(emitted layoutResources) {
 	o.emitted = emitted
 }
 
-// recheckEmitted holds again to the policy every resource on l and on its child
-// layouts that was there before the wrapped augmenter ran (before) and that this
-// wrapper's Generate returned: an augmenter may edit in place an object its
-// Generate returned, a list envelope's items included. What the augmenter added
-// was checked by stampAdded; an object a consumer put on the layout is not read.
+// recheckEmitted holds again to the policy, and to the Service name check, every
+// resource on l and on its child layouts that was there before the wrapped
+// augmenter ran (before) and that this wrapper's Generate returned: an augmenter
+// may edit in place an object its Generate returned, a list envelope's items
+// included. What the augmenter added was checked by stampAdded; an object a
+// consumer put on the layout is not read.
 func (o *ownedConfig) recheckEmitted(l *layout.ManifestLayout, before layoutResources) error {
-	if l == nil || o.kinds == nil {
+	if l == nil || !o.readsEmittedAgain() {
 		return nil
 	}
 	for _, r := range l.Resources {
@@ -292,6 +302,9 @@ func (o *ownedConfig) recheckEmitted(l *layout.ManifestLayout, before layoutReso
 			continue
 		}
 		if err := o.checkObjectKinds(r); err != nil {
+			return err
+		}
+		if err := o.checkServiceNames(r); err != nil {
 			return err
 		}
 	}

@@ -4725,9 +4725,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   refuses a Service of another name, and the operator fails the reconcile
   where it finds no governing Service of the name (`serviceName:
   "alerts.v1" is not a valid Service name, which must be a DNS-1123 label:
-  …`). A name starting with a digit (`1alerts`) is accepted; the cluster
-  needs RelaxedServiceNameValidation for it, the default from Kubernetes
-  1.36 (go-kure/launcher#959). `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
+  …`). A name starting with a digit (`1alerts`) is accepted by that rule and
+  refused when `spec.kubernetesVersion` is below 1.36, where
+  RelaxedServiceNameValidation is off by default (go-kure/launcher#959,
+  go-kure/launcher#1230). `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
   `clusterPeerTimeout` are refused where they parse as a duration of 0 or
   less (`retention: "0s" is not a positive duration: …`): the operator
   empties such a value before it builds the StatefulSet and runs the pods as
@@ -5054,9 +5055,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     10902/TCP and `reloader-web` at 8080/TCP, the last two unless
     `listenLocal` is set), and a port name that leaves two of one name is
     refused, as on `alertmanager`. A `serviceName` must be a DNS-1123 label,
-    the package's Service-name rule; a leading digit needs
-    RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36
-    (go-kure/launcher#959, `docs/delivery-scope.md` §3.5).
+    the package's Service-name rule; a leading digit is refused when
+    `spec.kubernetesVersion` is below 1.36 (RelaxedServiceNameValidation;
+    go-kure/launcher#959, go-kure/launcher#1230, `docs/delivery-scope.md` §3.5).
   - a negative `replicas`: the operator copies the count into the
     StatefulSet as written (:507), which the API refuses.
   - the storage rules of `alertmanager` (:92-133, :441-450): a claim of the
@@ -5418,8 +5419,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   given (`BuildProbes` and `buildProbeHandler`,
   `pkg/prometheus/promcfg.go:1398-1451` at prometheus-operator v0.94.1). Two
   `volumes` of one name are refused, and so is a `serviceName` that is not a DNS-1123 label (a
-  leading digit needs RelaxedServiceNameValidation on the cluster, the default
-  from Kubernetes 1.36; go-kure/launcher#959, `docs/delivery-scope.md` §3.5).
+  leading digit is refused when `spec.kubernetesVersion` is below 1.36,
+  RelaxedServiceNameValidation; go-kure/launcher#959, go-kure/launcher#1230,
+  `docs/delivery-scope.md` §3.5).
   A nonempty `externalUrl` that Prometheus exits on at
   startup is refused too, though the operator and the API accept it: the
   operator passes it unchanged as `--web.external-url`
@@ -6159,8 +6161,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     conversion (`name: "api.v1" is not a valid Service name, which must be a
     DNS-1123 label`) instead of building a manifest the cluster rejects on
     apply (go-kure/launcher#546). A leading digit (`1api`) is accepted: that
-    is the rule under RelaxedServiceNameValidation, the default from Kubernetes 1.36, and a cluster with that gate off refuses such a
-    Service (go-kure/launcher#959, `docs/delivery-scope.md` §3.5). `Generate` applies the
+    is the rule under RelaxedServiceNameValidation, on by default from Kubernetes 1.36, and a
+    build whose `spec.kubernetesVersion` is below 1.36 refuses such a Service at generation
+    (go-kure/launcher#959, go-kure/launcher#1230, `docs/delivery-scope.md` §3.5). `Generate` applies the
     same rule to the Application name it is handed. `worker` emits no Service
     and keeps accepting such a name, within the container-name rule above.
     The rule holds for the component name whatever the Service is named:
@@ -6332,9 +6335,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     name, which must be a DNS-1123 label`) instead of building a manifest the
     cluster rejects on apply. `Generate` applies the same rule to the
     Application name it is handed. A leading digit (`1api`) is accepted: that
-    is the rule under RelaxedServiceNameValidation, the default from Kubernetes 1.36, and a cluster with that gate off refuses such a
-    Service, and an Ingress whose backend names it (go-kure/launcher#959,
-    `docs/delivery-scope.md` §3.5).
+    is the rule under RelaxedServiceNameValidation, on by default from Kubernetes 1.36, and a
+    build whose `spec.kubernetesVersion` is below 1.36 refuses such a Service at generation
+    (go-kure/launcher#959, go-kure/launcher#1230, `docs/delivery-scope.md` §3.5).
   - **Routing traits use the first port.** `ingress`, `httproute` and `expose`
     (which lowers to one of the two) on a `service` component resolve their
     implicit backend to `ports[0].port` and refuse any other port on it,
@@ -9502,8 +9505,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     is refused at conversion otherwise (`serviceName: "api.v1" is not a valid
     Service name, which must be a DNS-1123 label`, go-kure/launcher#546);
     `Generate` applies the same rule to the config's `ServiceName`. A leading
-    digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36 (go-kure/launcher#959,
-    `docs/delivery-scope.md` §3.5). Before go-kure/launcher#690 `serviceName` defaulted to the
+    digit is accepted at every Kubernetes release: the API validates a StatefulSet's
+    `serviceName` as a DNS-1123 label, not as a Service name, and the `statefulset` emits no
+    Service, so `spec.kubernetesVersion` does not change it. The governing Service is a
+    `service` component's, and that name is checked (go-kure/launcher#959,
+    go-kure/launcher#1230, `docs/delivery-scope.md` §3.5). Before go-kure/launcher#690 `serviceName` defaulted to the
     component name and the component emitted that headless Service itself;
     "Main container ports" has the migration, including why an existing
     StatefulSet must be recreated.
@@ -12050,13 +12056,19 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   with `pooler.instances: 0` or less: its Pooler now holds that count. A
   document with `instances: 0` got one pod before and gets none now (the
   `postgresql-bootstrap-external` fixture shows it).
+  **An additional Service's name** is the `serviceTemplate.metadata.name` of a
+  `managed.services.additional[]` entry, and CloudNativePG creates the Service
+  under it: a name with a leading digit is refused when `spec.kubernetesVersion`
+  is below 1.36, RelaxedServiceNameValidation, naming the entry by its index
+  (go-kure/launcher#1230; `docs/delivery-scope.md` §3.5).
   **The Pooler's and the Databases' names** (go-kure/launcher#787) are
   resolved in the order of every name role (see "Name roles and the `Naming`
   hook" in `pkg/oam/README.md`): the author's property, else the consumer's
   `Naming` hook, else the default. `poolerName` names the Pooler (role
   `pooler`, default `<name>-pooler`) and must be a DNS-1123 label, since
-  CloudNativePG names the pooler's Service after it (a leading digit needs
-  RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36, `docs/delivery-scope.md` §3.5); it is refused when
+  CloudNativePG names the pooler's Service after it (a leading digit is refused when
+  `spec.kubernetesVersion` is below 1.36, RelaxedServiceNameValidation, the default
+  `<name>-pooler` included; `docs/delivery-scope.md` §3.5); it is refused when
   `pooler.enabled` is not true. `databases[].objectName` names that entry's
   Database object (role `database`, default `<name>-<db>`) and must be a
   DNS-1123 subdomain; the entry's `name` stays the database created in
@@ -12476,7 +12488,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   `cnpg-pooler` writes no type or instance count of its own, so the operator's
   defaults (`rw`, `1`) apply. Its component name is the Pooler's name and its
   Service's, so it must be a DNS-1123 label of at most 63 characters (a
-  leading digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36; CloudNativePG's Pooler
+  leading digit is refused when `spec.kubernetesVersion` is below 1.36, RelaxedServiceNameValidation; CloudNativePG's Pooler
   webhook checks no name syntax, go-kure/launcher#959,
   `docs/delivery-scope.md` §3.5), and a pooler named like its cluster is refused, as CloudNativePG's webhook does:
   by the build, and where its endpoint is collected in the same words

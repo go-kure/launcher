@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -66,6 +67,24 @@ func webserviceProps(extra map[string]any) map[string]any {
 	return props
 }
 
+// cnpgClusterWithService is a cnpg-cluster that asks CloudNativePG for one
+// additional Service, whose serviceTemplate states name; the operator creates the
+// Service under that name.
+func cnpgClusterWithService(name string) map[string]any {
+	return map[string]any{
+		"storage": map[string]any{"size": "10Gi"},
+		"managed": map[string]any{"services": map[string]any{"additional": []any{
+			map[string]any{
+				"selectorType": "rw",
+				"serviceTemplate": map[string]any{
+					"metadata": map[string]any{"name": name},
+					"spec":     map[string]any{"type": "ClusterIP"},
+				},
+			},
+		}}},
+	}
+}
+
 func serviceNameSources() []serviceNameSource {
 	svcPorts := func(extra map[string]any) map[string]any {
 		props := map[string]any{"ports": []any{map[string]any{"name": "http", "port": 80, "targetPort": 8080}}}
@@ -85,6 +104,10 @@ func serviceNameSources() []serviceNameSource {
 		}
 	}
 	return []serviceNameSource{
+		{name: "a cnpg-cluster additional service's name", typ: "cnpg-cluster", component: "db",
+			props:            cnpgClusterWithService("1extra"),
+			controlComponent: "db", controlProps: cnpgClusterWithService("extra1"),
+			fragments: []string{`component "db"`, `Cluster "db"`, "spec.managed.services.additional[0].serviceTemplate.metadata.name", `"1extra"`}},
 		{name: "a service component's name", typ: "service", component: "1api", props: svcPorts(nil),
 			controlComponent: "api1", controlProps: svcPorts(nil),
 			fragments: []string{`component "1api"`, `Service "1api"`}},
@@ -241,8 +264,12 @@ var serviceNameScanSkip = map[string]string{}
 // the StatefulSet fixture authors none (the component has no default, so the
 // field stays empty), so without this row the StatefulSet would render and
 // carry no Service name.
+//
+// The cnpg-cluster fixture asks for no additional service, so the scan gives it
+// one: the Cluster names a Service only through spec.managed.services.additional.
 var serviceNameScanProps = map[string]map[string]any{
-	"statefulset": workloadProps(map[string]any{"serviceName": "web"}),
+	"statefulset":  workloadProps(map[string]any{"serviceName": "web"}),
+	"cnpg-cluster": cnpgClusterWithService("extra"),
 }
 
 // serviceNameBearers are the objects the scan must find that name a Service, as
@@ -251,6 +278,7 @@ var serviceNameScanProps = map[string]map[string]any{
 // authors serviceName. Each row is asserted by name, so a fixture that stops
 // rendering one fails on that row and not on a count.
 var serviceNameBearers = []string{
+	"cnpg-cluster/Cluster",
 	"cnpg-pooler/Pooler",
 	"service/Service",
 	"statefulset/StatefulSet",
@@ -272,7 +300,12 @@ func TestServiceNameGate_EveryBuiltinKindIsCovered(t *testing.T) {
 	for _, s := range serviceNameSources() {
 		tested[s.typ] = true
 	}
-	known := map[string]bool{"Service": true, "Pooler": true, "Prometheus": true, "Alertmanager": true, "ThanosRuler": true}
+	// The kinds the check holds are the code's own list, not one kept here: dropping
+	// a row of it leaves the kind a fixture renders unheld, and this test fails on it.
+	known := map[schema.GroupKind]bool{}
+	for _, gk := range oam.ServiceNameCheckedKinds() {
+		known[gk] = true
+	}
 	exemptKind := map[string]bool{"StatefulSet": true}
 
 	handlers := builtinComponentHandlers()
@@ -318,9 +351,20 @@ func TestServiceNameGate_EveryBuiltinKindIsCovered(t *testing.T) {
 		}
 		for _, doc := range docs {
 			kind, _ := doc["kind"].(string)
+			apiVersion, _ := doc["apiVersion"].(string)
+			group, _, hasGroup := strings.Cut(apiVersion, "/") // "v1" has no group: the core group is ""
+			if !hasGroup {
+				group = ""
+			}
+			gk := schema.GroupKind{Group: group, Kind: kind}
 			spec, _ := doc["spec"].(map[string]any)
 			serviceName, _ := spec["serviceName"].(string)
-			if kind != "Service" && kind != "Pooler" && serviceName == "" { // an unset serviceName names nothing
+			managed, _ := spec["managed"].(map[string]any)
+			services, _ := managed["services"].(map[string]any)
+			additional, _ := services["additional"].([]any)
+			// An unset serviceName names nothing, and neither does a Cluster with no
+			// additional Services.
+			if kind != "Service" && kind != "Pooler" && serviceName == "" && len(additional) == 0 {
 				continue
 			}
 			key := typ + "/" + kind
@@ -328,8 +372,8 @@ func TestServiceNameGate_EveryBuiltinKindIsCovered(t *testing.T) {
 			if !slices.Contains(serviceNameBearers, key) {
 				t.Errorf("component type %q renders a %s that names a Service and is not in serviceNameBearers: add %q there once the Service name check holds it", typ, kind, key)
 			}
-			if !known[kind] && !exemptKind[kind] {
-				t.Errorf("component type %q renders a %s that names a Service (kind %q), which TestServiceNameGate_EverySource does not exercise: hold it in the gate, or exempt it with its reason", typ, kind, kind)
+			if !known[gk] && !exemptKind[kind] {
+				t.Errorf("component type %q renders a %s that names a Service (group %q, kind %q), which the Service name check does not hold: add it to the check's table, or exempt it with its reason", typ, kind, gk.Group, kind)
 			}
 		}
 	}

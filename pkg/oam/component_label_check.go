@@ -429,7 +429,7 @@ func readGeneratedObject(obj client.Object) (generatedObject, error) {
 // so a reserved key is refused as one (ErrReservedMetadataKey) whatever the
 // labels beside it hold.
 func (o *ownedConfig) check(obj client.Object) error {
-	if o.reserved == nil && o.component == "" && o.kinds == nil {
+	if o.reserved == nil && o.component == "" && o.kinds == nil && o.target == nil {
 		return nil
 	}
 	if err := o.checkObjectKinds(obj); err != nil {

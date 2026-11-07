@@ -1362,7 +1362,7 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `oci-kustomization` | The Flux Kustomization an `oci` component generates, whether the component keeps its source or shares one. | The component's name. | `kustomizationName` | unless `kustomizationName` is set |
 | `oci-source` | The OCIRepository an `oci` component keeps to itself: the one no other `oci` component of the document shares and no `source.name` names. | The component's name. | `source.objectName` | unless `source.objectName` is set; not for a shared source or one `source.name` names (`helm-source`) |
 | `workload-deployment` | The Deployment a `webservice` or `worker` component generates. It names the object alone: the pod labels, the selectors and every name derived from the component keep the component name. | The component's name. | `deploymentObjectName` | unless `deploymentObjectName` is set |
-| `workload-service` | The Service a `webservice` component generates; a DNS-1123 label (one starting with a digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36; `docs/delivery-scope.md` §3.5). Its name is its DNS name in the cluster, and launcher writes no such address (below). | The component's name. | `serviceObjectName` | unless `serviceObjectName` is set |
+| `workload-service` | The Service a `webservice` component generates; a DNS-1123 label (one starting with a digit is refused when `spec.kubernetesVersion` is below 1.36, RelaxedServiceNameValidation; `docs/delivery-scope.md` §3.5). Its name is its DNS name in the cluster, and launcher writes no such address (below). | The component's name. | `serviceObjectName` | unless `serviceObjectName` is set |
 | `workload-serviceaccount` | The ServiceAccount a `webservice` or `worker` component generates for its pods. | The component's name. | `serviceAccountObjectName` | unless `serviceAccountObjectName` is set; not when `serviceAccountName` names an existing account, since the component then generates none |
 | `workload-volume-claim` | The PersistentVolumeClaim a `pvc` volume of a `webservice` or `worker` component generates, asked once per such volume. The volume mounts the claim by this name. | `<component>-<volume>`, each half hyphen-escaped, shortened to 253 with `-<volume>` kept whole. | `volumes[].claimObjectName` | unless that volume's `claimObjectName` is set; not for a volume whose `claimName` references an existing claim, since it then generates none |
 | `postgresql-cluster` | The Cluster a `postgresql` component generates; a DNS-1035 label of at most 50 characters. The Pooler's, each Database's and each ScheduledBackup's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler, the Databases and the ScheduledBackups keep the component name. The operator derives the Cluster's Services and Secrets from this name (below). | The component's name. | `clusterObjectName` | unless `clusterObjectName` is set |
@@ -1636,8 +1636,9 @@ properties it knows, accepts it in both.
 A name that is not the default (the author's or the hook's) must be a DNS-1123 subdomain of
 at most 253 characters, and is used as given or refused, never shortened. The `pooler` and
 `workload-service` roles are narrower: a DNS-1123 label, which a Service's name must be, and
-the Pooler's Service carries the Pooler's name. A leading digit is accepted, which a cluster
-with RelaxedServiceNameValidation off (the default before Kubernetes 1.36) refuses in a Service name (`docs/delivery-scope.md` §3.5). Narrower
+the Pooler's Service carries the Pooler's name. A leading digit is accepted here, and a build
+whose `spec.kubernetesVersion` is below 1.36 (RelaxedServiceNameValidation off by default) refuses it in a generated Service
+at generation (`docs/delivery-scope.md` §3.5). Narrower
 still is `postgresql-cluster`, whose Services carry the Cluster's name with a suffix: a
 DNS-1035 label of at most 50 characters (CloudNativePG's own rule), a rule its default, the
 component name, is held to as well. `postgresql-scheduledbackup` keeps the subdomain's syntax

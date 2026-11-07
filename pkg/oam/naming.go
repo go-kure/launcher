@@ -208,8 +208,9 @@ const (
 	// characters, the rule the API server holds a Service name to under the
 	// RelaxedServiceNameValidation feature gate, on by default from Kubernetes
 	// 1.36. With the gate off it holds the name to a DNS-1035 label, which also
-	// refuses a leading digit: a documented limit, not a check
-	// (go-kure/launcher#959).
+	// refuses a leading digit: this syntax accepts one, and the generated Service
+	// is refused below 1.36 at generation (go-kure/launcher#959,
+	// go-kure/launcher#1230).
 	nameSyntaxServiceName
 	// nameSyntaxKustomization is a Flux Kustomization name: a DNS-1123 subdomain
 	// of at most 63 characters (stack.ValidateKustomizationName).

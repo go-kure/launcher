@@ -335,9 +335,10 @@ func appendUniquePort(ports []intstr.IntOrString, p intstr.IntOrString) []intstr
 // That is the rule under the RelaxedServiceNameValidation feature gate: alpha
 // and off by default in Kubernetes 1.34 and 1.35, on by default from 1.36, GA
 // and locked on in 1.37. With the gate off the API server holds a Service name
-// to a DNS-1035 label, which also refuses a leading digit ("1api"): this
-// package does not see the target cluster, so that is a documented limit, not
-// a check (go-kure/launcher#959).
+// to a DNS-1035 label, which also refuses a leading digit ("1api"). This
+// function does not see the target cluster, so it accepts such a name; the
+// refusal below 1.36 is oam.ownedConfig.checkServiceNames, on the objects the
+// component generates (go-kure/launcher#959, go-kure/launcher#1230).
 // field names where the value came from ("name" for the component name,
 // "serviceName" for statefulset's authored property), so the author can find
 // it. Every kind that emits a Service calls it, service and webservice

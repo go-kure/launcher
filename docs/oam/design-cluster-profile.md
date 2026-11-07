@@ -68,7 +68,8 @@ same string works in both.
 - **The table.** `pkg/oam/featuregates.go` holds one row per gate: its name and the first
   release where its Default is true, read from the Kubernetes feature gates reference. Two
   tests keep it honest: every `Gate` a built-in schema carries names a row, and every row is
-  carried by at least one schema.
+  carried by at least one schema or listed in `oam.CodeCheckedGates` (a gate that code
+  checks on generated objects, with no property to name it).
 
   | Gate | On by default from | Properties |
   |---|---|---|
@@ -77,6 +78,7 @@ same string works in both.
   | `PodLevelResources` | 1.34 | `podResources` (the pod kinds' `resources`) |
   | `HostnameOverride` | 1.35 | `hostnameOverride` |
   | `PreferSameTrafficDistribution` | 1.34 | the values `PreferSameZone` and `PreferSameNode` of `service`'s `trafficDistribution` (`PreferClose` is accepted at every version) |
+  | `RelaxedServiceNameValidation` | 1.36 | no property: the name of a generated Service that starts with a digit, checked on the objects (below) |
 
   A gate that covers single values of an enum is named per value (`PropertySchema.ValueGates`,
   published as `valueGates`); the refusal then names the value as well
@@ -106,12 +108,31 @@ same string works in both.
   it knows as on, and says nothing about a gate it does not know.
 - **A cluster that changed a gate** against its default is not modelled: the profile says
   the release, not the gate settings. Per-gate overrides are a follow-up
-  (go-kure/launcher#1231), as are version-dependent bounds such as a Service name rule
-  (go-kure/launcher#1230, second change) and adapting instead of refusing
-  (go-kure/launcher#1232).
+  (go-kure/launcher#1231), as is adapting instead of refusing (go-kure/launcher#1232).
+- **A Service name is checked on the objects, not on a property.** Below 1.36 the API
+  server holds a Service name to a DNS-1035 label (`RelaxedServiceNameValidation` is off),
+  which refuses a leading digit. The check reads the generated objects, so a default name, a
+  `Naming` hook's answer and a role override are held the same as an authored name: a core
+  `v1` Service (`metadata.name`), a CloudNativePG `Pooler` (`metadata.name`), a
+  CloudNativePG `Cluster` (`spec.managed.services.additional[].serviceTemplate.metadata.name`)
+  and the Prometheus operator's `Prometheus`, `PrometheusAgent`, `Alertmanager` and
+  `ThanosRuler` (`spec.serviceName`, the only kinds of its API that have the field), whose
+  operators create or look up the Service. The check reads the object as the writer writes
+  it (its JSON, kind and apiVersion included), so a list or number built in Go is read as a decoded one is; an object of
+  these kinds that does not encode as JSON is refused below 1.36 as a violation of its
+  owning component, since the name it holds cannot be read. The refusal is a
+  violation of the owning component, and names the object, the field, the gate, release 1.36
+  and the profile's version. A `statefulset`'s `serviceName` is not checked: the API server
+  validates it as a DNS-1123 label at every release, and the Service it names is a
+  `service` component's, which is. An Ingress backend naming such a Service is not checked
+  separately.
 - **Where it runs.** `kurel build` reads the profile's version and passes it to
   `ValidateAuthoredPropertiesForTarget`. A library caller passes the version to that method
-  itself; `ValidateAuthoredPropertiesWithCapabilities` takes none and checks no gate.
+  itself; `ValidateAuthoredPropertiesWithCapabilities` takes none and checks no gate. The
+  Service name check runs later, when the objects are generated (`oam.GenerateApplications`),
+  from `TransformContext.TargetVersion`: a caller that leaves that field unset gets no
+  check, and a caller that transforms and never generates sees no refusal. `kurel build`
+  sets it from the same profile version.
 
 ### Capability schema
 
