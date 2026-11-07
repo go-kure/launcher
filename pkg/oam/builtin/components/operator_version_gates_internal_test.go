@@ -858,6 +858,12 @@ type gateRow struct {
 	// a gate whose one version the walker cannot read. An empty bound is no
 	// gate: the id is not in the kind's tables.
 	bounds map[string]string
+	// window, beside paths, is for a gate whose condition holds a window: it
+	// compares against two minima and no maximum, the lower the version from
+	// which the operator carries the field this way and the higher the one
+	// from which another mechanism carries it. Each id of paths is a minimum
+	// at the lower.
+	window bool
 	floor  bool
 	not    string
 }
@@ -962,6 +968,15 @@ func holdVersionGates(t testing.TB, gates []operatorGate, rows []gateRow, funcs 
 			}
 			for _, id := range r.paths {
 				check(g, "maximum", id, r.major)
+			}
+		case r.window:
+			if len(g.minima) != 2 || len(g.maxima) > 0 {
+				t.Errorf("%s: %s compares against minima %v and maxima %v; a window is two minima and no maximum", g.pos, g.key(), g.minima, g.maxima)
+				continue
+			}
+			lower := slices.MinFunc(g.minima, func(a, b string) int { return semver.MustParse(a).Compare(semver.MustParse(b)) })
+			for _, id := range r.paths {
+				check(g, "minimum", id, lower)
 			}
 		default:
 			if len(g.minima) > 1 || len(g.maxima) > 1 || len(g.minima)+len(g.maxima) == 0 {

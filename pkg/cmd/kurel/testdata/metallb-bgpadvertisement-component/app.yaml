@@ -11,6 +11,7 @@ spec:
         aggregationLength: 24
         aggregationLengthV6: 64
         localPref: 100
+        asPathPrepend: 2
         communities: ["64512:100", no-export]
         ipAddressPools: [edge, shared]
         ipAddressPoolSelectors:

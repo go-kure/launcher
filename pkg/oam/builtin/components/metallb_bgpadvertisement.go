@@ -63,6 +63,10 @@ func (h *MetalLBBGPAdvertisementHandler) PropertySchema() map[string]oam.Propert
 			Type:        oam.PropertyTypeInteger,
 			Description: "BGPAdvertisement spec.localPref: the BGP LOCAL_PREF attribute of the announcement; a path with a higher one is preferred. Unset and 0 are the same advertisement: MetalLB's type holds one value for both, and the field is left out. What MetalLB then sends is its BGP backend's choice: at MetalLB v0.16.1 the native backend sends LOCAL_PREF 0 on an iBGP session; the FRR backends set no local preference.",
 		},
+		"asPathPrepend": {
+			Type:        oam.PropertyTypeInteger,
+			Description: "BGPAdvertisement spec.asPathPrepend: how many times the local ASN is prepended to the AS path of the announcement, which lengthens the path on purpose for traffic engineering. From 1 to 10; unset and 0 are the same advertisement, since MetalLB's type holds one value for both and the field is left out. MetalLB supports it only in its frr-k8s mode and refuses the configuration in another; this kind cannot see the mode, so it does not enforce that. Two advertisements that overlap must carry the same value.",
+		},
 		"communities":            names("BGPAdvertisement spec.communities: the BGP communities attached to the announcement.", "A standard community (1234:1234), a large one (large:1234:1234:1234) or the name of an alias a MetalLB Community object defines."),
 		"ipAddressPools":         names("BGPAdvertisement spec.ipAddressPools: the pools whose addresses this advertisement announces over BGP, by name. With no pool named here and none selected by ipAddressPoolSelectors, it applies to every pool.", "The name of an IPAddressPool in the same namespace."),
 		"ipAddressPoolSelectors": selectors("BGPAdvertisement spec.ipAddressPoolSelectors: the pools whose addresses this advertisement announces, by their labels. With no pool selected here and none named by ipAddressPools, it applies to every pool."),

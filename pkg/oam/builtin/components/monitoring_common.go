@@ -119,6 +119,10 @@ func monitoringScrapeSchema(kind string) map[string]oam.PropertySchema {
 			Type:        oam.PropertyTypeBoolean,
 			Description: spec + "scrapeClassicHistograms: whether a classic histogram that is also exposed as a native histogram is scraped (always_scrape_classic_histograms in the Prometheus configuration). Requires Prometheus v2.45.0 or later.",
 		},
+		"extraScrapeMetrics": {
+			Type:        oam.PropertyTypeBoolean,
+			Description: spec + "extraScrapeMetrics: whether to store three further series for each scrape: scrape_timeout_seconds, scrape_sample_limit and scrape_body_size_bytes, which show how close a target is to its limits. Overrides the setting of the selecting Prometheus for this object. Requires Prometheus v3.10.0 or later: the operator drops it from the configuration of an older one, and this kind cannot see which version selects it.",
+		},
 		"nativeHistogramBucketLimit": {
 			Type:        oam.PropertyTypeInteger,
 			Description: spec + "nativeHistogramBucketLimit: a native histogram with more buckets than this has its buckets merged to stay within the limit. At least 0. Requires Prometheus v2.45.0 or later.",

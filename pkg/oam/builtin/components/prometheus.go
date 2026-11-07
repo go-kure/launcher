@@ -199,6 +199,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"convertClassicHistogramsToNHCB": flag("convertClassicHistogramsToNHCB: true converts every scraped classic histogram into a native histogram with custom buckets. Requires Prometheus v3.4.0 or later."),
 		"scrapeNativeHistograms":         flag("scrapeNativeHistograms: whether native histograms are scraped. Requires Prometheus v3.8.0 or later."),
 		"scrapeClassicHistograms":        flag("scrapeClassicHistograms: whether a classic histogram that is also exposed as a native one is scraped too. Requires Prometheus v3.5.0 or later."),
+		"extraScrapeMetrics":             flag("extraScrapeMetrics: true stores three further series for each scrape: scrape_timeout_seconds, scrape_sample_limit and scrape_body_size_bytes, which show how close a target is to its limits. Refused below Prometheus v2.32.0, where the operator does not pass it; from v2.32.0 to v3.10.0 the operator turns on the extra-scrape-metrics feature flag, and from v3.10.0 it writes the configuration key, which a ServiceMonitor, PodMonitor or Probe object can override for its own scrape."),
 		"minReadySeconds":                number("minReadySeconds: how many seconds a new pod must be ready before it counts as available. At least 0."),
 		"hostAliases": objects("hostAliases: further entries of the pods' hosts file.",
 			"One entry: ip and hostnames, both required."),

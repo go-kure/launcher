@@ -27,7 +27,8 @@ import (
 //
 // Its properties are the top-level fields of monitoringv1.AlertmanagerSpec,
 // under their json names, decoded strictly (decodeKindSpec), less the three
-// deprecated ones that name the image in parts. It emits the Alertmanager,
+// deprecated ones that name the image in parts. alertmanagerConfigFileSystemMode
+// is refused at AllowAll (go-kure/launcher#1300). It emits the Alertmanager,
 // named after the component unless `objectName` names it, in the build
 // namespace, and nothing else: the Prometheus operator runs the pods, from a
 // StatefulSet it builds. What the spec says of those pods is held to the
@@ -147,12 +148,13 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"minReadySeconds":                     number("minReadySeconds: how many seconds a new pod must be ready before it counts as available. At least 0."),
 		"hostAliases": objects("hostAliases: further entries of the pods' hosts file.",
 			"One entry: ip and hostnames, both required."),
-		"hostNetwork":                  flag("hostNetwork: true runs the pods in the node's network namespace. Refused under an EnvironmentPolicy that does not allow the host network."),
-		"web":                          object("web: the web server's settings: tlsConfig and httpConfig, getConcurrency and timeout. A tlsConfig the operator refuses is refused: one without a certificate or a key, or naming one twice." + decoded + "AlertmanagerWebSpec in its API reference."),
-		"limits":                       object("limits: the limits Alertmanager is started with: maxSilences and maxPerSilenceBytes. Refused where version is under v0.28.0, which the operator does not pass them to." + decoded + "AlertmanagerLimitsSpec in its API reference."),
-		"clusterTLS":                   object("clusterTLS: the mutual TLS configuration of the gossip protocol: server and client, both required. Refused where version is under v0.24.0, for which the operator mounts no cluster TLS configuration. A server or client the operator refuses is refused: a server without a certificate or a key, a client without a certificate, or either naming one twice." + decoded + "ClusterTLSConfig in its API reference."),
-		"alertmanagerConfiguration":    object("alertmanagerConfiguration: the Alertmanager configuration, taken from the AlertmanagerConfig object `name` names in the same namespace, with global parameters and notification templates; it takes precedence over configSecret. A template whose key an earlier one names is refused: the operator skips it. Experimental upstream. Every credential in it is the key of a Secret." + decoded + "AlertmanagerConfiguration in its API reference."),
-		"automountServiceAccountToken": flag("automountServiceAccountToken: whether a service account token is mounted into the pods."),
+		"hostNetwork":                      flag("hostNetwork: true runs the pods in the node's network namespace. Refused under an EnvironmentPolicy that does not allow the host network."),
+		"web":                              object("web: the web server's settings: tlsConfig and httpConfig, getConcurrency and timeout. A tlsConfig the operator refuses is refused: one without a certificate or a key, or naming one twice." + decoded + "AlertmanagerWebSpec in its API reference."),
+		"limits":                           object("limits: the limits Alertmanager is started with: maxSilences and maxPerSilenceBytes. Refused where version is under v0.28.0, which the operator does not pass them to." + decoded + "AlertmanagerLimitsSpec in its API reference."),
+		"clusterTLS":                       object("clusterTLS: the mutual TLS configuration of the gossip protocol: server and client, both required. Refused where version is under v0.24.0, for which the operator mounts no cluster TLS configuration. A server or client the operator refuses is refused: a server without a certificate or a key, a client without a certificate, or either naming one twice." + decoded + "ClusterTLSConfig in its API reference."),
+		"alertmanagerConfiguration":        object("alertmanagerConfiguration: the Alertmanager configuration, taken from the AlertmanagerConfig object `name` names in the same namespace, with global parameters and notification templates; it takes precedence over configSecret. A template whose key an earlier one names is refused: the operator skips it. Experimental upstream. Every credential in it is the key of a Secret." + decoded + "AlertmanagerConfiguration in its API reference."),
+		"alertmanagerConfigFileSystemMode": text("alertmanagerConfigFileSystemMode: whether an AlertmanagerConfig object may reference files of the alertmanager container's filesystem, such as the botTokenFile of the Telegram receiver, which would let its author read the files of the container. DenyAll refuses every such object; FromAlertmanagerConfigMatcherStrategy, the operator's default, decides by alertmanagerConfigMatcherStrategy. AllowAll is refused: it lets every AlertmanagerConfig read the container's files, which loosens the operator's default (go-kure/launcher#1300 decides whether it may be set)."),
+		"automountServiceAccountToken":     flag("automountServiceAccountToken: whether a service account token is mounted into the pods."),
 		"enableFeatures": texts("enableFeatures: the Alertmanager feature flags to enable. Refused where version is under v0.27.0, which the operator does not pass them to. The operator joins them with \",\" and Alertmanager exits on an element it does not take, an empty one included, and on classic-mode with utf8-strict-mode: such a list is refused at version, unset the operator's default v0.34.2; above 0.34 no name is refused. A list of one empty element, which the operator passes as a flag without a value, is refused at any version. An element that refers to an environment variable, as $(AM_FEATURE), is left alone, as the kubelet expands it first; the other elements are judged, and classic-mode with utf8-strict-mode is refused where neither refers to one. A reference runs from $( to the first ) after it, and one whose name no variable can have, an empty one or one with =, a character beyond ASCII or one not printable, as $(), is read as written, as are $( without its closing parenthesis and $$, read as $, as the kubelet passes them.",
 			"The name of one feature flag."),
 		"additionalArgs": objects("additionalArgs: further command-line arguments of the alertmanager container, passed as they are. An argument naming a flag the operator generates for the spec and version, or its negation with no-, is refused: the operator then fails to build the pods. Without a version, the flags of the operator's default version are held, which is every such flag. Beyond that name launcher does not read them: an argument can change what the fields above configure.",
@@ -289,6 +291,9 @@ func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
 		if field.value != "" {
 			return errors.Errorf("%s: not authorable: the Prometheus operator deprecates the field, and composes the image it yields outside what the object states; use image", field.path)
 		}
+	}
+	if mode := spec.AlertmanagerConfigFileSystemMode; mode != nil && *mode == monitoringv1.AllowAllAlertmanagerConfigFileSystemMode {
+		return errors.New("alertmanagerConfigFileSystemMode: AllowAll is not authorable: it lets every AlertmanagerConfig object read the files of the alertmanager container, which loosens the operator's default (FromAlertmanagerConfigMatcherStrategy); use DenyAll or FromAlertmanagerConfigMatcherStrategy, or leave it unset (go-kure/launcher#1300)")
 	}
 	for _, field := range []fieldValue{
 		{"retention", string(spec.Retention)},

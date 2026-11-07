@@ -26,8 +26,6 @@ var alertmanagerUnfixtured = map[string]string{
 	"tag":         "not in the schema; refused when not empty, and an empty one writes nothing (TestAlertmanager_DeprecatedImageFields)",
 	"sha":         "not in the schema; refused when not empty, and an empty one writes nothing (TestAlertmanager_DeprecatedImageFields)",
 	"hostNetwork": "true is refused under the policy the fixture is built under, and the type omits false (TestAlertmanager_HostNetwork)",
-
-	"alertmanagerConfigFileSystemMode": newInOperator095 + "; refused as an unsupported field (TestUnexposedUpstreamFields_AreRefusedAsUnsupported)",
 }
 
 // alertmanagerFull sets every other top-level field of the spec, inside
@@ -67,11 +65,13 @@ func alertmanagerFull() map[string]any {
 		"volumes":                              []any{map[string]any{"name": "scratch", "emptyDir": map[string]any{"sizeLimit": "1Gi"}}},
 		"volumeMounts":                         []any{map[string]any{"name": "scratch", "mountPath": "/scratch"}},
 		"persistentVolumeClaimRetentionPolicy": map[string]any{"whenDeleted": "Delete", "whenScaled": "Retain"},
-		"externalUrl":                          "https://alerts.example.com",
-		"routePrefix":                          "/alerts",
-		"paused":                               true,
-		"nodeSelector":                         map[string]any{"kubernetes.io/os": "linux"},
-		"schedulerName":                        "default-scheduler",
+		// AllowAll is refused (TestAlertmanager_ConfigFileSystemModeAllowAllIsRefused).
+		"alertmanagerConfigFileSystemMode": "DenyAll",
+		"externalUrl":                      "https://alerts.example.com",
+		"routePrefix":                      "/alerts",
+		"paused":                           true,
+		"nodeSelector":                     map[string]any{"kubernetes.io/os": "linux"},
+		"schedulerName":                    "default-scheduler",
 		"resources": map[string]any{
 			"requests": map[string]any{"cpu": "100m", "memory": "128Mi"},
 			"limits":   map[string]any{"cpu": 2, "memory": "1Gi"},

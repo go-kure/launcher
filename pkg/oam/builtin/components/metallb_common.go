@@ -60,3 +60,9 @@ func metallbSelectorsRequired(lists ...string) map[string]string {
 // the metallb-l2advertisement and metallb-bgpadvertisement kinds say of
 // themselves: those of their three lists of selectors.
 var metallbAdvertisementRequiredText = metallbSelectorsRequired("ipAddressPoolSelectors", "nodeSelectors", "serviceSelectors")
+
+// metallbL2AdvertisementRequiredText is metallbAdvertisementRequiredText with
+// the match expressions of the preference of each preferredNodeSelectors entry
+// (go-kure/launcher#1265). The entry's weight and preference are said in the
+// default words.
+var metallbL2AdvertisementRequiredText = requiredFields(metallbAdvertisementRequiredText, labelSelectorRequired("preferredNodeSelectors[].preference"))

@@ -48,15 +48,6 @@ import (
 // object: each publishes the json fields of the object's spec type, decodes
 // them strictly, and emits one object carrying identity and the authored spec.
 
-// The reasons for the seven fields that the kure beta.25 pin brought into the
-// vendored types and no kind publishes yet (go-kure/launcher#1265).
-// TestUnexposedUpstreamFields_AreRefusedAsUnsupported holds that authoring one
-// is refused.
-const (
-	newInOperator095 = "added by prometheus-operator v0.95.0; not published yet, tracked in go-kure/launcher#1265"
-	newInMetalLB0162 = "added by metallb v0.16.2; not published yet, tracked in go-kure/launcher#1265"
-)
-
 // coreKindSchemas lists those components with the upstream spec type each
 // projects. excluded names the json fields of the type the component refuses,
 // each with its reason; every other field is authorable. The kinds of the
@@ -85,8 +76,6 @@ var coreKindSchemas = []struct {
 		"baseImage": "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
 		"tag":       "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
 		"sha":       "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
-
-		"alertmanagerConfigFileSystemMode": newInOperator095,
 	}},
 	{"apiservice", reflect.TypeFor[apiregistrationv1.APIServiceSpec](), &components.APIServiceHandler{}, nil},
 	{"artifactgenerator", reflect.TypeFor[swv1beta1.ArtifactGeneratorSpec](), &components.ArtifactGeneratorHandler{}, map[string]string{
@@ -157,15 +146,11 @@ var coreKindSchemas = []struct {
 	{"listenerset", reflect.TypeFor[gatewayv1.ListenerSetSpec](), &components.ListenerSetHandler{}, nil},
 	// And the kinds of MetalLB's API.
 	{"metallb-bfdprofile", reflect.TypeFor[metallbv1beta1.BFDProfileSpec](), &components.MetalLBBFDProfileHandler{}, nil},
-	{"metallb-bgpadvertisement", reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](), &components.MetalLBBGPAdvertisementHandler{}, map[string]string{
-		"asPathPrepend": newInMetalLB0162,
-	}},
+	{"metallb-bgpadvertisement", reflect.TypeFor[metallbv1beta1.BGPAdvertisementSpec](), &components.MetalLBBGPAdvertisementHandler{}, nil},
 	{"metallb-bgppeer", reflect.TypeFor[metallbv1beta2.BGPPeerSpec](), &components.MetalLBBGPPeerHandler{}, nil},
 	{"metallb-community", reflect.TypeFor[metallbv1beta1.CommunitySpec](), &components.MetalLBCommunityHandler{}, nil},
 	{"metallb-ipaddresspool", reflect.TypeFor[metallbv1beta1.IPAddressPoolSpec](), &components.MetalLBIPAddressPoolHandler{}, nil},
-	{"metallb-l2advertisement", reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), &components.MetalLBL2AdvertisementHandler{}, map[string]string{
-		"preferredNodeSelectors": newInMetalLB0162,
-	}},
+	{"metallb-l2advertisement", reflect.TypeFor[metallbv1beta1.L2AdvertisementSpec](), &components.MetalLBL2AdvertisementHandler{}, nil},
 	{"mutatingadmissionpolicy", reflect.TypeFor[admissionregistrationv1.MutatingAdmissionPolicySpec](), &components.MutatingAdmissionPolicyHandler{}, nil},
 	{"mutatingadmissionpolicybinding", reflect.TypeFor[admissionregistrationv1.MutatingAdmissionPolicyBindingSpec](), &components.MutatingAdmissionPolicyBindingHandler{}, nil},
 	{"mutatingwebhookconfiguration", reflect.TypeFor[admissionregistrationv1.MutatingWebhookConfiguration](), &components.MutatingWebhookConfigurationHandler{}, objectIdentityExcluded("an admissionregistration.k8s.io/v1 MutatingWebhookConfiguration")},
@@ -178,9 +163,7 @@ var coreKindSchemas = []struct {
 		"overhead":            "the RuntimeClass admission controller derives it from the RuntimeClass and rejects a differing value",
 	}},
 	{"poddisruptionbudget", reflect.TypeFor[policyv1.PodDisruptionBudgetSpec](), &components.PodDisruptionBudgetHandler{}, nil},
-	{"podmonitor", reflect.TypeFor[monitoringv1.PodMonitorSpec](), &components.PodMonitorHandler{}, map[string]string{
-		"extraScrapeMetrics": newInOperator095,
-	}},
+	{"podmonitor", reflect.TypeFor[monitoringv1.PodMonitorSpec](), &components.PodMonitorHandler{}, nil},
 	// A PodTemplate has no spec type: the component projects the object, less
 	// its identity.
 	{"podtemplate", reflect.TypeFor[corev1.PodTemplate](), &components.PodTemplateHandler{}, map[string]string{
@@ -193,12 +176,8 @@ var coreKindSchemas = []struct {
 		"baseImage": "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
 		"tag":       "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
 		"sha":       "deprecated upstream; the operator composes the image it yields outside what the object states, so the kind cannot say which image runs",
-
-		"extraScrapeMetrics": newInOperator095,
 	}},
-	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), &components.PrometheusProbeHandler{}, map[string]string{
-		"extraScrapeMetrics": newInOperator095,
-	}},
+	{"prometheus-probe", reflect.TypeFor[monitoringv1.ProbeSpec](), &components.PrometheusProbeHandler{}, nil},
 	{"prometheusrule", reflect.TypeFor[monitoringv1.PrometheusRuleSpec](), &components.PrometheusRuleHandler{}, nil},
 	{"referencegrant", reflect.TypeFor[gatewayv1.ReferenceGrantSpec](), &components.ReferenceGrantHandler{}, nil},
 	{"replicaset", reflect.TypeFor[appsv1.ReplicaSetSpec](), &components.ReplicaSetHandler{}, nil},
@@ -212,9 +191,7 @@ var coreKindSchemas = []struct {
 	{"runtimeclass", reflect.TypeFor[nodev1.RuntimeClass](), &components.RuntimeClassHandler{}, objectIdentityExcluded("a node.k8s.io/v1 RuntimeClass")},
 	{"secretstore", reflect.TypeFor[esv1.SecretStoreSpec](), &components.SecretStoreHandler{}, nil},
 	{"servicecidr", reflect.TypeFor[networkingv1.ServiceCIDRSpec](), &components.ServiceCIDRHandler{}, nil},
-	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), &components.ServiceMonitorHandler{}, map[string]string{
-		"extraScrapeMetrics": newInOperator095,
-	}},
+	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), &components.ServiceMonitorHandler{}, nil},
 	{"storageclass", reflect.TypeFor[storagev1.StorageClass](), &components.StorageClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 StorageClass")},
 	{"tcproute", reflect.TypeFor[gatewayv1.TCPRouteSpec](), &components.TCPRouteHandler{}, nil},
 	{"thanosruler", reflect.TypeFor[monitoringv1.ThanosRulerSpec](), &components.ThanosRulerHandler{}, nil},

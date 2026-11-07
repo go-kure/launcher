@@ -150,7 +150,7 @@ var requiredText = map[string]map[string]string{
 	"metallb-bgpadvertisement":     metallbAdvertisementRequiredText,
 	"metallb-bgppeer":              metallbBGPPeerRequiredText,
 	"metallb-ipaddresspool":        metallbIPAddressPoolRequiredText,
-	"metallb-l2advertisement":      metallbAdvertisementRequiredText,
+	"metallb-l2advertisement":      metallbL2AdvertisementRequiredText,
 	"cnpg-backup":                  cnpgBackupRequiredText,
 	"cnpg-clusterimagecatalog":     cnpgImageCatalogRequiredText,
 	"cnpg-databaserole":            cnpgDatabaseRoleRequiredText,

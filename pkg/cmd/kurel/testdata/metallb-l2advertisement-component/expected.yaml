@@ -24,6 +24,18 @@ spec:
       - b
     matchLabels:
       role: edge
+  preferredNodeSelectors:
+  - preference:
+      matchLabels:
+        role: edge
+    weight: 100
+  - preference:
+      matchExpressions:
+      - key: zone
+        operator: In
+        values:
+        - a
+    weight: 1
   serviceSelectors:
   - matchLabels:
       exposure: public

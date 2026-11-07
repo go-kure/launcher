@@ -215,11 +215,11 @@ reads it.
 | `listenerset` | ListenerSet | Kind-named Gateway API ListenerSet: the whole `ListenerSetSpec`, strictly decoded; `parentRef` with its `name` and at least one of `listeners`, each with its `name`, `port` and `protocol`, are required. No capability is required and no environment policy applies — see below. |
 | `manifests` | any | Raw manifests from `inline`/`url` with namespace stamping + `scopeOverrides`. Every object is checked against the environment policy — see below. The `volumeMounts` of every container and init container of a Pod, PodTemplate, ReplicationController, Deployment, StatefulSet, DaemonSet, ReplicaSet, Job or CronJob are held to the `app.yaml` mount rules, whatever the policy (go-kure/launcher#1212). A `lifecycle` or probe on an init container of those objects without `restartPolicy: Always` is refused the same way (go-kure/launcher#1237), as is a `lifecycle` sleep below zero or longer than the pod's `terminationGracePeriodSeconds` (30 when unset; go-kure/launcher#1236). A container name used by more than one init or regular container of one of those objects is refused the same way, naming both entries (go-kure/launcher#1253). |
 | `metallb-bfdprofile` | BFDProfile | Kind-named MetalLB BFD profile: the whole `BFDProfileSpec` (`receiveInterval`, `transmitInterval`, `echoInterval`, `detectMultiplier`, `echoMode`, `passiveMode` and `minimumTtl`, none required), strictly decoded. It is the timers of the BFD session of the BGP peers that name it, and so how fast the loss of such a peer is noticed. Namespaced; no environment policy applies and no capability is required — see below. |
-| `metallb-bgpadvertisement` | BGPAdvertisement | Kind-named MetalLB advertisement over BGP: the whole `BGPAdvertisementSpec` (`ipAddressPools`, `ipAddressPoolSelectors`, `peers`, `nodeSelectors`, `serviceSelectors`, `aggregationLength`, `aggregationLengthV6`, `localPref` and `communities`, none required), strictly decoded. It says which pools' addresses MetalLB announces to which BGP peers, for which Services, and with which route attributes; one that authors nothing limits none of them. `serviceSelectors` is refused beside an aggregation length other than 32 (IPv4) or 128 (IPv6), the CRD's expression rule. Namespaced; no environment policy applies and no capability is required — see below. |
+| `metallb-bgpadvertisement` | BGPAdvertisement | Kind-named MetalLB advertisement over BGP: the whole `BGPAdvertisementSpec` (`ipAddressPools`, `ipAddressPoolSelectors`, `peers`, `nodeSelectors`, `serviceSelectors`, `aggregationLength`, `aggregationLengthV6`, `localPref`, `asPathPrepend` and `communities`, none required), strictly decoded. It says which pools' addresses MetalLB announces to which BGP peers, for which Services, and with which route attributes; one that authors nothing limits none of them. `serviceSelectors` is refused beside an aggregation length other than 32 (IPv4) or 128 (IPv6), the CRD's expression rule. Namespaced; no environment policy applies and no capability is required — see below. |
 | `metallb-bgppeer` | BGPPeer | Kind-named MetalLB BGP peer, at `metallb.io/v1beta2`: the whole `BGPPeerSpec` (`myASN`, required; the peer's AS number, its address or interface, its port and timers, `nodeSelectors`, `password`, `passwordSecret`, `bfdProfile` and the switches of the session), strictly decoded. It is a router the cluster's nodes hold a BGP session with, and so one MetalLB announces addresses to. A `connectTime` outside 1 to 65535 seconds, or not a whole number of seconds read in whole milliseconds, is refused, the CRD's two expression rules on a create, and so is a `peerPort: 0`. A `password` written into the object is refused under an environment policy that forbids explicit secrets. Namespaced; no capability is required — see below. |
 | `metallb-community` | Community | Kind-named MetalLB Community: the whole `CommunitySpec` (`communities`, a list of aliases of a `name` and a `value`, none required), strictly decoded. It gives names to BGP community values; a BGP advertisement that names one attaches its value to what it announces. Namespaced; no environment policy applies and no capability is required — see below. |
 | `metallb-ipaddresspool` | IPAddressPool | Kind-named MetalLB address pool: the whole `IPAddressPoolSpec` (`addresses`, required, `autoAssign`, `avoidBuggyIPs` and `serviceAllocation`), strictly decoded. It says which Services, in which namespaces, MetalLB gives an address of which range. Namespaced; no environment policy applies and no capability is required — see below. |
-| `metallb-l2advertisement` | L2Advertisement | Kind-named MetalLB advertisement on the local network: the whole `L2AdvertisementSpec` (`ipAddressPools`, `ipAddressPoolSelectors`, `nodeSelectors`, `interfaces` and `serviceSelectors`, none required), strictly decoded. It says which pools' addresses MetalLB announces on the local network, from which nodes and interfaces, for which Services; one that authors nothing limits none of them. Namespaced; no environment policy applies and no capability is required — see below. |
+| `metallb-l2advertisement` | L2Advertisement | Kind-named MetalLB advertisement on the local network: the whole `L2AdvertisementSpec` (`ipAddressPools`, `ipAddressPoolSelectors`, `nodeSelectors`, `preferredNodeSelectors`, `interfaces` and `serviceSelectors`, none required), strictly decoded. It says which pools' addresses MetalLB announces on the local network, from which nodes and interfaces, for which Services; one that authors nothing limits none of them. Namespaced; no environment policy applies and no capability is required — see below. |
 | `mutatingadmissionpolicy` | MutatingAdmissionPolicy | Kind-named MutatingAdmissionPolicy: its `MutatingAdmissionPolicySpec`, strictly decoded; `matchConstraints` with at least one rule, at least one of `mutations`, each with its `patchType` and the patch of that type, and `reinvocationPolicy` are required. It changes objects of any namespace after the build. Served from Kubernetes 1.36. Cluster-scoped; only the environment policy's object kind rules apply — see below. |
 | `mutatingadmissionpolicybinding` | MutatingAdmissionPolicyBinding | Kind-named MutatingAdmissionPolicyBinding: its `MutatingAdmissionPolicyBindingSpec`, strictly decoded; `policyName` is required, and a `paramRef` holds exactly one of `name` and `selector` and its `parameterNotFoundAction`. Neither the policy nor the parameter is resolved at build. Served from Kubernetes 1.36. Cluster-scoped; only the environment policy's object kind rules apply — see below. |
 | `mutatingwebhookconfiguration` | MutatingWebhookConfiguration | Kind-named MutatingWebhookConfiguration: its `webhooks`, strictly decoded; a webhook's `name`, `clientConfig` (exactly one of `url` and `service`), `sideEffects` and `admissionReviewVersions` are required, and a rule names its operations, API groups, versions and resources. It changes objects of any namespace after the build. Cluster-scoped; only the environment policy's object kind rules apply — see below. |
@@ -3732,9 +3732,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   - `aggregationLength` and `aggregationLengthV6` roll the addresses up into
     a larger prefix, of that length, which is then what is announced in
     place of one route per address;
-  - `localPref` and `communities` are attributes of the announcement: BGP's
-    best path selection prefers a path with a higher LOCAL_PREF, and the
-    communities are attached to what the peers receive.
+  - `localPref`, `asPathPrepend` and `communities` are attributes of the
+    announcement: BGP's best path selection prefers a path with a higher
+    LOCAL_PREF, `asPathPrepend` lengthens the AS path on purpose by that
+    many copies of the local ASN, and the communities are attached to what
+    the peers receive.
 
   **A component that authors no property is the widest advertisement there
   is**: every pool, to every peer, for every Service, and no node excluded.
@@ -3772,6 +3774,13 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     local preference). An authored empty list is left out too, as the type
     omits it: it is the same advertisement as one that does not author the
     field.
+  - `asPathPrepend` is a number from 1 to 10 that the type omits at 0, so an
+    authored `asPathPrepend: 0` is left out and is the same advertisement as
+    one that does not author the field. MetalLB supports it only in its
+    frr-k8s mode and refuses the configuration in another; launcher cannot
+    see the mode and does not enforce that, nor the range, which the API
+    server checks. Advertisements that overlap must carry the same value,
+    which MetalLB checks and launcher does not.
 
   **Required**: the `key` and the `operator` of a match expression, in every
   selector of `ipAddressPoolSelectors`, `nodeSelectors` and
@@ -4146,6 +4155,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     applies to every pool MetalLB reads;
   - `nodeSelectors` limits the nodes that are announced as next hops for an
     address. With none, the advertisement excludes no node;
+  - `preferredNodeSelectors` ranks the nodes `nodeSelectors` admits: each
+    entry has a `weight` from 1 to 100 and a `preference`, a label selector,
+    and a node that matches it scores that weight (the weights of the
+    entries it matches add up). It never excludes a node;
   - `interfaces` lists the interfaces of a node the address is announced
     from. With none, it is announced from all of them;
   - `serviceSelectors` limits the Services. With none, every Service that
@@ -4177,9 +4190,11 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   as one that does not author the field.
 
   **Required**: the `key` and the `operator` of a match expression, in every
-  selector of `ipAddressPoolSelectors`, `nodeSelectors` and
-  `serviceSelectors` (`nodeSelectors[1].matchExpressions[0].key: required
-  (…)`). The API requires nothing else of the spec. The list is generated
+  selector of `ipAddressPoolSelectors`, `nodeSelectors`, `serviceSelectors`
+  and the `preference` of each `preferredNodeSelectors` entry (`nodeSelectors[1].matchExpressions[0].key:
+  required (…)`), and the `weight` and `preference` of each entry
+  (`preferredNodeSelectors[0].weight: required (…)`). The API requires
+  nothing else of the spec. The list is generated
   from the linked module's `v1beta1` CRD (go-kure/launcher#883; see "Required
   fields a kind writes unauthored and does not refuse"), and
   `TestMetalLBKinds_RequiredMatchCRD` holds it to that CRD as well.
@@ -4250,10 +4265,17 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `minReadySeconds`, `persistentVolumeClaimRetentionPolicy`;
   - Alertmanager itself: `configSecret`, `alertmanagerConfiguration`,
     `alertmanagerConfigSelector`, `alertmanagerConfigNamespaceSelector`,
-    `alertmanagerConfigMatcherStrategy`, `secrets`, `configMaps`,
-    `retention`, `logLevel`, `logFormat`, `externalUrl`, `routePrefix`,
-    `listenLocal`, `portName`, `web`, `limits`, `enableFeatures`,
-    `additionalArgs`, `paused`;
+    `alertmanagerConfigMatcherStrategy`, `alertmanagerConfigFileSystemMode`,
+    `secrets`, `configMaps`, `retention`, `logLevel`, `logFormat`,
+    `externalUrl`, `routePrefix`, `listenLocal`, `portName`, `web`,
+    `limits`, `enableFeatures`, `additionalArgs`, `paused`;
+  - `alertmanagerConfigFileSystemMode` takes `DenyAll` or
+    `FromAlertmanagerConfigMatcherStrategy`. `AllowAll`, which lets every
+    AlertmanagerConfig object read the files of the alertmanager container,
+    is refused with an error naming the field, because it loosens the
+    operator's default; whether an app.yaml may set it is open
+    (go-kure/launcher#1300). The operator applies the field at every
+    Alertmanager version;
   - its cluster: `additionalPeers`, `clusterAdvertiseAddress`,
     `clusterGossipInterval`, `clusterLabel`, `clusterPushpullInterval`,
     `clusterPeerTimeout`, `clusterPeerName`, `clusterTLS`,
@@ -5705,7 +5727,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       `logFormat` other than `logfmt` (2.6.0), `retentionSize` (2.7.0),
       `allowOverlappingBlocks` and `walCompression` (2.11.0),
       `web.tlsConfig` and `web.httpConfig` (2.24.0), `enableFeatures`
-      (2.25.0), `enableRemoteWriteReceiver` (2.33.0), `enableOTLPReceiver`
+      (2.25.0), `extraScrapeMetrics: true` (2.32.0; the operator passes it
+      as a feature flag up to 3.9 and writes it to the configuration from
+      3.10.0), `enableRemoteWriteReceiver` (2.33.0), `enableOTLPReceiver`
       (2.47.0), `remoteWriteReceiverMessageVersions` (2.54.0).
     - the configuration: `queryLogFile` (2.16.0), `exemplars`
       (2.29.0), `tsdb.outOfOrderTimeWindow` (2.39.0), `bodySizeLimit`,
@@ -7716,7 +7740,9 @@ go-kure/launcher#512 (see the `postgresql` entry below).
     `targetLimit`, `labelLimit`, `labelNameLengthLimit`,
     `labelValueLengthLimit`, `keepDroppedTargets`, `scrapeProtocols`,
     `fallbackScrapeProtocol`, `scrapeClass`, `scrapeNativeHistograms`,
-    `scrapeClassicHistograms`, `nativeHistogramBucketLimit`,
+    `scrapeClassicHistograms`, `extraScrapeMetrics` (Prometheus v3.10.0 or
+    later; the operator drops it from the configuration of an older one,
+    which these kinds cannot see), `nativeHistogramBucketLimit`,
     `nativeHistogramMinBucketFactor` and `convertClassicHistogramsToNHCB`.
   - An authored `0` or `false` is kept where the API tells it from an unset
     field (`sampleLimit: 0`, `filterRunning: false`, a group's `limit: 0`), and
