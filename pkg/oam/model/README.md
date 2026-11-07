@@ -69,8 +69,10 @@ its path, because YAML would drop it. In a free-form value, such as a `default`,
 resolves them, so `{1: a, 01: b}`, `{true: a, True: b}` and `{0.0: a, -0.0: b}` are refused.
 In a map that `Load` decodes into Go strings, two keys that decode to the same string are also
 refused. These maps are the inputs, the `properties` of a schema, a part or a trait, and the
-annotations. For example, `image` and `!!binary aW1hZ2U=` are one key. Keys that decode to
-different strings, such as `1` and `01`, stay apart.
+annotations. The YAML decoder refuses two keys with the same spelling. `Load` also refuses two keys
+with different spelling that decode to one string, such as `image` and `!!binary aW1hZ2U=`. Keys
+that decode to different strings, such as `1` and `01`, stay apart. A null key (`~`, `null` or an
+empty key) is skipped, as yaml.v3 skips it, so it never counts as a duplicate.
 
 ## API
 
