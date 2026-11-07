@@ -56,6 +56,12 @@ func refuseNullElements(n *yaml.Node, t reflect.Type, path string) error {
 			}
 		}
 		for i := 0; i+1 < len(n.Content); i += 2 {
+			// yaml.v3 skips a null key of a map with string keys together with its
+			// value, so the value is never decoded. A map with another key type keeps
+			// the nil key, and its value is walked.
+			if t.Key().Kind() == reflect.String && isNullScalar(n.Content[i]) {
+				continue
+			}
 			if err := refuseNullElements(n.Content[i+1], t.Elem(), joinPath(path, n.Content[i].Value)); err != nil {
 				return err
 			}
@@ -120,6 +126,12 @@ func joinPath(path, name string) string {
 	return path + "." + name
 }
 
+// isNullScalar reports whether n is a scalar that YAML resolves to null: `~`, `null`,
+// `Null`, `NULL`, an empty plain scalar or an explicit `!!null` tag.
+func isNullScalar(n *yaml.Node) bool {
+	return n.Kind == yaml.ScalarNode && n.ShortTag() == "!!null"
+}
+
 // refuseDuplicateStringKeys fails on a mapping that decodes into a Go map with string
 // keys when two of its keys decode to the same string. yaml.v3 compares the kind and
 // the value of two keys to find a duplicate, and it ignores the tag. So `image` and
@@ -132,7 +144,7 @@ func refuseDuplicateStringKeys(n *yaml.Node, path string) error {
 	seen := make(map[string]*yaml.Node, len(n.Content)/2)
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k := n.Content[i]
-		if k.Kind == yaml.ScalarNode && k.ShortTag() == "!!null" {
+		if isNullScalar(k) {
 			continue
 		}
 		var name string

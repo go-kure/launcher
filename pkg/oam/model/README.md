@@ -72,7 +72,8 @@ refused. These maps are the inputs, the `properties` of a schema, a part or a tr
 annotations. The YAML decoder refuses two keys with the same spelling. `Load` also refuses two keys
 with different spelling that decode to one string, such as `image` and `!!binary aW1hZ2U=`. Keys
 that decode to different strings, such as `1` and `01`, stay apart. A null key (`~`, `null` or an
-empty key) is skipped, as yaml.v3 skips it, so it never counts as a duplicate.
+empty key) is skipped with its value, as yaml.v3 skips it. It never counts as a duplicate, and
+`Load` does not check the value under it.
 
 ## API
 
