@@ -148,7 +148,7 @@ self-test (`make test-verify-merge`).
 | `test` | `test` | 25 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
 | `security` | `Security` | 15 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
 | `action-pins` | `action-pins` | 2 min | — | Fails if any third-party `uses:` ref is not pinned to a 40-char commit SHA (`go-kure/.github` composite action) |
-| `issue-refs` | `issue-refs` | 2 min | — | Self-tests then runs `scripts/check-issue-refs.sh` over the whole tracked tree, and on a pull request over its commit messages: rejects a bare `#N` or an ownerless `name#N` reference (go-kure/launcher#400, go-kure/launcher#732; `make check-issue-refs`) |
+| `issue-refs` | `issue-refs` | 2 min | — | Self-tests then runs `scripts/check-issue-refs.sh` over the whole tracked tree, and on a pull request over its commit messages: rejects a bare `#N` or an ownerless `name#N` reference (go-kure/launcher#400, go-kure/launcher#732; `make check-issue-refs`). Also self-tests `scripts/check-format-scope.sh` and, on a pull request, requires the `(format)` scope on commits that change what `app.yaml` accepts (go-kure/launcher#1279; `make check-format-scope`) |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment (same-repository PRs only: a fork PR has a read-only token, so the comment step is skipped while the threshold check still applies) |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
 | `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the forbidden-terms self-test of the CRD vendor scripts' matcher and `cliff.toml`'s scrub, run with git-cliff installed at `mise.toml`'s pin by the release installer from the same go-kure/.github checkout (`make test-forbidden-terms`) + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) |
@@ -214,6 +214,19 @@ Runs on main and `release/*` branches only (not PRs):
   message and the PR run already checked it. `make check-issue-refs` runs the same scan locally
   against `ISSUE_REFS_BASE` (default `origin/main`).
   Convention and known gaps: `AGENTS.md` § "Issue references"
+- **Format-scope guard** — the same `issue-refs` job also runs `make check-format-scope`
+  (go-kure/launcher#1279): the self-test (`scripts/check-format-scope-test.sh`, throwaway git
+  repositories plus a check that the scope pattern equals the one `cliff.toml` groups by), then,
+  on a pull request only, `scripts/check-format-scope.sh --commits <base.sha> --head <head.sha>`.
+  A commit fails when it changes a non-test file of `pkg/oam/validate.go`, `types.go`,
+  `capability.go`, `parser.go`, `package.go` or `profile.go` and its subject does not start with
+  `feat(format)`, `fix(format)`, `refactor(format)` or `docs(format)`, followed by an optional `!`,
+  a colon and a space (`cliff.toml` drops any other header from the changelog). A commit that
+  leaves the accepted format as it was takes a body line `Format-Scope: none (<reason>)`, and the
+  reason must not be empty. Renovate's and merge commits are skipped. In a shallow clone the guard
+  exits 2 when the clone cuts history inside the range. `make check-format-scope` runs the same
+  check locally against `ISSUE_REFS_BASE` (default `origin/main`). It does not see a change to a
+  builtin trait or component property validator. Convention: `AGENTS.md` "Document-format changes"
 - **Manifest schema validation** — `validate-manifests` builds a representative subset of
   `examples/*.yaml` via `kurel build` and validates the output against
   [fluxcd/flux-schema](https://github.com/fluxcd/flux-schema)'s `default` (embedded) catalog plus

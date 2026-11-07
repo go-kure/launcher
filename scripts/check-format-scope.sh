@@ -46,6 +46,11 @@ set -euo pipefail
 # regex crate reads it for these constructs).
 SCOPE_RE='^(feat|fix|refactor|docs?)\(format\)'
 
+# What must follow the scope. cliff.toml sets filter_unconventional, so a header without
+# the colon and space (with or without the breaking marker) is dropped from the changelog
+# even though SCOPE_RE matches its prefix.
+SCOPE_TAIL_RE='^!?: '
+
 ACCEPT_PATHS=(
   pkg/oam/validate.go
   pkg/oam/types.go
@@ -171,7 +176,10 @@ while IFS= read -r commit; do
 
   touched="$(touched_acceptance "$commit")" || exit 2
   [[ -n "$touched" ]] || continue
-  [[ "$subject" =~ $SCOPE_RE ]] && continue
+  if [[ "$subject" =~ $SCOPE_RE ]]; then
+    scope_tail="${subject:${#BASH_REMATCH[0]}}"
+    [[ "$scope_tail" =~ $SCOPE_TAIL_RE ]] && continue
+  fi
   state="$(trailer_state "$body")"
   [[ "$state" == "ok" ]] && continue
 
