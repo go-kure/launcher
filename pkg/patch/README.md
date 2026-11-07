@@ -6,14 +6,47 @@ The `patch` package provides a JSONPath-based system for declaratively modifying
 
 ## Scope and Status
 
-`pkg/patch` is a supported, standalone library. It is **not** invoked by `kurel build` — that
-pipeline is closed through explicit registration (author-declared `${var}` parameters plus
-registered component, trait, and lowering-rule handlers), not universally typed: a handler may
-declare a `PropertySchema` for an out-of-process validator to consume, but launcher's own authored
-document path does not check property shape against it — see `pkg/oam/validate.go` and
-`pkg/oam/property_validate.go`'s scope note. No implicit patch step is planned. `pkg/patch` is the
-designated implementation for explicit, user-invoked patching (e.g. interactive patch mode), used
-directly by callers that want to modify Kubernetes resources outside the kurel build path.
+`pkg/patch` is a supported, standalone library for callers that want to modify Kubernetes
+resources in Go. It is **not** part of `kurel build`, and no other package in this repository
+imports it. `kurel` has no patch subcommand (its commands are `build`, `config`, `completion` and
+`version`), and no implicit patch step is planned. Unlike a Flux Kustomization patch or a Helm
+post-renderer, it does not run in a cluster or in a render pipeline: the caller loads the
+resources, applies the patches and writes the result.
+
+### What is validated, and where
+
+The `kurel build` pipeline checks authored input in its own stages, none of which use this
+package:
+
+1. Parameters are substituted into the authored document.
+2. `ValidateAuthoredPropertiesForTarget` checks the authored properties: the keys, their types,
+   nested required fields and, when the profile names a Kubernetes version, feature gates. It
+   does not require a top-level property to be present; a handler or a capability supplies and
+   checks those. It returns the validated copy.
+3. `Transform` runs on that copy, then manifest generation and the in-document collision check.
+
+A handler may also declare a `PropertySchema` for an out-of-process validator; see the scope note
+in `pkg/oam/property_validate.go`.
+
+`pkg/patch` checks patch syntax in two stages. Loading a TOML file or a list of targeted YAML
+entries checks the field segments of each path up to its selector. That check first trims the dots
+at the start and at the end of that part, so `containers..[0]` reads as `containers[0]`. A TOML
+header also loses repeated dots: `[deployment.myapp.spec..template]` means the same as
+`[deployment.myapp.spec.template]`.
+After that, an empty segment in that part is refused. A selector is split off the path when the
+line is parsed, and so is the path written after a selector in the middle of a path
+(`containers[0].resources..cpu`). Both are read when the patch is applied. After a replacement
+selector such as `[0]`, that read trims the dots at the start and at the end of the path
+(`containers[0]..image.` reaches `image`). After an insertion selector (one that starts with `+` or
+`-`, such as `[+0]`), the text is kept as written, so `containers[+0]..image.` inserts a map whose
+key is `.image.`. No path check refuses an empty segment after the selector. Loading also
+substitutes variables: a TOML file in its values, a YAML file in its keys and values, a strategic
+patch in its payload values. It does not check them, and a reference that no variable defines stays
+as written. A path in a flat YAML mapping is parsed at load, but the check of its segments up to
+the selector (the trim and the empty-segment refusal above) runs only when the set is built.
+Building the set and applying a patch check the target and that part of the path. It does not check
+a value against a schema, and it does not run the `kurel build` checks above. Kubernetes admission
+is the check that sees the final object.
 
 ## Overview
 
