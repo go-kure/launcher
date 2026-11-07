@@ -133,7 +133,7 @@ func TestTypedVolumeMounts_NoMountsNoPodSpec(t *testing.T) {
 	if err := validateTypedVolumeMounts("", &corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}}); err != nil {
 		t.Errorf("a pod spec with no mount: %v", err)
 	}
-	if err := validateManifestMounts([]client.Object{&corev1.ConfigMap{}}); err != nil {
+	if err := validateManifestObjects([]client.Object{&corev1.ConfigMap{}}); err != nil {
 		t.Errorf("a ConfigMap: %v", err)
 	}
 }

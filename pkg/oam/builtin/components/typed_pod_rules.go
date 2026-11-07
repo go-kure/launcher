@@ -29,20 +29,27 @@ func validateObjectPodRules(obj client.Object) error {
 	return checkLifecycleSleep(prefix, ps, bare)
 }
 
-// validateManifestPodRules holds the pod spec of every typed workload object of
-// a manifests source to the rules the typed pod readers apply to an authored
-// pod spec and the mount rules do not cover: a container name used by more than
-// one init or regular container (validateObjectContainerNames,
-// go-kure/launcher#1253), then validateObjectPodRules. They hold whatever the
-// environment policy, and what they refuse names the object. Which objects are
-// read, and which pass unread, is as for validateManifestMounts.
-func validateManifestPodRules(objs []client.Object) error {
+// validateManifestObjects holds the pod spec of every typed workload object of
+// a manifests source to the checks the typed pod readers apply to an authored
+// pod spec, object by object and in their order: a container name used by more
+// than one init or regular container (validateObjectContainerNames,
+// go-kure/launcher#1253), then the mount rules (validateObjectMounts,
+// go-kure/launcher#1223), then validateObjectPodRules. A chart's render does the
+// same per object, so an object that fails more than one check gets the same
+// first error from either, and the first object that fails any check is the one
+// refused (go-kure/launcher#1297). They hold whatever the environment policy,
+// and what they refuse names the object. An object that runs no pod, and one
+// that reached the build untyped, passes, as for validateObjectMounts.
+func validateManifestObjects(objs []client.Object) error {
 	for _, obj := range objs {
-		if err := validateObjectContainerNames(obj); err != nil {
-			return errors.Wrapf(err, "manifest source: object %s", renderedObjectRef(obj))
-		}
-		if err := validateObjectPodRules(obj); err != nil {
-			return errors.Wrapf(err, "manifest source: object %s", renderedObjectRef(obj))
+		for _, check := range []func(client.Object) error{
+			validateObjectContainerNames,
+			validateObjectMounts,
+			validateObjectPodRules,
+		} {
+			if err := check(obj); err != nil {
+				return errors.Wrapf(err, "manifest source: object %s", renderedObjectRef(obj))
+			}
 		}
 	}
 	return nil
