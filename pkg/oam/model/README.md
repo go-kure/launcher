@@ -63,18 +63,25 @@ merge keys (`<<`) are refused with their line, because they hide duplicate keys.
 `types` must be a known type name, so `types: [""]` is refused. A union needs at least two
 different scalar types (`string`, `integer`, `number` or `boolean`), at every depth of a schema.
 So `types: [string]`, `types: [string, string]` and `types: [string, object]` are refused. These
-are the rules of the shared validator in `pkg/oam`, which rejects every value of such a schema.
-A null entry in a typed list (`types`, `values`, `parts`, `traits`, `exclusive`) is refused with
-its path, because YAML would drop it. In a free-form value, such as a `default`, the keys of a mapping must differ after YAML
+are the union rules of the shared validator in `pkg/oam`.
+A null entry in a list of strings or of objects with fixed fields is refused with its path,
+because YAML would drop it. Examples are `types`, `values`, `parts`, `traits`, `exclusive` and the
+`keys` of an exclusive group. A list of free-form items keeps its nulls. Examples are `enum` and
+any list inside a `default` or inside the `properties` of a part or a trait.
+In a free-form value, such as a `default`, the keys of a mapping must differ after YAML
 resolves them, so `{1: a, 01: b}`, `{true: a, True: b}` and `{0.0: a, -0.0: b}` are refused.
-In a map that `Load` decodes into Go strings, two keys that decode to the same string are also
-refused. These maps are the inputs, the `properties` of a schema, a part or a trait, and the
-annotations. The YAML decoder refuses two keys with the same spelling. `Load` also refuses two keys
-with different spelling that decode to one string, such as `image` and `!!binary aW1hZ2U=`. Keys
-that decode to different strings, such as `1` and `01`, stay apart. A null key (`~`, `null` or an
-empty key) is skipped with its value, as yaml.v3 skips it. It never counts as a duplicate. The
-checks of decoded values do not look at the value under it. The refusal of anchors, aliases and
-merge keys reads the whole document before the decoding, so it applies under a null key too.
+In every map whose keys `Load` decodes into Go strings, two keys that decode to the same string
+are also refused. Examples are the inputs, the `properties` and `gatedPaths` of a schema, the
+`properties` of a part or a trait, and the annotations. The YAML decoder refuses two keys with
+the same spelling. `Load` also refuses two keys with different spelling that decode to one
+string, such as `image` and `!!binary aW1hZ2U=`. Keys that decode to different strings, such as
+`1` and `01`, stay apart. In such a map, a null key is skipped with its value, as yaml.v3 skips
+it. A null key is written `~`, `null`, `Null`, `NULL` or with the `!!null` tag. Two null keys
+with different spelling, such as `~` and `null`, are no duplicate. Two null keys with the same
+spelling are refused by the YAML decoder, like any two keys with the same spelling. The checks
+of decoded values do not look at the value under a null key. The refusal of anchors, aliases
+and merge keys reads the whole document before the decoding, so it applies under a null key
+too.
 
 ## API
 
@@ -85,5 +92,5 @@ merge keys reads the whole document before the decoding, so it applies under a n
 | `(*Model).Key()` | The identity with the version in the canonical form (`name@v2.0.0`). The registry returns a version as it was registered, so compare and store this form (`oam.TypeID.Canonical`). |
 
 `Load` returns the first failure. The YAML, `apiVersion` and `kind` checks come first. Then come the
-null and duplicate-key checks, the metadata, the inputs in alphabetical order of their names
-(a Go map keeps no document order), the values and the parts in document order.
+null and duplicate-key checks, the metadata, `spec.celEnv`, the inputs in alphabetical order of
+their names (a Go map keeps no document order), the values and the parts in document order.
