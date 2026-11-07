@@ -1146,9 +1146,17 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 		}
 		component = named
+		// The same for the object's labels and annotations (go-kure/launcher#790).
+		labelled, err := withObjectMetadata(component, handler, ctx.componentLabelKey())
+		if err != nil {
+			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
+		}
+		component = labelled
 		// A handler that declares outputs is held to them here, where the name the
-		// transform gave its object is known (go-kure/launcher#1259). The query
-		// runs on a copy and its own allocator, as ComponentOutputsNamed does.
+		// transform gave its object is known (go-kure/launcher#1259). It is asked
+		// the component as the handler is given it, labels and annotations already
+		// taken off, as ComponentOutputsNamed asks it. The query runs on a copy
+		// and its own allocator.
 		if p, ok := handler.(OutputProvider); ok {
 			probe := probeCopy(component)
 			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming)
@@ -1159,12 +1167,6 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 			}
 		}
-		// The same for the object's labels and annotations (go-kure/launcher#790).
-		labelled, err := withObjectMetadata(component, handler, ctx.componentLabelKey())
-		if err != nil {
-			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
-		}
-		component = labelled
 
 		// The report's baseline for the component's own properties, before any fill
 		// hook below changes them.
