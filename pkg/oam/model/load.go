@@ -22,7 +22,9 @@ var ErrInvalid = errors.New("invalid model")
 
 // Load decodes one model document and checks its shape. It never compiles or
 // evaluates an expression. Decoding is strict: an unknown field fails with its
-// name and line, and so do YAML anchors, aliases and merge keys. A YAML type
+// name and line, and so do YAML anchors, aliases to an anchor defined earlier and
+// merge keys. An alias whose anchor is not defined earlier in the document is refused
+// by the YAML parser, with its own error and no line. A YAML type
 // error, such as a list where a string belongs, names the line of the field and
 // not its path. A null entry in a list of strings or of objects with fixed fields
 // fails with its path, and so does a free-form mapping that holds two keys YAML

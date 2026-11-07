@@ -58,6 +58,43 @@ func TestLoad_RefusesYAMLIndirection(t *testing.T) {
 	}
 }
 
+// An alias whose anchor is not defined earlier in the document never reaches the refusal
+// of anchors, aliases and merge keys. The YAML parser stops first, in the node decode of
+// Load, and Load returns that error as it is: no line, no ErrInvalid, and not the text of
+// the refusal. The anchor may be missing from the document, or it may come after the
+// alias, because the parser resolves anchors in document order. The README and the Load
+// comment say so. This test pins that sentence. It passes before and after the text change, so it is a pin and discriminates
+// nothing between the two sides.
+func TestLoad_RefusesUndefinedAliasInTheParser(t *testing.T) {
+	cases := []struct {
+		name  string
+		block string
+	}{
+		{"alias with no anchor", "  inputs:\n    image: *missing\n"},
+		{"alias before its anchor", "  inputs:\n    image: *later\n    other: &later\n      type: string\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := loadNoPanic(withInputs(t, tc.block))
+			if err == nil {
+				t.Fatalf("Load accepted the document: %+v", m)
+			}
+			if m != nil {
+				t.Fatalf("Load returned a model together with an error: %+v", m)
+			}
+			if !strings.Contains(err.Error(), "unknown anchor") {
+				t.Fatalf("error %q does not come from the unknown-anchor rule of the YAML parser", err)
+			}
+			if errors.Is(err, ErrInvalid) {
+				t.Fatalf("error %q wraps ErrInvalid, but a YAML parser error does not", err)
+			}
+			if strings.Contains(err.Error(), "anchors, aliases and merge keys") || strings.Contains(err.Error(), "line ") {
+				t.Fatalf("error %q holds the refusal text or a line, but the parser error has neither", err)
+			}
+		})
+	}
+}
+
 // An empty entry in types is no type. The single type field allows an empty value
 // because "unset" means "look at types"; an entry of types has no such meaning.
 func TestLoad_RefusesEmptyEntryInTypes(t *testing.T) {
