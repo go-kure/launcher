@@ -265,9 +265,13 @@ func recordNodes(path string, v any, onPath map[collectionID]bool, out map[strin
 
 // canonicalValue returns a copy of v in canonical form: a map with string keys is a
 // map[string]any, any other map a map[any]any, a slice or array a []any, all the way
-// down and through interface values; a null stays a null. A pointer or a struct is deep
-// copied with its types kept (copyTyped), so a change made in place afterwards does not
-// reach the copy. Any other value is kept as it is. A collection that contains itself is
+// down and through interface values; a null stays a null. An integer is folded the way
+// emission validation normalizes it (normalizeIntegerValue), so a value and its normalized
+// self are one value: int8, int16, every unsigned kind within math.MaxInt and a named int,
+// int32 or int64 become int. An unnamed int, int32 or int64 stays as it is, and so does an
+// unsigned value above math.MaxInt, which that validation refuses and canonical form
+// cannot. A pointer or a struct is deep copied with its types kept (copyTyped), so a
+// change made in place afterwards does not reach the copy. Any other value is kept as it is. A collection that contains itself is
 // not entered a second time: where it is met again it is kept as it is, so the walk ends.
 func canonicalValue(v any) any {
 	return canonicalWalk(reflect.ValueOf(v), map[collectionID]bool{})
@@ -324,6 +328,18 @@ func canonicalWalk(rv reflect.Value, onPath map[collectionID]bool) any {
 		return canonicalElements(rv, onPath)
 	case reflect.Pointer, reflect.Struct:
 		return copyTyped(rv, map[copyKey]reflect.Value{}).Interface()
+	case reflect.Int8, reflect.Int16:
+		return int(rv.Int())
+	case reflect.Int, reflect.Int32, reflect.Int64:
+		if i := rv.Int(); isNamedScalar(rv) && int64(int(i)) == i {
+			return int(i)
+		}
+		return rv.Interface()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		if u := rv.Uint(); u <= math.MaxInt {
+			return int(u)
+		}
+		return rv.Interface()
 	default:
 		return rv.Interface()
 	}
