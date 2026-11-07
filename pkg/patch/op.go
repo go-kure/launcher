@@ -498,6 +498,15 @@ func convertValueForUnstructured(value any) any {
 			converted[k] = convertValueForUnstructured(val)
 		}
 		return converted
+	case map[interface{}]interface{}:
+		// yaml.v3 decodes a mapping with a non-string key (`{123: hello}`) to this type,
+		// which DeepCopy refuses. Keys become strings via fmt.Sprint (a null key reads
+		// "<nil>"); values are converted recursively.
+		converted := make(map[string]any, len(v))
+		for k, val := range v {
+			converted[fmt.Sprint(k)] = convertValueForUnstructured(val)
+		}
+		return converted
 	case []any:
 		// Recursively convert slice values
 		converted := make([]any, len(v))
