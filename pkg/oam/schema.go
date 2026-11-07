@@ -118,7 +118,8 @@ type PropertySchema struct {
 	// takes its content from a strict decode into a Kubernetes type, so the gate
 	// check cannot find a Gate there (go-kure/launcher#1245). A key is a path
 	// relative to the node, dotted, with "[]" after the key of an array whose every
-	// element is walked (`env[].valueFrom.fileKeyRef`); the value is the gate, a row
+	// element is walked (`env[].valueFrom.fileKeyRef`) and which matches the authored
+	// keys case-insensitively, as the decode does; the value is the gate, a row
 	// of the lifecycle table in featuregates.go, with Gate's meaning. Only the gate
 	// check reads it: property validation does not, so what a document is accepted
 	// as, and the text of its other refusals, are the same with or without it. Like

@@ -84,7 +84,10 @@ same string works in both.
   `PropertySchema.GatedPaths` (published as `gatedPaths`): gate-relative paths to the gate
   that field needs, such as `env[].valueFrom.fileKeyRef` to `EnvFiles`. The check reads it
   and refuses the same way as for a declared `Gate`, naming the authored path
-  (`template.spec.containers[0].env[0].valueFrom.fileKeyRef`). Property validation does not
+  (`template.spec.containers[0].env[0].valueFrom.fileKeyRef`). The raw-kind decode matches
+  field names case-insensitively, so the check does too: every key of an open object that
+  matches a path key in any case is walked, and the refusal names the spelling the author
+  wrote (`template.spec.HostnameOverride`). Property validation does not
   read it, so what a document is accepted as is unchanged. The paths are
   `env[].valueFrom.fileKeyRef` and `restartPolicyRules` of `containers[]` and
   `initContainers[]`, and `hostnameOverride` and `resources` of the pod

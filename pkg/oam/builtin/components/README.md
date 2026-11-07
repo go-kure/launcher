@@ -1647,8 +1647,10 @@ template spec open, and the check reads declared schema, so their open nodes nam
 gated paths in `gatedPaths` instead: `env[].valueFrom.fileKeyRef` and `restartPolicyRules` of `containers[]` and
 `initContainers[]`, and `hostnameOverride` and
 `resources` of the pod spec (`template.spec.*` on a pod template). A path is refused the
-same way, naming the authored path (go-kure/launcher#1245); property validation does not
-read `gatedPaths`, so what a document is accepted as does not change.
+same way, naming the authored path (go-kure/launcher#1245). Field names match
+case-insensitively, as in the decode, so a key spelled in another case is refused too and
+is named as written; property validation does not read `gatedPaths`, so what a document is
+accepted as does not change.
 
 | Property | Type | Effect | Kind |
 |----------|------|--------|------|
