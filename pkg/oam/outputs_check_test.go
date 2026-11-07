@@ -204,7 +204,7 @@ func TestOutputCheck_RuleDerivationIsReappliedToTheHeldName(t *testing.T) {
 			t.Errorf("a derivation that differs when applied again, entry point %d: want the check to fail", i)
 			continue
 		}
-		for _, want := range []string{`output "app_secret"`, `component "pg"`, `"pg-cluster-app1"`, `"pg-cluster-app2"`} {
+		for _, want := range []string{`output "app_secret" (kind Secret)`, `component "pg"`, `"pg-cluster-app1"`, `"pg-cluster-app2"`} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("entry point %d: error %q lacks %s", i, err, want)
 			}
@@ -232,7 +232,7 @@ func TestOutputCheck_HandlerDerivationIsReappliedToTheHeldName(t *testing.T) {
 			t.Errorf("a derivation that differs when applied again, entry point %d: want the check to fail", i)
 			continue
 		}
-		for _, want := range []string{`output "copy"`, `component "settings"`, `"settings-app1"`, `"settings-app2"`} {
+		for _, want := range []string{`output "copy" (kind ConfigMap)`, `component "settings"`, `"settings-app1"`, `"settings-app2"`} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("entry point %d: error %q lacks %s", i, err, want)
 			}
@@ -640,7 +640,7 @@ func TestOutputCheck_MetadataErrorComesBeforeAProviderFailure(t *testing.T) {
 }
 
 // A derivation that yields no name is a defect of the provider, refused where
-// the declarations are answered: neither build check holds a derived output.
+// the declarations are answered, before the build checks re-apply any derivation.
 func TestResolveOutputs_RefusesAnEmptyDerivedName(t *testing.T) {
 	for _, derived := range []string{"", "  "} {
 		decls := []OutputDecl{
@@ -655,10 +655,10 @@ func TestResolveOutputs_RefusesAnEmptyDerivedName(t *testing.T) {
 }
 
 // A derived output names an allocated one, as OutputDecl says, so a derivation
-// from a derived output is refused where the declarations are answered: neither
-// build check holds a derived output, and a name derived from a derived name
-// would be held by nothing at all. A derived output of an allocated one is still
-// admitted, as is a second one of the same parent.
+// from a derived output is refused where the declarations are answered: the build
+// checks re-apply a derivation to the held name of an allocated parent, and a
+// derived output has no held name to re-apply one to. A derived output of an
+// allocated one is still admitted, as is a second one of the same parent.
 func TestResolveOutputs_RefusesAChainOfDerivedOutputs(t *testing.T) {
 	derive := func(s string) string { return s + "-x" }
 	cluster := OutputDecl{Key: "cluster", Role: NameRolePostgresqlCluster, Kind: outputClusterKind, Default: "pg", Name: "pg"}
@@ -691,8 +691,7 @@ func TestResolveOutputs_RefusesAChainOfDerivedOutputs(t *testing.T) {
 
 // A declaration names the kind of the object, so a kind with no kind name is
 // refused where the declarations are answered, as an empty one is: GroupKind
-// reads {Group: "example.com"} as not empty, and neither build check holds a
-// derived output.
+// reads {Group: "example.com"} as not empty.
 func TestResolveOutputs_RefusesAKindWithNoKindName(t *testing.T) {
 	cluster := OutputDecl{Key: "cluster", Role: NameRolePostgresqlCluster, Kind: outputClusterKind, Default: "pg", Name: "pg"}
 	for _, kc := range []struct {

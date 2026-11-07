@@ -1364,7 +1364,7 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `workload-deployment` | The Deployment a `webservice` or `worker` component generates. It names the object alone: the pod labels, the selectors and every name derived from the component keep the component name. | The component's name. | `deploymentObjectName` | unless `deploymentObjectName` is set |
 | `workload-service` | The Service a `webservice` component generates; a DNS-1123 label (one starting with a digit needs RelaxedServiceNameValidation on the cluster, the default from Kubernetes 1.36; `docs/delivery-scope.md` §3.5). Its name is its DNS name in the cluster, and launcher writes no such address (below). | The component's name. | `serviceObjectName` | unless `serviceObjectName` is set |
 | `workload-serviceaccount` | The ServiceAccount a `webservice` or `worker` component generates for its pods. | The component's name. | `serviceAccountObjectName` | unless `serviceAccountObjectName` is set; not when `serviceAccountName` names an existing account, since the component then generates none |
-| `workload-volume-claim` | The PersistentVolumeClaim a `pvc` volume of a `webservice` or `worker` component generates, asked once per such volume. The volume mounts the claim by this name. | `<component>-<volume>`, each half hyphen-escaped, shortened to 253 with `-<volume>` kept whole. | `volumes[].claimObjectName` | unless that volume's `claimObjectName` is set; not for a volume whose `claimName` references an existing claim, since it then generates none |
+| `workload-volume-claim` | The PersistentVolumeClaim a `pvc` volume of a `webservice` or `worker` component generates, asked for each such volume. The volume mounts the claim by this name. | `<component>-<volume>`, each half hyphen-escaped, shortened to 253 with `-<volume>` kept whole. | `volumes[].claimObjectName` | unless that volume's `claimObjectName` is set; not for a volume whose `claimName` references an existing claim, since it then generates none |
 | `postgresql-cluster` | The Cluster a `postgresql` component generates; a DNS-1035 label of at most 50 characters. The Pooler's, each Database's and each ScheduledBackup's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler, the Databases and the ScheduledBackups keep the component name. The operator derives the Cluster's Services and Secrets from this name (below). | The component's name. | `clusterObjectName` | unless `clusterObjectName` is set |
 | `postgresql-objectstore` | The ObjectStore a `postgresql` component generates for `backup`. The Cluster's backup plugin names the store by it (`barmanObjectName`). | The component's name. | `backup.objectStoreObjectName` | unless `backup.objectStoreObjectName` is set; not without `backup`, since the component then generates none |
 | `postgresql-scheduledbackup` | Each ScheduledBackup a `postgresql` component generates, asked once per `backup.schedules` entry, with the component. It names the Cluster by the name the Cluster took. Every name is held to 63 characters, the hook's and the default included: the operator copies it into a label of each Backup. | `<component>-<schedule name>` | none: the schedule's `name` is the suffix | once per `backup.schedules` entry |
@@ -1463,8 +1463,9 @@ The way out is another prefix for one of the components: `hookGroupNamePrefix`, 
 also set `KustomizationName` on a walked child before the integration.
 
 The hook sees every role. It is asked at least once for each name the transform resolves,
-and again by the output check of a type that declares outputs (see Outputs, below), and not at
-all for a name the author set. `NameRequest` carries the Application's name, the component
+and again by the output check of a type that declares outputs, for each name its provider
+resolves (see Outputs, below; a provider that reads an already resolved `Component.ObjectName()`
+causes no further call), and not at all for a name the author set. `NameRequest` carries the Application's name, the component
 (empty for the bundle, a group, an external backend's policy and a generated source the
 document's components share), the role, the object's kind
 as `Kind` or `Kind.group` (empty for a role that names no object) and the default as launcher
@@ -1527,8 +1528,9 @@ member whose type declares no object is refused by the transform. On a context w
 `LoweringContext.HasNamingHook()` reports whether a name resolved without an authored name
 may be the hook's answer. A rule that reads another component of `Document` and needs the
 name that component's object takes knows it only where the author wrote it, or where no hook
-is set: the hook is asked once per name, by the rule that generates the object, never on
-another rule's behalf (`postgresql`'s archive check, go-kure/launcher#1001).
+is set: the hook is asked by the rule that generates the object, never on another rule's
+behalf, and the same name may be asked again (see above; `postgresql`'s archive check,
+go-kure/launcher#1001).
 
 `LoweringContext.ResolveSharedName(base, suffix, identity, spec)` is `ResolveName` for an
 object the components of one document share: one its content identity determines wholly, as

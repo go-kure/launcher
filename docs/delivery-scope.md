@@ -379,7 +379,7 @@ Decided in the ticket:
   - `serviceAccountObjectName` is refused beside `serviceAccountName`, which names an
     existing account: the component then generates none, and the hook is not asked.
   - A `pvc` volume's `claimObjectName` names the claim the volume generates, under role
-    `workload-volume-claim`, asked once per such volume; the default stays
+    `workload-volume-claim`, asked for each such volume; the default stays
     `<component>-<volume>`, and the volume mounts the claim by the resolved name
     (`LoweringContext.ResolveName`). It is refused beside `claimName`, which references an
     existing claim: the volume then generates none, and the hook is not asked.

@@ -109,8 +109,10 @@ type TransformContext struct {
 	// It must be a pure function of its request: the same answer for the same
 	// NameRequest, whenever and however often it is asked. A name is asked for at
 	// least once in the transform, again by the output check of a type that
-	// declares outputs (OutputProvider), and again by ComponentEndpointsNamed,
-	// which builds a selector from the answer.
+	// declares outputs (OutputProvider) for each name its provider resolves (a
+	// provider that reads an already resolved Component.ObjectName() causes no
+	// further call), and again by ComponentEndpointsNamed, which builds a
+	// selector from the answer.
 	Naming func(NameRequest) (string, bool)
 	// ReservedMetadataKeys names the label and annotation keys the consumer keeps
 	// to itself (go-kure/launcher#790). An entry is a key ("example.com/owner",

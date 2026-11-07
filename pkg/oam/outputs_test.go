@@ -164,7 +164,10 @@ func TestComponentOutputs_RefusesBadDeclarations(t *testing.T) {
 // needs the role the name is resolved under and the default it falls back to. A
 // declaration the allocator would refuse (an unknown role, a role that names no
 // object, no default) is refused where it is answered, by the query as by the
-// build, with the output's key and what is wrong.
+// build, with the output's key and what is wrong. The blank default is the one
+// case the allocation check refuses more strictly than the landing resolver
+// does: the resolver rejects only an empty default, and this check enforces the
+// non-blank contract on the declaration itself.
 func TestComponentOutputs_RefusesAnAllocatedDeclarationTheAllocatorWouldRefuse(t *testing.T) {
 	cases := []struct {
 		name string
