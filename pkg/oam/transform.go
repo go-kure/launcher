@@ -1161,7 +1161,7 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			probe := probeCopy(component)
 			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming)
 			if err == nil {
-				err = checkHandlerOutputs(&component, decls, outs)
+				err = checkHandlerOutputs(&component, handler, decls, outs)
 			}
 			if err != nil {
 				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
