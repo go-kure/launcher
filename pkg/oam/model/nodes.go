@@ -1,7 +1,6 @@
 package model
 
 import (
-	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -33,7 +32,12 @@ func refuseNullElements(n *yaml.Node, t reflect.Type, path string) error {
 		fields := map[string]reflect.Type{}
 		collectFields(t, fields)
 		for i := 0; i+1 < len(n.Content); i += 2 {
-			name := n.Content[i].Value
+			// yaml.v3 decodes each struct key into a string, so a key tagged !!binary
+			// names the field its decoded text names. Decode it the same way.
+			var name string
+			if err := n.Content[i].Decode(&name); err != nil {
+				continue
+			}
 			ft, ok := fields[name]
 			if !ok {
 				continue
@@ -118,13 +122,15 @@ func joinPath(path, name string) string {
 // become one key and the later entry silently replaces the earlier one. A mapping
 // whose keys are all strings decodes into string keys and loses nothing.
 //
+// The check uses the equality of the Go map that yaml.v3 fills: it decodes each key
+// into an `any` and looks it up in a map of its own. So 0.0 and -0.0 count as one key,
+// and two NaN keys count as two, exactly as in the decoded value.
+//
 // The error names the path of the outermost free-form value. For a mapping nested
-// inside it, the line number in the message gives the exact place. The check
-// over-refuses one absurd case: `.nan` and `.NaN` print the same, although Go keeps
-// two NaN keys apart.
+// inside it, the line number in the message gives the exact place.
 func refuseDuplicateKeys(n *yaml.Node, path string) error {
 	if n.Kind == yaml.MappingNode && hasNonStringKey(n) {
-		seen := map[string]*yaml.Node{}
+		seen := map[any]*yaml.Node{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k := n.Content[i]
 			if k.Kind != yaml.ScalarNode {
@@ -134,11 +140,13 @@ func refuseDuplicateKeys(n *yaml.Node, path string) error {
 			if err := k.Decode(&v); err != nil {
 				continue
 			}
-			id := fmt.Sprintf("%T|%v", v, v)
-			if first, ok := seen[id]; ok {
+			if v != nil && !reflect.TypeOf(v).Comparable() {
+				continue
+			}
+			if first, ok := seen[v]; ok {
 				return invalid(path, "line %d: duplicate mapping key %s (same as %s on line %d)", k.Line, k.Value, first.Value, first.Line)
 			}
-			seen[id] = k
+			seen[v] = k
 		}
 	}
 	for _, c := range n.Content {

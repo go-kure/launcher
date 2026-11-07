@@ -63,7 +63,7 @@ merge keys (`<<`) are refused with their line, because they hide duplicate keys.
 `types` must be a known type name, so `types: [""]` is refused. A null entry in a typed list
 (`types`, `values`, `parts`, `traits`, `exclusive`) is refused with its path, because YAML would
 drop it. In a free-form value, such as a `default`, the keys of a mapping must differ after YAML
-resolves them, so `{1: a, 01: b}` and `{true: a, True: b}` are refused.
+resolves them, so `{1: a, 01: b}`, `{true: a, True: b}` and `{0.0: a, -0.0: b}` are refused.
 
 ## API
 
