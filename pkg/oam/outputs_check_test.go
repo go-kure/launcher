@@ -513,6 +513,41 @@ func TestResolveOutputs_RefusesAnEmptyDerivedName(t *testing.T) {
 	}
 }
 
+// A derived output names an allocated one, as OutputDecl says, so a derivation
+// from a derived output is refused where the declarations are answered: neither
+// build check holds a derived output, and a name derived from a derived name
+// would be held by nothing at all. A derived output of an allocated one is still
+// admitted, as is a second one of the same parent.
+func TestResolveOutputs_RefusesAChainOfDerivedOutputs(t *testing.T) {
+	derive := func(s string) string { return s + "-x" }
+	cluster := OutputDecl{Key: "cluster", Role: NameRolePostgresqlCluster, Kind: outputClusterKind, Default: "pg", Name: "pg"}
+	appSecret := OutputDecl{Key: "app_secret", Kind: outputSecretKind, From: "cluster", Derive: derive}
+
+	t.Run("a chain is refused", func(t *testing.T) {
+		chain := OutputDecl{Key: "another_secret", Kind: outputSecretKind, From: "app_secret", Derive: derive}
+		_, err := resolveOutputs([]OutputDecl{cluster, appSecret, chain})
+		if err == nil || !strings.Contains(err.Error(), `output "another_secret"`) ||
+			!strings.Contains(err.Error(), `derives from "app_secret"`) || !strings.Contains(err.Error(), "itself derived") {
+			t.Errorf("err = %v, want one naming the output, its parent and that the parent is itself derived", err)
+		}
+	})
+
+	t.Run("a derived output of an allocated one is admitted", func(t *testing.T) {
+		got, err := resolveOutputs([]OutputDecl{cluster, appSecret})
+		if err != nil || len(got) != 2 || got[1].Name != "pg-x" {
+			t.Errorf("resolveOutputs = %v, %v; want both outputs, the derived one named pg-x", got, err)
+		}
+	})
+
+	t.Run("two derived outputs of one allocated output are admitted", func(t *testing.T) {
+		second := OutputDecl{Key: "other_secret", Kind: outputSecretKind, From: "cluster", Derive: derive}
+		got, err := resolveOutputs([]OutputDecl{cluster, appSecret, second})
+		if err != nil || len(got) != 3 {
+			t.Errorf("resolveOutputs = %v, %v; want three outputs", got, err)
+		}
+	})
+}
+
 // A declaration names the kind of the object, so a kind with no kind name is
 // refused where the declarations are answered, as an empty one is: GroupKind
 // reads {Group: "example.com"} as not empty, and neither build check holds a
