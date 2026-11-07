@@ -55,8 +55,8 @@ func TestCiliumNetworkPolicy_RequiredMatchCRD(t *testing.T) {
 // spellings, of which the object carries one. The two policy kinds refuse such
 // a rule before the required list is read (refuseUncarriedSpecValues), so the
 // list never reads another spelling than the one the object is built from. The
-// trait has no such refusal, and its list is held on every spelling instead
-// (requiredfields.Refuse).
+// trait refuses it too, in the decode of its rule, so its required list never
+// reads two spellings either (go-kure/launcher#1322).
 func TestCiliumPolicyKinds_TwoSpellingsAreRefused(t *testing.T) {
 	peers := func(fields map[string]any) []any {
 		return []any{map[string]any{"matchExpressions": []any{fields}}}

@@ -302,12 +302,20 @@ func TestExclusiveAdopters_HelmRefTypedMaps(t *testing.T) {
 			wantErrContaining(t, site.direct(props), "source.ref sets branch, tag; an inline GitRepository takes exactly one of")
 		})
 	}
+	// Two spellings of ref in a named map are refused by the strict decode
+	// before the exclusive-adopters check reads either (go-kure/launcher#1322):
+	// before, the decode merged both objects into one ref and the check refused
+	// the merged ref, so this row was refused too, in other words.
+	t.Run("named source, ref twice", func(t *testing.T) {
+		site := exclusiveSite{compType: "helm", rule: components.HelmRule{}}
+		wantErrContaining(t, site.direct(map[string]any{"chart": "a", "source": helmSourceMap{"url": url, "kind": "GitRepository",
+			"Ref": map[string]any{"branch": "main"}, "ref": map[string]any{"tag": ""}}}),
+			"source.ref: sets the same field as source.Ref (field names match case-insensitively, so one value would be dropped)")
+	})
 	// The decode merges every ref object it reads into one ref, and the ref is
-	// authored by all of them: two spellings of ref in a named map, one ref
-	// twice in raw JSON, or a field set and then nulled.
+	// authored by all of them: one ref twice in raw JSON, which collapses to the
+	// last before any key is compared, or a field set and then nulled.
 	twice := map[string]map[string]any{
-		"named source, ref twice": {"chart": "a", "source": helmSourceMap{"url": url, "kind": "GitRepository",
-			"Ref": map[string]any{"branch": "main"}, "ref": map[string]any{"tag": ""}}},
 		"raw source, ref twice": {"chart": "a", "source": json.RawMessage(`{"url":"` + url +
 			`","kind":"GitRepository","ref":{"branch":"main"},"ref":{"tag":""}}`)},
 		"raw ref, branch then null": {"chart": "a", "source": map[string]any{"url": url, "kind": "GitRepository",

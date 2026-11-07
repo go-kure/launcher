@@ -134,9 +134,9 @@ func TestValidateLabelSelector_MatchesAPIMachinery(t *testing.T) {
 }
 
 // strictlyDecodedTypes maps the type argument of every strict decode of this
-// package, as the source spells it, to the type: what decodeKindSpec and
-// builtin.DecodeStrictJSON decode into and what a policyFreeKind or a
-// policyHeldKind is declared over. TestLabelSelectorKinds_CoverEverySelector
+// package, as the source spells it, to the type: what decodeKindSpec,
+// decodeStrippedAndRaw and builtin.DecodeStrictJSON decode into and what a
+// policyFreeKind or a policyHeldKind is declared over. TestLabelSelectorKinds_CoverEverySelector
 // holds the keys to the package's source and counts the kinds of each type by
 // the files that decode it, so a kind added without a row fails there.
 //
@@ -323,8 +323,8 @@ func sharedTableRows(t *testing.T, file *ast.File, name string) []ast.Expr {
 
 // strictDecodeSites reads the package's source, test files apart, and returns
 // the type argument of every strict decode in it, as spelled, with the files
-// that decode it, in order: of a call to decodeKindSpec or
-// builtin.DecodeStrictJSON, and of a policyFreeKind or policyHeldKind value.
+// that decode it, in order: of a call to decodeKindSpec, decodeStrippedAndRaw
+// or builtin.DecodeStrictJSON, and of a policyFreeKind or policyHeldKind value.
 // The type parameter of the generic code itself is not one. A kind component
 // is declared in a file of its own, so two files that decode one type are two
 // kinds of it (issuer and clusterissuer).
@@ -351,7 +351,7 @@ func strictDecodeSites(t *testing.T) map[string][]string {
 				return true
 			}
 			switch types.ExprString(index.X) {
-			case "decodeKindSpec", "builtin.DecodeStrictJSON", "policyFreeKind", "policyHeldKind":
+			case "decodeKindSpec", "decodeStrippedAndRaw", "builtin.DecodeStrictJSON", "policyFreeKind", "policyHeldKind":
 				if arg := types.ExprString(index.Index); arg != "T" && !slices.Contains(found[arg], name) {
 					found[arg] = append(found[arg], name)
 				}

@@ -1121,10 +1121,14 @@ of an `icmps` field is required too and is refused earlier, by Cilium's own deco
 (above).
 
 Field names match case-insensitively in the decode, so a rule can write one field in two
-spellings (`fromEndpoints` and `FromEndpoints`); the decode then keeps one of them, or
-merges the two. The trait does not refuse that, but each spelling is held to the list,
-and the refusal names the one that leaves the field out
-(`ingress[0].FromEndpoints[0].matchExpressions[0].operator`).
+spellings (`fromEndpoints` and `FromEndpoints`); the decode would keep one of them, or
+merge the two, without a message. The trait refuses a rule that does, even when both spellings
+are complete, in the decode of the rule: `decode into api.Rule (a rejected field is not
+supported by the linked Cilium API version): ingress[0].fromEndpoints: sets the same field as
+ingress[0].FromEndpoints (field names match case-insensitively, so one value would be
+dropped)`. A rule with one spelling, whatever its case, still reaches the required list and is
+refused by the path of the field it leaves out
+(`ingress[0].FROMENDPOINTS[0].matchExpressions[0].operator`).
 
 The list is the `cilium-networkpolicy` kind's, cut to what the trait publishes
 (`requiredfields.CiliumTraitRule` in the internal `pkg/oam/internal/requiredfields`), and

@@ -96,7 +96,9 @@ The component's `PropertySchema` mirrors the upstream spec type:
   (`builtin.DecodeStrictJSON`). A misspelt key at any depth, or a value of the
   wrong type, is an error naming it, not a field silently dropped from the
   emitted object. The strictness the schema does not carry below the top level
-  comes from here.
+  comes from here. The same decode refuses one field written in two spellings
+  (`suspend` and `Suspend`) at any depth, since `encoding/json` would keep one
+  value and drop the other.
 - **Pin the schema to the type with a coverage test.** A reflection test walks
   the upstream type's json fields and requires each to be either published in the
   schema, with the matching type, or listed in an exclusion map with a reason.

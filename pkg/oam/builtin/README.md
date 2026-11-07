@@ -15,6 +15,18 @@ the launcher-owned keys named in `owned` (matched case-insensitively, as `encodi
 fields) are split off and returned to the caller, and the rest is JSON-decoded into `T` with
 `DisallowUnknownFields`, so a misspelt key at any depth or a wrongly typed value is an error
 rather than a dropped field; a number in an interface-typed field stays an exact `json.Number`.
+`encoding/json` also matches field names ignoring case, so a map that writes one field in two
+spellings (`suspend` and `Suspend`) would keep one value and drop the other without a message.
+After a decode that succeeded, `DecodeStrictJSON` therefore refuses such a pair, at any depth, with
+a `*FoldedFieldError` whose text is `<later key>: sets the same field as <earlier key> (field names
+match case-insensitively, so one value would be dropped)`; keys compare in sorted order, so the
+lower-case spelling is the later one. The walk reads the declared field a key reaches, so it
+does not look inside a type that decodes itself, an `any` or a `json.RawMessage`, and does not
+treat the keys of a free-key map as field names. A null never forms a pair: it is absent, as in the
+null contract. Two keys that name two different declared fields (`Foo` and `foo`) are no pair. A caller
+that wraps the error keeps it findable with `errors.As`. `FoldedDuplicateFieldPath[T](props, owned...)`
+is the same walk without the decode, and `SameFieldError(later, earlier)` builds the error for a caller that
+finds a pair itself.
 It decodes only: no defaulting, no semantic checks. A panic inside the decode comes back as
 an error naming `T` and the panic's value, so an external type whose own `UnmarshalJSON` does
 not expect a value an author can write fails the build instead of crashing it (Cilium's ICMP
@@ -33,8 +45,10 @@ and fail when a Cilium bump adds such a type. Its unknown-key error is `encoding
 property root (`sourceRef.tag`, `patches[0].target.kinds`), or `""` when it finds none, for a
 caller whose type declares the same key in several places (go-kure/launcher#784; used by
 `fluxcd-kustomization`). The walk descends into the field the decoder fills. A key that
-matches several fields ignoring case lands on the shallowest, and at one depth on the
-first declared. `UnreachableJSONFields(type, owned...)` lists the spec keys an author cannot use that
+matches no field name exactly lands on the first field whose name equals it ignoring case,
+in the order of the `encoding/json` the package is built with (shallowest first with the
+jsonv2-backed decoder, the default on the Go version go.mod names, and index order with the v1 decoder). A name keeps its shallowest field, a tagged one before
+an untagged one at one depth, and no field when that leaves two. `UnreachableJSONFields(type, owned...)` lists the spec keys an author cannot use that
 way (tagged `json:"-"`, refused by `encoding/json` itself such as an ambiguously promoted key,
 shadowed by an owned key, or behind an unexported embedded pointer the decoder cannot set),
 including embedded ones; each key is probed against `encoding/json`, so the list agrees with

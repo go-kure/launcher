@@ -22,7 +22,6 @@ import (
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin"
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
@@ -219,19 +218,16 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 		instancesAuthored = instancesAuthored || present
 	}
 
-	spec, _, err := builtin.DecodeStrictJSON[cnpgv1.ClusterSpec](props)
-	if err != nil {
-		return nil, errors.Wrap(err, "properties do not decode into a postgresql.cnpg.io/v1 ClusterSpec")
-	}
 	// The null strip drops a null key at any depth, including one the type
 	// does not declare, so a misspelt key authored as null (`storage: {sise:
 	// null}`) would vanish. The package's null contract stops at declared keys
 	// (pkg/oam/property_validate.go), so the unstripped tree is decoded too,
 	// for its unknown-field refusal only: a null on a known field decodes as a
 	// no-op, and a null array element was refused by the strip, so this adds
-	// no other refusal.
-	if _, _, err := builtin.DecodeStrictJSON[cnpgv1.ClusterSpec](raw); err != nil {
-		return nil, errors.Wrap(err, "properties do not decode into a postgresql.cnpg.io/v1 ClusterSpec")
+	// no other refusal (decodeStrippedAndRaw).
+	spec, err := decodeStrippedAndRaw[cnpgv1.ClusterSpec](props, raw, "postgresql.cnpg.io/v1 ClusterSpec")
+	if err != nil {
+		return nil, err
 	}
 	// What was authored is also read back from the decoded spec, the check that
 	// cannot drift from the decoder. The map reading stays for the values the
