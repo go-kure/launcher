@@ -61,9 +61,25 @@ func partIn(t *testing.T, expr string) *Model {
 	return m
 }
 
+// diagnosticText returns the text of an error without the source lines that CEL
+// echoes under each issue (` | <expression>` and the caret line). The echo holds the
+// expression the test wrote, so a cause that appears in the expression would match it
+// even when the refusal came from another rule.
+func diagnosticText(err error) string {
+	var keep []string
+	for _, line := range strings.Split(err.Error(), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "|") {
+			continue
+		}
+		keep = append(keep, line)
+	}
+	return strings.Join(keep, "\n")
+}
+
 // wantRefusal compiles m and requires a failure that wraps ErrInvalid, names the
 // path, and names the cause. A bare "it failed" passes on a stub that refuses
-// everything, so every refusal test names both.
+// everything, so every refusal test names both. The cause is read in the diagnostic
+// text, never in the echoed source line.
 func wantRefusal(t *testing.T, m *Model, path, cause string) {
 	t.Helper()
 	cm, err := compileModel(m)
@@ -76,8 +92,27 @@ func wantRefusal(t *testing.T, m *Model, path, cause string) {
 	if !strings.Contains(err.Error(), path) {
 		t.Errorf("error %q does not name the path %q", err, path)
 	}
-	if !strings.Contains(err.Error(), cause) {
+	if !strings.Contains(diagnosticText(err), cause) {
 		t.Errorf("error %q does not name the cause %q", err, cause)
+	}
+}
+
+// The premise of diagnosticText: CEL echoes the expression under its issue, and the
+// helper drops that echo. Without the first half the helper would fix nothing, and
+// without the second a cause could still match the echo.
+func TestDiagnosticTextDropsTheSourceEcho(t *testing.T) {
+	_, err := compileModel(oneValue(t, "${inputs.nope + dyn(1)}"))
+	if err == nil {
+		t.Fatal("test bug: an undeclared input compiled")
+	}
+	if !strings.Contains(err.Error(), "dyn(1)") {
+		t.Fatalf("premise failed: the error does not echo the expression: %q", err)
+	}
+	if strings.Contains(diagnosticText(err), "dyn(1)") {
+		t.Errorf("diagnosticText kept the echo: %q", diagnosticText(err))
+	}
+	if !strings.Contains(diagnosticText(err), "undeclared reference") {
+		t.Errorf("diagnosticText lost the diagnostic: %q", diagnosticText(err))
 	}
 }
 
@@ -207,7 +242,7 @@ func TestMapRangeRefused(t *testing.T) {
 		"{'a': 1}.map(k, k)",
 	} {
 		t.Run(expr, func(t *testing.T) {
-			wantRefusal(t, oneValue(t, "${"+expr+"}"), "spec.values[0].expr", "list")
+			wantRefusal(t, oneValue(t, "${"+expr+"}"), "spec.values[0].expr", "ranges over a list in celEnv 1")
 		})
 	}
 }
@@ -218,7 +253,7 @@ func TestDynRangeRefused(t *testing.T) {
 		"inputs.config.items.exists(i, i == 'a')",
 	} {
 		t.Run(expr, func(t *testing.T) {
-			wantRefusal(t, oneValue(t, "${"+expr+"}"), "spec.values[0].expr", "list")
+			wantRefusal(t, oneValue(t, "${"+expr+"}"), "spec.values[0].expr", "ranges over a list in celEnv 1")
 		})
 	}
 }
@@ -230,14 +265,14 @@ func TestDynCallRefused(t *testing.T) {
 		"[dyn(1)]",
 	} {
 		t.Run(expr, func(t *testing.T) {
-			wantRefusal(t, oneValue(t, "${"+expr+"}"), "spec.values[0].expr", "dyn")
+			wantRefusal(t, oneValue(t, "${"+expr+"}"), "spec.values[0].expr", "dyn() is not available in celEnv 1")
 		})
 	}
 	t.Run("in when", func(t *testing.T) {
-		wantRefusal(t, partWhen(t, "${dyn(true)}"), "spec.parts[0].when", "dyn")
+		wantRefusal(t, partWhen(t, "${dyn(true)}"), "spec.parts[0].when", "dyn() is not available in celEnv 1")
 	})
 	t.Run("in forEach.in", func(t *testing.T) {
-		wantRefusal(t, partIn(t, "${dyn([1])}"), "spec.parts[0].forEach.in", "dyn")
+		wantRefusal(t, partIn(t, "${dyn([1])}"), "spec.parts[0].forEach.in", "dyn() is not available in celEnv 1")
 	})
 }
 
