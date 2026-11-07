@@ -530,7 +530,7 @@ func convertChecked(value any, collision *error) any {
 		for _, e := range entries {
 			name := fmt.Sprint(e.key)
 			if first, dup := seen[name]; dup && *collision == nil {
-				*collision = fmt.Errorf("map keys %#v and %#v both read %q", first, e.key, name)
+				*collision = errors.Errorf("map keys %#v and %#v both read %q", first, e.key, name)
 			}
 			seen[name] = e.key
 			converted[name] = convertChecked(e.val, collision)
