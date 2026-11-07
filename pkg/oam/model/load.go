@@ -21,17 +21,23 @@ var ErrInvalid = errors.New("invalid model")
 
 // Load decodes one model document and checks its shape. It never compiles or
 // evaluates an expression. Decoding is strict: an unknown field fails with its
-// name and line. Load returns the first failure in document order, and a nil
-// model with it.
+// name and line, and so do YAML anchors, aliases and merge keys. A YAML type
+// error, such as a list where a string belongs, names the line of the field and
+// not its path. Load returns the first failure, and a nil model with it. The
+// YAML, apiVersion and kind checks come first, then the metadata, the inputs in
+// alphabetical order of their names (a Go map keeps no document order), then the
+// values and the parts in document order.
 func Load(data []byte) (*Model, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil, errors.New("model: empty input")
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
 
-	var m Model
-	if err := dec.Decode(&m); err != nil {
+	// Read the document as a node tree first. yaml.v3 does not see a duplicate key
+	// when one key is an alias, and it panics on a merge key next to a sequence key.
+	// The format has no use for either, so the tree is checked before the struct decode.
+	var root yaml.Node
+	if err := dec.Decode(&root); err != nil {
 		if stderrors.Is(err, io.EOF) {
 			return nil, errors.New("model: empty input")
 		}
@@ -42,6 +48,16 @@ func Load(data []byte) (*Model, error) {
 	case err == nil:
 		return nil, errors.New("model: the input holds more than one document, want one document")
 	case !stderrors.Is(err, io.EOF):
+		return nil, errors.Errorf("model: %w", err)
+	}
+	if err := refuseIndirection(&root); err != nil {
+		return nil, err
+	}
+
+	strict := yaml.NewDecoder(bytes.NewReader(data))
+	strict.KnownFields(true)
+	var m Model
+	if err := strict.Decode(&m); err != nil {
 		return nil, errors.Errorf("model: %w", err)
 	}
 
@@ -55,6 +71,25 @@ func Load(data []byte) (*Model, error) {
 		return nil, err
 	}
 	return &m, nil
+}
+
+// refuseIndirection walks a YAML node tree and fails on the first anchor, alias or
+// merge key, with its line. The failure is a YAML-level one and does not wrap ErrInvalid.
+func refuseIndirection(n *yaml.Node) error {
+	switch {
+	case n.Kind == yaml.AliasNode:
+		return errors.Errorf("model: line %d: YAML anchors, aliases and merge keys are not supported", n.Line)
+	case n.Anchor != "":
+		return errors.Errorf("model: line %d: YAML anchors, aliases and merge keys are not supported", n.Line)
+	case n.Kind == yaml.ScalarNode && n.Value == "<<" && n.ShortTag() == "!!merge":
+		return errors.Errorf("model: line %d: YAML anchors, aliases and merge keys are not supported", n.Line)
+	}
+	for _, c := range n.Content {
+		if err := refuseIndirection(c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // identRe is a CEL identifier. Input, value, part and loop-variable names are
@@ -163,9 +198,16 @@ func validateSchema(path string, s oam.PropertySchema) error {
 	case s.Type != "" && len(s.Types) > 0:
 		return invalid(path, "type and types are both set, want one")
 	}
-	for _, t := range append([]oam.PropertyType{s.Type}, s.Types...) {
+	// Exactly one of type and types is set here. The single type field is empty when
+	// types is used, which means "look at types". An entry of types has no such
+	// meaning, so an empty entry is refused like any unknown name.
+	declared := s.Types
+	if s.Type != "" {
+		declared = []oam.PropertyType{s.Type}
+	}
+	for _, t := range declared {
 		switch t {
-		case "", oam.PropertyTypeString, oam.PropertyTypeInteger, oam.PropertyTypeBoolean,
+		case oam.PropertyTypeString, oam.PropertyTypeInteger, oam.PropertyTypeBoolean,
 			oam.PropertyTypeNumber, oam.PropertyTypeArray, oam.PropertyTypeObject:
 		default:
 			return invalid(path, "type %q is not string, integer, boolean, number, array or object", t)
