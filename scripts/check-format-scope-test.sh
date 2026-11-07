@@ -100,6 +100,9 @@ expect "builtin top-level handler" 1 "pkg/oam/builtin/networkpolicy.go" $DEV pkg
 # pin core.quotePath=true so a caller's global setting cannot hide the case.
 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotePath GIT_CONFIG_VALUE_0=true \
   expect "builtin handler with a non-ASCII name" 1 "pkg/oam/builtin/components/café.go" $DEV pkg/oam/builtin/components/café.go 'fix(components): x'
+# A newline inside a file name must neither hide a counted file nor make a text file count.
+expect "builtin handler with a newline in its name" 1 "pkg/oam/builtin/components/with" $DEV $'pkg/oam/builtin/components/with\nnewline.go' 'fix(components): x'
+expect "text file whose name embeds a builtin go path" 0 "" $DEV $'pkg/oam/builtin/components/x.go\nnotes.txt' 'fix(components): x'
 expect "builtin file with an empty trailer reason" 1 "Format-Scope" $DEV pkg/oam/builtin/components/typed_pod_rules.go $'fix(components): x\n\nFormat-Scope: none ()'
 
 # ── must pass ────────────────────────────────────────────────────────────────

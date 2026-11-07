@@ -104,15 +104,16 @@ resolve() {
 
 # touched_acceptance COMMIT: prints each acceptance file COMMIT changes.
 touched_acceptance() {
-  local commit="$1" files path accept
+  local commit="$1" path accept
   # -z prints each path raw and NUL-terminated, so core.quotePath cannot wrap a non-ASCII path in
-  # quotes and hide it from the prefix and suffix tests; tr turns the NULs into newlines, and
-  # pipefail keeps a git failure visible through the pipe.
-  if ! files="$(git -C "$ROOT" diff-tree -z --root --no-commit-id -r --name-only "$commit" | tr '\0' '\n')"; then
-    echo "ERROR: cannot list the files of commit $commit in $ROOT" >&2
-    exit 2
-  fi
-  while IFS= read -r path; do
+  # quotes and hide it from the prefix and suffix tests, and a newline inside a name cannot split
+  # one path into two. The loop reads the NUL records directly. A failing git prints one empty
+  # record, which no path can be, and the loop then stops with exit 2.
+  while IFS= read -r -d '' path; do
+    if [[ -z "$path" ]]; then
+      echo "ERROR: cannot list the files of commit $commit in $ROOT" >&2
+      exit 2
+    fi
     for accept in "${ACCEPT_PATHS[@]}"; do
       if [[ "$path" == "$accept" ]]; then
         printf '%s\n' "$path"
@@ -121,7 +122,7 @@ touched_acceptance() {
     if builtin_acceptance "$path"; then
       printf '%s\n' "$path"
     fi
-  done <<<"$files"
+  done < <(git -C "$ROOT" diff-tree -z --root --no-commit-id -r --name-only "$commit" || printf '\0')
 }
 
 # builtin_acceptance PATH: true for a non-test Go file under ACCEPT_PREFIX, other than a
