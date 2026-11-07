@@ -52,6 +52,33 @@ func TestLoad_SkipsValuesUnderNullKeys(t *testing.T) {
 	}
 }
 
+// Two null keys with different spelling, such as `~` and `null`, are no duplicate
+// (the first test above). Two keys with the same spelling are a duplicate to the YAML
+// decoder, a null key or not. The README says both. This test pins the second. It
+// passes before and after the text change, so it is a pin and discriminates nothing
+// between the two sides.
+func TestLoad_RefusesSameSpellingKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		keys string
+	}{
+		{"plain key twice", "        owner: other\n"},
+		{"null twice", "        null: a\n        null: b\n"},
+		{"tilde twice", "        ~: a\n        ~: b\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := loadNoPanic(replace(t, "        owner: acme\n", "        owner: acme\n"+tc.keys))
+			if err == nil {
+				t.Fatalf("Load accepted the document: %+v", m)
+			}
+			if !strings.Contains(err.Error(), "already defined") {
+				t.Fatalf("error %q does not come from the duplicate-key rule of the YAML decoder", err)
+			}
+		})
+	}
+}
+
 // The refusal of anchors, aliases and merge keys reads the whole document before yaml.v3
 // decodes it. So it also applies under a null key, although the checks of decoded values
 // skip that value. The README says so. This test pins that sentence and the line in the

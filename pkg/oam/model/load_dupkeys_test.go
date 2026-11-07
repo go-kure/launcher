@@ -9,8 +9,9 @@ import (
 // yaml.v3 decodes a key into a string, and a !!binary key goes through base64. So
 // `!!binary aW1hZ2U=` is the key `image`. yaml.v3 sees two different scalars and no
 // duplicate, but a Go map keeps one entry, so the later entry replaces the earlier one.
-// Load refuses the pair in every typed map of the format: the inputs, a schema's
-// properties, the properties of a part and of a trait, and the annotations.
+// Load refuses the pair in every map whose keys decode into Go strings: the inputs, a
+// schema's properties and gatedPaths, the properties of a part and of a trait, and the
+// annotations. The cases below pin each of these maps.
 func TestLoad_RefusesDuplicateDecodedStringKeys(t *testing.T) {
 	cases := []struct {
 		name string
@@ -23,6 +24,9 @@ func TestLoad_RefusesDuplicateDecodedStringKeys(t *testing.T) {
 		{"schema properties", func(t *testing.T) []byte {
 			return withInputs(t, "  inputs:\n    cfg:\n      type: object\n      properties:\n        image: {type: string}\n        !!binary aW1hZ2U=: {type: integer}\n")
 		}, "spec.inputs.cfg.properties"},
+		{"schema gatedPaths", func(t *testing.T) []byte {
+			return withInputs(t, "  inputs:\n    cfg:\n      type: object\n      gatedPaths:\n        image: A\n        !!binary aW1hZ2U=: B\n")
+		}, "spec.inputs.cfg.gatedPaths"},
 		{"part properties", func(t *testing.T) []byte {
 			return replace(t, "        replicas: \"${inputs.replicas}\"\n", "        replicas: \"${inputs.replicas}\"\n        !!binary cmVwbGljYXM=: 3\n")
 		}, "spec.parts[0].properties"},
