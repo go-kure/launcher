@@ -225,6 +225,7 @@ func checkHandlerOutputs(comp *Component, handler ComponentHandler, decls []Outp
 func resolveOutputs(decls []OutputDecl) ([]Output, error) {
 	outs := make([]Output, 0, len(decls))
 	names := make(map[string]string, len(decls))
+	allocated := make(map[string]bool, len(decls))
 	for _, d := range decls {
 		if !validOutputKey(d.Key) {
 			return nil, errors.Errorf("output key %q is not one identifier (letters, digits and underscores, not starting with a digit)", d.Key)
@@ -245,6 +246,9 @@ func resolveOutputs(decls []OutputDecl) ([]Output, error) {
 			if !ok {
 				return nil, errors.Errorf("output %q derives from %q, which is not an output declared before it", d.Key, d.From)
 			}
+			if !allocated[d.From] {
+				return nil, errors.Errorf("output %q derives from %q, which is itself derived: a derived output names an allocated one", d.Key, d.From)
+			}
 			if d.Derive == nil {
 				return nil, errors.Errorf("output %q derives from %q and has no derivation", d.Key, d.From)
 			}
@@ -255,6 +259,7 @@ func resolveOutputs(decls []OutputDecl) ([]Output, error) {
 		case strings.TrimSpace(name) == "":
 			return nil, errors.Errorf("output %q has no name", d.Key)
 		}
+		allocated[d.Key] = d.From == "" && d.Derive == nil
 		names[d.Key] = name
 		outs = append(outs, Output{Key: d.Key, Kind: d.Kind, Name: name})
 	}
