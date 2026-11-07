@@ -124,7 +124,8 @@ type Provenance struct {
 // TransformWithProvenance is TransformWithPolicy plus a report of which source
 // supplied each leaf property of the Application's components and traits. The
 // cluster and the PolicyResult are exactly those TransformWithPolicy returns;
-// TransformWithPolicy and Transform record nothing and pay nothing for the report.
+// TransformWithPolicy and Transform build no report and read no recorder, and their
+// output is the same; a config that reports its defaults still logs them there.
 //
 // A default the environment policy supplied is in the report as SourcePolicy when
 // the handler that applied it reports it (PolicyDefaultReporter), and a value a step

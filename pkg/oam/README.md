@@ -2455,12 +2455,16 @@ call: a leaf it added or changed is `capability`. The filler is handed a call-lo
 consumed set for that, merged into `ConsumedCapabilities` afterwards, so the result of
 `TransformWithPolicy` is unchanged.
 
-The report costs nothing when it is not asked for: `Transform` and `TransformWithPolicy`
-carry no recorder, and their allocations are those they had before. It covers the
-values a policy supplies and the fills of a post-policy step only where the config
-reports them (`policy` and `builtin` above; the typed config, not the property map,
-holds them). It does not cover a policy default or a fill of a config that reports
-nothing, defaults a handler applies while it builds its typed config, parameter
+`Transform` and `TransformWithPolicy` carry no recorder and build no report, and their
+output is unchanged. They are not free of the report's bookkeeping: a config that
+reports its defaults still logs each one when the policy or a post-policy step
+applies it, whether or not a report is asked for, at the cost of a few small slice
+appends per component.
+
+The report covers the values a policy supplies and the fills of a post-policy step only
+where the config reports them (`policy` and `builtin` above; the typed config, not the
+property map, holds them). It does not cover a policy default or a fill of a config that
+reports nothing, defaults a handler applies while it builds its typed config, parameter
 substitution, the names, labels and annotations the engine stamps on an object, or a
 statement about the generated objects: entries key property paths.
 
