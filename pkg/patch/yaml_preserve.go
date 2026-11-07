@@ -73,10 +73,10 @@ func LoadResourcesWithStructure(r io.Reader) (*YAMLDocumentSet, error) {
 		convertedRaw := convertBaseYAMLTypes(raw)
 		var resource *unstructured.Unstructured
 		if convertedMap, ok := convertedRaw.(map[string]any); ok {
-			resource = &unstructured.Unstructured{Object: convertedMap}
+			resource = &unstructured.Unstructured{Object: baseObject(convertedMap)}
 		} else {
 			// Fallback to original if conversion failed
-			resource = &unstructured.Unstructured{Object: raw}
+			resource = &unstructured.Unstructured{Object: baseObject(raw)}
 		}
 
 		// Also apply type conversion to the YAML node to preserve formatting

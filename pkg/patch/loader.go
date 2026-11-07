@@ -264,6 +264,16 @@ func LoadTOMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 	return patches, nil
 }
 
+// baseObject returns the object map of a base resource decoded by yaml.v3, with every
+// Go int turned into an int64. yaml.v3 decodes a YAML integer to int, and
+// Unstructured.DeepCopy panics on that type.
+func baseObject(raw map[string]any) map[string]any {
+	if converted, ok := convertValueForUnstructured(raw).(map[string]any); ok {
+		return converted
+	}
+	return raw
+}
+
 func LoadResourcesFromMultiYAML(r io.Reader) ([]*unstructured.Unstructured, error) {
 	dec := yaml.NewDecoder(r)
 	var resources []*unstructured.Unstructured
@@ -277,7 +287,7 @@ func LoadResourcesFromMultiYAML(r io.Reader) ([]*unstructured.Unstructured, erro
 			return nil, fmt.Errorf("failed to decode resource document: %w", err)
 		}
 		if len(raw) > 0 {
-			u := &unstructured.Unstructured{Object: raw}
+			u := &unstructured.Unstructured{Object: baseObject(raw)}
 			debugLog("Loaded resource: kind=%s name=%s", u.GetKind(), u.GetName())
 			resources = append(resources, u)
 		}
