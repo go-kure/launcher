@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -162,6 +163,146 @@ func TestCheckRuleOutputs_ExactlyOneClaimMatches(t *testing.T) {
 	if err := checkRuleOutputs("pg", derived, derivedOuts, []loweredName{claim("a")}); err != nil {
 		t.Errorf("derived output: %v", err)
 	}
+}
+
+// countingDerive returns a derivation that is no function of its input alone: it
+// numbers every name it makes, so applying it twice to one parent gives two names.
+func countingDerive() func(string) string {
+	n := 0
+	return func(parent string) string {
+		n++
+		return fmt.Sprintf("%s-app%d", parent, n)
+	}
+}
+
+// A derived output is the derivation of the name the build holds for its
+// parent. The build applies the derivation to that held name again and compares
+// it with the name it was answered, so a derivation that is not a pure function
+// of its parent fails the build with both names; a pure one passes.
+func TestOutputCheck_RuleDerivationIsReappliedToTheHeldName(t *testing.T) {
+	declare := func(derive func() func(string) string) func(*Component, LoweringContext) ([]OutputDecl, error) {
+		return func(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
+			decls, err := declareResolved(outputClusterKind)(c, lctx)
+			if err != nil {
+				return nil, err
+			}
+			return append(decls, OutputDecl{Key: "app_secret", Kind: outputSecretKind, From: "cluster", Derive: derive()}), nil
+		}
+	}
+	pure := func() func(string) string { return func(s string) string { return s + "-app" } }
+
+	tr := outputsTransformer(loweringOutputRule{typeName: "db", kinds: []schema.GroupKind{outputClusterKind}, declared: declare(pure)})
+	for i, err := range transformEverywhere(tr, TransformContext{}) {
+		if err != nil {
+			t.Errorf("a pure derivation, entry point %d: %v", i, err)
+		}
+	}
+
+	tr = outputsTransformer(loweringOutputRule{typeName: "db", kinds: []schema.GroupKind{outputClusterKind}, declared: declare(countingDerive)})
+	for i, err := range transformEverywhere(tr, TransformContext{}) {
+		if err == nil {
+			t.Errorf("a derivation that differs when applied again, entry point %d: want the check to fail", i)
+			continue
+		}
+		for _, want := range []string{`output "app_secret"`, `component "pg"`, `"pg-cluster-app1"`, `"pg-cluster-app2"`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("entry point %d: error %q lacks %s", i, err, want)
+			}
+		}
+	}
+}
+
+// A derived output of a handler's object is held the same way.
+func TestOutputCheck_HandlerDerivationIsReappliedToTheHeldName(t *testing.T) {
+	run := func(h *derivedObjectHandler) []error {
+		tr := NewTransformer(map[string]ComponentHandler{"cfg": h}, nil)
+		app := func() *Application { return terminalApp(Component{Name: "settings", Type: "cfg"}) }
+		_, e1 := tr.Transform(app(), TransformContext{})
+		_, _, e2 := tr.TransformWithPolicy(app(), TransformContext{})
+		_, _, _, e3 := tr.TransformWithProvenance(app(), TransformContext{})
+		return []error{e1, e2, e3}
+	}
+	for i, err := range run(&derivedObjectHandler{objectOutputHandler: objectOutputHandler{typ: "cfg"}, pure: true}) {
+		if err != nil {
+			t.Errorf("a pure derivation, entry point %d: %v", i, err)
+		}
+	}
+	for i, err := range run(&derivedObjectHandler{objectOutputHandler: objectOutputHandler{typ: "cfg"}}) {
+		if err == nil {
+			t.Errorf("a derivation that differs when applied again, entry point %d: want the check to fail", i)
+			continue
+		}
+		for _, want := range []string{`output "copy"`, `component "settings"`, `"settings-app1"`, `"settings-app2"`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("entry point %d: error %q lacks %s", i, err, want)
+			}
+		}
+	}
+}
+
+// The checks, called with the answers a provider gave, hold a derived output to
+// the derivation of the parent's held name: an answer the derivation no longer
+// gives is refused.
+func TestCheckOutputs_DerivedAnswerMustBeTheDerivationOfTheHeldName(t *testing.T) {
+	derive := func(s string) string { return s + "-app" }
+
+	t.Run("rule", func(t *testing.T) {
+		claim := loweredName{
+			group: outputClusterKind.Group, kind: outputClusterKind.Kind, name: "a",
+			claim: resolvedNameClaim{owner: nameOwner{component: "pg", role: NameRolePostgresqlCluster, def: "pg-cluster", lowered: true}},
+		}
+		decls := []OutputDecl{
+			{Key: "cluster", Role: NameRolePostgresqlCluster, Kind: outputClusterKind, Default: "pg-cluster", Name: "a"},
+			{Key: "app_secret", Kind: outputSecretKind, From: "cluster", Derive: derive},
+		}
+		good := []Output{{Key: "cluster", Kind: outputClusterKind, Name: "a"}, {Key: "app_secret", Kind: outputSecretKind, Name: "a-app"}}
+		stale := []Output{{Key: "cluster", Kind: outputClusterKind, Name: "a"}, {Key: "app_secret", Kind: outputSecretKind, Name: "stale"}}
+		if err := checkRuleOutputs("pg", decls, good, []loweredName{claim}); err != nil {
+			t.Errorf("the derivation's own answer: %v", err)
+		}
+		err := checkRuleOutputs("pg", decls, stale, []loweredName{claim})
+		if err == nil || !strings.Contains(err.Error(), `output "app_secret"`) || !strings.Contains(err.Error(), `"stale"`) || !strings.Contains(err.Error(), `"a-app"`) {
+			t.Errorf("a stale answer: err = %v, want one naming the output and both names", err)
+		}
+	})
+
+	t.Run("handler", func(t *testing.T) {
+		comp := &Component{Name: "settings", Type: "cfg"}
+		handler := &objectOutputHandler{typ: "cfg"}
+		decls := []OutputDecl{
+			{Key: "object", Role: NameRoleObject, Kind: schema.GroupKind{Kind: "ConfigMap"}, Default: "settings", Name: comp.ObjectName()},
+			{Key: "copy", Kind: schema.GroupKind{Kind: "ConfigMap"}, From: "object", Derive: derive},
+		}
+		good := []Output{{Key: "object", Name: "settings"}, {Key: "copy", Name: "settings-app"}}
+		stale := []Output{{Key: "object", Name: "settings"}, {Key: "copy", Name: "stale"}}
+		if err := checkHandlerOutputs(comp, handler, decls, good); err != nil {
+			t.Errorf("the derivation's own answer: %v", err)
+		}
+		err := checkHandlerOutputs(comp, handler, decls, stale)
+		if err == nil || !strings.Contains(err.Error(), `output "copy"`) || !strings.Contains(err.Error(), `"stale"`) || !strings.Contains(err.Error(), `"settings-app"`) {
+			t.Errorf("a stale answer: err = %v, want one naming the output and both names", err)
+		}
+	})
+}
+
+// derivedObjectHandler declares its one object and a copy of it derived from
+// its name. pure picks a derivation that is a function of its parent; without
+// it, the derivation numbers each name it makes.
+type derivedObjectHandler struct {
+	objectOutputHandler
+	pure bool
+}
+
+func (h *derivedObjectHandler) Outputs(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
+	decls, err := h.objectOutputHandler.Outputs(c, lctx)
+	if err != nil {
+		return nil, err
+	}
+	derive := countingDerive()
+	if h.pure {
+		derive = func(s string) string { return s + "-app" }
+	}
+	return append(decls, OutputDecl{Key: "copy", Kind: schema.GroupKind{Kind: "ConfigMap"}, From: "object", Derive: derive}), nil
 }
 
 // objectOutputHandler is a kind-component handler that declares its one object
