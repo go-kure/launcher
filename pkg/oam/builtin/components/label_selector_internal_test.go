@@ -863,9 +863,6 @@ var labelSelectorKinds = []labelSelectorKind{
 	{
 		component: "metallb-l2advertisement", typ: "metallbv1beta1.L2AdvertisementSpec", config: kindConfig(&MetalLBL2AdvertisementHandler{}),
 		base: map[string]any{},
-		excluded: map[string]string{
-			"preferredNodeSelectors[].preference": "preferredNodeSelectors is not published and the document check refuses it as an unsupported field (go-kure/launcher#1265, TestUnexposedUpstreamFields_AreRefusedAsUnsupported)",
-		},
 		crds: crdFileVersion(metallbModulePath, metallbCRDDir+"/metallb.io_l2advertisements.yaml", metallbVersion),
 	},
 	{
@@ -963,7 +960,7 @@ func withValueAt(props map[string]any, path string, value any) map[string]any {
 // affinityTermFields returns the object withValueAt creates at the path that
 // segments name, with the fields a kind whose required list is generated
 // requires of it: a pod affinity term with its topology key, a weighted term
-// with its weight, a topology spread constraint with its skew, key and
+// with its weight, a preferred node selector with its weight, a topology spread constraint with its skew, key and
 // policy, a volume with its name, a cluster trust bundle with its path, a
 // tablespace with its name, else an empty one.
 func affinityTermFields(segments []string) map[string]any {
@@ -981,6 +978,8 @@ func affinityTermFields(segments []string) map[string]any {
 		return map[string]any{"weight": 1}
 	case at == "podAffinityTerm" && parent == "preferredDuringSchedulingIgnoredDuringExecution[]":
 		return map[string]any{"topologyKey": "kubernetes.io/hostname"}
+	case at == "preferredNodeSelectors[]":
+		return map[string]any{"weight": 1}
 	case at == "topologySpreadConstraints[]":
 		return map[string]any{"maxSkew": 1, "topologyKey": "kubernetes.io/hostname", "whenUnsatisfiable": "DoNotSchedule"}
 	case at == "volumes[]":

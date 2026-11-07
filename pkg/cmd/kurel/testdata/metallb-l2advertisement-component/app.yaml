@@ -19,6 +19,17 @@ spec:
               - key: zone
                 operator: In
                 values: [a, b]
+        preferredNodeSelectors:
+          - weight: 100
+            preference:
+              matchLabels:
+                role: edge
+          - weight: 1
+            preference:
+              matchExpressions:
+                - key: zone
+                  operator: In
+                  values: [a]
         interfaces: [eth1, eth2]
         serviceSelectors:
           - matchLabels:

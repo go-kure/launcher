@@ -30,8 +30,6 @@ var prometheusUnfixtured = map[string]string{
 	"hostNetwork": "true is refused under the policy the fixture is built under, and the type omits false (TestPrometheus_HostNetwork)",
 	"allowOverlappingBlocks": "true is refused from version 2.39.0, below the version the fixture's other fields need, and the type omits false " +
 		"(TestPrometheusVersionGates_Refused)",
-
-	"extraScrapeMetrics": newInOperator095 + "; refused as an unsupported field (TestUnexposedUpstreamFields_AreRefusedAsUnsupported)",
 }
 
 // prometheusFull sets every other top-level field of the spec, inside
@@ -163,6 +161,7 @@ func prometheusFull() map[string]any {
 		"convertClassicHistogramsToNHCB":     true,
 		"scrapeNativeHistograms":             true,
 		"scrapeClassicHistograms":            false,
+		"extraScrapeMetrics":                 true,
 		"minReadySeconds":                    0,
 		"hostAliases":                        []any{map[string]any{"ip": "192.0.2.20", "hostnames": []any{"metrics.internal"}}},
 		"additionalArgs":                     []any{map[string]any{"name": "storage.tsdb.no-lockfile"}},

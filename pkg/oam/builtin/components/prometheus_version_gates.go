@@ -275,6 +275,7 @@ var prometheusVersionGates = func() []idGate[monitoringv1.PrometheusSpec] {
 		g("logFormat", "2.6.0", "does not pass it to Prometheus, which runs without it", func(s *spec) bool { return s.LogFormat != "" && s.LogFormat != "logfmt" }),
 		g("enableFeatures", "2.25.0", promFlagDropped, func(s *spec) bool { return len(s.EnableFeatures) > 0 }),
 		g("enableRemoteWriteReceiver", "2.33.0", promFlagDropped, func(s *spec) bool { return s.EnableRemoteWriteReceiver }),
+		g("extraScrapeMetrics", "2.32.0", promFlagDropped, func(s *spec) bool { return s.ExtraScrapeMetrics != nil && *s.ExtraScrapeMetrics }),
 		g("remoteWriteReceiverMessageVersions", "2.54.0", promFlagDropped, func(s *spec) bool {
 			return s.EnableRemoteWriteReceiver && len(s.RemoteWriteReceiverMessageVersions) > 0
 		}),

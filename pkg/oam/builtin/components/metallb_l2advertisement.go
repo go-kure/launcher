@@ -55,6 +55,14 @@ func (h *MetalLBL2AdvertisementHandler) PropertySchema() map[string]oam.Property
 		"nodeSelectors":          selectors("L2Advertisement spec.nodeSelectors: limits the nodes announced as next hops for the addresses. Unset, the advertisement excludes no node."),
 		"interfaces":             names("L2Advertisement spec.interfaces: the host interfaces the addresses are announced from. Unset, every interface of the host.", "The name of a network interface of the node."),
 		"serviceSelectors":       selectors("L2Advertisement spec.serviceSelectors: the Services whose addresses are announced. Unset, every Service that has an address of the pools."),
+		"preferredNodeSelectors": {
+			Type:        oam.PropertyTypeArray,
+			Description: "L2Advertisement spec.preferredNodeSelectors: soft preferences for the node that announces an address. A node that matches an entry's preference scores that entry's weight, and weights of entries that both match add up; the node with the highest score announces, and where no preferred node is available any node nodeSelectors admits can. A preference only applies to nodes nodeSelectors already admits. Unset, MetalLB has no preference.",
+			Items: &oam.PropertySchema{
+				Type: oam.PropertyTypeObject, AdditionalProperties: true,
+				Description: "One preference: weight, an integer from 1 to 100, and preference, a Kubernetes label selector (matchLabels and matchExpressions); an empty one matches every node. Both are required.",
+			},
+		},
 	}
 }
 

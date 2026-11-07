@@ -95,6 +95,9 @@ func prometheusGateRows(t *testing.T, src *vendoredPromOp) []gateRow {
 	not := func(file, fn, cond, why string) gateRow {
 		return gateRow{file: file, fn: fn, cond: cond, not: why}
 	}
+	window := func(file, fn, cond string, paths ...string) gateRow {
+		return gateRow{file: file, fn: fn, cond: cond, paths: paths, window: true}
+	}
 	rw := func(fn, cond string, fields ...string) gateRow {
 		paths := make([]string, len(fields))
 		for i, f := range fields {
@@ -270,15 +273,16 @@ func prometheusGateRows(t *testing.T, src *vendoredPromOp) []gateRow {
 		not(cfg, cg+"appendRuntime", `cg.WithMinimumVersion("3.15.0").IsCompatible()`,
 			"writes logLevel to runtime.log_level from 3.15.0 and passes it as the log.level flag below it; read at every version"),
 
-		// extraScrapeMetrics is a field of PrometheusSpec, PodMonitorSpec,
-		// ServiceMonitorSpec and ProbeSpec that no kind exposes yet
-		// (go-kure/launcher#1265): its gates join the table when it is.
-		not(cfg, cg+"addExtraScrapeMetrics", `return cg.WithMinimumVersion("3.10.0").AppendMapItem(cfg, "extra_scrape_metrics", *extraScrapeMetrics)`,
-			"the per-scrape extraScrapeMetrics of a ServiceMonitor, PodMonitor or Probe object, which this kind does not author"),
-		not(cfg, cg+"BuildCommonPrometheusArgs", `ptr.Deref(cpf.ExtraScrapeMetrics, false) && cg.Version().GTE(semver.MustParse("2.32.0")) && cg.Version().LT(semver.MustParse("3.10.0"))`,
-			"extraScrapeMetrics, which this kind does not expose yet (go-kure/launcher#1265)"),
+		// extraScrapeMetrics is carried by the extra-scrape-metrics feature flag
+		// from 2.32.0 and written to the global configuration from 3.10.0, where
+		// the flag stops (go-kure/launcher#1265). The per-scrape form on a
+		// ServiceMonitor, PodMonitor or Probe is read at 3.10.0 and later, and
+		// those kinds cannot see the version that selects them.
+		not(cfg, cg+"addExtraScrapeMetrics", `return cg.WithMinimumVersion("3.10.0").AppendMapItem(cfg, "extra_scrape_metrics", *extraScrapeMetrics)`, monitor),
+		window(cfg, cg+"BuildCommonPrometheusArgs", `ptr.Deref(cpf.ExtraScrapeMetrics, false) && cg.Version().GTE(semver.MustParse("2.32.0")) && cg.Version().LT(semver.MustParse("3.10.0"))`,
+			"extraScrapeMetrics"),
 		not(cfg, cg+"appendExtraScrapeMetrics", `cg.Version().LT(semver.MustParse("3.10.0"))`,
-			"extraScrapeMetrics, which this kind does not expose yet (go-kure/launcher#1265)"),
+			"writes the global extraScrapeMetrics to the configuration from 3.10.0 and passes it as the extra-scrape-metrics feature flag below it, from 2.32.0; the flag row above is the gate"),
 		gate(cfg, cg+"appendScrapeLimits", `cg.WithMinimumVersion("2.45.0").AppendMapItem(slice, "body_size_limit", cpf.BodySizeLimit)`, "bodySizeLimit"),
 		not(cfg, cg+"appendScrapeLimits", `cg.WithMinimumVersion("2.45.0").AppendMapItem(slice, "body_size_limit", cpf.EnforcedBodySizeLimit)`,
 			"the global form of enforcedBodySizeLimit, which every scrape configuration also takes from 2.28.0, where it is gated"),
@@ -557,6 +561,7 @@ func prometheusGateFixtures() map[string]promGateFixture {
 		"convertClassicHistogramsToNHCB":                f(m{"convertClassicHistogramsToNHCB": true}, "v3.3.0"),
 		"scrapeClassicHistograms":                       f(m{"scrapeClassicHistograms": false}, "v3.4.0"),
 		"scrapeNativeHistograms":                        f(m{"scrapeNativeHistograms": true}, "v3.7.0"),
+		"extraScrapeMetrics":                            f(m{"extraScrapeMetrics": true}, "v2.31.0"),
 
 		"otlp": f(otlp(m{}), "v2.54.0"),
 		// otlp is refused first, at the same minimum.
