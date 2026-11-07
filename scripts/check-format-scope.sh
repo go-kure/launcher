@@ -26,7 +26,7 @@
 #   pkg/oam/property_validate.go           the shared property checks (type, enum, integer, groups)
 #   pkg/oam/property_validate_authored.go  the authored entry point, ValidateAuthoredProperties*
 #   pkg/oam/lowering.go    the reserved-key, apiVersion and type refusals of the lowering engine
-#   pkg/oam/featuregate_check.go  the feature-gate refusals below the profile's kubernetesVersion
+#   pkg/oam/featuregate_check.go  the feature-gate refusals when the profile's kubernetesVersion predates the gate's default-on release
 #   pkg/oam/builtin/       every .go file below it (the per-kind property validators)
 #   pkg/oam/internal/      every .go file below it (the refusal helpers the builtin handlers call)
 # Under pkg/oam/builtin/ and pkg/oam/internal/ a *_test.go file, a contract.go or doc.go file,

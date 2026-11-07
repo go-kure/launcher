@@ -134,7 +134,7 @@ expect "trailer after other trailers" 0 "" $DEV pkg/oam/validate.go $'fix(oam): 
 expect "Renovate-authored change" 0 "1 Renovate commit(s) skipped" renovate@whitesourcesoftware.com pkg/oam/validate.go 'chore(deps): x'
 # CI passes the PR head with --head; a range that stops before the commit is clean.
 expect "head before the acceptance commit" 0 "0 commit(s)" $DEV pkg/oam/validate.go 'fix(oam): x' "" base
-# A builtin file under the format scope or the trailer passes, as the six listed files do.
+# A builtin file under the format scope or the trailer passes, as the explicitly listed files do.
 expect "builtin handler under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/builtin/components/typed_pod_rules.go 'fix(format): x'
 expect "builtin handler with a trailer reason" 0 "" $DEV pkg/oam/builtin/components/typed_pod_rules.go $'refactor(components): x\n\nFormat-Scope: none (comment only)'
 # Not part of the rule: tests, contract metadata, the package comment, vendored input,
