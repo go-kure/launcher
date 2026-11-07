@@ -168,7 +168,8 @@ func TestCheckRuleOutputs_ExactlyOneClaimMatches(t *testing.T) {
 // as an output, under a name the test chooses.
 type objectOutputHandler struct {
 	typ      string
-	declared string // "" declares the component's own object name
+	declared string           // "" declares the component's own object name
+	kind     schema.GroupKind // zero declares the kind of the handler's own object, a core ConfigMap
 }
 
 func (h *objectOutputHandler) CanHandle(t string) bool { return t == h.typ }
@@ -183,7 +184,11 @@ func (h *objectOutputHandler) Outputs(c *Component, _ LoweringContext) ([]Output
 	if name == "" {
 		name = c.ObjectName()
 	}
-	return []OutputDecl{{Key: "object", Role: NameRoleObject, Kind: schema.GroupKind{Kind: "ConfigMap"}, Default: c.Name, Name: name}}, nil
+	kind := h.kind
+	if kind.Empty() {
+		kind = schema.GroupKind{Kind: "ConfigMap"}
+	}
+	return []OutputDecl{{Key: "object", Role: NameRoleObject, Kind: kind, Default: c.Name, Name: name}}, nil
 }
 
 func TestOutputCheck_HandlerKindComponent(t *testing.T) {
@@ -210,6 +215,49 @@ func TestOutputCheck_HandlerKindComponent(t *testing.T) {
 	for i, err := range build(&objectOutputHandler{typ: "cfg", declared: "wrong"}, nil) {
 		if err == nil || !strings.Contains(err.Error(), `"wrong"`) || !strings.Contains(err.Error(), `"settings"`) {
 			t.Errorf("mismatch, entry point %d: error = %v, want both names", i, err)
+		}
+	}
+}
+
+// A handler's output names its one object, so its kind is the kind the handler
+// declares for that object (ComponentObject), the group included. The right
+// name under another kind, or under the same kind of another group, is refused
+// by every entry point; the right kind passes.
+func TestOutputCheck_HandlerOutputKindMustBeTheObjectsKind(t *testing.T) {
+	run := func(h *objectOutputHandler) []error {
+		tr := NewTransformer(map[string]ComponentHandler{"cfg": h}, nil)
+		app := func() *Application { return terminalApp(Component{Name: "settings", Type: "cfg"}) }
+		_, e1 := tr.Transform(app(), TransformContext{})
+		_, _, e2 := tr.TransformWithPolicy(app(), TransformContext{})
+		_, _, _, e3 := tr.TransformWithProvenance(app(), TransformContext{})
+		return []error{e1, e2, e3}
+	}
+	for i, err := range run(&objectOutputHandler{typ: "cfg", kind: schema.GroupKind{Kind: "ConfigMap"}}) {
+		if err != nil {
+			t.Errorf("right kind, entry point %d: %v", i, err)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		kind schema.GroupKind
+		want []string
+	}{
+		{"another kind", schema.GroupKind{Kind: "Secret"}, []string{"Secret", "ConfigMap"}},
+		{"same kind of another group", schema.GroupKind{Group: "example.com", Kind: "ConfigMap"}, []string{"ConfigMap.example.com", "ConfigMap"}},
+	} {
+		for i, err := range run(&objectOutputHandler{typ: "cfg", kind: tc.kind}) {
+			if err == nil {
+				t.Errorf("%s, entry point %d: no error, want the kind refused", tc.name, i)
+				continue
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("%s, entry point %d: error = %v, want it to name %q", tc.name, i, err, w)
+				}
+			}
+			if !strings.Contains(err.Error(), "kind") {
+				t.Errorf("%s, entry point %d: error = %v, want a kind refusal", tc.name, i, err)
+			}
 		}
 	}
 }
