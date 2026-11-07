@@ -1912,7 +1912,7 @@ and by scope, whatever component or trait emits it.
     `alertmanagerConfiguration.global`) is refused where `version` is below that
     version, which the refusal names; the operator's version comparisons are vendored
     and each is held to the list. An unset `version` is judged against the operator
-    release launcher vendors (v0.95.0, default v0.34.2), as the deployed operator's
+    release launcher vendors (v0.95.1, default v0.34.2), as the deployed operator's
     default is unknown at build time; at v0.34.2 no field is refused.
 - **Shipped: `thanosruler`, the ThanosRuler of the same API** (`thanosruler.go`, on
   what `monitoring_workload.go` shares): the strict projection of `ThanosRulerSpec`, built

@@ -19,7 +19,7 @@ import (
 // monitoringv1.PrometheusSpec the Prometheus operator reads only from some
 // Prometheus version on, or only below one, and the fields of its Thanos
 // sidecar it reads only from some Thanos version on, at prometheus-operator
-// v0.95.0.
+// v0.95.1.
 //
 // TestPrometheusVersionGates_MatchVendoredSource holds the tables to the
 // operator's source: every comparison of a version in the operator's packages
@@ -39,11 +39,11 @@ import (
 const (
 	// prometheusDefaultVersion is the version the operator configures for
 	// where version is unset (DefaultPrometheusVersion, the last entry of
-	// PrometheusCompatibilityMatrix, pkg/operator/defaults.go at v0.95.0).
+	// PrometheusCompatibilityMatrix, pkg/operator/defaults.go at v0.95.1).
 	prometheusDefaultVersion = "v3.14.0"
 	// prometheusThanosDefaultVersion is the version the operator configures
 	// the Thanos sidecar for where thanos.version is unset
-	// (DefaultThanosVersion, pkg/operator/defaults.go at v0.95.0).
+	// (DefaultThanosVersion, pkg/operator/defaults.go at v0.95.1).
 	prometheusThanosDefaultVersion = "v0.42.5"
 	// prometheusMajor2xMaximum is the least version of major 3: 3.0.0-0, as
 	// 3.0.0-rc.0 is already of major 3 for a check of the major alone.

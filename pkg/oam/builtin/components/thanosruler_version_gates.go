@@ -12,7 +12,7 @@ import (
 // The version gates of the thanosruler kind (go-kure/launcher#976; the class
 // is described in monitoring_version_gates.go): the fields of
 // monitoringv1.ThanosRulerSpec the Prometheus operator reads only from some
-// Thanos version on, at prometheus-operator v0.95.0.
+// Thanos version on, at prometheus-operator v0.95.1.
 //
 // TestThanosRulerVersionGates_MatchVendoredSource holds the table to the
 // operator's source: every comparison of a version in the operator's package
