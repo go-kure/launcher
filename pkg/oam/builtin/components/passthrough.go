@@ -513,13 +513,13 @@ func refuseWorkloadPodRules(u *unstructured.Unstructured) error {
 	// policyObject's error is the policy check's refusal to make, not these
 	// rules': an object it cannot read has no pod spec here to hold.
 	obj, err := policyObject(u)
-	if err != nil {
-		return nil
+	if err == nil {
+		if err = validateObjectMounts(obj); err != nil {
+			return err
+		}
+		return validateObjectPodRules(obj)
 	}
-	if err := validateObjectMounts(obj); err != nil {
-		return err
-	}
-	return validateObjectPodRules(obj)
+	return nil
 }
 
 // refuseRepeatedKeys refuses an object that holds a key twice in one JSON object, at
