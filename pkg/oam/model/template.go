@@ -13,7 +13,8 @@ const holeOpen = "${"
 // text, so a result keeps the CEL type of the expression.
 //
 // The scan finds the closing brace the way CEL reads the text: a `}` inside a string
-// literal does not close the hole, and a `{}` pair of a map literal nests.
+// literal or a `//` comment does not close the hole, and a `{}` pair of a map literal
+// nests.
 func scanHole(s string) (string, error) {
 	const want = "want exactly one ${ } hole and no other text"
 	if !strings.HasPrefix(s, holeOpen) {
@@ -46,6 +47,18 @@ func holeEnd(s string, i int) (int, error) {
 			}
 			i = j
 			continue
+		case '/':
+			// A comment runs from `//` to the end of the line, as in the CEL lexer
+			// (COMMENT : '//' (~'\n')*). A brace or a quote inside it is not syntax.
+			// With no newline the comment runs to the end of s, so the hole is not closed.
+			if strings.HasPrefix(s[i:], "//") {
+				nl := strings.IndexByte(s[i:], '\n')
+				if nl < 0 {
+					return 0, errors.New("the ${ hole is not closed")
+				}
+				i += nl
+				continue
+			}
 		case '{':
 			depth++
 		case '}':
