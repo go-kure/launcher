@@ -7,10 +7,11 @@ Package `model` defines the document format of a configuration-defined component
 CEL, and lists the parts (components and traits) that a component of the model type expands to.
 A user can add a component type without writing Go.
 
-This release step covers the format only. `model.Load` decodes a document and checks its
-shape. It does not compile or run any expression. The CEL environment, the lowering rule
-and the engine hooks arrive in later steps of go-kure/launcher#1261. A document that loads
-today keeps its meaning then.
+This release step covers the format and the CEL environment. `model.Load` decodes a document and
+checks its shape. It does not compile or run any expression. The package compiles the
+expressions of a loaded model against the environment below, and it does not run them yet. The
+lowering rule and the engine hooks arrive in later steps of go-kure/launcher#1261. A document
+that loads today keeps its meaning then.
 
 ## Document
 
@@ -49,13 +50,14 @@ spec:
 | `spec.parts` | At least one part. A model that expands to nothing is an error. |
 | `parts[].id` | A CEL identifier, unique in the model. Other parts read `parts.<id>`. |
 | `parts[].type`, `traits[].type` | A full identity, `name@version`. A short name and a missing version are refused. |
-| `parts[].when` | Optional expression. The part is emitted only when it is true. |
-| `parts[].forEach` | Optional `{as, in}`. `in` is an expression that gives a list. `as` is the loop variable, a CEL identifier. |
-| `parts[].name`, `properties`, `annotations` | Optional. Strings may hold `${ }` expressions. |
+| `parts[].when` | Optional. Exactly one `${ }` hole that gives a bool. The part is emitted only when it is true. It does not see the loop variable. |
+| `parts[].forEach` | Optional `{as, in}`. `in` is exactly one `${ }` hole that gives a list. `as` is the loop variable, a CEL identifier. A filter per element goes in `in`. |
+| `parts[].name`, `properties`, `annotations` | Optional. Strings may hold `${ }` expressions. `name` is a string template. |
 
 A string that is exactly one `${ expr }` keeps the CEL type of the result. A string with `${ }`
-inside is a string template. `$${` writes a literal `${`. Release one of the format does not
-compile these strings, so `Load` stores them as written.
+inside is a string template. `$${` writes a literal `${`. `values[].expr`, `when` and
+`forEach.in` take exactly one hole and no other text. `Load` stores all these strings as
+written and compiles none of them.
 
 Loading is always strict. An unknown field fails with its name and line. There is no `extends`
 and no `patches`. A file with more than one YAML document is refused. YAML anchors, aliases to
@@ -84,6 +86,36 @@ spelling are refused by the YAML decoder, like any two keys with the same spelli
 of decoded values do not look at the value under a null key. The refusal of anchors, aliases
 and merge keys reads the whole document before the decoding, so it applies under a null key
 too.
+
+## CEL environment (`celEnv: "1"`)
+
+The environment is the CEL standard library plus three extension libraries. Each library has a
+pinned version, because cel-go defaults every library to its newest version and a model would then
+change meaning on an upgrade. The versions are `ext.Strings` 5, `ext.Lists` 3 and `ext.Bindings` 1.
+A golden file lists every function and overload of the environment. A test fails when the list
+changes. No other library is available, so `math`, `sets` and the encoders are refused.
+
+A variable has a type from the input schema. `inputs.<name>` has the type of its schema. An
+`object` input is `map(string, dyn)` and a `types` union is `dyn`. A list inside an object
+input is therefore `dyn`. `self.name` and `self.application` are strings. `values.<name>` has
+the type of its expression. A value reads inputs and earlier values only.
+
+An optional input has no default and is not required. It is null when absent. Test it with
+`inputs.x == null`. `has(inputs.x)` is refused, because an input is a variable and not a map
+field. A null input in an operator or a method call, such as `inputs.x + 'a'`, compiles and fails
+at run time.
+
+Four rules keep an expression deterministic and bounded:
+
+- A comprehension (`map`, `filter`, `exists`, `all` and the like) ranges over a list only. A map
+  has no fixed key order. A `dyn` value has no known element type.
+- The function `dyn()` is refused, because it hides a type from the rule above.
+- An expression has at most 4096 code points, a parser recursion depth of 64 and 10000 nodes.
+  The node limit is a defensive bound. No input was found that reaches it under the size limit,
+  and that is not proven.
+- `cel.bind` nests at most 8 deep.
+
+The four numbers are start values. Raising a limit later breaks no model. Lowering one can.
 
 ## API
 
