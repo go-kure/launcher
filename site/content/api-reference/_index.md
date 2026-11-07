@@ -1,6 +1,6 @@
 ---
 title: "API Reference"
-weight: 35
+weight: 30
 ---
 
 Reference documentation for launcher's public Go packages. Each page below is
