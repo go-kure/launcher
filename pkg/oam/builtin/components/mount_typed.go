@@ -103,25 +103,13 @@ func validateTypedMount(label string, vm *corev1.VolumeMount) error {
 	return nil
 }
 
-// validateManifestMounts holds the pod spec of every typed workload object of
-// a manifests source to validateTypedVolumeMounts, whatever the environment
-// policy, and names the object in what it refuses.
-func validateManifestMounts(objs []client.Object) error {
-	for _, obj := range objs {
-		if err := validateObjectMounts(obj); err != nil {
-			return errors.Wrapf(err, "manifest source: object %s", renderedObjectRef(obj))
-		}
-	}
-	return nil
-}
-
 // validateObjectMounts holds the pod spec of one typed workload object to
 // validateTypedVolumeMounts and returns its refusal bare, for the caller to
-// name the object in. An object that runs no pod, and one that reached the
-// build untyped (a workload in an API version kure's scheme does not
-// register), passes: the latter has no typed pod spec to read, and the policy
-// check refuses it as unreadable (enforceRenderedObjectPolicy), which every
-// transform runs.
+// name the object in (validateManifestObjects for a manifests source). An
+// object that runs no pod, and one that reached the build untyped (a workload
+// in an API version kure's scheme does not register), passes: the latter has
+// no typed pod spec to read, and the policy check refuses it as unreadable
+// (enforceRenderedObjectPolicy), which every transform runs.
 func validateObjectMounts(obj client.Object) error {
 	path, ps := renderedPodSpec(obj)
 	if ps == nil {
