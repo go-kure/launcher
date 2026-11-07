@@ -190,10 +190,15 @@ func checkRuleOutputs(component string, decls []OutputDecl, outs []Output, claim
 }
 
 // checkHandlerOutputs holds the outputs a handler declared for comp against
-// the object name the transform resolved for comp (Component.ObjectName). A
-// handler's object is the one the engine names after the component, so only
-// the role object can be held.
-func checkHandlerOutputs(comp *Component, decls []OutputDecl, outs []Output) error {
+// the object the transform resolved for comp: its name (Component.ObjectName)
+// and its kind, the GroupKind the handler declares for that object
+// (ComponentObject), group included. A handler's object is the one the engine
+// names after the component, so only the role object can be held.
+func checkHandlerOutputs(comp *Component, handler ComponentHandler, decls []OutputDecl, outs []Output) error {
+	var objectKind schema.GroupKind
+	if p, ok := handler.(ComponentObjectProvider); ok {
+		objectKind, _ = p.ComponentObject()
+	}
 	for _, d := range decls {
 		if d.From != "" || d.Derive != nil {
 			continue
@@ -201,6 +206,10 @@ func checkHandlerOutputs(comp *Component, decls []OutputDecl, outs []Output) err
 		if d.Role != NameRoleObject {
 			return errors.Errorf("output %q of component %q is declared under role %q: a handler declares the one object it names after the component, role %q",
 				d.Key, comp.Name, d.Role, NameRoleObject)
+		}
+		if d.Kind != objectKind {
+			return errors.Errorf("output %q of component %q declares the object as kind %q, but the handler's object is kind %q",
+				d.Key, comp.Name, d.Kind, objectKind)
 		}
 		if d.Name != comp.ObjectName() {
 			return errors.Errorf("output %q of component %q declares the %s name %q, but the transform named the object %q",

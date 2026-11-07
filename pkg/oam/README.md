@@ -1874,7 +1874,8 @@ outputs as it lowers the component, and a difference fails the build, naming the
 the output key, the kind and both names. For a lowering rule the declaration must find exactly
 one name its lowering resolved for the same component, role, kind and default, and that name
 must equal the declared one; for a handler, which names one object, the declared name must be
-`Component.ObjectName`. All three entry points (`Transform`, `TransformWithPolicy`,
+`Component.ObjectName` and the declared kind the GroupKind the handler declares for that object
+(`ComponentObject`), group included. All three entry points (`Transform`, `TransformWithPolicy`,
 `TransformWithProvenance`) run the check. A provider whose declaration is malformed or
 whose query errs fails the build with its error: a malformed declaration is a defect of the
 provider, not a quiet empty list.
