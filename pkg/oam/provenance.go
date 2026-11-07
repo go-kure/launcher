@@ -282,21 +282,23 @@ func canonicalValue(v any) any {
 
 // snapshotValue is canonicalValue for the value a propIndex records. A named int32 or
 // int64 is kept as a namedInt there, not folded to an int, because a number schema writes
-// it back as an int32 or an int64 and an integer schema as an int; sameValue accepts both.
+// it back as an int32 or an int64 and an integer schema as an int; sameValue accepts both,
+// and either width, since the integer is the same.
 func snapshotValue(v any) any {
 	return canonicalWalk(reflect.ValueOf(v), map[collectionID]bool{}, true)
 }
 
-// namedInt is a named int32 or int64 in a snapshot, with the width of its kind. It is the
-// one value canonical form builds that sameValue compares through its kind.
+// namedInt is a named int32 or int64 in a snapshot. It marks that the value was named, so
+// that sameValue accepts the int, int32 or int64 validation wrote for it. A plain int32 or
+// int64 is not marked and keeps its width (go-kure/launcher#1308). It is the one value
+// canonical form builds that sameValue compares through its number.
 type namedInt struct {
-	v    int64
-	kind reflect.Kind
+	v int64
 }
 
 // canonicalWalk is canonicalValue with onPath, the maps and slices being copied above rv,
-// and keepWidth, which keeps a named int32 or int64 as a namedInt.
-func canonicalWalk(rv reflect.Value, onPath map[collectionID]bool, keepWidth bool) any {
+// and keepNamed, which keeps a named int32 or int64 as a namedInt.
+func canonicalWalk(rv reflect.Value, onPath map[collectionID]bool, keepNamed bool) any {
 	switch rv.Kind() {
 	case reflect.Invalid:
 		return nil
@@ -304,7 +306,7 @@ func canonicalWalk(rv reflect.Value, onPath map[collectionID]bool, keepWidth boo
 		if rv.IsNil() {
 			return nil
 		}
-		return canonicalWalk(rv.Elem(), onPath, keepWidth)
+		return canonicalWalk(rv.Elem(), onPath, keepNamed)
 	case reflect.Map:
 		stringKeys := rv.Type().Key().Kind() == reflect.String
 		if rv.IsNil() {
@@ -321,13 +323,13 @@ func canonicalWalk(rv reflect.Value, onPath map[collectionID]bool, keepWidth boo
 		if !stringKeys {
 			out := make(map[any]any, rv.Len())
 			for it := rv.MapRange(); it.Next(); {
-				out[it.Key().Interface()] = canonicalWalk(it.Value(), onPath, keepWidth)
+				out[it.Key().Interface()] = canonicalWalk(it.Value(), onPath, keepNamed)
 			}
 			return out
 		}
 		out := make(map[string]any, rv.Len())
 		for it := rv.MapRange(); it.Next(); {
-			out[it.Key().String()] = canonicalWalk(it.Value(), onPath, keepWidth)
+			out[it.Key().String()] = canonicalWalk(it.Value(), onPath, keepNamed)
 		}
 		return out
 	case reflect.Slice:
@@ -341,17 +343,17 @@ func canonicalWalk(rv reflect.Value, onPath map[collectionID]bool, keepWidth boo
 			onPath[idOf(rv)] = true
 			defer delete(onPath, idOf(rv))
 		}
-		return canonicalElements(rv, onPath, keepWidth)
+		return canonicalElements(rv, onPath, keepNamed)
 	case reflect.Array:
-		return canonicalElements(rv, onPath, keepWidth)
+		return canonicalElements(rv, onPath, keepNamed)
 	case reflect.Pointer, reflect.Struct:
 		return copyTyped(rv, map[copyKey]reflect.Value{}).Interface()
 	case reflect.Int8, reflect.Int16:
 		return int(rv.Int())
 	case reflect.Int, reflect.Int32, reflect.Int64:
 		if i := rv.Int(); isNamedScalar(rv) && int64(int(i)) == i {
-			if keepWidth && rv.Kind() != reflect.Int {
-				return namedInt{v: i, kind: rv.Kind()}
+			if keepNamed && rv.Kind() != reflect.Int {
+				return namedInt{v: i}
 			}
 			return int(i)
 		}
@@ -459,10 +461,10 @@ func copyTyped(rv reflect.Value, copies map[copyKey]reflect.Value) reflect.Value
 }
 
 // canonicalElements is the []any of the canonical elements of a slice or array.
-func canonicalElements(rv reflect.Value, onPath map[collectionID]bool, keepWidth bool) []any {
+func canonicalElements(rv reflect.Value, onPath map[collectionID]bool, keepNamed bool) []any {
 	out := make([]any, rv.Len())
 	for i := range out {
-		out[i] = canonicalWalk(rv.Index(i), onPath, keepWidth)
+		out[i] = canonicalWalk(rv.Index(i), onPath, keepNamed)
 	}
 	return out
 }
@@ -584,12 +586,12 @@ func asNamedInt(v reflect.Value) (namedInt, bool) {
 	if v.Type() != reflect.TypeFor[namedInt]() {
 		return namedInt{}, false
 	}
-	return namedInt{v: v.Field(0).Int(), kind: reflect.Kind(v.Field(1).Uint())}, true
+	return namedInt{v: v.Field(0).Int()}, true
 }
 
 // sameAsNamedInt reports whether o is the value n stands for: the int an integer schema
-// writes, the predeclared int32 or int64 a number schema writes, or the same namedInt. A
-// different number, another width and a float are other values.
+// writes, the predeclared int32 or int64 a number schema writes, whichever width it has, or
+// the same namedInt. A different number and a float are other values.
 func sameAsNamedInt(n namedInt, o reflect.Value) bool {
 	for o.Kind() == reflect.Interface && !o.IsNil() {
 		o = o.Elem()
@@ -601,7 +603,7 @@ func sameAsNamedInt(n namedInt, o reflect.Value) bool {
 		return m == n
 	}
 	switch o.Type() {
-	case reflect.TypeFor[int](), predeclaredScalarTypes[n.kind]:
+	case reflect.TypeFor[int](), reflect.TypeFor[int32](), reflect.TypeFor[int64]():
 		return o.Int() == n.v
 	}
 	return false
