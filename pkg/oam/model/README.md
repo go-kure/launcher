@@ -95,6 +95,12 @@ change meaning on an upgrade. The versions are `ext.Strings` 5, `ext.Lists` 3 an
 A golden file lists every function and overload of the environment. A test fails when the list
 changes. No other library is available, so `math`, `sets` and the encoders are refused.
 
+The golden file pins what the environment holds. Some names in it start with `@`:
+`cel.@block`, `@in`, `@not_strictly_false` and `@sortByAssociatedKeys`. CEL source cannot spell
+an identifier with `@`, so a model cannot call them. Macros reach them. The function
+`__not_strictly_false__` can be spelled in source. It takes a bool and gives a bool, so it is
+reachable but inert.
+
 A variable has a type from the input schema. `inputs.<name>` has the type of its schema. An
 `object` input is `map(string, dyn)` and a `types` union is `dyn`. A list inside an object
 input is therefore `dyn`. `self.name` and `self.application` are strings. `values.<name>` has
