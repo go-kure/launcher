@@ -113,6 +113,21 @@ type PropertySchema struct {
 	// A consumer that predates Gate ignores it and accepts the value, as it did
 	// before the field existed; the field is additive for it.
 	Gate string `json:"gate,omitempty" yaml:"gate,omitempty"`
+	// GatedPaths names the feature gates of fields below this node that its schema
+	// does not declare: a node left open (AdditionalProperties with no Properties)
+	// takes its content from a strict decode into a Kubernetes type, so the gate
+	// check cannot find a Gate there (go-kure/launcher#1245). A key is a path
+	// relative to the node, dotted, with "[]" after the key of an array whose every
+	// element is walked (`env[].valueFrom.fileKeyRef`); the value is the gate, a row
+	// of the lifecycle table in featuregates.go, with Gate's meaning. Only the gate
+	// check reads it: property validation does not, so what a document is accepted
+	// as, and the text of its other refusals, are the same with or without it. Like
+	// Gate, only meaningful for handler properties: the two flat call sites reject
+	// the key at decode time (flatschema.go's key allow-sets).
+	//
+	// A consumer that predates GatedPaths ignores it and accepts the value, as it did
+	// before the field existed; the field is additive for it.
+	GatedPaths map[string]string `json:"gatedPaths,omitempty" yaml:"gatedPaths,omitempty"`
 }
 
 // ExclusiveGroup is one group of PropertySchema.Exclusive: keys of one object, at

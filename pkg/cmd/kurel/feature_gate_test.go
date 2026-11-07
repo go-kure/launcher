@@ -30,6 +30,14 @@ func TestFeatureGates_TableAndSchemasAgree(t *testing.T) {
 				t.Errorf("%s: Gate %q names no row of the lifecycle table", path, node.Gate)
 			}
 		}
+		// The gates an open schema names for fields below it (go-kure/launcher#1245)
+		// are held to the table in both directions as the declared ones are.
+		for p, gate := range node.GatedPaths {
+			used[gate] = true
+			if _, ok := oam.FeatureGateOnByDefault(gate); !ok {
+				t.Errorf("%s: GatedPaths %q names gate %q, which names no row of the lifecycle table", path, p, gate)
+			}
+		}
 		for _, k := range sortedSchemaKeys(node.Properties) {
 			visit(path+"."+k, node.Properties[k])
 		}

@@ -73,18 +73,25 @@ same string works in both.
   | Gate | On by default from | Properties |
   |---|---|---|
   | `EnvFiles` | 1.35 | `env[].valueFrom.fileKeyRef` |
-  | `ContainerRestartRules` | 1.35 | an init container's `restartPolicyRules` (its `restartPolicy` values `Never` and `OnFailure` share the gate and are not checked: `Always` is accepted at every version) |
+  | `ContainerRestartRules` | 1.35 | `restartPolicyRules` (an init container's on the workload kinds; any container's on the raw-PodSpec kinds below) (its `restartPolicy` values `Never` and `OnFailure` share the gate and are not checked: `Always` is accepted at every version) |
   | `PodLevelResources` | 1.34 | `podResources` (the pod kinds' `resources`) |
   | `HostnameOverride` | 1.35 | `hostnameOverride` |
 
-- **Open schemas are not reached.** The check walks the declared schema, so it stops at an
-  object that declares no `Properties`. The raw-PodSpec kinds (`pod`, and the kinds that
-  take a pod template) leave their containers and template spec open, and these gated
-  paths are therefore not checked on them: `env[].valueFrom.fileKeyRef` of `containers[]`
-  and `initContainers[]`, `initContainers[].restartPolicyRules`, and
-  `template.spec.hostnameOverride` and `template.spec.resources` of a pod template.
-  Declaring them as nested `Properties` would make the validator type-check and null-strip
-  them, which changes what is accepted; the options are in go-kure/launcher#1245.
+- **Open schemas name their gated paths.** The check walks the declared schema, so it stops
+  at an object that declares no `Properties`. The raw-PodSpec kinds (`pod`, and the kinds
+  that take a pod template: `podtemplate`, `replicaset`, `replicationcontroller`) leave
+  their containers and template spec open, so the open node carries
+  `PropertySchema.GatedPaths` (published as `gatedPaths`): gate-relative paths to the gate
+  that field needs, such as `env[].valueFrom.fileKeyRef` to `EnvFiles`. The check reads it
+  and refuses the same way as for a declared `Gate`, naming the authored path
+  (`template.spec.containers[0].env[0].valueFrom.fileKeyRef`). Property validation does not
+  read it, so what a document is accepted as is unchanged. The paths are
+  `env[].valueFrom.fileKeyRef` and `restartPolicyRules` of `containers[]` and
+  `initContainers[]`, and `hostnameOverride` and `resources` of the pod
+  spec (`template.spec.*` on a pod template). Declaring them as nested `Properties`
+  instead would make the validator type-check and null-strip them, which changes what is
+  accepted (go-kure/launcher#1245). A test holds every gate a `gatedPaths` value names to a
+  row of the table and every path to a field of the Kubernetes type.
 - **Newer than launcher knows.** A release above the `k8s.io/api` version launcher is built
   against is a valid target: a newer cluster is not wrong. The table then reads every gate
   it knows as on, and says nothing about a gate it does not know.
