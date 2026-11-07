@@ -2560,8 +2560,11 @@ statement about the generated objects: entries key property paths.
 
 [`pkg/oam/builtin/registry`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/registry)
 returns every built-in handler and lowering rule launcher implements, one map per
-registration call, keyed by type. Registering all five gives the transformer `kurel build`
-uses:
+registration call, keyed by type. Registering all five, then declaring the type identities
+with `DeclareTypes`, gives the transformer `kurel build` uses (`pkg/cmd/kurel/build.go`
+registers the same set and declares the types last). `DeclareTypes` declares the versioned identities a document may author
+for the registered types, such as `deployment.apps@v1` or `webservice@v1` (see
+[Type identity](#type-identity)), so it runs after the registration:
 
 ```go
 t := oam.NewTransformer(registry.ComponentHandlers(), nil)
@@ -2577,11 +2580,20 @@ for name, h := range registry.PolicyHandlers() {
 for _, r := range registry.TraitLoweringRules() {
 	t.RegisterBuiltinTraitLowering(r)
 }
+if err := registry.DeclareTypes(t); err != nil {
+	return err
+}
 ```
+
+The `registry` package documentation holds the canonical copy of this example.
 
 Each call returns a new map, so a consumer drops or replaces entries before it registers
 them, and the change reaches no other caller; a type launcher adds later appears there
-without a change on the consumer's side. Built-in traits and trait lowering rules go
+without a change on the consumer's side. `registry.DeclareTypes` is refused for a built-in type
+the Transformer does not hold, so a consumer that dropped one does not call it: it passes
+`DeclareComponentTypes`, `DeclareTraitTypes` and `DeclarePolicyTypes` the maps that
+`ComponentTypeIDs()`, `TraitTypeIDs()` and `PolicyTypeIDs()` return, with the same entries
+deleted. Built-in traits and trait lowering rules go
 through `RegisterBuiltinTrait` and `RegisterBuiltinTraitLowering`, which exempt them from a
 `CapabilityDefinition` of the same type. A consumer that replaces a lowered type (such as
 `webservice`) with a handler of its own deletes it from `ComponentLoweringRules()` first:
