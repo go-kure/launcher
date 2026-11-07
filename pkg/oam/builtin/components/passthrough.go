@@ -465,8 +465,9 @@ func (c *PassthroughConfig) validated() (*unstructured.Unstructured, error) {
 	// A container name used twice in a workload's pod is refused, policy or none
 	// (go-kure/launcher#1253): the API server refuses such a pod. It runs first,
 	// in the order the typed pod reader applies the checks
-	// (validateAuthoredPodSpec), so every delivery path refuses an object with
-	// the same first error.
+	// (validateAuthoredPodSpec), so a passthrough component and a chart refuse an
+	// object with the same first error. The manifests source orders mounts before
+	// container names (go-kure/launcher#1297).
 	if err := refuseWorkloadContainerNames(u); err != nil {
 		return nil, errors.Wrapf(err, "passthrough component %q: object %s", c.componentName, renderedObjectRef(u))
 	}
