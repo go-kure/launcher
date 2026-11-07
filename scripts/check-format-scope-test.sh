@@ -88,6 +88,15 @@ expect "trailer with an empty reason" 1 "Format-Scope" $DEV pkg/oam/validate.go 
 expect "trailer with a blank reason" 1 "Format-Scope" $DEV pkg/oam/validate.go $'fix(oam): x\n\nFormat-Scope: none (   )'
 expect "trailer with no parentheses" 1 "Format-Scope" $DEV pkg/oam/validate.go $'fix(oam): x\n\nFormat-Scope: none'
 expect "trailer on the subject line only" 1 "Format-Scope" $DEV pkg/oam/validate.go 'fix(oam): x Format-Scope: none (reason)'
+# The builtin handlers refuse and build in one method, and their data tables refuse without
+# building an error, so every non-test .go file under pkg/oam/builtin/ counts (go-kure/launcher#1310).
+expect "builtin component handler" 1 "pkg/oam/builtin/components/typed_pod_rules.go" $DEV pkg/oam/builtin/components/typed_pod_rules.go 'fix(components): x'
+expect "builtin component data table" 1 "pkg/oam/builtin/components/kind_required.go" $DEV pkg/oam/builtin/components/kind_required.go 'fix(oam): x'
+expect "builtin trait schema" 1 "pkg/oam/builtin/traits/schema.go" $DEV pkg/oam/builtin/traits/schema.go 'feat(traits): x'
+expect "builtin policy handler" 1 "pkg/oam/builtin/policies/placement.go" $DEV pkg/oam/builtin/policies/placement.go 'fix(oam): x'
+expect "builtin registry" 1 "pkg/oam/builtin/registry/registry.go" $DEV pkg/oam/builtin/registry/registry.go 'feat(registry): x'
+expect "builtin top-level handler" 1 "pkg/oam/builtin/networkpolicy.go" $DEV pkg/oam/builtin/networkpolicy.go 'fix(oam): x'
+expect "builtin file with an empty trailer reason" 1 "Format-Scope" $DEV pkg/oam/builtin/components/typed_pod_rules.go $'fix(components): x\n\nFormat-Scope: none ()'
 
 # ── must pass ────────────────────────────────────────────────────────────────
 expect "validate.go under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/validate.go 'fix(format): x'
@@ -104,6 +113,19 @@ expect "trailer after other trailers" 0 "" $DEV pkg/oam/validate.go $'fix(oam): 
 expect "Renovate-authored change" 0 "1 Renovate commit(s) skipped" renovate@whitesourcesoftware.com pkg/oam/validate.go 'chore(deps): x'
 # CI passes the PR head with --head; a range that stops before the commit is clean.
 expect "head before the acceptance commit" 0 "0 commit(s)" $DEV pkg/oam/validate.go 'fix(oam): x' "" base
+# A builtin file under the format scope or the trailer passes, as the six listed files do.
+expect "builtin handler under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/builtin/components/typed_pod_rules.go 'fix(format): x'
+expect "builtin handler with a trailer reason" 0 "" $DEV pkg/oam/builtin/components/typed_pod_rules.go $'refactor(components): x\n\nFormat-Scope: none (comment only)'
+# Not part of the rule: tests, contract metadata, the package comment, vendored input,
+# non-Go files, and a path that only contains the prefix.
+expect "builtin test file" 0 "" $DEV pkg/oam/builtin/components/typed_pod_rules_test.go 'fix(components): x'
+expect "builtin components contract.go" 0 "" $DEV pkg/oam/builtin/components/contract.go 'fix(components): x'
+expect "builtin top-level contract.go" 0 "" $DEV pkg/oam/builtin/contract.go 'fix(oam): x'
+expect "builtin policies doc.go" 0 "" $DEV pkg/oam/builtin/policies/doc.go 'docs(oam): x'
+expect "builtin vendored testdata .go" 0 "" $DEV pkg/oam/builtin/components/testdata/upstream/kubernetes/pkg/apis/core/v1/x.go 'chore(deps): x'
+expect "builtin README" 0 "" $DEV pkg/oam/builtin/components/README.md 'docs(components): x'
+expect "prefix inside another path" 0 "" $DEV pkg/other/pkg/oam/builtin/components/x.go 'fix(oam): x'
+expect "sibling directory sharing the prefix" 0 "" $DEV pkg/oam/builtinx/foo.go 'fix(oam): x'
 
 # ── usage errors ─────────────────────────────────────────────────────────────
 expect "unresolvable base" 2 "is not a commit" $DEV pkg/oam/validate.go 'fix(oam): x' no-such-base
@@ -182,6 +204,31 @@ if git -C "$REPO_ROOT" rev-parse --verify --quiet "$control^{commit}" >/dev/null
   check "positive control: the disruption-trait commit fails" 1 "${control:0:8}" "$rc" "$out"
 else
   echo "SKIP positive control: $control is not in this clone (shallow checkout)"
+  skip=$((skip + 1))
+fi
+
+# ── real-repo controls for the builtin path rule (go-kure/launcher#1310) ─────────
+# 5a69e39a changed five production files under pkg/oam/builtin/components/ under a
+# non-format subject, so the guard must fail it and name one of them.
+# 660315cd changed six production files under fix(format), so the guard must pass it.
+control_builtin_fail=5a69e39a
+if git -C "$REPO_ROOT" rev-parse --verify --quiet "$control_builtin_fail^{commit}" >/dev/null &&
+   git -C "$REPO_ROOT" rev-parse --verify --quiet "$control_builtin_fail^^{commit}" >/dev/null; then
+  rc=0
+  out="$(bash "$GATE" --root "$REPO_ROOT" --commits "$control_builtin_fail^" --head "$control_builtin_fail" 2>&1)" || rc=$?
+  check "positive control: the builtin handler commit fails" 1 "typed_pod_rules.go" "$rc" "$out"
+else
+  echo "SKIP positive control: $control_builtin_fail is not in this clone (shallow checkout)"
+  skip=$((skip + 1))
+fi
+control_builtin_pass=660315cd
+if git -C "$REPO_ROOT" rev-parse --verify --quiet "$control_builtin_pass^{commit}" >/dev/null &&
+   git -C "$REPO_ROOT" rev-parse --verify --quiet "$control_builtin_pass^^{commit}" >/dev/null; then
+  rc=0
+  out="$(bash "$GATE" --root "$REPO_ROOT" --commits "$control_builtin_pass^" --head "$control_builtin_pass" 2>&1)" || rc=$?
+  check "negative control: the fix(format) builtin commit passes" 0 "" "$rc" "$out"
+else
+  echo "SKIP negative control: $control_builtin_pass is not in this clone (shallow checkout)"
   skip=$((skip + 1))
 fi
 
