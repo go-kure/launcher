@@ -1639,14 +1639,16 @@ a property whose gate is off by default at that release refused (go-kure/launche
 (`EnvFiles`) and an init container's `restartPolicyRules` below 1.35
 (`ContainerRestartRules`), on the kinds whose schema declares them. The gate and the
 release are in the property's published schema (`gate`). With no version stated nothing
-is checked. Two limits: the `Never` and `OnFailure` values of an init container's
+is checked. One limit: the `Never` and `OnFailure` values of an init container's
 `restartPolicy` share `ContainerRestartRules` and are not checked
-(go-kure/launcher#1230), and on the raw-PodSpec kinds (`pod` and the kinds that take a
-pod template) the check does not reach the gated paths under their open schemas:
-`env[].valueFrom.fileKeyRef` of `containers[]` and `initContainers[]`,
-`initContainers[].restartPolicyRules`, and `template.spec.hostnameOverride` and
-`template.spec.resources` of a pod template. Their schemas leave those objects open, and
-the check reads declared schema only (go-kure/launcher#1245).
+(go-kure/launcher#1230). The raw-PodSpec kinds (`pod` and the kinds that take a pod
+template: `podtemplate`, `replicaset`, `replicationcontroller`) leave their containers and
+template spec open, and the check reads declared schema, so their open nodes name the
+gated paths in `gatedPaths` instead: `env[].valueFrom.fileKeyRef` and `restartPolicyRules` of `containers[]` and
+`initContainers[]`, and `hostnameOverride` and
+`resources` of the pod spec (`template.spec.*` on a pod template). A path is refused the
+same way, naming the authored path (go-kure/launcher#1245); property validation does not
+read `gatedPaths`, so what a document is accepted as does not change.
 
 | Property | Type | Effect | Kind |
 |----------|------|--------|------|

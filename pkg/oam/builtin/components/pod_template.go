@@ -17,9 +17,13 @@ import (
 // creates from it carry the `app` label.
 
 // podTemplateSchema is the schema of a `template` property: an open object
-// decoded strictly into corev1.PodTemplateSpec.
+// decoded strictly into corev1.PodTemplateSpec. It names the gated paths of the pod
+// spec under it (podTemplateGatedPaths), which the open schema hides from the gate
+// check.
 func podTemplateSchema(desc string) oam.PropertySchema {
-	return podObjectSchema(desc, "PodTemplateSpec")
+	s := podObjectSchema(desc, "PodTemplateSpec")
+	s.GatedPaths = podTemplateGatedPaths()
+	return s
 }
 
 // podTemplateDefaultedZeros is the defaulted-zero list of a spec whose pod

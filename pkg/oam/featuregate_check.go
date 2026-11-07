@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -121,16 +122,12 @@ func checkGatedValue(field PropertySchema, value any, path string, target Kubern
 		return nil
 	}
 	if field.Gate != "" {
-		on, err := gateEnabled(field.Gate, target, nil)
-		if err != nil {
+		if err := refuseGateBelow(field.Gate, path, target); err != nil {
 			return err
 		}
-		if !on {
-			g, _ := lookupFeatureGate(field.Gate)
-			return errors.Errorf("%s: requires the Kubernetes feature gate %s, which is on by default from %s, "+
-				"and the ClusterProfile's kubernetesVersion is %s; remove the field or raise spec.kubernetesVersion",
-				path, g.Name, g.OnByDefault, target)
-		}
+	}
+	if err := checkGatedPaths(field.GatedPaths, value, path, target); err != nil {
+		return err
 	}
 	if obj, ok := asObjectValue(value); ok && len(field.Properties) > 0 {
 		return checkGatedProperties(field.Properties, obj, path, target)
@@ -140,6 +137,69 @@ func checkGatedValue(field PropertySchema, value any, path string, target Kubern
 			if err := checkGatedValue(*field.Items, item, fmt.Sprintf("%s[%d]", path, i), target); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// refuseGateBelow refuses the authored value at path when gate is off by default at
+// target, naming the path, the gate, the release where it turns on and the target.
+func refuseGateBelow(gate, path string, target KubernetesVersion) error {
+	on, err := gateEnabled(gate, target, nil)
+	if err != nil {
+		return err
+	}
+	if on {
+		return nil
+	}
+	g, _ := lookupFeatureGate(gate)
+	return errors.Errorf("%s: requires the Kubernetes feature gate %s, which is on by default from %s, "+
+		"and the ClusterProfile's kubernetesVersion is %s; remove the field or raise spec.kubernetesVersion",
+		path, g.Name, g.OnByDefault, target)
+}
+
+// checkGatedPaths refuses the first authored value, in sorted path order, that sits at
+// one of paths (PropertySchema.GatedPaths) below value and whose gate is off at target.
+// A path whose key is absent, null or of the wrong shape on the way is not its
+// business, as in checkGatedProperties.
+func checkGatedPaths(paths map[string]string, value any, path string, target KubernetesVersion) error {
+	for _, p := range slices.Sorted(maps.Keys(paths)) {
+		if err := checkGatedPath(strings.Split(p, "."), paths[p], value, path, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkGatedPath walks the keys of one GatedPaths path down value; a key ending in
+// "[]" names an array whose every element is walked further.
+func checkGatedPath(keys []string, gate string, value any, path string, target KubernetesVersion) error {
+	if isNullValue(value) {
+		return nil
+	}
+	if len(keys) == 0 {
+		return refuseGateBelow(gate, path, target)
+	}
+	obj, ok := asObjectValue(value)
+	if !ok {
+		return nil
+	}
+	key, each := strings.CutSuffix(keys[0], "[]")
+	next, ok := obj[key]
+	if !ok {
+		return nil
+	}
+	path += "." + key
+	if !each {
+		return checkGatedPath(keys[1:], gate, next, path, target)
+	}
+	items, ok := asArrayValue(next)
+	if !ok {
+		return nil
+	}
+	for i, item := range items {
+		if err := checkGatedPath(keys[1:], gate, item, fmt.Sprintf("%s[%d]", path, i), target); err != nil {
+			return err
 		}
 	}
 	return nil

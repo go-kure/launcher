@@ -3108,14 +3108,15 @@ rows of one table in `featuregates.go` (name, first release with Default true, r
 Kubernetes feature gates reference), held to the schemas by tests in both directions: a `Gate`
 no row names, or a row no schema uses, fails (go-kure/launcher#1183). Only Kubernetes core
 properties of the built-in components carry one today: `EnvFiles`
-(`env[].valueFrom.fileKeyRef`), `ContainerRestartRules` (an init container's
-`restartPolicyRules`), `PodLevelResources` (`podResources`) and `HostnameOverride`
+(`env[].valueFrom.fileKeyRef`), `ContainerRestartRules` (`restartPolicyRules`: an init
+container's on the workload kinds, any container's on the raw-PodSpec kinds below), `PodLevelResources` (`podResources`) and `HostnameOverride`
 (`hostnameOverride`). The check reads the declared schema, so it stops at an open object
-(`AdditionalProperties` with no `Properties`), so on the raw-PodSpec kinds (`pod` and the
-kinds that take a pod template) four paths are not reached: `env[].valueFrom.fileKeyRef` of
-`containers[]` and `initContainers[]`, `initContainers[].restartPolicyRules`, and
-`template.spec.hostnameOverride` and `template.spec.resources` of a pod template
-(go-kure/launcher#1245).
+(`AdditionalProperties` with no `Properties`). The raw-PodSpec kinds (`pod` and the kinds
+that take a pod template) leave their containers and template spec open, and their open
+nodes carry `GatedPaths` (published as `gatedPaths`) instead: gate-relative paths
+(`env[].valueFrom.fileKeyRef`, with `[]` after an array key) to the gate the field needs,
+read by the gate check alone, so property validation and what a document is accepted as do
+not change (go-kure/launcher#1245). A consumer that predates `gatedPaths` ignores it.
 
 Separately, `validateProperties` (`property_validate.go`) checks an EMITTED
 component/trait/policy's properties against its TARGET handler's declared schema —
