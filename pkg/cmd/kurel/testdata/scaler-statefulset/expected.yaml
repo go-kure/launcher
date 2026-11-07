@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: db
+    launcher.gokure.dev/component: db
+  name: db
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: db
+  serviceName: db-headless
+  template:
+    metadata:
+      labels:
+        app: db
+        launcher.gokure.dev/component: db
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - image: ghcr.io/example/postgres:v15.0
+        name: db
+        ports:
+        - containerPort: 5432
+          name: tcp
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: data
+  updateStrategy: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+    status: {}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  labels:
+    app: db
+    launcher.gokure.dev/component: db
+  name: db-hpa
+  namespace: default
+spec:
+  maxReplicas: 10
+  metrics:
+  - resource:
+      name: cpu
+      target:
+        averageUtilization: 80
+        type: Utilization
+    type: Resource
+  minReplicas: 2
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: db
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: db-headless
+    launcher.gokure.dev/component: db-headless
+  name: db-headless
+  namespace: default
+spec:
+  clusterIP: None
+  ports:
+  - name: tcp
+    port: 5432
+    protocol: TCP
+    targetPort: 5432
+  selector:
+    app: db
+  type: ClusterIP

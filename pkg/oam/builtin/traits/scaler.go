@@ -1,6 +1,8 @@
 package traits
 
 import (
+	"strings"
+
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -48,6 +50,9 @@ func (h *ScalerHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 		return err
 	}
 	config.TargetName = trait.ComponentObjectName()
+	if err := config.setScaleTarget(trait.ComponentType(), app.Name); err != nil {
+		return err
+	}
 	subAppName, err := resolveSubApplicationName(trait, app.Name+"-scaler")
 	if err != nil {
 		return err
@@ -59,6 +64,26 @@ func (h *ScalerHandler) Apply(trait *oam.Trait, app *stack.Application, bundle *
 		config,
 	)
 	bundle.Applications = append(bundle.Applications, scalerApp)
+	return nil
+}
+
+// setScaleTarget sets the workload the HorizontalPodAutoscaler scales from the
+// settled type of the component (oam.ScalerTargetFor), go-kure/launcher#1268. A
+// trait with no component type (Apply called outside a transform) keeps the
+// default, a Deployment. Inside a transform a type with no row in the table is
+// an error naming the component and the type, with no silent Deployment
+// fallback: admission refuses such a type, but a transformer that registers no
+// lowering rules skips validation and still calls Apply.
+func (c *ScalerConfig) setScaleTarget(componentType, componentName string) error {
+	if componentType == "" {
+		return nil
+	}
+	target, ok := oam.ScalerTargetFor(componentType)
+	if !ok {
+		return errors.Errorf("trait %q: component %q has type %q, which has no workload a HorizontalPodAutoscaler scales; supported types: %s",
+			"scaler", componentName, componentType, strings.Join(oam.ScalerComponentTypes(), ", "))
+	}
+	c.targetAPIVersion, c.targetKind = target.APIVersion, target.Kind
 	return nil
 }
 
@@ -191,7 +216,7 @@ type nonRWXClaimer interface {
 }
 
 // replicaScaler is implemented by the config of a scaler sub-application:
-// ScaledReplicas names the Deployment the HorizontalPodAutoscaler scales and
+// ScaledReplicas names the workload the HorizontalPodAutoscaler scales and
 // the minimum replica count it holds. A config that scales nothing returns ""
 // and 0, and a caller tests the returned value (go-kure/launcher#1196).
 // After the transform the scaler's config sits under the ownership wrapper, so
@@ -199,6 +224,13 @@ type nonRWXClaimer interface {
 // application's config.
 type replicaScaler interface {
 	ScaledReplicas() (target string, minReplicas int32)
+}
+
+// scaleTargetKinder is implemented by the same config: the kind of the workload
+// ScaledReplicas names, a separate method so that the ScaledReplicas signature
+// stays what its other callers and probes assert (go-kure/launcher#1268).
+type scaleTargetKinder interface {
+	ScaleTargetKind() string
 }
 
 // ScalerConfig implements stack.ApplicationConfig for scaler traits.
@@ -217,11 +249,18 @@ type ScalerConfig struct {
 	HPAName string
 	PDBName string
 
-	// TargetName is the name of the Deployment the HPA scales: the component's
+	// TargetName is the name of the workload the HPA scales: the component's
 	// object name (oam.Trait.ComponentObjectName), stored by Apply. "" on a
 	// config built directly leaves the component name. The HPA and PDB default
 	// names and the PDB selector keep the component name whatever this is.
 	TargetName string
+
+	// targetAPIVersion and targetKind are the workload the HPA scales, set by
+	// Apply from the settled component type (setScaleTarget). "" on a config
+	// built directly, or on a trait with no component type, leaves the Deployment
+	// (oam.DefaultScaleTarget).
+	targetAPIVersion string
+	targetKind       string
 
 	explicitMinReplicas bool
 	explicitMaxReplicas bool
@@ -245,7 +284,7 @@ func (c *ScalerConfig) ComponentName() string { return c.componentName }
 // (enablePDB). The disruption trait reads it to refuse a second budget.
 func (c *ScalerConfig) GeneratesPDB() bool { return c.EnablePDB }
 
-// targetName is the name of the Deployment the HorizontalPodAutoscaler scales:
+// targetName is the name of the workload the HorizontalPodAutoscaler scales:
 // TargetName, else the component name.
 func (c *ScalerConfig) targetName() string {
 	if c.TargetName == "" {
@@ -254,7 +293,21 @@ func (c *ScalerConfig) targetName() string {
 	return c.TargetName
 }
 
-// ScaledReplicas implements replicaScaler: the Deployment the HPA scales and
+// scaleTarget is the apiVersion and kind the HorizontalPodAutoscaler scales: the
+// ones setScaleTarget stored, else a Deployment.
+func (c *ScalerConfig) scaleTarget() oam.ScaleTarget {
+	if c.targetKind == "" {
+		return oam.DefaultScaleTarget
+	}
+	return oam.ScaleTarget{APIVersion: c.targetAPIVersion, Kind: c.targetKind}
+}
+
+// ScaleTargetKind implements scaleTargetKinder: the kind of the workload the HPA
+// scales, "Deployment" or "StatefulSet". topology-spread reads it so that the
+// scaler of a StatefulSet is not taken for the scaler of a same-name Deployment.
+func (c *ScalerConfig) ScaleTargetKind() string { return c.scaleTarget().Kind }
+
+// ScaledReplicas implements replicaScaler: the workload the HPA scales and
 // its effective minReplicas, final once ApplyPolicy ran. A minimum of 0 is a
 // config built without ApplyPolicy and counts as no value.
 func (c *ScalerConfig) ScaledReplicas() (string, int32) {
@@ -351,7 +404,8 @@ func (c *ScalerConfig) buildHPA(app *stack.Application, labels map[string]string
 	hpa := kubernetes.CreateHorizontalPodAutoscaler(name, app.Namespace)
 	hpa.Labels = labels
 	hpa.Annotations = nil
-	kubernetes.SetHPAScaleTargetRef(hpa, "apps/v1", "Deployment", c.targetName())
+	target := c.scaleTarget()
+	kubernetes.SetHPAScaleTargetRef(hpa, target.APIVersion, target.Kind, c.targetName())
 	kubernetes.SetHPAMinMaxReplicas(hpa, c.MinReplicas, c.MaxReplicas)
 	if c.CPUUtilization != nil {
 		kubernetes.AddHPACPUMetric(hpa, *c.CPUUtilization)

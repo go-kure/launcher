@@ -163,10 +163,10 @@ func TestValidate_ScalerTraitOnDeployment(t *testing.T) {
 	}
 }
 
-// TestValidate_ScalerTraitOnStatefulset pins that statefulset stays excluded:
-// besides standalone PVCs from `volumes`, it has per-pod claims from
-// volumeClaimTemplates, so the non-RWX question differs and admitting it is a
-// separate decision (go-kure/launcher#513).
+// TestValidate_ScalerTraitOnStatefulset pins that a statefulset takes a scaler
+// (go-kure/launcher#1268): the HPA scales a StatefulSet through its scale
+// subresource, and the kind's per-pod claims make the non-RWX question the
+// scaler asks of a Deployment moot.
 func TestValidate_ScalerTraitOnStatefulset(t *testing.T) {
 	app := &Application{
 		APIVersion: SupportedAPIVersion,
@@ -185,12 +185,39 @@ func TestValidate_ScalerTraitOnStatefulset(t *testing.T) {
 		},
 	}
 
-	err := validate(app)
-	if err == nil {
-		t.Fatal("expected validation error for scaler trait on statefulset, got nil")
+	if err := validate(app); err != nil {
+		t.Fatalf("expected scaler trait on statefulset to validate, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not supported on component type") {
-		t.Errorf("error = %q, want to contain 'not supported on component type'", err.Error())
+}
+
+// TestValidate_ScalerTraitRefusedOnKindsWithNoScaleTarget: a daemonset, job,
+// cronjob or pod has no HPA-usable scale subresource, so the scaler stays
+// refused there, and the refusal lists the admitted types, statefulset now
+// among them.
+func TestValidate_ScalerTraitRefusedOnKindsWithNoScaleTarget(t *testing.T) {
+	for _, typ := range []string{"daemonset", "job", "cronjob", "pod"} {
+		t.Run(typ, func(t *testing.T) {
+			app := &Application{
+				APIVersion: SupportedAPIVersion,
+				Kind:       "Application",
+				Metadata:   Metadata{Name: "test-app"},
+				Spec: ApplicationSpec{Components: []Component{{
+					Name: "x", Type: typ,
+					Traits: []Trait{{Type: "scaler", Properties: map[string]any{"maxReplicas": 5}}},
+				}}},
+			}
+			err := validate(app)
+			if err == nil {
+				t.Fatalf("a scaler on a %s validated; want it refused", typ)
+			}
+			if !strings.Contains(err.Error(), "not supported on component type") {
+				t.Errorf("error = %q, want to contain 'not supported on component type'", err.Error())
+			}
+			const wantList = "supported types: deployment, statefulset, webservice, worker"
+			if !strings.Contains(err.Error(), wantList) {
+				t.Errorf("error = %q, want to contain the sorted list %q", err.Error(), wantList)
+			}
+		})
 	}
 }
 

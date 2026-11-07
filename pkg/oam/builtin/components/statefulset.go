@@ -145,6 +145,7 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	}
 	config.Replicas = replicas
 	config.explicitReplicas = replicasAuthored
+	config.scaled = slices.ContainsFunc(component.Traits, func(t oam.Trait) bool { return t.Type == "scaler" })
 
 	// serviceName names the governing Service, which the component does not
 	// emit, so it is held to the Service-name rule (validateServiceName). It
@@ -358,6 +359,12 @@ type StatefulsetConfig struct {
 	// parseStatefulSetSpec).
 	StatefulSetSpec  StatefulSetSpecConfig
 	explicitReplicas bool
+	// scaled is true when the settled component carries a scaler trait. The
+	// HorizontalPodAutoscaler then owns the replica count and the scaler builds
+	// this StatefulSet without spec.replicas, as it does a Deployment
+	// (go-kure/launcher#1179, go-kure/launcher#1268), so the count held here is
+	// not what runs; the scaler's own maxReplicas check is the guard.
+	scaled bool
 }
 
 // ServiceAccountName implements oam.ServiceAccountNamer: the authored
@@ -372,7 +379,13 @@ func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
 		return nil
 	}
 
-	c.Replicas = applyReportedReplicas(&c.PolicyDefaultLog, "replicas", c.Replicas, c.explicitReplicas, p.DefaultReplicas())
+	// Under a scaler the HorizontalPodAutoscaler owns the count and this
+	// StatefulSet is built without spec.replicas, so the policy's default and
+	// ceiling have no count to act on. The scaler enforces the same ceiling on
+	// its own maxReplicas.
+	if !c.scaled {
+		c.Replicas = applyReportedReplicas(&c.PolicyDefaultLog, "replicas", c.Replicas, c.explicitReplicas, p.DefaultReplicas())
+	}
 	if err := c.Resources.applyPolicyRequestDefaults(p, &c.PolicyDefaultLog); err != nil {
 		return err
 	}
@@ -380,8 +393,10 @@ func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
 		return err
 	}
 
-	if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
-		return err
+	if !c.scaled {
+		if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
+			return err
+		}
 	}
 	if err := enforceMaxResources(c.Resources, p.MaxCPU(), p.MaxMemory()); err != nil {
 		return err
@@ -538,6 +553,10 @@ func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.S
 	}
 	sts.Spec.Selector = &metav1.LabelSelector{MatchLabels: appLabels(app.Name)}
 	kubernetes.SetStatefulSetReplicas(sts, c.Replicas)
+	if c.scaled {
+		// The HorizontalPodAutoscaler owns the count (go-kure/launcher#1268).
+		sts.Spec.Replicas = nil
+	}
 	sts.Spec.ServiceName = c.ServiceName
 	c.StatefulSetSpec.apply(sts)
 
