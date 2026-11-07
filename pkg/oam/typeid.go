@@ -51,6 +51,20 @@ type TypeID struct {
 // String returns the `name@version` form.
 func (t TypeID) String() string { return t.Name + "@" + t.Version }
 
+// Canonical returns t with its version in the canonical form, v<major>.<minor>.<patch>,
+// so v2 and v2.0 become v2.0.0. A Kubernetes alpha or beta API version (v1beta1)
+// keeps its spelling, and a version that is not valid is returned as written. The
+// grammar cannot tell a GA Kubernetes kind from a semver type, so deployment.apps@v1
+// becomes deployment.apps@v1.0.0: Canonical is a key to compare or persist, not a
+// Kubernetes apiVersion. TypeRegistry.IDs and Resolve return the version as it was
+// registered (go-kure/launcher#1289).
+func (t TypeID) Canonical() TypeID {
+	if key, err := normalizeTypeVersion(t.Version); err == nil {
+		t.Version = key
+	}
+	return t
+}
+
 // ShortName returns the name a type claims as a short name: the leading label
 // of Name, which is Name itself when it has no dot.
 func (t TypeID) ShortName() string {
