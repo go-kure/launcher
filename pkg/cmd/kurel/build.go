@@ -211,6 +211,9 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 		Namespace:    opts.namespace,
 		Capabilities: evaluatedProfile.Spec.Capabilities,
 		Domain:       kurelDomain,
+		// The same release the gate pass judged the authored properties by: the
+		// objects generated from them are held to it too (go-kure/launcher#1230).
+		TargetVersion: target,
 	}
 
 	cluster, err := transformer.Transform(validated, ctx)

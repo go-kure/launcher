@@ -435,6 +435,9 @@ func (o *ownedConfig) check(obj client.Object) error {
 	if err := o.checkObjectKinds(obj); err != nil {
 		return err
 	}
+	if err := o.checkServiceNames(obj); err != nil {
+		return err
+	}
 	checked := appliedSelfAndMembers(obj)
 	if o.reserved == nil && o.component == "" {
 		return nil

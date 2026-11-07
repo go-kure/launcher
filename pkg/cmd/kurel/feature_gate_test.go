@@ -88,9 +88,18 @@ func TestFeatureGates_TableAndSchemasAgree(t *testing.T) {
 	for name, h := range builtinPolicyHandlers() {
 		walk("policy", name, h)
 	}
+	// A gate a schema does not carry may be checked by code on the objects it
+	// generates (oam.CodeCheckedGates, go-kure/launcher#1230): it is held to the
+	// table the same way.
+	for _, gate := range oam.CodeCheckedGates() {
+		used[gate] = true
+		if _, ok := oam.FeatureGateOnByDefault(gate); !ok {
+			t.Errorf("CodeCheckedGates names %q, which names no row of the lifecycle table", gate)
+		}
+	}
 	for _, gate := range oam.FeatureGateNames() {
 		if !used[gate] {
-			t.Errorf("table row %q is carried by no built-in schema", gate)
+			t.Errorf("table row %q is carried by no built-in schema and checked by no code", gate)
 		}
 	}
 }

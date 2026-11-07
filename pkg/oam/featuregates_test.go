@@ -142,6 +142,9 @@ func TestFeatureGateTable_PinnedToUpstream(t *testing.T) {
 		{"HostnameOverride", KubernetesVersion{1, 35}},      // Alpha 1.34 (false), Beta 1.35-1.36 (true), Stable 1.37
 		// Alpha 1.33 (false), Beta 1.34 (true), Stable 1.35; page source rows 1412-1414.
 		{"PreferSameTrafficDistribution", KubernetesVersion{1, 34}},
+		// Alpha 1.34-1.35 (Default false), Beta 1.36 (true), Stable 1.37; a Service name may
+		// start with a digit only with it on (go-kure/launcher#1230 change 2).
+		{"RelaxedServiceNameValidation", KubernetesVersion{1, 36}},
 	} {
 		below := KubernetesVersion{c.on.Major, c.on.Minor - 1}
 		above := KubernetesVersion{c.on.Major, c.on.Minor + 1}
@@ -156,7 +159,7 @@ func TestFeatureGateTable_PinnedToUpstream(t *testing.T) {
 		}
 	}
 	// The pinned set is the table's set: a row added to the table needs a pin here.
-	pinned := []string{"EnvFiles", "ContainerRestartRules", "PodLevelResources", "HostnameOverride", "PreferSameTrafficDistribution"}
+	pinned := []string{"EnvFiles", "ContainerRestartRules", "PodLevelResources", "HostnameOverride", "PreferSameTrafficDistribution", "RelaxedServiceNameValidation"}
 	got := FeatureGateNames()
 	slices.Sort(got)
 	slices.Sort(pinned)
