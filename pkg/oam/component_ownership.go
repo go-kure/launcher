@@ -172,7 +172,7 @@ func UnwrapConfig(cfg stack.ApplicationConfig) stack.ApplicationConfig {
 // and the reserved metadata keys, and labelled with the owning component.
 func (o *ownedConfig) Generate(app *stack.Application) ([]*client.Object, error) {
 	objs, err := o.inner.Generate(app)
-	if err != nil || (o.component == "" && o.reserved == nil && o.kinds == nil) {
+	if err != nil || (o.component == "" && o.reserved == nil && o.kinds == nil && o.target == nil) {
 		return objs, err
 	}
 	emitted := layoutResources{}
@@ -378,15 +378,16 @@ type augmentingOwnedConfig struct {
 // Two things follow, and neither is checked here. An object that was on the
 // layout and that the wrapped augmenter edits in place is not read again for
 // the reserved keys or the component label: no augmenter of launcher's edits
-// one. It is read again for the object kind policy when this wrapper's Generate
-// returned it (recheckEmitted), so an augmenter that appends a forbidden member
-// to a list it generated is refused. A configMapGenerator entry the augmenter
+// one. It is read again for the object kind policy and for the Service name
+// check when this wrapper's Generate returned it (recheckEmitted), so an
+// augmenter that appends a forbidden member, or a Service named with a digit
+// below the release that allows one, to a list it generated is refused. A configMapGenerator entry the augmenter
 // adds under a name new to its layout is held to the object kind policy as the
 // ConfigMap Kustomize builds from it (checkAddedGenerators). And a caller that hands over a layout
 // holding objects that never passed through Generate gets them back unchecked
 // and unlabelled.
 func (a *augmentingOwnedConfig) AugmentLayout(l *layout.ManifestLayout) error {
-	if a.component == "" && a.reserved == nil && a.kinds == nil {
+	if a.component == "" && a.reserved == nil && a.kinds == nil && a.target == nil {
 		return a.augmenter.AugmentLayout(l)
 	}
 	before := layoutResources{}

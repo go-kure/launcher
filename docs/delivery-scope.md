@@ -584,7 +584,8 @@ Decided in the ticket:
 
 Every name launcher checks because it becomes a Service's name is held to one rule, a
 DNS-1123 label: at most 63 characters, lowercase letters, digits and `-`, starting and
-ending with a letter or digit. A leading digit (`1api`) is accepted.
+ending with a letter or digit. A leading digit (`1api`) is accepted by that rule, and a
+build for a cluster below Kubernetes 1.36 refuses it (the check, below).
 
 - **Where.** The name of a `service` component, or its `objectName`
   (`validateServiceName`, `pkg/oam/builtin/components/service.go`); a `webservice`
@@ -599,13 +600,37 @@ ending with a letter or digit. A leading digit (`1api`) is accepted.
   feature gate: alpha and off by default in Kubernetes 1.34 and 1.35, beta and on by
   default from 1.36, GA and locked on from 1.37. CloudNativePG's Pooler webhook checks no
   name syntax of its own.
-- **Documented limit, not a check.** Launcher does not see the target cluster. Where the
-  gate is off (before 1.34; 1.34 and 1.35 unless it is enabled; 1.36 if it is disabled)
-  the API server holds a Service name to a DNS-1035 label and refuses one with a leading
-  digit at creation. On such a cluster an Ingress whose backend names that Service is
-  refused too, since the Ingress backend service name check sits behind the same gate.
-  Launcher builds both, and the cluster refuses them on apply. A document for such a
-  cluster keeps a letter first.
+- **The check (go-kure/launcher#1230).** With the gate off the API server holds a Service
+  name to a DNS-1035 label and refuses one with a leading digit at creation. The gate is
+  off by default below 1.36, so a build whose `kubernetesVersion` is below 1.36 refuses
+  every generated object that names such a Service, as a violation of the owning
+  component (`component "api": Service "1api": a Service name may start with a digit only
+  with the Kubernetes feature gate RelaxedServiceNameValidation, on by default from 1.36,
+  and the ClusterProfile's kubernetesVersion is 1.35; start the name with a letter or raise
+  spec.kubernetesVersion`). It reads the emitted objects, so a default name, a Naming
+  hook's answer and a role override are held the same as an authored name. It covers a
+  core `v1` Service (`metadata.name`), a CloudNativePG `Pooler` (`metadata.name`, since the
+  operator names the pooler's Service after it), a CloudNativePG `Cluster`
+  (`spec.managed.services.additional[].serviceTemplate.metadata.name`, the name of each
+  additional Service the operator creates) and the Prometheus operator's `Prometheus`,
+  `PrometheusAgent`, `Alertmanager` and `ThanosRuler` (`spec.serviceName`, the governing
+  Service the operator looks up; the only kinds of that API with the field). The check
+  reads each object as the writer writes it, its kind and apiVersion included, so a list
+  built in Go is read as a decoded one is, and an object of these kinds that does not encode as JSON is refused below 1.36, as a
+  violation of its owning component, not read as naming no Service. An augmenter that appends such a Service to a list its own `Generate`
+  returned is held the same: the check reads the list again after every augmenter. The
+  rule is the lifecycle table's row `RelaxedServiceNameValidation`, on by default from
+  1.36.
+- **Where it runs, and what it leaves.** The check runs at generation, with the component
+  ownership wrapper, not at `Transform`; a caller that never generates sees no refusal. A
+  caller that leaves `TransformContext.TargetVersion` unset gets no check, and so does a
+  profile that states no `kubernetesVersion` (`kurel build` sets the field from it). A
+  cluster that enables the gate on an older release is not read (per-gate overrides,
+  go-kure/launcher#1231): the table's default decides. A `statefulset`'s `serviceName` is
+  not checked: it names a governing Service without emitting one, and the API server
+  validates it as a DNS-1123 label at every release, which admits a leading digit. The
+  Service it names is a `service` component's, which is checked. An Ingress backend that
+  names a Service and a raw-PodSpec value are not checked.
 - **Not this rule.** A CloudNativePG Cluster's name (role `postgresql-cluster`, the
   `cnpg-cluster` and `postgresql` names) stays a DNS-1035 label of at most 50 characters:
   that is CloudNativePG's own rule, not the API server's.

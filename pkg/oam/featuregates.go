@@ -85,7 +85,8 @@ const featureGateSource = "https://kubernetes.io/docs/reference/command-line-too
 // Renovate Management).
 //
 // Two tests hold the table to the schemas: every PropertySchema.Gate the built-in
-// handlers publish names a row, and every row is used by at least one schema.
+// handlers publish names a row, and every row is used by at least one schema or
+// listed in CodeCheckedGates.
 var featureGates = []featureGate{
 	// Alpha (default off) 1.34, beta (default on) 1.35.
 	{Name: "EnvFiles", OnByDefault: KubernetesVersion{1, 35}, Source: featureGateSource},
@@ -98,6 +99,10 @@ var featureGates = []featureGate{
 	// Alpha 1.33, beta 1.34, stable 1.35. Gates two Service trafficDistribution
 	// values, not a whole field (PropertySchema.ValueGates, go-kure/launcher#1230).
 	{Name: "PreferSameTrafficDistribution", OnByDefault: KubernetesVersion{1, 34}, Source: featureGateSource},
+	// Alpha 1.34 to 1.35, beta 1.36, stable 1.37. With it off a Service name is a
+	// DNS-1035 label and must start with a letter. No schema names it: code checks the
+	// names of the Services it generates (CodeCheckedGates, go-kure/launcher#1230).
+	{Name: serviceNameGate, OnByDefault: KubernetesVersion{1, 36}, Source: featureGateSource},
 }
 
 // FeatureGateNames returns the gates the lifecycle table knows, in table order. A

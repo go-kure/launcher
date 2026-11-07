@@ -281,6 +281,15 @@ placeholder is a bare string until it is substituted — checking a typed proper
 before that point would reject a document that is correct. See the OAM model's
 Property schemas section for what the check does and does not cover.
 
+`build` also hands the profile's `spec.kubernetesVersion` to the transformer as its
+target version. Below Kubernetes 1.36, where the `RelaxedServiceNameValidation` feature
+gate is off by default, the build refuses an application that would generate a Service
+name starting with a digit: a core Service, the Services a CloudNativePG Pooler or
+Cluster declares, and the `spec.serviceName` of a Prometheus, PrometheusAgent,
+Alertmanager or ThanosRuler. The error names the object, the field and the name, and
+is a violation of the component that owns the object. From 1.36 on, or with no version
+set, nothing is checked (go-kure/launcher#1230).
+
 ### Platform key domain
 
 kurel derives its platform label/annotation keys under the **`launcher.gokure.dev`**

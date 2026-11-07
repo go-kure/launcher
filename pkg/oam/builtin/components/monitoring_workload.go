@@ -262,7 +262,9 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 	// package is (validateServiceName), a DNS-1123 label: the API refuses a
 	// Service of another name. One starting with a digit needs the
 	// RelaxedServiceNameValidation feature gate, on by default from
-	// Kubernetes 1.36, a documented limit, not a check (go-kure/launcher#959).
+	// Kubernetes 1.36: below it the wrapper that owns the generated objects
+	// refuses the name (oam.ownedConfig.checkServiceNames, go-kure/launcher#959,
+	// go-kure/launcher#1230).
 	if w.serviceName != nil {
 		if err := validateServiceName("serviceName", *w.serviceName); err != nil {
 			return errors.Errorf("%w; the API refuses a Service of such a name, so the Prometheus operator fails to find the governing Service and builds no pods", err)
