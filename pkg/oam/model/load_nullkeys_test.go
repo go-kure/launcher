@@ -1,6 +1,10 @@
 package model
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 // yaml.v3 does not store a null key in a map with string keys: it skips the key. So a
 // document with null keys, or with a null key beside the empty string, loses nothing
@@ -43,6 +47,43 @@ func TestLoad_SkipsValuesUnderNullKeys(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := loadNoPanic(tc.doc); err != nil {
 				t.Fatalf("a value under a null key was checked and refused: %v", err)
+			}
+		})
+	}
+}
+
+// The refusal of anchors, aliases and merge keys reads the whole document before yaml.v3
+// decodes it. So it also applies under a null key, although the checks of decoded values
+// skip that value. The README says so. This test pins that sentence and the line in the
+// error. It passes before and after the change that fixed the text, so it is a pin: it
+// discriminates nothing between the two sides.
+func TestLoad_RefusesIndirectionUnderNullKey(t *testing.T) {
+	cases := []struct {
+		name   string
+		block  string
+		marker string // the text whose line the error must name
+	}{
+		{"anchor under a null key", "  inputs:\n    null: &a {type: string}\n    image:\n      type: string\n", "&a"},
+		{"anchor under a tilde key", "  inputs:\n    ~: &a {type: string}\n    image:\n      type: string\n", "&a"},
+		{"merge key under a null key", "  inputs:\n    null:\n      <<: {}\n    image:\n      type: string\n", "<<"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := withInputs(t, tc.block)
+			i := strings.Index(string(doc), tc.marker)
+			if i < 0 {
+				t.Fatalf("test bug: %q is not in the document", tc.marker)
+			}
+			wantLine := fmt.Sprintf("line %d:", strings.Count(string(doc[:i]), "\n")+1)
+			m, err := loadNoPanic(doc)
+			if err == nil {
+				t.Fatalf("Load accepted the document: %+v", m)
+			}
+			if !strings.Contains(err.Error(), "anchors, aliases and merge keys") {
+				t.Fatalf("error %q does not say that anchors, aliases and merge keys are refused", err)
+			}
+			if !strings.Contains(err.Error(), wantLine) {
+				t.Fatalf("error %q does not name %s", err, wantLine)
 			}
 		})
 	}
