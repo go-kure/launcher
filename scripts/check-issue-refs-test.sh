@@ -168,5 +168,95 @@ expect_commits "unresolvable base" 2 "is not a commit" dev@example.com 'fix: x' 
 expect_commits "head before the bare commit" 0 "0 commit message(s)" dev@example.com $'fix: x\n\nCloses #732' "" base
 expect_commits "unresolvable head" 2 "is not a commit" dev@example.com 'fix: x' "" no-such-head
 
+# ── shallow history (go-kure/launcher#1303: a range cut short must not read as clean) ──
+# expect_shallow <name> <want-rc: 0|1|2> <want-substring-or-empty> <boundary: base|a|b|c> <message-of-a> [shim-mode] [nonl]
+# History base <- a <- b <- c, then a `shallow` file naming <boundary> as the commit whose
+# parents are unknown, as a --depth clone leaves it. The objects stay, so both ends of
+# base..c resolve and only the cut can hide a commit: rev-list stops at the boundary
+# without an error, so a (which carries <message-of-a>) is missing from the scan.
+# shim-mode puts a `git` in front of the real one for the gate run only: `junk` makes
+# `rev-parse --is-shallow-repository` print its own option name, as a git that does not know
+# it does; `missing` makes `rev-parse --git-path shallow` name a file that does not exist.
+# shape rewrites the boundary line: `nonl` drops the final newline and `crlf` ends the line with
+# CR LF, both of which git accepts; `upper` writes the oid in uppercase hex, which git accepts
+# too.
+expect_shallow() {
+  local name="$1" want_rc="$2" want_out="$3" boundary="$4" msg_a="$5" shim_mode="${6:-}" shape="${7:-}" rc=0 out nl='\n'
+  local -a git=(git -C "$WORK/repo" -c core.hooksPath=/dev/null -c commit.gpgSign=false -c user.name=dev -c user.email=dev@example.com)
+  local -a gate_env=()
+  local oid_base oid_a oid_b oid_c real_git
+  case "$shape" in
+    nonl) nl='' ;;
+    crlf) nl='\r\n' ;;
+  esac
+  if [[ -n "$shim_mode" ]]; then
+    real_git="$(command -v git)"
+    mkdir -p "$WORK/shim"
+    cat >"$WORK/shim/git" <<SHIM
+#!/bin/bash
+case "\$SHIM_MODE:\$*" in
+  junk:*--is-shallow-repository*) echo "--is-shallow-repository"; exit 0 ;;
+  missing:*"--git-path shallow"*) echo "$WORK/no-such-shallow-file"; exit 0 ;;
+esac
+exec "$real_git" "\$@"
+SHIM
+    chmod +x "$WORK/shim/git"
+    gate_env=(env "PATH=$WORK/shim:$PATH" "SHIM_MODE=$shim_mode")
+  fi
+  rm -rf "$WORK/repo"
+  mkdir -p "$WORK/repo"
+  git -C "$WORK/repo" init -q
+  "${git[@]}" commit -q --allow-empty -m 'base'
+  oid_base="$(git -C "$WORK/repo" rev-parse HEAD)"
+  "${git[@]}" commit -q --allow-empty -m "$msg_a"
+  oid_a="$(git -C "$WORK/repo" rev-parse HEAD)"
+  "${git[@]}" commit -q --allow-empty -m 'fix: b'
+  oid_b="$(git -C "$WORK/repo" rev-parse HEAD)"
+  "${git[@]}" commit -q --allow-empty -m 'fix: c'
+  oid_c="$(git -C "$WORK/repo" rev-parse HEAD)"
+  case "$boundary" in
+    base) printf "%s$nl" "$oid_base" >"$WORK/repo/.git/shallow" ;;
+    a) printf "%s$nl" "$oid_a" >"$WORK/repo/.git/shallow" ;;
+    b) printf "%s$nl" "$oid_b" >"$WORK/repo/.git/shallow" ;;
+    c) printf "%s$nl" "$oid_c" >"$WORK/repo/.git/shallow" ;;
+  esac
+  case "$shape" in
+    upper) tr 'a-f' 'A-F' <"$WORK/repo/.git/shallow" >"$WORK/shallow.upper" && mv "$WORK/shallow.upper" "$WORK/repo/.git/shallow" ;;
+  esac
+  out="$("${gate_env[@]}" bash "$GATE" --root "$WORK/repo" --commits "$oid_base" --head "$oid_c" 2>&1)" || rc=$?
+  if [[ "$rc" -ne "$want_rc" ]]; then
+    echo "FAIL $name: exit $rc, want $want_rc"
+    printf '%s\n' "$out" | sed 's/^/    /'
+    fail=$((fail + 1))
+    return
+  fi
+  if [[ -n "$want_out" && "$out" != *"$want_out"* ]]; then
+    echo "FAIL $name: output lacks \"$want_out\""
+    printf '%s\n' "$out" | sed 's/^/    /'
+    fail=$((fail + 1))
+    return
+  fi
+  pass=$((pass + 1))
+}
+
+# The cut hides the offending commit a, so only the intersection check can catch it.
+expect_shallow "boundary inside the range, offender hidden" 2 "shallow history inside the range" b $'fix: x\n\nCloses #732'
+expect_shallow "boundary at the head" 2 "git fetch --unshallow" c 'fix: x'
+# The commit directly above the base is inside the range, so it is refused too, although its
+# parent happens to be the base here: the guard cannot tell that from a cut (policy, not a gap).
+expect_shallow "boundary directly above the base" 2 "shallow history inside the range" a 'fix: x'
+# The base is the boundary: base..c is complete, so the guard still reads it.
+expect_shallow "shallow clone, range complete, clean" 0 "3 commit message(s)" base 'fix: x'
+expect_shallow "shallow clone, range complete, offender flagged" 1 "Closes #732" base $'fix: x\n\nCloses #732'
+# The guard must not fail open (go-kure/launcher#1303 review): an answer that is neither true
+# nor false, an unreadable boundary file and a final boundary with no newline all exit 2.
+expect_shallow "shallow probe prints junk" 2 "cannot read the shallow boundary" b $'fix: x\n\nCloses #732' junk
+expect_shallow "shallow file cannot be opened" 2 "cannot read the shallow boundary" b $'fix: x\n\nCloses #732' missing
+expect_shallow "boundary without a final newline" 2 "shallow history inside the range" b $'fix: x\n\nCloses #732' "" nonl
+# Git also accepts an uppercase oid and a CR LF line end; the guard reads both as the cut they are.
+# (A line that is no oid is not tested: git itself dies on it before the guard reads the file.)
+expect_shallow "boundary oid in uppercase hex" 2 "shallow history inside the range" b $'fix: x\n\nCloses #732' "" upper
+expect_shallow "boundary line ends in CR LF" 2 "shallow history inside the range" b $'fix: x\n\nCloses #732' "" crlf
+
 echo "check-issue-refs-test: $pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]

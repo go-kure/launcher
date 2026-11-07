@@ -20,7 +20,12 @@
 # sets the other end), so a bare reference fails before the first push, while an
 # amend still costs nothing. Commits authored by Renovate
 # (renovate@whitesourcesoftware.com) are skipped: their messages are generated.
-# A BASE or HEAD that does not resolve is an error (exit 2), never a pass. A stale
+# A BASE or HEAD that does not resolve is an error (exit 2), never a pass. In a
+# shallow clone a boundary commit inside the range is an error too (exit 2), because
+# rev-list then stops short without one and the cut can hide an offender, the commit
+# directly above BASE included; a shallow clone whose boundaries all lie at BASE or
+# outside the range is still scanned; a shallow state that cannot be read
+# is an error as well, never a pass (go-kure/launcher#1303). A stale
 # local origin/main widens the range to commits that are already on main; the
 # failure message says so.
 #
@@ -171,12 +176,56 @@ resolve() {
 
 scan_commits() {
   local base head commits commit meta email subject message line scanned=0 skipped=0
+  local shallow_state shallow_file shallow_list in_range oid
   # resolve runs in a subshell, so its exit only ends that; pass the status on.
   base="$(resolve "$BASE")" || exit 2
   head="$(resolve "$HEAD_REV")" || exit 2
   if ! commits="$(git -C "$ROOT" rev-list --no-merges "$base..$head")"; then
     echo "ERROR: git rev-list $BASE..$HEAD_REV failed in $ROOT" >&2
     exit 2
+  fi
+
+  # A shallow clone stops rev-list at its boundary commits without an error, so the
+  # range can look complete when it is not, and an offender behind the cut reads as
+  # clean. A boundary commit inside BASE..HEAD, merges included, means history was cut
+  # inside the range: refuse, even when the boundary is the commit directly above BASE
+  # (whether its hidden parent is BASE cannot be told from a shallow clone). A shallow
+  # clone whose boundaries all lie at BASE or outside the range is still scanned.
+  # The guard never fails open: a probe that fails or answers anything but true or false,
+  # and a boundary list that cannot be read, exit 2 like the other unreadable states.
+  if ! shallow_state="$(git -C "$ROOT" rev-parse --is-shallow-repository)" ||
+     [[ "$shallow_state" != "true" && "$shallow_state" != "false" ]]; then
+    echo "ERROR: cannot read the shallow boundary of $ROOT (git rev-parse --is-shallow-repository did not answer true or false)" >&2
+    exit 2
+  fi
+  if [[ "$shallow_state" == "true" ]]; then
+    # The list is read whole, so a last oid with no final newline is still an oid.
+    if ! shallow_file="$(git -C "$ROOT" rev-parse --path-format=absolute --git-path shallow)" ||
+       [[ ! -r "$shallow_file" ]] ||
+       ! shallow_list="$(cat -- "$shallow_file")" ||
+       ! in_range="$(git -C "$ROOT" rev-list "$base..$head")"; then
+      echo "ERROR: cannot read the shallow boundary of $ROOT" >&2
+      exit 2
+    fi
+    # Git accepts an uppercase oid and a CR LF line end; rev-list prints lowercase, so
+    # normalize before matching, and read anything that is still no oid as unreadable.
+    declare -A cut=()
+    while IFS= read -r oid; do
+      oid="${oid%$'\r'}"
+      oid="${oid,,}"
+      [[ -n "$oid" ]] || continue
+      if [[ ! "$oid" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+        echo "ERROR: cannot read the shallow boundary of $ROOT (a line of $shallow_file is no object id)" >&2
+        exit 2
+      fi
+      cut[$oid]=1
+    done <<<"$shallow_list"
+    while IFS= read -r oid; do
+      if [[ -n "$oid" && -n "${cut[$oid]:-}" ]]; then
+        echo "ERROR: shallow history inside the range $BASE..$HEAD_REV (cut at ${oid:0:8}): fetch more history (git fetch --unshallow)" >&2
+        exit 2
+      fi
+    done <<<"$in_range"
   fi
 
   found=0
