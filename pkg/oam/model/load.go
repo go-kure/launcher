@@ -82,7 +82,9 @@ func Load(data []byte) (*Model, error) {
 }
 
 // refuseIndirection walks a YAML node tree and fails on the first anchor, alias or
-// merge key, with its line. The failure is a YAML-level one and does not wrap ErrInvalid.
+// merge key, with its line. It reads the whole document, so it also reaches a value that
+// yaml.v3 skips later, such as the value under a null key of a map with string keys. The
+// failure is a YAML-level one and does not wrap ErrInvalid.
 func refuseIndirection(n *yaml.Node) error {
 	switch {
 	case n.Kind == yaml.AliasNode:
