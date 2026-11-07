@@ -5,8 +5,9 @@ weight: 1
 
 # Introduction
 
-**kurel** is an OAM-native package manager for Kubernetes. You describe an
-application with an OAM-style document (`app.yaml`) — a set of typed *components*
+**launcher** is a Go library that translates OAM-style application documents into
+Kubernetes objects, and **kurel** is the supported command-line tool built on it. You
+describe an application with an OAM-style document (`app.yaml`) — a set of typed *components*
 (webservice, worker, cronjob, postgresql, …) decorated with *traits* (ingress,
 certificate, scaler, external-secret, …) — and `kurel build` resolves it into
 static, GitOps-ready Kubernetes manifests.

@@ -21,7 +21,7 @@
 
 ## 1. Vision
 
-**Launcher** is an OAM-inspired package manager for Kubernetes — a semantically richer alternative to Helm.
+**Launcher** is a Go library that translates OAM-style application documents into Kubernetes objects, and `kurel`, the command-line tool on it, is an OAM-inspired package manager for Kubernetes — a semantically richer alternative to Helm.
 
 Where Helm templates Kubernetes manifests from Go template files and a flat `values.yaml`, launcher models deployments using OAM concepts (Applications, Components, Traits) as its package format, under launcher's own API group. The result is a tool where application structure is explicit and typed, platform implementation choices are separated from application choices, and output is always static, GitOps-ready Kubernetes manifests.
 
@@ -36,7 +36,7 @@ Launcher uses the [kure](https://github.com/go-kure/kure) library for Kubernetes
 Launcher originated as `pkg/launcher` inside the kure library — an early prototype of a declarative, file-based Kubernetes manifest generation pipeline. That prototype demonstrated the core idea (parametric package definitions, patch-based composition) but was not yet OAM-aware and did not have a clear separation between platform and application concerns.
 
 The decision to extract launcher into its own repository reflects two things:
-1. Launcher is an *application* (a CLI tool with its own user, design space, and release cadence), not a *library component*. It does not belong inside kure.
+1. Launcher has its own users, design space, and release cadence: it ships a library and the `kurel` CLI on it, and neither belongs inside kure.
 2. The design direction is changing: the next iteration is built around OAM rather than the file-based patch pipeline of the prototype.
 
 The following code from kure moved to this repository as the starting point:
