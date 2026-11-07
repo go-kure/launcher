@@ -193,7 +193,7 @@ func requireKeyedConfig(t *testing.T, obj *unstructured.Unstructured) {
 	requireString(t, obj.Object, "dated", "spec", "keys", "2026-11-07")
 }
 
-// resolveStamps resolves a no-op patch over the set, which copies the targeted base
+// resolveStamps resolves an unrelated-field patch over the set, which copies the targeted base
 // resource, and runs check on the resolved base.
 func resolveStamps(t *testing.T, set *PatchableAppSet, check func(*testing.T, *unstructured.Unstructured)) {
 	t.Helper()
@@ -325,5 +325,150 @@ func TestLoadPatchFile_TimestampValueKeepsAuthoredText(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// requireQuotedStampsWritten checks the YAML text of a document node after a patch step. An
+// untouched plain timestamp is written back quoted, because the resource holds it as a
+// string and yaml.v3 quotes a string that reads as a timestamp. The quoted form is the same
+// value as the plain one for every JSON-based consumer (Kubernetes reads both as the string
+// "2026-11-07"); only the authored style is lost, which a follow-up issue tracks. The quoted
+// control stays quoted.
+func requireQuotedStampsWritten(t *testing.T, node *yaml.Node) {
+	t.Helper()
+	out, err := yaml.Marshal(node)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, want := range []string{
+		"dateOnly: \"2026-11-07\"\n",
+		"fractionOffset: \"2026-11-07T12:00:00.5+01:00\"\n",
+		"quoted: \"2026-11-07\"\n",
+		"when: \"2026-11-07\"\n",
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("write-back lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// ApplyPatchesToDocument marshals the resource and replaces the document's value nodes
+// with the marshaled ones. A timestamp the patch did not touch loads as its authored text
+// and comes back quoted.
+func TestApplyPatchesToDocument_UntouchedTimestampsAreWrittenQuoted(t *testing.T) {
+	docSet, err := LoadResourcesWithStructure(strings.NewReader(stampConfig))
+	if err != nil {
+		t.Fatalf("LoadResourcesWithStructure: %v", err)
+	}
+	doc := docSet.Documents[0]
+	requireStampConfig(t, doc.Resource)
+	if err := doc.ApplyPatchesToDocument(nil); err != nil {
+		t.Fatalf("ApplyPatchesToDocument: %v", err)
+	}
+	requireQuotedStampsWritten(t, doc.Node)
+}
+
+func TestApplyStrategicPatchesToDocument_UntouchedTimestampsAreWrittenQuoted(t *testing.T) {
+	lookup, err := DefaultKindLookup()
+	if err != nil {
+		t.Fatalf("DefaultKindLookup: %v", err)
+	}
+	docSet, err := LoadResourcesWithStructure(strings.NewReader(stampConfig))
+	if err != nil {
+		t.Fatalf("LoadResourcesWithStructure: %v", err)
+	}
+	doc := docSet.Documents[0]
+	requireStampConfig(t, doc.Resource)
+	patches := []StrategicPatch{{Patch: map[string]any{
+		"metadata": map[string]any{"labels": map[string]any{"a": "b"}},
+	}}}
+	if err := doc.ApplyStrategicPatchesToDocument(patches, lookup); err != nil {
+		t.Fatalf("ApplyStrategicPatchesToDocument: %v", err)
+	}
+	requireQuotedStampsWritten(t, doc.Node)
+}
+
+// Two distinct keys of one mapping that read the same after conversion (`0x10` is the
+// integer 16, `"16"` is a string) must be refused by both loaders, because loading would
+// keep one of the two values, chosen by map order, and drop the other.
+func TestLoaders_RefuseNonStringKeysThatReadTheSame(t *testing.T) {
+	const src = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: keys\nspec:\n  keys:\n    0x10: hexadecimal\n    \"16\": string\n"
+	for name, load := range map[string]func() error{
+		"multi": func() error {
+			_, err := LoadResourcesFromMultiYAML(strings.NewReader(src))
+			return err
+		},
+		"structure": func() error {
+			_, err := LoadResourcesWithStructure(strings.NewReader(src))
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := load()
+			if err == nil {
+				t.Fatal("loader accepted keys 0x10 and \"16\"")
+			}
+			if want := `both read "16"`; !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q lacks %q", err, want)
+			}
+		})
+	}
+}
+
+// An explicit !!timestamp tag on a valid timestamp keeps the authored text, like a plain
+// one. On a value that is no timestamp it must still fail as yaml.v3 fails it, so the
+// retag cannot turn a bad document into a string.
+func TestLoaders_ExplicitTimestampTag(t *testing.T) {
+	const valid = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: stamps\nspec:\n  stamp: !!timestamp 2026-11-07\n"
+	const invalid = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: stamps\nspec:\n  stamp: !!timestamp not-a-date\n"
+
+	multi, err := LoadResourcesFromMultiYAML(strings.NewReader(valid))
+	if err != nil || len(multi) != 1 {
+		t.Fatalf("LoadResourcesFromMultiYAML(valid): n=%d err=%v", len(multi), err)
+	}
+	requireString(t, multi[0].Object, "2026-11-07", "spec", "stamp")
+	docSet, err := LoadResourcesWithStructure(strings.NewReader(valid))
+	if err != nil || len(docSet.Documents) != 1 {
+		t.Fatalf("LoadResourcesWithStructure(valid): err=%v", err)
+	}
+	requireString(t, docSet.Documents[0].Resource.Object, "2026-11-07", "spec", "stamp")
+	patches, err := LoadPatchFile(strings.NewReader("- target: stamps\n  patch:\n    spec.stamp: !!timestamp 2026-11-07\n"))
+	if err != nil || len(patches) != 1 {
+		t.Fatalf("LoadPatchFile(valid): n=%d err=%v", len(patches), err)
+	}
+	if got, ok := patches[0].Patch.Value.(string); !ok || got != "2026-11-07" {
+		t.Errorf("patch value is %T %v, want string \"2026-11-07\"", patches[0].Patch.Value, patches[0].Patch.Value)
+	}
+
+	if _, err := LoadResourcesFromMultiYAML(strings.NewReader(invalid)); err == nil {
+		t.Error("LoadResourcesFromMultiYAML accepted !!timestamp not-a-date")
+	}
+	if _, err := LoadResourcesWithStructure(strings.NewReader(invalid)); err == nil {
+		t.Error("LoadResourcesWithStructure accepted !!timestamp not-a-date")
+	}
+	if _, err := LoadPatchFile(strings.NewReader("- target: stamps\n  patch:\n    spec.stamp: !!timestamp not-a-date\n")); err == nil {
+		t.Error("LoadPatchFile accepted !!timestamp not-a-date")
+	}
+}
+
+// A map with a timestamp key holds its keys as strings now, so it is an ordinary
+// string-keyed map and the base-type conversion of LoadResourcesWithStructure reads its
+// quoted "true" as a bool, as it does in every other string-keyed map (the sibling key).
+// Before keys were kept, such a map could not be resolved at all.
+func TestLoadResourcesWithStructure_TimestampKeyMapLoadsLikeStringKeyedMap(t *testing.T) {
+	docSet, err := LoadResourcesWithStructure(strings.NewReader(
+		"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: stamps\ndata:\n  2026-11-07: \"true\"\n  enabled: \"true\"\n"))
+	if err != nil {
+		t.Fatalf("LoadResourcesWithStructure: %v", err)
+	}
+	obj := docSet.Documents[0].Resource.Object
+	for _, key := range []string{"2026-11-07", "enabled"} {
+		got, found, err := unstructured.NestedFieldNoCopy(obj, "data", key)
+		if err != nil || !found {
+			t.Fatalf("data.%s: found=%v err=%v", key, found, err)
+		}
+		if got != true {
+			t.Errorf("data.%s = %v (%T), want bool true", key, got, got)
+		}
 	}
 }
