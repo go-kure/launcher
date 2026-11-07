@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -268,23 +269,34 @@ func LoadTOMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 // baseObject returns the object map of a base resource decoded by yaml.v3, with every
 // Go int turned into an int64, including the ints inside a map with non-string keys.
 // yaml.v3 decodes a YAML integer to int, and Unstructured.DeepCopy panics on that type.
-func baseObject(raw map[string]any) map[string]any {
-	if converted, ok := convertValueForUnstructured(raw).(map[string]any); ok {
-		return converted
+// It returns an error when two distinct non-string keys of one mapping read the same
+// after conversion (`0x10` and `"16"`): loading would drop one of the values.
+func baseObject(raw map[string]any) (map[string]any, error) {
+	var collision error
+	converted, ok := convertChecked(raw, &collision).(map[string]any)
+	if collision != nil {
+		return nil, collision
 	}
-	return raw
+	if !ok {
+		return raw, nil
+	}
+	return converted, nil
 }
 
-// keepTimestampText tags every plain timestamp scalar under n as a string, so that
-// decoding the node yields the text the author wrote. Without it yaml.v3 decodes
-// `2026-11-07` to a time.Time, which Unstructured.DeepCopy panics on and which
-// formatting would rewrite. A quoted timestamp already decodes as a string.
+// keepTimestampText tags every timestamp scalar under n as a string, so that decoding
+// the node yields the text the author wrote. Without it yaml.v3 decodes `2026-11-07`
+// to a time.Time, which Unstructured.DeepCopy panics on and which formatting would
+// rewrite. A quoted timestamp already decodes as a string. A scalar tagged
+// !!timestamp that is no timestamp keeps its tag, so decoding still rejects it.
 func keepTimestampText(n *yaml.Node) {
 	if n == nil {
 		return
 	}
 	if n.Kind == yaml.ScalarNode && n.ShortTag() == "!!timestamp" {
-		n.Tag = "!!str"
+		var t time.Time
+		if n.Decode(&t) == nil {
+			n.Tag = "!!str"
+		}
 	}
 	for _, child := range n.Content {
 		keepTimestampText(child)
@@ -309,7 +321,11 @@ func LoadResourcesFromMultiYAML(r io.Reader) ([]*unstructured.Unstructured, erro
 			return nil, fmt.Errorf("failed to decode resource document: %w", err)
 		}
 		if len(raw) > 0 {
-			u := &unstructured.Unstructured{Object: baseObject(raw)}
+			object, err := baseObject(raw)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode resource document: %w", err)
+			}
+			u := &unstructured.Unstructured{Object: object}
 			debugLog("Loaded resource: kind=%s name=%s", u.GetKind(), u.GetName())
 			resources = append(resources, u)
 		}

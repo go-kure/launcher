@@ -3,6 +3,7 @@ package patch
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -476,6 +477,15 @@ func isNumeric(s string) bool {
 // convertValueForUnstructured converts values to types compatible with unstructured.SetNestedField
 // The unstructured package expects specific types and doesn't handle raw int types well
 func convertValueForUnstructured(value any) any {
+	var collision error
+	return convertChecked(value, &collision)
+}
+
+// convertChecked is convertValueForUnstructured that also reports, in *collision, the first
+// mapping whose distinct non-string keys read the same after fmt.Sprint (`0x10` and `"16"`).
+// The converted value is still returned; one of the colliding entries is then lost, and the
+// choice is the same on every run. A loader returns the error instead of loading that value.
+func convertChecked(value any, collision *error) any {
 	switch v := value.(type) {
 	case int:
 		return int64(v) // Convert int to int64 for unstructured compatibility
@@ -495,23 +505,37 @@ func convertValueForUnstructured(value any) any {
 		// Recursively convert map values
 		converted := make(map[string]any)
 		for k, val := range v {
-			converted[k] = convertValueForUnstructured(val)
+			converted[k] = convertChecked(val, collision)
 		}
 		return converted
 	case map[interface{}]interface{}:
 		// yaml.v3 decodes a mapping with a non-string key (`{123: hello}`) to this type,
 		// which DeepCopy refuses. Keys become strings via fmt.Sprint (a null key reads
-		// "<nil>"); values are converted recursively.
+		// "<nil>"); values are converted recursively. Keys are visited in the order of
+		// their Go syntax, so a collision reads the same on every run.
+		keys := make([]any, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Slice(keys, func(i, j int) bool {
+			return fmt.Sprintf("%#v", keys[i]) < fmt.Sprintf("%#v", keys[j])
+		})
 		converted := make(map[string]any, len(v))
-		for k, val := range v {
-			converted[fmt.Sprint(k)] = convertValueForUnstructured(val)
+		seen := make(map[string]any, len(v))
+		for _, k := range keys {
+			name := fmt.Sprint(k)
+			if first, dup := seen[name]; dup && *collision == nil {
+				*collision = fmt.Errorf("map keys %#v and %#v both read %q", first, k, name)
+			}
+			seen[name] = k
+			converted[name] = convertChecked(v[k], collision)
 		}
 		return converted
 	case []any:
 		// Recursively convert slice values
 		converted := make([]any, len(v))
 		for i, val := range v {
-			converted[i] = convertValueForUnstructured(val)
+			converted[i] = convertChecked(val, collision)
 		}
 		return converted
 	default:

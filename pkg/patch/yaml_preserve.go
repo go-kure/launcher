@@ -78,13 +78,16 @@ func LoadResourcesWithStructure(r io.Reader) (*YAMLDocumentSet, error) {
 		// Apply type conversion to base YAML values to fix string ports, etc.
 		// First convert the raw data for the unstructured object
 		convertedRaw := convertBaseYAMLTypes(raw)
-		var resource *unstructured.Unstructured
+		base := raw
 		if convertedMap, ok := convertedRaw.(map[string]any); ok {
-			resource = &unstructured.Unstructured{Object: baseObject(convertedMap)}
-		} else {
-			// Fallback to original if conversion failed
-			resource = &unstructured.Unstructured{Object: baseObject(raw)}
+			base = convertedMap
 		}
+		// (else: fall back to the original if conversion failed)
+		object, err := baseObject(base)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse document %d into unstructured: %w", i, err)
+		}
+		resource := &unstructured.Unstructured{Object: object}
 
 		// Also apply type conversion to the YAML node to preserve formatting
 		if err := convertYAMLNodeTypes(&node); err != nil {
