@@ -48,37 +48,102 @@ imagePullPolicy: Always
 
 ### YAML Format
 
+The loader reads a YAML patch file in one of two shapes, chosen by the first node. A file that
+holds anything else is refused.
+
+A mapping is a flat list of `path: value` entries. A path whose first part is a resource name
+picks that resource (`myapp.spec.replicas`; `kind.name` is not accepted here, because the path is
+split at every dot). A path with no resource name applies to the one resource that accepts it.
+Loading the file does not check that: `NewPatchableAppSet` and `NewPatchableAppSetWithStructure`
+fail when none or several resources accept the path.
+
 ```yaml
-target:
-  kind: Deployment
-  name: myapp
-patches:
-  - path: spec.replicas
-    value: 3
-  - path: spec.template.spec.containers[0].image
-    value: "nginx:latest"
+myapp.spec.replicas: 3
+myapp.metadata.labels.env: production
 ```
+
+A sequence is a list of targeted entries. Each has a `target` (a resource name, `kind.name`, or
+`namespace/kind.name`) and a `patch` mapping of paths relative to that resource. A list index is
+written `[0]`, as in `containers[0].image`.
+
+```yaml
+- target: deployment.myapp
+  patch:
+    spec.replicas: 3
+    spec.template.spec.containers[0].image: nginx:1.27
+- target: deployment.myapp
+  patch:
+    metadata.labels.env: production
+```
+
+An entry with `type: strategic` holds a partial resource in `patch` and is merged as described
+under Strategic Merge Patch below. Any other `type` is refused.
 
 ## Quick Start
 
+Load the patches and the manifests, build the set, and write the patched file. The manifests are
+loaded with their layout, so the output keeps comments and key order:
+
 ```go
-import "github.com/go-kure/launcher/pkg/patch"
+import (
+    "os"
 
-// Load patches from file
-file, _ := os.Open("patches/customize.kpatch")
-specs, err := patch.LoadPatchFile(file)
+    "github.com/go-kure/launcher/pkg/patch"
+)
 
-// Create patchable set with resources and patches
-patchSet, err := patch.NewPatchableAppSet(resources, specs)
+func patchFile() error {
+    pf, err := os.Open("patches/customize.kpatch")
+    if err != nil {
+        return err
+    }
+    defer pf.Close()
+    specs, err := patch.LoadPatchFile(pf) // TOML or YAML, detected
+    if err != nil {
+        return err
+    }
 
-// Resolve targets and apply
-resolved, err := patchSet.Resolve()
-for _, r := range resolved {
-    err := r.Apply()
+    mf, err := os.Open("base/deployment.yaml")
+    if err != nil {
+        return err
+    }
+    defer mf.Close()
+    docs, err := patch.LoadResourcesWithStructure(mf)
+    if err != nil {
+        return err
+    }
+
+    set, err := patch.NewPatchableAppSetWithStructure(docs, specs)
+    if err != nil {
+        return err
+    }
+    // WriteToFile resolves and applies the patches itself.
+    return set.WriteToFile("output.yaml")
 }
+```
 
-// Write patched output
-err = patchSet.WriteToFile("output.yaml")
+`WriteToFile` needs the layout, so it fails with "no document set available" on a set built by
+`NewPatchableAppSet`. To patch objects in memory, resolve and apply each one, then read its
+`Base`:
+
+```go
+resources, err := patch.LoadResourcesFromMultiYAML(manifests)
+if err != nil {
+    return err
+}
+set, err := patch.NewPatchableAppSet(resources, specs)
+if err != nil {
+    return err
+}
+resolved, err := set.Resolve()
+if err != nil {
+    return err
+}
+for _, r := range resolved {
+    if err := r.Apply(); err != nil {
+        return err
+    }
+    // r.Base is the patched *unstructured.Unstructured
+}
 ```
 
 ## Key Features
