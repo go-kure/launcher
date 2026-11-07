@@ -1842,6 +1842,61 @@ claimed with `ClaimObjectName` or `ClaimFluxInputName`. So a `certificate` trait
 with the `secretName` of the `helm` rule's values Secret is refused: cert-manager would write
 over that Secret, and no generated-object check sees the Secret it writes.
 
+### Outputs: the names a component's objects get
+
+A consumer that wants to refer to an object a component generates (a Secret an operator
+reads, a Service a route points at) needs the object's name before the document is built.
+A component type answers with the optional `OutputProvider` interface, which the
+`ComponentLoweringRule` claiming the type implements, or the handler when no rule claims it,
+as for `EndpointProvider`. `Transformer.ComponentOutputs(comp)` returns one `Output` per
+declaration, in the provider's order: a `Key`, the object's `Kind` (a `schema.GroupKind`) and
+its `Name`. A key is one identifier (a letter or underscore, then letters, digits and
+underscores), so a document can address it as `parts.<part>.<key>`. A type that provides no
+outputs answers `(nil, nil)`.
+
+The name is the name the build gives: the author's property, else the `Naming` hook's answer,
+else the default. The provider resolves each name through `LoweringContext.ResolveName` or
+`ResolveMemberName`, with the base, suffix and `NameSpec` its lowering uses, on a fresh
+allocator, so the query claims nothing. As the endpoint queries do, `ComponentOutputs`
+consults no hook, and a consumer that sets `Naming` calls
+`ComponentOutputsNamed(application, comp, naming)`, which asks `naming` the same
+`NameRequest` the transform asks.
+
+A declaration is one of two shapes. An **allocated** output carries the `Role` and `Default`
+the name was resolved under, and `Name`. A **derived** output carries `From`, the key of an
+allocated output, and `Derive`, which maps that name to this one. It names an object the
+operator gives, not launcher: the Secret CloudNativePG generates for a `postgresql`
+component's application user is `<cluster>-app`. It is not in the built application, so
+nothing is claimed for it and nothing holds it.
+
+**The build holds every allocated declaration.** The transform asks each provider for its
+outputs as it lowers the component, and a difference fails the build, naming the component,
+the output key, the kind and both names. For a lowering rule the declaration must find exactly
+one name its lowering resolved for the same component, role, kind and default, and that name
+must equal the declared one; for a handler, which names one object, the declared name must be
+`Component.ObjectName` and the declared kind the GroupKind the handler declares for that object
+(`ComponentObject`), group included. All three entry points (`Transform`, `TransformWithPolicy`,
+`TransformWithProvenance`) run the check. A provider whose declaration is malformed or
+whose query errs fails the build with its error: a malformed declaration is a defect of the
+provider, not a quiet empty list.
+
+A provider is asked about a copy of the component, in a query and in the build: what it writes
+to the properties, trait properties or annotations stays in the answer and never reaches the
+document or the lowering. For a handler of a kind component the query and the build give it
+the same component: its object's name resolved and its `labels` and `annotations` taken off
+its properties. The build prepares the metadata before it holds the outputs, so a component
+with both a refused `labels` or `annotations` value and a failing provider reports the
+metadata refusal.
+
+What a query answers is not the build's verdict on the document. It is given one component
+and answers only for one its type's own parse accepts, refusing another in the parse's
+words. It does not see what only the document shows (a name that is already another
+component, two objects that collide), the schema check of authored properties, or the policy.
+A query made under an `application` other than the one the transform asks with is not held
+against a build: the hook is asked a different `NameRequest`, and a hook that answers by
+application can answer differently. `application` is the document's `metadata.name`, or the
+name it has after lowering where a document rule renames it.
+
 ### `objectName`: the object of a kind component
 
 A kind component (`deployment`, `service`, `configmap`, `cnpg-cluster`, `helmrelease`, …) is
