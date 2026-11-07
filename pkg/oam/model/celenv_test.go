@@ -14,7 +14,10 @@ const goldenFunctions = "testdata/celenv1-functions.txt"
 
 // functionLines lists every function of an environment as `name: overload,overload`,
 // sorted, one line per function. The overload ids are part of the line because a new
-// overload changes what an expression can mean.
+// overload changes what an expression can mean. A function whose declaration is
+// disabled is written `name [disabled]: ...`: the environment keeps its runtime
+// binding, but the type checker refuses a call in source. The names and the ids alone
+// cannot tell that state.
 func functionLines(env *cel.Env) string {
 	var lines []string
 	for name, fn := range env.Functions() {
@@ -23,6 +26,9 @@ func functionLines(env *cel.Env) string {
 			ids = append(ids, o.ID())
 		}
 		sort.Strings(ids)
+		if fn.IsDeclarationDisabled() {
+			name += " [disabled]"
+		}
 		lines = append(lines, name+": "+strings.Join(ids, ","))
 	}
 	sort.Strings(lines)
@@ -82,6 +88,33 @@ func TestEnvFunctionSetIsFrozen(t *testing.T) {
 	}
 	if got != string(want) {
 		t.Fatalf("the function set of celEnv 1 changed, first difference at %s", firstDifference(got, string(want)))
+	}
+}
+
+// The listing must see the state of a declaration. Two environments with the same
+// function name and the same overload id differ when one disables the declaration, and
+// the type checker then refuses every call of it in source. This test passes at the
+// commit that adds the marker: it guards the listing, and the golden test above guards
+// the environment.
+func TestFunctionLinesSeeDisabledDeclarations(t *testing.T) {
+	overload := cel.Overload("probe_int", []*cel.Type{cel.IntType}, cel.IntType)
+	on, err := cel.NewEnv(cel.Function("probe", overload))
+	if err != nil {
+		t.Fatalf("enabled env: %v", err)
+	}
+	off, err := cel.NewEnv(cel.Function("probe", cel.DisableDeclaration(true), overload))
+	if err != nil {
+		t.Fatalf("disabled env: %v", err)
+	}
+	gotOn, gotOff := functionLines(on), functionLines(off)
+	if !strings.Contains(gotOn, "probe: probe_int\n") {
+		t.Errorf("enabled listing has no `probe: probe_int` line:\n%s", gotOn)
+	}
+	if !strings.Contains(gotOff, "probe [disabled]: probe_int\n") {
+		t.Errorf("disabled listing has no `probe [disabled]: probe_int` line:\n%s", gotOff)
+	}
+	if gotOn == gotOff {
+		t.Error("the listing is the same for an enabled and a disabled declaration")
 	}
 }
 
