@@ -23,14 +23,23 @@
 #   pkg/oam/parser.go      the parse entry point
 #   pkg/oam/package.go     the kurel.yaml document type
 #   pkg/oam/profile.go     the cluster.yaml document type
+#   pkg/oam/property_validate.go           the shared property checks (type, enum, integer, groups)
+#   pkg/oam/property_validate_authored.go  the authored entry point, ValidateAuthoredProperties*
+#   pkg/oam/lowering.go    the reserved-key, apiVersion and type refusals of the lowering engine
+#   pkg/oam/featuregate_check.go  the feature-gate refusals when the profile's kubernetesVersion predates the gate's default-on release
 #   pkg/oam/builtin/       every .go file below it (the per-kind property validators)
-# Under pkg/oam/builtin/ a *_test.go file, a contract.go or doc.go file, and a file under
-# testdata/ never count. A *_test.go file never counts anywhere. The repository holds no
-# standalone schema files; the document schemas are the Go types above.
+#   pkg/oam/internal/      every .go file below it (the refusal helpers the builtin handlers call)
+# Under pkg/oam/builtin/ and pkg/oam/internal/ a *_test.go file, a contract.go or doc.go file,
+# and a file under testdata/ never count. A *_test.go file never counts anywhere. The
+# repository holds no standalone schema files; the document schemas are the Go types above.
 #
 # Not caught: a change inside a counted file that does not alter what is accepted but is
-# not marked by the trailer, and acceptance code outside this set (for example
-# pkg/oam/property_validate.go and pkg/oam/lowering.go). Reviewers remain the backstop.
+# not marked by the trailer, and acceptance code outside this set. pkg/oam/netpol/ is left
+# out on purpose (non-authorable synthesis types). pkg/oam/lowering_raw.go,
+# pkg/oam/lowering_targets.go and the other refusal files of pkg/oam (component_label_check.go,
+# cross_document_collisions.go, in_document_collisions.go, controller_claims.go,
+# hook_group_name.go, flux_namespace_inputs.go, bundle_application_names.go, classify.go) have
+# not been judged. Reviewers remain the backstop.
 #
 # Skips merge commits and Renovate's commits (its email, as check-issue-refs.sh does).
 # In a shallow clone it exits 2 when a boundary commit lies inside the range, because
@@ -59,12 +68,17 @@ ACCEPT_PATHS=(
   pkg/oam/parser.go
   pkg/oam/package.go
   pkg/oam/profile.go
+  pkg/oam/property_validate.go
+  pkg/oam/property_validate_authored.go
+  pkg/oam/lowering.go
+  pkg/oam/featuregate_check.go
 )
 
 # The builtin component, trait and policy handlers refuse and build in one method, and their
-# data tables refuse without building an error, so every non-test .go file under this prefix
-# counts too, except the file names below (contract metadata and the package comment).
-ACCEPT_PREFIX="pkg/oam/builtin/"
+# data tables refuse without building an error, so every non-test .go file under the first
+# prefix counts. The second holds the refusal helpers those handlers call. Both skip the file
+# names below (contract metadata and the package comment).
+ACCEPT_PREFIXES=(pkg/oam/builtin/ pkg/oam/internal/)
 ACCEPT_SKIP_NAMES=(contract.go doc.go)
 
 RENOVATE_EMAIL="renovate@whitesourcesoftware.com"
@@ -119,22 +133,25 @@ touched_acceptance() {
         printf '%s\n' "$path"
       fi
     done
-    if builtin_acceptance "$path"; then
+    if prefix_acceptance "$path"; then
       printf '%s\n' "$path"
     fi
   done < <(git -C "$ROOT" diff-tree -z --root --no-commit-id -r --name-only "$commit" || printf '\0')
 }
 
-# builtin_acceptance PATH: true for a non-test Go file under ACCEPT_PREFIX, other than a
-# skipped name or a file under testdata/.
-builtin_acceptance() {
-  local path="$1" skip
-  [[ "$path" == "$ACCEPT_PREFIX"* && "$path" == *.go && "$path" != *_test.go ]] || return 1
+# prefix_acceptance PATH: true for a non-test Go file under one of ACCEPT_PREFIXES, other
+# than a skipped name or a file under testdata/.
+prefix_acceptance() {
+  local path="$1" prefix skip
+  [[ "$path" == *.go && "$path" != *_test.go ]] || return 1
   [[ "$path" != */testdata/* ]] || return 1
   for skip in "${ACCEPT_SKIP_NAMES[@]}"; do
     [[ "${path##*/}" != "$skip" ]] || return 1
   done
-  return 0
+  for prefix in "${ACCEPT_PREFIXES[@]}"; do
+    [[ "$path" != "$prefix"* ]] || return 0
+  done
+  return 1
 }
 
 # trailer_state BODY: "ok" for a Format-Scope trailer with a reason, "empty" for one

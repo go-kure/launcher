@@ -104,6 +104,20 @@ GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotePath GIT_CONFIG_VALUE_0=true \
 expect "builtin handler with a newline in its name" 1 "pkg/oam/builtin/components/with" $DEV $'pkg/oam/builtin/components/with\nnewline.go' 'fix(components): x'
 expect "text file whose name embeds a builtin go path" 0 "" $DEV $'pkg/oam/builtin/components/x.go\nnotes.txt' 'fix(components): x'
 expect "builtin file with an empty trailer reason" 1 "Format-Scope" $DEV pkg/oam/builtin/components/typed_pod_rules.go $'fix(components): x\n\nFormat-Scope: none ()'
+# The authored property check, the lowering engine's refusals, the feature-gate check and the
+# refusal helpers the builtin handlers call also decide which documents are accepted
+# (go-kure/launcher#1314).
+expect "property_validate.go" 1 "pkg/oam/property_validate.go" $DEV pkg/oam/property_validate.go 'fix(oam): x'
+expect "property_validate_authored.go" 1 "pkg/oam/property_validate_authored.go" $DEV pkg/oam/property_validate_authored.go 'fix(oam): x'
+expect "lowering.go" 1 "pkg/oam/lowering.go" $DEV pkg/oam/lowering.go 'feat(oam): x'
+expect "featuregate_check.go" 1 "pkg/oam/featuregate_check.go" $DEV pkg/oam/featuregate_check.go 'fix(oam): x'
+expect "internal fluxduration" 1 "pkg/oam/internal/fluxduration/fluxduration.go" $DEV pkg/oam/internal/fluxduration/fluxduration.go 'fix(oam): x'
+expect "internal requiredfields" 1 "pkg/oam/internal/requiredfields/requiredfields.go" $DEV pkg/oam/internal/requiredfields/requiredfields.go 'fix(oam): x'
+expect "internal requiredfields data table" 1 "pkg/oam/internal/requiredfields/cilium.go" $DEV pkg/oam/internal/requiredfields/cilium.go 'feat(oam): x'
+expect "internal file with an empty trailer reason" 1 "Format-Scope" $DEV pkg/oam/internal/requiredfields/requiredfields.go $'fix(oam): x\n\nFormat-Scope: none ()'
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotePath GIT_CONFIG_VALUE_0=true \
+  expect "internal file with a non-ASCII name" 1 "pkg/oam/internal/fluxduration/café.go" $DEV pkg/oam/internal/fluxduration/café.go 'fix(oam): x'
+expect "internal file with a newline in its name" 1 "pkg/oam/internal/fluxduration/with" $DEV $'pkg/oam/internal/fluxduration/with\nnewline.go' 'fix(oam): x'
 
 # ── must pass ────────────────────────────────────────────────────────────────
 expect "validate.go under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/validate.go 'fix(format): x'
@@ -113,14 +127,14 @@ expect "validate.go under docs(format)" 0 "" $DEV pkg/oam/validate.go 'docs(form
 expect "validate.go under doc(format)" 0 "" $DEV pkg/oam/validate.go 'doc(format): x'
 expect "format scope with a breaking marker" 0 "" $DEV pkg/oam/validate.go 'feat(format)!: x'
 expect "test file beside the acceptance code" 0 "" $DEV pkg/oam/validate_test.go 'fix(oam): x'
-expect "file outside the acceptance list" 0 "" $DEV pkg/oam/lowering.go 'fix(oam): x'
+expect "file outside the acceptance list" 0 "" $DEV pkg/oam/lowering_raw.go 'fix(oam): x'
 expect "same file name in another directory" 0 "" $DEV pkg/other/validate.go 'fix(oam): x'
 expect "trailer with a reason" 0 "" $DEV pkg/oam/validate.go $'fix(oam): x\n\nFormat-Scope: none (only a comment changed)'
 expect "trailer after other trailers" 0 "" $DEV pkg/oam/validate.go $'fix(oam): x\n\nCloses go-kure/launcher#1\nFormat-Scope: none (error text only)'
 expect "Renovate-authored change" 0 "1 Renovate commit(s) skipped" renovate@whitesourcesoftware.com pkg/oam/validate.go 'chore(deps): x'
 # CI passes the PR head with --head; a range that stops before the commit is clean.
 expect "head before the acceptance commit" 0 "0 commit(s)" $DEV pkg/oam/validate.go 'fix(oam): x' "" base
-# A builtin file under the format scope or the trailer passes, as the six listed files do.
+# A builtin file under the format scope or the trailer passes, as the explicitly listed files do.
 expect "builtin handler under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/builtin/components/typed_pod_rules.go 'fix(format): x'
 expect "builtin handler with a trailer reason" 0 "" $DEV pkg/oam/builtin/components/typed_pod_rules.go $'refactor(components): x\n\nFormat-Scope: none (comment only)'
 # Not part of the rule: tests, contract metadata, the package comment, vendored input,
@@ -133,6 +147,29 @@ expect "builtin vendored testdata .go" 0 "" $DEV pkg/oam/builtin/components/test
 expect "builtin README" 0 "" $DEV pkg/oam/builtin/components/README.md 'docs(components): x'
 expect "prefix inside another path" 0 "" $DEV pkg/other/pkg/oam/builtin/components/x.go 'fix(oam): x'
 expect "sibling directory sharing the prefix" 0 "" $DEV pkg/oam/builtinx/foo.go 'fix(oam): x'
+# go-kure/launcher#1314: the same boundaries for the new rows.
+expect "property_validate.go under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/property_validate.go 'fix(format): x'
+expect "property_validate_authored.go under feat(format)" 0 "" $DEV pkg/oam/property_validate_authored.go 'feat(format): x'
+expect "lowering.go with a trailer reason" 0 "" $DEV pkg/oam/lowering.go $'refactor(oam): x\n\nFormat-Scope: none (rename only)'
+expect "featuregate_check.go under fix(format)" 0 "" $DEV pkg/oam/featuregate_check.go 'fix(format): x'
+expect "internal file under fix(format)" 0 "" $DEV pkg/oam/internal/requiredfields/requiredfields.go 'fix(format): x'
+expect "internal file with a trailer reason" 0 "" $DEV pkg/oam/internal/fluxduration/fluxduration.go $'refactor(oam): x\n\nFormat-Scope: none (comment only)'
+expect "property_validate test file" 0 "" $DEV pkg/oam/property_validate_test.go 'fix(oam): x'
+expect "property_validate_authored test file" 0 "" $DEV pkg/oam/property_validate_authored_test.go 'fix(oam): x'
+expect "lowering test file" 0 "" $DEV pkg/oam/lowering_test.go 'fix(oam): x'
+expect "featuregate_check test file" 0 "" $DEV pkg/oam/featuregate_check_test.go 'fix(oam): x'
+expect "internal test file" 0 "" $DEV pkg/oam/internal/fluxduration/fluxduration_test.go 'fix(oam): x'
+expect "internal doc.go" 0 "" $DEV pkg/oam/internal/fluxduration/doc.go 'docs(oam): x'
+expect "internal README" 0 "" $DEV pkg/oam/internal/requiredfields/README.md 'docs(oam): x'
+expect "internal testdata .go" 0 "" $DEV pkg/oam/internal/requiredfields/testdata/x.go 'chore(deps): x'
+# Left out on purpose: netpol holds non-authorable synthesis types, and lowering_raw.go and
+# lowering_targets.go are not yet read for refusal code (see the script header).
+expect "netpol types" 0 "" $DEV pkg/oam/netpol/types.go 'fix(oam): x'
+expect "lowering_targets.go" 0 "" $DEV pkg/oam/lowering_targets.go 'fix(oam): x'
+expect "property_validate.go under another directory" 0 "" $DEV pkg/other/pkg/oam/property_validate.go 'fix(oam): x'
+expect "property_validate.go with a suffix" 0 "" $DEV pkg/oam/property_validate.go.bak 'fix(oam): x'
+expect "sibling directory sharing the internal prefix" 0 "" $DEV pkg/oam/internalx/foo.go 'fix(oam): x'
+expect "internal prefix inside another path" 0 "" $DEV pkg/other/pkg/oam/internal/x/x.go 'fix(oam): x'
 
 # ── usage errors ─────────────────────────────────────────────────────────────
 expect "unresolvable base" 2 "is not a commit" $DEV pkg/oam/validate.go 'fix(oam): x' no-such-base
@@ -236,6 +273,32 @@ if git -C "$REPO_ROOT" rev-parse --verify --quiet "$control_builtin_pass^{commit
   check "negative control: the fix(format) builtin commit passes" 0 "" "$rc" "$out"
 else
   echo "SKIP negative control: $control_builtin_pass is not in this clone (shallow checkout)"
+  skip=$((skip + 1))
+fi
+
+# ── real-repo controls for the authored-check rows (go-kure/launcher#1314) ────────
+# 0b8c9798 declared exactly-one-of property groups under feat(oam): it changed
+# property_validate.go, property_validate_authored.go and lowering.go and none of the older
+# counted files, so only the rows added for go-kure/launcher#1314 can fail it.
+# 234f37be changed property_validate.go under feat(format), so the guard must pass it.
+control_authored_fail=0b8c9798
+if git -C "$REPO_ROOT" rev-parse --verify --quiet "$control_authored_fail^{commit}" >/dev/null &&
+   git -C "$REPO_ROOT" rev-parse --verify --quiet "$control_authored_fail^^{commit}" >/dev/null; then
+  rc=0
+  out="$(bash "$GATE" --root "$REPO_ROOT" --commits "$control_authored_fail^" --head "$control_authored_fail" 2>&1)" || rc=$?
+  check "positive control: the exclusive-group commit fails" 1 "property_validate.go" "$rc" "$out"
+else
+  echo "SKIP positive control: $control_authored_fail is not in this clone (shallow checkout)"
+  skip=$((skip + 1))
+fi
+control_authored_pass=234f37be
+if git -C "$REPO_ROOT" rev-parse --verify --quiet "$control_authored_pass^{commit}" >/dev/null &&
+   git -C "$REPO_ROOT" rev-parse --verify --quiet "$control_authored_pass^^{commit}" >/dev/null; then
+  rc=0
+  out="$(bash "$GATE" --root "$REPO_ROOT" --commits "$control_authored_pass^" --head "$control_authored_pass" 2>&1)" || rc=$?
+  check "negative control: the feat(format) authored-check commit passes" 0 "" "$rc" "$out"
+else
+  echo "SKIP negative control: $control_authored_pass is not in this clone (shallow checkout)"
   skip=$((skip + 1))
 fi
 
