@@ -1760,6 +1760,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			resolved.naming = ctx.names.forTrait(entry.component.Name, member, trait, step.first+position)
 			if resolved.naming != nil {
 				resolved.naming.objectName = entry.component.ObjectName()
+				resolved.naming.componentType = entry.component.Type
 				resolved.naming.fluxNamespace, resolved.naming.readers = ctx.FluxNamespace, readers
 				// What a reader's Flux object reads can depend on where it
 				// lands (a HelmRelease's chart verification Secret is read only

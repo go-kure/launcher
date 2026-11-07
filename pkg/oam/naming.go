@@ -647,6 +647,10 @@ type traitNaming struct {
 	// objectName is the name of the object of the component the trait is applied
 	// on (Component.ObjectName).
 	objectName string
+	// componentType is the settled type of the component the trait is applied on
+	// (Component.Type after lowering), for a trait whose behaviour follows the
+	// kind of workload its component builds (the scaler's scaleTargetRef).
+	componentType string
 	// fluxNamespace is the transform's TransformContext.FluxNamespace, and
 	// readers the applications whose Flux objects a trait object may follow
 	// there (landingNamespace): fluxInputReaders' answer for the application the
@@ -901,6 +905,18 @@ func (t *Trait) ComponentObjectName() string {
 		return ""
 	}
 	return t.naming.objectName
+}
+
+// ComponentType returns the settled type of the component the trait is applied
+// on: the type its handler was found by, after lowering and definition
+// resolution, and for a sibling-group member the member's own type. On a trait
+// built outside a transform (a handler's Apply called directly) it is "", and
+// the caller falls back to what it did before it read the type.
+func (t *Trait) ComponentType() string {
+	if t.naming == nil {
+		return ""
+	}
+	return t.naming.componentType
 }
 
 func (r *nameResolver) resolve(owner nameOwner, spec NameSpec) (string, error) {

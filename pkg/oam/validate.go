@@ -194,9 +194,11 @@ var validPolicyTypes = map[string]bool{
 }
 
 // traitComponentRestrictions maps trait types to the component types they support.
-// Traits not listed here are allowed on any component type.
+// Traits not listed here are allowed on any component type. The scaler's row is
+// derived from the table that also names what its HorizontalPodAutoscaler scales
+// (scalerTargets), so the two cannot disagree.
 var traitComponentRestrictions = map[string]map[string]bool{
-	"scaler":     {"webservice": true, "worker": true, "deployment": true},
+	"scaler":     scalerAdmittedTypes(),
 	"disruption": {"webservice": true, "worker": true, "deployment": true, "statefulset": true},
 }
 
@@ -436,24 +438,30 @@ func validateTrait(t *Trait, componentName, componentType string, componentProps
 		}
 	}
 
-	return validateScalerReplicas(t, componentName, componentProps)
+	return validateScalerReplicas(t, componentName, componentType, componentProps)
 }
 
 // validateScalerReplicas refuses a scaler trait on a component that authors
 // `replicas` (go-kure/launcher#1179). The HorizontalPodAutoscaler owns the
-// replica count of the Deployment it scales, so the scaler builds that
-// Deployment without spec.replicas; an authored count would be accepted and
+// replica count of the workload it scales, so the scaler builds that
+// workload without spec.replicas; an authored count would be accepted and
 // applied to nothing, or, kept in the manifest, reset by every apply (the
 // Kubernetes documentation advises removing spec.replicas when an HPA is
-// enabled). An authored null is no count (the null contract).
-func validateScalerReplicas(t *Trait, componentName string, props map[string]any) error {
+// enabled). An authored null is no count (the null contract). The message
+// names the workload the component type builds (scalerTargets): a Deployment
+// for the Deployment kinds, a StatefulSet for a statefulset.
+func validateScalerReplicas(t *Trait, componentName, componentType string, props map[string]any) error {
 	if t.Type != "scaler" {
 		return nil
 	}
 	if v, ok := props["replicas"]; ok && !isNullValue(v) {
+		workload := DefaultScaleTarget.Kind
+		if target, ok := ScalerTargetFor(componentType); ok {
+			workload = target.Kind
+		}
 		return oamValidationError("properties.replicas", fmt.Sprintf(
-			"component %q sets replicas and has a scaler trait: the HorizontalPodAutoscaler owns the replica count, so the Deployment is built without spec.replicas; remove replicas and set minReplicas and maxReplicas on the scaler",
-			componentName))
+			"component %q sets replicas and has a scaler trait: the HorizontalPodAutoscaler owns the replica count, so the %s is built without spec.replicas; remove replicas and set minReplicas and maxReplicas on the scaler",
+			componentName, workload))
 	}
 	return nil
 }

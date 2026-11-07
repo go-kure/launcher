@@ -2099,9 +2099,13 @@ only the component's effective replica count (authored, or the policy default),
 so it cannot account for later HPA scaling. The `scaler` trait covers
 that gap itself: `deployment` reports its first non-RWX claim to the trait
 (`NonRWXClaim`), and the trait refuses an effective `maxReplicas` above 1 when
-one is present (see "Non-RWX volumes"). `statefulset` is still excluded: besides
-claims referenced from `volumes`, as on the other kinds, it has
-per-pod claims from `volumeClaimTemplates`, so the question differs.
+one is present (see "Non-RWX volumes"). `scaler` is available on `statefulset`
+too (go-kure/launcher#1268), with the HPA's `scaleTargetRef` naming a `StatefulSet`.
+That kind reports no non-RWX claim and the scaler adds no such check for it: its
+claims come from `volumeClaimTemplates`, one per pod, so scaling does not make pods
+contend for them, and `statefulset` applies no non-RWX limit to an authored replica
+count either. A claim shared through `volumes` stays as unguarded under a scaler as
+it is under authored replicas.
 
 **`deployment` reports its pod template labels** (`PodTemplateLabels`), so a
 same-name sibling group can tell that a `service` member selects this
@@ -2232,10 +2236,10 @@ Lifecycle). On
 admitted there: the trait is newly admitted with this safeguard in place.
 
 **Replicas under a `scaler`** (go-kure/launcher#1179). The HorizontalPodAutoscaler
-owns the replica count of the Deployment it scales, so with a `scaler` on a
-`deployment`, `webservice` or `worker` the Deployment is built **without
-`spec.replicas`**. That holds for the kind's default of 1 and for an
-EnvironmentPolicy `DefaultReplicas`, which no longer reach that Deployment; the
+owns the replica count of the Deployment or StatefulSet it scales, so with a
+`scaler` on a `deployment`, `webservice`, `worker` or `statefulset` the object is
+built **without `spec.replicas`**. That holds for the kind's default of 1 and for an
+EnvironmentPolicy `DefaultReplicas`, which no longer reach that object; the
 policy's `MaxReplicas` ceiling is not checked against that unused count either,
 and holds on the scaler's own `maxReplicas`. An authored `replicas` beside a `scaler` is refused at validation, naming the
 component, since the count would be accepted and applied to nothing; set
@@ -2247,7 +2251,10 @@ unchanged. The non-RWX replica check reads one pod under a `scaler`, since the
 held count is unused (the HPA-bound check on `maxReplicas` is the guard), and the
 claim's `Recreate` strategy still applies. The `topology-spread` trait finds no count on
 the Deployment here, so under a `scaler` it counts the scaler's `minReplicas`
-instead (go-kure/launcher#1196). A `webservice` or `worker` already gets this
+instead (go-kure/launcher#1196). That applies to a Deployment only: `topology-spread`
+acts on Deployments, so on a `statefulset` it is refused with or without a `scaler`,
+and a scaler whose target is a StatefulSet never supplies the count of a Deployment
+that happens to share its name. A `webservice` or `worker` already gets this
 spread from its own `topologySpread` default, so an authored `topology-spread`
 trait beside a `scaler` with a `minReplicas` of 2 or more is now refused, as it
 is without a scaler at 2 or more replicas. It was admitted before, because the

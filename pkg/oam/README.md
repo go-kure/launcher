@@ -2114,12 +2114,16 @@ authored object, not the trait.
 parses a minimal document for every registered built-in type through
 `ParseWithExtraTypes`, the same entry point `kurel build` uses. One other per-type
 registry has the same shape and the same failure mode: `traitComponentRestrictions`
-(which traits a component type accepts; today only `scaler` is restricted, to `webservice`,
-`worker` and `deployment`, the kinds that report a non-RWX claim to it).
+(which traits a component type accepts; `scaler` is restricted to `webservice`, `worker`,
+`deployment` and `statefulset`, and `disruption` to the same four). The `scaler` entry is
+derived from the one table that also gives the scaler its HPA target kind (`Deployment`
+for the first three, `StatefulSet` for `statefulset`), so a type cannot be admitted without
+a target kind. The engine stamps the settled component type on the trait it applies
+(`Trait.ComponentType()`, empty outside a transform), which is where the scaler reads it.
 
 **A `scaler` refuses authored `replicas`** (go-kure/launcher#1179). The
-HorizontalPodAutoscaler owns the replica count, so the scaler builds the Deployment
-without `spec.replicas`, and `validateTrait` refuses a component that sets `replicas`
+HorizontalPodAutoscaler owns the replica count, so the scaler builds the Deployment or
+StatefulSet without `spec.replicas`, and `validateTrait` refuses a component that sets `replicas`
 beside a `scaler`, naming the component and pointing to `minReplicas`/`maxReplicas` on the
 scaler (`validateScalerReplicas`). An authored `null` is no value. The check runs on the
 properties a lowering rule emits too: while the component type is still lowerable

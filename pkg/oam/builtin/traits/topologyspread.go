@@ -111,7 +111,10 @@ type topologySpreadConfig struct {
 // render set one, and the namespace of app otherwise. The scaler's
 // HorizontalPodAutoscaler lives in the namespace of the scaler's application
 // and finds its target there. The first such application in bundle order wins.
-// A scaler that scales another object does not count.
+// A scaler that scales another object does not count, and neither does one that
+// scales another kind: a StatefulSet and a Deployment may share a name in one
+// namespace (go-kure/launcher#1268), and the scaler of the first says nothing
+// about the second.
 func (c *topologySpreadConfig) scaledMinReplicas(app *stack.Application, dep *appsv1.Deployment) (int32, bool) {
 	if c.bundle == nil {
 		return 0, false
@@ -126,6 +129,9 @@ func (c *topologySpreadConfig) scaledMinReplicas(app *stack.Application, dep *ap
 		}
 		s, ok := oam.UnwrapConfig(a.Config).(replicaScaler)
 		if !ok {
+			continue
+		}
+		if k, ok := s.(scaleTargetKinder); ok && k.ScaleTargetKind() != "Deployment" {
 			continue
 		}
 		if target, minReplicas := s.ScaledReplicas(); target == dep.Name && minReplicas > 0 {
