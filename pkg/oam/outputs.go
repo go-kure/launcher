@@ -265,8 +265,8 @@ func checkDerivedOutputs(component string, decls []OutputDecl, outs []Output, he
 			return errors.Errorf("output %q of component %q derives from %q, which the build holds no name for, or has no derivation", d.Key, component, d.From)
 		}
 		if again := d.Derive(parent); again != outs[i].Name {
-			return errors.Errorf("output %q of component %q is answered %q, but its derivation from %q (%q) now gives %q: a derivation must give one name for one parent name",
-				d.Key, component, outs[i].Name, d.From, parent, again)
+			return errors.Errorf("output %q (kind %s) of component %q is answered %q, but its derivation from %q (%q) now gives %q: a derivation must give one name for one parent name",
+				d.Key, d.Kind, component, outs[i].Name, d.From, parent, again)
 		}
 	}
 	return nil

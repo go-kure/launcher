@@ -2574,9 +2574,10 @@ refused in the lowering's own words. No other builtin declares any.
 | `webservice`, `worker` | `serviceaccount` | ServiceAccount | `serviceAccountObjectName`, else the component name; **absent** when `serviceAccountName` names an existing account |
 | `webservice`, `worker` | `claim_<volume>` | PersistentVolumeClaim | one per `pvc` volume that sets no `claimName`: the volume's `claimObjectName`, else `<component>-<volume>` with each hyphen in either part written `--`; hyphens in the key become underscores |
 
-`app_secret` is the one derived output: the Secret is created by the operator, is not in the
-built application and is held by nothing. The inline object store of `recovery.source` is not
-declared. A claim's name is resolved without the ClusterProfile `pvc` capability, which
+`app_secret` is the one derived output: the operator creates the Secret, so it is not in the
+built application and no object of the build holds it. The build still re-applies the
+derivation to the held cluster name and fails if the output was answered another name. The
+inline object store of `recovery.source` is not declared. A claim's name is resolved without the ClusterProfile `pvc` capability, which
 chooses its storage class and no name, so the query records no consumed capability key.
 
 ## Per-type highlights
@@ -6216,7 +6217,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
       generates* (role `workload-volume-claim`), in place of
       `<component>-<volume>`, used as written: a DNS-1123 subdomain, never
       shortened. The volume mounts the claim by that name. Without it the
-      `Naming` hook is asked once per such volume. A volume with `claimName`
+      `Naming` hook is asked for each such volume. A volume with `claimName`
       references an existing claim and generates none, so `claimObjectName`
       beside it is refused and the hook is not asked for it. Two volumes, or
       a volume and another component, that give one claim name are refused as

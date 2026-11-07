@@ -320,9 +320,9 @@ func (l LoweringContext) Capability(key string) (CapabilityBinding, bool) {
 // without an authored name may be the TransformContext.Naming hook's answer
 // rather than the default. A rule that reads another component of Document and
 // needs the name that component's object will take knows it here only where
-// the author wrote it, or where no hook is set: the hook is asked once per
-// name, by the rule that generates the object, and is not asked on another's
-// behalf.
+// the author wrote it, or where no hook is set: the hook is asked by the rule
+// that generates the object, and is not asked on another's behalf. The same
+// name may be asked again, by the output check.
 func (l LoweringContext) HasNamingHook() bool {
 	return l.Namer != nil && l.Namer.hook != nil
 }

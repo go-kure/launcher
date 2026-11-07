@@ -131,7 +131,7 @@ const (
 	// names an existing account with `serviceAccountName`: it generates none.
 	NameRoleWorkloadServiceAccount NameRole = "workload-serviceaccount"
 	// NameRoleWorkloadVolumeClaim is the PersistentVolumeClaim a `pvc` volume of
-	// a `webservice` or `worker` component generates, asked once per such
+	// a `webservice` or `worker` component generates, asked for each such
 	// volume. Default: "<component>-<volume>", each half hyphen-escaped and
 	// shortened to 253 with the volume half kept whole. The hook is asked with
 	// the component, and not at all for a volume that references an existing
