@@ -319,8 +319,10 @@ func (r *chartRender) render(renderFn renderChartFunc, componentType, name strin
 	// they came even with secretValues set, quoting the value as the policy
 	// check quotes what it refuses, and nothing is kept of the render. They run
 	// in the order the typed pod reader applies them (validateAuthoredPodSpec):
-	// container names, then mounts, then the pod rules, so every delivery path
-	// refuses an object with the same first error. Hook groups are included.
+	// container names, then mounts, then the pod rules, so a chart and a
+	// passthrough component refuse an object with the same first error. The
+	// manifests source orders mounts before container names
+	// (go-kure/launcher#1297). Hook groups are included.
 	for _, g := range groups {
 		for _, obj := range g.Resources {
 			if err := validateObjectContainerNames(obj); err != nil {
