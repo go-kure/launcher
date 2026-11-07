@@ -235,3 +235,58 @@ func TestTypeID_ShortName(t *testing.T) {
 		}
 	}
 }
+
+// The registry returns a version as it was registered (go-kure/launcher#1289):
+// a short version is exact, so v2 and v2.0.0 are one version, but IDs and Resolve
+// give back the spelling that was written. Canonical is the form to compare or
+// persist.
+func TestTypeRegistry_ReturnsTheRegisteredSpellingAndCanonicalIsTheKey(t *testing.T) {
+	r := NewTypeRegistry()
+	for _, id := range mustIDs(t, "webapp.acme.example@v2") {
+		if err := r.Register(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := r.IDs()
+	if len(ids) != 1 || ids[0].Version != "v2" {
+		t.Fatalf("IDs() = %v, want the one identity as registered (webapp.acme.example@v2)", ids)
+	}
+	for _, ref := range []string{"webapp", "webapp@v2", "webapp@v2.0", "webapp@v2.0.0"} {
+		got, err := r.Resolve(ref)
+		if err != nil {
+			t.Fatalf("Resolve(%q): %v", ref, err)
+		}
+		if got.Version != "v2" {
+			t.Errorf("Resolve(%q) = %s, want the registered spelling v2", ref, got)
+		}
+		if want := (TypeID{Name: "webapp.acme.example", Version: "v2.0.0"}); got.Canonical() != want {
+			t.Errorf("Resolve(%q).Canonical() = %s, want %s", ref, got.Canonical(), want)
+		}
+	}
+}
+
+func TestTypeID_Canonical(t *testing.T) {
+	for _, tc := range []struct{ id, want TypeID }{
+		{TypeID{"webapp.acme.example", "v2"}, TypeID{"webapp.acme.example", "v2.0.0"}},
+		{TypeID{"webapp.acme.example", "v2.1"}, TypeID{"webapp.acme.example", "v2.1.0"}},
+		{TypeID{"webapp.acme.example", "v2.1.3"}, TypeID{"webapp.acme.example", "v2.1.3"}},
+		// A Kubernetes alpha or beta API version keeps its spelling.
+		{TypeID{"widget.acme.example", "v1beta1"}, TypeID{"widget.acme.example", "v1beta1"}},
+		{TypeID{"gateway.networking.k8s.io", "v1alpha2"}, TypeID{"gateway.networking.k8s.io", "v1alpha2"}},
+		// The grammar cannot tell a GA Kubernetes kind from a semver type: v1 is v1.0.0
+		// for any name, so Canonical is a comparison key, not an apiVersion.
+		{TypeID{"deployment.apps", "v1"}, TypeID{"deployment.apps", "v1.0.0"}},
+		{TypeID{"service", "v1"}, TypeID{"service", "v1.0.0"}},
+		// An invalid version has no canonical form and comes back as written.
+		{TypeID{"webapp.acme.example", "2"}, TypeID{"webapp.acme.example", "2"}},
+		{TypeID{"webapp.acme.example", ""}, TypeID{"webapp.acme.example", ""}},
+	} {
+		got := tc.id.Canonical()
+		if got != tc.want {
+			t.Errorf("%s.Canonical() = %s, want %s", tc.id, got, tc.want)
+		}
+		if again := got.Canonical(); again != got {
+			t.Errorf("Canonical is not idempotent: %s -> %s", got, again)
+		}
+	}
+}

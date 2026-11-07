@@ -2279,6 +2279,13 @@ model declares its name and version when it registers (go-kure/launcher#1258).
 | Any other type or model | `<name>.<domain>@v<semver>`: `cnpg-cluster.launcher.gokure.dev@v1`. |
 | `version` | `v<major>`, `v<major>.<minor>` or `v<major>.<minor>.<patch>`. A short version is exact: `v2` is `v2.0.0`. |
 
+`TypeRegistry.IDs` and `TypeRegistry.Resolve` return a version as it was registered. A type registered
+as `webapp.acme.example@v2` comes back as `v2`, not `v2.0.0`. `TypeID.Canonical()` returns the identity
+with its version as `v<major>.<minor>.<patch>`: compare or persist that form. A Kubernetes alpha or
+beta API version (`v1beta1`) keeps its spelling. The grammar cannot tell a GA Kubernetes kind from a
+semver type, so `Canonical` turns `deployment.apps@v1` into `deployment.apps@v1.0.0`. It is a comparison
+key, not a Kubernetes `apiVersion`.
+
 The domain of launcher's own types is `launcher.gokure.dev`. A consumer or a configuration-defined
 model uses a domain it owns. The `<family>.v<N>` successor spelling (`webservice.v2`) is retired:
 a successor is the same name at a new version. Every version ever published stays registered.
@@ -2289,7 +2296,7 @@ the string an application authors to one registered identity.
 ### Resolution
 
 An application may write a short name, with or without a version. The reference resolves, and the
-result records the exact version it resolved to, only when all of these hold:
+result is the registered identity, with the version as it was registered, only when all of these hold:
 
 1. A short name resolves only when exactly one registered type claims it. A type claims its
    leading name segment (`cnpg-cluster`) and its Kubernetes kind (`deployment`).
@@ -2305,7 +2312,7 @@ that registered it.
 
 | Call | Does |
 |---|---|
-| `TypeRegistry.Resolve(ref)` | Resolves `name` or `name@version` against the identities registered in that registry (rules 1 to 4), or refuses it. The result is the registered identity, so it carries the exact version. |
+| `TypeRegistry.Resolve(ref)` | Resolves `name` or `name@version` against the identities registered in that registry (rules 1 to 4), or refuses it. The result is the registered identity, so its version is the registered spelling (see `TypeID.Canonical()`). |
 | `ResolveTypeReference(ref, registered)` | The same rule against a flat list of identities, such as `TypeRegistry.IDs` or a caller's own set. It refuses the list itself when two entries conflict. |
 
 ### Declaring and resolving
