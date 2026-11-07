@@ -178,12 +178,12 @@ func TestLaterValueRefused(t *testing.T) {
 	t.Run("value 1 reads value 2", func(t *testing.T) {
 		m := celBase(t)
 		m.Spec.Values = []Value{{Name: "first", Expr: "${values.second + 1}"}, {Name: "second", Expr: "${1}"}}
-		wantRefusal(t, m, "spec.values[0].expr", "values.second")
+		wantRefusal(t, m, "spec.values[0].expr", "values.second is not computed yet")
 	})
 	t.Run("a value reads itself", func(t *testing.T) {
 		m := celBase(t)
 		m.Spec.Values = []Value{{Name: "loop", Expr: "${values.loop}"}}
-		wantRefusal(t, m, "spec.values[0].expr", "values.loop")
+		wantRefusal(t, m, "spec.values[0].expr", "values.loop is not computed yet")
 	})
 	t.Run("a value reads an earlier value", func(t *testing.T) {
 		m := celBase(t)
