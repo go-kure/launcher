@@ -131,6 +131,14 @@ check-issue-refs: ## Reject bare #N and ownerless repo#N references (self-test, 
 	@bash scripts/check-issue-refs.sh
 	@bash scripts/check-issue-refs.sh --commits $(ISSUE_REFS_BASE)
 
+# A commit that changes what app.yaml accepts needs the (format) scope, or a
+# Format-Scope trailer saying why not (go-kure/launcher#1279). Self-test first, then
+# the commits in $(ISSUE_REFS_BASE)..HEAD.
+.PHONY: check-format-scope
+check-format-scope: ## Require the (format) scope on commits that change what app.yaml accepts (self-test, then commits since ISSUE_REFS_BASE)
+	@bash scripts/check-format-scope-test.sh
+	@bash scripts/check-format-scope.sh --commits $(ISSUE_REFS_BASE)
+
 # =============================================================================
 # Testing
 # =============================================================================
@@ -413,13 +421,13 @@ test-forbidden-terms: ## Self-test the vendor scripts' guard matcher and cliff.t
 	bash scripts/test/forbidden-terms-test.sh
 
 .PHONY: check
-check: lint vet test-short check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact test-forbidden-terms check-issue-refs ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins, verify-merge self-test, pin-impact cases, forbidden-terms self-test, issue refs)
+check: lint vet test-short check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact test-forbidden-terms check-issue-refs check-format-scope ## Quick code quality check (lint, vet, short tests, kure dep sync, tool pins, verify-merge self-test, pin-impact cases, forbidden-terms self-test, issue refs)
 
 .PHONY: precommit
-precommit: fmt tidy lint test check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact test-forbidden-terms check-issue-refs ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync, tool pins, verify-merge self-test, pin-impact cases, forbidden-terms self-test, issue refs)
+precommit: fmt tidy lint test check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact test-forbidden-terms check-issue-refs check-format-scope ## Run fast pre-commit checks (fmt, tidy, lint, test, kure dep sync, tool pins, verify-merge self-test, pin-impact cases, forbidden-terms self-test, issue refs)
 
 .PHONY: ci
-ci: deps fmt tidy lint vet test test-race test-coverage test-integration build vuln check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact check-issue-refs ## Run comprehensive CI pipeline
+ci: deps fmt tidy lint vet test test-race test-coverage test-integration build vuln check-kure-dep-sync check-tool-versions check-govulncheck-docs test-verify-merge test-pin-impact check-issue-refs check-format-scope ## Run comprehensive CI pipeline
 
 # =============================================================================
 # Cleanup

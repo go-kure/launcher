@@ -337,6 +337,7 @@ each other, not with upstream.
 - `test-pin-impact` - Run `scripts/check-pin-impact.sh`'s hermetic cases (`bash scripts/test/run-tests.sh`)
 - `test-forbidden-terms` - Self-test the guard matcher the CRD vendor scripts read (`scripts/forbidden-terms-lib.sh`) and `cliff.toml`'s changelog scrub against the forbidden-terms guard (`bash scripts/test/forbidden-terms-test.sh`; needs `git-cliff` on `PATH`, which mise installs)
 - `check-issue-refs` - Reject bare `#N` and ownerless `name#N` references (self-test, the tree, then commit messages since `ISSUE_REFS_BASE`, default `origin/main`; `AGENTS.md` § "Issue references")
+- `check-format-scope` - Require the `(format)` scope, or a `Format-Scope: none (<reason>)` body line, on commits that change the files deciding what `app.yaml` accepts (self-test, then commits since `ISSUE_REFS_BASE`; `AGENTS.md` "Document-format changes")
 
 ### Release
 No target releases or previews a release: run the **Release** workflow, with **Dry run** ticked for

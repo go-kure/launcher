@@ -398,6 +398,16 @@ jobs:
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: bash scripts/check-issue-refs.sh --commits "$BASE_SHA" --head "$HEAD_SHA"
+    # The format-scope rule shares this job, so it adds no required check
+    # (go-kure/launcher#1279). Same range and same pull_request-only reason as above.
+    - name: Self-test the format-scope guard
+      run: bash scripts/check-format-scope-test.sh
+    - name: Check the format scope in the pull request's commits
+      if: github.event_name == 'pull_request'
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: bash scripts/check-format-scope.sh --commits "$BASE_SHA" --head "$HEAD_SHA"
 
   pin-impact:
     name: pin-impact
