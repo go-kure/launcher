@@ -3,8 +3,6 @@ title: "Examples"
 weight: 5
 ---
 
-# Examples
-
 The [`examples/`](https://github.com/go-kure/launcher/tree/main/examples) directory
 contains runnable OAM Applications and cluster profiles. Build any of them with:
 

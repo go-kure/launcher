@@ -41,7 +41,9 @@ inject_fm() {
     echo "weight: $weight"
     echo "---"
     echo ""
-    cat "$src"
+    # The title above is the page's h1, so the source's own leading "# " heading
+    # would repeat it as a second h1.
+    awk 'NR == 1 && /^# / { next } { print }' "$src"
   } > "$dest"
 }
 

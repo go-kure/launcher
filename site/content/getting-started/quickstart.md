@@ -3,8 +3,6 @@ title: "Quickstart"
 weight: 3
 ---
 
-# Quickstart
-
 Build Kubernetes manifests from an OAM Application and a platform ClusterProfile.
 
 ## 1. An application
