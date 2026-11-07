@@ -58,14 +58,18 @@ inside is a string template. `$${` writes a literal `${`. Release one of the for
 compile these strings, so `Load` stores them as written.
 
 Loading is always strict. An unknown field fails with its name and line. There is no `extends`
-and no `patches`. A file with more than one YAML document is refused.
+and no `patches`. A file with more than one YAML document is refused. YAML anchors, aliases and
+merge keys (`<<`) are refused with their line, because they hide duplicate keys. Each entry of
+`types` must be a known type name, so `types: [""]` is refused.
 
 ## API
 
 | Call | Does |
 |---|---|
-| `model.Load(data)` | Decodes one document and checks it. A failure of a decoded document wraps `model.ErrInvalid` and names the field, for example `spec.parts[1].id`. A YAML, `apiVersion` or `kind` failure does not wrap it. |
+| `model.Load(data)` | Decodes one document and checks it. A failure of a decoded document wraps `model.ErrInvalid` and names the field, for example `spec.parts[1].id`. A YAML, `apiVersion` or `kind` failure does not wrap it. A YAML type error, such as a list where a string belongs, names the line of the field and not its path. |
 | `(*Model).Identity()` | The model identity as written in `metadata`. |
 | `(*Model).Key()` | The identity with the version in the canonical form (`name@v2.0.0`). The registry returns a version as it was registered, so compare and store this form (`oam.TypeID.Canonical`). |
 
-`Load` returns the first failure in document order.
+`Load` returns the first failure. The YAML, `apiVersion` and `kind` checks come first. Then come the
+metadata, the inputs in alphabetical order of their names (a Go map keeps no document order), the
+values and the parts in document order.
