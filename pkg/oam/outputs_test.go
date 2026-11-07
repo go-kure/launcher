@@ -111,6 +111,11 @@ func TestComponentOutputsNamed_Hook(t *testing.T) {
 	}
 }
 
+// objectDecl is a well-formed allocated Secret declaration named name.
+func objectDecl(key, name string) OutputDecl {
+	return OutputDecl{Key: key, Role: NameRoleObject, Kind: outputSecretKind, Default: name, Name: name}
+}
+
 func TestComponentOutputs_RefusesBadDeclarations(t *testing.T) {
 	derive := func(s string) string { return s }
 	cases := []struct {
@@ -122,8 +127,8 @@ func TestComponentOutputs_RefusesBadDeclarations(t *testing.T) {
 		{"leading digit", []OutputDecl{{Key: "0data", Kind: outputSecretKind, Name: "x"}}, `key "0data"`},
 		{"empty key", []OutputDecl{{Kind: outputSecretKind, Name: "x"}}, `key ""`},
 		{"duplicate key", []OutputDecl{
-			{Key: "a", Kind: outputSecretKind, Name: "x"},
-			{Key: "a", Kind: outputSecretKind, Name: "y"},
+			objectDecl("a", "x"),
+			objectDecl("a", "y"),
 		}, `declared twice`},
 		{"allocated output without a name", []OutputDecl{{Key: "a", Kind: outputSecretKind}}, `no name`},
 		{"derived from a missing key", []OutputDecl{{Key: "a", Kind: outputSecretKind, From: "nope", Derive: derive}}, `derives from "nope"`},
@@ -132,11 +137,11 @@ func TestComponentOutputs_RefusesBadDeclarations(t *testing.T) {
 			{Key: "b", Kind: outputSecretKind, Name: "x"},
 		}, `derives from "b"`},
 		{"derived without a function", []OutputDecl{
-			{Key: "b", Kind: outputSecretKind, Name: "x"},
+			objectDecl("b", "x"),
 			{Key: "a", Kind: outputSecretKind, From: "b"},
 		}, `no derivation`},
 		{"derived that also names itself", []OutputDecl{
-			{Key: "b", Kind: outputSecretKind, Name: "x"},
+			objectDecl("b", "x"),
 			{Key: "a", Kind: outputSecretKind, From: "b", Derive: derive, Name: "y"},
 		}, `both`},
 		{"no kind", []OutputDecl{{Key: "a", Name: "x"}}, `no kind`},
