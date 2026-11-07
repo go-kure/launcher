@@ -472,3 +472,46 @@ func TestLoadResourcesWithStructure_TimestampKeyMapLoadsLikeStringKeyedMap(t *te
 		}
 	}
 }
+
+// A NaN key must keep its value, because NaN never equals itself: a conversion that looks the
+// value up again by key finds nothing and loads `NaN: null` with no error. Both loaders and
+// the patch-value path are checked; the patch path is where the value was lost first.
+func TestNonStringKeysKeepTheValueOfANaNKey(t *testing.T) {
+	const src = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: keys\nspec:\n  keys:\n    .nan: keep-me\n"
+	t.Run("multi", func(t *testing.T) {
+		resources, err := LoadResourcesFromMultiYAML(strings.NewReader(src))
+		if err != nil || len(resources) != 1 {
+			t.Fatalf("LoadResourcesFromMultiYAML: n=%d err=%v", len(resources), err)
+		}
+		requireString(t, resources[0].Object, "keep-me", "spec", "keys", "NaN")
+	})
+	t.Run("structure", func(t *testing.T) {
+		docSet, err := LoadResourcesWithStructure(strings.NewReader(src))
+		if err != nil || len(docSet.Documents) != 1 {
+			t.Fatalf("LoadResourcesWithStructure: err=%v", err)
+		}
+		requireString(t, docSet.Documents[0].Resource.Object, "keep-me", "spec", "keys", "NaN")
+	})
+	t.Run("patch value", func(t *testing.T) {
+		patches, err := LoadPatchFile(strings.NewReader("- target: keys\n  patch:\n    spec.keys:\n      .nan: keep-me\n"))
+		if err != nil || len(patches) != 1 {
+			t.Fatalf("LoadPatchFile: n=%d err=%v", len(patches), err)
+		}
+		obj := map[string]any{"spec": map[string]any{"keys": map[string]any{}}}
+		if err := applyPatchOp(obj, patches[0].Patch); err != nil {
+			t.Fatalf("applyPatchOp: %v", err)
+		}
+		requireString(t, obj, "keep-me", "spec", "keys", "NaN")
+	})
+}
+
+// A NaN key next to the string key "NaN" is the same collision as 0x10 and "16".
+func TestLoaders_RefuseANaNKeyNextToItsStringSpelling(t *testing.T) {
+	const src = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: keys\nspec:\n  keys:\n    .nan: float\n    \"NaN\": string\n"
+	if _, err := LoadResourcesFromMultiYAML(strings.NewReader(src)); err == nil {
+		t.Error("LoadResourcesFromMultiYAML accepted keys .nan and \"NaN\"")
+	}
+	if _, err := LoadResourcesWithStructure(strings.NewReader(src)); err == nil {
+		t.Error("LoadResourcesWithStructure accepted keys .nan and \"NaN\"")
+	}
+}
