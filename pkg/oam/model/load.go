@@ -4,6 +4,7 @@ import (
 	"bytes"
 	stderrors "errors"
 	"io"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -23,8 +24,10 @@ var ErrInvalid = errors.New("invalid model")
 // evaluates an expression. Decoding is strict: an unknown field fails with its
 // name and line, and so do YAML anchors, aliases and merge keys. A YAML type
 // error, such as a list where a string belongs, names the line of the field and
-// not its path. Load returns the first failure, and a nil model with it. The
-// YAML, apiVersion and kind checks come first, then the metadata, the inputs in
+// not its path. A null entry in a typed list fails with its path, and so does a
+// free-form mapping that holds two keys YAML reads as one. Load returns the first
+// failure, and a nil model with it. The YAML, apiVersion and kind checks come
+// first, then the null and duplicate-key checks, then the metadata, the inputs in
 // alphabetical order of their names (a Go map keeps no document order), then the
 // values and the parts in document order.
 func Load(data []byte) (*Model, error) {
@@ -66,6 +69,11 @@ func Load(data []byte) (*Model, error) {
 	}
 	if m.Kind != Kind {
 		return nil, errors.Errorf("model: kind %q, want %q", m.Kind, Kind)
+	}
+	if len(root.Content) == 1 {
+		if err := refuseNullElements(root.Content[0], reflect.TypeOf(m), ""); err != nil {
+			return nil, err
+		}
 	}
 	if err := validate(&m); err != nil {
 		return nil, err
