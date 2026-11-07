@@ -80,7 +80,8 @@ same string works in both.
 - **Open schemas name their gated paths.** The check walks the declared schema, so it stops
   at an object that declares no `Properties`. The raw-PodSpec kinds (`pod`, and the kinds
   that take a pod template: `podtemplate`, `replicaset`, `replicationcontroller`) leave
-  their containers and template spec open, so the open node carries
+  their containers and template spec open, as does the `template` of `cnpg-pooler`
+  (go-kure/launcher#1321), so the open node carries
   `PropertySchema.GatedPaths` (published as `gatedPaths`): gate-relative paths to the gate
   that field needs, such as `env[].valueFrom.fileKeyRef` to `EnvFiles`. The check reads it
   and refuses the same way as for a declared `Gate`, naming the authored path
@@ -91,7 +92,7 @@ same string works in both.
   read it, so what a document is accepted as is unchanged. The paths are
   `env[].valueFrom.fileKeyRef` and `restartPolicyRules` of `containers[]` and
   `initContainers[]`, and `hostnameOverride` and `resources` of the pod
-  spec (`template.spec.*` on a pod template). Declaring them as nested `Properties`
+  spec (`template.spec.*` on a pod template and on the `cnpg-pooler` template). Declaring them as nested `Properties`
   instead would make the validator type-check and null-strip them, which changes what is
   accepted (go-kure/launcher#1245). A test holds every gate a `gatedPaths` value names to a
   row of the table and every path to a field of the Kubernetes type.
