@@ -77,6 +77,11 @@ type ownedConfig struct {
 	// kinds is the policy's ObjectKindPolicy, nil when it does not implement
 	// it (object_kind_policy.go).
 	kinds *objectKindRules
+	// target is the Kubernetes release the objects are for, nil when the
+	// transform was given none (TransformContext.TargetVersion). The wrapper
+	// holds a Service name to the release's rule only when it is set
+	// (service_name_gate.go).
+	target *KubernetesVersion
 	// emitted is the objects the latest Generate returned under kinds, which
 	// AugmentLayout reads again (recheckEmitted); each Generate replaces it, so
 	// no earlier generation's objects are kept. emittedMu guards it.
@@ -108,7 +113,14 @@ func wrapOwnedEntryConfig(inner stack.ApplicationConfig, component, entry, label
 // wrapOwnedEntryConfigKinds is wrapOwnedEntryConfig with the policy's object
 // kind rules, which the wrapper holds the application's objects to.
 func wrapOwnedEntryConfigKinds(inner stack.ApplicationConfig, component, entry, labelKey string, reserved *reservedMetadataKeys, kinds *objectKindRules) stack.ApplicationConfig {
-	owned := &ownedConfig{inner: inner, component: component, entry: entry, labelKey: labelKey, reserved: reserved, kinds: kinds}
+	return wrapOwnedEntryConfigTarget(inner, component, entry, labelKey, reserved, kinds, nil)
+}
+
+// wrapOwnedEntryConfigTarget is wrapOwnedEntryConfigKinds with the Kubernetes
+// release the objects are for, which the wrapper holds the Service names of the
+// application's objects to (go-kure/launcher#1230).
+func wrapOwnedEntryConfigTarget(inner stack.ApplicationConfig, component, entry, labelKey string, reserved *reservedMetadataKeys, kinds *objectKindRules, target *KubernetesVersion) stack.ApplicationConfig {
+	owned := &ownedConfig{inner: inner, component: component, entry: entry, labelKey: labelKey, reserved: reserved, kinds: kinds, target: target}
 	augmenter, ok := inner.(layout.LayoutAugmenter)
 	if !ok {
 		return owned
@@ -435,8 +447,10 @@ var (
 //
 // It refuses the one document the wrapper's `app` exemption would let another
 // component's label value through for (checkEntryLabelValues). kinds is the
-// policy's object kind rules, nil when it has none.
-func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subApps []traitSubApps, labelKey string, reserved *reservedMetadataKeys, kinds *objectKindRules) error {
+// policy's object kind rules, nil when it has none. target is the Kubernetes
+// release the wrapper holds a Service name to (TransformContext.TargetVersion),
+// nil when the transform was given none.
+func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subApps []traitSubApps, labelKey string, reserved *reservedMetadataKeys, kinds *objectKindRules, target *KubernetesVersion) error {
 	if cluster == nil {
 		return nil
 	}
@@ -483,7 +497,7 @@ func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subAp
 				entry := synthesizedPolicyComponent(app.Config)
 				own = owner{component: byEntryName[entry], entry: entry}
 			}
-			app.Config = wrapOwnedEntryConfigKinds(app.Config, own.component, own.entry, labelKey, reserved, kinds)
+			app.Config = wrapOwnedEntryConfigTarget(app.Config, own.component, own.entry, labelKey, reserved, kinds, target)
 		}
 	})
 	return nil

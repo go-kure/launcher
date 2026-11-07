@@ -41,6 +41,15 @@ type TransformContext struct {
 	GroupsWaitForFluxObjects bool
 	Policy                   Policy
 	Capabilities             map[string]CapabilityBinding
+	// TargetVersion is the Kubernetes release of the cluster the objects are for,
+	// the ClusterProfile's spec.kubernetesVersion (go-kure/launcher#1230). When it
+	// is set, generating an object that names a Service starting with a digit is
+	// refused below the release where the RelaxedServiceNameValidation feature
+	// gate is on by default, because the API server would refuse the Service. The
+	// check runs when the objects are generated (GenerateApplications), not in
+	// Transform, and it reads this field only: a caller that leaves it nil gets no
+	// check. Non-authorable platform input, like EgressPeers.
+	TargetVersion *KubernetesVersion
 	// EgressPeers carries downstream-supplied, graph-derived egress destinations keyed
 	// by OAM component name. Non-authorable: never sourced from OAM YAML or
 	// capability rendering, and never merged into trait properties. nil on the
@@ -1084,7 +1093,7 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 	// generates with its component (go-kure/launcher#788) and holds it to the
 	// consumer's reserved metadata keys (go-kure/launcher#790) and to the
 	// policy's object kinds (go-kure/launcher#922).
-	if err := markComponentOwnership(cluster, order, *ctx.traitSubApps, labelKey, reservedKeys, objectKinds); err != nil {
+	if err := markComponentOwnership(cluster, order, *ctx.traitSubApps, labelKey, reservedKeys, objectKinds, ctx.TargetVersion); err != nil {
 		return nil, nil, err
 	}
 
