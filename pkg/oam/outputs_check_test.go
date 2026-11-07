@@ -512,3 +512,35 @@ func TestResolveOutputs_RefusesAnEmptyDerivedName(t *testing.T) {
 		}
 	}
 }
+
+// A declaration names the kind of the object, so a kind with no kind name is
+// refused where the declarations are answered, as an empty one is: GroupKind
+// reads {Group: "example.com"} as not empty, and neither build check holds a
+// derived output.
+func TestResolveOutputs_RefusesAKindWithNoKindName(t *testing.T) {
+	cluster := OutputDecl{Key: "cluster", Role: NameRolePostgresqlCluster, Kind: outputClusterKind, Default: "pg", Name: "pg"}
+	for _, kc := range []struct {
+		name string
+		kind schema.GroupKind
+	}{
+		{"empty", schema.GroupKind{}},
+		{"group only", schema.GroupKind{Group: "example.com"}},
+		{"blank kind", schema.GroupKind{Kind: "  "}},
+		{"group and blank kind", schema.GroupKind{Group: "example.com", Kind: "\t"}},
+	} {
+		for _, shape := range []struct {
+			name string
+			decl OutputDecl
+		}{
+			{"derived", OutputDecl{Key: "secret", Kind: kc.kind, From: "cluster", Derive: func(s string) string { return s + "-app" }}},
+			{"allocated", OutputDecl{Key: "secret", Role: NameRoleObject, Kind: kc.kind, Default: "pg", Name: "pg-app"}},
+		} {
+			t.Run(kc.name+"/"+shape.name, func(t *testing.T) {
+				_, err := resolveOutputs([]OutputDecl{cluster, shape.decl})
+				if err == nil || !strings.Contains(err.Error(), `output "secret"`) || !strings.Contains(err.Error(), "no kind") {
+					t.Errorf("err = %v, want one naming the output and that it declares no kind", err)
+				}
+			})
+		}
+	}
+}
