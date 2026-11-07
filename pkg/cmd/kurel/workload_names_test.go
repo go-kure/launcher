@@ -207,13 +207,18 @@ func TestWorkloadNames_DecliningHookChangesNothing(t *testing.T) {
 		t.Errorf("a hook that declines every name changed the generated objects")
 	}
 
-	want := []oam.NameRequest{
+	// Each component's names are asked for twice, in this order: by the output
+	// query that runs before its lowering, then by the lowering itself.
+	web := []oam.NameRequest{
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadDeployment, Kind: "Deployment.apps", Default: "web"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadService, Kind: "Service", Default: "web"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadServiceAccount, Kind: "ServiceAccount", Default: "web"},
+	}
+	jobs := []oam.NameRequest{
 		{Application: "shop", Component: "jobs", Role: oam.NameRoleWorkloadDeployment, Kind: "Deployment.apps", Default: "jobs"},
 		{Application: "shop", Component: "jobs", Role: oam.NameRoleWorkloadServiceAccount, Kind: "ServiceAccount", Default: "jobs"},
 	}
+	want := slices.Concat(web, web, jobs, jobs)
 	if got := workloadRoleRequests(requests); !slices.Equal(got, want) {
 		t.Errorf("the hook was asked\n  %+v\nwant\n  %+v", got, want)
 	}
@@ -375,11 +380,16 @@ func TestWorkloadNames_ExistingAccountIsNotNamed(t *testing.T) {
 	doc := workloadNamesDoc("        serviceAccountName: shared\n", "        serviceAccountName: shared\n")
 	var requests []oam.NameRequest
 	_, apps := namingTransform(t, doc, workloadNamesContext(declineEveryName(&requests)))
-	want := []oam.NameRequest{
+	// Each component's names are asked for twice (the output query, then the
+	// lowering), and none is asked for the account.
+	web := []oam.NameRequest{
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadDeployment, Kind: "Deployment.apps", Default: "web"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadService, Kind: "Service", Default: "web"},
+	}
+	jobs := []oam.NameRequest{
 		{Application: "shop", Component: "jobs", Role: oam.NameRoleWorkloadDeployment, Kind: "Deployment.apps", Default: "jobs"},
 	}
+	want := slices.Concat(web, web, jobs, jobs)
 	if got := workloadRoleRequests(requests); !slices.Equal(got, want) {
 		t.Errorf("the hook was asked\n  %+v\nwant\n  %+v", got, want)
 	}

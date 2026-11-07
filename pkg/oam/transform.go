@@ -97,7 +97,7 @@ type TransformContext struct {
 	// kurel path, where endpoint-ingress synthesis is a no-op.
 	IngressPeers map[string][]netpol.IngressPeer
 	// Naming is the consumer's say in the names launcher generates
-	// (go-kure/launcher#787). It is asked once for each name of a role in
+	// (go-kure/launcher#787). It is asked at least once for each name of a role in
 	// NameRoles that the author did not set: return a name and true to use it in
 	// place of NameRequest.Default, or false to keep the default. A returned name
 	// must be a DNS-1123 subdomain (a DNS-1123 label for the pooler and
@@ -107,8 +107,9 @@ type TransformContext struct {
 	// the default. Non-authorable platform input.
 	//
 	// It must be a pure function of its request: the same answer for the same
-	// NameRequest, whenever and however often it is asked. One name is asked for
-	// more than once: in the transform, and again by ComponentEndpointsNamed,
+	// NameRequest, whenever and however often it is asked. A name is asked for at
+	// least once in the transform, again by the output check of a type that
+	// declares outputs (OutputProvider), and again by ComponentEndpointsNamed,
 	// which builds a selector from the answer.
 	Naming func(NameRequest) (string, bool)
 	// ReservedMetadataKeys names the label and annotation keys the consumer keeps

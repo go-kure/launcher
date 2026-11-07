@@ -16,7 +16,7 @@ import (
 )
 
 // These tests pin the consumer naming hook (go-kure/launcher#787) through
-// kurel's own transformer: TransformContext.Naming is asked once for each name
+// kurel's own transformer: TransformContext.Naming is asked at least once for each name
 // the author did not set, its answer is used as returned or refused, and two
 // names that end up naming one object fail the transform.
 
@@ -203,7 +203,7 @@ const (
 	scheduledBackupKind = "ScheduledBackup.postgresql.cnpg.io"
 )
 
-func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
+func TestNamingHook_AskedForEveryNameOfEveryRole(t *testing.T) {
 	var requests []oam.NameRequest
 	jobs := hookComponent("jobs", "helmtemplate", serveHookChart(t), "")
 	artifact := ociNamesComponent("artifact", "artifact", "", "")
@@ -221,7 +221,12 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 		subApp  = oam.NameRoleSubApplication
 		synthNP = "web-allow-egress-traffic"
 	)
-	// Each name once, in the order the transform reaches it: the names the
+	// Each name in the order the transform reaches it. A rule that declares its
+	// outputs (webservice, postgresql) is asked for them before it lowers, and
+	// that query resolves the names it declares on an allocator of its own, so the
+	// hook is asked for each of those names again, by the query and then by the
+	// lowering: the hook must be pure (TransformContext.Naming). A name no output
+	// declares is asked once. In that order: the names the
 	// lowering rules make, the object of each authored kind component, the
 	// hook-group prefix of the helmtemplate component, the bundles, each trait's
 	// objects and then its sub-application, the synthesized policy last. agent
@@ -237,10 +242,18 @@ func TestNamingHook_AskedOncePerNameOfEveryRole(t *testing.T) {
 	// then the recovery ObjectStore, before the Pooler, the Database and the
 	// ScheduledBackup.
 	want := []oam.NameRequest{
+		// The output query of web, then its lowering.
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadVolumeClaim, Kind: "PersistentVolumeClaim", Default: "web-data"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadDeployment, Kind: "Deployment.apps", Default: "web"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadService, Kind: "Service", Default: "web"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadServiceAccount, Kind: "ServiceAccount", Default: "web"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadVolumeClaim, Kind: "PersistentVolumeClaim", Default: "web-data"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadDeployment, Kind: "Deployment.apps", Default: "web"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadService, Kind: "Service", Default: "web"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleWorkloadServiceAccount, Kind: "ServiceAccount", Default: "web"},
+		// The output query of db (its Cluster and ObjectStore), then its lowering.
+		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlCluster, Kind: clusterKindName, Default: "db"},
+		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlObjectStore, Kind: objectStoreKindName, Default: "db"},
 		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlCluster, Kind: clusterKindName, Default: "db"},
 		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlObjectStore, Kind: objectStoreKindName, Default: "db"},
 		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlRecoveryObjectStore, Kind: objectStoreKindName, Default: "db-recovery-source"},

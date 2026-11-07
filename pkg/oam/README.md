@@ -1462,7 +1462,8 @@ The way out is another prefix for one of the components: `hookGroupNamePrefix`, 
 `Naming` hook's answer for the `hook-group` role. A consumer that walks the tree itself can
 also set `KustomizationName` on a walked child before the integration.
 
-The hook sees every role. It is asked once for each name the transform resolves, and not at
+The hook sees every role. It is asked at least once for each name the transform resolves,
+and again by the output check of a type that declares outputs (see Outputs, below), and not at
 all for a name the author set. `NameRequest` carries the Application's name, the component
 (empty for the bundle, a group, an external backend's policy and a generated source the
 document's components share), the role, the object's kind
@@ -1472,8 +1473,8 @@ would use it: already shortened where launcher shortens a name (a group's bundle
 trait's sub-application default (`<component>-scaler` is 260 characters for a 253-character
 component name) and the `hook-group` prefix, which is shortened only inside the names built
 from it. The default is what tells apart several names of one component and role. Returning
-`false` keeps the default. Answers are not cached, and one name is asked for more than once
-(in the transform, and again by `ComponentEndpointsNamed`, below): the hook must be a pure
+`false` keeps the default. Answers are not cached, and a name can be asked for more than once (as said above, and
+again by `ComponentEndpointsNamed`, below): the hook must be a pure
 function of its request, the same answer for the same `NameRequest` whenever it is asked. A
 component's own application, whose name is the component's, is not a role, and the hook is
 not asked for it. The application of a trait a rule appends is a trait's like any other: the
@@ -1863,14 +1864,19 @@ consults no hook, and a consumer that sets `Naming` calls
 `NameRequest` the transform asks.
 
 A declaration is one of two shapes. An **allocated** output carries the `Role` and `Default`
-the name was resolved under, and `Name`. A **derived** output carries `From`, the key of an
-allocated output, and `Derive`, which maps that name to this one. It names an object the
-operator gives, not launcher: the Secret CloudNativePG generates for a `postgresql`
-component's application user is `<cluster>-app`. It is not in the built application, so
-nothing is claimed for it and nothing holds it.
+the name was resolved under, and `Name`. The role must be a name role that names an object
+and the default must not be empty, as the allocator requires; a declaration that fails either
+is refused where it is answered, by a query as by the build. A **derived** output carries
+`From`, the key of an allocated output, and `Derive`, which maps that name to this one. It
+names an object the operator gives, not launcher: the Secret CloudNativePG generates for a
+`postgresql` component's application user is `<cluster>-app`. It is not in the built
+application, so nothing is claimed for it. The build applies `Derive` again to the name it
+holds for the parent and fails if the result is not the name the output was answered, so
+`Derive` must give one name for one parent name.
 
-**The build holds every allocated declaration.** The transform asks each provider for its
-outputs as it lowers the component, and a difference fails the build, naming the component,
+**The build holds every declaration.** The transform asks each provider for its
+outputs as it lowers the component (asking the `Naming` hook again for each name the provider
+resolves), and a difference fails the build, naming the component,
 the output key, the kind and both names. For a lowering rule the declaration must find exactly
 one name its lowering resolved for the same component, role, kind and default, and that name
 must equal the declared one; for a handler, which names one object, the declared name must be

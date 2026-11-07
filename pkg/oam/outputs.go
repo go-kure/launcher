@@ -30,12 +30,15 @@ type OutputProvider interface {
 // document and is one identifier (validOutputKey). It is one of two shapes:
 //
 //   - allocated: Name is the name the provider resolved for the object, Role and
-//     Default are what it resolved it under, and From and Derive are empty. The
+//     Default are what it resolved it under (a name role that names an object,
+//     and a default that is not empty), and From and Derive are empty. The
 //     transform holds Name against the name the lowering gives the object.
 //   - derived: From names the Key of an earlier allocated output and Derive maps
 //     that output's name to this one (a name the operator, not launcher, gives:
 //     CloudNativePG's <cluster>-app Secret). Name is empty. The object does not
-//     exist in the built application, so nothing is claimed for it.
+//     exist in the built application, so nothing is claimed for it. Derive must
+//     give one name for one parent name: the build applies it again to the name
+//     it holds for the parent and refuses a different answer.
 type OutputDecl struct {
 	Key     string
 	Role    NameRole
@@ -160,8 +163,10 @@ func probeCopy(comp Component) Component {
 // lowering rule, and that claim must carry the declared name. Kind tells
 // apart two names a rule resolves under one role and default (a ConfigMap and
 // a Secret answered differently by the hook). A derived output claims nothing:
-// it is the derivation of its parent, which was held.
+// its derivation is applied again to the name held for its parent and must give
+// the name it was answered (checkDerivedOutputs).
 func checkRuleOutputs(component string, decls []OutputDecl, outs []Output, claims []loweredName) error {
+	held := make(map[string]string, len(decls))
 	for _, d := range decls {
 		if d.From != "" || d.Derive != nil {
 			continue
@@ -185,20 +190,23 @@ func checkRuleOutputs(component string, decls []OutputDecl, outs []Output, claim
 			return errors.Errorf("output %q of component %q declares the %s name %q, but the lowering named the object %q",
 				d.Key, component, d.Kind, d.Name, matched[0].name)
 		}
+		held[d.Key] = matched[0].name
 	}
-	return nil
+	return checkDerivedOutputs(component, decls, outs, held)
 }
 
 // checkHandlerOutputs holds the outputs a handler declared for comp against
 // the object the transform resolved for comp: its name (Component.ObjectName)
 // and its kind, the GroupKind the handler declares for that object
 // (ComponentObject), group included. A handler's object is the one the engine
-// names after the component, so only the role object can be held.
+// names after the component, so only the role object can be held. A derived
+// output is held to the derivation of that name (checkDerivedOutputs).
 func checkHandlerOutputs(comp *Component, handler ComponentHandler, decls []OutputDecl, outs []Output) error {
 	var objectKind schema.GroupKind
 	if p, ok := handler.(ComponentObjectProvider); ok {
 		objectKind, _ = p.ComponentObject()
 	}
+	held := make(map[string]string, len(decls))
 	for _, d := range decls {
 		if d.From != "" || d.Derive != nil {
 			continue
@@ -215,13 +223,59 @@ func checkHandlerOutputs(comp *Component, handler ComponentHandler, decls []Outp
 			return errors.Errorf("output %q of component %q declares the %s name %q, but the transform named the object %q",
 				d.Key, comp.Name, d.Kind, d.Name, comp.ObjectName())
 		}
+		held[d.Key] = comp.ObjectName()
+	}
+	return checkDerivedOutputs(comp.Name, decls, outs, held)
+}
+
+// checkAllocation holds an allocated declaration to what the allocator holds a
+// name to, so a declaration the lowering could never resolve is refused where it
+// is answered: a Role that is a name role naming an object, and a Default to
+// fall back to. The build check matches the claim of the lowering on both.
+func checkAllocation(d OutputDecl) error {
+	class, _, known := classOfNameRole(d.Role)
+	switch {
+	case !known:
+		return errors.Errorf("output %q is declared under role %q, which is not a name role (the roles: %s)", d.Key, d.Role, joinNameRoles())
+	case class != nameClassObject:
+		return errors.Errorf("output %q is declared under role %q, which names no object", d.Key, d.Role)
+	case strings.TrimSpace(d.Default) == "":
+		return errors.Errorf("output %q has no default name for role %q", d.Key, d.Role)
+	}
+	return nil
+}
+
+// checkDerivedOutputs holds the derived outputs to the name the build holds for
+// their parent: each derivation is applied again to that held name and must give
+// the name the output was answered. An answer is made once, from the name the
+// provider declared for the parent, so a derivation that is not a pure function
+// of its parent's name (a counter, a clock) would otherwise name an object the
+// build never checks. held maps the key of each allocated output to the name the
+// build holds for it; outs are the answers to decls, in order.
+func checkDerivedOutputs(component string, decls []OutputDecl, outs []Output, held map[string]string) error {
+	if len(outs) != len(decls) {
+		return errors.Errorf("component %q declares %d outputs and has %d answers", component, len(decls), len(outs))
+	}
+	for i, d := range decls {
+		if d.From == "" && d.Derive == nil {
+			continue
+		}
+		parent, ok := held[d.From]
+		if !ok || d.Derive == nil {
+			return errors.Errorf("output %q of component %q derives from %q, which the build holds no name for, or has no derivation", d.Key, component, d.From)
+		}
+		if again := d.Derive(parent); again != outs[i].Name {
+			return errors.Errorf("output %q of component %q is answered %q, but its derivation from %q (%q) now gives %q: a derivation must give one name for one parent name",
+				d.Key, component, outs[i].Name, d.From, parent, again)
+		}
 	}
 	return nil
 }
 
 // resolveOutputs checks decls and answers them: every key is one identifier and
-// appears once, an allocated output has a name and a kind, a derived output
-// names an earlier allocated output and carries its derivation.
+// appears once, an allocated output has a name, a kind, a name role that names an
+// object and a default, a derived output names an earlier allocated output and
+// carries its derivation.
 func resolveOutputs(decls []OutputDecl) ([]Output, error) {
 	outs := make([]Output, 0, len(decls))
 	names := make(map[string]string, len(decls))
@@ -258,6 +312,10 @@ func resolveOutputs(decls []OutputDecl) ([]Output, error) {
 			}
 		case strings.TrimSpace(name) == "":
 			return nil, errors.Errorf("output %q has no name", d.Key)
+		default:
+			if err := checkAllocation(d); err != nil {
+				return nil, err
+			}
 		}
 		allocated[d.Key] = d.From == "" && d.Derive == nil
 		names[d.Key] = name

@@ -126,10 +126,11 @@ func TestPostgresqlObjectNames_DecliningHookChangesNothing(t *testing.T) {
 		t.Errorf("a hook that declines every name changed the generated objects")
 	}
 
-	want := []oam.NameRequest{
-		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlCluster, Kind: clusterKindName, Default: "db"},
-		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlObjectStore, Kind: objectStoreKindName, Default: "db"},
-	}
+	// The rule declares its outputs, so both names are asked for twice: by the
+	// output query that runs before the lowering, then by the lowering itself.
+	cluster1 := oam.NameRequest{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlCluster, Kind: clusterKindName, Default: "db"}
+	store1 := oam.NameRequest{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlObjectStore, Kind: objectStoreKindName, Default: "db"}
+	want := []oam.NameRequest{cluster1, store1, cluster1, store1}
 	if got := postgresqlObjectRequests(requests); !slices.Equal(got, want) {
 		t.Errorf("the hook was asked\n  %+v\nwant\n  %+v", got, want)
 	}
@@ -161,8 +162,8 @@ func TestPostgresqlObjectNames_HookAnswerIsUsed(t *testing.T) {
 	cluster, apps := namingTransform(t, doc, postgresqlNamesContext(hook))
 	assertPostgresqlObjects(t, generatedDocs(t, apps), postgresqlRenamedNames)
 	request := oam.NameRequest{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlCluster, Kind: clusterKindName, Default: "db"}
-	if !slices.Equal(asked, []oam.NameRequest{request}) {
-		t.Errorf("the transform asked the hook for the Cluster\n  %+v\nwant once, for the lowering and every reference alike:\n  %+v", asked, request)
+	if !slices.Equal(asked, []oam.NameRequest{request, request}) {
+		t.Errorf("the transform asked the hook for the Cluster\n  %+v\nwant the same request twice, by the output query and by the lowering, and for every reference alike:\n  %+v", asked, request)
 	}
 
 	plainCluster, plainApps := namingTransform(t, doc, postgresqlNamesContext(nil))
@@ -188,8 +189,8 @@ func TestPostgresqlObjectNames_HookAnswerIsUsed(t *testing.T) {
 	if selected := postgresqlClusterSelector(t, eps, err); selected != postgresqlRenamedNames.cluster {
 		t.Errorf("ComponentEndpointsNamed selects cnpg.io/cluster=%q, want the name the Cluster got", selected)
 	}
-	if !slices.Equal(asked, []oam.NameRequest{request, request}) {
-		t.Errorf("the hook was asked for the Cluster\n  %+v\nwant the transform's request, and the same again for the endpoint:\n  %+v", asked, request)
+	if !slices.Equal(asked, []oam.NameRequest{request, request, request}) {
+		t.Errorf("the hook was asked for the Cluster\n  %+v\nwant the transform's request twice, and the same again for the endpoint:\n  %+v", asked, request)
 	}
 
 	eps, err = transformer.ComponentEndpoints(comp)
@@ -254,9 +255,10 @@ func TestPostgresqlObjectNames_OneNameAtATime(t *testing.T) {
 func TestPostgresqlObjectNames_HookNotAskedForAStoreNotGenerated(t *testing.T) {
 	var requests []oam.NameRequest
 	namingTransform(t, helmNamesApp(namingDB), postgresqlNamesContext(declineEveryName(&requests)))
-	want := []oam.NameRequest{
-		{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlCluster, Kind: clusterKindName, Default: "db"},
-	}
+	// The Cluster's name twice, by the output query and by the lowering: no
+	// request for an ObjectStore, which is not generated.
+	cluster1 := oam.NameRequest{Application: "shop", Component: "db", Role: oam.NameRolePostgresqlCluster, Kind: clusterKindName, Default: "db"}
+	want := []oam.NameRequest{cluster1, cluster1}
 	if got := postgresqlObjectRequests(requests); !slices.Equal(got, want) {
 		t.Errorf("the hook was asked\n  %+v\nwant\n  %+v", got, want)
 	}
