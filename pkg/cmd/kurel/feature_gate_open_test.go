@@ -3,6 +3,7 @@ package kurel
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -408,5 +409,258 @@ func TestFeatureGates_OpenSchemasNullUsesNoGate(t *testing.T) {
 	doc, _ := openGateDoc("pod", specs["fileKeyRef"])
 	if err := validateForTarget(t, doc, &oldest); err != nil {
 		t.Fatalf("a null fileKeyRef on a pod must pass any version, got %v", err)
+	}
+}
+
+// casingCase is one gated property under an open schema authored with a field name
+// spelled in a different case. The raw-kind decoder matches field names
+// case-insensitively (encoding/json), so the document builds the same object as the
+// canonical spelling does, and the gate check has to see it as the same field.
+type casingCase struct {
+	name  string
+	gate  string
+	field string // the authored path below the pod spec, in the authored spelling
+	spec  string
+	// specKey is the authored spelling of the pod template's `spec` key; empty keeps `spec`.
+	specKey string
+	kinds   []string
+}
+
+var templateKinds = []string{"podtemplate", "replicaset", "replicationcontroller"}
+
+const casingApp = `containers:
+  - name: app
+    image: ghcr.io/example/app:v1.0.0
+`
+
+// leafCasingCases spell the gated field itself in another case.
+var leafCasingCases = []casingCase{
+	{
+		name: "template HostnameOverride", gate: "HostnameOverride", field: "HostnameOverride",
+		kinds: templateKinds,
+		spec:  casingApp + "HostnameOverride: web.example.com\n",
+	},
+	{
+		name: "template HOSTNAMEOVERRIDE", gate: "HostnameOverride", field: "HOSTNAMEOVERRIDE",
+		kinds: templateKinds,
+		spec:  casingApp + "HOSTNAMEOVERRIDE: web.example.com\n",
+	},
+	{
+		name: "template Resources", gate: "PodLevelResources", field: "Resources",
+		kinds: templateKinds,
+		spec:  casingApp + "Resources:\n  requests:\n    cpu: 500m\n    memory: 1Gi\n",
+	},
+	{
+		name: "container RestartPolicyRules", gate: "ContainerRestartRules", field: "containers[0].RestartPolicyRules",
+		kinds: openGateKinds,
+		spec: `containers:
+  - name: app
+    image: ghcr.io/example/app:v1.0.0
+    restartPolicy: Never
+    RestartPolicyRules:
+      - action: Restart
+        exitCodes:
+          operator: In
+          values: [42]
+`,
+	},
+	{
+		name: "initContainer RestartPolicyRules", gate: "ContainerRestartRules", field: "initContainers[0].RestartPolicyRules",
+		kinds: openGateKinds,
+		spec: casingApp + `initContainers:
+  - name: migrate
+    image: ghcr.io/example/migrate:v1.0.0
+    RestartPolicyRules:
+      - action: Restart
+        exitCodes:
+          operator: In
+          values: [42]
+`,
+	},
+	{
+		name: "container FileKeyRef", gate: "EnvFiles", field: "containers[0].env[0].valueFrom.FileKeyRef",
+		kinds: openGateKinds,
+		spec: openGateVolume + `containers:
+  - name: app
+    image: ghcr.io/example/app:v1.0.0
+    env:
+      - name: API_KEY
+        valueFrom:
+          FileKeyRef:
+            volumeName: envfiles
+            path: api.env
+            key: API_KEY
+`,
+	},
+}
+
+// intermediateCasingCases spell a key on the way to the gated field in another case.
+var intermediateCasingCases = []casingCase{
+	{
+		name: "container Env and ValueFrom", gate: "EnvFiles", field: "containers[0].Env[0].ValueFrom.fileKeyRef",
+		kinds: openGateKinds,
+		spec: openGateVolume + `containers:
+  - name: app
+    image: ghcr.io/example/app:v1.0.0
+    Env:
+      - name: API_KEY
+        ValueFrom:
+          fileKeyRef:
+            volumeName: envfiles
+            path: api.env
+            key: API_KEY
+`,
+	},
+	{
+		name: "template Spec", gate: "HostnameOverride", field: "hostnameOverride",
+		kinds: templateKinds, specKey: "Spec",
+		spec: casingApp + "hostnameOverride: web.example.com\n",
+	},
+	{
+		name: "template Containers", gate: "EnvFiles", field: "Containers[0].env[0].valueFrom.fileKeyRef",
+		kinds: templateKinds,
+		spec: openGateVolume + `Containers:
+  - name: app
+    image: ghcr.io/example/app:v1.0.0
+    env:
+      - name: API_KEY
+        valueFrom:
+          fileKeyRef:
+            volumeName: envfiles
+            path: api.env
+            key: API_KEY
+`,
+	},
+	{
+		name: "template InitContainers", gate: "ContainerRestartRules", field: "InitContainers[0].restartPolicyRules",
+		kinds: templateKinds,
+		spec: casingApp + `InitContainers:
+  - name: migrate
+    image: ghcr.io/example/migrate:v1.0.0
+    restartPolicyRules:
+      - action: Restart
+        exitCodes:
+          operator: In
+          values: [42]
+`,
+	},
+}
+
+// casingDoc is the document that authors c on kind, and the path the refusal names
+// for it: the kind's prefix, with the authored spelling of `spec`, and c.field.
+func casingDoc(kind string, c casingCase) (doc, path string) {
+	doc, prefix := openGateDoc(kind, c.spec)
+	if c.specKey != "" {
+		doc = strings.Replace(doc, "\n          spec:\n", "\n          "+c.specKey+":\n", 1)
+		prefix = strings.Replace(prefix, ".spec.", "."+c.specKey+".", 1)
+	}
+	return doc, prefix + c.field
+}
+
+// requireCasingRefusedBelow: the gated field authored in another case is refused one
+// release below its gate, naming the authored spelling, the gate and both releases.
+func requireCasingRefusedBelow(t *testing.T, cases []casingCase) {
+	t.Helper()
+	for _, c := range cases {
+		for _, kind := range c.kinds {
+			t.Run(kind+"/"+c.name, func(t *testing.T) {
+				on, ok := oam.FeatureGateOnByDefault(c.gate)
+				if !ok {
+					t.Fatalf("gate %q is not in the table", c.gate)
+				}
+				doc, field := casingDoc(kind, c)
+				below := oam.KubernetesVersion{Major: on.Major, Minor: on.Minor - 1}
+				err := validateForTarget(t, doc, &below)
+				if err == nil {
+					t.Fatalf("%s accepted at %s: want it refused (gate %s is on from %s)", field, below, c.gate, on)
+				}
+				for _, want := range []string{field, c.gate, "from " + on.String(), "kubernetesVersion is " + below.String()} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("at %s: error %q does not name %q", below, err, want)
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestFeatureGates_OpenSchemasLeafCasingRefusedBelow: go-kure/launcher#1245 F2. The
+// raw-kind decoder matches field names case-insensitively, so `HostnameOverride` sets
+// the field `hostnameOverride` does; the gate must refuse it below its release too.
+func TestFeatureGates_OpenSchemasLeafCasingRefusedBelow(t *testing.T) {
+	requireCasingRefusedBelow(t, leafCasingCases)
+}
+
+// TestFeatureGates_OpenSchemasIntermediateCasingRefusedBelow: the same for a key on the
+// way to the gated field (`Spec`, `Containers`, `Env`, `ValueFrom`).
+func TestFeatureGates_OpenSchemasIntermediateCasingRefusedBelow(t *testing.T) {
+	requireCasingRefusedBelow(t, intermediateCasingCases)
+}
+
+// TestFeatureGates_OpenSchemasCasingAcceptedAtAndAbove: the control that the handler
+// builds every casing variant above, so a refusal below is the gate's and not the
+// decoder's: accepted with no version stated, at the gate's release, and above it.
+func TestFeatureGates_OpenSchemasCasingAcceptedAtAndAbove(t *testing.T) {
+	for _, c := range append(slices.Clone(leafCasingCases), intermediateCasingCases...) {
+		for _, kind := range c.kinds {
+			t.Run(kind+"/"+c.name, func(t *testing.T) {
+				on, ok := oam.FeatureGateOnByDefault(c.gate)
+				if !ok {
+					t.Fatalf("gate %q is not in the table", c.gate)
+				}
+				doc, _ := casingDoc(kind, c)
+				above := oam.KubernetesVersion{Major: on.Major, Minor: on.Minor + 5}
+				if err := validateForTarget(t, doc, nil); err != nil {
+					t.Fatalf("no version stated: want accepted, got %v", err)
+				}
+				for _, v := range []oam.KubernetesVersion{on, above} {
+					if err := validateForTarget(t, doc, &v); err != nil {
+						t.Errorf("at %s: want accepted, got %v", v, err)
+					}
+				}
+			})
+		}
+	}
+}
+
+// TestFeatureGates_OpenSchemasDuplicateSpellingRefusedBelow: when a field is authored
+// under two spellings, the gate checks every spelling, so it refuses below the gate
+// whichever one the decoder keeps. Neither spelling here is the canonical one, and in
+// the second case the spelling that sets the field sits beside a null one (a null is
+// absent). The document is built, not refused, with the duplicate (that is tracked
+// separately), so this test asserts only the gate's refusal.
+func TestFeatureGates_OpenSchemasDuplicateSpellingRefusedBelow(t *testing.T) {
+	on, ok := oam.FeatureGateOnByDefault("HostnameOverride")
+	if !ok {
+		t.Fatal("gate HostnameOverride is not in the table")
+	}
+	below := oam.KubernetesVersion{Major: on.Major, Minor: on.Minor - 1}
+	cases := []struct {
+		name string
+		spec string
+		// set is the authored spelling that sets the field, which the error must name.
+		set string
+	}{
+		{"both set", casingApp + "HostnameOverride: web.example.com\nHOSTNAMEOVERRIDE: other.example.com\n", "HostnameOverride"},
+		{"null beside set", casingApp + "HostnameOverride: null\nHOSTNAMEOVERRIDE: web.example.com\n", "HOSTNAMEOVERRIDE"},
+	}
+	for _, c := range cases {
+		for _, kind := range templateKinds {
+			t.Run(kind+"/"+c.name, func(t *testing.T) {
+				doc, prefix := openGateDoc(kind, c.spec)
+				err := validateForTarget(t, doc, &below)
+				if err == nil {
+					t.Fatalf("%s%s accepted at %s: want it refused (gate HostnameOverride is on from %s)", prefix, c.set, below, on)
+				}
+				for _, want := range []string{"HostnameOverride", "from " + on.String(), "kubernetesVersion is " + below.String()} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("at %s: error %q does not name %q", below, err, want)
+					}
+				}
+				if c.name == "null beside set" && !strings.Contains(err.Error(), prefix+c.set) {
+					t.Errorf("at %s: error %q does not name the spelling that sets the field, %s%s", below, err, prefix, c.set)
+				}
+			})
+		}
 	}
 }

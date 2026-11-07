@@ -172,7 +172,9 @@ func checkGatedPaths(paths map[string]string, value any, path string, target Kub
 }
 
 // checkGatedPath walks the keys of one GatedPaths path down value; a key ending in
-// "[]" names an array whose every element is walked further.
+// "[]" names an array whose every element is walked further. A key matches the
+// authored keys case-insensitively (foldedKeys), and the path it builds names the
+// spelling the author wrote.
 func checkGatedPath(keys []string, gate string, value any, path string, target KubernetesVersion) error {
 	if isNullValue(value) {
 		return nil
@@ -185,22 +187,41 @@ func checkGatedPath(keys []string, gate string, value any, path string, target K
 		return nil
 	}
 	key, each := strings.CutSuffix(keys[0], "[]")
-	next, ok := obj[key]
-	if !ok {
-		return nil
-	}
-	path += "." + key
-	if !each {
-		return checkGatedPath(keys[1:], gate, next, path, target)
-	}
-	items, ok := asArrayValue(next)
-	if !ok {
-		return nil
-	}
-	for i, item := range items {
-		if err := checkGatedPath(keys[1:], gate, item, fmt.Sprintf("%s[%d]", path, i), target); err != nil {
-			return err
+	for _, authored := range foldedKeys(obj, key) {
+		next := obj[authored]
+		here := path + "." + authored
+		if !each {
+			if err := checkGatedPath(keys[1:], gate, next, here, target); err != nil {
+				return err
+			}
+			continue
+		}
+		items, ok := asArrayValue(next)
+		if !ok {
+			continue
+		}
+		for i, item := range items {
+			if err := checkGatedPath(keys[1:], gate, item, fmt.Sprintf("%s[%d]", here, i), target); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// foldedKeys returns, in sorted order, every key of obj that equals key ignoring case.
+// An open object is decoded by encoding/json, which matches field names
+// case-insensitively, so `HostnameOverride` sets the field `hostnameOverride` does
+// (go-kure/launcher#1245). The document may spell one field twice, and which spelling
+// the decode keeps is not the author's order, so the check walks all of them: a
+// refusal then names an authored spelling whichever one the decode keeps.
+func foldedKeys(obj map[string]any, key string) []string {
+	var out []string
+	for k := range obj {
+		if strings.EqualFold(k, key) {
+			out = append(out, k)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
