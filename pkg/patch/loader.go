@@ -2,7 +2,6 @@ package patch
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/go-kure/kure/pkg/logger"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // patchLogger is a package-level logger for debug messages.
@@ -318,12 +319,12 @@ func LoadResourcesFromMultiYAML(r io.Reader) ([]*unstructured.Unstructured, erro
 		keepTimestampText(&node)
 		var raw map[string]any
 		if err := node.Decode(&raw); err != nil {
-			return nil, fmt.Errorf("failed to decode resource document: %w", err)
+			return nil, errors.Wrap(err, "failed to decode resource document")
 		}
 		if len(raw) > 0 {
 			object, err := baseObject(raw)
 			if err != nil {
-				return nil, fmt.Errorf("failed to decode resource document: %w", err)
+				return nil, errors.Wrap(err, "failed to decode resource document")
 			}
 			u := &unstructured.Unstructured{Object: object}
 			debugLog("Loaded resource: kind=%s name=%s", u.GetKind(), u.GetName())

@@ -13,6 +13,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // YAMLDocument represents a single YAML document with preserved structure
@@ -63,12 +65,12 @@ func LoadResourcesWithStructure(r io.Reader) (*YAMLDocumentSet, error) {
 		// on a plain timestamp makes the encoder quote it.
 		var rawNode yaml.Node
 		if err := yaml.Unmarshal([]byte(docContent), &rawNode); err != nil {
-			return nil, fmt.Errorf("failed to parse document %d into unstructured: %w", i, err)
+			return nil, errors.Wrapf(err, "failed to parse document %d into unstructured", i)
 		}
 		keepTimestampText(&rawNode)
 		var raw map[string]any
 		if err := rawNode.Decode(&raw); err != nil {
-			return nil, fmt.Errorf("failed to parse document %d into unstructured: %w", i, err)
+			return nil, errors.Wrapf(err, "failed to parse document %d into unstructured", i)
 		}
 
 		if len(raw) == 0 {
@@ -85,7 +87,7 @@ func LoadResourcesWithStructure(r io.Reader) (*YAMLDocumentSet, error) {
 		// (else: fall back to the original if conversion failed)
 		object, err := baseObject(base)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse document %d into unstructured: %w", i, err)
+			return nil, errors.Wrapf(err, "failed to parse document %d into unstructured", i)
 		}
 		resource := &unstructured.Unstructured{Object: object}
 
