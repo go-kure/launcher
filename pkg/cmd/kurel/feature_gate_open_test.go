@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -21,6 +22,17 @@ import (
 // schemas. pod takes a PodSpec's fields at its top level; the others take them under
 // template.spec.
 var openGateKinds = []string{"pod", "podtemplate", "replicaset", "replicationcontroller"}
+
+// The cnpg-pooler kind takes a pod template under `template` too, decoded into the
+// CloudNativePG pod template type (go-kure/launcher#1321). openGateCaseKinds adds it to
+// the kinds a case runs on, and podTemplateGateKinds adds it to the kinds that take a
+// pod template, which are the only open schemas a pod spec's own fields
+// (hostnameOverride, resources) can be authored under. The pod kind declares them as
+// typed gated properties of its own.
+var (
+	openGateCaseKinds    = append(slices.Clone(openGateKinds), "cnpg-pooler")
+	podTemplateGateKinds = append(slices.Clone(templateKinds), "cnpg-pooler")
+)
 
 // openGateCase is one gated property under an open schema: a PodSpec fragment that
 // authors it, and the path the refusal names below the pod spec.
@@ -41,7 +53,7 @@ const openGateVolume = `volumes:
 var openGateCases = []openGateCase{
 	{
 		name: "container fileKeyRef", gate: "EnvFiles", field: "containers[0].env[0].valueFrom.fileKeyRef",
-		kinds: openGateKinds,
+		kinds: openGateCaseKinds,
 		spec: openGateVolume + `containers:
   - name: app
     image: ghcr.io/example/app:v1.0.0
@@ -56,7 +68,7 @@ var openGateCases = []openGateCase{
 	},
 	{
 		name: "initContainer fileKeyRef", gate: "EnvFiles", field: "initContainers[0].env[0].valueFrom.fileKeyRef",
-		kinds: openGateKinds,
+		kinds: openGateCaseKinds,
 		spec: openGateVolume + `containers:
   - name: app
     image: ghcr.io/example/app:v1.0.0
@@ -76,7 +88,7 @@ initContainers:
 	// the same gate); the init-only limit belongs to the workload kinds' shorthand.
 	{
 		name: "container restartPolicyRules", gate: "ContainerRestartRules", field: "containers[0].restartPolicyRules",
-		kinds: openGateKinds,
+		kinds: openGateCaseKinds,
 		spec: `containers:
   - name: app
     image: ghcr.io/example/app:v1.0.0
@@ -90,7 +102,7 @@ initContainers:
 	},
 	{
 		name: "initContainer restartPolicyRules", gate: "ContainerRestartRules", field: "initContainers[0].restartPolicyRules",
-		kinds: openGateKinds,
+		kinds: openGateCaseKinds,
 		spec: `containers:
   - name: app
     image: ghcr.io/example/app:v1.0.0
@@ -109,7 +121,7 @@ initContainers:
 	// the pod template's spec is the open schema.
 	{
 		name: "template hostnameOverride", gate: "HostnameOverride", field: "hostnameOverride",
-		kinds: []string{"podtemplate", "replicaset", "replicationcontroller"},
+		kinds: podTemplateGateKinds,
 		spec: `containers:
   - name: app
     image: ghcr.io/example/app:v1.0.0
@@ -118,7 +130,7 @@ hostnameOverride: web.example.com
 	},
 	{
 		name: "template resources", gate: "PodLevelResources", field: "resources",
-		kinds: []string{"podtemplate", "replicaset", "replicationcontroller"},
+		kinds: podTemplateGateKinds,
 		spec: `containers:
   - name: app
     image: ghcr.io/example/app:v1.0.0
@@ -158,6 +170,10 @@ func openGateDoc(kind, spec string) (doc, prefix string) {
 	case "replicationcontroller":
 		props = "        selector:\n          tier: web\n" +
 			"        template:\n          metadata:\n            labels:\n              tier: web\n          spec:\n" + indentLines(spec, 12)
+		prefix = "template.spec."
+	case "cnpg-pooler":
+		props = "        cluster:\n          name: db\n        pgbouncer: {}\n" +
+			"        template:\n          spec:\n" + indentLines(spec, 12)
 		prefix = "template.spec."
 	default:
 		panic("openGateDoc: unknown kind " + kind)
@@ -306,7 +322,7 @@ func resolveGatedPath(typ reflect.Type, path string) error {
 
 // TestFeatureGates_GatedPathsNameRealFields holds every GatedPaths path to a field of
 // the Kubernetes type its open node is decoded into, so a typo cannot hide a gated
-// field, and holds the set of nodes that carry one to the five this change adds.
+// field, and holds the set of nodes that carry one to the six listed in holders.
 func TestFeatureGates_GatedPathsNameRealFields(t *testing.T) {
 	// The resolver itself: a wrong key, a "[]" on a non-list and a missing "[]" all fail.
 	container := reflect.TypeOf(corev1.Container{})
@@ -339,6 +355,8 @@ func TestFeatureGates_GatedPathsNameRealFields(t *testing.T) {
 	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller"} {
 		holders = append(holders, holder{kind + " template", schemaOf(kind)["template"], reflect.TypeOf(corev1.PodTemplateSpec{})})
 	}
+	// The pooler's template is the CloudNativePG pod template type, not corev1's.
+	holders = append(holders, holder{"cnpg-pooler template", schemaOf("cnpg-pooler")["template"], reflect.TypeOf(cnpgv1.PodTemplateSpec{})})
 	for _, h := range holders[:2] {
 		// A raw PodSpec container and init container take the same gated fields.
 		for _, want := range []string{"env[].valueFrom.fileKeyRef", "restartPolicyRules"} {
@@ -384,6 +402,39 @@ func TestFeatureGates_GatedPathsNameRealFields(t *testing.T) {
 	}
 }
 
+// TestFeatureGates_CnpgPoolerFragmentsBuild: every pod spec fragment the cases author
+// on a cnpg-pooler builds, with no version stated. It is the control for the pooler
+// rows above, which validate only (validateForTarget never runs the handler), so they
+// would also accept a fragment the pooler kind itself refuses. This test shows that
+// each fragment builds, so those rows refuse a document that is otherwise valid. It
+// passes before the gate change too, so it discriminates nothing about it.
+func TestFeatureGates_CnpgPoolerFragmentsBuild(t *testing.T) {
+	for _, c := range openGateCases {
+		if !slices.Contains(c.kinds, "cnpg-pooler") {
+			continue
+		}
+		t.Run(c.name, func(t *testing.T) {
+			doc, _ := openGateDoc("cnpg-pooler", c.spec)
+			transformer := newBuiltinTransformer()
+			app, err := oam.ParseWithExtraTypes([]byte(doc), nil, transformer.LowerableTypes())
+			if err != nil {
+				t.Fatalf("parsing: %v", err)
+			}
+			validated, err := transformer.ValidateAuthoredProperties(app)
+			if err != nil {
+				t.Fatalf("validating: %v", err)
+			}
+			cluster, err := transformer.Transform(validated, oam.TransformContext{Domain: kurelDomain})
+			if err != nil {
+				t.Fatalf("transforming: %v", err)
+			}
+			if _, err := oam.GenerateApplications(cluster); err != nil {
+				t.Fatalf("generating: %v", err)
+			}
+		})
+	}
+}
+
 // TestFeatureGates_OpenSchemasNullUsesNoGate: a null is absent at every depth, so a
 // gated key authored as null under an open schema does not trip its gate. It passes
 // before the change too (the open schema was never walked), so it discriminates
@@ -396,7 +447,7 @@ func TestFeatureGates_OpenSchemasNullUsesNoGate(t *testing.T) {
 			"      - name: API_KEY\n        valueFrom:\n          fileKeyRef: null\n",
 		"restartPolicyRules": "containers:\n  - name: app\n    image: ghcr.io/example/app:v1.0.0\n    restartPolicyRules: null\n",
 	}
-	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller"} {
+	for _, kind := range podTemplateGateKinds {
 		for name, spec := range specs {
 			t.Run(kind+"/"+name, func(t *testing.T) {
 				doc, _ := openGateDoc(kind, spec)

@@ -1643,10 +1643,10 @@ is checked. One limit: the `Never` and `OnFailure` values of an init container's
 `restartPolicy` share `ContainerRestartRules` and are not checked
 (go-kure/launcher#1230). The raw-PodSpec kinds (`pod` and the kinds that take a pod
 template: `podtemplate`, `replicaset`, `replicationcontroller`) leave their containers and
-template spec open, and the check reads declared schema, so their open nodes name the
+template spec open, as does the `template` of `cnpg-pooler` (go-kure/launcher#1321), and the check reads declared schema, so their open nodes name the
 gated paths in `gatedPaths` instead: `env[].valueFrom.fileKeyRef` and `restartPolicyRules` of `containers[]` and
 `initContainers[]`, and `hostnameOverride` and
-`resources` of the pod spec (`template.spec.*` on a pod template). A path is refused the
+`resources` of the pod spec (`template.spec.*` on a pod template and on the `cnpg-pooler` template). A path is refused the
 same way, naming the authored path (go-kure/launcher#1245). Field names match
 case-insensitively, as in the decode, so a key spelled in another case is refused too and
 is named as written; property validation does not read `gatedPaths`, so what a document is
@@ -12438,7 +12438,12 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (go-kure/launcher#790): `cluster` and `pgbouncer` of a `cnpg-pooler`;
   `cluster`, `name` and `owner` of a `cnpg-database`; `configuration` of a
   `cnpg-objectstore`. That refuses no component that built before, since the
-  kind refused each without it already.
+  kind refused each without it already. The `template` of a `cnpg-pooler` is an
+  open object, so its schema names the gated pod fields in `gatedPaths`, as the
+  pod template kinds do: a gated field under `template.spec` is refused when the
+  ClusterProfile's `kubernetesVersion` is below the release where its feature
+  gate is on by default (go-kure/launcher#1321). A document with no
+  `kubernetesVersion` is unchanged.
   **The required lists of the three kinds are generated**
   (go-kure/launcher#883), as `cnpg-cluster`'s is: every field each CRD
   requires that the Go type writes whether or not it was authored is refused

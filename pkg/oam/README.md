@@ -3112,7 +3112,7 @@ properties of the built-in components carry one today: `EnvFiles`
 container's on the workload kinds, any container's on the raw-PodSpec kinds below), `PodLevelResources` (`podResources`) and `HostnameOverride`
 (`hostnameOverride`). The check reads the declared schema, so it stops at an open object
 (`AdditionalProperties` with no `Properties`). The raw-PodSpec kinds (`pod` and the kinds
-that take a pod template) leave their containers and template spec open, and their open
+that take a pod template, and the `template` of `cnpg-pooler`) leave their containers and template spec open, and their open
 nodes carry `GatedPaths` (published as `gatedPaths`) instead: gate-relative paths
 (`env[].valueFrom.fileKeyRef`, with `[]` after an array key) to the gate the field needs,
 read by the gate check alone, so property validation and what a document is accepted as do
