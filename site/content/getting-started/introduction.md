@@ -3,8 +3,6 @@ title: "Introduction"
 weight: 1
 ---
 
-# Introduction
-
 **launcher** is a Go library that translates OAM-style application documents into
 Kubernetes objects, and **kurel** is the supported command-line tool built on it. You
 describe an application with an OAM-style document (`app.yaml`) — a set of typed *components*

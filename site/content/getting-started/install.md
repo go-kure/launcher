@@ -3,8 +3,6 @@ title: "Install"
 weight: 2
 ---
 
-# Install
-
 ## Release binaries
 
 Each [release](https://github.com/go-kure/launcher/releases) carries `kurel`
