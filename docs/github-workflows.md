@@ -212,7 +212,12 @@ Runs on main and `release/*` branches only (not PRs):
   (`--commits <base.sha> --head <head.sha>`, go-kure/launcher#732) with the same matcher,
   skipping Renovate's commits; push and merge-queue runs skip it, because a rebase keeps each
   message and the PR run already checked it. `make check-issue-refs` runs the same scan locally
-  against `ISSUE_REFS_BASE` (default `origin/main`).
+  against `ISSUE_REFS_BASE` (default `origin/main`). In a shallow clone, a boundary commit
+  inside the scanned range makes the commit scan exit 2 (`git fetch --unshallow`), because
+  `git rev-list` stops at the cut without an error and the scan would read the rest as clean
+  (go-kure/launcher#1303). A shallow clone is scanned only when every boundary lies at the base
+  or outside the range; a boundary on any commit in the range, the one directly above the base
+  included, is refused. CI checks out with `fetch-depth: 0` and never meets it.
   Convention and known gaps: `AGENTS.md` § "Issue references"
 - **Format-scope guard** — the same `issue-refs` job also runs `make check-format-scope`
   (go-kure/launcher#1279): the self-test (`scripts/check-format-scope-test.sh`, throwaway git

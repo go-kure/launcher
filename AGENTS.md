@@ -300,7 +300,10 @@ Commit messages are covered too, so write `Closes go-kure/launcher#N`, not `Clos
 (go-kure/launcher#732). The same matcher scans each non-merge commit message, against the
 pull request's base in CI and `ISSUE_REFS_BASE` (default `origin/main`) in
 `make check-issue-refs`. It skips Renovate's commits, and a stale local `origin/main` needs a
-`git fetch origin` first.
+`git fetch origin` first. In a shallow clone it exits 2 when a boundary commit lies inside the
+range, the commit directly above the base included, because history cut there would read as
+clean (go-kure/launcher#1303); run `git fetch --unshallow`. A boundary at the base or outside the
+range is scanned.
 
 Known gaps — the guard does not catch these, so a reviewer must:
 
