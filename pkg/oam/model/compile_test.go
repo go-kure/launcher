@@ -340,6 +340,35 @@ func TestBindDepth(t *testing.T) {
 	wantRefusal(t, oneValue(t, "${"+bindNest(9)+"}"), "spec.values[0].expr", "nesting")
 }
 
+// sortByChain builds [seed] followed by n sortBy calls. Each sortBy macro expands into a
+// bind-shaped comprehension (ext/lists.go in cel-go), and the next call's target is that
+// comprehension's initializer.
+func sortByChain(seed string, n int) string {
+	return seed + strings.Repeat(".sortBy(x, x)", n)
+}
+
+// The nesting limit counts every bind-shaped comprehension, not only the explicit
+// cel.bind calls. In celEnv 1 the macros that expand to one are cel.bind and sortBy; the
+// README names both. These rows pin that rule. The code already behaves this way, so
+// they guard the README and are not evidence for a code change.
+func TestBindDepthCountsGeneratedBinds(t *testing.T) {
+	cm := wantCompiled(t, oneValue(t, "${"+sortByChain("[1]", 8)+"}"))
+	if got := cm.valueType("v"); got != "list(int)" {
+		t.Errorf("8 chained sortBy calls have type %q, want list(int)", got)
+	}
+	wantRefusal(t, oneValue(t, "${"+sortByChain("[1]", 9)+"}"), "spec.values[0].expr", "nesting")
+
+	// An explicit bind and a generated one add up.
+	outer := func(inner string) string {
+		return "${cel.bind(a, 1, cel.bind(b, a, cel.bind(c, b, cel.bind(d, c, " + inner + "))))}"
+	}
+	cm = wantCompiled(t, oneValue(t, outer(sortByChain("[d]", 4))))
+	if got := cm.valueType("v"); got != "list(int)" {
+		t.Errorf("4 binds and 4 sortBy calls have type %q, want list(int)", got)
+	}
+	wantRefusal(t, oneValue(t, outer(sortByChain("[d]", 5))), "spec.values[0].expr", "nesting")
+}
+
 func TestExpressionSize(t *testing.T) {
 	literal := func(n int) string { return "'" + strings.Repeat("a", n-2) + "'" }
 	if got := len(literal(4096)); got != 4096 {
