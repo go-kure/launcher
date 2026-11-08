@@ -47,6 +47,18 @@ func holeEnd(s string, i int) (int, error) {
 			}
 			i = j
 			continue
+		case '`':
+			// An escaped identifier (CEL.g4, ESC_IDENTIFIER) holds letters, digits and
+			// the characters _ . - / and space. So it may hold `//`, which is not a
+			// comment here, and it never holds a quote, a brace or a new line. It ends at
+			// the next backtick. A new line or the end of the text before that is not a
+			// valid identifier, so the hole is not closed.
+			end := strings.IndexAny(s[i+1:], "`\n")
+			if end < 0 || s[i+1+end] != '`' {
+				return 0, errors.New("an escaped identifier in the ${ } hole is not closed")
+			}
+			i += end + 2
+			continue
 		case '/':
 			// A comment runs from `//` to the end of the line, as in the CEL lexer
 			// (COMMENT : '//' (~'\n')*). A brace or a quote inside it is not syntax.
