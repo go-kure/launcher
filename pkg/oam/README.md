@@ -1374,11 +1374,15 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `generated` | An object a lowering rule or a trait handler generates that no other role names: the role for a rule or a handler outside launcher's own. No builtin rule or handler asks it. | The one the rule or the handler builds. | the rule's or the handler's own, if it has one | once per object, unless the author named it |
 
 The last column says when the hook is asked for a name, not how many times. `once per X` names
-the unit that has a name of its own: a source, a schedule entry, a `helmtemplate` component, an
-object. A type that declares outputs is asked again by the output check (see "Outputs: the
-names a component's objects get"), and the lowering resolves the same name a second time, so
-the hook can run twice for one object. The hook must be a pure function of its request, as
-below, so both calls give the same answer.
+the scope of the decision: the source, schedule entry, component or object whose name the hook
+answers. The `hook-group` answer is the exception in kind. It is a prefix that a component's
+layouts share, not a name of its own. A type that declares outputs is asked again by the output
+check (see "Outputs: the names a component's objects get") for each name its provider
+resolves, and the lowering resolves the same name a second time. So the hook can run more than
+once for one object. A provider that reads an already resolved `Component.ObjectName()` adds
+no call, as the `configmap` and `secret` components do. Other queries ask again too:
+`ComponentEndpointsNamed` asks for a name again (below). The hook must be a pure function of
+its request, as below, so every call gives the same answer.
 
 The `bundle`, `group` and `netpol-synth` names are the hook's to change, and only the hook's.
 The `bundle` and `group` defaults carry no namespace: two applications of one name, or whose
@@ -1896,11 +1900,9 @@ must equal the declared one; for a handler, which names one object, the declared
 whose query errs fails the build with its error: a malformed declaration is a defect of the
 provider, not a quiet empty list.
 
-A provider is asked about a copy of the component, in a query and in the build. The copy holds
-the maps, slices and arrays of the properties and trait properties at any depth, and the
-annotations map, so a write to those stays in the answer and never reaches the document or the
-lowering. A pointer, or any other value, is shared with the document: a component built in Go
-that holds a pointer in its properties sees a write made through that pointer. For a handler of a kind component the query and the build give it
+A provider is asked about a copy of the component, in a query and in the build: what it writes
+to the properties, trait properties or annotations stays in the answer and never reaches the
+document or the lowering. For a handler of a kind component the query and the build give it
 the same component: its object's name resolved and its `labels` and `annotations` taken off
 its properties. The build prepares the metadata before it holds the outputs, so a component
 with both a refused `labels` or `annotations` value and a failing provider reports the
