@@ -189,8 +189,10 @@ The builtin example today is the `expose` trait, which lowers into a terminal `i
 **Axis B — kind-named vs role-named.** A *kind-named* type projects exactly one Kubernetes API
 kind as that kind, adding no role-specific opinions, and is named after it: the `deployment`
 component, the `ingress`, `httproute` and `networkpolicy` traits. Two things do not change
-that. Supporting objects the kind needs (the `deployment` component's ServiceAccount, an
-optional PVC) are one. Defaults and safety constraints shared by every type that projects the
+that. Supporting objects the kind needs (a ServiceAccount, a PVC) are one. The `deployment`
+component itself emits a Deployment and nothing beside it; the `webservice` rule builds the
+ServiceAccount as a sibling component and the volume claims as traits. Defaults and safety
+constraints shared by every type that projects the
 same kind are the other: the guard that refuses more than one replica and forces a `Recreate`
 strategy when a non-RWX PVC is attached applies to `deployment`, `webservice` and `worker`
 alike. A *role-named* type is named for the job it does: it combines kinds as peers
@@ -201,8 +203,10 @@ which `deployment` deliberately leaves out; see `pkg/oam/builtin/components/READ
 number of kinds emitted does not decide the axis; whether the type projects the API kind or a
 role does. Nothing checks this axis; it binds naming choices, like the covenant above.
 
-The axes are orthogonal. `deployment` and `webservice` are both terminal, one kind-named and one
-role-named; `expose` is lowerable and role-named. The layering the Helm-family redesign uses
+The axes are orthogonal. `deployment` is terminal and kind-named. `webservice` is lowerable and
+role-named: its rule lowers it into the terminal `deployment`, `service` and (unless
+`serviceAccountName` is authored) `serviceaccount` components. `expose` is lowerable and
+role-named too. The layering the Helm-family redesign uses
 (go-kure/launcher#336) is a role-named lowerable upper tier (`helm`) over kind-named terminals
 (`helmrelease`, `helmrepository`, `ocirepository`, …).
 

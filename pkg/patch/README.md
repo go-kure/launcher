@@ -359,16 +359,21 @@ if errors.As(err, &pe) {
 and `ResourceWithPatches.Apply()` (both build on the same `NewPatchError` calls above) even where a
 caller in `set.go` wraps them again with `fmt.Errorf("...: %w", err)` — `%w` preserves the chain.
 
-Two call paths never produce a `*errors.PatchError`, so `errors.As(err, &pe)` will not match them:
-direct use of `ApplyStrategicMergePatch` (and its `applyJSONMergePatch`/`applyTypedSMP` helpers in
-`strategic.go`), and the YAML-structure-preserving document mutation helpers
-(`YAMLDocument.ApplyPatchesToDocument` / `ApplyStrategicPatchesToDocument` in `yaml_preserve.go`,
-reached via `PatchableAppSet.WriteToFile`'s per-document apply loop, and
-`UpdateDocumentFromResource`). Those return plain wrapped errors (`errors.Wrap`/`fmt.Errorf`). So
-do the resource loaders and the patch file loader when two keys of one mapping read the same after conversion (`loader.go`, `op.go`; see
-Value Types in Loaded Resources). The loaders in `loader.go` build these plain errors with
-`Wrap`, `Wrapf`, `Errorf` and `New` from `pkg/errors`; their text is the same as before. Do not
-assume every error out of this package is a `*errors.PatchError` — check the call path.
+Three call paths do not produce a `*errors.PatchError`, so `errors.As(err, &pe)` will not match
+them: direct use of `ApplyStrategicMergePatch` (and its `applyJSONMergePatch`/`applyTypedSMP`
+helpers in `strategic.go`), `YAMLDocument.ApplyStrategicPatchesToDocument`, and
+`YAMLDocument.UpdateDocumentFromResource` (both in `yaml_preserve.go`). They return plain wrapped
+errors (`errors.Wrap`/`fmt.Errorf`). So do the resource loaders and the patch file loader when two
+keys of one mapping read the same after conversion (`loader.go`, `op.go`; see Value Types in Loaded
+Resources). The loaders in `loader.go` build these plain errors with `Wrap`, `Wrapf`, `Errorf` and
+`New` from `pkg/errors`; their text is the same as before.
+
+`YAMLDocument.ApplyPatchesToDocument` is not one of them: it applies each field patch with the same
+operation code as above and wraps a failure with `%w`, so a failed field patch matches
+`errors.As(err, &pe)`, also through `PatchableAppSet.WriteToFile`, whose per-document apply loop
+wraps with `%w` too. The strategic apply in that loop does not (`pkg/patch/patcherror_paths_test.go`
+pins both). Do not assume every error out of this package is a `*errors.PatchError` — check the
+call path.
 
 ## Related Packages
 
