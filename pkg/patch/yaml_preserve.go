@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -31,7 +30,10 @@ type YAMLDocumentSet struct {
 	Separator string // Document separator (usually "---")
 }
 
-// LoadResourcesWithStructure loads YAML resources while preserving comments and order
+// LoadResourcesWithStructure loads YAML resources while preserving comments and order.
+// A quoted scalar keeps its authored type: "true" and "8080" load as strings, as they
+// do through LoadResourcesFromMultiYAML. Only baseObject's normalisation applies, which
+// turns an unquoted integer into an int64.
 func LoadResourcesWithStructure(r io.Reader) (*YAMLDocumentSet, error) {
 	content, err := io.ReadAll(r)
 	if err != nil {
@@ -77,26 +79,11 @@ func LoadResourcesWithStructure(r io.Reader) (*YAMLDocumentSet, error) {
 			continue // Skip empty documents
 		}
 
-		// Apply type conversion to base YAML values to fix string ports, etc.
-		// First convert the raw data for the unstructured object
-		convertedRaw := convertBaseYAMLTypes(raw)
-		base := raw
-		if convertedMap, ok := convertedRaw.(map[string]any); ok {
-			base = convertedMap
-		}
-		// (else: fall back to the original if conversion failed)
-		object, err := baseObject(base)
+		object, err := baseObject(raw)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to parse document %d into unstructured", i)
 		}
 		resource := &unstructured.Unstructured{Object: object}
-
-		// Also apply type conversion to the YAML node to preserve formatting
-		if err := convertYAMLNodeTypes(&node); err != nil {
-			if Debug {
-				fmt.Printf("Warning: failed to convert YAML node types: %v\n", err)
-			}
-		}
 
 		doc := &YAMLDocument{
 			Node:     &node,
@@ -682,156 +669,4 @@ func extractBaseName(filePath string) string {
 	// Clean up filename for use in output (remove invalid characters)
 	re := regexp.MustCompile(`[^a-zA-Z0-9\-_]`)
 	return re.ReplaceAllString(filename, "-")
-}
-
-// convertBaseYAMLTypes recursively converts string values in base YAML to appropriate types
-// This fixes issues where Kubernetes YAML files have numeric fields as strings
-func convertBaseYAMLTypes(obj any) any {
-	switch v := obj.(type) {
-	case map[string]any:
-		converted := make(map[string]any)
-		for key, value := range v {
-			// Apply type inference based on field name and value
-			if strValue, ok := value.(string); ok {
-				if shouldConvertToInteger(key, strValue) {
-					if intVal, err := strconv.Atoi(strValue); err == nil {
-						converted[key] = int64(intVal) // Use int64 for unstructured compatibility
-						continue
-					}
-				}
-				if shouldConvertToBoolean(strValue) {
-					if boolVal, err := strconv.ParseBool(strValue); err == nil {
-						converted[key] = boolVal
-						continue
-					}
-				}
-			}
-			// Recursively convert nested objects
-			converted[key] = convertBaseYAMLTypes(value)
-		}
-		return converted
-	case []any:
-		converted := make([]any, len(v))
-		for i, item := range v {
-			converted[i] = convertBaseYAMLTypes(item)
-		}
-		return converted
-	default:
-		return obj
-	}
-}
-
-// shouldConvertToInteger determines if a string field should be converted to integer
-func shouldConvertToInteger(key, value string) bool {
-	// Skip if not a valid integer
-	if _, err := strconv.Atoi(value); err != nil {
-		return false
-	}
-
-	// Convert common Kubernetes integer fields
-	integerFields := []string{
-		"port", "targetport", "nodeport", "containerport",
-		"replicas", "maxunavailable", "maxsurge",
-		"initialdelayseconds", "timeoutseconds", "periodseconds",
-		"successthreshold", "failurethreshold",
-		"terminationgraceperiodseconds", "activedeadlineseconds",
-		"runasuser", "runasgroup", "fsgroup",
-		"weight", "priority", "number",
-	}
-
-	keyLower := strings.ToLower(key)
-	for _, field := range integerFields {
-		if strings.Contains(keyLower, field) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// shouldConvertToBoolean determines if a string should be converted to boolean
-func shouldConvertToBoolean(value string) bool {
-	lowerValue := strings.ToLower(value)
-	return lowerValue == "true" || lowerValue == "false"
-}
-
-// convertYAMLNodeTypes recursively converts string values in YAML nodes to appropriate types
-// while preserving the original YAML structure and formatting
-func convertYAMLNodeTypes(node *yaml.Node) error {
-	if node == nil {
-		return nil
-	}
-
-	switch node.Kind {
-	case yaml.DocumentNode:
-		// Process document content
-		for _, child := range node.Content {
-			if err := convertYAMLNodeTypes(child); err != nil {
-				return err
-			}
-		}
-
-	case yaml.MappingNode:
-		// Process mapping nodes (key-value pairs)
-		for i := 0; i < len(node.Content); i += 2 {
-			keyNode := node.Content[i]
-			valueNode := node.Content[i+1]
-
-			// Convert the value node based on the key name
-			if keyNode.Kind == yaml.ScalarNode && valueNode.Kind == yaml.ScalarNode {
-				convertScalarNodeType(keyNode.Value, valueNode)
-			}
-
-			// Recursively process nested nodes
-			if err := convertYAMLNodeTypes(valueNode); err != nil {
-				return err
-			}
-		}
-
-	case yaml.SequenceNode:
-		// Process sequence nodes (arrays)
-		for _, child := range node.Content {
-			if err := convertYAMLNodeTypes(child); err != nil {
-				return err
-			}
-		}
-
-	case yaml.ScalarNode:
-		// Scalar nodes are handled by their parent mapping node
-		// No additional processing needed here
-
-	case yaml.AliasNode:
-		// Alias nodes reference other nodes; no conversion needed
-	}
-
-	return nil
-}
-
-// convertScalarNodeType converts a scalar YAML node value based on the field name
-func convertScalarNodeType(fieldName string, valueNode *yaml.Node) {
-	if valueNode.Kind != yaml.ScalarNode {
-		return
-	}
-
-	originalValue := valueNode.Value
-
-	// Try integer conversion
-	if shouldConvertToInteger(fieldName, originalValue) {
-		if _, err := strconv.Atoi(originalValue); err == nil {
-			// Keep the same value but remove quotes by changing the style
-			valueNode.Style = 0 // Plain style (no quotes)
-			// The value stays the same, but YAML will interpret it as an integer
-			return
-		}
-	}
-
-	// Try boolean conversion
-	if shouldConvertToBoolean(originalValue) {
-		lowerValue := strings.ToLower(originalValue)
-		if lowerValue == "true" || lowerValue == "false" {
-			valueNode.Value = lowerValue
-			valueNode.Style = 0 // Plain style
-			return
-		}
-	}
 }

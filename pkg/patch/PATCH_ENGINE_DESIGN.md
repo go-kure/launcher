@@ -33,7 +33,7 @@ This forms the foundation for Kure's deterministic, introspectable Kubernetes ma
    - Path syntax is explicitly validated before application
    - Comprehensive debug logging with `KURE_DEBUG=1`
 
-5. **Automatic type inference and conversion**:
+5. **Automatic type inference and conversion** (patch values only; a base resource keeps a quoted scalar as a string):
    - Intelligent conversion of string values to appropriate Go types (int, bool, etc.)
    - Context-aware type inference based on Kubernetes field patterns
    - Compatible with unstructured.Unstructured requirements
@@ -160,7 +160,8 @@ debug.enabled: "${features.enable_debug}"
 ```
 
 ### Automatic Type Inference
+- Applies to patch values, not to base resources: a base resource keeps a quoted scalar (`"true"`, `"8080"`) as a string
 - Converts string values to appropriate Go types based on field context
 - Recognizes port numbers, replica counts, timeout values automatically
-- Kubernetes-compatible type conversion for unstructured objects
+- For a base resource, the only conversion is the `int64` normalisation of an unquoted integer, which the unstructured object needs
 
