@@ -3,9 +3,10 @@
 #
 # The guard is only proven if a commit that changes what app.yaml accepts, under a
 # non-format scope, makes it fail. Each case commits one change into a throwaway git
-# repository and scans base..HEAD. Three cases read the real repository instead:
-# the scope pattern must equal the one cliff.toml groups by, and the commit that
-# added the disruption trait (go-kure/launcher#1277) is the positive control.
+# repository and scans base..HEAD. The last cases read the real repository instead:
+# the scope pattern must equal the one cliff.toml groups by, and past commits that
+# changed acceptance code (the first added the disruption trait, go-kure/launcher#1277)
+# are the controls.
 #
 # Usage: bash scripts/check-format-scope-test.sh
 # (invoked via `make check-format-scope`, before the guard runs on the real range)
@@ -113,6 +114,18 @@ expect "feature-gate check" 1 "pkg/oam/featuregate_check.go" $DEV pkg/oam/featur
 expect "internal required-fields table" 1 "pkg/oam/internal/requiredfields/cilium.go" $DEV pkg/oam/internal/requiredfields/cilium.go 'fix(oam): x'
 expect "internal Flux duration forms" 1 "pkg/oam/internal/fluxduration/fluxduration.go" $DEV pkg/oam/internal/fluxduration/fluxduration.go 'fix(oam): x'
 expect "lowering engine with an empty trailer reason" 1 "Format-Scope" $DEV pkg/oam/lowering.go $'fix(oam): x\n\nFormat-Scope: none ()'
+# The collision, ownership, reserved-key and kind-policy checks refuse what an authored document
+# puts into its generated objects. The raw lowering path refuses authored raw documents. The
+# Model document loader refuses an authored Model (go-kure/launcher#1362).
+expect "in-document collision check" 1 "pkg/oam/in_document_collisions.go" $DEV pkg/oam/in_document_collisions.go 'fix(oam): x'
+expect "controller claims" 1 "pkg/oam/controller_claims.go" $DEV pkg/oam/controller_claims.go 'fix(oam): x'
+expect "reserved metadata keys" 1 "pkg/oam/reserved_metadata.go" $DEV pkg/oam/reserved_metadata.go 'fix(oam): x'
+expect "rendered reserved values" 1 "pkg/oam/rendered_reserved.go" $DEV pkg/oam/rendered_reserved.go 'fix(oam): x'
+expect "object kind policy" 1 "pkg/oam/object_kind_policy.go" $DEV pkg/oam/object_kind_policy.go 'feat(oam): x'
+expect "component ownership" 1 "pkg/oam/component_ownership.go" $DEV pkg/oam/component_ownership.go 'fix(oam): x'
+expect "component label check" 1 "pkg/oam/component_label_check.go" $DEV pkg/oam/component_label_check.go 'fix(oam): x'
+expect "raw lowering path" 1 "pkg/oam/lowering_raw.go" $DEV pkg/oam/lowering_raw.go 'fix(oam): x'
+expect "Model document loader" 1 "pkg/oam/model/load.go" $DEV pkg/oam/model/load.go 'test(format): x'
 
 # ── must pass ────────────────────────────────────────────────────────────────
 expect "validate.go under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/validate.go 'fix(format): x'
@@ -142,6 +155,17 @@ expect "internal test file" 0 "" $DEV pkg/oam/internal/requiredfields/requiredfi
 expect "internal package comment" 0 "" $DEV pkg/oam/internal/requiredfields/doc.go 'docs(oam): x'
 expect "netpol synthesis types" 0 "" $DEV pkg/oam/netpol/types.go 'fix(oam): x'
 expect "test file beside the lowering engine" 0 "" $DEV pkg/oam/lowering_test.go 'fix(oam): x'
+# Ruled out by go-kure/launcher#1362: an error type and its text (the refusal is decided
+# elsewhere), a classifier of refusals, a registry check, and a check of a document set that
+# nothing calls. Tests, the package comment and testdata under pkg/oam/model/ stay out too.
+expect "name collision error type" 0 "" $DEV pkg/oam/name_collision.go 'fix(oam): x'
+expect "hook group name error type" 0 "" $DEV pkg/oam/hook_group_name.go 'fix(oam): x'
+expect "policy refusal classifier" 0 "" $DEV pkg/oam/policy_refusal.go 'fix(oam): x'
+expect "lowering target registry check" 0 "" $DEV pkg/oam/lowering_targets.go 'fix(oam): x'
+expect "cross-document collision check" 0 "" $DEV pkg/oam/cross_document_collisions.go 'fix(oam): x'
+expect "Model package comment" 0 "" $DEV pkg/oam/model/doc.go 'docs(oam): x'
+expect "Model testdata .go" 0 "" $DEV pkg/oam/model/testdata/x.go 'test(oam): x'
+expect "Model test file" 0 "" $DEV pkg/oam/model/load_test.go 'test(format): x'
 # Not part of the rule: tests, contract metadata, the package comment, vendored input,
 # non-Go files, and a path that only contains the prefix.
 expect "builtin test file" 0 "" $DEV pkg/oam/builtin/components/typed_pod_rules_test.go 'fix(components): x'
@@ -271,6 +295,25 @@ else
   echo "SKIP positive control: $control_lowering_fail is not in this clone (shallow checkout)"
   skip=$((skip + 1))
 fi
+
+# ── real-repo controls for the collision and reserved-key checks (go-kure/launcher#1362) ──
+# 3503a228 changed pkg/oam/in_document_collisions.go under fix(oam)! so that two unnamed Lists
+# are no longer refused as one object. 5dcd15b0 changed pkg/oam/reserved_metadata.go and
+# pkg/oam/component_label_check.go under fix(oam) so that another component's label value on an
+# ArtifactGenerator is no longer refused. Neither has a trailer, so the guard must fail both.
+for control_spec in "3503a228 pkg/oam/in_document_collisions.go the in-document collision commit" \
+                    "5dcd15b0 pkg/oam/reserved_metadata.go the reserved-key commit"; do
+  read -r control control_path control_name <<<"$control_spec"
+  if git -C "$REPO_ROOT" rev-parse --verify --quiet "$control^{commit}" >/dev/null &&
+     git -C "$REPO_ROOT" rev-parse --verify --quiet "$control^^{commit}" >/dev/null; then
+    rc=0
+    out="$(bash "$GATE" --root "$REPO_ROOT" --commits "$control^" --head "$control" 2>&1)" || rc=$?
+    check "positive control: $control_name fails" 1 "$control_path" "$rc" "$out"
+  else
+    echo "SKIP positive control: $control is not in this clone (shallow checkout)"
+    skip=$((skip + 1))
+  fi
+done
 
 echo "check-format-scope-test: $pass passed, $fail failed, $skip skipped"
 [[ "$fail" -eq 0 ]]
