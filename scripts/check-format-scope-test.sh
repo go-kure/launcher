@@ -187,10 +187,25 @@ expect "lowering target registry check" 0 "" $DEV pkg/oam/lowering_targets.go 'f
 # in_document_collisions.go and sibling_group.go, so a change there moves what is accepted.
 expect "cross-document collision check" 1 "pkg/oam/cross_document_collisions.go" $DEV pkg/oam/cross_document_collisions.go 'fix(oam): x'
 # Ruled out by go-kure/launcher#1367: a provider's output declarations (Go code, never a
-# document), the sentinel errors, and a file that only wraps what naming.go decides.
+# document) and the sentinel errors.
 expect "output declarations" 0 "" $DEV pkg/oam/outputs.go 'fix(oam): x'
 expect "sentinel errors" 0 "" $DEV pkg/oam/errors.go 'fix(oam): x'
-expect "naming engine" 0 "" $DEV pkg/oam/naming_engine.go 'fix(oam): x'
+# Ruled in by go-kure/launcher#1377 after reading each helper and each caller: the file's code
+# decides what a document is refused for, though the refusal is raised in another file.
+expect "component label value check" 1 "pkg/oam/component_label.go" $DEV pkg/oam/component_label.go 'fix(oam): x'
+expect "applied objects of the collision and kind checks" 1 "pkg/oam/force_warnings.go" $DEV pkg/oam/force_warnings.go 'fix(oam): x'
+expect "exclusive property groups" 1 "pkg/oam/handler.go" $DEV pkg/oam/handler.go 'fix(oam): x'
+expect "naming engine" 1 "pkg/oam/naming_engine.go" $DEV pkg/oam/naming_engine.go 'fix(oam): x'
+expect "tier order" 1 "pkg/oam/pipeline.go" $DEV pkg/oam/pipeline.go 'fix(oam): x'
+expect "explicit secrets policy" 1 "pkg/oam/policy.go" $DEV pkg/oam/policy.go 'fix(oam): x'
+expect "scaler target types" 1 "pkg/oam/scaler_targets.go" $DEV pkg/oam/scaler_targets.go 'fix(oam): x'
+expect "property schema type" 1 "pkg/oam/schema.go" $DEV pkg/oam/schema.go 'fix(oam): x'
+expect "generated name syntax check" 1 "pkg/oam/shorten_name.go" $DEV pkg/oam/shorten_name.go 'fix(oam): x'
+# The trailer is the way out for an edit that leaves the accepted format as it was: a comment in
+# schema.go, and the warnings in force_warnings.go that refuse nothing.
+expect "schema type with a trailer reason" 0 "" $DEV pkg/oam/schema.go $'docs(oam): x\n\nFormat-Scope: none (comment only)'
+expect "force warnings with a trailer reason" 0 "" $DEV pkg/oam/force_warnings.go $'fix(oam): x\n\nFormat-Scope: none (warning text only)'
+expect "naming engine under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/naming_engine.go 'fix(format): x'
 expect "transform with a trailer reason" 0 "" $DEV pkg/oam/transform.go $'refactor(oam): x\n\nFormat-Scope: none (Go API only)'
 expect "Model package comment" 0 "" $DEV pkg/oam/model/doc.go 'docs(oam): x'
 expect "Model testdata .go" 0 "" $DEV pkg/oam/model/testdata/x.go 'test(oam): x'
@@ -500,12 +515,15 @@ fi
 
 # ── replay of a pinned range (go-kure/launcher#1367) ─────────────────────────
 # The last 200 non-merge commits when the audit ran are b25900b3..f126e143. The guard reads the
-# range the same way after main moves, because both ends are fixed. It must flag 44 commits. The
+# range the same way after main moves, because both ends are fixed. It must flag 45 commits. The
 # set before the audit flagged 30, so the 14 more are the commits the added files catch. No commit
-# in the window touches cross_document_collisions.go, so adding it kept the count at 44. When
-# a later audit changes the set, update the count here and say why in that commit.
+# in the window touches cross_document_collisions.go, so adding it kept the count at 44. The nine
+# files go-kure/launcher#1377 ruled in add one commit, bd23dfbe1, a comment-only edit of schema.go
+# (the other seven commits that touch them carry the (format) scope or already touch a counted
+# file). When a later audit changes the set, update the count here and say why in that commit.
 replay_base=b25900b3
 replay_head=f126e143
+replay_count=45
 
 # replay_summary <out> <count>: prints the guard's summary line when a line of <out> starts with
 # "check-format-scope: <count> commit(s) in <range> ", and prints nothing otherwise. The check
@@ -525,6 +543,7 @@ assert_summary() {
   check "$name" 0 "" "$rc" "summary line read: [$got]"
 }
 summary_range="$replay_base..$replay_head change what app.yaml accepts without the (format) scope."
+# These cases test replay_summary with a count of their own, 44. It is not the pinned count.
 assert_summary "replay summary accepts 44" yes 44 "check-format-scope: 44 commit(s) in $summary_range"
 assert_summary "replay summary rejects 144 for 44" no 44 "check-format-scope: 144 commit(s) in $summary_range"
 assert_summary "replay summary rejects x44 for 44" no 44 "check-format-scope: x44 commit(s) in $summary_range"
@@ -539,11 +558,11 @@ if git -C "$REPO_ROOT" rev-parse --verify --quiet "$replay_base^{commit}" >/dev/
    git -C "$REPO_ROOT" rev-parse --verify --quiet "$replay_head^{commit}" >/dev/null; then
   rc=0
   out="$(bash "$GATE" --root "$REPO_ROOT" --commits "$replay_base" --head "$replay_head" 2>&1)" || rc=$?
-  summary="$(replay_summary "$out" 44)"
+  summary="$(replay_summary "$out" "$replay_count")"
   if [[ -n "$summary" ]]; then
-    check "replay of $replay_base..$replay_head flags 44 commits" 1 "" "$rc" "$summary"
+    check "replay of $replay_base..$replay_head flags $replay_count commits" 1 "" "$rc" "$summary"
   else
-    echo "FAIL replay of $replay_base..$replay_head flags 44 commits: no line starts with the 44-commit summary"
+    echo "FAIL replay of $replay_base..$replay_head flags $replay_count commits: no line starts with the $replay_count-commit summary"
     printf '%s\n' "$out" | sed 's/^/    /'
     fail=$((fail + 1))
   fi

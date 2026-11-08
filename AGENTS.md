@@ -169,8 +169,11 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   `resolver.go`, `typeid.go`, `typeid_transformer.go`, `naming.go`, `naming_lowering.go`,
   `netpol_synthesis.go`, `object_metadata.go`, `object_name.go`, `flatschema.go`,
   `featuregates.go`, `service_name_gate.go`, `ordering.go`, `flux_namespace_inputs.go`,
-  `classify.go`, `sibling_group.go`, `bundle_application_names.go` or
-  `cross_document_collisions.go`, or any non-test
+  `classify.go`, `sibling_group.go`, `bundle_application_names.go`,
+  `cross_document_collisions.go`, `component_label.go`, `force_warnings.go`, `handler.go`,
+  `naming_engine.go`, `pipeline.go`, `policy.go`, `scaler_targets.go`, `schema.go` or
+  `shorten_name.go` (go-kure/launcher#1377: each holds a helper that a refusal elsewhere
+  calls), or any non-test
   `.go` file under `pkg/oam/builtin/`, `pkg/oam/internal/` or `pkg/oam/model/` other than
   `contract.go`, `doc.go` and files under `testdata/`, must
   use `feat(format)`, `fix(format)`,
