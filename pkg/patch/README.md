@@ -368,12 +368,16 @@ keys of one mapping read the same after conversion (`loader.go`, `op.go`; see Va
 Resources). The loaders in `loader.go` build these plain errors with `Wrap`, `Wrapf`, `Errorf` and
 `New` from `pkg/errors`; their text is the same as before.
 
-`YAMLDocument.ApplyPatchesToDocument` is not one of them: it applies each field patch with the same
-operation code as above and wraps a failure with `%w`, so a failed field patch matches
+`YAMLDocument.ApplyPatchesToDocument` is not one of them. It applies each field patch with the same
+operation code as above and wraps a failure with `%w`. So a failed field patch matches
 `errors.As(err, &pe)`, also through `PatchableAppSet.WriteToFile`, whose per-document apply loop
-wraps with `%w` too. The strategic apply in that loop does not (`pkg/patch/patcherror_paths_test.go`
-pins both). Do not assume every error out of this package is a `*errors.PatchError` — check the
-call path.
+wraps with `%w` too. Two failures carry a `*errors.ValidationError` and no `*errors.PatchError`: an
+unknown `Op`, and a bad `Selector` on an array replace (`applyArrayReplace` in `op.go`).
+
+The strategic apply in the `WriteToFile` loop wraps with `%w` as well, so `errors.Is` and
+`errors.As` still reach the underlying error. That path never builds a `*errors.PatchError`, so
+`errors.As(err, &pe)` finds none. `pkg/patch/patcherror_paths_test.go` pins these paths. Do not
+assume every error out of this package is a `*errors.PatchError`. Check the call path.
 
 ## Related Packages
 

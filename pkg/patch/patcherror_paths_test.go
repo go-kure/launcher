@@ -96,3 +96,35 @@ func TestApplyStrategicPatchesToDocument_BuildsNoPatchError(t *testing.T) {
 		})
 	}
 }
+
+// WriteToFile wraps a strategic failure with %w: the chain stays, so errors.Is reaches the
+// underlying error, and the path still builds no PatchError. The KindLookup is nil, so the
+// patch takes the JSON merge fallback, where errTooDeep comes from normalizeNil.
+func TestWriteToFile_StrategicFailureKeepsTheChainAndBuildsNoPatchError(t *testing.T) {
+	docSet, err := LoadResourcesWithStructure(strings.NewReader(patchErrorConfigMap))
+	if err != nil {
+		t.Fatalf("LoadResourcesWithStructure: %v", err)
+	}
+	pas := &PatchableAppSet{
+		Resources:   docSet.GetResources(),
+		DocumentSet: docSet,
+		Patches: []struct {
+			Target    string
+			Patch     PatchOp
+			Strategic *StrategicPatch
+		}{
+			{Target: "cm", Strategic: &StrategicPatch{Patch: map[string]any{"data": deepMap(maxDepth + 1)}}},
+		},
+	}
+	err = pas.WriteToFile(t.TempDir() + "/out.yaml")
+	if err == nil {
+		t.Fatal("want an error for a patch nested deeper than maxDepth")
+	}
+	if !errors.Is(err, errTooDeep) {
+		t.Errorf("errors.Is did not reach errTooDeep: the %%w chain is broken in %T: %v", err, err)
+	}
+	var pe *errors.PatchError
+	if errors.As(err, &pe) {
+		t.Errorf("errors.As found a *errors.PatchError (%v) on the strategic WriteToFile path; the README says it builds none", pe)
+	}
+}
