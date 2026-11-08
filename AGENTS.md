@@ -161,17 +161,21 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   string.
   CI enforces the scope (the `issue-refs` job, `make check-format-scope`,
   `scripts/check-format-scope.sh`, go-kure/launcher#1279): a commit that changes a non-test
-  file of `pkg/oam/validate.go`, `types.go`, `capability.go`, `parser.go`, `package.go` or
-  `profile.go`, or any non-test `.go` file under `pkg/oam/builtin/` other than `contract.go`,
-  `doc.go` and files under `testdata/`, must use `feat(format)`, `fix(format)`,
+  file of `pkg/oam/validate.go`, `types.go`, `capability.go`, `parser.go`, `package.go`,
+  `profile.go`, `property_validate.go`, `property_validate_authored.go`, `lowering.go` or
+  `featuregate_check.go`, or any non-test `.go` file under `pkg/oam/builtin/` or
+  `pkg/oam/internal/` other than `contract.go`, `doc.go` and files under `testdata/`, must
+  use `feat(format)`, `fix(format)`,
   `refactor(format)` or `docs(format)`
   followed by `: ` or `!: ` (the pattern `cliff.toml` groups by; a self-test fails if the two
   differ, and `cliff.toml` drops a header without the colon). When such a
   change leaves the accepted format as it was (a comment, an error message, a refactor), the
   commit body carries `Format-Scope: none (<reason>)` and the reason must not be empty. The
   guard does not see a semantic change inside a counted file that the path rule cannot tell
-  apart, nor acceptance code outside the set (such as `pkg/oam/property_validate.go` and
-  `pkg/oam/lowering.go`); review is the backstop for both.
+  apart, nor acceptance code outside the set (such as `pkg/oam/cross_document_collisions.go`,
+  which refuses a generated object that more than one document produces); review is the
+  backstop for both. The remaining `pkg/oam/` files that may refuse a document are audited in
+  go-kure/launcher#1362.
 
 ## Code Conventions
 

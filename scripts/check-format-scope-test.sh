@@ -104,6 +104,15 @@ GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.quotePath GIT_CONFIG_VALUE_0=true \
 expect "builtin handler with a newline in its name" 1 "pkg/oam/builtin/components/with" $DEV $'pkg/oam/builtin/components/with\nnewline.go' 'fix(components): x'
 expect "text file whose name embeds a builtin go path" 0 "" $DEV $'pkg/oam/builtin/components/x.go\nnotes.txt' 'fix(components): x'
 expect "builtin file with an empty trailer reason" 1 "Format-Scope" $DEV pkg/oam/builtin/components/typed_pod_rules.go $'fix(components): x\n\nFormat-Scope: none ()'
+# The property validators, the lowering engine and the feature-gate check refuse documents too,
+# and pkg/oam/internal/ holds refusal tables (go-kure/launcher#1314).
+expect "property validator" 1 "pkg/oam/property_validate.go" $DEV pkg/oam/property_validate.go 'fix(oam): x'
+expect "authored property validator" 1 "pkg/oam/property_validate_authored.go" $DEV pkg/oam/property_validate_authored.go 'fix(oam): x'
+expect "lowering engine" 1 "pkg/oam/lowering.go" $DEV pkg/oam/lowering.go 'fix(oam): x'
+expect "feature-gate check" 1 "pkg/oam/featuregate_check.go" $DEV pkg/oam/featuregate_check.go 'feat(oam): x'
+expect "internal required-fields table" 1 "pkg/oam/internal/requiredfields/cilium.go" $DEV pkg/oam/internal/requiredfields/cilium.go 'fix(oam): x'
+expect "internal Flux duration forms" 1 "pkg/oam/internal/fluxduration/fluxduration.go" $DEV pkg/oam/internal/fluxduration/fluxduration.go 'fix(oam): x'
+expect "lowering engine with an empty trailer reason" 1 "Format-Scope" $DEV pkg/oam/lowering.go $'fix(oam): x\n\nFormat-Scope: none ()'
 
 # ── must pass ────────────────────────────────────────────────────────────────
 expect "validate.go under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/validate.go 'fix(format): x'
@@ -113,7 +122,7 @@ expect "validate.go under docs(format)" 0 "" $DEV pkg/oam/validate.go 'docs(form
 expect "validate.go under doc(format)" 0 "" $DEV pkg/oam/validate.go 'doc(format): x'
 expect "format scope with a breaking marker" 0 "" $DEV pkg/oam/validate.go 'feat(format)!: x'
 expect "test file beside the acceptance code" 0 "" $DEV pkg/oam/validate_test.go 'fix(oam): x'
-expect "file outside the acceptance list" 0 "" $DEV pkg/oam/lowering.go 'fix(oam): x'
+expect "file outside the acceptance list" 0 "" $DEV pkg/oam/provenance.go 'fix(oam): x'
 expect "same file name in another directory" 0 "" $DEV pkg/other/validate.go 'fix(oam): x'
 expect "trailer with a reason" 0 "" $DEV pkg/oam/validate.go $'fix(oam): x\n\nFormat-Scope: none (only a comment changed)'
 expect "trailer after other trailers" 0 "" $DEV pkg/oam/validate.go $'fix(oam): x\n\nCloses go-kure/launcher#1\nFormat-Scope: none (error text only)'
@@ -123,6 +132,16 @@ expect "head before the acceptance commit" 0 "0 commit(s)" $DEV pkg/oam/validate
 # A builtin file under the format scope or the trailer passes, as the six listed files do.
 expect "builtin handler under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/builtin/components/typed_pod_rules.go 'fix(format): x'
 expect "builtin handler with a trailer reason" 0 "" $DEV pkg/oam/builtin/components/typed_pod_rules.go $'refactor(components): x\n\nFormat-Scope: none (comment only)'
+expect "lowering engine under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/lowering.go 'fix(format): x'
+expect "lowering engine with a trailer reason" 0 "" $DEV pkg/oam/lowering.go $'refactor(oam): x\n\nFormat-Scope: none (comment only)'
+expect "property validator under feat(format)" 0 "" $DEV pkg/oam/property_validate.go 'feat(format): x'
+expect "internal file under fix(format)" 0 "" $DEV pkg/oam/internal/requiredfields/cilium.go 'fix(format): x'
+# Not part of the rule: tests and the package comment under pkg/oam/internal/, and the
+# non-authorable synthesis types in pkg/oam/netpol/.
+expect "internal test file" 0 "" $DEV pkg/oam/internal/requiredfields/requiredfields_test.go 'fix(oam): x'
+expect "internal package comment" 0 "" $DEV pkg/oam/internal/requiredfields/doc.go 'docs(oam): x'
+expect "netpol synthesis types" 0 "" $DEV pkg/oam/netpol/types.go 'fix(oam): x'
+expect "test file beside the lowering engine" 0 "" $DEV pkg/oam/lowering_test.go 'fix(oam): x'
 # Not part of the rule: tests, contract metadata, the package comment, vendored input,
 # non-Go files, and a path that only contains the prefix.
 expect "builtin test file" 0 "" $DEV pkg/oam/builtin/components/typed_pod_rules_test.go 'fix(components): x'
@@ -236,6 +255,20 @@ if git -C "$REPO_ROOT" rev-parse --verify --quiet "$control_builtin_pass^{commit
   check "negative control: the fix(format) builtin commit passes" 0 "" "$rc" "$out"
 else
   echo "SKIP negative control: $control_builtin_pass is not in this clone (shallow checkout)"
+  skip=$((skip + 1))
+fi
+
+# ── real-repo control for the validation and lowering files (go-kure/launcher#1314) ──
+# 9e8c1d1d changed pkg/oam/lowering.go under a fix(oam) subject with no trailer, so the guard
+# must fail it and name that file.
+control_lowering_fail=9e8c1d1d
+if git -C "$REPO_ROOT" rev-parse --verify --quiet "$control_lowering_fail^{commit}" >/dev/null &&
+   git -C "$REPO_ROOT" rev-parse --verify --quiet "$control_lowering_fail^^{commit}" >/dev/null; then
+  rc=0
+  out="$(bash "$GATE" --root "$REPO_ROOT" --commits "$control_lowering_fail^" --head "$control_lowering_fail" 2>&1)" || rc=$?
+  check "positive control: the lowering engine commit fails" 1 "pkg/oam/lowering.go" "$rc" "$out"
+else
+  echo "SKIP positive control: $control_lowering_fail is not in this clone (shallow checkout)"
   skip=$((skip + 1))
 fi
 
