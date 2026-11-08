@@ -27,16 +27,27 @@
 #   pkg/oam/property_validate_authored.go  the authored-property validators
 #   pkg/oam/lowering.go                    the lowering engine, which refuses documents it cannot lower
 #   pkg/oam/featuregate_check.go           the feature-gate check
+#   pkg/oam/in_document_collisions.go      two applications of one document generating one object
+#   pkg/oam/controller_claims.go           the objects a generated HelmRelease claims, for that check
+#   pkg/oam/reserved_metadata.go           reserved label and annotation keys on generated objects
+#   pkg/oam/rendered_reserved.go           which platform-reserved property values a document may hold
+#   pkg/oam/object_kind_policy.go          the object kind policy
+#   pkg/oam/component_ownership.go         the component label and the content it is stamped into
+#   pkg/oam/component_label_check.go       foreign component label values and selectors
+#   pkg/oam/lowering_raw.go                the raw lowering path a downstream lowering consumer runs;
+#                                          kurel's app.yaml path does not
 #   pkg/oam/builtin/       every .go file below it (the per-kind property validators)
 #   pkg/oam/internal/      every .go file below it (the shared refusal tables and checks)
-# Under pkg/oam/builtin/ and pkg/oam/internal/ a *_test.go file, a contract.go or doc.go file,
-# and a file under testdata/ never count. A *_test.go file never counts anywhere. The
-# repository holds no standalone schema files; the document schemas are the Go types above.
+#   pkg/oam/model/         every .go file below it (the Model document and its loader)
+# Under these prefixes a *_test.go file, a contract.go or doc.go file, and a file under
+# testdata/ never count. A *_test.go file never counts anywhere. The repository holds no
+# standalone schema files; the document schemas are the Go types above.
 #
 # Not caught: a change inside a counted file that does not alter what is accepted but is
-# not marked by the trailer, and acceptance code outside this set (for example
-# pkg/oam/cross_document_collisions.go, which refuses a generated object produced by more than
-# one document). Reviewers remain the backstop.
+# not marked by the trailer, and acceptance code outside this set. Two examples:
+# pkg/oam/cross_document_collisions.go refuses a generated object produced by more than one
+# document, but nothing calls it yet; and the rest of pkg/oam/ is still to be audited
+# (go-kure/launcher#1367). Reviewers remain the backstop.
 #
 # Skips merge commits and Renovate's commits (its email, as check-issue-refs.sh does).
 # In a shallow clone it exits 2 when a boundary commit lies inside the range, because
@@ -69,13 +80,22 @@ ACCEPT_PATHS=(
   pkg/oam/property_validate_authored.go
   pkg/oam/lowering.go
   pkg/oam/featuregate_check.go
+  pkg/oam/in_document_collisions.go
+  pkg/oam/controller_claims.go
+  pkg/oam/reserved_metadata.go
+  pkg/oam/rendered_reserved.go
+  pkg/oam/object_kind_policy.go
+  pkg/oam/component_ownership.go
+  pkg/oam/component_label_check.go
+  pkg/oam/lowering_raw.go
 )
 
 # The builtin component, trait and policy handlers refuse and build in one method, and their
 # data tables refuse without building an error, so every non-test .go file under these prefixes
 # counts too, except the file names below (contract metadata and the package comment).
 # pkg/oam/internal/ holds the shared refusal tables and checks the validators call.
-ACCEPT_PREFIXES=(pkg/oam/builtin/ pkg/oam/internal/)
+# pkg/oam/model/ is the Model document (a launcher.gokure.dev/v1alpha1 kind) and its loader.
+ACCEPT_PREFIXES=(pkg/oam/builtin/ pkg/oam/internal/ pkg/oam/model/)
 ACCEPT_SKIP_NAMES=(contract.go doc.go)
 
 RENOVATE_EMAIL="renovate@whitesourcesoftware.com"

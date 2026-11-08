@@ -225,9 +225,12 @@ Runs on main and `release/*` branches only (not PRs):
   on a pull request only, `scripts/check-format-scope.sh --commits <base.sha> --head <head.sha>`.
   A commit fails when it changes a non-test file of `pkg/oam/validate.go`, `types.go`,
   `capability.go`, `parser.go`, `package.go`, `profile.go`, `property_validate.go`,
-  `property_validate_authored.go`, `lowering.go` or `featuregate_check.go`, or any non-test `.go`
-  file under `pkg/oam/builtin/` or `pkg/oam/internal/` other than `contract.go`, `doc.go` and
-  files under `testdata/`, and its subject does not start with
+  `property_validate_authored.go`, `lowering.go`, `featuregate_check.go`,
+  `in_document_collisions.go`, `controller_claims.go`, `reserved_metadata.go`,
+  `rendered_reserved.go`, `object_kind_policy.go`, `component_ownership.go`,
+  `component_label_check.go` or `lowering_raw.go`, or any non-test `.go` file under
+  `pkg/oam/builtin/`, `pkg/oam/internal/` or `pkg/oam/model/` other than `contract.go`, `doc.go`
+  and files under `testdata/`, and its subject does not start with
   `feat(format)`, `fix(format)`, `refactor(format)` or `docs(format)`, followed by an optional `!`,
   a colon and a space (`cliff.toml` drops any other header from the changelog). A commit that
   leaves the accepted format as it was takes a body line `Format-Scope: none (<reason>)`, and the
