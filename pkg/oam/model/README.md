@@ -7,11 +7,11 @@ Package `model` defines the document format of a configuration-defined component
 CEL, and lists the parts (components and traits) that a component of the model type expands to.
 A user can add a component type without writing Go.
 
-This release step covers the format and the CEL environment. `model.Load` decodes a document and
-checks its shape. It does not compile or run any expression. The package compiles the
-expressions of a loaded model against the environment below, and it does not run them yet. The
-lowering rule and the engine hooks arrive in later steps of go-kure/launcher#1261. A document
-that loads today keeps its meaning then.
+This release step covers the format, the CEL environment and the evaluation of one expression.
+`model.Load` decodes a document and checks its shape. It does not compile or run any expression.
+`model.Compile` compiles every expression of a loaded model against the environment below, and
+`Compiled.Eval` runs one of them. The lowering rule and the engine hooks arrive in later steps of
+go-kure/launcher#1261. A document that loads today keeps its meaning then.
 
 ## Document
 
@@ -153,10 +153,64 @@ Four rules keep an expression deterministic and bounded:
 
 The four numbers are start values. Raising a limit later breaks no model. Lowering one can.
 
+## Evaluation
+
+`model.Compile(m)` compiles every expression site of a loaded model. `Compiled.Eval(path, scope)`
+runs one site and returns the Go value, the actual cost and an error. A site is named by its
+path: `spec.values[0].expr`, `spec.parts[0].when`, `spec.parts[0].forEach.in`,
+`spec.parts[0].name`, `spec.parts[0].properties.a.b`, `spec.parts[0].properties.list[1]`,
+`spec.parts[0].traits[0].properties.a` and `spec.parts[0].annotations.k`. Every string in
+`properties`, in `traits[].properties` and in `annotations` is a site, with or without a hole. An
+unknown path is an error.
+
+`Compile` returns the first failure, which wraps `ErrInvalid` and names the site. The order is the
+values, then for each part: `when`, `forEach.in`, `name`, the properties (keys sorted at every
+level), the trait properties and the annotations. The scope of a site is the inputs, `self`, the
+earlier values and, for `name`, the properties, the traits and the annotations of a `forEach`
+part, the loop variable. `when` and `forEach.in` do not see the loop variable. The loop variable
+has the element type of `forEach.in`.
+
+**Result.** A string that is exactly one hole gives the value with its type: `int64`, `uint64`,
+`float64`, `bool`, `string`, `[]byte`, `[]any` (in order), `map[string]any` or `nil`. A string
+with text around a hole, or with several holes, gives a string. A map key must be a string. A
+map with another key type is refused when the model compiles.
+
+**Text.** Inside text a hole must give a string, an int, a uint, a double or a bool. A list, a
+map or a `dyn` value is refused when the model compiles ("not allowed in text"). A double takes
+the form of CEL `string(x)`: `1.0` gives `1`, `0.1` gives `0.1`, `100000000.0` gives `1e+08`,
+`1e21` gives `1e+21`, `-0.0` gives `-0`. A bool gives `true` or `false`. Text and a number or a
+bool do not join with `+`: `'a' + 1.0` is a compile error, and `'a' + string(1.0)` works.
+
+**Null.** A single hole keeps null: the result is `nil` and a property with a null value stays
+null downstream, no key is dropped. An input that is absent from `Scope.Inputs` is null. Null in
+mixed text is an error that names the site, never the text `null` and never an empty string.
+
+**Numbers.** A NaN or an infinity has no place in a document. A single hole, or a list or map
+inside it, that holds one fails with `ErrNonFinite`, and so does a double of that kind in text. An
+explicit `string(1.0 / 0.0)` is text and is not refused: the author asked for the conversion.
+
+**Map keys.** A key in `properties`, in `traits[].properties` and in `annotations` is literal
+text. A key that holds `${` is refused when the model compiles, whether it is a hole or the
+escape `$${`.
+
+**Cost.** One hole has a cost limit of 1,000,000. An evaluation that spends more fails with
+`ErrCostLimit`, which names the site and the limit. The cost of a site is the sum of its holes.
+Whether the cost also bounds the size of a result is tested for `replace`, `join`, `format` and
+`lists.range`.
+
+**Cache.** `Cache.Compile` keeps a compiled site under the model identity (`Model.Key()`), the
+site path and the template text. A second compile of a model reuses the sites. The same text at
+another path, or in a model of another identity, is another entry, because its types differ. An
+identity names one definition: a changed model under the same identity must use a new cache. A
+`Compiled` and a `Cache` are safe for concurrent use.
+
 ## API
 
 | Call | Does |
 |---|---|
+| `model.Compile(m)` | Compiles every expression site of `m` with a cache of its own. |
+| `(*Cache).Compile(m)` | The same, with a shared cache from `model.NewCache()`. `Len()` counts the cached sites. |
+| `(*Compiled).Eval(path, scope)` | Runs one site. Returns the Go value, the actual cost and an error. |
 | `model.Load(data)` | Decodes one document and checks it. A failure of a decoded document wraps `model.ErrInvalid` and names the field, for example `spec.parts[1].id`. A YAML, `apiVersion` or `kind` failure does not wrap it. A YAML type error, such as a list where a string belongs, names the line of the field and not its path. An explicit tag that does not fit its value, such as `!!bool notabool`, names its line too, when one tagged value is at fault; with two or more, the error has no line. |
 | `(*Model).Identity()` | The model identity as written in `metadata`. |
 | `(*Model).Key()` | The identity with the version in the canonical form (`name@v2.0.0`). The registry returns a version as it was registered, so compare and store this form (`oam.TypeID.Canonical`). |
