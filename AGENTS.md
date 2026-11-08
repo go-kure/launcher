@@ -162,9 +162,12 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   CI enforces the scope (the `issue-refs` job, `make check-format-scope`,
   `scripts/check-format-scope.sh`, go-kure/launcher#1279): a commit that changes a non-test
   file of `pkg/oam/validate.go`, `types.go`, `capability.go`, `parser.go`, `package.go`,
-  `profile.go`, `property_validate.go`, `property_validate_authored.go`, `lowering.go` or
-  `featuregate_check.go`, or any non-test `.go` file under `pkg/oam/builtin/` or
-  `pkg/oam/internal/` other than `contract.go`, `doc.go` and files under `testdata/`, must
+  `profile.go`, `property_validate.go`, `property_validate_authored.go`, `lowering.go`,
+  `featuregate_check.go`, `in_document_collisions.go`, `controller_claims.go`,
+  `reserved_metadata.go`, `rendered_reserved.go`, `object_kind_policy.go`,
+  `component_ownership.go`, `component_label_check.go` or `lowering_raw.go`, or any non-test
+  `.go` file under `pkg/oam/builtin/`, `pkg/oam/internal/` or `pkg/oam/model/` other than
+  `contract.go`, `doc.go` and files under `testdata/`, must
   use `feat(format)`, `fix(format)`,
   `refactor(format)` or `docs(format)`
   followed by `: ` or `!: ` (the pattern `cliff.toml` groups by; a self-test fails if the two
@@ -173,9 +176,9 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   commit body carries `Format-Scope: none (<reason>)` and the reason must not be empty. The
   guard does not see a semantic change inside a counted file that the path rule cannot tell
   apart, nor acceptance code outside the set (such as `pkg/oam/cross_document_collisions.go`,
-  which refuses a generated object that more than one document produces); review is the
-  backstop for both. The remaining `pkg/oam/` files that may refuse a document are audited in
-  go-kure/launcher#1362.
+  which refuses a generated object that more than one document produces, but which nothing
+  calls yet); review is the backstop for both. go-kure/launcher#1362 audited the files it
+  listed. The rest of `pkg/oam/` is audited in go-kure/launcher#1367.
 
 ## Code Conventions
 
