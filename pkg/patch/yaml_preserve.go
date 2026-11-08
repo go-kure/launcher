@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -193,7 +195,8 @@ func (doc *YAMLDocument) ApplyPatchesToDocument(patches []PatchOp) error {
 		return fmt.Errorf("failed to parse patched YAML: %w", err)
 	}
 
-	// Try to preserve comments by merging structures
+	// Give an untouched timestamp its authored style, then merge to keep the comments
+	keepAuthoredTimestampStyle(doc.Node, &patchedNode, touchedPaths(patches))
 	if err := mergeYAMLNodes(doc.Node, &patchedNode); err != nil {
 		// If merging fails, fall back to using the patched node
 		doc.Node = &patchedNode
@@ -224,6 +227,7 @@ func (doc *YAMLDocument) ApplyStrategicPatchesToDocument(patches []StrategicPatc
 		return fmt.Errorf("failed to parse patched YAML: %w", err)
 	}
 
+	keepAuthoredTimestampStyle(doc.Node, &patchedNode, touchedStrategicPaths(patches))
 	if err := mergeYAMLNodes(doc.Node, &patchedNode); err != nil {
 		doc.Node = &patchedNode
 	}
@@ -472,6 +476,170 @@ func preserveComments(src, dst *yaml.Node) {
 	}
 }
 
+// keepAuthoredTimestampStyle gives each scalar under next the tag and style of the authored
+// scalar it replaces, when the authored scalar is a timestamp and next holds the same text as
+// a string. The loader hands a timestamp to the resource as its text, so the marshaled resource
+// holds a string, and yaml.v3 quotes a string that reads as a timestamp. With the authored tag
+// and style an untouched timestamp is written as it was authored. A value with other text or
+// another type keeps its own node, so a timestamp a patch sets is still written quoted.
+//
+// It runs on the patched node before the merge, so it covers every way the merge keeps or
+// replaces a node. A path in touched, or under one, is a value a patch wrote: it keeps its own
+// node even when its text equals the authored text, as in a batch that changes a timestamp to
+// another type and back. Mappings pair entries by scalar key. A sequence pairs a scalar item
+// with the first unpaired authored scalar of the same text, so a deletion that moves items
+// down does not break the pairs. A mapping or list item is paired by merge key, else by index.
+//
+// Limits, all of them quoting style and never a value: a patch that addresses a list item by
+// index or by key leaves every timestamp in that list quoted; after a delete, items that pair
+// by index (mapping items with no merge key, lists inside a list) may stay quoted; and where
+// one list holds equal text in two styles (`"2026-11-07"` and a timestamp), a delete can leave
+// the survivor in the style of the item that was removed.
+func keepAuthoredTimestampStyle(authored, next *yaml.Node, touched [][]string) {
+	keepAuthoredStyleAt(authored, next, nil, touched)
+}
+
+// touchedPaths lists the field paths that patches write. A path stops at its first selector, so
+// a patch that addresses a list item by index or by key touches the whole list. The path as
+// written is recorded as well, for a field name that holds literal brackets. A delete writes
+// nothing: the items it leaves keep their authored style.
+func touchedPaths(patches []PatchOp) [][]string {
+	var out [][]string
+	for _, patch := range patches {
+		if patch.Op == "delete" {
+			continue
+		}
+		var path []string
+		literal := parsePath(patch.Path)
+		for _, segment := range literal {
+			i := strings.Index(segment, "[")
+			if i < 0 {
+				path = append(path, segment)
+				continue
+			}
+			if i > 0 {
+				path = append(path, segment[:i])
+			}
+			break
+		}
+		if len(path) > 0 {
+			out = append(out, path)
+		}
+		// A root key that starts with a bracket cuts to an empty path, but the literal one still names it.
+		if len(literal) > 0 && !slices.Equal(path, literal) {
+			out = append(out, literal)
+		}
+	}
+	return out
+}
+
+// touchedStrategicPaths lists the field paths that strategic patches write: every key of a
+// patch map down to its first non-mapping value. A list in a patch touches the whole list. An
+// empty mapping writes nothing, so it touches nothing.
+func touchedStrategicPaths(patches []StrategicPatch) [][]string {
+	var out [][]string
+	var walk func(path []string, value map[string]any)
+	walk = func(path []string, value map[string]any) {
+		for key, v := range value {
+			p := append(slices.Clone(path), key)
+			if m, ok := v.(map[string]any); ok {
+				walk(p, m)
+				continue
+			}
+			out = append(out, p)
+		}
+	}
+	for _, patch := range patches {
+		walk(nil, patch.Patch)
+	}
+	return out
+}
+
+// isTouched reports whether path equals a touched path or lies under one.
+func isTouched(path []string, touched [][]string) bool {
+	for _, t := range touched {
+		if len(t) <= len(path) && slices.Equal(t, path[:len(t)]) {
+			return true
+		}
+	}
+	return false
+}
+
+func keepAuthoredStyleAt(authored, next *yaml.Node, path []string, touched [][]string) {
+	if authored != nil && authored.Kind == yaml.AliasNode && authored.Alias != nil {
+		authored = authored.Alias // an alias is the node it points at
+	}
+	if authored == nil || next == nil || authored.Kind != next.Kind || isTouched(path, touched) {
+		return
+	}
+	switch authored.Kind {
+	case yaml.AliasNode:
+		// an alias with no target (not resolved above): nothing to keep
+	case yaml.ScalarNode:
+		if authored.ShortTag() != "!!timestamp" || next.ShortTag() != "!!str" || next.Value != authored.Value {
+			return
+		}
+		var t time.Time
+		if authored.Decode(&t) != nil {
+			return
+		}
+		next.Tag = authored.Tag
+		next.Style = authored.Style
+	case yaml.MappingNode:
+		authoredValues := make(map[string]*yaml.Node, len(authored.Content)/2)
+		for i := 0; i+1 < len(authored.Content); i += 2 {
+			if authored.Content[i].Kind == yaml.ScalarNode {
+				authoredValues[authored.Content[i].Value] = authored.Content[i+1]
+			}
+		}
+		for i := 0; i+1 < len(next.Content); i += 2 {
+			if next.Content[i].Kind != yaml.ScalarNode {
+				continue
+			}
+			key := next.Content[i].Value
+			if value, ok := authoredValues[key]; ok {
+				keepAuthoredStyleAt(value, next.Content[i+1], append(slices.Clone(path), key), touched)
+			}
+		}
+	case yaml.DocumentNode:
+		for i := 0; i < len(authored.Content) && i < len(next.Content); i++ {
+			keepAuthoredStyleAt(authored.Content[i], next.Content[i], path, touched)
+		}
+	case yaml.SequenceNode:
+		mergeKey := detectMergeKey(authored)
+		var byKey map[string]*yaml.Node
+		if mergeKey != "" {
+			byKey = buildMergeKeyIndex(authored, mergeKey)
+		}
+		paired := make(map[*yaml.Node]bool, len(authored.Content))
+		for i, item := range next.Content {
+			var match *yaml.Node
+			switch {
+			case item.Kind == yaml.ScalarNode:
+				for _, candidate := range authored.Content {
+					if !paired[candidate] && candidate.Kind == yaml.ScalarNode && candidate.Value == item.Value {
+						match = candidate
+						break
+					}
+				}
+			default:
+				if mergeKey != "" {
+					if candidate, ok := byKey[extractMergeKeyValue(item, mergeKey)]; ok && !paired[candidate] {
+						match = candidate
+					}
+				}
+				if match == nil && i < len(authored.Content) && !paired[authored.Content[i]] {
+					match = authored.Content[i]
+				}
+			}
+			if match != nil {
+				paired[match] = true
+				keepAuthoredStyleAt(match, item, path, touched)
+			}
+		}
+	}
+}
+
 // WriteToFile writes the document set to a file with preserved structure
 func (set *YAMLDocumentSet) WriteToFile(filename string) error {
 	var buf bytes.Buffer
@@ -552,8 +720,15 @@ func (set *YAMLDocumentSet) FindDocumentByKindNameAndNamespace(kind, name, names
 	return nil
 }
 
-// UpdateDocumentFromResource updates a document's YAML node from its resource
+// UpdateDocumentFromResource updates a document's YAML node from its resource. It cannot tell
+// which fields a patch wrote, so a timestamp whose text is unchanged keeps its authored style.
 func (doc *YAMLDocument) UpdateDocumentFromResource() error {
+	return doc.updateDocumentFromResource(nil)
+}
+
+// updateDocumentFromResource is UpdateDocumentFromResource for a caller that applied patches to
+// the resource and knows the paths they wrote: those fields keep their own node.
+func (doc *YAMLDocument) updateDocumentFromResource(touched [][]string) error {
 	// Marshal the updated resource to YAML
 	updatedYAML, err := marshalResource(doc.Resource.Object)
 	if err != nil {
@@ -568,6 +743,7 @@ func (doc *YAMLDocument) UpdateDocumentFromResource() error {
 
 	// For now, use the updated node directly to ensure correctness
 	// Comment preservation will be improved in a future iteration
+	keepAuthoredTimestampStyle(doc.Node, &updatedNode, touched)
 	doc.Node = &updatedNode
 
 	return nil

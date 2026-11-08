@@ -256,8 +256,9 @@ func (s *PatchableAppSet) WritePatchedFilesWithOptions(originalPath string, patc
 			}
 			if doc != nil {
 				doc.Resource = r.Base
-				// Update the YAML node from the patched resource
-				if err := doc.UpdateDocumentFromResource(); err != nil {
+				// Update the YAML node from the patched resource; the fields the patches wrote keep their own node
+				touched := append(touchedPaths(r.Patches), touchedStrategicPaths(r.StrategicPatches)...)
+				if err := doc.updateDocumentFromResource(touched); err != nil {
 					return fmt.Errorf("failed to update document structure for %s: %w", r.Name, err)
 				}
 			}
