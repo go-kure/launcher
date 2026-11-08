@@ -378,7 +378,8 @@ and was silently dropped. While that held, *every* property ever added to an exi
 or trait kind was formally breaking, because a document could already have been authoring that
 key to no effect and would start compiling to different output the moment a handler claimed it.
 go-kure/launcher#408 closed the gap before the first stable GA release: a document that
-authored a key no handler declares was accepted before and is a build error now. It never
+authored a property that neither its handler or lowering rule declares nor the engine reads
+was accepted before and is a build error now, for a type that declares a schema. It never
 compiled to the output its author intended — the key was dropped — and the change was taken
 under `v1alpha1` while no stability promise applied, so the promise starts without that hole.
 
