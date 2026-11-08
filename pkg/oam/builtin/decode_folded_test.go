@@ -2,6 +2,7 @@ package builtin_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -260,6 +261,40 @@ type (
 	foldRepOnce struct{ foldRepLeft }
 )
 
+// Fixtures for the tag option case. The jsonv2-backed decoder reads case:strict
+// and case:ignore. The v1 decoder reads neither. A field tagged case:strict is
+// filled only by a key spelled exactly as its name. The other fields stay open
+// to a key that differs in case, and case:ignore is what they do already.
+//
+// foldCaseOnly has one strict field. foldCaseMixed adds a loose field whose
+// name equals it ignoring case. foldCaseEmbedTarget holds the same two fields in
+// two structs embedded at one depth, the strict one first.
+type (
+	foldCaseOnly struct {
+		Only string `json:"name,case:strict"`
+	}
+	foldCaseMixed struct {
+		Strict string `json:"name,case:strict"`
+		Loose  string `json:"NAME"`
+	}
+	foldCaseIgnore struct {
+		Ign string `json:"name,case:ignore"`
+	}
+	foldCaseStrictEmbed struct {
+		Strict string `json:"name,case:strict"`
+	}
+	foldCaseLooseEmbed struct {
+		Loose string `json:"NAME"`
+	}
+	foldCaseEmbedTarget struct {
+		foldCaseStrictEmbed
+		foldCaseLooseEmbed
+	}
+	foldCaseNested struct {
+		Sub foldItem `json:"sub,case:strict"`
+	}
+)
+
 // decodeLikeTheDecoder decodes src into a T with encoding/json, the keys in the
 // order json.Marshal gives a map, as DecodeStrictJSON feeds them.
 func decodeLikeTheDecoder[T any](t *testing.T, src map[string]any) T {
@@ -398,6 +433,100 @@ func TestFoldedDuplicateFieldPath_FieldSelection(t *testing.T) {
 	})
 	t.Run("a type that embeds itself is walked once", func(t *testing.T) {
 		wantWalk[RecursiveEmbed](t, pair("name", "Name", "a", "b"), "name", "Name")
+	})
+}
+
+// TestFoldedDuplicateFieldPath_CaseOptions: the walk files a key under the field
+// the decoder fills, so a field tagged case:strict takes no key that differs from
+// its name in case. Each case first states what the decoder did, then what the
+// walk found. The v1 decoder reads no case option, so on it the same cases find
+// a pair where the jsonv2-backed decoder finds none. The cases for case:ignore
+// and for UnreachableJSONFields are controls: they hold before and after the
+// change.
+func TestFoldedDuplicateFieldPath_CaseOptions(t *testing.T) {
+	// honorsStrict: the decoder in use files the key Name under no field of a
+	// type whose only field is tagged case:strict with the name name.
+	honorsStrict := decodeLikeTheDecoder[foldCaseOnly](t, map[string]any{"Name": "a"}).Only == ""
+
+	t.Run("a strict field and a loose field that fold together", func(t *testing.T) {
+		src := pair("name", "Name", "a", "b")
+		got := decodeLikeTheDecoder[foldCaseMixed](t, src)
+		if honorsStrict {
+			// Name fills Loose and name fills Strict: two fields, no pair.
+			if got.Strict != "a" || got.Loose != "b" {
+				t.Fatalf("premise: the decoder filled Strict %q and Loose %q, want a and b", got.Strict, got.Loose)
+			}
+			wantWalk[foldCaseMixed](t, src, "", "")
+			return
+		}
+		// Name and name both fill Strict, and the later one wins.
+		if got.Strict != "a" || got.Loose != "" {
+			t.Fatalf("premise: the decoder filled Strict %q and Loose %q, want a and empty", got.Strict, got.Loose)
+		}
+		wantWalk[foldCaseMixed](t, src, "name", "Name")
+	})
+	t.Run("a lone strict field, the walk called alone", func(t *testing.T) {
+		src := pair("name", "Name", "a", "b")
+		if got := decodeLikeTheDecoder[foldCaseOnly](t, src); got.Only != "a" {
+			t.Fatalf("premise: the decoder filled Only %q, want a", got.Only)
+		}
+		if honorsStrict {
+			// The key Name fills nothing, so it drops no value.
+			wantWalk[foldCaseOnly](t, src, "", "")
+			return
+		}
+		wantWalk[foldCaseOnly](t, src, "name", "Name")
+	})
+	t.Run("a lone strict field through DecodeStrictJSON (control)", func(t *testing.T) {
+		// The decode runs first with DisallowUnknownFields, so a decoder that
+		// honors the option reports the key Name as unknown before the walk.
+		_, _, err := builtin.DecodeStrictJSON[foldCaseOnly](pair("name", "Name", "a", "b"))
+		var folded *builtin.FoldedFieldError
+		if honorsStrict {
+			if err == nil || errors.As(err, &folded) || !strings.Contains(err.Error(), "unknown field") {
+				t.Errorf("DecodeStrictJSON error = %v, want the decoder's unknown field error and no *FoldedFieldError", err)
+			}
+			return
+		}
+		if !errors.As(err, &folded) || folded.Later != "name" || folded.Earlier != "Name" {
+			t.Errorf("DecodeStrictJSON error = %v, want a *FoldedFieldError for name and Name", err)
+		}
+	})
+	t.Run("case:ignore changes nothing (control)", func(t *testing.T) {
+		src := pair("name", "Name", "a", "b")
+		if got := decodeLikeTheDecoder[foldCaseIgnore](t, src); got.Ign != "a" {
+			t.Fatalf("premise: the decoder filled Ign %q, want a", got.Ign)
+		}
+		wantWalk[foldCaseIgnore](t, src, "name", "Name")
+	})
+	t.Run("a strict field promoted from an embedded struct", func(t *testing.T) {
+		src := pair("name", "Name", "a", "b")
+		got := decodeLikeTheDecoder[foldCaseEmbedTarget](t, src)
+		if honorsStrict {
+			if got.Strict != "a" || got.Loose != "b" {
+				t.Fatalf("premise: the decoder filled Strict %q and Loose %q, want a and b", got.Strict, got.Loose)
+			}
+			wantWalk[foldCaseEmbedTarget](t, src, "", "")
+			return
+		}
+		if got.Strict != "a" || got.Loose != "" {
+			t.Fatalf("premise: the decoder filled Strict %q and Loose %q, want a and empty", got.Strict, got.Loose)
+		}
+		wantWalk[foldCaseEmbedTarget](t, src, "name", "Name")
+	})
+	t.Run("a pair below a strict field is still found (control)", func(t *testing.T) {
+		// The exact key sub reaches the strict field, so the walk goes into it.
+		src := map[string]any{"sub": pair("name", "Name", "a", "b")}
+		wantWalk[foldCaseNested](t, src, "sub.name", "sub.Name")
+	})
+	t.Run("UnreachableJSONFields with a strict rival (control)", func(t *testing.T) {
+		// Both fields encode when set alone, so neither is reported whatever
+		// the decoder does with the option.
+		for _, typ := range []reflect.Type{reflect.TypeFor[foldCaseMixed](), reflect.TypeFor[foldCaseEmbedTarget]()} {
+			if got := builtin.UnreachableJSONFields(typ); len(got) != 0 {
+				t.Errorf("UnreachableJSONFields(%s) = %v, want none", typ, got)
+			}
+		}
 	})
 }
 
