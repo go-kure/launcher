@@ -1896,9 +1896,11 @@ must equal the declared one; for a handler, which names one object, the declared
 whose query errs fails the build with its error: a malformed declaration is a defect of the
 provider, not a quiet empty list.
 
-A provider is asked about a copy of the component, in a query and in the build: what it writes
-to the properties, trait properties or annotations stays in the answer and never reaches the
-document or the lowering. For a handler of a kind component the query and the build give it
+A provider is asked about a copy of the component, in a query and in the build. The copy holds
+the maps, slices and arrays of the properties and trait properties at any depth, and the
+annotations map, so a write to those stays in the answer and never reaches the document or the
+lowering. A pointer, or any other value, is shared with the document: a component built in Go
+that holds a pointer in its properties sees a write made through that pointer. For a handler of a kind component the query and the build give it
 the same component: its object's name resolved and its `labels` and `annotations` taken off
 its properties. The build prepares the metadata before it holds the outputs, so a component
 with both a refused `labels` or `annotations` value and a failing provider reports the
