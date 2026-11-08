@@ -13352,8 +13352,11 @@ element through `nullElem` first, for the same untyped refusal and message.
 two spellings (`suspend` and `Suspend`) would build with one value and drop the other without a
 message. Every kind that decodes through `builtin.DecodeStrictJSON` refuses such a map, at any
 depth, naming both keys: `<later>: sets the same field as <earlier> (field names match
-case-insensitively, so one value would be dropped)`. The later key is the lower-case spelling,
-because keys compare in sorted order. The refusal comes after the strict decode, so an unknown
+case-insensitively, so one value would be dropped)`. Keys compare in byte order, at the first
+byte where they differ. An upper-case ASCII letter sorts before its lower-case letter, and a
+non-ASCII character sorts after every ASCII character. So in `Suspend` and `suspend` the later key
+is `suspend`, and with the Kelvin sign (U+212A) in place of `k` the Kelvin spelling is the later
+key. The refusal comes after the strict decode, so an unknown
 key or a wrong type is still the first error, and a null never forms a pair.
 
 `kurel build` reaches the decode only after the authored-property check, which holds each

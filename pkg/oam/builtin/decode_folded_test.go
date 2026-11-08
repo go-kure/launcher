@@ -60,6 +60,21 @@ type foldTarget struct {
 	Nested map[string][]foldItem `json:"nested"`
 }
 
+// foldSuspendTarget, foldKindTarget and foldAsTarget each declare one field.
+// A non-ASCII spelling reaches it by simple case folding: the Kelvin sign
+// (U+212A) folds to k, and the long s (U+017F) folds to s.
+type foldSuspendTarget struct {
+	Suspend bool `json:"suspend"`
+}
+
+type foldKindTarget struct {
+	Kind string `json:"kind"`
+}
+
+type foldAsTarget struct {
+	As string `json:"as"`
+}
+
 // foldSentence is the text every refusal of two spellings of one field carries.
 func foldSentence(later, earlier string) string {
 	return later + ": sets the same field as " + earlier + " (field names match case-insensitively, so one value would be dropped)"
@@ -71,8 +86,9 @@ func pair(a, b string, av, bv any) map[string]any {
 }
 
 // TestFoldedDuplicateFieldPath: the walk names the two keys of one object that
-// encoding/json files under one field, the later key first. Keys sort with an
-// upper-case letter before its lower-case twin, so the lower-case key is later.
+// encoding/json files under one field, the later key first. Keys sort in byte
+// order, so an ASCII upper-case letter comes before its lower-case twin and the
+// lower-case key is later. A non-ASCII character comes after every ASCII one.
 func TestFoldedDuplicateFieldPath(t *testing.T) {
 	item := func() map[string]any { return pair("name", "Name", "a", "b") }
 	cases := []struct {
@@ -121,6 +137,46 @@ func TestFoldedDuplicateFieldPath(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			later, earlier := builtin.FoldedDuplicateFieldPath[foldTarget](tc.src, tc.owned...)
+			if later != tc.later || earlier != tc.earlier {
+				t.Errorf("FoldedDuplicateFieldPath = (%q, %q), want (%q, %q)", later, earlier, tc.later, tc.earlier)
+			}
+		})
+	}
+}
+
+// TestFoldedDuplicateFieldPath_ByteOrder pins the order the documentation
+// states: keys compare in byte order, at the first byte where they differ. The
+// rows pass before and after the documentation change, because the code was
+// right and only the sentence was wrong. They pin the sentence and kill no
+// mutant.
+func TestFoldedDuplicateFieldPath_ByteOrder(t *testing.T) {
+	cases := []struct {
+		name           string
+		later, earlier string
+		run            func() (string, string)
+	}{
+		{
+			name: "ASCII letters: upper case first", later: "suspend", earlier: "Suspend",
+			run: func() (string, string) {
+				return builtin.FoldedDuplicateFieldPath[foldSuspendTarget](pair("suspend", "Suspend", "a", "b"))
+			},
+		},
+		{
+			name: "the Kelvin sign sorts after k", later: "\U0000212Aind", earlier: "kind",
+			run: func() (string, string) {
+				return builtin.FoldedDuplicateFieldPath[foldKindTarget](pair("kind", "\U0000212Aind", "a", "b"))
+			},
+		},
+		{
+			name: "an ASCII difference before a non-ASCII one decides", later: "as", earlier: "A\U0000017F",
+			run: func() (string, string) {
+				return builtin.FoldedDuplicateFieldPath[foldAsTarget](pair("A\U0000017F", "as", "a", "b"))
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			later, earlier := tc.run()
 			if later != tc.later || earlier != tc.earlier {
 				t.Errorf("FoldedDuplicateFieldPath = (%q, %q), want (%q, %q)", later, earlier, tc.later, tc.earlier)
 			}
