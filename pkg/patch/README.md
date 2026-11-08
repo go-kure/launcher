@@ -343,8 +343,10 @@ direct use of `ApplyStrategicMergePatch` (and its `applyJSONMergePatch`/`applyTy
 `strategic.go`), and the YAML-structure-preserving document mutation helpers
 (`YAMLDocument.ApplyPatchesToDocument` / `ApplyStrategicPatchesToDocument` in `yaml_preserve.go`,
 reached via `PatchableAppSet.WriteToFile`'s per-document apply loop, and
-`UpdateDocumentFromResource`). Those return plain wrapped errors (`errors.Wrap`/`fmt.Errorf`). Do
-not assume every error out of this package is a `*errors.PatchError` — check the call path.
+`UpdateDocumentFromResource`). Those return plain wrapped errors (`errors.Wrap`/`fmt.Errorf`). So
+do the resource loaders when two keys of one mapping read the same after conversion (`op.go`; see
+Value Types in Loaded Resources). Do not assume every error out of this package is a
+`*errors.PatchError` — check the call path.
 
 ## Related Packages
 
