@@ -234,7 +234,7 @@ To append to a list, end the path with `[-]`. The value is a mapping, so use the
 
 ### Structure Preservation
 
-When using `NewPatchableAppSetWithStructure`, the original YAML document structure is preserved through patching, maintaining comments, key ordering, and formatting. One exception: a plain timestamp (`created: 2026-11-07`) is written back quoted (`"2026-11-07"`), with the same text.
+When using `NewPatchableAppSetWithStructure`, the original YAML document structure is preserved through patching, maintaining comments, key ordering, and formatting. A timestamp that no patch changes is written back in its authored style: `created: 2026-11-07` stays plain, and an explicit `!!timestamp` tag stays. A timestamp that a patch sets is a string in the resource, so it is written quoted (`created: "2026-12-01"`), also when it has the same text as before. Four limits affect the quoting style only, never a value. A patch that adds, replaces or inserts a list item by index or by key leaves every timestamp in that list quoted. After a delete, items that pair by position (mapping items with no merge key, and lists inside a list) may stay quoted. Where one list holds the same text in two styles, such as `"2026-11-07"` and a plain timestamp, a delete can leave the survivor in the style of the removed item. A list item that is an alias of a timestamp (`- *date`) is written quoted.
 
 ### Value Types in Loaded Resources
 
@@ -250,7 +250,6 @@ When using `NewPatchableAppSetWithStructure`, the original YAML document structu
 
 - Write-back of a non-string key whose authored spelling differs from its converted one (`.nan`, `0x10`) keeps both keys in the output: go-kure/launcher#1346.
 - A patch value that carries colliding non-string keys loses an entry without an error: go-kure/launcher#1347.
-- A plain timestamp loses its unquoted style on write-back: go-kure/launcher#1344.
 - An unsigned integer above the `int64` range is not converted.
 
 ### Strategic Merge Patch
