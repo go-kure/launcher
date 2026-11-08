@@ -224,9 +224,10 @@ Runs on main and `release/*` branches only (not PRs):
   repositories plus a check that the scope pattern equals the one `cliff.toml` groups by), then,
   on a pull request only, `scripts/check-format-scope.sh --commits <base.sha> --head <head.sha>`.
   A commit fails when it changes a non-test file of `pkg/oam/validate.go`, `types.go`,
-  `capability.go`, `parser.go`, `package.go` or `profile.go`, or any non-test `.go` file under
-  `pkg/oam/builtin/` other than `contract.go`, `doc.go` and files under `testdata/`, and its
-  subject does not start with
+  `capability.go`, `parser.go`, `package.go`, `profile.go`, `property_validate.go`,
+  `property_validate_authored.go`, `lowering.go` or `featuregate_check.go`, or any non-test `.go`
+  file under `pkg/oam/builtin/` or `pkg/oam/internal/` other than `contract.go`, `doc.go` and
+  files under `testdata/`, and its subject does not start with
   `feat(format)`, `fix(format)`, `refactor(format)` or `docs(format)`, followed by an optional `!`,
   a colon and a space (`cliff.toml` drops any other header from the changelog). A commit that
   leaves the accepted format as it was takes a body line `Format-Scope: none (<reason>)`, and the

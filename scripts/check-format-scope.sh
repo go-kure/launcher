@@ -23,14 +23,20 @@
 #   pkg/oam/parser.go      the parse entry point
 #   pkg/oam/package.go     the kurel.yaml document type
 #   pkg/oam/profile.go     the cluster.yaml document type
+#   pkg/oam/property_validate.go           the property validators
+#   pkg/oam/property_validate_authored.go  the authored-property validators
+#   pkg/oam/lowering.go                    the lowering engine, which refuses documents it cannot lower
+#   pkg/oam/featuregate_check.go           the feature-gate check
 #   pkg/oam/builtin/       every .go file below it (the per-kind property validators)
-# Under pkg/oam/builtin/ a *_test.go file, a contract.go or doc.go file, and a file under
-# testdata/ never count. A *_test.go file never counts anywhere. The repository holds no
-# standalone schema files; the document schemas are the Go types above.
+#   pkg/oam/internal/      every .go file below it (the shared refusal tables and checks)
+# Under pkg/oam/builtin/ and pkg/oam/internal/ a *_test.go file, a contract.go or doc.go file,
+# and a file under testdata/ never count. A *_test.go file never counts anywhere. The
+# repository holds no standalone schema files; the document schemas are the Go types above.
 #
 # Not caught: a change inside a counted file that does not alter what is accepted but is
 # not marked by the trailer, and acceptance code outside this set (for example
-# pkg/oam/property_validate.go and pkg/oam/lowering.go). Reviewers remain the backstop.
+# pkg/oam/cross_document_collisions.go, which refuses a generated object produced by more than
+# one document). Reviewers remain the backstop.
 #
 # Skips merge commits and Renovate's commits (its email, as check-issue-refs.sh does).
 # In a shallow clone it exits 2 when a boundary commit lies inside the range, because
@@ -59,12 +65,17 @@ ACCEPT_PATHS=(
   pkg/oam/parser.go
   pkg/oam/package.go
   pkg/oam/profile.go
+  pkg/oam/property_validate.go
+  pkg/oam/property_validate_authored.go
+  pkg/oam/lowering.go
+  pkg/oam/featuregate_check.go
 )
 
 # The builtin component, trait and policy handlers refuse and build in one method, and their
-# data tables refuse without building an error, so every non-test .go file under this prefix
+# data tables refuse without building an error, so every non-test .go file under these prefixes
 # counts too, except the file names below (contract metadata and the package comment).
-ACCEPT_PREFIX="pkg/oam/builtin/"
+# pkg/oam/internal/ holds the shared refusal tables and checks the validators call.
+ACCEPT_PREFIXES=(pkg/oam/builtin/ pkg/oam/internal/)
 ACCEPT_SKIP_NAMES=(contract.go doc.go)
 
 RENOVATE_EMAIL="renovate@whitesourcesoftware.com"
@@ -125,11 +136,14 @@ touched_acceptance() {
   done < <(git -C "$ROOT" diff-tree -z --root --no-commit-id -r --name-only "$commit" || printf '\0')
 }
 
-# builtin_acceptance PATH: true for a non-test Go file under ACCEPT_PREFIX, other than a
-# skipped name or a file under testdata/.
+# builtin_acceptance PATH: true for a non-test Go file under one of ACCEPT_PREFIXES, other
+# than a skipped name or a file under testdata/.
 builtin_acceptance() {
-  local path="$1" skip
-  [[ "$path" == "$ACCEPT_PREFIX"* && "$path" == *.go && "$path" != *_test.go ]] || return 1
+  local path="$1" skip prefix under=1
+  for prefix in "${ACCEPT_PREFIXES[@]}"; do
+    [[ "$path" == "$prefix"* ]] && under=0
+  done
+  [[ "$under" == 0 && "$path" == *.go && "$path" != *_test.go ]] || return 1
   [[ "$path" != */testdata/* ]] || return 1
   for skip in "${ACCEPT_SKIP_NAMES[@]}"; do
     [[ "${path##*/}" != "$skip" ]] || return 1
