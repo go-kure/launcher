@@ -126,6 +126,26 @@ expect "component ownership" 1 "pkg/oam/component_ownership.go" $DEV pkg/oam/com
 expect "component label check" 1 "pkg/oam/component_label_check.go" $DEV pkg/oam/component_label_check.go 'fix(oam): x'
 expect "raw lowering path" 1 "pkg/oam/lowering_raw.go" $DEV pkg/oam/lowering_raw.go 'fix(oam): x'
 expect "Model document loader" 1 "pkg/oam/model/load.go" $DEV pkg/oam/model/load.go 'test(format): x'
+# The rest of pkg/oam/ was audited in go-kure/launcher#1367: every file that refuses an authored
+# document, or holds both such refusals and Go-API ones, counts.
+expect "transform" 1 "pkg/oam/transform.go" $DEV pkg/oam/transform.go 'fix(oam): x'
+expect "kurel.yaml parameter resolver" 1 "pkg/oam/resolver.go" $DEV pkg/oam/resolver.go 'fix(oam): x'
+expect "type ID grammar" 1 "pkg/oam/typeid.go" $DEV pkg/oam/typeid.go 'feat(oam): x'
+expect "type ID transformer" 1 "pkg/oam/typeid_transformer.go" $DEV pkg/oam/typeid_transformer.go 'fix(oam): x'
+expect "authored naming" 1 "pkg/oam/naming.go" $DEV pkg/oam/naming.go 'fix(oam): x'
+expect "naming at lowering" 1 "pkg/oam/naming_lowering.go" $DEV pkg/oam/naming_lowering.go 'fix(oam): x'
+expect "network policy synthesis" 1 "pkg/oam/netpol_synthesis.go" $DEV pkg/oam/netpol_synthesis.go 'fix(oam): x'
+expect "authored object metadata" 1 "pkg/oam/object_metadata.go" $DEV pkg/oam/object_metadata.go 'fix(oam): x'
+expect "authored object name" 1 "pkg/oam/object_name.go" $DEV pkg/oam/object_name.go 'fix(oam): x'
+expect "flat schema documents" 1 "pkg/oam/flatschema.go" $DEV pkg/oam/flatschema.go 'fix(oam): x'
+expect "feature gates" 1 "pkg/oam/featuregates.go" $DEV pkg/oam/featuregates.go 'fix(oam): x'
+expect "Service name gate" 1 "pkg/oam/service_name_gate.go" $DEV pkg/oam/service_name_gate.go 'fix(oam): x'
+expect "ordering" 1 "pkg/oam/ordering.go" $DEV pkg/oam/ordering.go 'fix(oam): x'
+expect "Flux namespace inputs" 1 "pkg/oam/flux_namespace_inputs.go" $DEV pkg/oam/flux_namespace_inputs.go 'fix(oam): x'
+expect "tier classification" 1 "pkg/oam/classify.go" $DEV pkg/oam/classify.go 'fix(oam): x'
+expect "sibling group" 1 "pkg/oam/sibling_group.go" $DEV pkg/oam/sibling_group.go 'fix(oam): x'
+expect "bundle application names" 1 "pkg/oam/bundle_application_names.go" $DEV pkg/oam/bundle_application_names.go 'fix(oam): x'
+expect "transform with an empty trailer reason" 1 "Format-Scope" $DEV pkg/oam/transform.go $'fix(oam): x\n\nFormat-Scope: none ()'
 
 # ── must pass ────────────────────────────────────────────────────────────────
 expect "validate.go under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/validate.go 'fix(format): x'
@@ -156,13 +176,22 @@ expect "internal package comment" 0 "" $DEV pkg/oam/internal/requiredfields/doc.
 expect "netpol synthesis types" 0 "" $DEV pkg/oam/netpol/types.go 'fix(oam): x'
 expect "test file beside the lowering engine" 0 "" $DEV pkg/oam/lowering_test.go 'fix(oam): x'
 # Ruled out by go-kure/launcher#1362: an error type and its text (the refusal is decided
-# elsewhere), a classifier of refusals, a registry check, and a check of a document set that
-# nothing calls. Tests, the package comment and testdata under pkg/oam/model/ stay out too.
+# elsewhere), a classifier of refusals and a registry check. Tests, the package comment and
+# testdata under pkg/oam/model/ stay out too. The fifth file of that ruling,
+# cross_document_collisions.go, is in the set: see the case below.
 expect "name collision error type" 0 "" $DEV pkg/oam/name_collision.go 'fix(oam): x'
 expect "hook group name error type" 0 "" $DEV pkg/oam/hook_group_name.go 'fix(oam): x'
 expect "policy refusal classifier" 0 "" $DEV pkg/oam/policy_refusal.go 'fix(oam): x'
 expect "lowering target registry check" 0 "" $DEV pkg/oam/lowering_targets.go 'fix(oam): x'
-expect "cross-document collision check" 0 "" $DEV pkg/oam/cross_document_collisions.go 'fix(oam): x'
+# Its check function has no caller yet, but keyedObjects in the same file is called by
+# in_document_collisions.go and sibling_group.go, so a change there moves what is accepted.
+expect "cross-document collision check" 1 "pkg/oam/cross_document_collisions.go" $DEV pkg/oam/cross_document_collisions.go 'fix(oam): x'
+# Ruled out by go-kure/launcher#1367: a provider's output declarations (Go code, never a
+# document), the sentinel errors, and a file that only wraps what naming.go decides.
+expect "output declarations" 0 "" $DEV pkg/oam/outputs.go 'fix(oam): x'
+expect "sentinel errors" 0 "" $DEV pkg/oam/errors.go 'fix(oam): x'
+expect "naming engine" 0 "" $DEV pkg/oam/naming_engine.go 'fix(oam): x'
+expect "transform with a trailer reason" 0 "" $DEV pkg/oam/transform.go $'refactor(oam): x\n\nFormat-Scope: none (Go API only)'
 expect "Model package comment" 0 "" $DEV pkg/oam/model/doc.go 'docs(oam): x'
 expect "Model testdata .go" 0 "" $DEV pkg/oam/model/testdata/x.go 'test(oam): x'
 expect "Model test file" 0 "" $DEV pkg/oam/model/load_test.go 'test(format): x'
@@ -314,6 +343,78 @@ for control_spec in "3503a228 pkg/oam/in_document_collisions.go the in-document 
     skip=$((skip + 1))
   fi
 done
+
+# ── real-repo controls for the rest of pkg/oam/ (go-kure/launcher#1367) ───────
+# 1dad99a82 changed pkg/oam/typeid.go under feat(oam). c8be4fb0c changed pkg/oam/transform.go and
+# pkg/oam/outputs.go under fix(oam): the guard must fail it and name transform.go, and outputs.go
+# stays out of the set. Neither has a trailer.
+for control_spec in "1dad99a82 pkg/oam/typeid.go the type ID commit" \
+                    "c8be4fb0c pkg/oam/transform.go the transform commit"; do
+  read -r control control_path control_name <<<"$control_spec"
+  if git -C "$REPO_ROOT" rev-parse --verify --quiet "$control^{commit}" >/dev/null &&
+     git -C "$REPO_ROOT" rev-parse --verify --quiet "$control^^{commit}" >/dev/null; then
+    rc=0
+    out="$(bash "$GATE" --root "$REPO_ROOT" --commits "$control^" --head "$control" 2>&1)" || rc=$?
+    check "positive control: $control_name fails" 1 "$control_path" "$rc" "$out"
+  else
+    echo "SKIP positive control: $control is not in this clone (shallow checkout)"
+    skip=$((skip + 1))
+  fi
+done
+
+# ── replay of a pinned range (go-kure/launcher#1367) ─────────────────────────
+# The last 200 non-merge commits when the audit ran are b25900b3..f126e143. The guard reads the
+# range the same way after main moves, because both ends are fixed. It must flag 44 commits. The
+# set before the audit flagged 30, so the 14 more are the commits the added files catch. No commit
+# in the window touches cross_document_collisions.go, so adding it kept the count at 44. When
+# a later audit changes the set, update the count here and say why in that commit.
+replay_base=b25900b3
+replay_head=f126e143
+
+# replay_summary <out> <count>: prints the guard's summary line when a line of <out> starts with
+# "check-format-scope: <count> commit(s) in <range> ", and prints nothing otherwise. The check
+# helper tests a substring, which also accepts "144 commit(s) in", so the count is read here.
+replay_summary() {
+  local line want="check-format-scope: $2 commit(s) in $replay_base..$replay_head "
+  while IFS= read -r line; do
+    if [[ "$line" == "$want"* ]]; then printf '%s\n' "$line"; return 0; fi
+  done <<<"$1"
+  return 0
+}
+# assert_summary <name> <yes|no> <count> <guard output>: replay_summary finds, or does not find, a summary.
+assert_summary() {
+  local name="$1" want="$2" count="$3" text="$4" got rc=0
+  got="$(replay_summary "$text" "$count")"
+  if [[ "$want" == yes ]]; then [[ -n "$got" ]] || rc=1; else [[ -z "$got" ]] || rc=1; fi
+  check "$name" 0 "" "$rc" "summary line read: [$got]"
+}
+summary_range="$replay_base..$replay_head change what app.yaml accepts without the (format) scope."
+assert_summary "replay summary accepts 44" yes 44 "check-format-scope: 44 commit(s) in $summary_range"
+assert_summary "replay summary rejects 144 for 44" no 44 "check-format-scope: 144 commit(s) in $summary_range"
+assert_summary "replay summary rejects x44 for 44" no 44 "check-format-scope: x44 commit(s) in $summary_range"
+assert_summary "replay summary rejects 30 for 44" no 44 "check-format-scope: 30 commit(s) in $summary_range"
+assert_summary "replay summary rejects a 44 line that does not start the line" no 44 \
+  "abc1234 (see check-format-scope: 44 commit(s) in $summary_range): pkg/oam/validate.go"
+assert_summary "replay summary rejects 44 for another range" no 44 "check-format-scope: 44 commit(s) in 1111111..2222222 x"
+assert_summary "replay summary finds the line among others" yes 44 \
+  $'c215cff3 (fix(oam): x): pkg/oam/validate.go\n\ncheck-format-scope: 44 commit(s) in '"$summary_range"
+
+if git -C "$REPO_ROOT" rev-parse --verify --quiet "$replay_base^{commit}" >/dev/null &&
+   git -C "$REPO_ROOT" rev-parse --verify --quiet "$replay_head^{commit}" >/dev/null; then
+  rc=0
+  out="$(bash "$GATE" --root "$REPO_ROOT" --commits "$replay_base" --head "$replay_head" 2>&1)" || rc=$?
+  summary="$(replay_summary "$out" 44)"
+  if [[ -n "$summary" ]]; then
+    check "replay of $replay_base..$replay_head flags 44 commits" 1 "" "$rc" "$summary"
+  else
+    echo "FAIL replay of $replay_base..$replay_head flags 44 commits: no line starts with the 44-commit summary"
+    printf '%s\n' "$out" | sed 's/^/    /'
+    fail=$((fail + 1))
+  fi
+else
+  echo "SKIP replay: $replay_base..$replay_head is not in this clone (shallow checkout)"
+  skip=$((skip + 1))
+fi
 
 echo "check-format-scope-test: $pass passed, $fail failed, $skip skipped"
 [[ "$fail" -eq 0 ]]
