@@ -243,8 +243,9 @@ func TestTemplateInMapKeyIsRefused(t *testing.T) {
 	}
 }
 
-// Document order across the template sites: values, then per part name, when, forEach, properties
-// (keys sorted), traits, annotations. The first failure wins.
+// Document order across the template sites: values, then per part when, forEach.in, name,
+// properties (keys sorted), traits, annotations. A name comes after forEach.in because it can read
+// the loop variable. The first failure wins.
 func TestCompileFirstFailureOrder(t *testing.T) {
 	bad := "${inputs.nope}"
 	t.Run("a bad name comes before a bad property", func(t *testing.T) {
@@ -538,6 +539,18 @@ func TestResultConversion(t *testing.T) {
 	}
 	t.Run("a map key that is not a string is refused", func(t *testing.T) {
 		wantCompileRefusal(t, propModel(t, "${{1: 'a'}}"), propSite, "map keys must be strings")
+	})
+	// The same rule holds at the strict sites, because Eval returns Go data for them too: a value goes
+	// back in Scope.Values and a forEach.in list gives the loop variable.
+	t.Run("a value with a map key that is not a string is refused", func(t *testing.T) {
+		m := evalBase(t)
+		m.Spec.Values = []Value{{Name: "m", Expr: "${{1: 'a'}}"}}
+		wantCompileRefusal(t, m, "spec.values[0].expr", "map keys must be strings")
+	})
+	t.Run("a forEach.in list of maps with a key that is not a string is refused", func(t *testing.T) {
+		m := evalBase(t)
+		m.Spec.Parts[0].ForEach = &ForEach{As: "n", In: "${[{1: 'a'}]}"}
+		wantCompileRefusal(t, m, "spec.parts[0].forEach.in", "map keys must be strings")
 	})
 	// JSON cannot encode NaN or an infinity, so such a double is refused at the site and not later in
 	// the writer. The error wraps ErrNonFinite and names the site. The same holds inside a list and
