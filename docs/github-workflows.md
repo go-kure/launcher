@@ -151,7 +151,7 @@ self-test (`make test-verify-merge`).
 | `issue-refs` | `issue-refs` | 2 min | — | Self-tests then runs `scripts/check-issue-refs.sh` over the whole tracked tree, and on a pull request over its commit messages: rejects a bare `#N` or an ownerless `name#N` reference (go-kure/launcher#400, go-kure/launcher#732; `make check-issue-refs`). Also self-tests `scripts/check-format-scope.sh` and, on a pull request, requires the `(format)` scope on commits that change what `app.yaml` accepts (go-kure/launcher#1279; `make check-format-scope`) |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload, PR sticky comment (same-repository PRs only: a fork PR has a read-only token, so the comment step is skipped while the threshold check still applies) |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
-| `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the forbidden-terms self-test of the CRD vendor scripts' matcher and `cliff.toml`'s scrub, run with git-cliff installed at `mise.toml`'s pin by the release installer from the same go-kure/.github checkout (`make test-forbidden-terms`) + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) |
+| `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the forbidden-terms self-test of the CRD vendor scripts' matcher and `cliff.toml`'s scrub, run with git-cliff installed at `mise.toml`'s pin by the release installer from the same go-kure/.github checkout (`make test-forbidden-terms`) + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) + the source-revision check on the built site (`make check-revision-shown`) |
 | `pin-impact` | `pin-impact` | 3 min | — | On a merge-queue run, only checks that every `go-kure/.github` reference in the merged tree pins the same commit. On a PR, renders and gates on the real impact of a `go-kure/.github` pin bump: resolves each referenced action's `$GITHUB_ACTION_PATH` script (and the siblings those `source` or run), intersects against the compare diff, fails if a consumed path changed and refuses any shape it cannot resolve (go-kure/launcher#358) |
 | `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check, action-pins, security, pin-impact, issue-refs | Aggregation gate |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
@@ -198,6 +198,15 @@ Runs on main and `release/*` branches only (not PRs):
   quickstart with `traits: []` re-introduced at spec level (go-kure/launcher#417) — so a gate that
   can no longer fail goes red as well. Marker syntax: `DEVELOPMENT.md` § "Checking documentation
   YAML fences"
+- **Source-revision check** — `docs-build` runs `make check-revision-shown` right after the Hugo
+  build (go-kure/launcher#1336). The built site shows the commit it came from: the sidebar footer
+  of every page reads "Version <label>, built from commit <sha>" and links the commit. The commit
+  is `git rev-parse --short HEAD`, which `scripts/gen-versions-toml.sh` writes into the overlay as
+  `commitSha`. The gate (`site/scripts/check-revision-shown.sh`) reads the home page and one nested
+  page of `site/public`. It fails on a missing line, on another commit or label, and on an overlay
+  that carries a commit other than HEAD's, and it reports the overlay cause apart from a missing
+  line. The target runs the gate's self-test (`site/scripts/check-revision-shown-test.sh`) first,
+  so a gate that can no longer fail goes red as well.
 - **Issue-reference guard** — `issue-refs` runs `make check-issue-refs`'s first two steps
   (go-kure/launcher#400): the self-test (`scripts/check-issue-refs-test.sh`, fixtures that must
   fail and must pass, each in a throwaway git repository), then `scripts/check-issue-refs.sh` on
@@ -473,7 +482,10 @@ Runs on main and `release/*` branches only (not PRs):
 
 1. Determines version parameters (dev for push to main, explicit slot for manual dispatch)
 2. Reads Hugo, Go and yq versions from `mise.toml`
-3. Runs `scripts/gen-versions-toml.sh` to generate versioned Hugo config overlay
+3. Runs `scripts/gen-versions-toml.sh` to generate versioned Hugo config overlay. The overlay
+   carries the short commit of the checkout, and the sidebar footer of every page shows it as
+   "built from commit <sha>". The commit is the one the run checked out, which for a dispatch is
+   the dispatched ref and not always the tag in the label
 4. Builds the Hugo site targeting `https://www.gokure.dev/launcher/<slot>/`
 5. If `set_latest=true`, also builds at `https://www.gokure.dev/launcher/`
 6. Checks out `go-kure/go-kure.github.io` and deploys to `launcher/<slot>/` through the shared
