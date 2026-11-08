@@ -19,8 +19,11 @@ rather than a dropped field; a number in an interface-typed field stays an exact
 spellings (`suspend` and `Suspend`) would keep one value and drop the other without a message.
 After a decode that succeeded, `DecodeStrictJSON` therefore refuses such a pair, at any depth, with
 a `*FoldedFieldError` whose text is `<later key>: sets the same field as <earlier key> (field names
-match case-insensitively, so one value would be dropped)`; keys compare in sorted order, so the
-lower-case spelling is the later one. The walk reads the declared field a key reaches, so it
+match case-insensitively, so one value would be dropped)`. Keys compare in byte order, at the
+first byte where they differ. An upper-case ASCII letter sorts before its lower-case letter, and a
+non-ASCII character sorts after every ASCII character. So in `Suspend` and `suspend` the later key
+is `suspend`, and with the Kelvin sign (U+212A) in place of `k` the Kelvin spelling is the later
+key. The walk reads the declared field a key reaches, so it
 does not look inside a type that decodes itself, an `any` or a `json.RawMessage`, and does not
 treat the keys of a free-key map as field names. A null never forms a pair: it is absent, as in the
 null contract. Two keys that name two different declared fields (`Foo` and `foo`) are no pair. A caller

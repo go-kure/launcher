@@ -372,8 +372,8 @@ func TestCiliumNetworkPolicyTrait_EverySpellingIsHeldToTheList(t *testing.T) {
 		}
 	}
 
-	// Keys sort with an upper-case letter first, so the lower-case spelling is
-	// the later one in the sentence.
+	// Keys sort in byte order, so an ASCII upper-case letter comes first and the
+	// lower-case spelling is the later one in the sentence.
 	t.Run("the spelling the decode keeps leaves the operator out", func(t *testing.T) {
 		_, err := buildCiliumTrait(trait(map[string]any{
 			"FROMENDPOINTS": expression(complete),
