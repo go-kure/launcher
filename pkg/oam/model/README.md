@@ -113,6 +113,12 @@ A comment in a hole runs from `//` to the end of the line, as in CEL. A `}` or a
 comment does not close the hole and does not open a string. A comment with no newline after it
 runs to the end of the text, so the hole is not closed.
 
+The same text is not a comment inside a string, a bytes literal or an escaped identifier. These
+forms may hold `//`: single, double and triple quoted strings, the raw form of each (`r'...'`),
+the bytes form of each (`b'...'`, `br'...'`) and an identifier in backticks, such as
+`` {'a//b': 1}.`a//b` ``. An escaped identifier ends at the next backtick. It holds no quote, brace or
+new line, so one that is not closed before the end of the line or text leaves the hole not closed.
+
 An optional input has no default and is not required. It is null when absent. Test it with
 `inputs.x == null`. `has(inputs.x)` is refused, because an input is a variable and not a map
 field. A null input in an operator or a method call, such as `inputs.x + 'a'`, compiles and fails
@@ -120,9 +126,11 @@ at run time.
 
 A value that is exactly one reference to an input or to an earlier value has the declared type
 of that reference. If the input is optional, the value is also nullable, so `values.x == null`
-compiles. Any other expression has the plain type that the checker reports and is not nullable,
-for example `inputs.tags + []`. A local name `values` in a `cel.bind` or a comprehension hides
-the model values inside its scope, as in CEL.
+compiles. Any other expression has the type that the checker reports. The checker drops the
+nullable wrapper of a list or map result, so `inputs.tags + []` is not nullable. It keeps the
+wrapper of a scalar result, so `cel.bind(x, inputs.nick, x)` with an optional string `nick` is
+still nullable. A local name `values` in a `cel.bind` or a comprehension hides the model values
+inside its scope, as in CEL.
 
 Four rules keep an expression deterministic and bounded:
 
@@ -132,7 +140,11 @@ Four rules keep an expression deterministic and bounded:
 - An expression has at most 4096 code points, a parser recursion depth of 64 and 10000 nodes.
   The node limit is a defensive bound. No input was found that reaches it under the size limit,
   and that is not proven.
-- `cel.bind` nests at most 8 deep.
+- A bind nests at most 8 deep. The limit counts every macro that expands to a bind, not only the
+  `cel.bind` calls you write. In celEnv 1 these are `cel.bind` and `sortBy`. Chained `sortBy` calls
+  nest, because the target of each call is the initializer of the bind before it. So
+  `[1].sortBy(x, x)` repeated 9 times is refused, and so are 4 `cel.bind` calls around 5 `sortBy`
+  calls. The `optMap` and `optFlatMap` macros expand to a bind too, and celEnv 1 does not load them.
 
 The four numbers are start values. Raising a limit later breaks no model. Lowering one can.
 
