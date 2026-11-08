@@ -1,8 +1,11 @@
 package oam
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -121,6 +124,12 @@ func checkGatedValue(field PropertySchema, value any, path string, target Kubern
 	if isNullValue(value) {
 		return nil
 	}
+	// Everything below reads the value as the writer writes it, so a struct is read as
+	// the map, array or scalar it encodes to, and one that encodes to null is absent.
+	value, ok, err := readWritten(value, path, func() (bool, error) { return fieldGateOff(field, target) })
+	if err != nil || !ok {
+		return err
+	}
 	if field.Gate != "" {
 		if err := refuseGateBelow(field.Gate, path, target); err != nil {
 			return err
@@ -137,8 +146,10 @@ func checkGatedValue(field PropertySchema, value any, path string, target Kubern
 			return err
 		}
 	}
-	if obj, ok := asObjectValue(value); ok && len(field.Properties) > 0 {
-		return checkGatedProperties(field.Properties, obj, path, target)
+	if len(field.Properties) > 0 {
+		if obj, ok := asObjectValue(value); ok {
+			return checkGatedProperties(field.Properties, obj, path, target)
+		}
 	}
 	if items, ok := asArrayValue(value); ok && field.Items != nil {
 		for i, item := range items {
@@ -201,7 +212,7 @@ func checkGatedPaths(paths map[string]string, value any, path string, target Kub
 	for _, p := range slices.Sorted(maps.Keys(paths)) {
 		gate := paths[p]
 		leaf := func(_ any, at string) error { return refuseGateBelow(gate, at, target) }
-		if err := walkGatedPath(strings.Split(p, "."), value, path, leaf); err != nil {
+		if err := walkGatedPath(strings.Split(p, "."), value, path, []string{gate}, target, leaf); err != nil {
 			return err
 		}
 	}
@@ -218,7 +229,7 @@ func checkValueGatedPaths(paths map[string]map[string]string, value any, path st
 	for _, p := range slices.Sorted(maps.Keys(paths)) {
 		gates := paths[p]
 		leaf := func(v any, at string) error { return refuseValueGateBelow(gates, v, at, target) }
-		if err := walkGatedPath(strings.Split(p, "."), value, path, leaf); err != nil {
+		if err := walkGatedPath(strings.Split(p, "."), value, path, slices.Sorted(maps.Values(gates)), target, leaf); err != nil {
 			return err
 		}
 	}
@@ -229,10 +240,17 @@ func checkValueGatedPaths(paths map[string]map[string]string, value any, path st
 // value found at its end and the path that names it; a key ending in "[]" names an
 // array whose every element is walked further. A key matches the authored keys
 // case-insensitively (foldedKeys), and the path it builds names the spelling the author
-// wrote. A null value ends the walk with no call.
-func walkGatedPath(keys []string, value any, path string, leaf func(value any, path string) error) error {
+// wrote. A null value ends the walk with no call. gates are the gates the walk reads:
+// a struct below the path that does not encode is refused only where one of them is off
+// at target, because where all are on nothing below it would be refused.
+func walkGatedPath(keys []string, value any, path string, gates []string, target KubernetesVersion, leaf func(value any, path string) error) error {
 	if isNullValue(value) {
 		return nil
+	}
+	off := func() (bool, error) { return anyGateOff(gates, target) }
+	value, ok, err := readWritten(value, path, off)
+	if err != nil || !ok {
+		return err
 	}
 	if len(keys) == 0 {
 		return leaf(value, path)
@@ -246,22 +264,140 @@ func walkGatedPath(keys []string, value any, path string, leaf func(value any, p
 		next := obj[authored]
 		here := path + "." + authored
 		if !each {
-			if err := walkGatedPath(keys[1:], next, here, leaf); err != nil {
+			if err := walkGatedPath(keys[1:], next, here, gates, target, leaf); err != nil {
 				return err
 			}
 			continue
 		}
-		items, ok := asArrayValue(next)
-		if !ok {
+		next, ok, err := readWritten(next, here, off)
+		if err != nil {
+			return err
+		}
+		items, isArray := asArrayValue(next)
+		if !ok || !isArray {
 			continue
 		}
 		for i, item := range items {
-			if err := walkGatedPath(keys[1:], item, fmt.Sprintf("%s[%d]", here, i), leaf); err != nil {
+			if err := walkGatedPath(keys[1:], item, fmt.Sprintf("%s[%d]", here, i), gates, target, leaf); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// readWritten returns value as the writer writes it (go-kure/launcher#1320). A Go-built
+// property value holds a struct where a decoded document holds a map, an array or a
+// scalar (a runtime.RawExtension holds any of them), and asObjectValue and asArrayValue
+// read a struct as a leaf, so a gated field or value inside it was never seen. A struct,
+// or a pointer to one, is read through writtenForm; every other value is returned as it
+// stands. A struct that does not encode cannot be read: it is refused with an error
+// naming path where off reports a gate the read covers is off at target, and otherwise
+// it ends the read (ok is false), because where every such gate is on nothing below it
+// would be refused.
+func readWritten(value any, path string, off func() (bool, error)) (written any, ok bool, err error) {
+	if !isGoBuiltValue(value) {
+		return value, true, nil
+	}
+	written, err = writtenForm(value)
+	if err == nil {
+		// A struct that encodes to null is absent, as a decoded null is.
+		return written, !isNullValue(written), nil
+	}
+	isOff, gerr := off()
+	if gerr != nil {
+		return nil, false, gerr
+	}
+	if isOff {
+		return nil, false, errors.Wrapf(err, "%s", path)
+	}
+	return nil, false, nil
+}
+
+// gateOffIn reports whether a gate the walk reads in schema, at any depth, is off at
+// target: a field's Gate, a GatedPaths gate or a ValueGates gate.
+func gateOffIn(schema map[string]PropertySchema, target KubernetesVersion) (bool, error) {
+	for _, key := range slices.Sorted(maps.Keys(schema)) {
+		if off, err := fieldGateOff(schema[key], target); off || err != nil {
+			return off, err
+		}
+	}
+	return false, nil
+}
+
+// anyGateOff reports whether any of gates is off by default at target.
+func anyGateOff(gates []string, target KubernetesVersion) (bool, error) {
+	for _, gate := range gates {
+		on, err := gateEnabled(gate, target, nil)
+		if err != nil {
+			return false, err
+		}
+		if !on {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func fieldGateOff(field PropertySchema, target KubernetesVersion) (bool, error) {
+	var gates []string
+	if field.Gate != "" {
+		gates = append(gates, field.Gate)
+	}
+	gates = append(gates, slices.Sorted(maps.Values(field.GatedPaths))...)
+	gates = append(gates, slices.Sorted(maps.Values(field.ValueGates))...)
+	for _, p := range slices.Sorted(maps.Keys(field.ValueGatedPaths)) {
+		gates = append(gates, slices.Sorted(maps.Values(field.ValueGatedPaths[p]))...)
+	}
+	if off, err := anyGateOff(gates, target); off || err != nil {
+		return off, err
+	}
+	if off, err := gateOffIn(field.Properties, target); off || err != nil {
+		return off, err
+	}
+	if field.Items != nil {
+		return fieldGateOff(*field.Items, target)
+	}
+	return false, nil
+}
+
+// isGoBuiltValue reports whether value's type is a struct, a pointer chain to one, or a
+// slice of either: the Go-built form of an object, or a list of objects, that a decoded
+// document holds as a map or a list of maps. asObjectValue reads a struct as a leaf. The
+// type decides, never the value, so a pointer to a nil pointer is converted and written
+// as null. A slice is converted whole, never element by element, because the writer
+// marshals its elements in place, where a MarshalJSON on the pointer type applies, and a
+// copy of an element would lose it.
+func isGoBuiltValue(value any) bool {
+	t := reflect.TypeOf(value)
+	if t == nil {
+		return false
+	}
+	if t.Kind() == reflect.Slice {
+		t = t.Elem()
+	}
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return t.Kind() == reflect.Struct
+}
+
+// writtenForm returns value as the writer writes it: a struct read back from its JSON
+// as a map, every number kept as its text (json.Number), so a 64-bit integer survives
+// and the walk reads the same keys a decoded document has. The error is non-nil when
+// value does not encode. value is not edited.
+func writtenForm(value any) (any, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, errors.Wrap(err, "the value does not encode as JSON")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var out any
+	if err := dec.Decode(&out); err != nil {
+		return nil, errors.Wrap(err, "the value does not decode from its JSON")
+	}
+	return out, nil
 }
 
 // foldedKeys returns, in sorted order, every key of obj that equals key ignoring case.
