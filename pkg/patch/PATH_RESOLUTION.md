@@ -1,6 +1,6 @@
-# Advanced Path Resolution and Type Inference
+# Advanced Path Resolution and Patch Value Typing
 
-This document provides an in-depth technical guide to the sophisticated path resolution and type inference systems in the Kure patch module.
+This document provides an in-depth technical guide to the sophisticated path resolution and patch value typing in the Kure patch module.
 
 ## Path Resolution Architecture
 
@@ -77,41 +77,44 @@ TOML headers are intelligently mapped to Kubernetes paths:
 - Direct field access to `data.*` fields
 - Automatic string/binary data type detection
 
-## Type Inference System
+## Patch Value Typing
 
-### Automatic Type Detection
+### YAML
 
-The `inferValueType()` function performs context-aware type inference:
+A YAML value keeps the type YAML gave it. The loader infers nothing from the key:
 
 ```go
-// Port numbers
-"8080" → int64(8080)     // when field contains "port"
-"80"   → int64(80)       // when field is "containerPort", "targetPort"
-
-// Resource quantities  
-"500m" → "500m"          // preserved as string for Kubernetes resource.Quantity
-"1Gi"  → "1Gi"           // preserved as string for memory quantities
-
-// Boolean values
-"true"    → true         // when field suggests boolean context
-"enabled" → true         // when field is "enabled", "debug", etc.
-
-// Replica counts
-"3" → int64(3)           // when field is "replicas", "instances"
+8080     → int            // unquoted number
+"8080"   → "8080"         // quoted: a string
+"true"   → "true"         // quoted: a string
+true     → true           // unquoted bool
 ```
 
-### Context-Driven Inference
+### TOML
 
-The system considers multiple context clues:
+A TOML patch line has no type syntax, so `LoadTOMLPatchFile` types the text:
 
-1. **Field Name Patterns**: `port`, `replicas`, `timeout`, `enabled`
-2. **Parent Path Context**: `resources.limits.*`, `spec.ports.*`
-3. **Value Format Recognition**: Kubernetes quantity formats, duration strings
-4. **Resource Type Context**: Different inference rules for different Kubernetes kinds
+```go
+`"8080"`                 → "8080"          // double quotes: a string, read by strconv.Unquote
+`true` / `False`         → true / false    // bool, in any case
+`3` under `replicas`     → 3               // integer, last path segment names an integer field
+`1` under `support`      → "1"             // the field name is matched whole, not by substring
+`500m`, `1Gi`            → "500m", "1Gi"   // any other text stays a string
+```
+
+`inferValueType()` makes the last two decisions. `isIntegerField()` strips a trailing selector
+(`[0]`), takes the segment after the last `.`, and compares it with the known integer field
+names, ignoring case.
+
+### Variables
+
+A value that is one whole `${values.x}` or `${features.x}` reference takes the variable's own
+type, so an `int` variable gives an integer and a `"3"` string variable gives a string. A
+reference inside longer text, or two references, gives a string.
 
 ### Kubernetes Compatibility
 
-All inferred types are compatible with `unstructured.Unstructured`:
+All patch value types are compatible with `unstructured.Unstructured`:
 
 ```go
 func convertValueForUnstructured(value interface{}) interface{} {
@@ -175,7 +178,7 @@ The patch system follows a "warn, don't fail" philosophy:
 
 - Missing target resources generate warnings but don't stop processing
 - Invalid selectors are logged but don't crash the operation
-- Type inference failures fall back to string values
+- A TOML value that is not a bool or an integer-field value stays a string
 
 ### Debug Logging
 
@@ -186,7 +189,6 @@ DEBUG: Resolving TOML header [deployment.app.containers.name=main]
 DEBUG: Mapped to path: spec.template.spec.containers[name=main]
 DEBUG: Found target container at index 0
 DEBUG: Applying patch: image.tag = "v1.2.3"
-DEBUG: Type inference: "8080" → int64(8080) (field context: containerPort)
 ```
 
 ### Validation Pipeline
@@ -237,7 +239,7 @@ image.tag: "${values.version}"
 Resolution happens after variable substitution:
 1. Substitute variables in headers and values
 2. Parse the resolved paths  
-3. Apply type inference to final values
+3. Type the final TOML values (YAML values keep their own types)
 
 ### Structure Preservation
 

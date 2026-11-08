@@ -38,15 +38,10 @@ if !fieldExists {
 }
 ```
 
-#### Type Inference Fallbacks
-```go
-// Can't infer type, fall back to string
-if inferredType == nil {
-    log.Printf("WARNING: Could not infer type for '%s', using string value", 
-               fieldName)
-    value = stringValue
-}
-```
+#### Value Typing Fallbacks
+An unquoted TOML value that is not a bool, and is not under a known integer field name, stays a
+string. A double-quoted TOML value that `strconv.Unquote` cannot read is also kept as written.
+Neither case is an error.
 
 #### Selector Resolution Issues
 ```go

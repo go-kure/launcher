@@ -316,43 +316,46 @@ func TestStrategicPatch_VariableSubstitution(t *testing.T) {
 	}
 }
 
-// TestStrategicPatch_VariableSubstitutionInfersTypes verifies that after
-// variable substitution, numeric and boolean strings are converted to their
-// typed equivalents (matching field-level patch behavior).
-func TestStrategicPatch_VariableSubstitutionInfersTypes(t *testing.T) {
+// TestStrategicPatch_VariableSubstitutionKeepsVariableType verifies that a value
+// that is exactly one variable reference takes the variable's own type. The
+// earlier version of this test expected the string "3" to be inferred into an
+// int, which is the inference that rewrote quoted strings; an integer variable
+// now gives the integer.
+func TestStrategicPatch_VariableSubstitutionKeepsVariableType(t *testing.T) {
 	patchYAML := `- target: my-app
   type: strategic
   patch:
     spec:
       replicas: "${values.replicas}"
 `
-	varCtx := &VariableContext{
-		Values: map[string]any{
-			"replicas": "3",
-		},
-	}
+	for name, tc := range map[string]struct {
+		variable any
+		want     any
+	}{
+		"integer_variable_gives_an_integer": {variable: 3, want: 3},
+		"string_variable_gives_a_string":    {variable: "3", want: "3"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			varCtx := &VariableContext{Values: map[string]any{"replicas": tc.variable}}
 
-	patches, err := LoadYAMLPatchFile(strings.NewReader(patchYAML), varCtx)
-	if err != nil {
-		t.Fatalf("LoadYAMLPatchFile: %v", err)
-	}
+			patches, err := LoadYAMLPatchFile(strings.NewReader(patchYAML), varCtx)
+			if err != nil {
+				t.Fatalf("LoadYAMLPatchFile: %v", err)
+			}
 
-	if len(patches) != 1 || patches[0].Strategic == nil {
-		t.Fatal("expected 1 strategic patch")
-	}
+			if len(patches) != 1 || patches[0].Strategic == nil {
+				t.Fatal("expected 1 strategic patch")
+			}
 
-	spec, ok := patches[0].Strategic.Patch["spec"].(map[string]any)
-	if !ok {
-		t.Fatalf("spec not a map: %T", patches[0].Strategic.Patch["spec"])
-	}
+			spec, ok := patches[0].Strategic.Patch["spec"].(map[string]any)
+			if !ok {
+				t.Fatalf("spec not a map: %T", patches[0].Strategic.Patch["spec"])
+			}
 
-	replicas := spec["replicas"]
-	// After type inference, replicas should be an int, not a string
-	switch replicas.(type) {
-	case int, int64:
-		// OK
-	default:
-		t.Errorf("expected replicas to be inferred as integer, got %T(%v)", replicas, replicas)
+			if replicas := spec["replicas"]; replicas != tc.want {
+				t.Errorf("replicas is %T(%v), want %T(%v)", replicas, replicas, tc.want, tc.want)
+			}
+		})
 	}
 }
 

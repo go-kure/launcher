@@ -154,7 +154,7 @@ Note: You may omit brackets around `key=value` unless the key or value contains 
 - Advanced structure preservation maintaining comments and formatting
 - Intelligent path resolution with disambiguation
 - Variable substitution with `${values.key}` and `${features.flag}` syntax
-- Automatic type inference for Kubernetes compatibility
+- Predictable patch value typing: YAML keeps its own types, TOML types an unquoted bool or integer-field value
 - Comprehensive debug logging with `KURE_DEBUG=1`
 - Graceful error handling with warnings for missing targets
 - Strategic merge patch (SMP) for deep-merging partial YAML documents

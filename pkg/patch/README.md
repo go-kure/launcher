@@ -60,6 +60,12 @@ The header `[kind.name]` names the resource. Each line under it is `path: value`
 the first colon, so a value may contain colons (`nginx:1.27`). It is not TOML `key = value`:
 a line without a colon is refused.
 
+A value has no type of its own in this format. A value in double quotes is a string, whatever
+it holds (`"8080"`, `"true"`), and its escapes are read as in Go (`"a\tb"`). An unquoted value is
+a bool when it reads `true` or `false`, in any case, and an integer when the last part of its
+path is a known integer field (`replicas`, `port`, `containerPort`, and similar). Any other
+unquoted value stays a string. A whole `${values.x}` reference keeps the type of the variable.
+
 ```toml
 # Target a resource by kind and name
 [deployment.myapp]
@@ -94,6 +100,9 @@ fail when none or several resources accept the path.
 myapp.spec.replicas: 3
 myapp.metadata.labels.env: production
 ```
+
+A YAML value keeps the type YAML gave it: `8080` is an integer, `"8080"` is a string, and
+`"true"` is a string. The loader does not infer a type from the key.
 
 A sequence is a list of targeted entries. Each has a `target` (a resource name, `kind.name`, or
 `namespace/kind.name`) and a `patch` mapping of paths relative to that resource. A list index is
@@ -186,6 +195,10 @@ for _, r := range resolved {
 Patches support `${values.<key>}` and `${features.<flag>}` references that resolve against a
 `VariableContext`. A reference to a name the context does not hold is left as written, and
 with a nil context nothing is substituted.
+
+A value that is one whole reference (`${values.replicas}`) takes the type of the variable: an
+`int` stays an `int`, and a string `"3"` stays a string. A reference inside longer text
+(`n${values.a}`, or two references) gives a string.
 
 ```toml
 [deployment.myapp]

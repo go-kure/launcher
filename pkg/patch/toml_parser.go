@@ -419,10 +419,66 @@ func (h *TOMLHeader) String() string {
 	return fmt.Sprintf("[%s]", result)
 }
 
-// inferValueType attempts to convert string values to appropriate Go types
-// This is important for Kubernetes fields that expect specific types (e.g., ports as integers)
+// wholeReferencePattern matches a value that is exactly one ${values.x} or ${features.x} reference.
+var wholeReferencePattern = regexp.MustCompile(`^\$\{(values|features)\.([^}]+)\}$`)
+
+// referencePattern matches a ${values.x} or ${features.x} reference anywhere in a value.
+var referencePattern = regexp.MustCompile(`\$\{(values|features)\.([^}]+)\}`)
+
+// substituteValue substitutes variables in a value. When the value is exactly one defined
+// reference (`${values.replicas}`), it returns the variable itself, with its own type.
+// Otherwise it returns the text SubstituteVariables builds, so an embedded reference
+// (`nginx:${values.tag}`) always gives a string. A reference to an undefined name is left
+// as written.
+func substituteValue(value string, ctx *VariableContext) (any, error) {
+	if ctx == nil {
+		return value, nil
+	}
+	if m := wholeReferencePattern.FindStringSubmatch(value); m != nil {
+		switch m[1] {
+		case "values":
+			if v, ok := ctx.Values[m[2]]; ok {
+				return v, nil
+			}
+		case "features":
+			if v, ok := ctx.Features[m[2]]; ok {
+				return v, nil
+			}
+		}
+	}
+	return SubstituteVariables(value, ctx)
+}
+
+// tomlValue types the value text of one TOML patch line. The TOML form has no types of its
+// own, so the text decides:
+//   - A value whose whole text is a double-quoted string (Go syntax, `strconv.Unquote`) is a
+//     string. The quotes are removed, variables are substituted as text and nothing is inferred.
+//     Text that is not one such string, such as `"a" and "b"` or a single-quoted value, is
+//     read as unquoted text.
+//   - An unquoted value with no reference is inferred by inferValueType.
+//   - An unquoted whole reference takes the variable's own type, and an unquoted embedded
+//     reference gives a string. Neither is inferred.
+func tomlValue(key, text string, ctx *VariableContext) (any, error) {
+	if len(text) >= 2 && text[0] == '"' {
+		if unquoted, err := strconv.Unquote(text); err == nil {
+			return SubstituteVariables(unquoted, ctx)
+		}
+	}
+	value, err := substituteValue(text, ctx)
+	if err != nil {
+		return nil, err
+	}
+	s, isString := value.(string)
+	if !isString || referencePattern.MatchString(text) {
+		return value, nil
+	}
+	return inferValueType(key, s), nil
+}
+
+// inferValueType types the text of an unquoted TOML value: `true` or `false` in any case is a
+// bool, and an integer is an int under a Kubernetes integer field. Everything else stays a
+// string. Only the TOML form calls it: a YAML value already has a type.
 func inferValueType(key, value string) any {
-	// Handle boolean values
 	switch strings.ToLower(value) {
 	case "true":
 		return true
@@ -430,72 +486,46 @@ func inferValueType(key, value string) any {
 		return false
 	}
 
-	// Handle integer values - common Kubernetes fields that should be integers
 	if isIntegerField(key) {
 		if intVal, err := strconv.Atoi(value); err == nil {
 			return intVal
 		}
 	}
 
-	// Try to parse as integer for any numeric-looking string
-	if intVal, err := strconv.Atoi(value); err == nil {
-		// Check if this looks like a port, replica count, or other integer field
-		if isLikelyIntegerValue(key, value) {
-			return intVal
-		}
-	}
-
-	// Return as string for everything else
 	return value
 }
 
-// isIntegerField checks if a field path indicates it should be an integer
-func isIntegerField(key string) bool {
-	integerFields := []string{
-		"port", "targetPort", "nodePort", "containerPort",
-		"replicas", "maxUnavailable", "maxSurge",
-		"initialDelaySeconds", "timeoutSeconds", "periodSeconds", "successThreshold", "failureThreshold",
-		"terminationGracePeriodSeconds", "activeDeadlineSeconds",
-		"runAsUser", "runAsGroup", "fsGroup",
-		"weight", "priority", "number",
-	}
+// integerFields are the names of Kubernetes fields that hold an integer.
+var integerFields = []string{
+	"port", "targetPort", "nodePort", "containerPort",
+	"replicas", "maxUnavailable", "maxSurge",
+	"initialDelaySeconds", "timeoutSeconds", "periodSeconds", "successThreshold", "failureThreshold",
+	"terminationGracePeriodSeconds", "activeDeadlineSeconds",
+	"runAsUser", "runAsGroup", "fsGroup",
+	"weight", "priority", "number",
+}
 
-	keyLower := strings.ToLower(key)
+// isIntegerField reports whether the last path segment of key is the name of an integer
+// field, ignoring case. A trailing selector (`[0]`, `[name=http]`) is not part of the
+// name, and a name that merely contains one (`support`, `phoneNumber`) does not match. Dots at
+// either end of the path, and before a selector, are ignored, as path parsing ignores them, so
+// `spec.replicas.` and `spec.replicas.[0]` both name `replicas`.
+func isIntegerField(key string) bool {
+	key = strings.Trim(key, ".")
+	for strings.HasSuffix(key, "]") {
+		i := strings.LastIndex(key, "[")
+		if i < 0 {
+			break
+		}
+		key = strings.Trim(key[:i], ".")
+	}
+	if i := strings.LastIndex(key, "."); i >= 0 {
+		key = key[i+1:]
+	}
 	for _, field := range integerFields {
-		if strings.Contains(keyLower, strings.ToLower(field)) {
+		if strings.EqualFold(key, field) {
 			return true
 		}
 	}
-
-	return false
-}
-
-// isLikelyIntegerValue uses heuristics to determine if a value should be an integer
-func isLikelyIntegerValue(key, value string) bool {
-	keyLower := strings.ToLower(key)
-
-	// Port ranges (1-65535)
-	if intVal, err := strconv.Atoi(value); err == nil {
-		if intVal >= 1 && intVal <= 65535 {
-			if strings.Contains(keyLower, "port") {
-				return true
-			}
-		}
-
-		// Replica counts (typically 0-100)
-		if intVal >= 0 && intVal <= 100 {
-			if strings.Contains(keyLower, "replica") {
-				return true
-			}
-		}
-
-		// Common timeout/delay values (0-3600 seconds)
-		if intVal >= 0 && intVal <= 3600 {
-			if strings.Contains(keyLower, "delay") || strings.Contains(keyLower, "timeout") || strings.Contains(keyLower, "period") {
-				return true
-			}
-		}
-	}
-
 	return false
 }
