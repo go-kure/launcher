@@ -173,10 +173,13 @@ has the element type of `forEach.in`.
 **Result.** A string that is exactly one hole gives the value with its type: `int64`, `uint64`,
 `float64`, `bool`, `string`, `[]byte`, `[]any` (in order), `map[string]any` or `nil`. A string
 with text around a hole, or with several holes, gives a string. A map key must be a string. A
-map with another key type is refused when the model compiles.
+map with another key type is refused when the model compiles, at every site that gives a value:
+a property, a value and a `forEach.in` list (a map in its elements included).
 
 **Text.** Inside text a hole must give a string, an int, a uint, a double or a bool. A list, a
-map or a `dyn` value is refused when the model compiles ("not allowed in text"). A double takes
+map or a `dyn` value is refused when the model compiles ("not allowed in text"). The type of a
+`dyn` value is not known when the model compiles, so even a `dyn` value that holds a string is
+refused: write `string(x)` around it. A double takes
 the form of CEL `string(x)`: `1.0` gives `1`, `0.1` gives `0.1`, `100000000.0` gives `1e+08`,
 `1e21` gives `1e+21`, `-0.0` gives `-0`. A bool gives `true` or `false`. Text and a number or a
 bool do not join with `+`: `'a' + 1.0` is a compile error, and `'a' + string(1.0)` works.

@@ -225,7 +225,7 @@ func (w *walker) build(path, text string, spec siteSpec) (*site, error) {
 			return nil, err
 		}
 		switch {
-		case s.single && !spec.strict:
+		case s.single:
 			if err := stringKeys(out); err != nil {
 				return nil, invalid(path, "%s", err)
 			}
