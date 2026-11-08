@@ -362,6 +362,142 @@ for control_spec in "1dad99a82 pkg/oam/typeid.go the type ID commit" \
   fi
 done
 
+# ── every file directly under pkg/oam/ has exactly one ruling (go-kure/launcher#1373) ──
+# A new non-test .go file directly under pkg/oam/ is acceptance code nobody has ruled yet, and the
+# guard cannot see it, so this case does. The file must be in ACCEPT_PATHS (it counts) or in
+# LEFT_OUT_PATHS (ruled out, with the reason beside it in the guard): never in neither, never in
+# both, never listed twice. An entry that names no such file is stale and fails too.
+
+# ruling_problems <tree files> <accepted> <left out>: prints one sorted line per problem, and
+# nothing when every file has exactly one ruling. Each argument holds one path per line.
+ruling_problems() {
+  local f
+  local -A on_tree=() n_accept=() n_left=()
+  local -a problems=()
+  while IFS= read -r f; do
+    if [[ -n "$f" ]]; then on_tree[$f]=1; fi
+  done <<<"$1"
+  while IFS= read -r f; do
+    if [[ -n "$f" ]]; then n_accept[$f]=$(( ${n_accept[$f]:-0} + 1 )); fi
+  done <<<"$2"
+  while IFS= read -r f; do
+    if [[ -n "$f" ]]; then n_left[$f]=$(( ${n_left[$f]:-0} + 1 )); fi
+  done <<<"$3"
+  for f in "${!on_tree[@]}"; do
+    if (( ${n_accept[$f]:-0} + ${n_left[$f]:-0} == 0 )); then
+      problems+=("$f is in neither ACCEPT_PATHS nor LEFT_OUT_PATHS")
+    elif (( ${n_accept[$f]:-0} > 0 && ${n_left[$f]:-0} > 0 )); then
+      problems+=("$f is in both ACCEPT_PATHS and LEFT_OUT_PATHS")
+    elif (( ${n_accept[$f]:-0} > 1 )); then
+      problems+=("$f is listed twice in ACCEPT_PATHS")
+    elif (( ${n_left[$f]:-0} > 1 )); then
+      problems+=("$f is listed twice in LEFT_OUT_PATHS")
+    fi
+  done
+  for f in "${!n_accept[@]}"; do
+    if [[ -z "${on_tree[$f]:-}" ]]; then
+      problems+=("$f is in ACCEPT_PATHS but is not a non-test .go file directly under pkg/oam/")
+    fi
+  done
+  for f in "${!n_left[@]}"; do
+    if [[ -z "${on_tree[$f]:-}" ]]; then
+      problems+=("$f is in LEFT_OUT_PATHS but is not a non-test .go file directly under pkg/oam/")
+    fi
+  done
+  if (( ${#problems[@]} > 0 )); then printf '%s\n' "${problems[@]}" | sort; fi
+}
+
+# expect_rulings <name> <want-rc: 0|1> <want-substring-or-empty> <tree> <accepted> <left out>
+expect_rulings() {
+  local name="$1" want_rc="$2" want_out="$3" out rc=0
+  out="$(ruling_problems "$4" "$5" "$6")"
+  if [[ -n "$out" ]]; then rc=1; fi
+  check "$name" "$want_rc" "$want_out" "$rc" "$out"
+}
+
+expect_rulings "ruling: each file in one list" 0 "" $'pkg/oam/a.go\npkg/oam/b.go' 'pkg/oam/a.go' 'pkg/oam/b.go'
+expect_rulings "ruling: a file in neither list" 1 "pkg/oam/new.go is in neither" \
+  $'pkg/oam/a.go\npkg/oam/new.go' 'pkg/oam/a.go' ''
+expect_rulings "ruling: every unruled file is named, not only the first" 1 "pkg/oam/c.go is in neither" \
+  $'pkg/oam/a.go\npkg/oam/b.go\npkg/oam/c.go' 'pkg/oam/a.go' ''
+expect_rulings "ruling: a file in both lists" 1 "pkg/oam/a.go is in both" 'pkg/oam/a.go' 'pkg/oam/a.go' 'pkg/oam/a.go'
+expect_rulings "ruling: a stale accepted entry" 1 "pkg/oam/gone.go is in ACCEPT_PATHS but" \
+  'pkg/oam/a.go' $'pkg/oam/a.go\npkg/oam/gone.go' ''
+expect_rulings "ruling: a stale left-out entry" 1 "pkg/oam/gone.go is in LEFT_OUT_PATHS but" \
+  'pkg/oam/a.go' 'pkg/oam/a.go' 'pkg/oam/gone.go'
+expect_rulings "ruling: a file listed twice as accepted" 1 "pkg/oam/a.go is listed twice in ACCEPT_PATHS" \
+  'pkg/oam/a.go' $'pkg/oam/a.go\npkg/oam/a.go' ''
+expect_rulings "ruling: a file listed twice as left out" 1 "pkg/oam/a.go is listed twice in LEFT_OUT_PATHS" \
+  'pkg/oam/a.go' '' $'pkg/oam/a.go\npkg/oam/a.go'
+
+# --print-paths names one of the two lists.
+rc=0
+out="$(bash "$GATE" --print-paths 2>&1)" || rc=$?
+check "--print-paths without a list" 2 "accept or left-out" "$rc" "$out"
+rc=0
+out="$(bash "$GATE" --print-paths both 2>&1)" || rc=$?
+check "--print-paths with an unknown list" 2 "accept or left-out" "$rc" "$out"
+
+# oam_tree_files <repo root>: the tracked non-test .go files directly under pkg/oam/, one per line.
+# git lists a name with a byte outside ASCII, a quote or a backslash in double quotes with escapes
+# unless the listing is NUL-delimited (-z), and a quoted name would slip past the prefix test below,
+# so the completeness check would pass for a file that has no ruling.
+oam_tree_files() {
+  local root=$1 listed list_file git_rc=0
+  list_file="$(mktemp "$WORK/oam-listing.XXXXXX")" || return 1
+  git -C "$root" ls-files -z -- 'pkg/oam/*.go' >"$list_file" || git_rc=$?
+  while IFS= read -r -d '' listed; do
+    # The pathspec glob also matches below pkg/oam/ and test files: keep the files directly under it.
+    if [[ "${listed#pkg/oam/}" != */* && "$listed" != *_test.go ]]; then printf '%s\n' "$listed"; fi
+  done <"$list_file"
+  rm -f -- "$list_file"
+  return "$git_rc"
+}
+# A throwaway repository: a plain file, a file whose name has a byte outside ASCII, a file with a
+# quote in its name, a test file, and a file below pkg/oam/ must give exactly the first three.
+listing_repo="$WORK/listing-repo"
+mkdir -p "$listing_repo/pkg/oam/sub"
+git -C "$listing_repo" init -q
+for listing_file in pkg/oam/a.go $'pkg/oam/caf\303\251.go' 'pkg/oam/q"uote.go' pkg/oam/a_test.go pkg/oam/sub/b.go; do
+  : >"$listing_repo/$listing_file"
+done
+git -C "$listing_repo" add -A
+rc=0
+out="$(oam_tree_files "$listing_repo")" || rc=$?
+want_listing=$'pkg/oam/a.go\npkg/oam/caf\303\251.go\npkg/oam/q"uote.go'
+if [[ "$rc" -eq 0 && "$(printf '%s\n' "$out" | sort)" == "$(printf '%s\n' "$want_listing" | sort)" ]]; then
+  check "tree listing keeps a name git would quote" 0 "" 0 ""
+else
+  check "tree listing keeps a name git would quote" 0 "" 1 "rc=$rc, got: $out"
+fi
+
+# The real tree. The listing must find files (a listing that finds none proves nothing), and
+# both lists must print.
+rc=0
+accepted_paths="$(bash "$GATE" --print-paths accept 2>&1)" || rc=$?
+left_out_paths="$(bash "$GATE" --print-paths left-out 2>&1)" || rc=$?
+if [[ "$rc" -ne 0 ]]; then
+  check "--print-paths prints both lists" 0 "" "$rc" "accept: $accepted_paths"$'\n'"left-out: $left_out_paths"
+else
+  rc=0
+  listing="$(oam_tree_files "$REPO_ROOT")" || rc=$?
+  tree_paths=()
+  while IFS= read -r listed; do
+    if [[ -n "$listed" ]]; then tree_paths+=("$listed"); fi
+  done <<<"$listing"
+  if [[ "$rc" -ne 0 || "${#tree_paths[@]}" -eq 0 ]]; then
+    check "pkg/oam holds .go files to rule" 0 "" 1 "git ls-files found no non-test .go file directly under pkg/oam/ (rc=$rc): the listing proves nothing"
+  else
+    ruling_out="$(ruling_problems "$(printf '%s\n' "${tree_paths[@]}")" "$accepted_paths" "$left_out_paths")"
+    rc=0
+    if [[ -n "$ruling_out" ]]; then rc=1; fi
+    check "every file directly under pkg/oam/ has exactly one ruling" 0 "" "$rc" "$ruling_out"
+    n_accepted="$(printf '%s\n' "$accepted_paths" | wc -l)"
+    n_left_out="$(printf '%s\n' "$left_out_paths" | wc -l)"
+    echo "pkg/oam rulings: ${#tree_paths[@]} files = $((n_accepted)) accepted + $((n_left_out)) left out"
+  fi
+fi
+
 # ── replay of a pinned range (go-kure/launcher#1367) ─────────────────────────
 # The last 200 non-merge commits when the audit ran are b25900b3..f126e143. The guard reads the
 # range the same way after main moves, because both ends are fixed. It must flag 44 commits. The

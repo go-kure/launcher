@@ -63,17 +63,20 @@
 # standalone schema files; the document schemas are the Go types above.
 #
 # Left out on purpose, after the audit of pkg/oam/ (go-kure/launcher#1367): a file whose
-# refusals the Go API raises, never a document. outputs.go (a provider's output declarations),
-# errors.go and name_collision.go (error types and their text), naming_engine.go (wraps what
-# naming.go decides), policy_refusal.go, hook_group_name.go and lowering_targets.go (decided
-# elsewhere), and the files that hold no refusal. cross_document_collisions.go is in the set:
+# refusals the Go API raises, never a document, and the files that hold no refusal. They are
+# the LEFT_OUT_PATHS array below, with the reason beside each group. Every non-test .go file
+# directly under pkg/oam/ is in exactly one of ACCEPT_PATHS and LEFT_OUT_PATHS, and the
+# self-test fails with the file name when one is in neither (go-kure/launcher#1373).
+# cross_document_collisions.go is in the set:
 # its check function CheckCrossDocumentCollisions has no caller yet, but the helpers beside it
 # (keyedObjects, qualifiedName, objectIdentity) are live. A file that holds both Go-API refusals and refusals of an authored document is in
 # the set, and the trailer is the way out for an edit that leaves the accepted format as it was.
 #
 # Not caught: a change inside a counted file that does not alter what is accepted but is
-# not marked by the trailer, and acceptance code outside this set, such as a new file under
-# pkg/oam/ that nobody has ruled yet. Reviewers remain the backstop.
+# not marked by the trailer, and acceptance code outside this set, such as a file in a
+# subdirectory of pkg/oam/ other than builtin/, internal/ and model/ (pkg/oam/netpol/ for one).
+# A new file directly under pkg/oam/ is caught by the self-test, not by the guard. Reviewers
+# remain the backstop.
 #
 # Skips merge commits and Renovate's commits (its email, as check-issue-refs.sh does).
 # In a shallow clone it exits 2 when a boundary commit lies inside the range, because
@@ -82,6 +85,7 @@
 #
 # Usage: check-format-scope.sh [--root DIR] --commits [BASE] [--head REV]
 #        check-format-scope.sh --print-scope-pattern
+#        check-format-scope.sh --print-paths accept|left-out
 # Exit:  0 clean, 1 a commit lacks the scope, 2 usage or scan error.
 
 set -euo pipefail
@@ -134,6 +138,40 @@ ACCEPT_PATHS=(
   pkg/oam/cross_document_collisions.go
 )
 
+# Every non-test .go file directly under pkg/oam/ that is not in ACCEPT_PATHS, ruled out on purpose.
+# The guard never reads this list. The self-test does, through --print-paths left-out: a file
+# directly under pkg/oam/ must be in exactly one of the two lists, so a new file fails the
+# self-test until someone rules it (go-kure/launcher#1373). Add the reason beside the group.
+LEFT_OUT_PATHS=(
+  # Go API only, never a document: error types and their text, a provider's output declarations
+  # (go-kure/launcher#1367).
+  pkg/oam/errors.go
+  pkg/oam/name_collision.go
+  pkg/oam/generated_object_collision.go
+  pkg/oam/outputs.go
+  # The refusal is decided elsewhere (go-kure/launcher#1362, go-kure/launcher#1367).
+  pkg/oam/policy_refusal.go
+  pkg/oam/hook_group_name.go
+  pkg/oam/lowering_targets.go
+  # No refusal of an authored document: the package comment, and files that only pass on an
+  # error they received.
+  pkg/oam/doc.go
+  pkg/oam/post_policy_step.go
+  pkg/oam/provenance.go
+  pkg/oam/routed_backend.go
+  # Not yet ruled in or out as to their refusals. go-kure/launcher#1377 reads each helper and
+  # each caller.
+  pkg/oam/component_label.go
+  pkg/oam/force_warnings.go
+  pkg/oam/handler.go
+  pkg/oam/naming_engine.go
+  pkg/oam/pipeline.go
+  pkg/oam/policy.go
+  pkg/oam/scaler_targets.go
+  pkg/oam/schema.go
+  pkg/oam/shorten_name.go
+)
+
 # The builtin component, trait and policy handlers refuse and build in one method, and their
 # data tables refuse without building an error, so every non-test .go file under these prefixes
 # counts too, except the file names below (contract metadata and the package comment).
@@ -157,6 +195,12 @@ while [[ $# -gt 0 ]]; do
       shift ;;
     --head) HEAD_REV="${2:-}"; [[ -n "$HEAD_REV" ]] || { echo "ERROR: --head needs a revision" >&2; exit 2; }; shift 2 ;;
     --print-scope-pattern) printf '%s\n' "$SCOPE_RE"; exit 0 ;;
+    --print-paths)
+      case "${2:-}" in
+        accept) printf '%s\n' "${ACCEPT_PATHS[@]}"; exit 0 ;;
+        left-out) printf '%s\n' "${LEFT_OUT_PATHS[@]}"; exit 0 ;;
+        *) echo "ERROR: --print-paths takes accept or left-out" >&2; exit 2 ;;
+      esac ;;
     -h|--help) sed -n '2,/^# Exit:/p' "$0"; exit 0 ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac

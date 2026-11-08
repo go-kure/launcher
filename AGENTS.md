@@ -182,12 +182,13 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   guard does not see a semantic change inside a counted file that the path rule cannot tell
   apart (some counted files hold Go-API refusals beside the refusals of an authored document,
   and an edit that touches only the Go-API ones takes the trailer), nor acceptance code outside
-  the set (such as a new file under `pkg/oam/` that nobody has ruled yet); review is the
-  backstop for both. go-kure/launcher#1362 and
-  go-kure/launcher#1367 audited every file directly under `pkg/oam/`. `outputs.go` (a
-  provider's output declarations, which only Go code writes), `errors.go`, `name_collision.go`,
-  `naming_engine.go`, `policy_refusal.go`, `hook_group_name.go` and `lowering_targets.go` stay
-  out on purpose. `cross_document_collisions.go` is in the set: its check function
+  the set (such as a file in a subdirectory of `pkg/oam/` other than `builtin/`, `internal/`
+  and `model/`); review is the backstop for both. go-kure/launcher#1362 and
+  go-kure/launcher#1367 audited every file directly under `pkg/oam/`. The files left out on
+  purpose are the `LEFT_OUT_PATHS` array in `scripts/check-format-scope.sh`, with the reason
+  beside each group. Every non-test `.go` file directly under `pkg/oam/` is in exactly one of
+  that array and `ACCEPT_PATHS`, and the self-test fails with the file name when one is in
+  neither (go-kure/launcher#1373). `cross_document_collisions.go` is in the set: its check function
   `CheckCrossDocumentCollisions` has no caller yet, but the helper `keyedObjects` beside it is
   live.
 

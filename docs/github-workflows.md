@@ -221,7 +221,9 @@ Runs on main and `release/*` branches only (not PRs):
   Convention and known gaps: `AGENTS.md` § "Issue references"
 - **Format-scope guard** — the same `issue-refs` job also runs `make check-format-scope`
   (go-kure/launcher#1279): the self-test (`scripts/check-format-scope-test.sh`, throwaway git
-  repositories plus a check that the scope pattern equals the one `cliff.toml` groups by), then,
+  repositories, a check that the scope pattern equals the one `cliff.toml` groups by, and a check
+  that every non-test `.go` file directly under `pkg/oam/` is in exactly one of `ACCEPT_PATHS`
+  and `LEFT_OUT_PATHS`, go-kure/launcher#1373), then,
   on a pull request only, `scripts/check-format-scope.sh --commits <base.sha> --head <head.sha>`.
   A commit fails when it changes a non-test file of `pkg/oam/validate.go`, `types.go`,
   `capability.go`, `parser.go`, `package.go`, `profile.go`, `property_validate.go`,
