@@ -336,6 +336,52 @@ func TestFeatureGates_OpenSchemasChangeNoOutput(t *testing.T) {
 	}
 }
 
+// TestFeatureGates_GoBuiltPodSpecRefusedBelow: a pod template whose spec a Go caller
+// built as a corev1.PodSpec, through each real kind that takes a pod template, is
+// refused below the HostnameOverride release as the decoded document is, and accepted
+// at that release and with no version stated (go-kure/launcher#1320).
+func TestFeatureGates_GoBuiltPodSpecRefusedBelow(t *testing.T) {
+	on, ok := oam.FeatureGateOnByDefault("HostnameOverride")
+	if !ok {
+		t.Fatal("gate HostnameOverride is not in the table")
+	}
+	below := oam.KubernetesVersion{Major: on.Major, Minor: on.Minor - 1}
+	for _, kind := range podTemplateGateKinds {
+		t.Run(kind, func(t *testing.T) {
+			transformer := newBuiltinTransformer()
+			doc, _ := openGateDoc(kind, "containers:\n  - name: app\n    image: ghcr.io/example/app:v1.0.0\n")
+			build := func() *oam.Application {
+				app, err := oam.ParseWithExtraTypes([]byte(doc), nil, transformer.LowerableTypes())
+				if err != nil {
+					t.Fatalf("parsing: %v", err)
+				}
+				tmpl, ok := app.Spec.Components[0].Properties["template"].(map[string]any)
+				if !ok {
+					t.Fatalf("template is %T, want a map", app.Spec.Components[0].Properties["template"])
+				}
+				host := "web.example.com"
+				tmpl["spec"] = corev1.PodSpec{HostnameOverride: &host,
+					Containers: []corev1.Container{{Name: "app", Image: "ghcr.io/example/app:v1.0.0"}}}
+				return app
+			}
+			for _, target := range []*oam.KubernetesVersion{nil, &on} {
+				if _, err := transformer.ValidateAuthoredPropertiesForTarget(build(), nil, target); err != nil {
+					t.Errorf("target %v: want accepted, got %v", target, err)
+				}
+			}
+			_, err := transformer.ValidateAuthoredPropertiesForTarget(build(), nil, &below)
+			if err == nil {
+				t.Fatalf("at %s: want template.spec.hostnameOverride refused", below)
+			}
+			for _, want := range []string{"template.spec.hostnameOverride", "HostnameOverride", "kubernetesVersion is " + below.String()} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("at %s: error %q does not name %q", below, err, want)
+				}
+			}
+		})
+	}
+}
+
 // derefType strips pointers from typ.
 func derefType(typ reflect.Type) reflect.Type {
 	for typ.Kind() == reflect.Pointer {

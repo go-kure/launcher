@@ -3244,6 +3244,13 @@ nodes carry `GatedPaths` (published as `gatedPaths`) instead: gate-relative path
 (`env[].valueFrom.fileKeyRef`, with `[]` after an array key) to the gate the field needs,
 read by the gate check alone, so property validation and what a document is accepted as do
 not change (go-kure/launcher#1245). A consumer that predates `gatedPaths` ignores it.
+The gate check reads a value as the writer writes it. A property value built in Go can
+hold a struct from the Kubernetes API types (a `corev1.PodSpec` in a template, a
+`[]corev1.EnvVar`) where a decoded document holds a map. The check reads such a struct, a
+pointer to one, or a slice of either, through its JSON form, so it is held to the same
+gates as the decoded document. A struct that encodes to null is absent, as a decoded null
+is. A struct that does not encode as JSON is refused, with its path, where a gate
+below it is off at the target (go-kure/launcher#1320).
 
 A gate may also cover single values of an enum property: `ValueGates` (published as
 `valueGates`) maps an `Enum` value to the gate that value alone needs, and the property is
