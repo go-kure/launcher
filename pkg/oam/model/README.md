@@ -163,6 +163,13 @@ path: `spec.values[0].expr`, `spec.parts[0].when`, `spec.parts[0].forEach.in`,
 `properties`, in `traits[].properties` and in `annotations` is a site, with or without a hole. An
 unknown path is an error.
 
+Two sites never share a path. A key that holds a dot or a bracket can write the path of another
+property, such as `a.b` beside `a: {b: ...}`, or `a[0]` beside a list `a`. The model is refused
+when it compiles, and the error names the path. A free-form map whose keys are not all strings,
+which YAML gives for a key such as `1` or `true`, is read like any other map. The text of the key is
+the path segment, so the key `1` gives `.1`. The integer key `1` and the string key `"1"` give one
+path, so a map that holds both is refused.
+
 `Compile` returns the first failure, which wraps `ErrInvalid` and names the site. The order is the
 values, then for each part: `when`, `forEach.in`, `name`, the properties (keys sorted at every
 level), the trait properties and the annotations. The scope of a site is the inputs, `self`, the
@@ -172,9 +179,13 @@ has the element type of `forEach.in`.
 
 **Result.** A string that is exactly one hole gives the value with its type: `int64`, `uint64`,
 `float64`, `bool`, `string`, `[]byte`, `[]any` (in order), `map[string]any` or `nil`. A string
-with text around a hole, or with several holes, gives a string. A map key must be a string. A
-map with another key type is refused when the model compiles, at every site that gives a value:
-a property, a value and a `forEach.in` list (a map in its elements included).
+with text around a hole, or with several holes, gives a string. A `[]byte` result is a copy: a
+write to it does not change the next result of the site. A map key must be a string. The compile
+check reads the type of the result and refuses a map whose key type is not a string, at every site
+that gives a value: a property, a value and a `forEach.in` list (a map in its elements included).
+A map literal with a key of another type, such as `{1: 'a', 'b': 'c'}`, has the key type `dyn`,
+which the check cannot read. Such a map compiles and fails when the site is evaluated, with the
+same words: map keys must be strings.
 
 **Text.** Inside text a hole must give a string, an int, a uint, a double or a bool. A list, a
 map or a `dyn` value is refused when the model compiles ("not allowed in text"). The type of a
@@ -204,6 +215,12 @@ test pins both). `lists.range(1000000)` is stopped by the cost limit. A list of 
 cost limit. The cost does not bound the size of the result
 of `format`: a `format` that builds a result of 2,000,000 bytes runs to the end. A size limit for
 `format` is a separate change.
+
+**Result size.** The Go copy of a single-hole result holds at most 1,000,000 list elements and map
+entries, counted at every depth. The copy is made after the evaluation. An expression can share one
+list in many places at a small cost, and the copy counts the list once for each place. So the cost
+limit does not bound the copy. A result over the limit fails with `ErrCostLimit`, which names the
+site.
 
 **Cache.** `Cache.Compile` keeps a compiled site under the model identity (`Model.Key()`), the
 site path and the template text. A second compile of a model reuses the sites. The same text at

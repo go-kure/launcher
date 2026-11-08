@@ -23,6 +23,11 @@ const (
 	// maxExpressionCost is the runtime cost of one hole. An evaluation that would spend
 	// more stops with ErrCostLimit.
 	maxExpressionCost = 1000000
+	// maxResultElements is the number of list elements and map entries, at every depth, that
+	// the Go copy of one single-hole result can hold. The copy is made after the evaluation,
+	// and a shared list is copied once for each place that holds it, so the cost limit does
+	// not bound it. A result over this stops with ErrCostLimit.
+	maxResultElements = 1000000
 )
 
 // The versions of the cel-go extension libraries that celEnv 1 means. Each library
