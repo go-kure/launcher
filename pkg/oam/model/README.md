@@ -198,8 +198,11 @@ escape `$${`.
 
 **Cost.** One hole has a cost limit of 1,000,000. An evaluation that spends more fails with
 `ErrCostLimit`, which names the site and the limit. The cost of a site is the sum of its holes.
-Whether the cost also bounds the size of a result is tested for `replace`, `join`, `format` and
-`lists.range`.
+The cost also stops a `replace` or a `join` that would build a result of several megabytes (a
+test pins both). A list of more than 1,000,000 elements is refused by cel-go, which has its own
+cap for `lists.range`, and not by the cost limit. The cost does not bound the size of the result
+of `format`: a `format` that builds a result of 2,000,000 bytes runs to the end. A size limit for
+`format` is a separate change.
 
 **Cache.** `Cache.Compile` keeps a compiled site under the model identity (`Model.Key()`), the
 site path and the template text. A second compile of a model reuses the sites. The same text at
