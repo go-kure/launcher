@@ -14,13 +14,35 @@ func TestHoleComments(t *testing.T) {
 		{"an apostrophe in the comment", "${1 // it's\n}", "int"},
 		{"a double quote in the comment", "${1 // say \"hi\n}", "int"},
 		{"code after the comment line", "${1 // }\n + 2}", "int"},
-		// The next four pass before the fix too. They pin that the comment skip does
-		// not treat `//` inside a string as a comment, which would eat the brace.
+		// The rows down to the backtick rows pass before the second repair too. They pin,
+		// one lexical form of the CEL grammar (CEL.g4, STRING, BYTES and ESC_IDENTIFIER)
+		// per row, that the comment skip does not treat `//` inside the form as a
+		// comment, which would eat the brace. They are not evidence for the repair.
 		{"slashes in a single-quoted string", "${'a//b'}", "string"},
 		{"slashes in a double-quoted string", `${"a//b"}`, "string"},
 		{"slashes in a triple-quoted string", "${'''a//b'''}", "string"},
+		{"slashes in a triple-double-quoted string", `${"""a//b"""}`, "string"},
 		{"slashes in a raw string", "${r'a//b'}", "string"},
+		{"slashes in a double-quoted raw string", `${r"a//b"}`, "string"},
+		{"slashes in a raw triple-quoted string", "${r'''a//b'''}", "string"},
+		{"slashes in a raw triple-double-quoted string", `${R"""a//b"""}`, "string"},
+		{"slashes in a bytes literal", "${b'a//b'}", "bytes"},
+		{"slashes in an upper-case bytes literal", `${B"a//b"}`, "bytes"},
+		{"slashes in a raw bytes literal", "${br'a//b'}", "bytes"},
+		{"slashes in a raw triple-quoted bytes literal", `${bR"""a//b"""}`, "bytes"},
 		{"a brace and slashes in a string", "${'}//' + 'x'}", "string"},
+		// A quote can also sit inside a string: after a backslash in a normal string, and
+		// next to a backslash in a raw string, where the backslash escapes nothing.
+		{"an escaped quote in a string", `${'it\'s' + '}'}`, "string"},
+		{"a backslash in a raw string", `${r'\' + '}'}`, "string"},
+		{"a backtick in a comment", "${1 // `\n}", "int"},
+		{"an escaped identifier without slashes", "${{'a b': 1}.`a b`}", "int"},
+		{"a comment after an escaped identifier", "${{'a': 1}.`a` // }\n}", "int"},
+		// These fail before the second repair: an escaped identifier may hold `//`
+		// (ESC_IDENTIFIER allows `/`), and the scanner read it as a comment.
+		{"slashes in an escaped identifier", "${{'a//b': 1}.`a//b`}", "int"},
+		{"an escaped identifier with slashes, then a comment", "${{'a//b': 1}.`a//b` // }\n}", "int"},
+		{"two escaped identifiers with slashes", "${{'a//b': 1, 'c//d': 2}.`a//b` + {'a//b': 1, 'c//d': 2}.`c//d`}", "int"},
 	}
 	for _, tc := range accepted {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,6 +61,19 @@ func TestHoleComments(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			wantRefusal(t, oneValue(t, expr), "spec.values[0].expr", "the ${ hole is not closed")
+		})
+	}
+
+	// An escaped identifier that is not closed is a scanner refusal of its own, and it
+	// must not read the rest of the text as a comment or as syntax.
+	for name, expr := range map[string]string{
+		"an unclosed escaped identifier":                   "${{'a': 1}.`a}",
+		"an unclosed escaped identifier with slashes":      "${{'a//b': 1}.`a//b}",
+		"an unclosed escaped identifier before a new line": "${{'a': 1}.`a\n}",
+		"an escaped identifier across a new line":          "${{'a': 1}.`a\n`}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantRefusal(t, oneValue(t, expr), "spec.values[0].expr", "escaped identifier in the ${ } hole is not closed")
 		})
 	}
 }
@@ -121,7 +156,9 @@ func TestInOperatorAndDisabledNames(t *testing.T) {
 // The checker rebuilds a list or map type without its nullable wrapper, so a value that
 // copies an optional list or object input would lose the null. A value that is exactly
 // one reference keeps the declared type of what it references. Any other expression
-// gives the plain type, and the README states the rule.
+// gives the type the checker reports: a list or map result is not nullable, and a
+// scalar result keeps its wrapper (a bind that returns an optional string stays
+// nullable). The README states the rule.
 func TestNullableAliases(t *testing.T) {
 	m := celBase(t)
 	m.Spec.Values = []Value{
@@ -135,9 +172,12 @@ func TestNullableAliases(t *testing.T) {
 		{Name: "objNull", Expr: "${values.obj == null}"},
 		{Name: "strNull", Expr: "${values.str == null}"},
 		{Name: "againNull", Expr: "${values.again == null}"},
+		// Not a bare reference, but a scalar keeps the wrapper the checker reports.
+		{Name: "viaBind", Expr: "${cel.bind(x, inputs.nick, x)}"},
+		{Name: "viaBindNull", Expr: "${values.viaBind == null}"},
 	}
 	cm := wantCompiled(t, m)
-	for _, name := range []string{"listNull", "mapNull", "objNull", "strNull", "againNull"} {
+	for _, name := range []string{"listNull", "mapNull", "objNull", "strNull", "againNull", "viaBindNull"} {
 		if got := cm.valueType(name); got != "bool" {
 			t.Errorf("value %s has type %q, want bool", name, got)
 		}
@@ -149,7 +189,7 @@ func TestNullableAliases(t *testing.T) {
 	wantRefusal(t, req, "spec.values[1].expr", "no matching overload")
 
 	// A value that is not one bare reference gives the plain type: this pins the rule
-	// that the README states. It passes before the fix as well.
+	// that the README states for a list. It passes before the fix as well.
 	plain := celBase(t)
 	plain.Spec.Values = []Value{{Name: "plus", Expr: "${inputs.tags + []}"}, {Name: "plusNull", Expr: "${values.plus == null}"}}
 	wantRefusal(t, plain, "spec.values[1].expr", "no matching overload")
