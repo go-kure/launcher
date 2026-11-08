@@ -87,6 +87,37 @@ func TestLocalVariableNamedValues(t *testing.T) {
 	}
 }
 
+// The standard library declares `_in_` and `in` as disabled legacy names of the `in`
+// operator, and `__not_strictly_false__` as a disabled legacy name too. The operator
+// itself works through `@in`. This test pins both halves of the README sentence: the
+// operator compiles for a list and for a map, and the disabled names cannot be called.
+// It was added after the red run and passes at every commit of the branch that has the
+// environment, so it is a guard on the README and not evidence for a round-1 repair.
+func TestInOperatorAndDisabledNames(t *testing.T) {
+	accepted := []struct{ name, expr string }{
+		{"a string in a list input", "${'a' in inputs.tags}"},
+		{"an int in a list literal", "${1 in [1, 2]}"},
+		{"a key in a map input", "${'k' in inputs.labels}"},
+		{"a key in a map literal", "${'k' in {'k': 1}}"},
+	}
+	for _, tc := range accepted {
+		t.Run(tc.name, func(t *testing.T) {
+			cm := wantCompiled(t, oneValue(t, tc.expr))
+			if got := cm.valueType("v"); got != "bool" {
+				t.Errorf("value v has type %q, want bool", got)
+			}
+		})
+	}
+	for _, tc := range []struct{ name, expr string }{
+		{"the legacy in function", "${_in_(1, [1])}"},
+		{"the legacy not-strictly-false function", "${__not_strictly_false__(true)}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wantRefusal(t, oneValue(t, tc.expr), "spec.values[0].expr", "undeclared reference")
+		})
+	}
+}
+
 // The checker rebuilds a list or map type without its nullable wrapper, so a value that
 // copies an optional list or object input would lose the null. A value that is exactly
 // one reference keeps the declared type of what it references. Any other expression

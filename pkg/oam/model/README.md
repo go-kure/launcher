@@ -98,8 +98,10 @@ changes. No other library is available, so `math`, `sets` and the encoders are r
 The golden file pins what the environment holds. Some names in it start with `@`:
 `cel.@block`, `@in`, `@not_strictly_false` and `@sortByAssociatedKeys`. CEL source cannot spell
 an identifier with `@`, so a model cannot call them. Macros reach them. The function
-`__not_strictly_false__` is declared but disabled. The type checker refuses a call of it in
-source, and only the runtime binding of a macro uses it. The golden file marks it
+`__not_strictly_false__` is declared but disabled. So are `_in_` and `in`, the legacy names of
+the `in` operator. The type checker refuses a call of a disabled function in source, and only the
+runtime binding of a macro or an operator uses it. The `in` operator itself works through `@in`,
+so `x in list` and `k in map` compile. The golden file marks each disabled function
 `[disabled]`, so a change of that state fails the test.
 
 A variable has a type from the input schema. `inputs.<name>` has the type of its schema. An

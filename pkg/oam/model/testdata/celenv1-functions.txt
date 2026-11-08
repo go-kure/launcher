@@ -17,8 +17,8 @@ _>=_: greater_equals_bool,greater_equals_bytes,greater_equals_double,greater_equ
 _>_: greater_bool,greater_bytes,greater_double,greater_double_int64,greater_double_uint64,greater_duration,greater_int64,greater_int64_double,greater_int64_uint64,greater_string,greater_timestamp,greater_uint64,greater_uint64_double,greater_uint64_int64
 _?_:_: conditional
 _[_]: index_list,index_map
-__not_strictly_false__: __not_strictly_false__
-_in_: in_list,in_map
+__not_strictly_false__ [disabled]: __not_strictly_false__
+_in_ [disabled]: in_list,in_map
 _||_: logical_or
 bool: bool_to_bool,string_to_bool
 bytes: bytes_to_bytes,string_to_bytes
@@ -42,7 +42,7 @@ getMilliseconds: duration_to_milliseconds,timestamp_to_milliseconds,timestamp_to
 getMinutes: duration_to_minutes,timestamp_to_minutes,timestamp_to_minutes_with_tz
 getMonth: timestamp_to_month,timestamp_to_month_with_tz
 getSeconds: duration_to_seconds,timestamp_to_seconds,timestamp_to_seconds_tz
-in: in_list,in_map
+in [disabled]: in_list,in_map
 indexOf: string_index_of_string,string_index_of_string_int
 int: double_to_int64,duration_to_int64,int64_to_int64,string_to_int64,timestamp_to_int64,uint64_to_int64
 join: list_join,list_join_string
