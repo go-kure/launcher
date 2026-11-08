@@ -30,6 +30,10 @@ func debugLog(format string, args ...any) {
 	}
 }
 
+// RawPatchMap is a mapping of patch paths to values. The loader no longer decodes into it:
+// a nested mapping decodes to the type of the map it sits in, so decoding the simple form
+// into this named type gave every nested mapping this type. Substitution and the conversion
+// to an unstructured value still accept it, for a caller that builds a value of this type.
 type RawPatchMap map[string]any
 
 type TargetedPatch struct {
@@ -84,7 +88,7 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 	var patches []PatchSpec
 
 	if firstToken.Kind == yaml.MappingNode {
-		var raw RawPatchMap
+		var raw map[string]any
 		if err := firstToken.Decode(&raw); err != nil {
 			return nil, fmt.Errorf("invalid simple patch map: %w", err)
 		}
@@ -574,6 +578,8 @@ func substituteVariablesInValue(v any, ctx *VariableContext) (any, error) {
 	case string:
 		return substituteValue(val, ctx)
 	case map[string]any:
+		return substituteVariablesInMap(val, ctx)
+	case RawPatchMap:
 		return substituteVariablesInMap(val, ctx)
 	case []any:
 		result := make([]any, len(val))

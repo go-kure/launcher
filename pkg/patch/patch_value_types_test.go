@@ -65,9 +65,9 @@ func TestYAMLPatchValue_StrategicPayloadKeepsQuotedStrings(t *testing.T) {
 	t.Run("Y5_httpPort", func(t *testing.T) { requireValue(t, data["httpPort"], "80") })
 }
 
-// Y6: the targeted form hands its map value to the loader as map[string]any. The simple form
-// hands it over as RawPatchMap, which the loader never inferred inside, so that row passes at
-// the base and is a control.
+// Y6: the targeted form and the simple form both hand a map value over as map[string]any.
+// C11 asserted RawPatchMap for the simple form until the loader stopped decoding into that
+// type; the flip is an intended change.
 func TestYAMLPatchValue_QuotedScalarInMapValueStaysString(t *testing.T) {
 	t.Run("Y6_targeted_form", func(t *testing.T) {
 		value, ok := yamlPatchValue(t, "- target: app\n  patch:\n    metadata.labels:\n      weight: \"3\"\n", nil).(map[string]any)
@@ -77,9 +77,9 @@ func TestYAMLPatchValue_QuotedScalarInMapValueStaysString(t *testing.T) {
 		requireValue(t, value["weight"], "3")
 	})
 	t.Run("C11_simple_form_control", func(t *testing.T) {
-		value, ok := yamlPatchValue(t, "metadata.labels:\n  weight: \"3\"\n", nil).(RawPatchMap)
+		value, ok := yamlPatchValue(t, "metadata.labels:\n  weight: \"3\"\n", nil).(map[string]any)
 		if !ok {
-			t.Fatal("the patch value is not a RawPatchMap")
+			t.Fatal("the patch value is not a map[string]any")
 		}
 		requireValue(t, value["weight"], "3")
 	})
