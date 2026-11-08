@@ -1373,6 +1373,13 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `layout` | The Flux Kustomization kure generates under `FluxIntegratedPerLayout` placement for a chart's own layout: a `helmtemplate` component's, the only layout of its own a component has under the default `ApplicationGrouping`. It is no object launcher writes and names neither the layout nor its directory; under any other placement the layout has no Kustomization of its own, and kure's Flux integration refuses a name set on it (go-kure/kure#1032). | `<bundle>-<component>`, the bundle as launcher named it (the `bundle` or `group` role's answer): kure's own default, which launcher never sets and kure shortens past 63 characters by its own rule. | `layoutKustomizationName`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `layoutKustomizationName` is set |
 | `generated` | An object a lowering rule or a trait handler generates that no other role names: the role for a rule or a handler outside launcher's own. No builtin rule or handler asks it. | The one the rule or the handler builds. | the rule's or the handler's own, if it has one | once per object, unless the author named it |
 
+The last column says when the hook is asked for a name, not how many times. `once per X` names
+the unit that has a name of its own: a source, a schedule entry, a `helmtemplate` component, an
+object. A type that declares outputs is asked again by the output check (see "Outputs: the
+names a component's objects get"), and the lowering resolves the same name a second time, so
+the hook can run twice for one object. The hook must be a pure function of its request, as
+below, so both calls give the same answer.
+
 The `bundle`, `group` and `netpol-synth` names are the hook's to change, and only the hook's.
 The `bundle` and `group` defaults carry no namespace: two applications of one name, or whose
 order gives the same group name, get the same bundle names wherever they are deployed. Keeping
