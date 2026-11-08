@@ -557,7 +557,7 @@ func NewPatchableAppSetWithStructure(documentSet *YAMLDocumentSet, patches []Pat
 }
 
 // substituteVariablesInMap recursively applies variable substitution to all
-// string leaf values in a map[string]interface{}.
+// string leaf values in a map[string]interface{}, and in the mappings with non-string keys inside it.
 func substituteVariablesInMap(m map[string]any, ctx *VariableContext) (map[string]any, error) {
 	if ctx == nil {
 		return m, nil
@@ -581,6 +581,22 @@ func substituteVariablesInValue(v any, ctx *VariableContext) (any, error) {
 		return substituteVariablesInMap(val, ctx)
 	case RawPatchMap:
 		return substituteVariablesInMap(val, ctx)
+	case map[interface{}]interface{}:
+		// yaml.v3 decodes a mapping with a non-string key (`1: x`) to this type. Its keys stay as
+		// authored: Apply turns them into strings. The entries come from the range and are not looked
+		// up again by key, because a NaN key never equals itself.
+		if ctx == nil {
+			return val, nil
+		}
+		result := make(map[interface{}]interface{}, len(val))
+		for k, item := range val {
+			substituted, err := substituteVariablesInValue(item, ctx)
+			if err != nil {
+				return nil, err
+			}
+			result[k] = substituted
+		}
+		return result, nil
 	case []any:
 		result := make([]any, len(val))
 		for i, item := range val {
