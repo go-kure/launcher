@@ -165,7 +165,12 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   `profile.go`, `property_validate.go`, `property_validate_authored.go`, `lowering.go`,
   `featuregate_check.go`, `in_document_collisions.go`, `controller_claims.go`,
   `reserved_metadata.go`, `rendered_reserved.go`, `object_kind_policy.go`,
-  `component_ownership.go`, `component_label_check.go` or `lowering_raw.go`, or any non-test
+  `component_ownership.go`, `component_label_check.go`, `lowering_raw.go`, `transform.go`,
+  `resolver.go`, `typeid.go`, `typeid_transformer.go`, `naming.go`, `naming_lowering.go`,
+  `netpol_synthesis.go`, `object_metadata.go`, `object_name.go`, `flatschema.go`,
+  `featuregates.go`, `service_name_gate.go`, `ordering.go`, `flux_namespace_inputs.go`,
+  `classify.go`, `sibling_group.go`, `bundle_application_names.go` or
+  `cross_document_collisions.go`, or any non-test
   `.go` file under `pkg/oam/builtin/`, `pkg/oam/internal/` or `pkg/oam/model/` other than
   `contract.go`, `doc.go` and files under `testdata/`, must
   use `feat(format)`, `fix(format)`,
@@ -175,10 +180,16 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   change leaves the accepted format as it was (a comment, an error message, a refactor), the
   commit body carries `Format-Scope: none (<reason>)` and the reason must not be empty. The
   guard does not see a semantic change inside a counted file that the path rule cannot tell
-  apart, nor acceptance code outside the set (such as `pkg/oam/cross_document_collisions.go`,
-  which refuses a generated object that more than one document produces, but which nothing
-  calls yet); review is the backstop for both. go-kure/launcher#1362 audited the files it
-  listed. The rest of `pkg/oam/` is audited in go-kure/launcher#1367.
+  apart (some counted files hold Go-API refusals beside the refusals of an authored document,
+  and an edit that touches only the Go-API ones takes the trailer), nor acceptance code outside
+  the set (such as a new file under `pkg/oam/` that nobody has ruled yet); review is the
+  backstop for both. go-kure/launcher#1362 and
+  go-kure/launcher#1367 audited every file directly under `pkg/oam/`. `outputs.go` (a
+  provider's output declarations, which only Go code writes), `errors.go`, `name_collision.go`,
+  `naming_engine.go`, `policy_refusal.go`, `hook_group_name.go` and `lowering_targets.go` stay
+  out on purpose. `cross_document_collisions.go` is in the set: its check function
+  `CheckCrossDocumentCollisions` has no caller yet, but the helper `keyedObjects` beside it is
+  live.
 
 ## Code Conventions
 

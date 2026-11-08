@@ -36,18 +36,44 @@
 #   pkg/oam/component_label_check.go       foreign component label values and selectors
 #   pkg/oam/lowering_raw.go                the raw lowering path a downstream lowering consumer runs;
 #                                          kurel's app.yaml path does not
-#   pkg/oam/builtin/       every .go file below it (the per-kind property validators)
+#   pkg/oam/transform.go                   the transform: unknown types, missing capabilities, defaults
+#   pkg/oam/resolver.go                    the kurel.yaml parameters and the --values/--set values
+#   pkg/oam/typeid.go                      the name@version grammar and type-reference lookup
+#   pkg/oam/typeid_transformer.go          authored type references resolved before dispatch
+#   pkg/oam/naming.go                      authored names and the name-collision check
+#   pkg/oam/naming_lowering.go             authored names at lowering
+#   pkg/oam/netpol_synthesis.go            two components resolving one Service name; a backend selector
+#   pkg/oam/object_metadata.go             the authored labels and annotations properties
+#   pkg/oam/object_name.go                 the authored objectName property
+#   pkg/oam/flatschema.go                  the parameter and capability-rendering schema documents
+#   pkg/oam/featuregates.go                spec.kubernetesVersion and the feature-gate lookup
+#   pkg/oam/service_name_gate.go           a Service name that starts with a digit
+#   pkg/oam/ordering.go                    ordering tiers, dependencies and cycles
+#   pkg/oam/flux_namespace_inputs.go       delivery that never converges from authored placement
+#   pkg/oam/classify.go                    the authored tier annotation
+#   pkg/oam/sibling_group.go               member tiers of a sibling group
+#   pkg/oam/bundle_application_names.go    two bundles' applications with one name
+#   pkg/oam/cross_document_collisions.go   keyedObjects, which the in-document check and the
+#                                          sibling group check call (List expansion, kindless objects)
+#   pkg/oam/builtin/     every .go file below it (the per-kind property validators)
 #   pkg/oam/internal/      every .go file below it (the shared refusal tables and checks)
 #   pkg/oam/model/         every .go file below it (the Model document and its loader)
 # Under these prefixes a *_test.go file, a contract.go or doc.go file, and a file under
 # testdata/ never count. A *_test.go file never counts anywhere. The repository holds no
 # standalone schema files; the document schemas are the Go types above.
 #
+# Left out on purpose, after the audit of pkg/oam/ (go-kure/launcher#1367): a file whose
+# refusals the Go API raises, never a document. outputs.go (a provider's output declarations),
+# errors.go and name_collision.go (error types and their text), naming_engine.go (wraps what
+# naming.go decides), policy_refusal.go, hook_group_name.go and lowering_targets.go (decided
+# elsewhere), and the files that hold no refusal. cross_document_collisions.go is in the set:
+# its check function CheckCrossDocumentCollisions has no caller yet, but the helpers beside it
+# (keyedObjects, qualifiedName, objectIdentity) are live. A file that holds both Go-API refusals and refusals of an authored document is in
+# the set, and the trailer is the way out for an edit that leaves the accepted format as it was.
+#
 # Not caught: a change inside a counted file that does not alter what is accepted but is
-# not marked by the trailer, and acceptance code outside this set. Two examples:
-# pkg/oam/cross_document_collisions.go refuses a generated object produced by more than one
-# document, but nothing calls it yet; and the rest of pkg/oam/ is still to be audited
-# (go-kure/launcher#1367). Reviewers remain the backstop.
+# not marked by the trailer, and acceptance code outside this set, such as a new file under
+# pkg/oam/ that nobody has ruled yet. Reviewers remain the backstop.
 #
 # Skips merge commits and Renovate's commits (its email, as check-issue-refs.sh does).
 # In a shallow clone it exits 2 when a boundary commit lies inside the range, because
@@ -88,6 +114,24 @@ ACCEPT_PATHS=(
   pkg/oam/component_ownership.go
   pkg/oam/component_label_check.go
   pkg/oam/lowering_raw.go
+  pkg/oam/transform.go
+  pkg/oam/resolver.go
+  pkg/oam/typeid.go
+  pkg/oam/typeid_transformer.go
+  pkg/oam/naming.go
+  pkg/oam/naming_lowering.go
+  pkg/oam/netpol_synthesis.go
+  pkg/oam/object_metadata.go
+  pkg/oam/object_name.go
+  pkg/oam/flatschema.go
+  pkg/oam/featuregates.go
+  pkg/oam/service_name_gate.go
+  pkg/oam/ordering.go
+  pkg/oam/flux_namespace_inputs.go
+  pkg/oam/classify.go
+  pkg/oam/sibling_group.go
+  pkg/oam/bundle_application_names.go
+  pkg/oam/cross_document_collisions.go
 )
 
 # The builtin component, trait and policy handlers refuse and build in one method, and their

@@ -228,7 +228,13 @@ Runs on main and `release/*` branches only (not PRs):
   `property_validate_authored.go`, `lowering.go`, `featuregate_check.go`,
   `in_document_collisions.go`, `controller_claims.go`, `reserved_metadata.go`,
   `rendered_reserved.go`, `object_kind_policy.go`, `component_ownership.go`,
-  `component_label_check.go` or `lowering_raw.go`, or any non-test `.go` file under
+  `component_label_check.go`, `lowering_raw.go`, `transform.go`, `resolver.go`, `typeid.go`,
+  `typeid_transformer.go`, `naming.go`, `naming_lowering.go`, `netpol_synthesis.go`,
+  `object_metadata.go`, `object_name.go`, `flatschema.go`, `featuregates.go`,
+  `service_name_gate.go`, `ordering.go`, `flux_namespace_inputs.go`, `classify.go`,
+  `sibling_group.go`, `bundle_application_names.go` or `cross_document_collisions.go` (its
+  check function has no caller yet, but its helper `keyedObjects` is live), or any non-test
+  `.go` file under
   `pkg/oam/builtin/`, `pkg/oam/internal/` or `pkg/oam/model/` other than `contract.go`, `doc.go`
   and files under `testdata/`, and its subject does not start with
   `feat(format)`, `fix(format)`, `refactor(format)` or `docs(format)`, followed by an optional `!`,
