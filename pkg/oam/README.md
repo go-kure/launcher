@@ -286,7 +286,15 @@ decides what `CheckInDocumentCollisions`, `CheckCrossDocumentCollisions` and a s
 comparison of its members key, as it decides what the forced-volume warning, the component
 label and the reserved metadata keys read. So an item another application, document or member
 also generates is a collision, reported by the item's own kind and name; and the envelope is
-no object, so two Lists with different items, or none, do not collide. An object with no kind
+no object, so two Lists with different items, or none, do not collide. The three comparisons
+also leave out what Kustomize's build drops: an object whose
+`config.kubernetes.io/local-config` annotation is present with any value but `"false"` (an
+empty value drops it too) is never applied, so it generates nothing and collides with nothing,
+and the claim it would make for a controller goes with it (go-kure/launcher#1338). That is
+judged on each item once a `List` is inlined, so a `List`'s own annotation is not read; an
+envelope whose kind does not end in `List` is one object for Kustomize and is dropped with all
+its items. The other readers of generated objects, such as the forced-volume warning, still
+read it. An object with no kind
 cannot be keyed. A generated object with none is refused by the three comparisons before it
 is read, as before, whatever it holds. An item with none is refused too, with the one
 exception the rule itself makes: an item of a `List` that has no kind and holds an `items`
@@ -2697,7 +2705,25 @@ every object — keyed by API group, kind, namespace and name — that more than
 generates, once per object, naming every document that generates it. Being keyed on the objects rather than on allocator claims,
 it also catches two same-named authored components in one namespace, and a cluster-scoped
 object generated from documents in different namespaces. An object's namespace is read from
-the object, so pass objects as generated; an object with no kind is an error.
+the object, so pass objects as generated; an object with no kind is an error. An object that
+Kustomize's build drops (`config.kubernetes.io/local-config` present, not `"false"`) is not
+compared.
+
+Both checks return the refusal as a `*oam.GeneratedObjectCollisionError`, with the text
+unchanged. `errors.Is(err, oam.ErrGeneratedObjectCollision)` is true, also behind a prefix a
+caller adds, and `errors.As` finds the error and tells which objects collide and who
+produces each, without parsing the text (go-kure/launcher#1338):
+
+```go
+var collision *oam.GeneratedObjectCollisionError
+if errors.As(err, &collision) {
+	// collision.Scope: oam.CollisionAcrossDocuments or oam.CollisionWithinDocument
+	for _, c := range collision.Collisions {
+		// c.Group, c.Kind, c.Namespace, c.Name: the object
+		// c.Producers: every producer of it, a controller's claim first
+	}
+}
+```
 
 Nothing above compares the applications inside one document: a component and another
 component's trait, two components, or two traits can each generate the same object, and
