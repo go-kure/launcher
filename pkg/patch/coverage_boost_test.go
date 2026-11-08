@@ -1323,39 +1323,6 @@ data:
 }
 
 // ===========================================================================
-// isLikelyIntegerValue (0% -> covered)
-// ===========================================================================
-
-func TestIsLikelyIntegerValue(t *testing.T) {
-	tests := []struct {
-		key   string
-		value string
-		want  bool
-	}{
-		{key: "containerPort", value: "8080", want: true},
-		{key: "port", value: "443", want: true},
-		{key: "port", value: "99999", want: false},   // out of port range
-		{key: "replicas", value: "3", want: true},    // replica count
-		{key: "replicas", value: "999", want: false}, // beyond 100
-		{key: "delay", value: "30", want: true},      // timeout/delay
-		{key: "timeout", value: "60", want: true},    // timeout
-		{key: "period", value: "10", want: true},     // period
-		{key: "somefield", value: "42", want: false}, // not a known field
-		{key: "port", value: "abc", want: false},     // not a number
-		{key: "delay", value: "99999", want: false},  // beyond 3600
-	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%s=%s", tt.key, tt.value), func(t *testing.T) {
-			got := isLikelyIntegerValue(tt.key, tt.value)
-			if got != tt.want {
-				t.Errorf("isLikelyIntegerValue(%q, %q) = %v, want %v", tt.key, tt.value, got, tt.want)
-			}
-		})
-	}
-}
-
-// ===========================================================================
 // mapSectionsToKubernetesPath (25% -> higher coverage)
 // ===========================================================================
 
@@ -1709,14 +1676,15 @@ func TestInferValueType(t *testing.T) {
 		{key: "containerPort", value: "443", want: 443}, // isIntegerField
 		{key: "name", value: "my-app", want: "my-app"},  // not an integer field
 		{key: "image", value: "nginx:1.24", want: "nginx:1.24"},
-		{key: "somePort", value: "80", want: 80},      // isLikelyIntegerValue via port heuristic
-		{key: "randomField", value: "42", want: "42"}, // not a known integer context
+		{key: "somePort", value: "80", want: "80"},                      // a name that only contains "port" is no integer field
+		{key: "randomField", value: "42", want: "42"},                   // not a known integer context
+		{key: "spec.ports[0].containerPort", value: "8080", want: 8080}, // the last segment decides, not the selector
 	}
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s=%s", tt.key, tt.value), func(t *testing.T) {
 			got := inferValueType(tt.key, tt.value)
-			if fmt.Sprintf("%v", got) != fmt.Sprintf("%v", tt.want) {
+			if fmt.Sprintf("%v", got) != fmt.Sprintf("%v", tt.want) || fmt.Sprintf("%T", got) != fmt.Sprintf("%T", tt.want) {
 				t.Errorf("inferValueType(%q, %q) = %v (%T), want %v (%T)", tt.key, tt.value, got, got, tt.want, tt.want)
 			}
 		})
@@ -2499,30 +2467,6 @@ func TestSubstituteVariablesInValue_NonStringNonMapNonSlice(t *testing.T) {
 	}
 	if result != 42 {
 		t.Errorf("expected 42, got %v", result)
-	}
-}
-
-// ===========================================================================
-// inferTypesInValue edge cases
-// ===========================================================================
-
-func TestInferTypesInValue_NonStringNonMapNonSlice(t *testing.T) {
-	result := inferTypesInValue("key", 42)
-	if result != 42 {
-		t.Errorf("expected 42, got %v", result)
-	}
-}
-
-func TestInferTypesInValue_Slice(t *testing.T) {
-	input := []any{"3", "hello"}
-	result := inferTypesInValue("replicas", input)
-	slice, ok := result.([]any)
-	if !ok {
-		t.Fatalf("expected slice, got %T", result)
-	}
-	// "3" should be inferred as int based on key "replicas"
-	if _, ok := slice[0].(int); !ok {
-		t.Errorf("expected int for '3' with key 'replicas', got %T", slice[0])
 	}
 }
 

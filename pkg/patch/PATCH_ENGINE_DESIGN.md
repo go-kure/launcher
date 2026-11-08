@@ -6,7 +6,7 @@ The `patch` module provides the **core abstraction layer** for loading, represen
 
 It enables tools to declaratively define resource configurations and safe modifications using **dual-format support** (YAML and TOML) with **Go-native data structures**. Patches modify an existing **base resource**, with advanced **structure preservation** that maintains comments, formatting, and document order.
 
-This forms the foundation for Kure's deterministic, introspectable Kubernetes manifest generation pipeline with sophisticated **intelligent path resolution** and **automatic type inference**.
+This forms the foundation for Kure's deterministic, introspectable Kubernetes manifest generation pipeline with sophisticated **intelligent path resolution** and **predictable patch value typing**.
 
 ---
 
@@ -33,9 +33,10 @@ This forms the foundation for Kure's deterministic, introspectable Kubernetes ma
    - Path syntax is explicitly validated before application
    - Comprehensive debug logging with `KURE_DEBUG=1`
 
-5. **Automatic type inference and conversion** (patch values only; a base resource keeps a quoted scalar as a string):
-   - Intelligent conversion of string values to appropriate Go types (int, bool, etc.)
-   - Context-aware type inference based on Kubernetes field patterns
+5. **Patch value typing**:
+   - A YAML value keeps the type YAML gave it; a quoted `"8080"` stays a string
+   - A TOML value in double quotes is a string; an unquoted one is a bool (`true`/`false`) or, under a known integer field name, an integer
+   - A whole `${values.x}` reference keeps the variable's type; a reference inside text gives a string
    - Compatible with unstructured.Unstructured requirements
 
 6. **Graceful error handling**:
@@ -83,7 +84,7 @@ This forms the foundation for Kure's deterministic, introspectable Kubernetes ma
 - `ParseTOMLHeader(string)` — Parse TOML headers with intelligent path mapping
 
 ### Type System and Variable Support
-- `inferValueType(key, value string)` — Automatic type inference for Kubernetes compatibility
+- `inferValueType(key, value string)` — Types an unquoted TOML value: a bool, or an integer under a known integer field name
 - `SubstituteVariables(string, *VariableContext)` — Variable substitution with ${values.key} syntax
 
 ---
@@ -159,9 +160,10 @@ resources.requests.cpu: "${values.cpu_request}"
 debug.enabled: "${features.enable_debug}"
 ```
 
-### Automatic Type Inference
-- Applies to patch values, not to base resources: a base resource keeps a quoted scalar (`"true"`, `"8080"`) as a string
-- Converts string values to appropriate Go types based on field context
-- Recognizes port numbers, replica counts, timeout values automatically
-- For a base resource, the only conversion is the `int64` normalisation of an unquoted integer, which the unstructured object needs
+### Patch Value Typing
+- A YAML value keeps the type YAML gave it, so a quoted `"8080"` stays a string
+- A TOML value in double quotes is a string (read with `strconv.Unquote`); an unquoted value is a bool, or an integer when the last path segment names an integer field (`port`, `replicas`, `containerPort`, ...)
+- The field name is matched whole, ignoring case, so `support` and `phoneNumber` are not integer fields
+- A whole `${values.x}` or `${features.x}` reference keeps the variable's type; a reference inside text gives a string
+- A base resource keeps a quoted scalar (`"true"`, `"8080"`) as a string; its only conversion is the `int64` normalisation of an unquoted integer, which the unstructured object needs
 

@@ -102,13 +102,7 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 				return nil, fmt.Errorf("variable substitution failed for key '%s': %w", keyStr, err)
 			}
 
-			// Apply type inference to convert strings to appropriate types (int, bool, etc.)
-			if valueStr, ok := substitutedValue.(string); ok {
-				substitutedValue = inferValueType(keyStr, valueStr)
-			} else if m, ok := substitutedValue.(map[string]any); ok {
-				inferTypesInMap(m)
-			}
-
+			// A YAML value keeps the type YAML gave it: a quoted "8080" stays a string.
 			op, err := ParsePatchLine(keyStr, substitutedValue)
 			if err != nil {
 				return nil, fmt.Errorf("invalid patch line '%s': %w", keyStr, err)
@@ -132,7 +126,6 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 				if err != nil {
 					return nil, fmt.Errorf("variable substitution failed for strategic patch targeting '%s': %w", entry.Target, err)
 				}
-				inferTypesInMap(substitutedPatch)
 				debugLog("Strategic patch loaded: target=%s", entry.Target)
 				patches = append(patches, PatchSpec{
 					Target:    entry.Target,
@@ -155,13 +148,7 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 					return nil, fmt.Errorf("variable substitution failed for key '%s': %w", keyStr, err)
 				}
 
-				// Apply type inference to convert strings to appropriate types (int, bool, etc.)
-				if valueStr, ok := substitutedValue.(string); ok {
-					substitutedValue = inferValueType(keyStr, valueStr)
-				} else if m, ok := substitutedValue.(map[string]any); ok {
-					inferTypesInMap(m)
-				}
-
+				// A YAML value keeps the type YAML gave it: a quoted "8080" stays a string.
 				op, err := ParsePatchLine(keyStr, substitutedValue)
 				if err != nil {
 					return nil, fmt.Errorf("invalid patch line '%s': %w", keyStr, err)
@@ -219,15 +206,10 @@ func LoadTOMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 		key := strings.TrimSpace(parts[0])
 		valueStr := strings.TrimSpace(parts[1])
 
-		// Apply variable substitution to value
-		value, err := SubstituteVariables(valueStr, varCtx)
+		// Type the value: quoting, variable substitution and inference are tomlValue's
+		value, err := tomlValue(key, valueStr, varCtx)
 		if err != nil {
 			return nil, fmt.Errorf("variable substitution failed at line %d: %w", lineNum, err)
-		}
-
-		// Apply type inference to convert strings to appropriate types (int, bool, etc.)
-		if valueStr, ok := value.(string); ok {
-			value = inferValueType(key, valueStr)
 		}
 
 		// Convert TOML header to resource target and field path
@@ -590,7 +572,7 @@ func substituteVariablesInMap(m map[string]any, ctx *VariableContext) (map[strin
 func substituteVariablesInValue(v any, ctx *VariableContext) (any, error) {
 	switch val := v.(type) {
 	case string:
-		return SubstituteVariables(val, ctx)
+		return substituteValue(val, ctx)
 	case map[string]any:
 		return substituteVariablesInMap(val, ctx)
 	case []any:
@@ -605,31 +587,5 @@ func substituteVariablesInValue(v any, ctx *VariableContext) (any, error) {
 		return result, nil
 	default:
 		return v, nil
-	}
-}
-
-// inferTypesInMap recursively applies type inference to string leaf values
-// in a map, converting numeric and boolean strings to their typed equivalents.
-// This matches the type inference applied to field-level patch values.
-func inferTypesInMap(m map[string]any) {
-	for k, v := range m {
-		m[k] = inferTypesInValue(k, v)
-	}
-}
-
-func inferTypesInValue(key string, v any) any {
-	switch val := v.(type) {
-	case string:
-		return inferValueType(key, val)
-	case map[string]any:
-		inferTypesInMap(val)
-		return val
-	case []any:
-		for i, item := range val {
-			val[i] = inferTypesInValue(key, item)
-		}
-		return val
-	default:
-		return v
 	}
 }

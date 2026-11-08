@@ -281,9 +281,10 @@ spec:
 		t.Fatalf("Failed to get port from patched ConfigMap: %v", err)
 	}
 
-	// The port should be converted to integer (due to type inference)
-	if portInt, ok := portValue.(int64); !ok || portInt != 9090 {
-		t.Errorf("Expected port to be int64 9090, got %T with value %v", portValue, portValue)
+	// The patch value was quoted, so it is the string "9090". ConfigMap data holds strings
+	// only; the earlier expectation of int64 9090 pinned the type inference that rewrote it.
+	if portStr, ok := portValue.(string); !ok || portStr != "9090" {
+		t.Errorf("Expected port to be the string \"9090\", got %T with value %v", portValue, portValue)
 	}
 
 	// Verify that unpatched values remain unchanged
