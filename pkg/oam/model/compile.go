@@ -112,7 +112,11 @@ func scopeTypes(m *Model) map[string]*cel.Type {
 // scopeVariables declares the variables of scopeTypes. The names are sorted so the
 // environment does not depend on map order.
 func scopeVariables(m *Model) []cel.EnvOption {
-	declared := scopeTypes(m)
+	return variables(scopeTypes(m))
+}
+
+// variables declares each name of declared, in sorted order.
+func variables(declared map[string]*cel.Type) []cel.EnvOption {
 	names := make([]string, 0, len(declared))
 	for name := range declared {
 		names = append(names, name)
@@ -138,23 +142,30 @@ func compileHole(env *cel.Env, path, src string, notYet map[string]bool, declare
 	if err != nil {
 		return nil, invalid(path, "%s", err)
 	}
+	_, out, err := checkHole(env, path, inner, notYet, declared)
+	return out, err
+}
+
+// checkHole parses, form-checks and type-checks the CEL source inner of one hole. It
+// returns the checked expression, for a program, and the type as compileHole defines it.
+func checkHole(env *cel.Env, path, inner string, notYet map[string]bool, declared map[string]*cel.Type) (*cel.Ast, *cel.Type, error) {
 	parsed, iss := env.Parse(inner)
 	if iss != nil && iss.Err() != nil {
-		return nil, invalid(path, "%s", iss.Err())
+		return nil, nil, invalid(path, "%s", iss.Err())
 	}
 	if msg := refuseForm(parsed, notYet); msg != "" {
-		return nil, invalid(path, "%s", msg)
+		return nil, nil, invalid(path, "%s", msg)
 	}
 	checked, iss := env.Check(parsed)
 	if iss != nil && iss.Err() != nil {
-		return nil, invalid(path, "%s", iss.Err())
+		return nil, nil, invalid(path, "%s", iss.Err())
 	}
 	if root := checked.NativeRep().Expr(); root.Kind() == celast.IdentKind {
 		if t := declared[root.AsIdent()]; t != nil {
-			return t, nil
+			return checked, t, nil
 		}
 	}
-	return checked.OutputType(), nil
+	return checked, checked.OutputType(), nil
 }
 
 // refuseForm reads a parsed expression for two forms that the type check cannot name.

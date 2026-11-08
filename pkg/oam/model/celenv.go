@@ -20,6 +20,9 @@ const (
 	maxNodeCount = 10000
 	// maxBindDepth is the nesting depth of cel.bind.
 	maxBindDepth = 8
+	// maxExpressionCost is the runtime cost of one hole. An evaluation that would spend
+	// more stops with ErrCostLimit.
+	maxExpressionCost = 1000000
 )
 
 // The versions of the cel-go extension libraries that celEnv 1 means. Each library
