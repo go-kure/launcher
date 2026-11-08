@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -181,7 +182,10 @@ func (w *walker) baseEnv() (*cel.Env, error) {
 // site returns the compiled site at path, from the cache when its model identity, path
 // and text are all there.
 func (w *walker) site(path, text string, spec siteSpec) (*site, error) {
-	k := w.key + "\x00" + path + "\x00" + text
+	if _, taken := w.sites[path]; taken {
+		return nil, invalid(path, "two sites give the same path: a key that holds a dot or a bracket, or an integer key beside a string key of the same text, writes the path of another property")
+	}
+	k := cacheKey(w.key, path, text)
 	s := w.cache.get(k)
 	if s == nil {
 		built, err := w.build(path, text, spec)
@@ -192,6 +196,13 @@ func (w *walker) site(path, text string, spec siteSpec) (*site, error) {
 	}
 	w.sites[path] = s
 	return s, nil
+}
+
+// cacheKey joins the model identity, the site path and the template text so that two different
+// triples never make one key. The identity and the path carry their length, and the text is
+// last. A separator byte would not do: a path and a text can hold any byte, a NUL included.
+func cacheKey(identity, path, text string) string {
+	return strconv.Itoa(len(identity)) + ":" + identity + strconv.Itoa(len(path)) + ":" + path + text
 }
 
 func (w *walker) build(path, text string, spec siteSpec) (*site, error) {
@@ -298,17 +309,46 @@ func (w *walker) part(base string, p Part) error {
 // walkMap compiles the strings below a map, in sorted key order. A key is literal text: a
 // `${` in one is refused, whether it is a hole or an escape.
 func (w *walker) walkMap(path string, m map[string]any, spec siteSpec) error {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+	entries := make([]entry, 0, len(m))
+	for k, v := range m {
+		entries = append(entries, entry{k, v})
 	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		kp := path + "." + k
-		if strings.Contains(k, holeOpen) {
+	return w.walkEntries(path, entries, spec)
+}
+
+// walkAnyMap is walkMap for a free-form map whose keys are not all strings, which yaml.v3 gives as
+// map[any]any. The text of a key is its path segment, so the integer key 1 and the string key "1"
+// are two entries with one path, and the second is refused as a path that is already taken.
+func (w *walker) walkAnyMap(path string, m map[any]any, spec siteSpec) error {
+	entries := make([]entry, 0, len(m))
+	for k, v := range m {
+		entries = append(entries, entry{keyText(k), v})
+	}
+	return w.walkEntries(path, entries, spec)
+}
+
+// entry is one key of a map, as the text of the key, with its value.
+type entry struct {
+	key string
+	val any
+}
+
+// keyText is the text of a map key that is not a string: 1 gives "1", true gives "true", null gives "null".
+func keyText(k any) string {
+	if k == nil {
+		return "null"
+	}
+	return fmt.Sprint(k)
+}
+
+func (w *walker) walkEntries(path string, entries []entry, spec siteSpec) error {
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].key < entries[j].key })
+	for _, e := range entries {
+		kp := path + "." + e.key
+		if strings.Contains(e.key, holeOpen) {
 			return invalid(kp, "a %q in a map key is not allowed: a key is literal text, so neither a hole nor an escape works there", holeOpen)
 		}
-		if err := w.walk(kp, m[k], spec); err != nil {
+		if err := w.walk(kp, e.val, spec); err != nil {
 			return err
 		}
 	}
@@ -322,6 +362,8 @@ func (w *walker) walk(path string, v any, spec siteSpec) error {
 		return err
 	case map[string]any:
 		return w.walkMap(path, x, spec)
+	case map[any]any:
+		return w.walkAnyMap(path, x, spec)
 	case []any:
 		for i, e := range x {
 			if err := w.walk(path+"["+strconv.Itoa(i)+"]", e, spec); err != nil {
@@ -437,6 +479,9 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 		}
 		if s.single {
 			out, err := toGo(val)
+			if errors.Is(err, errResultSize) {
+				return nil, cost, errors.Errorf("%w: %s: the result holds more than %d elements", ErrCostLimit, path, maxResultElements)
+			}
 			if err != nil {
 				return nil, cost, errors.Errorf("model: evaluate %s: %w", path, err)
 			}
@@ -485,9 +530,31 @@ func textOf(v ref.Val) (string, error) {
 	return "", errors.Errorf("a %s value has no text form", v.Type())
 }
 
-// toGo converts a CEL result to plain Go data. Lists and maps convert at every depth. A
-// map key must be a string, and a double must be finite.
+// errResultSize stops the copy of a result that holds more than maxResultElements elements.
+// Eval turns it into a failure that wraps ErrCostLimit and names the site.
+var errResultSize = errors.New("model: result holds too many elements")
+
+// converter copies CEL results to Go data and counts the list elements and map entries it makes.
+type converter struct{ left int }
+
+// take counts one element and reports errResultSize when the budget is spent.
+func (c *converter) take() error {
+	c.left--
+	if c.left < 0 {
+		return errResultSize
+	}
+	return nil
+}
+
+// toGo converts a CEL result to plain Go data. Lists and maps convert at every depth, and
+// together they hold at most maxResultElements elements. A map key must be a string, a
+// double must be finite, and a bytes value is a copy.
 func toGo(v ref.Val) (any, error) {
+	c := converter{left: maxResultElements}
+	return c.toGo(v)
+}
+
+func (c *converter) toGo(v ref.Val) (any, error) {
 	switch x := v.(type) {
 	case types.Null:
 		return nil, nil
@@ -506,15 +573,18 @@ func toGo(v ref.Val) (any, error) {
 	case types.String:
 		return string(x), nil
 	case types.Bytes:
-		return []byte(x), nil
+		return append([]byte{}, x...), nil
 	case traits.Mapper:
 		out := map[string]any{}
 		for it := x.Iterator(); it.HasNext() == types.True; {
+			if err := c.take(); err != nil {
+				return nil, err
+			}
 			k, ok := it.Next().(types.String)
 			if !ok {
 				return nil, errors.New("map keys must be strings")
 			}
-			e, err := toGo(x.Get(k))
+			e, err := c.toGo(x.Get(k))
 			if err != nil {
 				return nil, err
 			}
@@ -524,7 +594,10 @@ func toGo(v ref.Val) (any, error) {
 	case traits.Lister:
 		out := []any{}
 		for it := x.Iterator(); it.HasNext() == types.True; {
-			e, err := toGo(it.Next())
+			if err := c.take(); err != nil {
+				return nil, err
+			}
+			e, err := c.toGo(it.Next())
 			if err != nil {
 				return nil, err
 			}
