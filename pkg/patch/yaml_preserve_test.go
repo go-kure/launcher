@@ -1,6 +1,9 @@
 package patch
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -304,65 +307,172 @@ spec:
 	}
 }
 
-// TestIntegerConversionInYAML tests that string integers are converted to proper integers
-func TestIntegerConversionInYAML(t *testing.T) {
-	testYAML := `apiVersion: v1
-kind: Service
-metadata:
-  name: test-service
-spec:
-  type: ClusterIP
-  ports:
-  - name: http
-    port: "80"         # Should be converted to integer
-    targetPort: "8080" # Should be converted to integer
-  replicas: "3"        # Should be converted to integer`
+// quotedScalarCheck names one quoted scalar in a base resource: where it sits in
+// the loaded object, the string it must load as, and the text it must keep when
+// the document is written back.
+type quotedScalarCheck struct {
+	path []any // string = map key, int = list index
+	want string
+	text string
+}
 
-	// Load with structure preservation (which includes type conversion)
-	docSet, err := LoadResourcesWithStructure(strings.NewReader(testYAML))
-	if err != nil {
-		t.Fatalf("Failed to load YAML with structure: %v", err)
+var quotedScalarCases = []struct {
+	row    string
+	doc    string
+	checks []quotedScalarCheck
+}{
+	{
+		row: "T1 quoted bool in a ConfigMap",
+		doc: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\ndata:\n  enabled: \"true\"\n",
+		checks: []quotedScalarCheck{
+			{[]any{"data", "enabled"}, "true", `enabled: "true"`},
+		},
+	},
+	{
+		row: "T2 quoted integer in a ConfigMap",
+		doc: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\ndata:\n  port: \"8080\"\n",
+		checks: []quotedScalarCheck{
+			{[]any{"data", "port"}, "8080", `port: "8080"`},
+		},
+	},
+	{
+		row: "T3 quoted integer in an annotation",
+		doc: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: p\n  annotations:\n    prometheus.io/port: \"9102\"\n",
+		checks: []quotedScalarCheck{
+			{[]any{"metadata", "annotations", "prometheus.io/port"}, "9102", `prometheus.io/port: "9102"`},
+		},
+	},
+	{
+		row: "T4 quoted bools in container env values",
+		doc: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: p\nspec:\n  containers:\n  - name: app\n    env:\n    - name: A\n      value: \"true\"\n    - name: B\n      value: \"false\"\n    - name: C\n      value: \"True\"\n",
+		checks: []quotedScalarCheck{
+			{[]any{"spec", "containers", 0, "env", 0, "value"}, "true", `value: "true"`},
+			{[]any{"spec", "containers", 0, "env", 1, "value"}, "false", `value: "false"`},
+			{[]any{"spec", "containers", 0, "env", 2, "value"}, "True", `value: "True"`},
+		},
+	},
+	{
+		row: "T5 quoted upper-case bool in a label",
+		doc: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: p\n  labels:\n    x: \"TRUE\"\n",
+		checks: []quotedScalarCheck{
+			{[]any{"metadata", "labels", "x"}, "TRUE", `x: "TRUE"`},
+		},
+	},
+	{
+		row: "T6 write-back keeps case and quotes",
+		doc: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\ndata:\n  flag: \"True\"\n  enabled: \"true\"\n",
+		checks: []quotedScalarCheck{
+			{[]any{"data", "flag"}, "True", `flag: "True"`},
+			{[]any{"data", "enabled"}, "true", `enabled: "true"`},
+		},
+	},
+	{
+		row: "T7 a key that merely contains an integer-field name",
+		doc: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\ndata:\n  support: \"1\"\n",
+		checks: []quotedScalarCheck{
+			{[]any{"data", "support"}, "1", `support: "1"`},
+		},
+	},
+	{
+		row: "T8 quoted ports in a Service",
+		doc: "apiVersion: v1\nkind: Service\nmetadata:\n  name: s\nspec:\n  ports:\n  - name: http\n    port: \"80\"\n    targetPort: \"8080\"\n",
+		checks: []quotedScalarCheck{
+			{[]any{"spec", "ports", 0, "port"}, "80", `port: "80"`},
+			{[]any{"spec", "ports", 0, "targetPort"}, "8080", `targetPort: "8080"`},
+		},
+	},
+	{
+		row: "T8 quoted replicas, hostPort and selector port in a Deployment",
+		doc: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: d\nspec:\n  replicas: \"3\"\n  selector:\n    port: \"8080\"\n  template:\n    spec:\n      containers:\n      - name: app\n        ports:\n        - hostPort: \"8080\"\n",
+		checks: []quotedScalarCheck{
+			{[]any{"spec", "replicas"}, "3", `replicas: "3"`},
+			{[]any{"spec", "selector", "port"}, "8080", `port: "8080"`},
+			{[]any{"spec", "template", "spec", "containers", 0, "ports", 0, "hostPort"}, "8080", `hostPort: "8080"`},
+		},
+	},
+}
+
+// valueAtPath walks a loaded object by map keys (string) and list indexes (int).
+func valueAtPath(t *testing.T, obj any, path []any) any {
+	t.Helper()
+	cur := obj
+	for _, seg := range path {
+		switch s := seg.(type) {
+		case string:
+			m, ok := cur.(map[string]any)
+			if !ok {
+				t.Fatalf("path %v: %T is not a map at %q", path, cur, s)
+			}
+			cur, ok = m[s]
+			if !ok {
+				t.Fatalf("path %v: key %q not found", path, s)
+			}
+		case int:
+			l, ok := cur.([]any)
+			if !ok || s >= len(l) {
+				t.Fatalf("path %v: %T has no index %d", path, cur, s)
+			}
+			cur = l[s]
+		}
 	}
+	return cur
+}
 
-	if len(docSet.Documents) != 1 {
-		t.Fatalf("Expected 1 document, got %d", len(docSet.Documents))
+// TestQuotedScalarsStayStrings pins that a quoted scalar in a base resource keeps
+// its authored string type and its quoting in both loaders and in the written file.
+func TestQuotedScalarsStayStrings(t *testing.T) {
+	for _, tc := range quotedScalarCases {
+		t.Run(tc.row, func(t *testing.T) {
+			multi, err := LoadResourcesFromMultiYAML(strings.NewReader(tc.doc))
+			if err != nil || len(multi) != 1 {
+				t.Fatalf("LoadResourcesFromMultiYAML: n=%d err=%v", len(multi), err)
+			}
+			set, err := LoadResourcesWithStructure(strings.NewReader(tc.doc))
+			if err != nil || len(set.Documents) != 1 {
+				t.Fatalf("LoadResourcesWithStructure: err=%v", err)
+			}
+			out := filepath.Join(t.TempDir(), "out.yaml")
+			if err := set.WriteToFile(out); err != nil {
+				t.Fatalf("WriteToFile: %v", err)
+			}
+			written, err := os.ReadFile(out)
+			if err != nil {
+				t.Fatalf("read written file: %v", err)
+			}
+			for _, c := range tc.checks {
+				for name, obj := range map[string]map[string]any{
+					"LoadResourcesFromMultiYAML": multi[0].Object,
+					"LoadResourcesWithStructure": set.Documents[0].Resource.Object,
+				} {
+					if got := valueAtPath(t, obj, c.path); got != c.want {
+						t.Errorf("%s: %v = %v (%T), want string %q", name, c.path, got, got, c.want)
+					}
+				}
+				if !strings.Contains(string(written), c.text) {
+					t.Errorf("written file lacks %q:\n%s", c.text, written)
+				}
+			}
+		})
 	}
+}
 
-	service := docSet.Documents[0]
-
-	// Check that port values were converted to integers in the resource object
-	ports, found, err := unstructured.NestedSlice(service.Resource.Object, "spec", "ports")
-	if err != nil || !found {
-		t.Fatalf("Failed to get ports from service: %v", err)
-	}
-
-	if len(ports) != 1 {
-		t.Fatalf("Expected 1 port, got %d", len(ports))
-	}
-
-	portMap, ok := ports[0].(map[string]any)
-	if !ok {
-		t.Fatal("Port is not a map")
-	}
-
-	// Check that port is an integer (int64 for unstructured compatibility)
-	port, exists := portMap["port"]
-	if !exists {
-		t.Fatal("Port field not found")
-	}
-
-	if _, ok := port.(int64); !ok {
-		t.Errorf("Expected port to be int64, got %T with value %v", port, port)
-	}
-
-	// Check that targetPort is an integer
-	targetPort, exists := portMap["targetPort"]
-	if !exists {
-		t.Fatal("TargetPort field not found")
-	}
-
-	if _, ok := targetPort.(int64); !ok {
-		t.Errorf("Expected targetPort to be int64, got %T with value %v", targetPort, targetPort)
+// TestQuotedScalarsLoadersAgree pins that both loaders produce deeply equal
+// objects for the quoted-scalar inputs.
+func TestQuotedScalarsLoadersAgree(t *testing.T) {
+	for _, tc := range quotedScalarCases {
+		t.Run(tc.row, func(t *testing.T) {
+			multi, err := LoadResourcesFromMultiYAML(strings.NewReader(tc.doc))
+			if err != nil || len(multi) != 1 {
+				t.Fatalf("LoadResourcesFromMultiYAML: n=%d err=%v", len(multi), err)
+			}
+			set, err := LoadResourcesWithStructure(strings.NewReader(tc.doc))
+			if err != nil || len(set.Documents) != 1 {
+				t.Fatalf("LoadResourcesWithStructure: err=%v", err)
+			}
+			if !reflect.DeepEqual(multi[0].Object, set.Documents[0].Resource.Object) {
+				t.Errorf("loaders differ:\nmulti:     %#v\nstructure: %#v", multi[0].Object, set.Documents[0].Resource.Object)
+			}
+		})
 	}
 }
 

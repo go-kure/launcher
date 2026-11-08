@@ -240,7 +240,8 @@ When using `NewPatchableAppSetWithStructure`, the original YAML document structu
 
 `LoadResourcesFromMultiYAML` and `LoadResourcesWithStructure` turn the YAML values of a base resource into types that `Unstructured.DeepCopy` accepts, so `PatchableAppSet.Resolve` can copy the resource:
 
-- An integer becomes `int64`.
+- An unquoted integer becomes `int64`.
+- A quoted scalar (`"true"`, `"8080"`) keeps its authored string type, in both loaders.
 - A plain timestamp keeps its authored text and loads as a string, not as a `time.Time`. An explicit `!!timestamp` tag is treated the same way when the text parses as a time.
 - A mapping with a non-string key (`1: a`, `0x10: b`) loads as a string-keyed mapping. The key is its `fmt.Sprint` spelling.
 - Two keys of one mapping that read the same after that conversion (`0x10` and `"16"`) are an error; the loader refuses the document. A `.nan` key keeps its value.
@@ -249,7 +250,6 @@ When using `NewPatchableAppSetWithStructure`, the original YAML document structu
 
 - Write-back of a non-string key whose authored spelling differs from its converted one (`.nan`, `0x10`) keeps both keys in the output: go-kure/launcher#1346.
 - A patch value that carries colliding non-string keys loses an entry without an error: go-kure/launcher#1347.
-- A quoted `"true"` inside a string-keyed mapping loads as a bool through `LoadResourcesWithStructure`: go-kure/launcher#1343.
 - A plain timestamp loses its unquoted style on write-back: go-kure/launcher#1344.
 - An unsigned integer above the `int64` range is not converted.
 

@@ -452,9 +452,9 @@ func TestLoaders_ExplicitTimestampTag(t *testing.T) {
 }
 
 // A map with a timestamp key holds its keys as strings now, so it is an ordinary
-// string-keyed map and the base-type conversion of LoadResourcesWithStructure reads its
-// quoted "true" as a bool, as it does in every other string-keyed map (the sibling key).
-// Before keys were kept, such a map could not be resolved at all.
+// string-keyed map and a quoted "true" under it stays the string "true", as it does under
+// every other key (the sibling key). Before keys were kept, such a map could not be
+// resolved at all.
 func TestLoadResourcesWithStructure_TimestampKeyMapLoadsLikeStringKeyedMap(t *testing.T) {
 	docSet, err := LoadResourcesWithStructure(strings.NewReader(
 		"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: stamps\ndata:\n  2026-11-07: \"true\"\n  enabled: \"true\"\n"))
@@ -467,8 +467,8 @@ func TestLoadResourcesWithStructure_TimestampKeyMapLoadsLikeStringKeyedMap(t *te
 		if err != nil || !found {
 			t.Fatalf("data.%s: found=%v err=%v", key, found, err)
 		}
-		if got != true {
-			t.Errorf("data.%s = %v (%T), want bool true", key, got, got)
+		if got != "true" {
+			t.Errorf("data.%s = %v (%T), want string \"true\"", key, got, got)
 		}
 	}
 }
