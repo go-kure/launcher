@@ -641,16 +641,19 @@ func TestCostLimit(t *testing.T) {
 }
 
 // TestReplaceGrowth decides whether cost alone bounds the size of a result. The call result
-// limit is 1,000,000 bytes. Each hostile row builds a result of several megabytes with replace,
-// join, format or lists.range. A row passes when the evaluation fails or the result is within the
-// limit. A row that fails shows that cost does not bound it, and then the size check moves to
-// its own overloads in another pull request. The control rows show that the evaluation works at
-// all, so a pass of a hostile row on a stub is not read as evidence.
+// limit is 1,000,000 bytes. Each hostile row builds a result of several megabytes with replace or
+// join, or a list of more than 1,000,000 elements with lists.range. A row passes when the
+// evaluation stops with the stop that row names, or the result is within the limit. replace and
+// join must stop with ErrCostLimit. lists.range(1000001) must stop with the exact refusal of
+// cel-go, which has its own cap of 1,000,000 elements: any other error fails the row, and so does a
+// cel-go that lifts the cap. A row that fails shows that nothing bounds it, and then the size check
+// moves to its own overloads in another pull request. format is not tested here: cost does not
+// bound its result, and its row comes with those overloads. The control rows show that the
+// evaluation works at all, so a pass of a hostile row on a stub is not read as evidence.
 func TestReplaceGrowth(t *testing.T) {
 	const ten = "'xxxxxxxxxx'"
 	base := "lists.range(1000).map(i, " + ten + ").join('')" // 10,000 bytes
 	grow := ".replace('x', 'xxxxxxxxxx')"                    // times 10
-	big := base + ".replace('x', 'xxxxxxxxxxxxxxxxxxxx')"    // 200,000 bytes
 	t.Run("control a growth within the limit", func(t *testing.T) {
 		c := mustCompile(t, propModel(t, "${size("+base+grow+")}"))
 		got, _ := mustEval(t, c, propSite, stdScope())
@@ -684,16 +687,26 @@ func TestReplaceGrowth(t *testing.T) {
 			}
 		})
 	}
-	hostile := []struct{ name, expr string }{
-		{"hostile replace three times", base + grow + grow + grow},
-		// The bound string is built once, so the cost of these two rows is the join or format
-		// call and not the build of its operands.
-		{"hostile join", "cel.bind(b, " + base + ", lists.range(1000).map(i, b).join(''))"},
-		{"hostile format", "cel.bind(b, " + big + ", '%s%s%s%s%s%s%s%s%s%s'.format([b, b, b, b, b, b, b, b, b, b]))"},
+	costStop := func(err error) bool { return errors.Is(err, ErrCostLimit) }
+	// The text is the refusal of cel-go v0.31.0 for a count of 1,000,001.
+	rangeCap := func(err error) bool {
+		return strings.Contains(err.Error(), "lists.range: size 1000001 exceeds maximum allowed (1000000)")
+	}
+	hostile := []struct {
+		name, expr string
+		stops      func(error) bool
+	}{
+		{"hostile replace three times", base + grow + grow + grow, costStop},
+		// The bound string is built once, so the cost of this row is the join call and not the build of
+		// its operand.
+		{"hostile join", "cel.bind(b, " + base + ", lists.range(1000).map(i, b).join(''))", costStop},
 		// The smallest count that crosses a limit of 1,000,000 elements. If nothing bounds it, the row
 		// allocates one list of 1,000,001 values: about 24 bytes each, so about 24 MiB, and up to
 		// twice that while the list grows.
-		{"hostile lists.range", "lists.range(1000001).size()"},
+		{"hostile lists.range", "lists.range(1000001).size()", rangeCap},
+		// The largest count below that cap. Either the cost limit stops it or it ends with a result
+		// within the limit. The row logs which, with the cost, so the outcome is read and not assumed.
+		{"hostile lists.range at the cap", "lists.range(1000000).size()", costStop},
 	}
 	for _, tc := range hostile {
 		t.Run(tc.name, func(t *testing.T) {
@@ -701,12 +714,13 @@ func TestReplaceGrowth(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Compile: %v", err)
 			}
-			got, _, err := c.Eval(propSite, stdScope())
+			got, cost, err := c.Eval(propSite, stdScope())
+			t.Logf("outcome of %s: result %#v, cost %d, error %v", tc.name, got, cost, err)
 			if err != nil {
-				// A bounded row stops under the cost limit. A failure with another cause shows a
+				// A bounded row stops with the stop it names. A failure with another cause shows a
 				// mistake in the row and proves nothing about the bound.
-				if !errors.Is(err, ErrCostLimit) {
-					t.Errorf("the row failed for a cause other than the cost limit: %v", err)
+				if !tc.stops(err) {
+					t.Errorf("the row failed for a cause other than its stop: %v", err)
 				}
 				return
 			}
