@@ -55,6 +55,16 @@
 #   pkg/oam/bundle_application_names.go    two bundles' applications with one name
 #   pkg/oam/cross_document_collisions.go   keyedObjects, which the in-document check and the
 #                                          sibling group check call (List expansion, kindless objects)
+#   pkg/oam/component_label.go             the refusal of a component label value that is not a label
+#   pkg/oam/force_warnings.go              appliedObjects, which the collision, kind-policy and
+#                                          label-stamp checks call (the warnings beside it take the trailer)
+#   pkg/oam/handler.go                     exclusiveProperties, the key groups a handler refuses together
+#   pkg/oam/naming_engine.go               which generated names are claimed, so which collisions are refused
+#   pkg/oam/pipeline.go                    TierOrder, the tiers a placement policy may name
+#   pkg/oam/policy.go                      ExplicitSecretsAllowed, which gates the explicit-secret refusals
+#   pkg/oam/scaler_targets.go              the component types that admit a scaler trait
+#   pkg/oam/schema.go                      the property schema type, whose tags are the authored key names
+#   pkg/oam/shorten_name.go                SubdomainSyntaxErrors, which decides which generated names are refused
 #   pkg/oam/builtin/     every .go file below it (the per-kind property validators)
 #   pkg/oam/internal/      every .go file below it (the shared refusal tables and checks)
 #   pkg/oam/model/         every .go file below it (the Model document and its loader)
@@ -136,6 +146,15 @@ ACCEPT_PATHS=(
   pkg/oam/sibling_group.go
   pkg/oam/bundle_application_names.go
   pkg/oam/cross_document_collisions.go
+  pkg/oam/component_label.go
+  pkg/oam/force_warnings.go
+  pkg/oam/handler.go
+  pkg/oam/naming_engine.go
+  pkg/oam/pipeline.go
+  pkg/oam/policy.go
+  pkg/oam/scaler_targets.go
+  pkg/oam/schema.go
+  pkg/oam/shorten_name.go
 )
 
 # Every non-test .go file directly under pkg/oam/ that is not in ACCEPT_PATHS, ruled out on purpose.
@@ -159,17 +178,6 @@ LEFT_OUT_PATHS=(
   pkg/oam/post_policy_step.go
   pkg/oam/provenance.go
   pkg/oam/routed_backend.go
-  # Not yet ruled in or out as to their refusals. go-kure/launcher#1377 reads each helper and
-  # each caller.
-  pkg/oam/component_label.go
-  pkg/oam/force_warnings.go
-  pkg/oam/handler.go
-  pkg/oam/naming_engine.go
-  pkg/oam/pipeline.go
-  pkg/oam/policy.go
-  pkg/oam/scaler_targets.go
-  pkg/oam/schema.go
-  pkg/oam/shorten_name.go
 )
 
 # The builtin component, trait and policy handlers refuse and build in one method, and their
