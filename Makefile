@@ -121,6 +121,13 @@ check-doc-fences: build-kurel ## Check the documentation's marked YAML fences (s
 	@bash site/scripts/check-doc-fences-test.sh
 	@bash site/scripts/check-doc-fences.sh
 
+# Self-test first, for the same reason (go-kure/launcher#1336). The tree is a built site:
+# run the Hugo build with site/versions.toml first (CI's docs-build job does).
+.PHONY: check-revision-shown
+check-revision-shown: ## Check the built site shows its source commit (self-test, then site/public)
+	@bash site/scripts/check-revision-shown-test.sh
+	@bash site/scripts/check-revision-shown.sh
+
 # Self-test first, for the same reason (go-kure/launcher#400).
 # Commit messages in $(ISSUE_REFS_BASE)..HEAD are checked too (go-kure/launcher#732).
 ISSUE_REFS_BASE ?= origin/main

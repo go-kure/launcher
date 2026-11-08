@@ -1,0 +1,12 @@
+{{- /*
+  Replaces the theme's menu-footer.html for the whole site (go-kure/launcher#1336).
+  Adds the version label and the commit the site was built from above the theme's own line.
+  The commit comes from the overlay scripts/gen-versions-toml.sh writes. Without it, or when
+  it reads "unknown", no commit is shown, so a build with no git metadata never prints one.
+  site/scripts/check-revision-shown.sh reads the sentence below: change them together.
+*/ -}}
+{{- $sha := site.Params.commitSha | default "" -}}
+{{- if and $sha (ne $sha "unknown") -}}
+<p id="R-revision">Version {{ site.Params.version }}, built from commit <a href="{{ site.Params.sourceURL }}/commit/{{ $sha }}">{{ $sha }}</a></p>
+{{ end -}}
+<p>Built with <a href="https://github.com/McShelby/hugo-theme-relearn" title="love"><i class="fas fa-heart"></i></a> by <a href="https://gohugo.io/">Hugo</a></p>

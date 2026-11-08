@@ -312,6 +312,7 @@ each other, not with upstream.
 - `build` / `build-kurel` - Build kurel executable
 - `validate-manifests` - Build example manifests and validate against flux-schema
 - `check-doc-fences` - Check the documentation's marked YAML fences (self-test, then the tree)
+- `check-revision-shown` - Check the built site (`site/public`) shows its source commit (self-test, then the tree)
 
 ### Testing
 - `test` - Run all tests

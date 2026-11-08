@@ -8,6 +8,10 @@ title = 'Go Kure — Launcher'
   # Version is overridden at build time via versions.toml config overlay.
   # Default to "dev" so local builds and CI validation show the WIP banner.
   version = "dev"
+  # The commit the site was built from. Empty here, so a local build without the overlay
+  # shows none. scripts/gen-versions-toml.sh sets it. The sidebar footer links it under sourceURL.
+  commitSha = ""
+  sourceURL = "https://github.com/go-kure/launcher"
 
 [module]
   [[module.imports]]
