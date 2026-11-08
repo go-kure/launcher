@@ -509,6 +509,9 @@ func convertChecked(value any, collision *error) any {
 			converted[k] = convertChecked(val, collision)
 		}
 		return converted
+	case RawPatchMap:
+		// A named map type that DeepCopy refuses: convert it as the plain map it is.
+		return convertChecked(map[string]any(v), collision)
 	case map[interface{}]interface{}:
 		// yaml.v3 decodes a mapping with a non-string key (`{123: hello}`) to this type,
 		// which DeepCopy refuses. Keys become strings via fmt.Sprint (a null key reads

@@ -102,7 +102,8 @@ myapp.metadata.labels.env: production
 ```
 
 A YAML value keeps the type YAML gave it: `8080` is an integer, `"8080"` is a string, and
-`"true"` is a string. The loader does not infer a type from the key.
+`"true"` is a string. The loader does not infer a type from the key. A mapping value, or a list
+of mappings, is substituted and applied like one in the targeted shape below.
 
 A sequence is a list of targeted entries. Each has a `target` (a resource name, `kind.name`, or
 `namespace/kind.name`) and a `patch` mapping of paths relative to that resource. A list index is
