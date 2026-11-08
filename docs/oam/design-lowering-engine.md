@@ -59,7 +59,11 @@ across documents; a caller transforming several documents passes their generated
 more than one document generates, once per object, naming every such document. Within one
 document, the object two of its applications generate is reported by
 `CheckInDocumentCollisions` (`in_document_collisions.go`) over `GenerateApplications`'
-output, naming both producers (go-kure/launcher#646). `Transform` itself refuses no such
+output, naming both producers (go-kure/launcher#646). Both return a typed
+`*GeneratedObjectCollisionError` (`errors.As`, or `errors.Is` against
+`ErrGeneratedObjectCollision`) and skip an object Kustomize's build drops
+(`config.kubernetes.io/local-config` present and not `"false"`) (go-kure/launcher#1338).
+`Transform` itself refuses no such
 object, not even one two traits of one component render (go-kure/launcher#757): a library
 caller must run `GenerateApplications` and `CheckInDocumentCollisions` on each transformed
 document, as `kurel build` does. Adoption is sound only for a
