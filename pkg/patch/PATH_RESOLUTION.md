@@ -98,6 +98,7 @@ A TOML patch line has no type syntax, so `LoadTOMLPatchFile` types the text:
 `"8080"`                 → "8080"          // double quotes: a string, read by strconv.Unquote
 `true` / `False`         → true / false    // bool, in any case
 `3` under `replicas`     → 3               // integer, last path segment names an integer field
+`.: 3` under `[…spec.replicas]` → 3        // a key of only dots takes the field name from the header path
 `1` under `support`      → "1"             // the field name is matched whole, not by substring
 `500m`, `1Gi`            → "500m", "1Gi"   // any other text stays a string
 ```

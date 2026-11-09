@@ -210,12 +210,6 @@ func LoadTOMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 		key := strings.TrimSpace(parts[0])
 		valueStr := strings.TrimSpace(parts[1])
 
-		// Type the value: quoting, variable substitution and inference are tomlValue's
-		value, err := tomlValue(key, valueStr, varCtx)
-		if err != nil {
-			return nil, fmt.Errorf("variable substitution failed at line %d: %w", lineNum, err)
-		}
-
 		// Convert TOML header to resource target and field path
 		resourceTarget, fieldPath, err := currentHeader.ResolveTOMLPath()
 		if err != nil {
@@ -228,6 +222,14 @@ func LoadTOMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 			finalPath = fieldPath + "." + key
 		} else {
 			finalPath = key
+		}
+
+		// Type the value: quoting, variable substitution and inference are tomlValue's. The field
+		// name for the integer test comes from the whole path, so a key of only dots (`.: 3`) takes
+		// the name of the field the header names.
+		value, err := tomlValue(finalPath, valueStr, varCtx)
+		if err != nil {
+			return nil, fmt.Errorf("variable substitution failed at line %d: %w", lineNum, err)
 		}
 
 		// Create patch operation
