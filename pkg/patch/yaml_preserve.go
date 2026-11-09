@@ -488,7 +488,8 @@ func preserveComments(src, dst *yaml.Node) {
 // node even when its text equals the authored text, as in a batch that changes a timestamp to
 // another type and back. Mappings pair entries by scalar key. A sequence pairs a scalar item
 // with the first unpaired authored scalar of the same text, so a deletion that moves items
-// down does not break the pairs. A mapping or list item is paired by merge key, else by index.
+// down does not break the pairs. An authored item that is an alias counts as the scalar it
+// points at. A mapping or list item is paired by merge key, else by index.
 //
 // Limits, all of them quoting style and never a value: a patch that addresses a list item by
 // index or by key leaves every timestamp in that list quoted; after a delete, items that pair
@@ -565,9 +566,18 @@ func isTouched(path []string, touched [][]string) bool {
 	return false
 }
 
+// resolveAlias returns the node an alias points at, and any other node as it is. An alias with
+// no target is returned as it is.
+func resolveAlias(node *yaml.Node) *yaml.Node {
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		return node.Alias
+	}
+	return node
+}
+
 func keepAuthoredStyleAt(authored, next *yaml.Node, path []string, touched [][]string) {
-	if authored != nil && authored.Kind == yaml.AliasNode && authored.Alias != nil {
-		authored = authored.Alias // an alias is the node it points at
+	if authored != nil {
+		authored = resolveAlias(authored) // an alias is the node it points at
 	}
 	if authored == nil || next == nil || authored.Kind != next.Kind || isTouched(path, touched) {
 		return
@@ -617,7 +627,8 @@ func keepAuthoredStyleAt(authored, next *yaml.Node, path []string, touched [][]s
 			switch {
 			case item.Kind == yaml.ScalarNode:
 				for _, candidate := range authored.Content {
-					if !paired[candidate] && candidate.Kind == yaml.ScalarNode && candidate.Value == item.Value {
+					target := resolveAlias(candidate)
+					if !paired[candidate] && target.Kind == yaml.ScalarNode && target.Value == item.Value {
 						match = candidate
 						break
 					}
