@@ -39,7 +39,11 @@ line is parsed, and so is the path written after a selector in the middle of a p
 selector such as `[0]`, that read trims the dots at the start and at the end of the path
 (`containers[0]..image.` reaches `image`). After an insertion selector (one that starts with `+` or
 `-`, such as `[+0]`), the text is kept as written, so `containers[+0]..image.` inserts a map whose
-key is `.image.`. No path check refuses an empty segment after the selector. Loading also
+key is `.image.`. No path check refuses an empty segment after the selector. A key can hold more
+than one selector. The first one must be a replacement selector, and each next one selects an item
+in the list that the one before it selected: `containers[0].ports[name=http].containerPort` sets the
+port of the first container. A selector right after a selector (`ports[0][1]`) is not supported.
+Loading also
 substitutes variables: a TOML file in its values, a YAML file in its keys and values, a strategic
 patch in its payload values. It does not check them, and a reference that no variable defines stays
 as written. A path in a flat YAML mapping is parsed at load, but the check of its segments up to

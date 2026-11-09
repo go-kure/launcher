@@ -160,11 +160,12 @@ func TestParsePatchLineWithMidSelectors(t *testing.T) {
 			expectedValue: map[string]any{"image": "test-value"},
 		},
 		{
+			// Two selectors: the key splits at the first, and the rest travels in the value.
 			name:          "ingress path selector",
 			input:         "spec.rules[0].paths[path=/api].backend.service.name",
-			expectedPath:  "spec.rules[0].paths",
-			expectedSel:   "path=/api",
-			expectedValue: map[string]any{"backend.service.name": "test-value"},
+			expectedPath:  "spec.rules",
+			expectedSel:   "0",
+			expectedValue: map[string]any{"paths[path=/api].backend.service.name": "test-value"},
 		},
 	}
 
