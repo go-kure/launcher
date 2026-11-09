@@ -248,7 +248,11 @@ func mergeYAMLNodes(original, patched *yaml.Node) error {
 	switch original.Kind {
 	case yaml.DocumentNode:
 		if len(original.Content) > 0 && len(patched.Content) > 0 {
-			return mergeYAMLNodes(original.Content[0], patched.Content[0])
+			o, p := original.Content[0], patched.Content[0]
+			if o.Kind == yaml.MappingNode && p.Kind == yaml.MappingNode {
+				return mergeMappingNodesAt(o, p, true)
+			}
+			return mergeYAMLNodes(o, p)
 		}
 	case yaml.MappingNode:
 		return mergeMappingNodes(original, patched)
@@ -265,12 +269,53 @@ func mergeYAMLNodes(original, patched *yaml.Node) error {
 	return nil
 }
 
-// mergeMappingNodes merges mapping (object) nodes
+// keyText returns the text a mapping key of the kept node has in the resource. The loader turns
+// a key that is not a string into the fmt.Sprint spelling of its decoded value (convertChecked),
+// and it reads a plain timestamp as its text (keepTimestampText). So the authored key `0x10`
+// reads "16", `.nan` reads "NaN", and `1.0` reads "1". The marshaled resource holds those
+// spellings, and a pairing of the kept node with it has to use them. A key that is a string,
+// or that does not decode, reads as its own text.
+func keyText(n *yaml.Node) string {
+	if n.Kind != yaml.ScalarNode {
+		return n.Value
+	}
+	switch n.ShortTag() {
+	case "!!str", "!!timestamp":
+		return n.Value
+	}
+	var v any
+	if err := n.Decode(&v); err != nil {
+		return n.Value
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprint(v)
+}
+
+// mergeMappingNodes merges mapping (object) nodes. An original key pairs with the patched key
+// that holds its resource spelling (keyText), and the merge keeps the original key node, so an
+// authored key such as `0x10` is written as authored and not beside its converted spelling.
+// The root mapping of a document is the exception: the loader decodes it into a string-keyed
+// map, so a root key keeps its authored text and pairs by it (root). Two authored keys of one
+// mapping never read the same here, because the loaders refuse such a document. One exception
+// is a key the patch adds with the text of an authored key (the string "0x10" beside `0x10`): the
+// authored key then takes its resource spelling ("16") and the new key is written quoted.
 func mergeMappingNodes(original, patched *yaml.Node) error {
+	return mergeMappingNodesAt(original, patched, false)
+}
+
+// mergeMappingNodesAt is mergeMappingNodes, with root true for the root mapping of a document.
+func mergeMappingNodesAt(original, patched *yaml.Node, root bool) error {
 	if len(patched.Content)%2 != 0 {
 		return fmt.Errorf("invalid mapping node: odd number of content items")
 	}
-
+	pairKey := func(n *yaml.Node) string {
+		if root {
+			return n.Value
+		}
+		return keyText(n)
+	}
 	// Create a map of keys in the patched node for efficient lookup
 	patchedMap := make(map[string]*yaml.Node)
 	for i := 0; i < len(patched.Content); i += 2 {
@@ -281,7 +326,7 @@ func mergeMappingNodes(original, patched *yaml.Node) error {
 
 	// Update existing keys in original
 	for i := 0; i < len(original.Content); i += 2 {
-		key := original.Content[i].Value
+		key := pairKey(original.Content[i])
 		if patchedValue, exists := patchedMap[key]; exists {
 			// Recursively merge if both are objects/arrays, otherwise replace
 			if original.Content[i+1].Kind == patchedValue.Kind &&
@@ -297,11 +342,24 @@ func mergeMappingNodes(original, patched *yaml.Node) error {
 		}
 	}
 
-	// Add new keys from patched
+	// Add new keys from patched.
+	// A new key whose text an authored key already holds (a string key "0x10" beside the authored
+	// key `0x10`) cannot sit beside it: the decoder reads two keys with one text as a duplicate. The
+	// authored key then takes its resource spelling ("16") and the new key is written quoted.
+	held := make(map[string]*yaml.Node, len(original.Content)/2)
+	for i := 0; i+1 < len(original.Content); i += 2 {
+		if original.Content[i].Kind == yaml.ScalarNode {
+			held[original.Content[i].Value] = original.Content[i]
+		}
+	}
 	for key, value := range patchedMap {
 		keyNode := &yaml.Node{
 			Kind:  yaml.ScalarNode,
 			Value: key,
+		}
+		if authored, ok := held[key]; ok {
+			authored.Value, authored.Tag, authored.Style = keyText(authored), "!!str", 0
+			keyNode.Tag, keyNode.Style = "!!str", yaml.DoubleQuotedStyle
 		}
 		original.Content = append(original.Content, keyNode, value)
 	}
@@ -443,7 +501,14 @@ func preserveComments(src, dst *yaml.Node) {
 	srcMap := make(map[string]kvPair)
 	for i := 0; i < len(src.Content)-1; i += 2 {
 		if src.Content[i].Kind == yaml.ScalarNode {
-			srcMap[src.Content[i].Value] = kvPair{src.Content[i], src.Content[i+1]}
+			srcMap[keyText(src.Content[i])] = kvPair{src.Content[i], src.Content[i+1]}
+		}
+	}
+
+	dstTexts := make(map[string]bool, len(dst.Content)/2)
+	for i := 0; i < len(dst.Content)-1; i += 2 {
+		if dst.Content[i].Kind == yaml.ScalarNode {
+			dstTexts[dst.Content[i].Value] = true
 		}
 	}
 
@@ -454,6 +519,12 @@ func preserveComments(src, dst *yaml.Node) {
 			continue
 		}
 		if srcKV, ok := srcMap[dstKey.Value]; ok {
+			// A key that is not a string reads differently in the resource (`0x10` reads "16"):
+			// the item keeps the authored key text, tag and style. It does not when another key of
+			// the item already has that text, because the item would then hold the text twice.
+			if dstKey.Value != srcKV.key.Value && !dstTexts[srcKV.key.Value] {
+				dstKey.Value, dstKey.Tag, dstKey.Style = srcKV.key.Value, srcKV.key.Tag, srcKV.key.Style
+			}
 			// Copy comments from source key and value nodes
 			if dstKey.HeadComment == "" {
 				dstKey.HeadComment = srcKV.key.HeadComment
@@ -603,7 +674,12 @@ func keepAuthoredStyleAt(authored, next *yaml.Node, path []string, touched [][]s
 		authoredValues := make(map[string]*yaml.Node, len(authored.Content)/2)
 		for i := 0; i+1 < len(authored.Content); i += 2 {
 			if authored.Content[i].Kind == yaml.ScalarNode {
-				authoredValues[authored.Content[i].Value] = authored.Content[i+1]
+				// The root mapping keeps its authored key text in the resource (mergeMappingNodesAt).
+				if len(path) == 0 {
+					authoredValues[authored.Content[i].Value] = authored.Content[i+1]
+				} else {
+					authoredValues[keyText(authored.Content[i])] = authored.Content[i+1]
+				}
 			}
 		}
 		for i := 0; i+1 < len(next.Content); i += 2 {
