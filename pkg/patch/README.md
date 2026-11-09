@@ -239,6 +239,8 @@ image: updated:latest
 image: updated:latest
 ```
 
+A header may also spell the start of a shorthand path. `[deployment.myapp.spec.template.spec.containers.0]` means the same as `[deployment.myapp.containers.0]`, and the spelled part is not repeated. Under a container item, `ports` is the container field, so `[deployment.myapp.containers.0.ports]` does not become the Service `spec.ports`.
+
 To append to a list, end the path with `[-]`. The value is a mapping, so use the YAML form:
 
 ```yaml

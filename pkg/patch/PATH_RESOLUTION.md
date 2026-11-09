@@ -68,6 +68,8 @@ TOML headers are intelligently mapped to Kubernetes paths:
 - `containers.*` → `spec.template.spec.containers.*`
 - `volumes.*` → `spec.template.spec.volumes.*`
 - `env.*` → `spec.template.spec.containers[].env.*`
+- A header that already spells the start of the expansion, such as `spec.template.spec.containers.*`, gives the same path. The spelled part is not repeated.
+- `ports` after `containers.<index>` or `initContainers.<index>` is the container field `ports`, not the Service `spec.ports`.
 
 #### Service Resources  
 - `ports.*` → `spec.ports.*`
