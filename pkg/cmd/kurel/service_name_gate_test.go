@@ -110,16 +110,16 @@ func serviceNameSources() []serviceNameSource {
 			fragments: []string{`component "db"`, `Cluster "db"`, "spec.managed.services.additional[0].serviceTemplate.metadata.name", `"1extra"`}},
 		{name: "a service component's name", typ: "service", component: "1api", props: svcPorts(nil),
 			controlComponent: "api1", controlProps: svcPorts(nil),
-			fragments: []string{`component "1api"`, `Service "1api"`}},
+			fragments: []string{`component "1api"`, `Service metadata.name "1api"`}},
 		{name: "a service component's objectName", typ: "service", component: "api", props: svcPorts(map[string]any{"objectName": "1api"}),
 			controlComponent: "api", controlProps: svcPorts(map[string]any{"objectName": "api1"}),
-			fragments: []string{`component "api"`, `Service "1api"`}},
+			fragments: []string{`component "api"`, `Service metadata.name "1api"`}},
 		{name: "a webservice component's name", typ: "webservice", component: "1web", props: webserviceProps(nil),
 			controlComponent: "web1", controlProps: webserviceProps(nil),
-			fragments: []string{`component "1web"`, `Service "1web"`}},
+			fragments: []string{`component "1web"`, `Service metadata.name "1web"`}},
 		{name: "a webservice's serviceObjectName", typ: "webservice", component: "web", props: webserviceProps(map[string]any{"serviceObjectName": "1entry"}),
 			controlComponent: "web", controlProps: webserviceProps(map[string]any{"serviceObjectName": "entry1"}),
-			fragments: []string{`component "web"`, `Service "1entry"`}},
+			fragments: []string{`component "web"`, `Service metadata.name "1entry"`}},
 		monitoring("alertmanager", "Alertmanager", "am", "spec.serviceName", map[string]any{"version": "v0.28.1", "replicas": 1}),
 		monitoring("prometheus", "Prometheus", "prom", "spec.serviceName", nil),
 		monitoring("thanosruler", "ThanosRuler", "tr", "spec.serviceName", map[string]any{
@@ -127,16 +127,16 @@ func serviceNameSources() []serviceNameSource {
 		{name: "a cnpg-pooler component's name", typ: "cnpg-pooler", component: "1pool",
 			props:            map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{}},
 			controlComponent: "pool1", controlProps: map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{}},
-			fragments: []string{`component "1pool"`, `Pooler "1pool"`, "metadata.name"}},
+			fragments: []string{`component "1pool"`, `Pooler metadata.name "1pool"`}},
 		{name: "a postgresql poolerName", typ: "postgresql", component: "db",
 			props:            map[string]any{"version": "16", "storageSize": "10Gi", "pooler": map[string]any{"enabled": true}, "poolerName": "1edge"},
 			controlComponent: "db", controlProps: map[string]any{"version": "16", "storageSize": "10Gi", "pooler": map[string]any{"enabled": true}, "poolerName": "edge1"},
-			fragments: []string{`component "db"`, `Pooler "1edge"`, "metadata.name"}},
+			fragments: []string{`component "db"`, `Pooler metadata.name "1edge"`}},
 		// The default <name>-pooler is built by launcher, never written by the author.
 		{name: "a postgresql pooler's default name", typ: "postgresql", component: "1db",
 			props:            map[string]any{"version": "16", "storageSize": "10Gi", "pooler": map[string]any{"enabled": true}, "clusterObjectName": "db"},
 			controlComponent: "db1", controlProps: map[string]any{"version": "16", "storageSize": "10Gi", "pooler": map[string]any{"enabled": true}},
-			fragments: []string{`component "1db"`, `Pooler "1db-pooler"`, "metadata.name"}},
+			fragments: []string{`component "1db"`, `Pooler metadata.name "1db-pooler"`}},
 	}
 }
 
@@ -220,7 +220,7 @@ func TestServiceNameGate_HookAnswer(t *testing.T) {
 	if err == nil {
 		t.Fatal("1.35: want the hook's Service name refused")
 	}
-	for _, want := range []string{`component "web"`, `Service "1web"`, "RelaxedServiceNameValidation", "kubernetesVersion is 1.35"} {
+	for _, want := range []string{`component "web"`, `Service metadata.name "1web"`, "RelaxedServiceNameValidation", "kubernetesVersion is 1.35"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not name %q", err, want)
 		}

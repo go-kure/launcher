@@ -175,13 +175,13 @@ func TestOwnedConfig_ServiceNameGate(t *testing.T) {
 		refused []string // fragments of the refusal; nil means the object passes
 	}{
 		{name: "a typed Service", object: &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "1api"}},
-			refused: []string{`Service "1api"`}},
+			refused: []string{`Service metadata.name "1api"`}},
 		{name: "an unstructured Service", object: svcObject("v1", "Service", "1api"),
-			refused: []string{`Service "1api"`}},
+			refused: []string{`Service metadata.name "1api"`}},
 		{name: "a member of a List", object: list,
-			refused: []string{`Service "1member"`}},
+			refused: []string{`Service metadata.name "1member"`}},
 		{name: "a Pooler", object: svcObject("postgresql.cnpg.io/v1", "Pooler", "1pool"),
-			refused: []string{`Pooler "1pool"`, "metadata.name"}},
+			refused: []string{`Pooler metadata.name "1pool"`}},
 		{name: "a Prometheus", object: withServiceName(svcObject("monitoring.coreos.com/v1", "Prometheus", "prom"), "1prom"),
 			refused: []string{`Prometheus "prom"`, "spec.serviceName", `"1prom"`}},
 		{name: "an Alertmanager", object: withServiceName(svcObject("monitoring.coreos.com/v1", "Alertmanager", "am"), "1am"),
@@ -361,9 +361,34 @@ func TestOwnedConfig_ServiceNameGate_MetadataAsWritten(t *testing.T) {
 			if err == nil {
 				t.Fatal("want the object with map[string]string metadata refused at 1.35")
 			}
-			wantServiceNameRefusal(t, err, "shop-source", c.kind+` "`+c.bad+`"`, "metadata.name")
+			wantServiceNameRefusal(t, err, "shop-source", c.kind+` metadata.name "`+c.bad+`"`)
 			if err := o.checkServiceNames(goMetadata(c.good)); err != nil {
 				t.Errorf("a name with a letter first: want the object accepted, got %v", err)
+			}
+		})
+	}
+}
+
+// TestOwnedConfig_ServiceNameGate_NamePrintedOnce: a Service and a Pooler hold the
+// name in metadata.name, so the refusal names the kind and the field and prints the
+// name once. The owner "web" is a different value, so it adds no second hit.
+func TestOwnedConfig_ServiceNameGate_NamePrintedOnce(t *testing.T) {
+	cases := []struct{ name, apiVersion, kind, bad string }{
+		{name: "a Service", apiVersion: "v1", kind: "Service", bad: "1api"},
+		{name: "a Pooler", apiVersion: "postgresql.cnpg.io/v1", kind: "Pooler", bad: "1api"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			o := &ownedConfig{entry: "web", target: serviceNameTarget(35)}
+			err := o.checkServiceNames(svcObject(c.apiVersion, c.kind, c.bad))
+			if err == nil {
+				t.Fatal("want the object refused at 1.35")
+			}
+			if n := strings.Count(err.Error(), `"`+c.bad+`"`); n != 1 {
+				t.Errorf("the name %q appears %d times in %q, want once", c.bad, n, err)
+			}
+			if want := c.kind + ` metadata.name "` + c.bad + `": a Service name`; !strings.Contains(err.Error(), want) {
+				t.Errorf("refusal %q lacks %q", err, want)
 			}
 		})
 	}
@@ -411,7 +436,7 @@ func TestOwnedConfig_ServiceNameGate_KindAsWritten(t *testing.T) {
 			if err == nil {
 				t.Fatal("want the object with a raw kind or apiVersion refused at 1.35")
 			}
-			wantServiceNameRefusal(t, err, "shop-source", c.kind+` "`+c.bad+`"`, "metadata.name")
+			wantServiceNameRefusal(t, err, "shop-source", c.kind+` metadata.name "`+c.bad+`"`)
 			if err := o.checkServiceNames(build(c.good)); err != nil {
 				t.Errorf("a name with a letter first: want the object accepted, got %v", err)
 			}
@@ -460,7 +485,7 @@ func TestOwnedConfig_ServiceNameGate_NoOtherDutyToHold(t *testing.T) {
 	if err == nil {
 		t.Fatal("want the Service of a document-owned application refused at 1.35")
 	}
-	wantServiceNameRefusal(t, err, "shop-source", `Service "1api"`)
+	wantServiceNameRefusal(t, err, "shop-source", `Service metadata.name "1api"`)
 
 	// The same wrapper with a target below the release and an object that passes.
 	if err := generateAtTarget("", "shop-source", serviceNameTarget(35), svcObject("v1", "Service", "api1")); err != nil {
@@ -495,7 +520,7 @@ func TestOwnedConfig_ServiceNameGate_LayoutAddedService(t *testing.T) {
 	if err == nil {
 		t.Fatal("want the Service added by AugmentLayout refused at 1.35")
 	}
-	wantServiceNameRefusal(t, err, "web", `Service "1api"`)
+	wantServiceNameRefusal(t, err, "web", `Service metadata.name "1api"`)
 }
 
 // TestOwnedConfig_ServiceNameGate_ListGrownByAugmenter: a Service an augmenter
@@ -540,7 +565,7 @@ func TestOwnedConfig_ServiceNameGate_ListGrownByAugmenter(t *testing.T) {
 			if err == nil {
 				t.Fatal("want the Service appended to the list refused at 1.35")
 			}
-			wantServiceNameRefusal(t, err, "web", `Service "1api"`)
+			wantServiceNameRefusal(t, err, "web", `Service metadata.name "1api"`)
 
 			// The controls: a name starting with a letter, and a release that allows a digit.
 			if err := grow("api1", serviceNameTarget(35)); err != nil {
