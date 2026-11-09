@@ -266,8 +266,8 @@ When using `NewPatchableAppSetWithStructure`, the original YAML document structu
 - A quoted scalar (`"true"`, `"8080"`) keeps its authored string type, in both loaders.
 - A plain timestamp keeps its authored text and loads as a string, not as a `time.Time`. An explicit `!!timestamp` tag is treated the same way when the text parses as a time.
 - A mapping with a non-string key (`1: a`, `0x10: b`) loads as a string-keyed mapping. The key is its `fmt.Sprint` spelling.
-- Two keys of one mapping that read the same after that conversion (`0x10` and `"16"`) are an error; the loader refuses the document. A `.nan` key keeps its value.
-- A patch value with such colliding keys is refused when the patch is applied, and the resource is not changed.
+- Two keys of one mapping that read the same after that conversion are an error: `0x10` and `"16"`, or `0x10` and `16`. Both loaders refuse the document. For `0x10` and `16` the YAML decoder would otherwise merge the two into one entry and drop the first value, so the loaders check the keys before the decode. The loaders decode each key into the key type the YAML decoder gives its mapping, and compare the results. A key and an alias of it read the same in every mapping, the root included. The keys of a merge source (`<<`) are decoded into the mapping that names it, and a merged entry that the mapping already holds is skipped, as the decoder skips it. The root mapping of a document is read into a string-keyed map, so `0x10` and `16` at the root load as two keys. So do the keys of a merge source that a string-keyed mapping names. A `.nan` key keeps its value.
+- A patch file is checked the same way when it loads, in the simple form and in the list form, and the file is not used: two keys that decode to one value (`0x10` and `16`) are refused at load. Two keys of different types that read the same only after conversion (`0x10` and `"16"`) load, and are refused when the patch is applied. A `PatchOp` that code builds by hand is refused when the patch is applied, and the resource is not changed.
 
 #### Known limits
 
@@ -365,7 +365,7 @@ direct use of `ApplyStrategicMergePatch` (and its `applyJSONMergePatch`/`applyTy
 (`YAMLDocument.ApplyPatchesToDocument` / `ApplyStrategicPatchesToDocument` in `yaml_preserve.go`,
 reached via `PatchableAppSet.WriteToFile`'s per-document apply loop, and
 `UpdateDocumentFromResource`). Those return plain wrapped errors (`errors.Wrap`/`fmt.Errorf`). So
-do the resource loaders when two keys of one mapping read the same after conversion (`op.go`; see
+do the resource loaders and the patch file loader when two keys of one mapping read the same after conversion (`loader.go`, `op.go`; see
 Value Types in Loaded Resources). Do not assume every error out of this package is a
 `*errors.PatchError` — check the call path.
 

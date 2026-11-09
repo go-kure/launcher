@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -88,6 +89,9 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 	var patches []PatchSpec
 
 	if firstToken.Kind == yaml.MappingNode {
+		if err := refuseEquivalentKeys(&firstToken); err != nil {
+			return nil, fmt.Errorf("invalid simple patch map: %w", err)
+		}
 		var raw map[string]any
 		if err := firstToken.Decode(&raw); err != nil {
 			return nil, fmt.Errorf("invalid simple patch map: %w", err)
@@ -114,6 +118,9 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 			patches = append(patches, PatchSpec{Patch: op})
 		}
 	} else if firstToken.Kind == yaml.SequenceNode {
+		if err := refuseEquivalentPatchKeys(&firstToken); err != nil {
+			return nil, fmt.Errorf("invalid patch list: %w", err)
+		}
 		var list []TargetedPatch
 		if err := firstToken.Decode(&list); err != nil {
 			return nil, fmt.Errorf("invalid patch list: %w", err)
@@ -292,6 +299,348 @@ func keepTimestampText(n *yaml.Node) {
 	}
 }
 
+// refuseEquivalentKeys returns an error when two keys of one mapping below top are written
+// differently but decode to the same map key: `0x10` and `16`, `1.0` and `1.00`, `true` and
+// `True`, `null` and `~`, an anchored key and its alias. The YAML decoder merges such keys into
+// one entry before any later check sees them, so the first value would be lost without an error.
+//
+// The check does not keep a rule list of its own. It decodes every key with the decoder, into
+// the key type the decoder gives that mapping, and compares what comes out. top is decoded into
+// a string-keyed map, which keeps the text of each key. Any other mapping is decoded into a
+// string-keyed map when every own key is a string or the merge key, and into a general map
+// otherwise. These choices are yaml.v3 v3.0.1 as pinned in go.mod: isStringMap (decode.go:864),
+// the choice in mapping (decode.go:790-795), and a merge source decoded into the map of the
+// mapping that names it (merge, decode.go:959-996). The one rule copied by hand is the merge
+// precedence: an entry of a merge source whose key the mapping or an earlier source already
+// holds is skipped before its value is read (decode.go:828-838 and :960-968), so it loses
+// nothing and is not checked. A pair of keys is refused when the decoder reads it as one key
+// and does not report it: the decoder reports only a literal repeat, which has the same kind and
+// text (decode.go:769-778). Keys of different Go types that read the same after conversion
+// (`0x10` and `"16"`) are left to convertChecked, and complex keys are skipped. The target of an
+// alias value is not followed, because the anchored node is checked where it is defined. Call it
+// after keepTimestampText, so a plain timestamp key reads as its text.
+func refuseEquivalentKeys(top *yaml.Node) error {
+	if top != nil && top.Kind == yaml.DocumentNode && len(top.Content) > 0 {
+		top = top.Content[0]
+	}
+	if top != nil && top.Kind == yaml.AliasNode && top.Alias != nil {
+		top = top.Alias
+	}
+	if top == nil {
+		return nil
+	}
+	c := &keyChecker{active: map[*yaml.Node]bool{}, walked: map[*yaml.Node]bool{}}
+	if top.Kind == yaml.MappingNode {
+		return c.mapping(top, stringKeys)
+	}
+	return c.value(top)
+}
+
+// destKeys is the key type of the map the decoder fills for a mapping.
+type destKeys int
+
+const (
+	stringKeys destKeys = iota // map[string]...: a key decodes into its text
+	anyKeys                    // map[interface{}]...: a key decodes into its YAML value
+)
+
+// maxSourceRepeats bounds how often the check walks a merge source it has already walked. Many
+// inline sources cost one walk each and are never counted. An alias that reuses a source counts,
+// because nested reuse grows exponentially while the decoder still reads the nodes, and the
+// decoder rejects that growth later (decode.go:484-490).
+const maxSourceRepeats = 100000
+
+type keyChecker struct {
+	walked  map[*yaml.Node]bool
+	repeats int
+	active  map[*yaml.Node]bool
+}
+
+// value checks a node the decoder reads into an interface value.
+func (c *keyChecker) value(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.MappingNode:
+		if isStringMap(n) {
+			return c.mapping(n, stringKeys)
+		}
+		return c.mapping(n, anyKeys)
+	case yaml.SequenceNode:
+		for _, child := range n.Content {
+			if err := c.value(child); err != nil {
+				return err
+			}
+		}
+	default:
+		// A scalar holds no keys, and an alias is checked where its anchor is defined.
+	}
+	return nil
+}
+
+// mapping checks mapping n, which the decoder reads into a map of key type kt, then the merge
+// sources it names.
+func (c *keyChecker) mapping(n *yaml.Node, kt destKeys) error {
+	if err := c.entries(n, kt, nil); err != nil {
+		return err
+	}
+	var taken map[any]bool
+	applied := map[*yaml.Node]bool{}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if !isMergeKey(n.Content[i]) {
+			continue
+		}
+		if taken == nil {
+			taken = ownKeys(n)
+		}
+		for _, source := range mergeSources(n.Content[i+1]) {
+			if err := c.source(source, kt, taken, applied); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// source checks one merge source of a mapping with key type kt, then the sources it names in
+// turn. taken holds the keys the destination already holds. A source that was applied once adds
+// nothing the second time, and a source that is being walked is a cycle the decoder rejects.
+func (c *keyChecker) source(n *yaml.Node, kt destKeys, taken map[any]bool, applied map[*yaml.Node]bool) error {
+	if applied[n] || c.active[n] {
+		return nil
+	}
+	if c.walked[n] {
+		c.repeats++
+		if c.repeats > maxSourceRepeats {
+			return errors.New("document reuses merge sources too often to check")
+		}
+	}
+	c.walked[n] = true
+	applied[n] = true
+	c.active[n] = true
+	defer delete(c.active, n)
+	if err := c.entries(n, kt, taken); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if !isMergeKey(n.Content[i]) {
+			continue
+		}
+		for _, next := range mergeSources(n.Content[i+1]) {
+			if err := c.source(next, kt, taken, applied); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// entries compares the keys of one mapping and checks the value of each entry the decoder reads.
+// taken is nil for the mapping itself. For a merge source it holds the keys already held, and an
+// entry with such a key is skipped.
+func (c *keyChecker) entries(n *yaml.Node, kt destKeys, taken map[any]bool) error {
+	type seenKey struct {
+		node *yaml.Node
+		key  any
+	}
+	var seen []seenKey
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		written, value := n.Content[i], n.Content[i+1]
+		if isMergeKey(written) {
+			continue
+		}
+		key, ok := decodeKey(written, kt)
+		if !ok {
+			continue // the later decode reports it
+		}
+		for _, prior := range seen {
+			if sameDecodedKey(prior.key, key) && (prior.node.Kind != written.Kind || prior.node.Value != written.Value) {
+				return errors.Errorf("map keys %s and %s both read %q", keyLabel(prior.node), keyLabel(written), fmt.Sprint(key))
+			}
+		}
+		if taken != nil {
+			if taken[key] {
+				continue
+			}
+			taken[key] = true
+		}
+		seen = append(seen, seenKey{written, key})
+		if err := c.value(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// decodeKey decodes a key node into the key type of its map, as the decoder does. It reports
+// false for a key the decoder cannot use as a map key.
+func decodeKey(key *yaml.Node, kt destKeys) (any, bool) {
+	if key.Kind != yaml.ScalarNode && key.Kind != yaml.AliasNode {
+		return nil, false
+	}
+	if kt == stringKeys {
+		return decodeText(key)
+	}
+	var value any
+	if key.Decode(&value) != nil || !hashable(value) {
+		return nil, false
+	}
+	return value, true
+}
+
+// decodeText decodes a key node into a string, as the decoder does for a string-keyed map and for
+// a struct field name. A null key does not decode into a string: unmarshal returns false with no
+// error (decode.go:554-562), and the decoder then skips the entry without holding its name
+// (decode.go:832 and :911). Node.Decode drops that false result, so the null is tested here.
+func decodeText(key *yaml.Node) (string, bool) {
+	target := key
+	if target.Kind == yaml.AliasNode && target.Alias != nil {
+		target = target.Alias
+	}
+	if target.Kind == yaml.ScalarNode && target.ShortTag() == "!!null" {
+		return "", false
+	}
+	var text string
+	if key.Decode(&text) != nil {
+		return "", false
+	}
+	return text, true
+}
+
+// ownKeys is the set the decoder starts a merge with: every own key of n decoded into an
+// interface value (merge, decode.go:960-968).
+func ownKeys(n *yaml.Node) map[any]bool {
+	taken := map[any]bool{}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		var value any
+		if n.Content[i].Decode(&value) == nil && hashable(value) {
+			taken[value] = true
+		}
+	}
+	return taken
+}
+
+func hashable(v any) bool {
+	t := reflect.TypeOf(v)
+	return t == nil || t.Comparable()
+}
+
+// isMergeKey reports whether key is the merge key `<<`, which names sources and is no entry.
+// It is yaml.v3's isMerge (decode.go:998) as pinned in go.mod: a quoted "<<" or a !!binary key
+// that reads "<<" is an ordinary key.
+func isMergeKey(key *yaml.Node) bool {
+	return key.Kind == yaml.ScalarNode && key.Value == "<<" &&
+		(key.Tag == "" || key.Tag == "!" || key.Tag == "!!merge")
+}
+
+// isStringMap is yaml.v3's isStringMap (decode.go:864), the test mapping (decode.go:790-795)
+// uses to choose a string-keyed map for a mapping it reads into an interface value: every own
+// key is a string or the merge key.
+func isStringMap(n *yaml.Node) bool {
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if tag := n.Content[i].ShortTag(); tag != "!!str" && tag != "!!merge" {
+			return false
+		}
+	}
+	return true
+}
+
+// mergeSources returns the mappings that the value of a merge key names: a mapping, an alias of
+// one, or a sequence of those (merge, decode.go:959-996). Anything else is the decoder's error.
+func mergeSources(value *yaml.Node) []*yaml.Node {
+	switch value.Kind {
+	case yaml.MappingNode:
+		return []*yaml.Node{value}
+	case yaml.AliasNode:
+		if value.Alias != nil && value.Alias.Kind == yaml.MappingNode {
+			return []*yaml.Node{value.Alias}
+		}
+	case yaml.SequenceNode:
+		var sources []*yaml.Node
+		for _, child := range value.Content {
+			sources = append(sources, mergeSources(child)...)
+		}
+		return sources
+	default:
+		// A scalar names no source.
+	}
+	return nil
+}
+
+// keyLabel is the text a user wrote for a key: an alias reads as `*name`.
+func keyLabel(key *yaml.Node) string {
+	if key.Kind == yaml.AliasNode {
+		return "*" + key.Value
+	}
+	return key.Value
+}
+
+// sameDecodedKey reports whether two decoded keys are one map key. Different Go types are
+// never equal, and a NaN never equals itself, which is how the decoder treats them.
+func sameDecodedKey(a, b any) bool {
+	return hashable(a) && hashable(b) && a == b
+}
+
+// refuseEquivalentPatchKeys applies refuseEquivalentKeys to the patch field of every entry of
+// the list form of a patch file. The decoder reads that field into a string-keyed map. An entry
+// can be an alias, and can take its patch field from a merge source, so both are followed.
+func refuseEquivalentPatchKeys(list *yaml.Node) error {
+	for _, entry := range list.Content {
+		for _, patch := range patchFields(entry) {
+			if err := refuseEquivalentKeys(patch); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// patchFields returns the value of the patch field of a list entry. The decoder reads an entry
+// into a struct, decoding each key into a string (mappingStruct, decode.go:878-953), so a key
+// written as `!!binary cGF0Y2g=` or as an alias of `patch` names the field too. A field in a
+// merge source counts unless the entry or an earlier source holds that name (decode.go:915-920).
+func patchFields(entry *yaml.Node) []*yaml.Node {
+	if entry.Kind == yaml.AliasNode && entry.Alias != nil {
+		entry = entry.Alias
+	}
+	if entry.Kind != yaml.MappingNode {
+		return nil
+	}
+	var fields []*yaml.Node
+	collectPatchFields(entry, ownKeys(entry), true, map[*yaml.Node]bool{}, &fields)
+	return fields
+}
+
+func collectPatchFields(n *yaml.Node, taken map[any]bool, own bool, applied map[*yaml.Node]bool, fields *[]*yaml.Node) {
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if isMergeKey(n.Content[i]) {
+			continue
+		}
+		name, ok := decodeText(n.Content[i])
+		if !ok {
+			continue
+		}
+		if !own {
+			if taken[name] {
+				continue
+			}
+			taken[name] = true
+		}
+		if name == "patch" {
+			*fields = append(*fields, n.Content[i+1])
+		}
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if !isMergeKey(n.Content[i]) {
+			continue
+		}
+		for _, source := range mergeSources(n.Content[i+1]) {
+			if !applied[source] {
+				applied[source] = true
+				collectPatchFields(source, taken, false, applied, fields)
+			}
+		}
+	}
+}
+
 func LoadResourcesFromMultiYAML(r io.Reader) ([]*unstructured.Unstructured, error) {
 	dec := yaml.NewDecoder(r)
 	var resources []*unstructured.Unstructured
@@ -305,6 +654,9 @@ func LoadResourcesFromMultiYAML(r io.Reader) ([]*unstructured.Unstructured, erro
 			return nil, fmt.Errorf("failed to decode resource document: %w", err)
 		}
 		keepTimestampText(&node)
+		if err := refuseEquivalentKeys(&node); err != nil {
+			return nil, errors.Wrap(err, "failed to decode resource document")
+		}
 		var raw map[string]any
 		if err := node.Decode(&raw); err != nil {
 			return nil, errors.Wrap(err, "failed to decode resource document")

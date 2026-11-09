@@ -72,6 +72,9 @@ func LoadResourcesWithStructure(r io.Reader) (*YAMLDocumentSet, error) {
 			return nil, errors.Wrapf(err, "failed to parse document %d into unstructured", i)
 		}
 		keepTimestampText(&rawNode)
+		if err := refuseEquivalentKeys(&rawNode); err != nil {
+			return nil, errors.Wrapf(err, "failed to parse document %d into unstructured", i)
+		}
 		var raw map[string]any
 		if err := rawNode.Decode(&raw); err != nil {
 			return nil, errors.Wrapf(err, "failed to parse document %d into unstructured", i)
