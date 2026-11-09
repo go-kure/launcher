@@ -209,6 +209,13 @@ func applyArrayReplace(obj map[string]any, op PatchOp) error {
 
 		// Apply the nested patch to the array item
 		for remainingPath, newValue := range valueMap {
+			// A rest that holds a selector is a patch on the item: parse it and apply it there.
+			if sub, perr := ParsePatchLine(remainingPath, newValue); perr == nil && (sub.Selector != "" || sub.Op != "replace") {
+				if err := applyPatchOp(item, sub); err != nil {
+					return errors.NewPatchError(op.Op, op.Path+"."+remainingPath, "", "failed to patch the list item", err)
+				}
+				continue
+			}
 			// Convert value to appropriate type for unstructured
 			convertedValue := convertValueForUnstructured(newValue)
 			if err := unstructured.SetNestedField(item, convertedValue, parsePath(remainingPath)...); err != nil {
@@ -238,9 +245,24 @@ func parsePath(path string) []string {
 	return strings.Split(clean, ".")
 }
 
+// nestedSelectorRe matches path[plain selector].rest where rest holds another selector. The
+// path before the first selector has no bracket, and a selector that starts with + or - is an
+// insert, which only the last selector of a key can be.
+var nestedSelectorRe = regexp.MustCompile(`^([^\[]+)\[([^\]+\-][^\]]*)\]\.(.*\[.*)$`)
+
 // ParsePatchLine converts a YAML patch line of form "path[selector]" into a PatchOp.
 func ParsePatchLine(key string, value any) (PatchOp, error) {
 	var op PatchOp
+	// A key with a plain selector (an index or key=value) followed by more path that holds a
+	// selector of its own splits at the first selector. The rest of the key travels in the
+	// value, and applying the item parses it again.
+	if m := nestedSelectorRe.FindStringSubmatch(key); len(m) == 4 {
+		op.Op = "replace"
+		op.Path = m[1]
+		op.Selector = m[2]
+		op.Value = map[string]any{m[3]: value}
+		return op, nil
+	}
 	if strings.HasSuffix(key, "[-]") {
 		op.Op = "append"
 		op.Path = strings.TrimSuffix(key, "[-]")
