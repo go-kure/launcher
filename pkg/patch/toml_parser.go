@@ -199,22 +199,22 @@ func (h *TOMLHeader) mapSectionsToKubernetesPath() []string {
 		switch section {
 		case "containers":
 			if isWorkloadKind(kind) {
-				pathParts = append(pathParts, "spec", "template", "spec", "containers")
+				pathParts = appendExpansion(pathParts, "spec", "template", "spec", "containers")
 			} else {
-				pathParts = append(pathParts, "spec", "containers")
+				pathParts = appendExpansion(pathParts, "spec", "containers")
 			}
 		case "initContainers":
 			if isWorkloadKind(kind) {
-				pathParts = append(pathParts, "spec", "template", "spec", "initContainers")
+				pathParts = appendExpansion(pathParts, "spec", "template", "spec", "initContainers")
 			} else {
-				pathParts = append(pathParts, "spec", "initContainers")
+				pathParts = appendExpansion(pathParts, "spec", "initContainers")
 			}
 		case "ports":
 			// Context-sensitive: could be container ports or service ports
-			if i > 0 && h.Sections[i-1] == "containers" {
+			if inContainerList(h.Sections, i) {
 				pathParts = append(pathParts, "ports")
 			} else {
-				pathParts = append(pathParts, "spec", "ports")
+				pathParts = appendExpansion(pathParts, "spec", "ports")
 			}
 		case "env":
 			pathParts = append(pathParts, "env")
@@ -224,9 +224,9 @@ func (h *TOMLHeader) mapSectionsToKubernetesPath() []string {
 			pathParts = append(pathParts, "volumeMounts")
 		case "volumes":
 			if isWorkloadKind(kind) {
-				pathParts = append(pathParts, "spec", "template", "spec", "volumes")
+				pathParts = appendExpansion(pathParts, "spec", "template", "spec", "volumes")
 			} else {
-				pathParts = append(pathParts, "spec", "volumes")
+				pathParts = appendExpansion(pathParts, "spec", "volumes")
 			}
 		case "resources":
 			pathParts = append(pathParts, "resources")
@@ -241,19 +241,19 @@ func (h *TOMLHeader) mapSectionsToKubernetesPath() []string {
 
 		// Service-specific sections
 		case "selector":
-			pathParts = append(pathParts, "spec", "selector")
+			pathParts = appendExpansion(pathParts, "spec", "selector")
 		case "type":
-			pathParts = append(pathParts, "spec", "type")
+			pathParts = appendExpansion(pathParts, "spec", "type")
 
 		// Ingress-specific sections
 		case "tls":
-			pathParts = append(pathParts, "spec", "tls")
+			pathParts = appendExpansion(pathParts, "spec", "tls")
 		case "rules":
 			if kind == "role" || kind == "clusterrole" {
 				pathParts = append(pathParts, "rules")
 			} else {
 				// Ingress rules
-				pathParts = append(pathParts, "spec", "rules")
+				pathParts = appendExpansion(pathParts, "spec", "rules")
 			}
 		case "backend":
 			pathParts = append(pathParts, "backend")
@@ -313,6 +313,33 @@ func (h *TOMLHeader) mapSectionsToKubernetesPath() []string {
 	}
 
 	return pathParts
+}
+
+// appendExpansion appends the path that a section name expands to. A section such as
+// `containers` expands to `spec.template.spec.containers`. When everything the header spelled
+// before it is the start of that path (`[deployment.app.spec.template.spec.containers]`), only the
+// rest is appended, so the part already written is not written twice. A header that spelled
+// something else first (`[deployment.app.metadata.spec.containers]`) is left as it was.
+func appendExpansion(pathParts []string, expansion ...string) []string {
+	if len(pathParts) <= len(expansion) && slices.Equal(pathParts, expansion[:len(pathParts)]) {
+		return append(pathParts, expansion[len(pathParts):]...)
+	}
+	return append(pathParts, expansion...)
+}
+
+// inContainerList reports whether section i sits directly under a container list, or under one
+// item of it (`containers.0.ports`). The two lists are `containers` and `initContainers`.
+func inContainerList(sections []string, i int) bool {
+	isList := func(s string) bool { return s == "containers" || s == "initContainers" }
+	if i > 0 && isList(sections[i-1]) {
+		return true
+	}
+	if i > 1 {
+		if _, err := strconv.Atoi(sections[i-1]); err == nil {
+			return isList(sections[i-2])
+		}
+	}
+	return false
 }
 
 // isWorkloadKind returns true for Kubernetes workload kinds that have pod templates
