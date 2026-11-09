@@ -147,7 +147,7 @@ func (o *ownedConfig) checkServiceName(obj client.Object) error {
 			}
 			return nil
 		case b.path == nil:
-			return o.serviceNameViolation(serviceNameGateProblem(object+" metadata.name", name, *o.target))
+			return o.serviceNameViolation(serviceNameGateProblem(gvk.Kind+" metadata.name", name, *o.target))
 		default:
 			return o.serviceNameViolation(serviceNameGateProblem(object+" "+strings.Join(b.path, "."), serviceNameField(m, b.path), *o.target))
 		}

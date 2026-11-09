@@ -1660,7 +1660,8 @@ at most 253 characters, and is used as given or refused, never shortened. The `p
 `workload-service` roles are narrower: a DNS-1123 label, which a Service's name must be, and
 the Pooler's Service carries the Pooler's name. A leading digit is accepted here, and a build
 whose `spec.kubernetesVersion` is below 1.36 (RelaxedServiceNameValidation off by default) refuses it in a generated Service
-at generation (`docs/delivery-scope.md` §3.5). Narrower
+at generation (`docs/delivery-scope.md` §3.5). The refusal of a name written in `metadata.name`
+names the kind and the field, as `Service metadata.name "1api"`, and prints the name once. Narrower
 still is `postgresql-cluster`, whose Services carry the Cluster's name with a suffix: a
 DNS-1035 label of at most 50 characters (CloudNativePG's own rule), a rule its default, the
 component name, is held to as well. `postgresql-scheduledbackup` keeps the subdomain's syntax

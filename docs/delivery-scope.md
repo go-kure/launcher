@@ -606,7 +606,7 @@ build for a cluster below Kubernetes 1.36 refuses it (the check, below).
   name to a DNS-1035 label and refuses one with a leading digit at creation. The gate is
   off by default below 1.36, so a build whose `kubernetesVersion` is below 1.36 refuses
   every generated object that names such a Service, as a violation of the owning
-  component (`component "api": Service "1api": a Service name may start with a digit only
+  component (`component "api": Service metadata.name "1api": a Service name may start with a digit only
   with the Kubernetes feature gate RelaxedServiceNameValidation, on by default from 1.36,
   and the ClusterProfile's kubernetesVersion is 1.35; start the name with a letter or raise
   spec.kubernetesVersion`). It reads the emitted objects, so a default name, a Naming
