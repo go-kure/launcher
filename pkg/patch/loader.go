@@ -61,7 +61,7 @@ func LoadPatchFileWithVariables(r io.Reader, varCtx *VariableContext) ([]PatchSp
 	// Read all content to detect format
 	content, err := io.ReadAll(r)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read patch content: %w", err)
+		return nil, errors.Wrap(err, "failed to read patch content")
 	}
 
 	contentStr := string(content)
@@ -79,7 +79,7 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 
 	var firstToken yaml.Node
 	if err := dec.Decode(&firstToken); err != nil {
-		return nil, fmt.Errorf("failed to read patch input: %w", err)
+		return nil, errors.Wrap(err, "failed to read patch input")
 	}
 	if firstToken.Kind == yaml.DocumentNode && len(firstToken.Content) > 0 {
 		firstToken = *firstToken.Content[0]
@@ -94,26 +94,26 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 		}
 		var raw map[string]any
 		if err := firstToken.Decode(&raw); err != nil {
-			return nil, fmt.Errorf("invalid simple patch map: %w", err)
+			return nil, errors.Wrap(err, "invalid simple patch map")
 		}
 		for k, v := range raw {
 			// Apply variable substitution to key
 			substitutedKey, err := SubstituteVariables(k, varCtx)
 			if err != nil {
-				return nil, fmt.Errorf("variable substitution failed for key: %w", err)
+				return nil, errors.Wrap(err, "variable substitution failed for key")
 			}
 			keyStr := fmt.Sprintf("%v", substitutedKey)
 
 			// Apply variable substitution to value based on type
 			substitutedValue, err := substituteVariablesInValue(v, varCtx)
 			if err != nil {
-				return nil, fmt.Errorf("variable substitution failed for key '%s': %w", keyStr, err)
+				return nil, errors.Wrapf(err, "variable substitution failed for key '%s'", keyStr)
 			}
 
 			// A YAML value keeps the type YAML gave it: a quoted "8080" stays a string.
 			op, err := ParsePatchLine(keyStr, substitutedValue)
 			if err != nil {
-				return nil, fmt.Errorf("invalid patch line '%s': %w", keyStr, err)
+				return nil, errors.Wrapf(err, "invalid patch line '%s'", keyStr)
 			}
 			patches = append(patches, PatchSpec{Patch: op})
 		}
@@ -123,19 +123,19 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 		}
 		var list []TargetedPatch
 		if err := firstToken.Decode(&list); err != nil {
-			return nil, fmt.Errorf("invalid patch list: %w", err)
+			return nil, errors.Wrap(err, "invalid patch list")
 		}
 		for _, entry := range list {
 			if entry.Type != "" && entry.Type != "strategic" {
-				return nil, fmt.Errorf("unknown patch type %q for target %q: must be \"\" or \"strategic\"", entry.Type, entry.Target)
+				return nil, errors.Errorf("unknown patch type %q for target %q: must be \"\" or \"strategic\"", entry.Type, entry.Target)
 			}
 			if entry.Type == "strategic" {
 				if len(entry.Patch) == 0 {
-					return nil, fmt.Errorf("strategic patch targeting '%s' has no patch payload", entry.Target)
+					return nil, errors.Errorf("strategic patch targeting '%s' has no patch payload", entry.Target)
 				}
 				substitutedPatch, err := substituteVariablesInMap(entry.Patch, varCtx)
 				if err != nil {
-					return nil, fmt.Errorf("variable substitution failed for strategic patch targeting '%s': %w", entry.Target, err)
+					return nil, errors.Wrapf(err, "variable substitution failed for strategic patch targeting '%s'", entry.Target)
 				}
 				debugLog("Strategic patch loaded: target=%s", entry.Target)
 				patches = append(patches, PatchSpec{
@@ -149,30 +149,30 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 				// Apply variable substitution to key
 				substitutedKey, err := SubstituteVariables(k, varCtx)
 				if err != nil {
-					return nil, fmt.Errorf("variable substitution failed for key: %w", err)
+					return nil, errors.Wrap(err, "variable substitution failed for key")
 				}
 				keyStr := fmt.Sprintf("%v", substitutedKey)
 
 				// Apply variable substitution to value based on type
 				substitutedValue, err := substituteVariablesInValue(v, varCtx)
 				if err != nil {
-					return nil, fmt.Errorf("variable substitution failed for key '%s': %w", keyStr, err)
+					return nil, errors.Wrapf(err, "variable substitution failed for key '%s'", keyStr)
 				}
 
 				// A YAML value keeps the type YAML gave it: a quoted "8080" stays a string.
 				op, err := ParsePatchLine(keyStr, substitutedValue)
 				if err != nil {
-					return nil, fmt.Errorf("invalid patch line '%s': %w", keyStr, err)
+					return nil, errors.Wrapf(err, "invalid patch line '%s'", keyStr)
 				}
 				if err := op.NormalizePath(); err != nil {
-					return nil, fmt.Errorf("invalid patch path syntax: %s: %w", op.Path, err)
+					return nil, errors.Wrapf(err, "invalid patch path syntax: %s", op.Path)
 				}
 				debugLog("Targeted patch loaded: target=%s op=%s path=%s value=%v", entry.Target, op.Op, op.Path, substitutedValue)
 				patches = append(patches, PatchSpec{Target: entry.Target, Patch: op})
 			}
 		}
 	} else {
-		return nil, fmt.Errorf("unrecognized patch format")
+		return nil, errors.New("unrecognized patch format")
 	}
 
 	return patches, nil
@@ -197,7 +197,7 @@ func LoadTOMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			header, err := ParseTOMLHeader(line)
 			if err != nil {
-				return nil, fmt.Errorf("invalid TOML header at line %d: %w", lineNum, err)
+				return nil, errors.Wrapf(err, "invalid TOML header at line %d", lineNum)
 			}
 			currentHeader = header
 			continue
@@ -205,13 +205,13 @@ func LoadTOMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 
 		// Parse key-value pair
 		if currentHeader == nil {
-			return nil, fmt.Errorf("patch value without header at line %d: %s", lineNum, line)
+			return nil, errors.Errorf("patch value without header at line %d: %s", lineNum, line)
 		}
 
 		// Split key: value
 		parts := strings.SplitN(line, ":", 2)
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid patch line format at line %d: %s", lineNum, line)
+			return nil, errors.Errorf("invalid patch line format at line %d: %s", lineNum, line)
 		}
 
 		key := strings.TrimSpace(parts[0])
@@ -220,7 +220,7 @@ func LoadTOMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 		// Convert TOML header to resource target and field path
 		resourceTarget, fieldPath, err := currentHeader.ResolveTOMLPath()
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve TOML path for header %s: %w", currentHeader.String(), err)
+			return nil, errors.Wrapf(err, "failed to resolve TOML path for header %s", currentHeader.String())
 		}
 
 		// Combine field path with key if we have a field path
@@ -236,17 +236,17 @@ func LoadTOMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 		// the name of the field the header names.
 		value, err := tomlValue(finalPath, valueStr, varCtx)
 		if err != nil {
-			return nil, fmt.Errorf("variable substitution failed at line %d: %w", lineNum, err)
+			return nil, errors.Wrapf(err, "variable substitution failed at line %d", lineNum)
 		}
 
 		// Create patch operation
 		op, err := ParsePatchLine(finalPath, value)
 		if err != nil {
-			return nil, fmt.Errorf("invalid patch line '%s' at line %d: %w", finalPath, lineNum, err)
+			return nil, errors.Wrapf(err, "invalid patch line '%s' at line %d", finalPath, lineNum)
 		}
 
 		if err := op.NormalizePath(); err != nil {
-			return nil, fmt.Errorf("invalid patch path syntax: %s: %w", op.Path, err)
+			return nil, errors.Wrapf(err, "invalid patch path syntax: %s", op.Path)
 		}
 
 		debugLog("TOML patch loaded: header=%s target=%s op=%s path=%s value=%v",
@@ -256,7 +256,7 @@ func LoadTOMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading patch file: %w", err)
+		return nil, errors.Wrap(err, "error reading patch file")
 	}
 
 	return patches, nil
@@ -651,7 +651,7 @@ func LoadResourcesFromMultiYAML(r io.Reader) ([]*unstructured.Unstructured, erro
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return nil, fmt.Errorf("failed to decode resource document: %w", err)
+			return nil, errors.Wrap(err, "failed to decode resource document")
 		}
 		keepTimestampText(&node)
 		if err := refuseEquivalentKeys(&node); err != nil {
@@ -736,7 +736,7 @@ func ResolveTargetKey(resources []*unstructured.Unstructured, target string) (st
 				return CanonicalResourceKey(r), nil
 			}
 		}
-		return "", fmt.Errorf("target %q not found in base resources", target)
+		return "", errors.Errorf("target %q not found in base resources", target)
 	}
 
 	// Try kind.name match first (case-insensitive)
@@ -752,7 +752,7 @@ func ResolveTargetKey(resources []*unstructured.Unstructured, target string) (st
 		return CanonicalResourceKey(kindNameMatches[0]), nil
 	}
 	if len(kindNameMatches) > 1 {
-		return "", fmt.Errorf("target %q is ambiguous, matches %d resources; use namespace/kind.name to disambiguate",
+		return "", errors.Errorf("target %q is ambiguous, matches %d resources; use namespace/kind.name to disambiguate",
 			target, len(kindNameMatches))
 	}
 
@@ -766,7 +766,7 @@ func ResolveTargetKey(resources []*unstructured.Unstructured, target string) (st
 
 	switch len(shortMatches) {
 	case 0:
-		return "", fmt.Errorf("target %q not found in base resources", target)
+		return "", errors.Errorf("target %q not found in base resources", target)
 	case 1:
 		return CanonicalResourceKey(shortMatches[0]), nil
 	default:
@@ -774,7 +774,7 @@ func ResolveTargetKey(resources []*unstructured.Unstructured, target string) (st
 		for i, r := range shortMatches {
 			names[i] = fmt.Sprintf("%s.%s", strings.ToLower(r.GetKind()), r.GetName())
 		}
-		return "", fmt.Errorf("target %q is ambiguous, matches: %s; use kind.name format",
+		return "", errors.Errorf("target %q is ambiguous, matches: %s; use kind.name format",
 			target, strings.Join(names, ", "))
 	}
 }
@@ -808,11 +808,11 @@ func resolvePatches(resources []*unstructured.Unstructured, patches []PatchSpec)
 		if spec.Strategic != nil {
 			target := spec.Target
 			if target == "" {
-				return nil, fmt.Errorf("strategic merge patch requires an explicit target")
+				return nil, errors.New("strategic merge patch requires an explicit target")
 			}
 			resolved, err := ResolveTargetKey(resources, target)
 			if err != nil {
-				return nil, fmt.Errorf("strategic merge patch: %w", err)
+				return nil, errors.Wrap(err, "strategic merge patch")
 			}
 			target = resolved
 
@@ -823,7 +823,7 @@ func resolvePatches(resources []*unstructured.Unstructured, patches []PatchSpec)
 
 		p := spec.Patch
 		if err := p.NormalizePath(); err != nil {
-			return nil, fmt.Errorf("invalid patch path syntax: %s: %w", p.Path, err)
+			return nil, errors.Wrapf(err, "invalid patch path syntax: %s", p.Path)
 		}
 
 		var target string
@@ -832,9 +832,9 @@ func resolvePatches(resources []*unstructured.Unstructured, patches []PatchSpec)
 			resolved, err := ResolveTargetKey(resources, spec.Target)
 			if err != nil {
 				if strings.Contains(err.Error(), "not found in base resources") {
-					return nil, fmt.Errorf("explicit target not found: %s", spec.Target)
+					return nil, errors.Errorf("explicit target not found: %s", spec.Target)
 				}
-				return nil, fmt.Errorf("explicit target %q: %w", spec.Target, err)
+				return nil, errors.Wrapf(err, "explicit target %q", spec.Target)
 			}
 			target = resolved
 		} else {
@@ -848,7 +848,7 @@ func resolvePatches(resources []*unstructured.Unstructured, patches []PatchSpec)
 		}
 
 		if target == "" {
-			return nil, fmt.Errorf("could not determine target resource for patch path: %s", p.Path)
+			return nil, errors.Errorf("could not determine target resource for patch path: %s", p.Path)
 		}
 
 		if trimmed != "" {

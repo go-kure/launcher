@@ -366,8 +366,9 @@ direct use of `ApplyStrategicMergePatch` (and its `applyJSONMergePatch`/`applyTy
 reached via `PatchableAppSet.WriteToFile`'s per-document apply loop, and
 `UpdateDocumentFromResource`). Those return plain wrapped errors (`errors.Wrap`/`fmt.Errorf`). So
 do the resource loaders and the patch file loader when two keys of one mapping read the same after conversion (`loader.go`, `op.go`; see
-Value Types in Loaded Resources). Do not assume every error out of this package is a
-`*errors.PatchError` — check the call path.
+Value Types in Loaded Resources). The loaders in `loader.go` build these plain errors with
+`Wrap`, `Wrapf`, `Errorf` and `New` from `pkg/errors`; their text is the same as before. Do not
+assume every error out of this package is a `*errors.PatchError` — check the call path.
 
 ## Related Packages
 
