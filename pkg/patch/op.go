@@ -66,7 +66,10 @@ func applyPatchOp(obj map[string]any, op PatchOp) error {
 		if op.Selector != "" {
 			return applyArrayReplace(obj, op)
 		}
-		convertedValue := convertValueForUnstructured(op.Value)
+		convertedValue, err := convertValueForUnstructured(op.Value)
+		if err != nil {
+			return errors.NewPatchError(op.Op, op.Path, "", "invalid replacement value", err)
+		}
 		if err := unstructured.SetNestedField(obj, convertedValue, parsePath(op.Path)...); err != nil {
 			return errors.NewPatchError(op.Op, op.Path, "", "failed to set field", err)
 		}
@@ -108,7 +111,10 @@ func applyPatchOp(obj map[string]any, op PatchOp) error {
 		if !found {
 			return errors.NewPatchError(op.Op, op.Path, "", "list not found", nil)
 		}
-		convertedValue := convertValueForUnstructured(op.Value)
+		convertedValue, err := convertValueForUnstructured(op.Value)
+		if err != nil {
+			return errors.NewPatchError(op.Op, op.Path, "", "invalid appended value", err)
+		}
 		lst = append(lst, convertedValue)
 		if err := unstructured.SetNestedSlice(obj, lst, parsePath(op.Path)...); err != nil {
 			return errors.NewPatchError(op.Op, op.Path, "", "failed to update list", err)
@@ -136,7 +142,10 @@ func applyListPatch(obj map[string]any, op PatchOp) error {
 		return errors.NewPatchError(op.Op, op.Path, "", "failed to resolve list index", err)
 	}
 
-	convertedValue := convertValueForUnstructured(op.Value)
+	convertedValue, err := convertValueForUnstructured(op.Value)
+	if err != nil {
+		return errors.NewPatchError(op.Op, op.Path, "", "invalid inserted value", err)
+	}
 	switch op.Op {
 	case "insertBefore":
 		lst = append(lst[:idx], append([]any{convertedValue}, lst[idx:]...)...)
@@ -217,7 +226,10 @@ func applyArrayReplace(obj map[string]any, op PatchOp) error {
 				continue
 			}
 			// Convert value to appropriate type for unstructured
-			convertedValue := convertValueForUnstructured(newValue)
+			convertedValue, err := convertValueForUnstructured(newValue)
+			if err != nil {
+				return errors.NewPatchError(op.Op, op.Path+"."+remainingPath, "", "invalid field value", err)
+			}
 			if err := unstructured.SetNestedField(item, convertedValue, parsePath(remainingPath)...); err != nil {
 				return errors.NewPatchError(op.Op, op.Path+"."+remainingPath, "", "failed to set nested field", err)
 			}
@@ -227,7 +239,10 @@ func applyArrayReplace(obj map[string]any, op PatchOp) error {
 		lst[idx] = item
 	} else {
 		// Direct replacement of the array item
-		convertedValue := convertValueForUnstructured(op.Value)
+		convertedValue, err := convertValueForUnstructured(op.Value)
+		if err != nil {
+			return errors.NewPatchError(op.Op, op.Path, "", "invalid item value", err)
+		}
 		lst[idx] = convertedValue
 	}
 
@@ -497,17 +512,24 @@ func isNumeric(s string) bool {
 }
 
 // convertValueForUnstructured converts values to types compatible with unstructured.SetNestedField
-// The unstructured package expects specific types and doesn't handle raw int types well
-func convertValueForUnstructured(value any) any {
+// The unstructured package expects specific types and doesn't handle raw int types well.
+// It returns an error when a mapping holds distinct non-string keys that read the same
+// after fmt.Sprint (`0x10` and `"16"`), because converting such a mapping would lose an
+// entry. Every caller refuses the patch on that error, before it changes the resource.
+func convertValueForUnstructured(value any) (any, error) {
 	var collision error
-	return convertChecked(value, &collision)
+	converted := convertChecked(value, &collision)
+	if collision != nil {
+		return nil, collision
+	}
+	return converted, nil
 }
 
 // convertChecked is convertValueForUnstructured that also reports, in *collision, the first
 // mapping whose distinct non-string keys read the same after fmt.Sprint (`0x10` and `"16"`).
-// The converted value is still returned; one of the colliding entries is then lost. A loader
-// returns the error instead of loading that value; only convertValueForUnstructured, which
-// ignores the error, keeps the survivor.
+// The converted value is still returned; one of the colliding entries is then lost. Both
+// callers, the loader and convertValueForUnstructured, return the error instead of using
+// that value, so a survivor is never loaded and never applied.
 func convertChecked(value any, collision *error) any {
 	switch v := value.(type) {
 	case int:
@@ -541,7 +563,8 @@ func convertChecked(value any, collision *error) any {
 		// and not looked up again by key, because a NaN key never equals itself. They are
 		// visited in the order of their Go syntax, so the message of a collision is stable;
 		// the order of keys that print the same way (`int(1)` and `float64(1)`) is not
-		// defined, which is harmless because a loader refuses such a collision.
+		// defined, which is harmless because a loader refuses such a collision and so does
+		// an apply of a patch value.
 		type entry struct{ key, val any }
 		entries := make([]entry, 0, len(v))
 		for k, val := range v {

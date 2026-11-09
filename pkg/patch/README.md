@@ -267,11 +267,11 @@ When using `NewPatchableAppSetWithStructure`, the original YAML document structu
 - A plain timestamp keeps its authored text and loads as a string, not as a `time.Time`. An explicit `!!timestamp` tag is treated the same way when the text parses as a time.
 - A mapping with a non-string key (`1: a`, `0x10: b`) loads as a string-keyed mapping. The key is its `fmt.Sprint` spelling.
 - Two keys of one mapping that read the same after that conversion (`0x10` and `"16"`) are an error; the loader refuses the document. A `.nan` key keeps its value.
+- A patch value with such colliding keys is refused when the patch is applied, and the resource is not changed.
 
 #### Known limits
 
 - Write-back of a non-string key whose authored spelling differs from its converted one (`.nan`, `0x10`) keeps both keys in the output: go-kure/launcher#1346.
-- A patch value that carries colliding non-string keys loses an entry without an error: go-kure/launcher#1347.
 - An unsigned integer above the `int64` range is not converted.
 
 ### Strategic Merge Patch
