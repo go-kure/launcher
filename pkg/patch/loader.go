@@ -90,7 +90,7 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 
 	if firstToken.Kind == yaml.MappingNode {
 		if err := refuseEquivalentKeys(&firstToken); err != nil {
-			return nil, fmt.Errorf("invalid simple patch map: %w", err)
+			return nil, errors.Wrap(err, "invalid simple patch map")
 		}
 		var raw map[string]any
 		if err := firstToken.Decode(&raw); err != nil {
@@ -119,7 +119,7 @@ func LoadYAMLPatchFile(r io.Reader, varCtx *VariableContext) ([]PatchSpec, error
 		}
 	} else if firstToken.Kind == yaml.SequenceNode {
 		if err := refuseEquivalentPatchKeys(&firstToken); err != nil {
-			return nil, fmt.Errorf("invalid patch list: %w", err)
+			return nil, errors.Wrap(err, "invalid patch list")
 		}
 		var list []TargetedPatch
 		if err := firstToken.Decode(&list); err != nil {
