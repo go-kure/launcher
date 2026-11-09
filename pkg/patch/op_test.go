@@ -676,7 +676,10 @@ func TestConvertValueForUnstructured(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := convertValueForUnstructured(tt.input)
+			got, err := convertValueForUnstructured(tt.input)
+			if err != nil {
+				t.Fatalf("convertValueForUnstructured(%v) returned an error: %v", tt.input, err)
+			}
 			if tt.input == nil {
 				if got != nil {
 					t.Errorf("expected nil, got %v", got)
@@ -695,7 +698,10 @@ func TestConvertValueForUnstructured_MapRecursion(t *testing.T) {
 		"count": int(5),
 		"name":  "test",
 	}
-	got := convertValueForUnstructured(input)
+	got, err := convertValueForUnstructured(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	m, ok := got.(map[string]any)
 	if !ok {
 		t.Fatalf("expected map, got %T", got)
@@ -710,7 +716,10 @@ func TestConvertValueForUnstructured_MapRecursion(t *testing.T) {
 
 func TestConvertValueForUnstructured_SliceRecursion(t *testing.T) {
 	input := []any{int(1), int32(2), "three"}
-	got := convertValueForUnstructured(input)
+	got, err := convertValueForUnstructured(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	s, ok := got.([]any)
 	if !ok {
 		t.Fatalf("expected slice, got %T", got)

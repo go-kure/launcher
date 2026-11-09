@@ -120,15 +120,18 @@ reference inside longer text, or two references, gives a string.
 All patch value types are compatible with `unstructured.Unstructured`:
 
 ```go
-func convertValueForUnstructured(value interface{}) interface{} {
+func convertValueForUnstructured(value interface{}) (interface{}, error) {
     switch v := value.(type) {
-    case int:    return int64(v)      // Kubernetes expects int64
-    case int32:  return int64(v)      // Convert to standard int64
-    case float32: return float64(v)   // Convert to standard float64
+    case int:    return int64(v), nil      // Kubernetes expects int64
+    case int32:  return int64(v), nil      // Convert to standard int64
+    case float32: return float64(v), nil   // Convert to standard float64
     // ... handle maps and slices recursively
     }
 }
 ```
+
+Two keys of one mapping that read the same after conversion (`0x10` and `"16"`) return an
+error. The patch is refused and the resource is not changed.
 
 ## List Resolution Algorithms
 
