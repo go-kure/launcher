@@ -489,7 +489,8 @@ func preserveComments(src, dst *yaml.Node) {
 // another type and back. Mappings pair entries by scalar key. A sequence pairs a scalar item
 // with the first unpaired authored scalar of the same text, so a deletion that moves items
 // down does not break the pairs. An authored item that is an alias counts as the scalar it
-// points at. A mapping or list item is paired by merge key, else by index.
+// points at. A mapping or list item is paired by merge key, else by index. The pairing takes
+// time linear in the list length.
 //
 // Limits, all of them quoting style and never a value: a patch that addresses a list item by
 // index or by key leaves every timestamp in that list quoted; after a delete, items that pair
@@ -622,16 +623,33 @@ func keepAuthoredStyleAt(authored, next *yaml.Node, path []string, touched [][]s
 			byKey = buildMergeKeyIndex(authored, mergeKey)
 		}
 		paired := make(map[*yaml.Node]bool, len(authored.Content))
+		// The authored scalar items by text, in list order, built once on the first scalar item.
+		// resume holds, for each text, the first index that can still be unpaired: an item before
+		// it is paired, and an item is never unpaired. So each authored item is passed at most
+		// once and the pairing takes time linear in the list length.
+		var byText map[string][]*yaml.Node
+		var resume map[string]int
 		for i, item := range next.Content {
 			var match *yaml.Node
 			switch {
 			case item.Kind == yaml.ScalarNode:
-				for _, candidate := range authored.Content {
-					target := resolveAlias(candidate)
-					if !paired[candidate] && target.Kind == yaml.ScalarNode && target.Value == item.Value {
-						match = candidate
-						break
+				if byText == nil {
+					byText = make(map[string][]*yaml.Node)
+					resume = make(map[string]int)
+					for _, candidate := range authored.Content {
+						if target := resolveAlias(candidate); target.Kind == yaml.ScalarNode {
+							byText[target.Value] = append(byText[target.Value], candidate)
+						}
 					}
+				}
+				candidates := byText[item.Value]
+				j := resume[item.Value]
+				for j < len(candidates) && paired[candidates[j]] {
+					j++
+				}
+				resume[item.Value] = j
+				if j < len(candidates) {
+					match = candidates[j]
 				}
 			default:
 				if mergeKey != "" {

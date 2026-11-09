@@ -1,9 +1,11 @@
 package patch
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -783,6 +785,90 @@ func TestWriteBack_AliasedTimestampInList_Touched(t *testing.T) {
 			}
 			if out := writtenBack(t, doc.Node); !strings.Contains(out, c.want) {
 				t.Errorf("write-back lacks %q:\n%s", c.want, out)
+			}
+		})
+	}
+}
+
+// A scalar list item pairs with the first unpaired authored scalar of the same text, in list
+// order. Both rows pass with the old scan and with the index: they guard the order and the
+// skip of a paired item, which a wrong index would break.
+func TestWriteBack_ScalarListPairingKeepsOrder(t *testing.T) {
+	const prefix = "apiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: stamps\nspec:\n"
+	t.Run("E1_equal_text_pairs_in_list_order", func(t *testing.T) {
+		// A quoted string, then two plain timestamps, all with the same text.
+		doc := loadOneDocument(t, prefix+"  list:\n  - \"2026-11-07\"\n  - 2026-11-07\n  - 2026-11-07\n")
+		if err := doc.ApplyPatchesToDocument(nil); err != nil {
+			t.Fatalf("ApplyPatchesToDocument: %v", err)
+		}
+		if out, want := writtenBack(t, doc.Node), "list:\n        - \"2026-11-07\"\n        - 2026-11-07\n        - 2026-11-07\n"; !strings.Contains(out, want) {
+			t.Errorf("write-back lacks %q:\n%s", want, out)
+		}
+	})
+	t.Run("E2_item_taken_by_a_mapping_is_skipped", func(t *testing.T) {
+		// The resource list becomes text, a mapping, text. The mapping takes the second authored
+		// item by index, so the last item must pair with the third authored item, the quoted one.
+		doc := loadOneDocument(t, prefix+"  list:\n  - 2026-11-07\n  - 2026-11-07\n  - \"2026-11-07\"\n")
+		list := []any{"2026-11-07", map[string]any{"k": "v"}, "2026-11-07"}
+		if err := unstructured.SetNestedSlice(doc.Resource.Object, list, "spec", "list"); err != nil {
+			t.Fatalf("SetNestedSlice: %v", err)
+		}
+		if err := doc.UpdateDocumentFromResource(); err != nil {
+			t.Fatalf("UpdateDocumentFromResource: %v", err)
+		}
+		if out, want := writtenBack(t, doc.Node), "list:\n        - 2026-11-07\n        - k: v\n        - \"2026-11-07\"\n"; !strings.Contains(out, want) {
+			t.Errorf("write-back lacks %q:\n%s", want, out)
+		}
+	})
+}
+
+// A scalar item pairs only with an authored scalar. An empty item must not take an authored
+// mapping, which has no text: the mapping item then pairs with it by index and keeps its style.
+func TestWriteBack_ScalarItemDoesNotTakeAMapping(t *testing.T) {
+	doc := loadOneDocument(t, "apiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: stamps\nspec:\n  list:\n  - a\n  - when: 2026-11-07\n")
+	list := []any{"", map[string]any{"when": "2026-11-07"}}
+	if err := unstructured.SetNestedSlice(doc.Resource.Object, list, "spec", "list"); err != nil {
+		t.Fatalf("SetNestedSlice: %v", err)
+	}
+	if err := doc.UpdateDocumentFromResource(); err != nil {
+		t.Fatalf("UpdateDocumentFromResource: %v", err)
+	}
+	if out, want := writtenBack(t, doc.Node), "list:\n        - \"\"\n        - when: 2026-11-07\n"; !strings.Contains(out, want) {
+		t.Errorf("write-back lacks %q:\n%s", want, out)
+	}
+}
+
+// scalarListPairingBound is the time the write-back of a 50000-item scalar list may take. The
+// linear pairing needs 0.1 to 0.2 s plain and up to 1.4 s under the race detector, and the
+// quadratic scan needed 21 s plain, so the bound separates them in both runs.
+const scalarListPairingBound = 5 * time.Second
+
+// The write-back of a scalar list takes time linear in the list length. The pairing of a list
+// item with its authored item scanned the whole authored list for every item.
+func TestWriteBack_LargeScalarListIsLinear(t *testing.T) {
+	const items = 50000
+	for _, c := range []struct {
+		name string
+		text func(i int) string
+	}{
+		{"distinct_strings", func(i int) string { return fmt.Sprintf("v%d", i) }},
+		{"one_repeated_timestamp", func(int) string { return "2026-11-07" }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var b strings.Builder
+			b.WriteString("apiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: stamps\nspec:\n  list:\n")
+			for i := 0; i < items; i++ {
+				b.WriteString("  - " + c.text(i) + "\n")
+			}
+			doc := loadOneDocument(t, b.String())
+			start := time.Now()
+			err := doc.ApplyPatchesToDocument(nil)
+			elapsed := time.Since(start)
+			if err != nil {
+				t.Fatalf("ApplyPatchesToDocument: %v", err)
+			}
+			if elapsed > scalarListPairingBound {
+				t.Errorf("write-back of a %d-item scalar list took %v, bound %v: the pairing is no longer linear", items, elapsed, scalarListPairingBound)
 			}
 		})
 	}
