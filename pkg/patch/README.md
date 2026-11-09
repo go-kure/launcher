@@ -65,6 +65,8 @@ it holds (`"8080"`, `"true"`), and its escapes are read as in Go (`"a\tb"`). An 
 a bool when it reads `true` or `false`, in any case, and an integer when the last part of its
 path is a known integer field (`replicas`, `port`, `containerPort`, and similar). Any other
 unquoted value stays a string. A whole `${values.x}` reference keeps the type of the variable.
+The path is the header path plus the key, so a key of only dots (`.: 3` under
+`[deployment.app.spec.replicas]`) sets the field the header names and gives the integer 3.
 
 ```toml
 # Target a resource by kind and name
