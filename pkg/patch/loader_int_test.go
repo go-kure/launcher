@@ -698,8 +698,29 @@ func TestWritePatchedFilesWithOptions_StrategicSameTextTimestampReplacementIsQuo
 // A timestamp reached through an alias is the same timestamp: the copy keeps the style of the
 // node the alias points at, on every write-back path.
 func TestWriteBack_AliasedTimestampKeepsAuthoredStyle(t *testing.T) {
-	const src = "apiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: stamps\nspec:\n  stamp: &date 2026-11-07\n  copy: *date\n"
-	for name, step := range map[string]func(*testing.T, *YAMLDocument){
+	const prefix = "apiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: stamps\nspec:\n"
+	for _, c := range []struct{ name, body, want string }{
+		{"mapping_value", "  stamp: &date 2026-11-07\n  copy: *date\n", "copy: 2026-11-07\n"},
+		{"scalar_list_item", "  stamp: &date 2026-11-07\n  dates:\n    - *date\n", "dates:\n        - 2026-11-07\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			for name, step := range writeBackSteps() {
+				t.Run(name, func(t *testing.T) {
+					doc := loadOneDocument(t, prefix+c.body)
+					step(t, doc)
+					if out := writtenBack(t, doc.Node); !strings.Contains(out, c.want) {
+						t.Errorf("write-back lacks %q:\n%s", c.want, out)
+					}
+				})
+			}
+		})
+	}
+}
+
+// writeBackSteps are the three write-back paths. Each one writes nothing under spec, so every
+// timestamp under spec is untouched.
+func writeBackSteps() map[string]func(*testing.T, *YAMLDocument) {
+	return map[string]func(*testing.T, *YAMLDocument){
 		"apply": func(t *testing.T, doc *YAMLDocument) {
 			if err := doc.ApplyPatchesToDocument(nil); err != nil {
 				t.Fatalf("ApplyPatchesToDocument: %v", err)
@@ -712,12 +733,56 @@ func TestWriteBack_AliasedTimestampKeepsAuthoredStyle(t *testing.T) {
 				t.Fatalf("UpdateDocumentFromResource: %v", err)
 			}
 		},
+	}
+}
+
+// A list item that is an alias counts as the scalar it points at, so it keeps that scalar's
+// authored style, on every write-back path. The controls pin what must not change: an alias of
+// a string, of a quoted string and of a mapping.
+func TestWriteBack_AliasedTimestampInList(t *testing.T) {
+	const prefix = "apiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: stamps\nspec:\n"
+	for _, c := range []struct{ name, body, want string }{
+		{"B_alias_then_plain_item", "  stamp: &date 2026-11-07\n  dates:\n    - *date\n    - 2026-11-08\n", "dates:\n        - 2026-11-07\n        - 2026-11-08\n"},
+		{"C_two_aliases_of_one_node", "  stamp: &date 2026-11-07\n  dates:\n    - *date\n    - *date\n", "dates:\n        - 2026-11-07\n        - 2026-11-07\n"},
+		{"E_alias_of_a_tagged_timestamp", "  stamp: &date !!timestamp 2026-11-07\n  dates:\n    - *date\n", "dates:\n        - !!timestamp 2026-11-07\n"},
+		{"H_anchor_item_then_its_alias", "  dates:\n    - &d 2026-11-07\n    - *d\n", "dates:\n        - 2026-11-07\n        - 2026-11-07\n"},
+		{"D_control_alias_of_a_string", "  name: &n hello\n  names:\n    - *n\n", "names:\n        - hello\n"},
+		{"G_control_alias_of_a_quoted_string", "  q: &q \"2026-11-07\"\n  dates:\n    - *q\n", "dates:\n        - \"2026-11-07\"\n"},
+		{"F_control_alias_of_a_mapping", "  base: &b {name: x}\n  items:\n    - *b\n", "items:\n        - name: x\n"},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
+			for name, step := range writeBackSteps() {
+				t.Run(name, func(t *testing.T) {
+					doc := loadOneDocument(t, prefix+c.body)
+					step(t, doc)
+					if out := writtenBack(t, doc.Node); !strings.Contains(out, c.want) {
+						t.Errorf("write-back lacks %q:\n%s", c.want, out)
+					}
+				})
+			}
+		})
+	}
+}
+
+// A field a patch writes keeps its own node, so a patch that writes the list quotes its
+// timestamp, while a patch that writes another field leaves the list item as authored.
+func TestWriteBack_AliasedTimestampInList_Touched(t *testing.T) {
+	const src = "apiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: stamps\nspec:\n  stamp: &date 2026-11-07\n  dates:\n    - *date\n  other: x\n"
+	for _, c := range []struct {
+		name  string
+		patch PatchOp
+		want  string
+	}{
+		{"T1_control_patch_writes_the_list", PatchOp{Op: "replace", Path: "spec.dates", Value: []any{"2026-11-07"}}, "dates:\n        - \"2026-11-07\"\n"},
+		{"T2_patch_writes_another_field", PatchOp{Op: "replace", Path: "spec.other", Value: "y"}, "dates:\n        - 2026-11-07\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
 			doc := loadOneDocument(t, src)
-			step(t, doc)
-			if out, want := writtenBack(t, doc.Node), "copy: 2026-11-07\n"; !strings.Contains(out, want) {
-				t.Errorf("write-back lacks %q:\n%s", want, out)
+			if err := doc.ApplyPatchesToDocument([]PatchOp{c.patch}); err != nil {
+				t.Fatalf("ApplyPatchesToDocument: %v", err)
+			}
+			if out := writtenBack(t, doc.Node); !strings.Contains(out, c.want) {
+				t.Errorf("write-back lacks %q:\n%s", c.want, out)
 			}
 		})
 	}
