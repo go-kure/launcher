@@ -6,6 +6,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // ConflictReport describes conflicts detected among strategic merge patches
@@ -63,7 +65,7 @@ func DetectSMPConflicts(
 			// here, so patches[i]/patches[j] cannot go out of range.
 			hasConflict, err := detectPairConflict(patches[i], patches[j], schema)
 			if err != nil {
-				return nil, fmt.Errorf("conflict detection failed between patch %d and %d: %w", i, j, err)
+				return nil, errors.Wrapf(err, "conflict detection failed between patch %d and %d", i, j)
 			}
 			if hasConflict {
 				report.Conflicts = append(report.Conflicts, PatchConflict{

@@ -121,7 +121,7 @@ func (s *PatchableAppSet) ResolveWithConflictCheck() ([]*ResourceWithPatches, []
 		gvk := rw.Base.GroupVersionKind()
 		report, err := DetectSMPConflicts(patchMaps, s.KindLookup, gvk)
 		if err != nil {
-			return nil, nil, fmt.Errorf("conflict detection failed for resource %s: %w", rw.Name, err)
+			return nil, nil, errors.Wrapf(err, "conflict detection failed for resource %s", rw.Name)
 		}
 		if report.HasConflicts() {
 			report.ResourceName = rw.Name
@@ -136,13 +136,13 @@ func (s *PatchableAppSet) ResolveWithConflictCheck() ([]*ResourceWithPatches, []
 // WriteToFile writes the patched resources to a file while preserving structure
 func (s *PatchableAppSet) WriteToFile(filename string) error {
 	if s.DocumentSet == nil {
-		return fmt.Errorf("no document set available for structure preservation")
+		return errors.New("no document set available for structure preservation")
 	}
 
 	// First, resolve and apply all patches
 	resolved, err := s.Resolve()
 	if err != nil {
-		return fmt.Errorf("failed to resolve patches: %w", err)
+		return errors.Wrap(err, "failed to resolve patches")
 	}
 
 	// Build maps for both patch types, keyed by canonical resource key to avoid
@@ -162,12 +162,12 @@ func (s *PatchableAppSet) WriteToFile(filename string) error {
 		docKey := CanonicalResourceKey(doc.Resource)
 		if rw, exists := strategicByTarget[docKey]; exists {
 			if err := doc.ApplyStrategicPatchesToDocument(rw.StrategicPatches, s.KindLookup); err != nil {
-				return fmt.Errorf("failed to apply strategic patches to document %s: %w", docKey, err)
+				return errors.Wrapf(err, "failed to apply strategic patches to document %s", docKey)
 			}
 		}
 		if patches, exists := patchesByTarget[docKey]; exists {
 			if err := doc.ApplyPatchesToDocument(patches); err != nil {
-				return fmt.Errorf("failed to apply patches to document %s: %w", docKey, err)
+				return errors.Wrapf(err, "failed to apply patches to document %s", docKey)
 			}
 		}
 	}
@@ -186,7 +186,7 @@ func (s *PatchableAppSet) WritePatchedFiles(originalPath string, patchFiles []st
 // with explicit debug control, avoiding mutation of the global Debug flag.
 func (s *PatchableAppSet) WritePatchedFilesWithOptions(originalPath string, patchFiles []string, outputDir string, debug bool) error {
 	if s.DocumentSet == nil {
-		return fmt.Errorf("no document set available for structure preservation")
+		return errors.New("no document set available for structure preservation")
 	}
 
 	for _, patchFile := range patchFiles {
@@ -196,19 +196,19 @@ func (s *PatchableAppSet) WritePatchedFilesWithOptions(originalPath string, patc
 		// Create a copy of the document set for this patch
 		docSetCopy, err := s.DocumentSet.Copy()
 		if err != nil {
-			return fmt.Errorf("failed to copy document set: %w", err)
+			return errors.Wrap(err, "failed to copy document set")
 		}
 
 		// Load patches from the specific patch file
 		patchReader, err := openFile(patchFile)
 		if err != nil {
-			return fmt.Errorf("failed to open patch file %s: %w", patchFile, err)
+			return errors.Wrapf(err, "failed to open patch file %s", patchFile)
 		}
 
 		patches, err := LoadPatchFile(patchReader)
 		_ = patchReader.Close()
 		if err != nil {
-			return fmt.Errorf("failed to load patches from %s: %w", patchFile, err)
+			return errors.Wrapf(err, "failed to load patches from %s", patchFile)
 		}
 
 		// Create a proper PatchableAppSet with structure preservation
@@ -222,7 +222,7 @@ func (s *PatchableAppSet) WritePatchedFilesWithOptions(originalPath string, patc
 				}
 				continue
 			}
-			return fmt.Errorf("failed to create patchable set for %s: %w", patchFile, err)
+			return errors.Wrapf(err, "failed to create patchable set for %s", patchFile)
 		}
 
 		// Propagate KindLookup so strategic merge patches use schema-aware merging
@@ -231,13 +231,13 @@ func (s *PatchableAppSet) WritePatchedFilesWithOptions(originalPath string, patc
 		// Resolve and apply patches
 		resolved, err := patchableSet.Resolve()
 		if err != nil {
-			return fmt.Errorf("failed to resolve patches from %s: %w", patchFile, err)
+			return errors.Wrapf(err, "failed to resolve patches from %s", patchFile)
 		}
 
 		// Apply patches to the resources in memory
 		for _, r := range resolved {
 			if err := r.Apply(); err != nil {
-				return fmt.Errorf("failed to apply patches to resource %s: %w", r.Name, err)
+				return errors.Wrapf(err, "failed to apply patches to resource %s", r.Name)
 			}
 		}
 
@@ -259,7 +259,7 @@ func (s *PatchableAppSet) WritePatchedFilesWithOptions(originalPath string, patc
 				// Update the YAML node from the patched resource; the fields the patches wrote keep their own node
 				touched := append(touchedPaths(r.Patches), touchedStrategicPaths(r.StrategicPatches)...)
 				if err := doc.updateDocumentFromResource(touched); err != nil {
-					return fmt.Errorf("failed to update document structure for %s: %w", r.Name, err)
+					return errors.Wrapf(err, "failed to update document structure for %s", r.Name)
 				}
 			}
 		}
@@ -267,13 +267,13 @@ func (s *PatchableAppSet) WritePatchedFilesWithOptions(originalPath string, patc
 		// Create output directory if it doesn't exist
 		if outputDir != "" && outputDir != "." {
 			if err := os.MkdirAll(outputDir, 0755); err != nil {
-				return fmt.Errorf("failed to create output directory %s: %w", outputDir, err)
+				return errors.Wrapf(err, "failed to create output directory %s", outputDir)
 			}
 		}
 
 		// Write to output file
 		if err := docSetCopy.WriteToFile(outputFile); err != nil {
-			return fmt.Errorf("failed to write patched file %s: %w", outputFile, err)
+			return errors.Wrapf(err, "failed to write patched file %s", outputFile)
 		}
 
 		if debug {

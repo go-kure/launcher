@@ -357,15 +357,15 @@ if errors.As(err, &pe) {
 
 `errors.As(err, &pe)` also matches failures from `PatchableAppSet.Resolve()`'s target-lookup check
 and `ResourceWithPatches.Apply()` (both build on the same `NewPatchError` calls above) even where a
-caller in `set.go` wraps them again with `fmt.Errorf("...: %w", err)` — `%w` preserves the chain.
+caller in `set.go` wraps them again with `errors.Wrap` or `errors.Wrapf` — the wrap preserves the chain.
 
 Three call paths do not produce a `*errors.PatchError`, so `errors.As(err, &pe)` will not match
 them: direct use of `ApplyStrategicMergePatch` (and its `applyJSONMergePatch`/`applyTypedSMP`
 helpers in `strategic.go`), `YAMLDocument.ApplyStrategicPatchesToDocument`, and
 `YAMLDocument.UpdateDocumentFromResource` (both in `yaml_preserve.go`). They return plain wrapped
-errors (`errors.Wrap`/`fmt.Errorf`). So do the resource loaders and the patch file loader when two
+errors (`errors.Wrap`/`errors.Wrapf`). So do the resource loaders and the patch file loader when two
 keys of one mapping read the same after conversion (`loader.go`, `op.go`; see Value Types in Loaded
-Resources). The loaders in `loader.go` build these plain errors with `Wrap`, `Wrapf`, `Errorf` and
+Resources). The files of this package build these plain errors with `Wrap`, `Wrapf`, `Errorf` and
 `New` from `pkg/errors`; their text is the same as before.
 
 `YAMLDocument.ApplyPatchesToDocument` is not one of them. It applies each field patch with the same

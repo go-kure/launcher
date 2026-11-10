@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // TOMLHeader represents a parsed TOML-style header like [kind.name.section.selector]
@@ -42,12 +44,12 @@ func ParseTOMLHeader(header string) (*TOMLHeader, error) {
 	// Remove brackets and trim whitespace
 	header = strings.TrimSpace(header)
 	if !strings.HasPrefix(header, "[") || !strings.HasSuffix(header, "]") {
-		return nil, fmt.Errorf("invalid TOML header format: %s", header)
+		return nil, errors.Errorf("invalid TOML header format: %s", header)
 	}
 
 	content := strings.TrimSpace(header[1 : len(header)-1])
 	if content == "" {
-		return nil, fmt.Errorf("empty TOML header")
+		return nil, errors.New("empty TOML header")
 	}
 
 	// Handle bracketed selectors first: [deployment.app.containers[image.name=main]]
@@ -58,7 +60,7 @@ func ParseTOMLHeader(header string) (*TOMLHeader, error) {
 
 		parts := strings.Split(path, ".")
 		if len(parts) < 2 {
-			return nil, fmt.Errorf("TOML header must have at least kind.name: %s", header)
+			return nil, errors.Errorf("TOML header must have at least kind.name: %s", header)
 		}
 
 		return &TOMLHeader{
@@ -75,7 +77,7 @@ func ParseTOMLHeader(header string) (*TOMLHeader, error) {
 	// Split by dots
 	parts := strings.Split(content, ".")
 	if len(parts) < 2 {
-		return nil, fmt.Errorf("TOML header must have at least kind.name: %s", header)
+		return nil, errors.Errorf("TOML header must have at least kind.name: %s", header)
 	}
 
 	result := &TOMLHeader{
