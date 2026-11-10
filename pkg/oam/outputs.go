@@ -2,6 +2,7 @@ package oam
 
 import (
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -140,20 +141,160 @@ func outputsOf(p OutputProvider, comp *Component, application string, naming fun
 // probeCopy returns a copy of comp a provider can be asked about without a
 // write reaching the component the build uses: the properties of the component
 // and of its traits, and its annotations, are copied down through every map,
-// slice and array in them, whatever its Go type (copyPropertyMap). Any other
-// value is shared.
+// slice, array, pointer and exported struct field in them, whatever its Go
+// type (copyProbeMap). A value whose type has a DeepCopy method is copied with
+// that method. A channel, a function, a zero-size value, and an unexported
+// field of a type without DeepCopy are shared.
 func probeCopy(comp Component) Component {
-	comp.Properties = copyPropertyMap(comp.Properties)
+	// One walk for the component and its traits: a pointee that two of them
+	// reference stays one pointee in the copy.
+	seen := map[propertyCopyKey]reflect.Value{}
+	comp.Properties = copyProbeMap(comp.Properties, seen)
 	comp.Annotations = maps.Clone(comp.Annotations)
 	if comp.Traits != nil {
 		traits := make([]Trait, len(comp.Traits))
 		for i, t := range comp.Traits {
-			t.Properties = copyPropertyMap(t.Properties)
+			t.Properties = copyProbeMap(t.Properties, seen)
 			traits[i] = t
 		}
 		comp.Traits = traits
 	}
 	return comp
+}
+
+// copyProbeMap is copyPropertyMap for the probe: the same walk, and it also
+// follows pointers and the exported fields of structs (copyProbeValue).
+func copyProbeMap(m map[string]any, seen map[propertyCopyKey]reflect.Value) map[string]any {
+	if m == nil {
+		return nil
+	}
+	return copyProbeValue(reflect.ValueOf(m), seen).Interface().(map[string]any)
+}
+
+// copyProbeValue copies v for the probe. A pointee seen before in this walk
+// keeps one copy, so two references to one pointee stay one pointee and a
+// pointer cycle ends. A map key is copied like a value, because a pointer in a
+// key reaches the caller's value too. A pointer keeps its own Go type, a
+// defined one (type P *string) included. A struct is copied whole first, then each exported field
+// is replaced by its own copy: reflection cannot set an unexported field, so
+// that field is shared unless the type's DeepCopy copies it.
+func copyProbeValue(v reflect.Value, seen map[propertyCopyKey]reflect.Value) reflect.Value {
+	if out, ok := probeDeepCopy(v, seen); ok {
+		return out
+	}
+	switch v.Kind() {
+	case reflect.Map:
+		if v.IsNil() {
+			return v
+		}
+		key := propertyCopyKey{ptr: v.Pointer(), typ: v.Type()}
+		if out, ok := seen[key]; ok {
+			return out
+		}
+		out := reflect.MakeMapWithSize(v.Type(), v.Len())
+		seen[key] = out
+		for iter := v.MapRange(); iter.Next(); {
+			out.SetMapIndex(copyProbeValue(iter.Key(), seen), copyProbeValue(iter.Value(), seen))
+		}
+		return out
+	case reflect.Slice:
+		if v.IsNil() {
+			return v
+		}
+		key := propertyCopyKey{ptr: v.Pointer(), len: v.Len(), typ: v.Type()}
+		if out, ok := seen[key]; ok {
+			return out
+		}
+		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+		seen[key] = out
+		for i := range v.Len() {
+			out.Index(i).Set(copyProbeValue(v.Index(i), seen))
+		}
+		return out
+	case reflect.Array:
+		out := reflect.New(v.Type()).Elem()
+		for i := range v.Len() {
+			out.Index(i).Set(copyProbeValue(v.Index(i), seen))
+		}
+		return out
+	case reflect.Interface:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.New(v.Type()).Elem()
+		out.Set(copyProbeValue(v.Elem(), seen))
+		return out
+	case reflect.Pointer:
+		if v.IsNil() {
+			return v
+		}
+		// A pointee of size zero holds no state, so a write through it reaches
+		// nothing. It stays shared: the runtime gives every new zero-size value
+		// one address, so copies of pointers to distinct zero-size values would
+		// become one pointer, and map keys made of them would collide.
+		if v.Type().Elem().Size() == 0 {
+			return v
+		}
+		// The key names the pointee and not the pointer type, so a defined
+		// pointer type (type P *T) and *T that reference one pointee get one
+		// copy. The copy is held as *T and converted to the type of each
+		// reference.
+		key := propertyCopyKey{ptr: v.Pointer(), typ: v.Type().Elem()}
+		if out, ok := seen[key]; ok {
+			return out.Convert(v.Type())
+		}
+		out := reflect.New(v.Type().Elem())
+		seen[key] = out
+		out.Elem().Set(copyProbeValue(v.Elem(), seen))
+		return out.Convert(v.Type())
+	case reflect.Struct:
+		out := reflect.New(v.Type()).Elem()
+		out.Set(v)
+		for i := range v.NumField() {
+			if v.Type().Field(i).IsExported() {
+				out.Field(i).Set(copyProbeValue(v.Field(i), seen))
+			}
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// probeDeepCopy copies v with its type's own DeepCopy method, when it has one
+// that takes nothing and returns the type of v itself: the value-receiver form
+// (func (T) DeepCopy() T, as resource.Quantity has) and the pointer-receiver
+// form (func (*T) DeepCopy() *T, as the generated Kubernetes types have). It
+// never calls the method on a nil pointer or on a value reflection marks
+// unexported. The method runs in the probe: it must be pure. A pointer it
+// returns is recorded in seen, so two references to one pointee get one copy.
+func probeDeepCopy(v reflect.Value, seen map[propertyCopyKey]reflect.Value) (reflect.Value, bool) {
+	if !v.IsValid() || !v.CanInterface() {
+		return reflect.Value{}, false
+	}
+	if k := v.Kind(); k != reflect.Pointer && k != reflect.Struct {
+		return reflect.Value{}, false
+	}
+	if v.Kind() == reflect.Pointer && v.IsNil() {
+		return reflect.Value{}, false
+	}
+	m := v.MethodByName("DeepCopy")
+	if !m.IsValid() {
+		return reflect.Value{}, false
+	}
+	if t := m.Type(); t.NumIn() != 0 || t.NumOut() != 1 || t.Out(0) != v.Type() {
+		return reflect.Value{}, false
+	}
+	if v.Kind() != reflect.Pointer {
+		return m.Call(nil)[0], true
+	}
+	key := propertyCopyKey{ptr: v.Pointer(), typ: v.Type().Elem()}
+	if out, ok := seen[key]; ok {
+		return out.Convert(v.Type()), true
+	}
+	out := m.Call(nil)[0]
+	seen[key] = out
+	return out, true
 }
 
 // checkRuleOutputs holds the outputs a lowering rule declared for component
