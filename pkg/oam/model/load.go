@@ -27,7 +27,9 @@ var ErrInvalid = errors.New("invalid model")
 // whose anchor is not defined earlier in the document is refused
 // by the YAML parser, with its own error and no line. A YAML type
 // error, such as a list where a string belongs, names the line of the field and
-// not its path. A null entry in a list of strings or of objects with fixed fields
+// not its path. An explicit tag that does not fit its value, such as `!!bool notabool`,
+// names its line when exactly one tagged value is at fault. A null entry in a list of
+// strings or of objects with fixed fields
 // fails with its path, and so does a free-form mapping that holds two keys YAML
 // reads as one. Load returns the first
 // failure, and a nil model with it. The YAML, apiVersion and kind checks come
@@ -65,6 +67,9 @@ func Load(data []byte) (*Model, error) {
 	strict.KnownFields(true)
 	var m Model
 	if err := strict.Decode(&m); err != nil {
+		if located := locateTagError(&root, err); located != nil {
+			return nil, located
+		}
 		return nil, errors.Errorf("model: %w", err)
 	}
 
@@ -108,6 +113,42 @@ func refuseIndirection(n *yaml.Node) error {
 		}
 	}
 	return nil
+}
+
+// locateTagError adds a line to the failure of a YAML explicit tag that does not fit its
+// value, such as `!!bool notabool` or a `!!binary` payload that is not base64. yaml.v3
+// reports such a failure with no position. The strict decode stops at the first failing
+// node it reaches, and it never reaches a value it skips, such as the value under a null
+// key or under an unknown field. A walk cannot tell which nodes the decode reaches. So it
+// names a line only when exactly one tagged scalar fails to decode, and that scalar's
+// message is the message of the strict decode. With no such scalar, or with two or more,
+// it returns nil and the caller keeps the error as it is. A type error of the strict
+// decode already names its line and is left alone.
+func locateTagError(root *yaml.Node, err error) error {
+	var typeErr *yaml.TypeError
+	if stderrors.As(err, &typeErr) {
+		return nil
+	}
+	var failing []*yaml.Node
+	var failure string
+	var walk func(n *yaml.Node)
+	walk = func(n *yaml.Node) {
+		if n.Kind == yaml.ScalarNode && n.Style&yaml.TaggedStyle != 0 {
+			var v any
+			if derr := n.Decode(&v); derr != nil {
+				failing = append(failing, n)
+				failure = strings.TrimPrefix(derr.Error(), "yaml: ")
+			}
+		}
+		for _, c := range n.Content {
+			walk(c)
+		}
+	}
+	walk(root)
+	if len(failing) != 1 || failure != strings.TrimPrefix(err.Error(), "yaml: ") {
+		return nil
+	}
+	return errors.Errorf("model: line %d: %s", failing[0].Line, failure)
 }
 
 // identRe is a CEL identifier. Input, value, part and loop-variable names are
