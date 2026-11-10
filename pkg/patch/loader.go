@@ -317,8 +317,12 @@ func keepTimestampText(n *yaml.Node) {
 // and does not report it: the decoder reports only a literal repeat, which has the same kind and
 // text (decode.go:769-778). Keys of different Go types that read the same after conversion
 // (`0x10` and `"16"`) are left to convertChecked, and complex keys are skipped. The target of an
-// alias value is not followed, because the anchored node is checked where it is defined. Call it
-// after keepTimestampText, so a plain timestamp key reads as its text.
+// alias value is followed and checked where the alias is used, because the anchor may sit where the
+// decoder never reads it: in a merged entry the mapping overrides, or in a field the patch entry
+// does not declare. The decoder decodes the target into the same interface value as the alias
+// (decode.go:533-542), so the key type is the one value picks for the target. An anchor that no
+// alias reads is not read either, because nothing is lost. Call it after keepTimestampText, so a
+// plain timestamp key reads as its text.
 func refuseEquivalentKeys(top *yaml.Node) error {
 	if top != nil && top.Kind == yaml.DocumentNode && len(top.Content) > 0 {
 		top = top.Content[0]
@@ -329,7 +333,7 @@ func refuseEquivalentKeys(top *yaml.Node) error {
 	if top == nil {
 		return nil
 	}
-	c := &keyChecker{active: map[*yaml.Node]bool{}, walked: map[*yaml.Node]bool{}}
+	c := &keyChecker{active: map[*yaml.Node]bool{}, walked: map[*yaml.Node]bool{}, followed: map[*yaml.Node]bool{}}
 	if top.Kind == yaml.MappingNode {
 		return c.mapping(top, stringKeys)
 	}
@@ -354,11 +358,29 @@ type keyChecker struct {
 	walked  map[*yaml.Node]bool
 	repeats int
 	active  map[*yaml.Node]bool
+	// followed holds the targets of the alias values value has started on. The result of value
+	// depends on the node alone, so a target that many aliases reuse is checked once, and an alias
+	// that reaches its own anchor ends here, as the decoder ends it (decode.go:533-537).
+	followed map[*yaml.Node]bool
 }
 
-// value checks a node the decoder reads into an interface value.
+// value checks a node the decoder reads into an interface value. An alias reads its target into
+// the same interface value, so the target is checked here, where it is used.
 func (c *keyChecker) value(n *yaml.Node) error {
 	switch n.Kind {
+	case yaml.AliasNode:
+		if n.Alias == nil || c.followed[n.Alias] {
+			return nil
+		}
+		c.followed[n.Alias] = true
+		// The target is read afresh, so no merge of the enclosing walk is in progress for it. Keeping
+		// that walk's active sources would skip a source the target reads and leave it unchecked for
+		// every later alias, which the followed memo then skips.
+		outer := c.active
+		c.active = map[*yaml.Node]bool{}
+		err := c.value(n.Alias)
+		c.active = outer
+		return err
 	case yaml.MappingNode:
 		if isStringMap(n) {
 			return c.mapping(n, stringKeys)
@@ -371,7 +393,7 @@ func (c *keyChecker) value(n *yaml.Node) error {
 			}
 		}
 	default:
-		// A scalar holds no keys, and an alias is checked where its anchor is defined.
+		// A scalar holds no keys.
 	}
 	return nil
 }
