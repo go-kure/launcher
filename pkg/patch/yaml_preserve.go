@@ -320,7 +320,7 @@ func mayReadOtherwise(n *yaml.Node) bool {
 				continue
 			}
 			// The decoder refuses two keys of one authored text, and the loader two of one reading.
-			read, raw := "r:"+keyText(n.Content[i]), "w:"+rawKeyText(n.Content[i])
+			read, raw := "r:"+keyText(n.Content[i]), "w:"+resolveAlias(n.Content[i]).Value
 			if seen[read] || seen[raw] {
 				return true
 			}
@@ -417,9 +417,15 @@ func keyText(n *yaml.Node) string {
 	return fmt.Sprint(v)
 }
 
-// rawKeyText returns the text of a key as authored, an alias key being the key it points at. The
-// root mapping of a document pairs by it, because the loader keeps the authored text of a root key.
+// rawKeyText returns the text of a key as the loader reads it from the root mapping, an alias key
+// being the key it points at. The loader decodes a root key into a string and keeps that text, so
+// a plain key keeps its authored text (`0x10`) and a tagged key reads as its decoded text
+// (`!!binary YWJj` reads `abc`). A null key does not decode into a string, and the loader skips
+// it, so it keeps the resolved text.
 func rawKeyText(n *yaml.Node) string {
+	if text, ok := decodeText(n); ok {
+		return text
+	}
 	return resolveAlias(n).Value
 }
 
@@ -455,7 +461,9 @@ func mergeMappingNodesAt(original, patched *yaml.Node, root bool) error {
 	patchedMap := make(map[string]*yaml.Node)
 	patchedKeys := make(map[string]*yaml.Node)
 	for i := 0; i < len(patched.Content); i += 2 {
-		key := patched.Content[i].Value
+		// The marshaler writes a key that is not text as `!!binary`, so a key pairs by the text the
+		// loader reads on both sides, never by the text the marshaler wrote.
+		key := pairKey(patched.Content[i])
 		value := patched.Content[i+1]
 		patchedMap[key] = value
 		patchedKeys[key] = patched.Content[i]
@@ -493,13 +501,14 @@ func mergeMappingNodesAt(original, patched *yaml.Node, root bool) error {
 	for key, value := range patchedMap {
 		// A new key keeps the tag and style the marshaler gave it, so a string key that reads as
 		// a number (`"16"`) is written quoted, and so does not read as another key.
+		written := patchedKeys[key].Value
 		keyNode := &yaml.Node{
 			Kind:  yaml.ScalarNode,
-			Value: key,
+			Value: written,
 			Tag:   patchedKeys[key].Tag,
 			Style: patchedKeys[key].Style,
 		}
-		if authored, ok := held[key]; ok {
+		if authored, ok := held[written]; ok {
 			// The authored key takes its resource spelling. Where another key of the mapping already
 			// holds that text, the written mapping holds it twice and does not load. mergeBack finds
 			// that when it loads the merged text again, and writes the patched resource as it stands:
@@ -711,7 +720,7 @@ func preserveAt(src, dst *yaml.Node, comments bool) {
 		if dstKey.Kind != yaml.ScalarNode {
 			continue
 		}
-		if srcKV, ok := srcMap[dstKey.Value]; ok {
+		if srcKV, ok := srcMap[keyText(dstKey)]; ok {
 			// A key that is not a string reads differently in the resource (`0x10` reads "16"):
 			// the item keeps the authored key text, tag and style. It does not when another key of
 			// the item already has that text, because the item would then hold the text twice.
@@ -1074,7 +1083,12 @@ func keepAuthoredStyleAt(authored, next *yaml.Node, path []string, touched [][]s
 			if next.Content[i].Kind != yaml.ScalarNode {
 				continue
 			}
-			key := next.Content[i].Value
+			// A key pairs by the text the loader reads, as the authored keys above do: the marshaler
+			// writes a key that is not text as `!!binary`.
+			key := keyText(next.Content[i])
+			if len(path) == 0 {
+				key = rawKeyText(next.Content[i])
+			}
 			if value, ok := authoredValues[key]; ok {
 				keepAuthoredStyleAt(value, next.Content[i+1], append(slices.Clone(path), key), touched)
 			}
