@@ -154,7 +154,7 @@ The four numbers are start values. Raising a limit later breaks no model. Loweri
 
 | Call | Does |
 |---|---|
-| `model.Load(data)` | Decodes one document and checks it. A failure of a decoded document wraps `model.ErrInvalid` and names the field, for example `spec.parts[1].id`. A YAML, `apiVersion` or `kind` failure does not wrap it. A YAML type error, such as a list where a string belongs, names the line of the field and not its path. |
+| `model.Load(data)` | Decodes one document and checks it. A failure of a decoded document wraps `model.ErrInvalid` and names the field, for example `spec.parts[1].id`. A YAML, `apiVersion` or `kind` failure does not wrap it. A YAML type error, such as a list where a string belongs, names the line of the field and not its path. An explicit tag that does not fit its value, such as `!!bool notabool`, names its line too, when one tagged value is at fault; with two or more, the error has no line. |
 | `(*Model).Identity()` | The model identity as written in `metadata`. |
 | `(*Model).Key()` | The identity with the version in the canonical form (`name@v2.0.0`). The registry returns a version as it was registered, so compare and store this form (`oam.TypeID.Canonical`). |
 
