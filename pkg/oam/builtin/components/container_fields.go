@@ -381,10 +381,7 @@ func schemaInitContainerRestart() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"restartPolicy": {
 			Type: oam.PropertyTypeString, Enum: enumValues(initContainerRestartPolicies),
-			ValueGates: map[string]string{
-				string(corev1.ContainerRestartPolicyNever):     "ContainerRestartRules",
-				string(corev1.ContainerRestartPolicyOnFailure): "ContainerRestartRules",
-			},
+			ValueGates:  maps.Clone(initContainerRestartValueGates),
 			Description: "The init container's own restart policy, overriding the pod's for this container. Always makes the container a native sidecar: it runs for the life of the pod, alongside the main container, and takes probes and lifecycle hooks but no restartPolicyRules. Never and OnFailure need the cluster's ContainerRestartRules feature gate, on by default from Kubernetes 1.35.",
 		},
 		"restartPolicyRules": {

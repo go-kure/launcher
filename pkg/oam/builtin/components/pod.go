@@ -63,10 +63,10 @@ func (h *PodHandler) PropertySchema() map[string]oam.PropertySchema {
 	}
 	containers := podListSchema("Required. Pod spec.containers: the containers of the pod. Each image is held to the image rule and, under an environment policy, to its registry allowlist, resource maxima and privilege gates.", container, "Container")
 	containers.Required = true
-	containers = withItemGatedPaths(containers, containerGatedPaths)
+	containers = withItemGatedPaths(containers, regularContainerPaths(), nil)
 	return map[string]oam.PropertySchema{
 		"volumes":                       podListSchema("Pod spec.volumes: the volumes the containers can mount. A hostPath volume is refused unless the environment policy allows hostPath volumes.", "One volume: name and exactly one volume source.", "Volume"),
-		"initContainers":                withItemGatedPaths(podListSchema("Pod spec.initContainers: the containers run to completion, in order, before the regular ones. Held to the same rules as containers.", container, "Container"), containerGatedPaths),
+		"initContainers":                withItemGatedPaths(podListSchema("Pod spec.initContainers: the containers run to completion, in order, before the regular ones. Held to the same rules as containers.", container, "Container"), containerGatedPaths, initContainerValueGatedPaths),
 		"containers":                    containers,
 		"restartPolicy":                 str("Pod spec.restartPolicy: Always, OnFailure or Never. The API server defaults it to Always."),
 		"terminationGracePeriodSeconds": integer("Pod spec.terminationGracePeriodSeconds: seconds the pod is given to stop before it is killed. The API server defaults it to 30."),

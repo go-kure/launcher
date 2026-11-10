@@ -39,6 +39,16 @@ func TestFeatureGates_TableAndSchemasAgree(t *testing.T) {
 				t.Errorf("%s: GatedPaths %q names gate %q, which names no row of the lifecycle table", path, p, gate)
 			}
 		}
+		// The gates an open schema names for values below it (ValueGatedPaths,
+		// go-kure/launcher#1330) are held to the table in both directions too.
+		for p, gates := range node.ValueGatedPaths {
+			for value, gate := range gates {
+				used[gate] = true
+				if _, ok := oam.FeatureGateOnByDefault(gate); !ok {
+					t.Errorf("%s: ValueGatedPaths %q value %q names gate %q, which names no row of the lifecycle table", path, p, value, gate)
+				}
+			}
+		}
 		// A per-value gate (PropertySchema.ValueGates) names a row too, and must sit on
 		// a value the property's Enum lists (go-kure/launcher#1230).
 		for value, gate := range node.ValueGates {

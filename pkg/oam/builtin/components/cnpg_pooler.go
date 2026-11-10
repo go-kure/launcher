@@ -96,9 +96,10 @@ func (h *CnpgPoolerHandler) PropertySchema() map[string]oam.PropertySchema {
 	// The template is open, so the feature-gate check cannot find a Gate inside
 	// it. It decodes into cnpgv1.PodTemplateSpec, whose spec is a corev1.PodSpec,
 	// so it takes the same gated paths as the pod template kinds
-	// (go-kure/launcher#1321).
+	// (go-kure/launcher#1321), and the same value-gated paths (go-kure/launcher#1330).
 	template := obj("Pod template for the PgBouncer pods. Environment policy applies to it: host namespaces, hostPath volumes, privilege, capabilities, image registries and cpu/memory maxima.")
 	template.GatedPaths = podTemplateGatedPaths()
+	template.ValueGatedPaths = podTemplateValueGatedPaths()
 	return map[string]oam.PropertySchema{
 		"cluster":            required(obj("Required. Reference to the CloudNativePG Cluster the pooler serves: {name: <cluster>}. The name must differ from this pooler's own.")),
 		"type":               {Type: oam.PropertyTypeString, Description: "Service the pooler forwards to: rw, ro or r. The operator's default (rw) applies when omitted."},
