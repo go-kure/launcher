@@ -62,7 +62,15 @@ func refuseNullElements(n *yaml.Node, t reflect.Type, path string) error {
 			if t.Key().Kind() == reflect.String && isNullScalar(n.Content[i]) {
 				continue
 			}
-			if err := refuseNullElements(n.Content[i+1], t.Elem(), joinPath(path, n.Content[i].Value)); err != nil {
+			// The path names the key as decoded, like the struct branch above: a key
+			// tagged !!binary names the entry its decoded text names. A key that does
+			// not decode into a string keeps its raw spelling.
+			name := n.Content[i].Value
+			var decoded string
+			if t.Key().Kind() == reflect.String && n.Content[i].Decode(&decoded) == nil {
+				name = decoded
+			}
+			if err := refuseNullElements(n.Content[i+1], t.Elem(), joinPath(path, name)); err != nil {
 				return err
 			}
 		}
