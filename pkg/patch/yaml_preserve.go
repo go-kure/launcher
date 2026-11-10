@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -199,13 +200,36 @@ func (doc *YAMLDocument) ApplyPatchesToDocument(patches []PatchOp) error {
 	}
 
 	// Give an untouched timestamp its authored style, then merge to keep the comments
-	keepAuthoredTimestampStyle(doc.Node, &patchedNode, touchedPaths(patches))
-	if err := mergeYAMLNodes(doc.Node, &patchedNode); err != nil {
-		// If merging fails, fall back to using the patched node
-		doc.Node = &patchedNode
-	}
+	return doc.mergeBack(patchedYAML, &patchedNode, touchedPaths(patches))
+}
 
+// mergeBack merges the patched node into the document. The document is written from the patched
+// resource as it stands, and so loses its comments, in two cases: the merge reports an error, or the
+// merged text would not load (an alias key whose anchor now sits after it, after a list is reordered).
+// The merge changes the patched node (it gives its keys and items the authored text and comments), so
+// the fallback is a second parse of the same bytes, made before the merge: it holds nothing of the
+// document, and it loads.
+func (doc *YAMLDocument) mergeBack(patchedYAML []byte, patched *yaml.Node, touched [][]string) error {
+	var fallback yaml.Node
+	if err := yaml.Unmarshal(patchedYAML, &fallback); err != nil {
+		return errors.Wrap(err, "failed to parse patched YAML")
+	}
+	keepAuthoredTimestampStyle(doc.Node, patched, touched)
+	keepAuthoredTimestampStyle(doc.Node, &fallback, touched)
+	if err := mergeYAMLNodes(doc.Node, patched); err != nil || !loadsAgain(doc.Node) {
+		doc.Node = &fallback
+	}
 	return nil
+}
+
+// loadsAgain reports whether the document node, written out, loads again through the loader.
+func loadsAgain(node *yaml.Node) bool {
+	out, err := yaml.Marshal(node)
+	if err != nil {
+		return false
+	}
+	_, err = LoadResourcesWithStructure(bytes.NewReader(out))
+	return err == nil
 }
 
 // ApplyStrategicPatchesToDocument applies strategic merge patches to a YAML
@@ -230,12 +254,7 @@ func (doc *YAMLDocument) ApplyStrategicPatchesToDocument(patches []StrategicPatc
 		return fmt.Errorf("failed to parse patched YAML: %w", err)
 	}
 
-	keepAuthoredTimestampStyle(doc.Node, &patchedNode, touchedStrategicPaths(patches))
-	if err := mergeYAMLNodes(doc.Node, &patchedNode); err != nil {
-		doc.Node = &patchedNode
-	}
-
-	return nil
+	return doc.mergeBack(patchedYAML, &patchedNode, touchedStrategicPaths(patches))
 }
 
 // mergeYAMLNodes attempts to merge patched values into original node structure
@@ -378,14 +397,10 @@ func mergeMappingNodesAt(original, patched *yaml.Node, root bool) error {
 		}
 		if authored, ok := held[key]; ok {
 			// The authored key takes its resource spelling. Where another key of the mapping already
-			// holds that text, the written mapping would hold it twice and not load. The merge then
-			// reports an error, and the caller writes the patched resource as it stands: it loads, and
-			// the comments of the document are lost.
-			text := keyText(authored)
-			if other, clash := held[text]; clash && other != authored {
-				return fmt.Errorf("key %q would take the text %q of another key", key, text)
-			}
-			authored.Value, authored.Tag, authored.Style = text, "!!str", 0
+			// holds that text, the written mapping holds it twice and does not load. mergeBack finds
+			// that when it loads the merged text again, and writes the patched resource as it stands:
+			// it loads, and the comments of the document are lost.
+			authored.Value, authored.Tag, authored.Style = keyText(authored), "!!str", 0
 			keyNode.Tag, keyNode.Style = "!!str", yaml.DoubleQuotedStyle
 		}
 		original.Content = append(original.Content, keyNode, value)
@@ -405,7 +420,9 @@ func mergeMappingNodesAt(original, patched *yaml.Node, root bool) error {
 func mergeSequenceNodes(original, patched *yaml.Node) error {
 	mergeKey := detectMergeKey(original)
 	if mergeKey == "" {
-		// No recognizable merge key — replace the entire sequence
+		// No recognizable merge key — replace the entire sequence. The items keep the authored text
+		// of their keys where the two lists pair by position (preserveSequence).
+		preserveSequence(original, patched, true)
 		original.Content = patched.Content
 		return nil
 	}
@@ -499,23 +516,37 @@ func extractMergeKeyValue(node *yaml.Node, mergeKey string) string {
 
 // preserveComments copies comments from src (original) to dst (patched) by
 // walking both mapping nodes in parallel and matching keys. Only comments on
-// keys that exist in dst are transferred.
+// keys that exist in dst are transferred. It also gives a key of dst the authored
+// text of the key it pairs with, in the mapping and in every list below it.
 func preserveComments(src, dst *yaml.Node) {
+	preserveAt(src, dst, true)
+}
+
+// preserveAt is preserveComments, with comments false to restore the key text of the pairs and
+// to copy no comment. A list with no merge key pairs its items by position, and a position is no
+// proof that two items are the same item, so a comment never follows it.
+func preserveAt(src, dst *yaml.Node, comments bool) {
 	if src == nil || dst == nil {
 		return
 	}
 
 	// Copy top-level comments
-	if dst.HeadComment == "" {
-		dst.HeadComment = src.HeadComment
-	}
-	if dst.LineComment == "" {
-		dst.LineComment = src.LineComment
-	}
-	if dst.FootComment == "" {
-		dst.FootComment = src.FootComment
+	if comments {
+		if dst.HeadComment == "" {
+			dst.HeadComment = src.HeadComment
+		}
+		if dst.LineComment == "" {
+			dst.LineComment = src.LineComment
+		}
+		if dst.FootComment == "" {
+			dst.FootComment = src.FootComment
+		}
 	}
 
+	if src.Kind == yaml.SequenceNode && dst.Kind == yaml.SequenceNode {
+		preserveSequence(src, dst, comments)
+		return
+	}
 	if src.Kind != yaml.MappingNode || dst.Kind != yaml.MappingNode {
 		return
 	}
@@ -554,31 +585,129 @@ func preserveComments(src, dst *yaml.Node) {
 			if srcKV.key.Kind == yaml.AliasNode {
 				dstKey.Kind, dstKey.Alias = srcKV.key.Kind, srcKV.key.Alias
 				dstKey.Value, dstKey.Tag, dstKey.Style = srcKV.key.Value, srcKV.key.Tag, srcKV.key.Style
-			} else if dstKey.Value != srcKV.key.Value && !dstTexts[srcKV.key.Value] {
+			} else if dstKey.Value == srcKV.key.Value {
+				// The same text can be written as another type: the authored `16` against the
+				// resource's string "16". The key keeps its authored tag and style.
+				dstKey.Tag, dstKey.Style = srcKV.key.Tag, srcKV.key.Style
+			} else if !dstTexts[srcKV.key.Value] {
 				dstKey.Value, dstKey.Tag, dstKey.Style = srcKV.key.Value, srcKV.key.Tag, srcKV.key.Style
 			}
+			// The key keeps the anchor it declares, so an alias key written elsewhere still has
+			// its anchor (`&k 0x10` in one item, `*k` in another).
+			if srcKV.key.Anchor != "" {
+				dstKey.Anchor = srcKV.key.Anchor
+			}
 			// Copy comments from source key and value nodes
-			if dstKey.HeadComment == "" {
-				dstKey.HeadComment = srcKV.key.HeadComment
-			}
-			if dstKey.LineComment == "" {
-				dstKey.LineComment = srcKV.key.LineComment
-			}
-			if dstKey.FootComment == "" {
-				dstKey.FootComment = srcKV.key.FootComment
-			}
-			if dstVal.HeadComment == "" {
-				dstVal.HeadComment = srcKV.value.HeadComment
-			}
-			if dstVal.LineComment == "" {
-				dstVal.LineComment = srcKV.value.LineComment
-			}
-			if dstVal.FootComment == "" {
-				dstVal.FootComment = srcKV.value.FootComment
+			if comments {
+				if dstKey.HeadComment == "" {
+					dstKey.HeadComment = srcKV.key.HeadComment
+				}
+				if dstKey.LineComment == "" {
+					dstKey.LineComment = srcKV.key.LineComment
+				}
+				if dstKey.FootComment == "" {
+					dstKey.FootComment = srcKV.key.FootComment
+				}
+				if dstVal.HeadComment == "" {
+					dstVal.HeadComment = srcKV.value.HeadComment
+				}
+				if dstVal.LineComment == "" {
+					dstVal.LineComment = srcKV.value.LineComment
+				}
+				if dstVal.FootComment == "" {
+					dstVal.FootComment = srcKV.value.FootComment
+				}
 			}
 			// Recurse into nested structures
-			preserveComments(srcKV.value, dstVal)
+			preserveAt(srcKV.value, dstVal, comments)
 		}
+	}
+}
+
+// preserveSequence pairs the items of two lists and restores what preserveAt restores. Items pair
+// by merge key when the authored list has one, and then comments follow as in mergeSequenceNodes.
+// A merge-key value that more than one authored item holds pairs nothing: neither item can be shown
+// to be the item the resource holds. Without a merge key an item pairs by position only when the two
+// lists have the same length and the two items hold the same data. After an add, a delete, a reorder
+// or a change of the item, a position can name another item, so no pair is made and each item keeps
+// the text the resource gave it. The rule is no pair rather than a wrong pair.
+func preserveSequence(src, dst *yaml.Node, comments bool) {
+	if mergeKey := detectMergeKey(src); mergeKey != "" {
+		index := buildUniqueMergeKeyIndex(src, mergeKey)
+		for _, item := range dst.Content {
+			if match, ok := index[extractMergeKeyValue(item, mergeKey)]; ok {
+				// A list below an item that paired by position copies no comment either: a merge key
+				// names the child, and cannot show that the parent is the same item.
+				preserveAt(match, item, comments)
+			}
+		}
+		return
+	}
+	if len(src.Content) != len(dst.Content) {
+		return
+	}
+	// The loop is bounded by both lengths, whatever the check above says, so a position never reads
+	// past the end of the shorter list.
+	for i := range min(len(src.Content), len(dst.Content)) {
+		if sameItemData(src.Content[i], dst.Content[i]) {
+			preserveAt(src.Content[i], dst.Content[i], false)
+		}
+	}
+}
+
+// buildUniqueMergeKeyIndex is buildMergeKeyIndex without the values that more than one item holds.
+func buildUniqueMergeKeyIndex(seq *yaml.Node, mergeKey string) map[string]*yaml.Node {
+	index := make(map[string]*yaml.Node)
+	seen := make(map[string]bool)
+	for _, item := range seq.Content {
+		val := extractMergeKeyValue(item, mergeKey)
+		if val == "" {
+			continue
+		}
+		if seen[val] {
+			delete(index, val)
+			continue
+		}
+		seen[val] = true
+		index[val] = item
+	}
+	return index
+}
+
+// sameItemData reports whether an authored list item and a written list item hold the same data, as
+// the resource reads them: a key compares by its resource spelling (`0x10` and "16" are the same
+// key). A merge entry (`<<`) is read as a key of its own and is not
+// expanded, so an authored item that uses one differs from the written item, which holds the
+// expanded entries, and pairs with nothing.
+func sameItemData(a, b *yaml.Node) bool {
+	return reflect.DeepEqual(itemData(a), itemData(b))
+}
+
+// itemData reads a node as the data the resource holds: mappings keyed by resource spelling, lists,
+// and scalars as their decoded value. A scalar that does not decode reads as null: the loaders refuse
+// such a document before a write-back runs.
+func itemData(node *yaml.Node) any {
+	n := resolveAlias(node)
+	switch n.Kind {
+	case yaml.MappingNode:
+		out := make(map[string]any, len(n.Content)/2)
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			out[keyText(n.Content[i])] = itemData(n.Content[i+1])
+		}
+		return out
+	case yaml.SequenceNode:
+		out := make([]any, 0, len(n.Content))
+		for _, c := range n.Content {
+			out = append(out, itemData(c))
+		}
+		return out
+	case yaml.ScalarNode:
+		var v any
+		_ = n.Decode(&v)
+		return v
+	default:
+		// resolveAlias leaves no alias node, and a document node never reaches here.
+		return nil
 	}
 }
 
