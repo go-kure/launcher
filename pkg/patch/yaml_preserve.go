@@ -377,7 +377,15 @@ func mergeMappingNodesAt(original, patched *yaml.Node, root bool) error {
 			Style: patchedKeys[key].Style,
 		}
 		if authored, ok := held[key]; ok {
-			authored.Value, authored.Tag, authored.Style = keyText(authored), "!!str", 0
+			// The authored key takes its resource spelling. Where another key of the mapping already
+			// holds that text, the written mapping would hold it twice and not load. The merge then
+			// reports an error, and the caller writes the patched resource as it stands: it loads, and
+			// the comments of the document are lost.
+			text := keyText(authored)
+			if other, clash := held[text]; clash && other != authored {
+				return fmt.Errorf("key %q would take the text %q of another key", key, text)
+			}
+			authored.Value, authored.Tag, authored.Style = text, "!!str", 0
 			keyNode.Tag, keyNode.Style = "!!str", yaml.DoubleQuotedStyle
 		}
 		original.Content = append(original.Content, keyNode, value)

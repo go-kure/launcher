@@ -96,3 +96,41 @@ func TestWriteBack_AddsAKeyWhoseTextAnAliasKeyReads(t *testing.T) {
 	requireString(t, again.Documents[0].Resource.Object, "a", "data", "16")
 	requireString(t, again.Documents[0].Resource.Object, "new", "data", "0x10")
 }
+
+// A key with an explicit tag reads as the text it decodes to: `!!binary MHgxMA==` reads "0x10".
+// A strategic patch can add the key "MHgxMA==", the raw text of that authored key. The authored key
+// would then take its resource spelling "0x10", which another authored key (`0x10`) holds as its
+// own text, so the written document would not load. The merge then reports an error and the
+// document is written from the patched resource: it loads, it carries the resource spelling, and
+// the comments of the document are gone. The row pins that fallback, so a change cannot pass it by
+// keeping the authored text or by refusing the patch.
+func TestWriteBack_FallsBackWhenARenamedKeyWouldRepeatAKey(t *testing.T) {
+	const src = keyHead + "# about data\ndata:\n  !!binary MHgxMA==: x\n  0x10: y\n"
+	doc := loadOneDocument(t, src)
+	applyStrategic(t, doc, map[string]any{"data": map[string]any{"MHgxMA==": "n"}})
+	out := writtenBack(t, doc.Node)
+	again := requireLoads(t, out)
+	data := again.Documents[0].Resource.Object
+	requireString(t, data, "x", "data", "0x10")
+	requireString(t, data, "y", "data", "16")
+	requireString(t, data, "n", "data", "MHgxMA==")
+	if strings.Contains(out, "!!binary") || strings.Contains(out, "# about data") {
+		t.Errorf("the written text keeps the authored tag or the comment above the mapping, so it is not the fallback:\n%s", out)
+	}
+}
+
+// Where the renamed key repeats nothing, the authored key takes its resource spelling, the new key
+// is added beside it, and the comment above the mapping stays: the merge ran, not the fallback.
+// This is the control of the fallback row.
+func TestWriteBack_RenamesATaggedKeyWhenNothingRepeats(t *testing.T) {
+	const src = keyHead + "# about data\ndata:\n  !!binary MHgxMA==: x\n  other: y\n"
+	doc := loadOneDocument(t, src)
+	applyStrategic(t, doc, map[string]any{"data": map[string]any{"MHgxMA==": "n"}})
+	out := writtenBack(t, doc.Node)
+	requireLoads(t, out)
+	for _, want := range []string{"# about data\n", `"0x10": x`, `"MHgxMA==": "n"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the written text lacks %q:\n%s", want, out)
+		}
+	}
+}

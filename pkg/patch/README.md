@@ -272,7 +272,8 @@ When using `NewPatchableAppSetWithStructure`, the original YAML document structu
 #### Known limits
 
 - An unsigned integer above the `int64` range is not converted.
-- A write-back does not keep every non-string key as authored: go-kure/launcher#1400. A key with an explicit tag (`!!binary`) can make the written document fail to load again, as it did before this change. A key in a list nested inside a list item takes the converted spelling (`"16"`), and the document still loads.
+- A write-back does not keep every non-string key as authored: go-kure/launcher#1400. A key in a list nested inside a list item takes the converted spelling (`"16"`), and the document still loads.
+- A patch can add a key with the text of a tagged key (`!!binary`), and the tagged key would then take a spelling that another key of the mapping holds. The write-back then writes the patched resource as it stands. The document loads, and all its comments are lost.
 
 ### Strategic Merge Patch
 
