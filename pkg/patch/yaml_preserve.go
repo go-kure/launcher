@@ -274,8 +274,10 @@ func mergeYAMLNodes(original, patched *yaml.Node) error {
 // and it reads a plain timestamp as its text (keepTimestampText). So the authored key `0x10`
 // reads "16", `.nan` reads "NaN", and `1.0` reads "1". The marshaled resource holds those
 // spellings, and a pairing of the kept node with it has to use them. A key that is a string,
-// or that does not decode, reads as its own text.
+// or that does not decode, reads as its own text. An alias key (`*k`) reads as the key it points
+// at, as the decoder reads it.
 func keyText(n *yaml.Node) string {
+	n = resolveAlias(n)
 	if n.Kind != yaml.ScalarNode {
 		return n.Value
 	}
@@ -291,6 +293,17 @@ func keyText(n *yaml.Node) string {
 		return s
 	}
 	return fmt.Sprint(v)
+}
+
+// rawKeyText returns the text of a key as authored, an alias key being the key it points at. The
+// root mapping of a document pairs by it, because the loader keeps the authored text of a root key.
+func rawKeyText(n *yaml.Node) string {
+	return resolveAlias(n).Value
+}
+
+// isScalarKey reports whether a key is a scalar, or an alias of one.
+func isScalarKey(n *yaml.Node) bool {
+	return resolveAlias(n).Kind == yaml.ScalarNode
 }
 
 // mergeMappingNodes merges mapping (object) nodes. An original key pairs with the patched key
@@ -312,16 +325,18 @@ func mergeMappingNodesAt(original, patched *yaml.Node, root bool) error {
 	}
 	pairKey := func(n *yaml.Node) string {
 		if root {
-			return n.Value
+			return rawKeyText(n)
 		}
 		return keyText(n)
 	}
 	// Create a map of keys in the patched node for efficient lookup
 	patchedMap := make(map[string]*yaml.Node)
+	patchedKeys := make(map[string]*yaml.Node)
 	for i := 0; i < len(patched.Content); i += 2 {
 		key := patched.Content[i].Value
 		value := patched.Content[i+1]
 		patchedMap[key] = value
+		patchedKeys[key] = patched.Content[i]
 	}
 
 	// Update existing keys in original
@@ -353,9 +368,13 @@ func mergeMappingNodesAt(original, patched *yaml.Node, root bool) error {
 		}
 	}
 	for key, value := range patchedMap {
+		// A new key keeps the tag and style the marshaler gave it, so a string key that reads as
+		// a number (`"16"`) is written quoted, and so does not read as another key.
 		keyNode := &yaml.Node{
 			Kind:  yaml.ScalarNode,
 			Value: key,
+			Tag:   patchedKeys[key].Tag,
+			Style: patchedKeys[key].Style,
 		}
 		if authored, ok := held[key]; ok {
 			authored.Value, authored.Tag, authored.Style = keyText(authored), "!!str", 0
@@ -500,7 +519,7 @@ func preserveComments(src, dst *yaml.Node) {
 	}
 	srcMap := make(map[string]kvPair)
 	for i := 0; i < len(src.Content)-1; i += 2 {
-		if src.Content[i].Kind == yaml.ScalarNode {
+		if isScalarKey(src.Content[i]) {
 			srcMap[keyText(src.Content[i])] = kvPair{src.Content[i], src.Content[i+1]}
 		}
 	}
@@ -522,7 +541,12 @@ func preserveComments(src, dst *yaml.Node) {
 			// A key that is not a string reads differently in the resource (`0x10` reads "16"):
 			// the item keeps the authored key text, tag and style. It does not when another key of
 			// the item already has that text, because the item would then hold the text twice.
-			if dstKey.Value != srcKV.key.Value && !dstTexts[srcKV.key.Value] {
+			// An alias key is written as the alias: it is a different kind of node and never
+			// repeats the text of a scalar key.
+			if srcKV.key.Kind == yaml.AliasNode {
+				dstKey.Kind, dstKey.Alias = srcKV.key.Kind, srcKV.key.Alias
+				dstKey.Value, dstKey.Tag, dstKey.Style = srcKV.key.Value, srcKV.key.Tag, srcKV.key.Style
+			} else if dstKey.Value != srcKV.key.Value && !dstTexts[srcKV.key.Value] {
 				dstKey.Value, dstKey.Tag, dstKey.Style = srcKV.key.Value, srcKV.key.Tag, srcKV.key.Style
 			}
 			// Copy comments from source key and value nodes
@@ -673,10 +697,10 @@ func keepAuthoredStyleAt(authored, next *yaml.Node, path []string, touched [][]s
 	case yaml.MappingNode:
 		authoredValues := make(map[string]*yaml.Node, len(authored.Content)/2)
 		for i := 0; i+1 < len(authored.Content); i += 2 {
-			if authored.Content[i].Kind == yaml.ScalarNode {
+			if isScalarKey(authored.Content[i]) {
 				// The root mapping keeps its authored key text in the resource (mergeMappingNodesAt).
 				if len(path) == 0 {
-					authoredValues[authored.Content[i].Value] = authored.Content[i+1]
+					authoredValues[rawKeyText(authored.Content[i])] = authored.Content[i+1]
 				} else {
 					authoredValues[keyText(authored.Content[i])] = authored.Content[i+1]
 				}
