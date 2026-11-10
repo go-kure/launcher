@@ -27,6 +27,12 @@ func TestLoad_RefusesDuplicateDecodedStringKeys(t *testing.T) {
 		{"schema gatedPaths", func(t *testing.T) []byte {
 			return withInputs(t, "  inputs:\n    cfg:\n      type: object\n      gatedPaths:\n        image: A\n        !!binary aW1hZ2U=: B\n")
 		}, "spec.inputs.cfg.gatedPaths"},
+		{"schema valueGatedPaths", func(t *testing.T) []byte {
+			return withInputs(t, "  inputs:\n    cfg:\n      type: object\n      valueGatedPaths:\n        restartPolicy: {Never: A}\n        !!binary cmVzdGFydFBvbGljeQ==: {Never: B}\n")
+		}, "spec.inputs.cfg.valueGatedPaths"},
+		{"schema valueGatedPaths values", func(t *testing.T) []byte {
+			return withInputs(t, "  inputs:\n    cfg:\n      type: object\n      valueGatedPaths:\n        restartPolicy:\n          Never: A\n          !!binary TmV2ZXI=: B\n")
+		}, "spec.inputs.cfg.valueGatedPaths.restartPolicy"},
 		{"part properties", func(t *testing.T) []byte {
 			return replace(t, "        replicas: \"${inputs.replicas}\"\n", "        replicas: \"${inputs.replicas}\"\n        !!binary cmVwbGljYXM=: 3\n")
 		}, "spec.parts[0].properties"},

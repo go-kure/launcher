@@ -1648,14 +1648,21 @@ schema (`valueGates`, go-kure/launcher#1230). The raw-PodSpec kinds (`pod` and t
 template: `podtemplate`, `replicaset`, `replicationcontroller`) leave their containers and
 template spec open, as does the `template` of `cnpg-pooler` (go-kure/launcher#1321), and the check reads declared schema, so their open nodes name the
 gated paths in `gatedPaths` instead: `env[].valueFrom.fileKeyRef` and `restartPolicyRules` of `containers[]` and
-`initContainers[]`, and `hostnameOverride` and
+`initContainers[]`, the `restartPolicy` of `containers[]` (Kubernetes forbids the field on a regular
+container with the gate off, `Always` included), and `hostnameOverride` and
 `resources` of the pod spec (`template.spec.*` on a pod template and on the `cnpg-pooler` template). A path is refused the
 same way, naming the authored path (go-kure/launcher#1245). Field names match
 case-insensitively, as in the decode, so a key spelled in another case is refused too and
 is named as written; property validation does not read `gatedPaths`, so what a document is
-accepted as does not change. One limit: `gatedPaths` names a field, not a value, so the
-`Never` and `OnFailure` values of a `restartPolicy` on those kinds are not checked
-(go-kure/launcher#1330).
+accepted as does not change. A path that gates a value, not the field, sits in
+`valueGatedPaths`: a map from a gate-relative path to a map from a value to its gate. The
+`restartPolicy` of `initContainers[]` is there, so `Never` and `OnFailure` are refused
+below 1.35 on these kinds as on the workload kinds, and `Always` is accepted at every
+version. The match is exact and only a string is looked up, so a null, a number or a
+string that the table does not name is not refused. The workload kinds and the raw-PodSpec
+kinds share one table, so the two cannot differ. The refusal names the authored path and
+the value (go-kure/launcher#1330). This check does not read whether a value such as
+`never` reaches a cluster. It only refuses the values the table names.
 
 | Property | Type | Effect | Kind |
 |----------|------|--------|------|

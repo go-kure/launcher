@@ -74,7 +74,7 @@ same string works in both.
   | Gate | On by default from | Properties |
   |---|---|---|
   | `EnvFiles` | 1.35 | `env[].valueFrom.fileKeyRef` |
-  | `ContainerRestartRules` | 1.35 | `restartPolicyRules` (an init container's on the workload kinds; any container's on the raw-PodSpec kinds below), and on the workload kinds the values `Never` and `OnFailure` of an init container's `restartPolicy` (`Always` is accepted at every version; the raw-PodSpec kinds do not check the `restartPolicy` values, go-kure/launcher#1330) |
+  | `ContainerRestartRules` | 1.35 | `restartPolicyRules` (an init container's on the workload kinds; any container's on the raw-PodSpec kinds below), and on the workload kinds the values `Never` and `OnFailure` of an init container's `restartPolicy` (`Always` is accepted at every version; on the raw-PodSpec kinds the same values are checked through `valueGatedPaths`, and a regular container's `restartPolicy` is gated whole, go-kure/launcher#1330) |
   | `PodLevelResources` | 1.34 | `podResources` (the pod kinds' `resources`) |
   | `HostnameOverride` | 1.35 | `hostnameOverride` |
   | `PreferSameTrafficDistribution` | 1.34 | the values `PreferSameZone` and `PreferSameNode` of `service`'s `trafficDistribution` (`PreferClose` is accepted at every version) |
@@ -98,8 +98,12 @@ same string works in both.
   wrote (`template.spec.HostnameOverride`). Property validation does not
   read it, so what a document is accepted as is unchanged. The paths are
   `env[].valueFrom.fileKeyRef` and `restartPolicyRules` of `containers[]` and
-  `initContainers[]`, and `hostnameOverride` and `resources` of the pod
-  spec (`template.spec.*` on a pod template and on the `cnpg-pooler` template). Declaring them as nested `Properties`
+  `initContainers[]`, the `restartPolicy` of `containers[]`, and `hostnameOverride` and `resources` of the pod
+  spec (`template.spec.*` on a pod template and on the `cnpg-pooler` template). A path
+  that gates single values sits in `PropertySchema.ValueGatedPaths` (published as
+  `valueGatedPaths`), a map from a path to a map from a value to its gate: the
+  `restartPolicy` of `initContainers[]` is there with `Never` and `OnFailure`, from the
+  same table as the shorthand (go-kure/launcher#1330). Declaring them as nested `Properties`
   instead would make the validator type-check and null-strip them, which changes what is
   accepted (go-kure/launcher#1245). A test holds every gate a `gatedPaths` value names to a
   row of the table and every path to a field of the Kubernetes type.

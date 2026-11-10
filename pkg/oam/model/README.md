@@ -79,7 +79,7 @@ any list inside a `default` or inside the `properties` of a part or a trait.
 In a free-form value, such as a `default`, the keys of a mapping must differ after YAML
 resolves them, so `{1: a, 01: b}`, `{true: a, True: b}` and `{0.0: a, -0.0: b}` are refused.
 In every map whose keys `Load` decodes into Go strings, two keys that decode to the same string
-are also refused. Examples are the inputs, the `properties` and `gatedPaths` of a schema, the
+are also refused. Examples are the inputs, the `properties`, `gatedPaths` and `valueGatedPaths` (at both levels) of a schema, the
 `properties` of a part or a trait, and the annotations. The YAML decoder refuses two keys with
 the same spelling. `Load` also refuses two keys with different spelling that decode to one
 string, such as `image` and `!!binary aW1hZ2U=`. Keys that decode to different strings, such as

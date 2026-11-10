@@ -129,20 +129,12 @@ func checkGatedValue(field PropertySchema, value any, path string, target Kubern
 	if err := checkGatedPaths(field.GatedPaths, value, path, target); err != nil {
 		return err
 	}
+	if err := checkValueGatedPaths(field.ValueGatedPaths, value, path, target); err != nil {
+		return err
+	}
 	if len(field.ValueGates) > 0 {
-		if s, ok := value.(string); ok {
-			if gate, gated := field.ValueGates[s]; gated {
-				on, err := gateEnabled(gate, target, nil)
-				if err != nil {
-					return err
-				}
-				if !on {
-					g, _ := lookupFeatureGate(gate)
-					return errors.Errorf("%s: value %q requires the Kubernetes feature gate %s, which is on by default from %s, "+
-						"and the ClusterProfile's kubernetesVersion is %s; use another value or raise spec.kubernetesVersion",
-						path, s, g.Name, g.OnByDefault, target)
-				}
-			}
+		if err := refuseValueGateBelow(field.ValueGates, value, path, target); err != nil {
+			return err
 		}
 	}
 	if obj, ok := asObjectValue(value); ok && len(field.Properties) > 0 {
@@ -174,29 +166,76 @@ func refuseGateBelow(gate, path string, target KubernetesVersion) error {
 		path, g.Name, g.OnByDefault, target)
 }
 
+// refuseValueGateBelow refuses value at path when it is a string that gates names and
+// that gate is off by default at target, naming the path, the value, the gate, the
+// release where it turns on and the target. Any other value is accepted: a value of
+// another type, and a string no key names. The match is exact, as the Enum a
+// ValueGates key is held to is (go-kure/launcher#1230).
+func refuseValueGateBelow(gates map[string]string, value any, path string, target KubernetesVersion) error {
+	s, ok := value.(string)
+	if !ok {
+		return nil
+	}
+	gate, gated := gates[s]
+	if !gated {
+		return nil
+	}
+	on, err := gateEnabled(gate, target, nil)
+	if err != nil {
+		return err
+	}
+	if on {
+		return nil
+	}
+	g, _ := lookupFeatureGate(gate)
+	return errors.Errorf("%s: value %q requires the Kubernetes feature gate %s, which is on by default from %s, "+
+		"and the ClusterProfile's kubernetesVersion is %s; use another value or raise spec.kubernetesVersion",
+		path, s, g.Name, g.OnByDefault, target)
+}
+
 // checkGatedPaths refuses the first authored value, in sorted path order, that sits at
 // one of paths (PropertySchema.GatedPaths) below value and whose gate is off at target.
 // A path whose key is absent, null or of the wrong shape on the way is not its
 // business, as in checkGatedProperties.
 func checkGatedPaths(paths map[string]string, value any, path string, target KubernetesVersion) error {
 	for _, p := range slices.Sorted(maps.Keys(paths)) {
-		if err := checkGatedPath(strings.Split(p, "."), paths[p], value, path, target); err != nil {
+		gate := paths[p]
+		leaf := func(_ any, at string) error { return refuseGateBelow(gate, at, target) }
+		if err := walkGatedPath(strings.Split(p, "."), value, path, leaf); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// checkGatedPath walks the keys of one GatedPaths path down value; a key ending in
-// "[]" names an array whose every element is walked further. A key matches the
-// authored keys case-insensitively (foldedKeys), and the path it builds names the
-// spelling the author wrote.
-func checkGatedPath(keys []string, gate string, value any, path string, target KubernetesVersion) error {
+// checkValueGatedPaths refuses the first authored value, in sorted path order, that
+// sits at one of paths (PropertySchema.ValueGatedPaths) below value, is a string that
+// the path's own table names, and whose gate is off at target (go-kure/launcher#1330).
+// The walk is checkGatedPaths's, so a key matches case-insensitively and the path the
+// refusal names carries the authored spelling. The value match is exact. A null, a
+// value that is not a string and a string the table does not name use no gate.
+func checkValueGatedPaths(paths map[string]map[string]string, value any, path string, target KubernetesVersion) error {
+	for _, p := range slices.Sorted(maps.Keys(paths)) {
+		gates := paths[p]
+		leaf := func(v any, at string) error { return refuseValueGateBelow(gates, v, at, target) }
+		if err := walkGatedPath(strings.Split(p, "."), value, path, leaf); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// walkGatedPath walks the keys of one gated path down value and calls leaf with the
+// value found at its end and the path that names it; a key ending in "[]" names an
+// array whose every element is walked further. A key matches the authored keys
+// case-insensitively (foldedKeys), and the path it builds names the spelling the author
+// wrote. A null value ends the walk with no call.
+func walkGatedPath(keys []string, value any, path string, leaf func(value any, path string) error) error {
 	if isNullValue(value) {
 		return nil
 	}
 	if len(keys) == 0 {
-		return refuseGateBelow(gate, path, target)
+		return leaf(value, path)
 	}
 	obj, ok := asObjectValue(value)
 	if !ok {
@@ -207,7 +246,7 @@ func checkGatedPath(keys []string, gate string, value any, path string, target K
 		next := obj[authored]
 		here := path + "." + authored
 		if !each {
-			if err := checkGatedPath(keys[1:], gate, next, here, target); err != nil {
+			if err := walkGatedPath(keys[1:], next, here, leaf); err != nil {
 				return err
 			}
 			continue
@@ -217,7 +256,7 @@ func checkGatedPath(keys []string, gate string, value any, path string, target K
 			continue
 		}
 		for i, item := range items {
-			if err := checkGatedPath(keys[1:], gate, item, fmt.Sprintf("%s[%d]", here, i), target); err != nil {
+			if err := walkGatedPath(keys[1:], item, fmt.Sprintf("%s[%d]", here, i), leaf); err != nil {
 				return err
 			}
 		}

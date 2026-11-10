@@ -85,14 +85,17 @@ initContainers:
 `,
 	},
 	// A raw PodSpec takes restartPolicyRules on a regular container too (corev1.Container,
-	// the same gate); the init-only limit belongs to the workload kinds' shorthand.
+	// the same gate); the init-only limit belongs to the workload kinds' shorthand. The row
+	// authors no restartPolicy, as the init row below does not: a regular container's
+	// restartPolicy is gated by the same gate and sorts before restartPolicyRules, so
+	// authoring it would make the refusal name the policy and not the rules
+	// (go-kure/launcher#1330).
 	{
 		name: "container restartPolicyRules", gate: "ContainerRestartRules", field: "containers[0].restartPolicyRules",
 		kinds: openGateCaseKinds,
 		spec: `containers:
   - name: app
     image: ghcr.io/example/app:v1.0.0
-    restartPolicy: Never
     restartPolicyRules:
       - action: Restart
         exitCodes:
@@ -114,6 +117,70 @@ initContainers:
         exitCodes:
           operator: In
           values: [42]
+`,
+	},
+	// A regular container's restartPolicy is refused below the gate for every value,
+	// Always included: Kubernetes forbids the field there with the gate off
+	// (go-kure/launcher#1330).
+	{
+		name: "container restartPolicy Always", gate: "ContainerRestartRules", field: "containers[0].restartPolicy",
+		kinds: openGateCaseKinds,
+		spec: `containers:
+  - name: app
+    image: ghcr.io/example/app:v1.0.0
+    restartPolicy: Always
+`,
+	},
+	{
+		name: "container restartPolicy Never", gate: "ContainerRestartRules", field: "containers[0].restartPolicy",
+		kinds: openGateCaseKinds,
+		spec: `containers:
+  - name: app
+    image: ghcr.io/example/app:v1.0.0
+    restartPolicy: Never
+`,
+	},
+	// An init container's restartPolicy is refused for Never and OnFailure only: with the
+	// gate off Kubernetes accepts Always there (TestFeatureGates_OpenSchemasInitRestartPolicyAlways).
+	{
+		name: "initContainer restartPolicy Never", gate: "ContainerRestartRules", field: "initContainers[0].restartPolicy",
+		kinds: openGateCaseKinds,
+		spec: `containers:
+  - name: app
+    image: ghcr.io/example/app:v1.0.0
+initContainers:
+  - name: migrate
+    image: ghcr.io/example/migrate:v1.0.0
+    restartPolicy: Never
+`,
+	},
+	{
+		name: "initContainer restartPolicy OnFailure", gate: "ContainerRestartRules", field: "initContainers[0].restartPolicy",
+		kinds: openGateCaseKinds,
+		spec: `containers:
+  - name: app
+    image: ghcr.io/example/app:v1.0.0
+initContainers:
+  - name: migrate
+    image: ghcr.io/example/migrate:v1.0.0
+    restartPolicy: OnFailure
+`,
+	},
+	// The walk reaches every init container: the first one is a native sidecar the gate
+	// accepts, and the second is refused, with its index in the path.
+	{
+		name: "second initContainer restartPolicy Never", gate: "ContainerRestartRules", field: "initContainers[1].restartPolicy",
+		kinds: openGateCaseKinds,
+		spec: `containers:
+  - name: app
+    image: ghcr.io/example/app:v1.0.0
+initContainers:
+  - name: proxy
+    image: ghcr.io/example/proxy:v1.0.0
+    restartPolicy: Always
+  - name: migrate
+    image: ghcr.io/example/migrate:v1.0.0
+    restartPolicy: Never
 `,
 	},
 	// The pod kind declares hostnameOverride and resources at its top level, so
@@ -298,26 +365,33 @@ func jsonField(typ reflect.Type, name string) (reflect.StructField, bool) {
 // resolveGatedPath follows a GatedPaths path down the Kubernetes type typ by json
 // name, "[]" naming a list, and reports where it leaves the type.
 func resolveGatedPath(typ reflect.Type, path string) error {
+	_, err := resolveGatedPathType(typ, path)
+	return err
+}
+
+// resolveGatedPathType is resolveGatedPath returning the type the path ends at, with
+// pointers removed, so a test can hold a ValueGatedPaths value to that type's enum.
+func resolveGatedPathType(typ reflect.Type, path string) (reflect.Type, error) {
 	for _, key := range strings.Split(path, ".") {
 		name, each := strings.CutSuffix(key, "[]")
 		typ = derefType(typ)
 		if typ.Kind() != reflect.Struct {
-			return fmt.Errorf("%q: %s is not an object", key, typ)
+			return nil, fmt.Errorf("%q: %s is not an object", key, typ)
 		}
 		f, ok := jsonField(typ, name)
 		if !ok {
-			return fmt.Errorf("%q: %s has no field with json name %q", key, typ, name)
+			return nil, fmt.Errorf("%q: %s has no field with json name %q", key, typ, name)
 		}
 		typ = f.Type
 		if each {
 			typ = derefType(typ)
 			if typ.Kind() != reflect.Slice {
-				return fmt.Errorf("%q: %s is not a list", key, typ)
+				return nil, fmt.Errorf("%q: %s is not a list", key, typ)
 			}
 			typ = typ.Elem()
 		}
 	}
-	return nil
+	return derefType(typ), nil
 }
 
 // TestFeatureGates_GatedPathsNameRealFields holds every GatedPaths path to a field of
@@ -507,12 +581,29 @@ var leafCasingCases = []casingCase{
 		spec: `containers:
   - name: app
     image: ghcr.io/example/app:v1.0.0
-    restartPolicy: Never
     RestartPolicyRules:
       - action: Restart
         exitCodes:
           operator: In
           values: [42]
+`,
+	},
+	{
+		name: "container RestartPolicy", gate: "ContainerRestartRules", field: "containers[0].RestartPolicy",
+		kinds: openGateKinds,
+		spec: `containers:
+  - name: app
+    image: ghcr.io/example/app:v1.0.0
+    RestartPolicy: Always
+`,
+	},
+	{
+		name: "initContainer RestartPolicy", gate: "ContainerRestartRules", field: "initContainers[0].RestartPolicy",
+		kinds: openGateKinds,
+		spec: casingApp + `initContainers:
+  - name: migrate
+    image: ghcr.io/example/migrate:v1.0.0
+    RestartPolicy: Never
 `,
 	},
 	{

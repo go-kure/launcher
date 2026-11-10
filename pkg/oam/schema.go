@@ -129,6 +129,23 @@ type PropertySchema struct {
 	// A consumer that predates GatedPaths ignores it and accepts the value, as it did
 	// before the field existed; the field is additive for it.
 	GatedPaths map[string]string `json:"gatedPaths,omitempty" yaml:"gatedPaths,omitempty"`
+	// ValueGatedPaths is GatedPaths for a field of which only some values need a gate
+	// (go-kure/launcher#1330): an open node's schema cannot declare ValueGates on a field
+	// below it, so it names them here. The outer key is a path, written as in GatedPaths
+	// ("[]" after the key of an array whose every element is walked, matched
+	// case-insensitively against the authored keys); the inner key is a value of the
+	// field and the inner value is its gate, a row of the lifecycle table in
+	// featuregates.go. An authored string value listed there is refused below the release
+	// where its gate is on by default, with the path, the value, the gate, the release and
+	// the target, as ValueGates refuses it. The value match is exact. Any other value of
+	// the field, a null and a value that is not a string are accepted. Like GatedPaths,
+	// only the gate check reads it, so what a document is accepted as is the same with or
+	// without it, and it is only meaningful for handler properties: the two flat call
+	// sites reject the key at decode time (flatschema.go's key allow-sets leave it out).
+	//
+	// A consumer that predates ValueGatedPaths ignores it and accepts the value, as it did
+	// before the field existed; the field is additive for it.
+	ValueGatedPaths map[string]map[string]string `json:"valueGatedPaths,omitempty" yaml:"valueGatedPaths,omitempty"`
 
 	// ValueGates names, per Enum value, the Kubernetes feature gate (a row of the
 	// lifecycle table in featuregates.go) that value alone needs on the cluster: the

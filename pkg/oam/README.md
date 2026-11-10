@@ -3245,8 +3245,15 @@ the key is rejected at the two flat call sites, so it is absent from their allow
 (go-kure/launcher#1230). Two properties carry it today: an init container's
 `restartPolicy` (`Never` and `OnFailure`, `ContainerRestartRules`) and `service`'s
 `trafficDistribution` (`PreferSameZone` and `PreferSameNode`, `PreferSameTrafficDistribution`).
-`GatedPaths` names a field, not a value, so the raw-PodSpec kinds do not check the values
-of a container's `restartPolicy` (go-kure/launcher#1330).
+`GatedPaths` names a field, not a value. A path that gates values sits in `ValueGatedPaths`
+(published as `valueGatedPaths`): a gate-relative path maps to a map from a value to its
+gate, and the check walks the path as it walks `GatedPaths`. The raw-PodSpec kinds use it
+for the `restartPolicy` of an init container, from the same table as the shorthand
+(`Never` and `OnFailure`, `ContainerRestartRules`). Their `restartPolicy` on a regular
+container is a plain `GatedPaths` entry, because Kubernetes forbids the field there with
+the gate off, `Always` included. A null, a value that is not a string and a string the table
+does not name use no gate. Like `Gate`, the key is rejected at the two flat call sites
+(go-kure/launcher#1330).
 
 Separately, `validateProperties` (`property_validate.go`) checks an EMITTED
 component/trait/policy's properties against its TARGET handler's declared schema —
