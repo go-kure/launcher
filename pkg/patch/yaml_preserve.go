@@ -707,12 +707,20 @@ func preserveAt(src, dst *yaml.Node, comments bool) {
 		}
 	}
 
-	dstTexts := make(map[string]bool, len(dst.Content)/2)
+	// held is the set of key texts the keys of dst hold now. A key restores its authored text only
+	// when no key holds it, and a restore frees the text the key held, so the restores run after
+	// the loop below, in passes, until a pass restores nothing.
+	held := make(map[string]bool, len(dst.Content)/2)
 	for i := 0; i < len(dst.Content)-1; i += 2 {
 		if dst.Content[i].Kind == yaml.ScalarNode {
-			dstTexts[dst.Content[i].Value] = true
+			held[dst.Content[i].Value] = true
 		}
 	}
+	type restore struct {
+		key  *yaml.Node
+		from *yaml.Node
+	}
+	var pending []restore
 
 	for i := 0; i < len(dst.Content)-1; i += 2 {
 		dstKey := dst.Content[i]
@@ -723,18 +731,20 @@ func preserveAt(src, dst *yaml.Node, comments bool) {
 		if srcKV, ok := srcMap[keyText(dstKey)]; ok {
 			// A key that is not a string reads differently in the resource (`0x10` reads "16"):
 			// the item keeps the authored key text, tag and style. It does not when another key of
-			// the item already has that text, because the item would then hold the text twice.
-			// An alias key is written as the alias: it is a different kind of node and never
-			// repeats the text of a scalar key.
+			// the item holds that text, because the item would then hold the text twice (see the
+			// restores after this loop). An alias key is written as the alias: it is a different
+			// kind of node and never repeats the text of a scalar key.
 			if srcKV.key.Kind == yaml.AliasNode {
+				// The scalar key becomes an alias, so the text it held is free.
+				delete(held, dstKey.Value)
 				dstKey.Kind, dstKey.Alias = srcKV.key.Kind, srcKV.key.Alias
 				dstKey.Value, dstKey.Tag, dstKey.Style = srcKV.key.Value, srcKV.key.Tag, srcKV.key.Style
 			} else if dstKey.Value == srcKV.key.Value {
 				// The same text can be written as another type: the authored `16` against the
 				// resource's string "16". The key keeps its authored tag and style.
 				dstKey.Tag, dstKey.Style = srcKV.key.Tag, srcKV.key.Style
-			} else if !dstTexts[srcKV.key.Value] {
-				dstKey.Value, dstKey.Tag, dstKey.Style = srcKV.key.Value, srcKV.key.Tag, srcKV.key.Style
+			} else {
+				pending = append(pending, restore{dstKey, srcKV.key})
 			}
 			// The key keeps the anchor it declares, so an alias key written elsewhere still has
 			// its anchor (`&k 0x10` in one item, `*k` in another).
@@ -765,6 +775,26 @@ func preserveAt(src, dst *yaml.Node, comments bool) {
 			// Recurse into nested structures
 			preserveAt(srcKV.value, dstVal, comments)
 		}
+	}
+
+	// Two authored keys of one mapping never read the same, so no two keys want one text and a
+	// restore never blocks another restore for good. Each pass restores at least one key or ends the
+	// loop, so the loop ends after at most len(pending) passes. A text that a key the patch added
+	// holds is never freed, and its authored key stays converted.
+	for changed := true; changed; {
+		changed = false
+		rest := pending[:0]
+		for _, p := range pending {
+			if held[p.from.Value] {
+				rest = append(rest, p)
+				continue
+			}
+			delete(held, p.key.Value)
+			p.key.Value, p.key.Tag, p.key.Style = p.from.Value, p.from.Tag, p.from.Style
+			held[p.key.Value] = true
+			changed = true
+		}
+		pending = rest
 	}
 }
 
