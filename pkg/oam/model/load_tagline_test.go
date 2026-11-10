@@ -104,3 +104,58 @@ func TestLoad_YAMLTagUnderNullKeyStaysAccepted(t *testing.T) {
 		t.Fatalf("Load refused a document whose only bad tag sits under a null key: %v (model %+v)", err, m)
 	}
 }
+
+// The walk names a line only when its message equals the message of the strict decode.
+// Here exactly one tagged scalar fails when decoded alone: the `!!bool` under the null key,
+// which the strict decode never reaches. The strict decode fails on something else, a
+// sequence used as a mapping key inside `default`, which is a plain YAML error with no
+// line. Naming the line of the `!!bool` would point at a value that is not at fault, so
+// Load keeps the error as it was.
+func TestLoad_YAMLTagErrorKeepsTheErrorWhenMessagesDiffer(t *testing.T) {
+	block := "  inputs:\n    null:\n      required: !!bool first\n    image:\n      type: string\n      default:\n        ? [a, b]\n        : c\n"
+	doc := withInputs(t, block)
+
+	// The row proves the equality half only if the strict decode fails with an error that
+	// is not a tag failure and not a type error. Stop the test on a miss, so a changed
+	// decoder reads as a broken row and never as a pass.
+	strict := yaml.NewDecoder(bytes.NewReader(doc))
+	strict.KnownFields(true)
+	var probe Model
+	sErr := strict.Decode(&probe)
+	if sErr == nil {
+		t.Fatal("test bug: the strict decode accepted the document")
+	}
+	var typeErr *yaml.TypeError
+	if errors.As(sErr, &typeErr) {
+		t.Fatalf("test bug: the strict decode error is a *yaml.TypeError, which carries its own lines: %v", sErr)
+	}
+	if !strings.Contains(sErr.Error(), "invalid map key") {
+		t.Fatalf("test bug: the strict decode failed on something else than the sequence key: %v", sErr)
+	}
+	var tagged yaml.Node
+	if err := yaml.Unmarshal([]byte("required: !!bool first\n"), &tagged); err != nil {
+		t.Fatalf("test bug: %v", err)
+	}
+	var v any
+	tagErr := tagged.Content[0].Content[1].Decode(&v)
+	if tagErr == nil {
+		t.Fatal("test bug: the tagged scalar decodes without an error")
+	}
+	if strings.TrimPrefix(tagErr.Error(), "yaml: ") == strings.TrimPrefix(sErr.Error(), "yaml: ") {
+		t.Fatalf("test bug: the tag failure and the strict decode failure have the same message: %v", tagErr)
+	}
+
+	t.Logf("precondition met: strict decode error %q is no *yaml.TypeError and differs from the tag failure %q", sErr, tagErr)
+
+	m, err := loadNoPanic(doc)
+	if err == nil {
+		t.Fatalf("Load accepted the document: %+v", m)
+	}
+	if strings.Contains(err.Error(), "line ") {
+		t.Fatalf("error %q names a line, but the tagged scalar is not what the strict decode failed on", err)
+	}
+	want := "model: " + sErr.Error()
+	if err.Error() != want {
+		t.Fatalf("error = %q, want the strict decode error as it was: %q", err, want)
+	}
+}
