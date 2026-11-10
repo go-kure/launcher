@@ -3193,6 +3193,9 @@ schema check, as for every other property rule. It is reported before the docume
 (`Required` and group membership); a reserved-property or value-type error of the document may be
 reported first. A consumer
 that does not read `Exclusive` sees each key as the optional key it is declared as.
+`CheckSchemaNodeGroups(field, path)` applies those five rules to one declared node and does not
+recurse, for a caller that walks a schema itself and spells the path itself. `model.Load` calls it
+for each node of the input schemas it visits, so a malformed group in a model is refused at load.
 
 `Description` is optional (`json:"description,omitempty"`) but every built-in property populates it —
 including nested object fields and array item schemas at every depth — so the downstream runtime can surface prose in

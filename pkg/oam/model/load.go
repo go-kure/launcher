@@ -275,6 +275,11 @@ func validateSchema(path string, s oam.PropertySchema) error {
 	if err := validateUnion(path, s.Types); err != nil {
 		return err
 	}
+	// The exclusive groups of this node follow the rules of pkg/oam, which checks one
+	// node and leaves the walk to this function. Its error names the path it is given.
+	if err := oam.CheckSchemaNodeGroups(s, path); err != nil {
+		return errors.Errorf("%w: %s", ErrInvalid, err.Error())
+	}
 	keys := make([]string, 0, len(s.Properties))
 	for k := range s.Properties {
 		keys = append(keys, k)
