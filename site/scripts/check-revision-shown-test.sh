@@ -162,6 +162,14 @@ expect "a last option without a value names that option" 2 "--sha needs a value"
     --site "$WORK/ok-7/site" --sha
 expect "an unknown option is a usage error" 2 "unknown option: --nope" -- \
     --nope
+# An option followed by another option has no value, in every position. The next option is
+# never taken as the value, so the message names the option that lacks it.
+expect "a first option followed by an option has no value" 2 "--site needs a value" -- \
+    --site --sha "$SHA7"
+expect "a middle option followed by an option has no value" 2 "--label needs a value" -- \
+    --site "$WORK/ok-7/site" --label --nope --sha "$SHA7"
+expect "a last option followed by an unknown option has no value" 2 "--label needs a value" -- \
+    --site "$WORK/ok-7/site" --overlay "$WORK/ok-7/overlay.toml" --sha "$SHA7" --label --nope
 
 echo ""
 echo "$pass passed, $fail failed ($n cases)"
