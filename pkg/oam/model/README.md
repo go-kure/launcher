@@ -61,8 +61,9 @@ written and compiles none of them.
 
 Loading is always strict. An unknown field fails with its name and line. There is no `extends`
 and no `patches`. A file with more than one YAML document is refused. YAML anchors, aliases to
-an anchor defined earlier and merge keys (`<<`) are refused with their line, because they hide
-duplicate keys. An alias whose anchor is not defined earlier in the document is refused by the
+an anchor defined earlier and merge keys (`<<` as a mapping key) are refused with their line,
+because they hide duplicate keys. The same text `<<` as a value is the string `<<` and loads.
+An alias whose anchor is not defined earlier in the document is refused by the
 YAML parser, with its own error and no line. Each entry of
 `types` must be a known type name, so `types: [""]` is refused. A union needs at least two
 different scalar types (`string`, `integer`, `number` or `boolean`), at every depth of a schema.

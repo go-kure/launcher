@@ -23,7 +23,8 @@ var ErrInvalid = errors.New("invalid model")
 // Load decodes one model document and checks its shape. It never compiles or
 // evaluates an expression. Decoding is strict: an unknown field fails with its
 // name and line, and so do YAML anchors, aliases to an anchor defined earlier and
-// merge keys. An alias whose anchor is not defined earlier in the document is refused
+// merge keys (`<<` as a mapping key; as a value it is the string `<<`). An alias
+// whose anchor is not defined earlier in the document is refused
 // by the YAML parser, with its own error and no line. A YAML type
 // error, such as a list where a string belongs, names the line of the field and
 // not its path. A null entry in a list of strings or of objects with fixed fields
@@ -87,17 +88,21 @@ func Load(data []byte) (*Model, error) {
 // refuseIndirection walks a YAML node tree and fails on the first anchor, alias or
 // merge key, with its line. It reads the whole document, so it also reaches a value that
 // yaml.v3 skips later, such as the value under a null key of a map with string keys. The
-// failure is a YAML-level one and does not wrap ErrInvalid.
+// failure is a YAML-level one and does not wrap ErrInvalid. A merge key is `<<` as a
+// mapping key. The same plain `<<` as a value is the string `<<`, although yaml.v3 gives
+// it the !!merge tag in every position, so only the key positions of a mapping are tested.
 func refuseIndirection(n *yaml.Node) error {
 	switch {
 	case n.Kind == yaml.AliasNode:
 		return errors.Errorf("model: line %d: YAML anchors, aliases and merge keys are not supported", n.Line)
 	case n.Anchor != "":
 		return errors.Errorf("model: line %d: YAML anchors, aliases and merge keys are not supported", n.Line)
-	case n.Kind == yaml.ScalarNode && n.Value == "<<" && n.ShortTag() == "!!merge":
-		return errors.Errorf("model: line %d: YAML anchors, aliases and merge keys are not supported", n.Line)
 	}
-	for _, c := range n.Content {
+	for i, c := range n.Content {
+		isKey := n.Kind == yaml.MappingNode && i%2 == 0
+		if isKey && c.Kind == yaml.ScalarNode && c.Value == "<<" && c.ShortTag() == "!!merge" {
+			return errors.Errorf("model: line %d: YAML anchors, aliases and merge keys are not supported", c.Line)
+		}
 		if err := refuseIndirection(c); err != nil {
 			return err
 		}
