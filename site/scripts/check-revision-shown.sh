@@ -34,11 +34,12 @@ NESTED="getting-started/install"
 
 die() { echo "check-revision-shown: $*" >&2; exit 2; }
 
-# An option without a value is a usage error (exit 2). `${2:?}` would end the shell with 1.
+# An option without a value is a usage error (exit 2), and so is an option followed by another
+# option (a value starting with `--`). `${2:?}` would end the shell with 1.
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --site|--overlay|--sha|--label|--repo-url|--nested)
-            [[ $# -ge 2 ]] || die "$1 needs a value"
+            [[ $# -ge 2 && "$2" != --* ]] || die "$1 needs a value"
             case "$1" in
                 --site)     SITE="$2" ;;
                 --overlay)  OVERLAY="$2" ;;
