@@ -68,7 +68,10 @@ YAML parser, with its own error and no line. Each entry of
 `types` must be a known type name, so `types: [""]` is refused. A union needs at least two
 different scalar types (`string`, `integer`, `number` or `boolean`), at every depth of a schema.
 So `types: [string]`, `types: [string, string]` and `types: [string, object]` are refused. These
-are the union rules of the shared validator in `pkg/oam`.
+are the union rules of the shared validator in `pkg/oam`. A malformed exclusive group on any node of an
+input schema is refused too, with the path of that node: a group of fewer than two keys, a key the
+node does not declare, a key in two groups, a `Required` key, or groups on a node that is not an
+object. These are the group rules of the same validator.
 A null entry in a list of strings or of objects with fixed fields is refused with its path,
 because YAML would drop it. Examples are `types`, `values`, `parts`, `traits`, `exclusive` and the
 `keys` of an exclusive group. A list of free-form items keeps its nulls. Examples are `enum` and

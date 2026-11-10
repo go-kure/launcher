@@ -352,14 +352,35 @@ func checkObjectGroups(schema map[string]PropertySchema, exclusive []ExclusiveGr
 	return nil
 }
 
+// CheckSchemaNodeGroups reports a malformed exclusive group on one declared node: an
+// object node with fewer than two keys in a group, a key it does not declare, a key
+// listed twice across its groups or a key declared Required, or any node that is not an
+// object and still declares groups. It checks this node only and does not recurse: a
+// caller that owns the walk, such as the loader of a model, calls it for each node it
+// visits and spells the path itself. path prefixes the error.
+func CheckSchemaNodeGroups(field PropertySchema, path string) error {
+	switch {
+	case field.Type == PropertyTypeObject:
+		return checkExclusiveGroups(field.Exclusive, field.Properties, path)
+	case len(field.Exclusive) > 0:
+		return errors.Errorf("%s: schema declares exclusive groups on a non-object node; they name keys of an object", path)
+	}
+	return nil
+}
+
 // checkFieldGroups is checkObjectGroups for one declared node: an object's groups
 // and fields, an array's Items, and no groups on any other node. Items are named "[]".
 func checkFieldGroups(field PropertySchema, path string) error {
+	if err := CheckSchemaNodeGroups(field, path); err != nil {
+		return err
+	}
 	switch {
 	case field.Type == PropertyTypeObject:
-		return checkObjectGroups(field.Properties, field.Exclusive, path)
-	case len(field.Exclusive) > 0:
-		return errors.Errorf("%s: schema declares exclusive groups on a non-object node; they name keys of an object", path)
+		for _, key := range slices.Sorted(maps.Keys(field.Properties)) {
+			if err := checkFieldGroups(field.Properties[key], path+"."+key); err != nil {
+				return err
+			}
+		}
 	case field.Type == PropertyTypeArray && field.Items != nil:
 		return checkFieldGroups(*field.Items, path+"[]")
 	}
