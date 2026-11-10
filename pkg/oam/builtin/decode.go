@@ -62,6 +62,10 @@ func DecodeStrict[T any](src map[string]any) (*T, error) {
 // Two keys that encoding/json files under one field of T, such as url and URL, are
 // refused with a *FoldedFieldError (FoldedDuplicateFieldPath): the decoder would
 // keep one of the two values and drop the other without a message.
+// A key given twice in one JSON object, at any depth, is refused too: a map cannot
+// hold one twice, but a value that serializes itself, such as a json.RawMessage, can.
+// The decoder merges the occurrences of an object member and keeps the last of a
+// scalar, so one value would be dropped without a message (go-kure/launcher#1361).
 //
 // A panic inside the decode is returned as an error: see decodeJSONRecovering.
 func DecodeStrictJSON[T any](src map[string]any, owned ...string) (*T, map[string]any, error) {
@@ -87,10 +91,109 @@ func DecodeStrictJSON[T any](src map[string]any, owned ...string) (*T, map[strin
 		return nil, nil, err
 	}
 	// After the decode, so an unknown key or a wrong type is reported first.
+	// Before the fold walk: that walk reads the tree decoded into any, which keeps
+	// only the last occurrence of a repeated key, so a repeat is refused first.
+	path, found, err := repeatedJSONKey(data)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "read properties")
+	}
+	if found {
+		return nil, nil, errors.Errorf("%s is given more than once in the same object; give each key once", path)
+	}
 	if later, earlier := foldedDuplicateInJSON[T](data); later != "" {
 		return nil, nil, SameFieldError(later, earlier)
 	}
 	return &out, split, nil
+}
+
+// repeatedJSONKey returns the path of the first key that appears twice in one
+// object of data, at any depth, and whether there is one. Paths are written as in
+// FoldedFieldError. found is its own result because the path of a repeated empty
+// key can be "" too, so the path cannot tell a repeat from none.
+// The walk reads every value, including one inside an interface, a json.RawMessage
+// or a type that decodes itself: a self-serializing value is the only way a repeat
+// reaches data. It compares the names json.Decoder.Token returns, which are decoded,
+// so a key written with an escape is the same key.
+func repeatedJSONKey(data []byte) (path string, found bool, err error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var stack []repeatSegment
+	found, err = repeatedJSONKeyIn(dec, &stack)
+	if err != nil || !found {
+		return "", false, err
+	}
+	return joinRepeatSegments(stack), true, nil
+}
+
+// repeatSegment is one step of the path to a value: an object key or a list index.
+// The walk keeps the steps on one stack and writes the path text only for a repeat,
+// so a deep value costs one entry per level, never a copy of the whole path.
+type repeatSegment struct {
+	key   string
+	index int
+	isIdx bool
+}
+
+// joinRepeatSegments writes the path as FoldedFieldError does: keys joined by ".",
+// an index as "[n]" after its parent. An empty key is a segment like any other, so
+// an empty first key leaves ".x" for a repeat of x under it.
+func joinRepeatSegments(stack []repeatSegment) string {
+	var b strings.Builder
+	for i, s := range stack {
+		switch {
+		case s.isIdx:
+			b.WriteString("[" + strconv.Itoa(s.index) + "]")
+		case i > 0:
+			b.WriteString("." + s.key)
+		default:
+			b.WriteString(s.key)
+		}
+	}
+	return b.String()
+}
+
+// repeatedJSONKeyIn walks the next value of dec. On a repeat it returns true with
+// *stack holding the path of the repeated key.
+func repeatedJSONKeyIn(dec *json.Decoder, stack *[]repeatSegment) (bool, error) {
+	tok, err := dec.Token()
+	if err != nil {
+		return false, err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return false, nil
+	}
+	switch delim {
+	case '{':
+		seen := map[string]bool{}
+		for dec.More() {
+			keyTok, err := dec.Token()
+			if err != nil {
+				return false, err
+			}
+			key, _ := keyTok.(string)
+			*stack = append(*stack, repeatSegment{key: key})
+			if seen[key] {
+				return true, nil
+			}
+			seen[key] = true
+			if found, err := repeatedJSONKeyIn(dec, stack); err != nil || found {
+				return found, err
+			}
+			*stack = (*stack)[:len(*stack)-1]
+		}
+	case '[':
+		for i := 0; dec.More(); i++ {
+			*stack = append(*stack, repeatSegment{index: i, isIdx: true})
+			if found, err := repeatedJSONKeyIn(dec, stack); err != nil || found {
+				return found, err
+			}
+			*stack = (*stack)[:len(*stack)-1]
+		}
+	}
+	// The closing delimiter.
+	_, err = dec.Token()
+	return false, err
 }
 
 // decodeJSONRecovering is dec.Decode(out) with a panic turned into an error
@@ -151,7 +254,9 @@ type SelfDecodedShapes map[reflect.Type]reflect.Type
 // into, as in UnknownJSONFieldPath.
 //
 // Called after DecodeStrictJSON[T] accepted the same src, it returns the path
-// of a key that decode dropped inside one of those types, or "".
+// of a key that decode dropped inside one of those types, or "". A key given
+// twice in one object is DecodeStrictJSON's to refuse, before this walk: the
+// walk alone reads the last occurrence.
 func UnknownJSONFieldPathIn[T any](src map[string]any, shapes SelfDecodedShapes, owned ...string) string {
 	rest := make(map[string]any, len(src))
 	for k, v := range src {
@@ -288,7 +393,8 @@ func SameFieldError(later, earlier string) error {
 // are data and are not compared, and the walk does not look inside a type that
 // decodes itself, an interface value or json.RawMessage, where the decoder
 // checks no key either. Where it cannot show which field a key fills, it
-// reports nothing.
+// reports nothing. A key given twice in one object is DecodeStrictJSON's to
+// refuse, before this walk: the walk alone reads the last occurrence.
 func FoldedDuplicateFieldPath[T any](src map[string]any, owned ...string) (later, earlier string) {
 	rest := make(map[string]any, len(src))
 	for k, v := range src {

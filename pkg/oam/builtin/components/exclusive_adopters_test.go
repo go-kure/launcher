@@ -313,18 +313,25 @@ func TestExclusiveAdopters_HelmRefTypedMaps(t *testing.T) {
 			"source.ref: sets the same field as source.Ref (field names match case-insensitively, so one value would be dropped)")
 	})
 	// The decode merges every ref object it reads into one ref, and the ref is
-	// authored by all of them: one ref twice in raw JSON, which collapses to the
-	// last before any key is compared, or a field set and then nulled.
-	twice := map[string]map[string]any{
-		"raw source, ref twice": {"chart": "a", "source": json.RawMessage(`{"url":"` + url +
+	// authored by all of them: one ref twice in raw JSON, or a field set and then
+	// nulled. The strict decode refuses a key given twice in one object before any
+	// key is compared (go-kure/launcher#1361), so neither reaches the check: before,
+	// each merged into one ref and the check refused that ref, in other words.
+	twice := map[string]struct {
+		props map[string]any
+		want  string
+	}{
+		"raw source, ref twice": {map[string]any{"chart": "a", "source": json.RawMessage(`{"url":"` + url +
 			`","kind":"GitRepository","ref":{"branch":"main"},"ref":{"tag":""}}`)},
-		"raw ref, branch then null": {"chart": "a", "source": map[string]any{"url": url, "kind": "GitRepository",
+			"source.ref is given more than once in the same object; give each key once"},
+		"raw ref, branch then null": {map[string]any{"chart": "a", "source": map[string]any{"url": url, "kind": "GitRepository",
 			"ref": json.RawMessage(`{"tag":"","branch":"main","branch":null}`)}},
+			"source.ref.branch is given more than once in the same object; give each key once"},
 	}
-	for name, props := range twice {
+	for name, tc := range twice {
 		t.Run(name, func(t *testing.T) {
 			site := exclusiveSite{compType: "helm", rule: components.HelmRule{}}
-			wantErrContaining(t, site.direct(props), "source.ref sets branch, tag; an inline GitRepository takes exactly one of")
+			wantErrContaining(t, site.direct(tc.props), tc.want)
 		})
 	}
 	// The authored fields are read from the bytes the decode reads, so a

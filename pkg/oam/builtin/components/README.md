@@ -13382,6 +13382,12 @@ refusal pairs no other spelling with it. The v1 decoder (`GOEXPERIMENT=nojsonv2`
 option. The refusal comes after the strict decode, so an unknown
 key or a wrong type is still the first error, and a null never forms a pair.
 
+The same decode refuses a key given twice in one JSON object, at any depth, with `<path> is given
+more than once in the same object; give each key once`. A map cannot hold a key twice, but a
+value that serializes itself, such as a `json.RawMessage`, can, and the decoder would merge its
+occurrences of an object member or keep the last scalar without a message. This refusal comes
+before the pair walk.
+
 `kurel build` reaches the decode only after the authored-property check, which holds each
 top-level key to the kind's schema by exact name. A top-level pair therefore stops earlier there:
 the spelling the schema does not declare is refused as `unsupported field "Suspend" (allowed: ...)`,

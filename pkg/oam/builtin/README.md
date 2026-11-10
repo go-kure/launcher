@@ -32,6 +32,11 @@ null contract. Two keys that name two different declared fields (`Foo` and `foo`
 that wraps the error keeps it findable with `errors.As`. `FoldedDuplicateFieldPath[T](props, owned...)`
 is the same walk without the decode, and `SameFieldError(later, earlier)` builds the error for a caller that
 finds a pair itself.
+`DecodeStrictJSON` also refuses a key given twice in one JSON object, at any depth, with
+`<path> is given more than once in the same object; give each key once`. A map cannot hold a key
+twice, but a value that serializes itself, such as a `json.RawMessage`, can. The decoder merges the
+occurrences of an object member and keeps the last scalar, so one value would be dropped without a
+message. The refusal comes after the decode and before the pair walk.
 It decodes only: no defaulting, no semantic checks. A panic inside the decode comes back as
 an error naming `T` and the panic's value, so an external type whose own `UnmarshalJSON` does
 not expect a value an author can write fails the build instead of crashing it (Cilium's ICMP
