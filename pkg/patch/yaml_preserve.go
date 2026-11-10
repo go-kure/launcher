@@ -41,13 +41,13 @@ type YAMLDocumentSet struct {
 func LoadResourcesWithStructure(r io.Reader) (*YAMLDocumentSet, error) {
 	content, err := io.ReadAll(r)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read YAML content: %w", err)
+		return nil, errors.Wrap(err, "failed to read YAML content")
 	}
 
 	// Split into documents while preserving separators and content
 	documents, err := parseYAMLDocuments(string(content))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse YAML documents: %w", err)
+		return nil, errors.Wrap(err, "failed to parse YAML documents")
 	}
 
 	set := &YAMLDocumentSet{
@@ -63,7 +63,7 @@ func LoadResourcesWithStructure(r io.Reader) (*YAMLDocumentSet, error) {
 		// Parse with yaml.v3 to preserve structure
 		var node yaml.Node
 		if err := yaml.Unmarshal([]byte(docContent), &node); err != nil {
-			return nil, fmt.Errorf("failed to parse document %d: %w", i, err)
+			return nil, errors.Wrapf(err, "failed to parse document %d", i)
 		}
 
 		// Also parse into unstructured for patching. This is a second parse, so that
@@ -142,7 +142,7 @@ func parseYAMLDocuments(content string) ([]string, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading YAML content: %w", err)
+		return nil, errors.Wrap(err, "error reading YAML content")
 	}
 
 	return documents, nil
@@ -183,7 +183,7 @@ func (doc *YAMLDocument) ApplyPatchesToDocument(patches []PatchOp) error {
 	// Apply patches to the unstructured resource
 	for _, patch := range patches {
 		if err := applyPatchOp(doc.Resource.Object, patch); err != nil {
-			return fmt.Errorf("failed to apply patch %v: %w", patch, err)
+			return errors.Wrapf(err, "failed to apply patch %v", patch)
 		}
 	}
 
@@ -191,13 +191,13 @@ func (doc *YAMLDocument) ApplyPatchesToDocument(patches []PatchOp) error {
 	// First, marshal the patched resource to YAML
 	patchedYAML, err := marshalResource(doc.Resource.Object)
 	if err != nil {
-		return fmt.Errorf("failed to marshal patched resource: %w", err)
+		return errors.Wrap(err, "failed to marshal patched resource")
 	}
 
 	// Parse the patched YAML back into a node structure
 	var patchedNode yaml.Node
 	if err := yaml.Unmarshal(patchedYAML, &patchedNode); err != nil {
-		return fmt.Errorf("failed to parse patched YAML: %w", err)
+		return errors.Wrap(err, "failed to parse patched YAML")
 	}
 
 	// Give an untouched timestamp its authored style, then merge to keep the comments
@@ -280,19 +280,19 @@ func mayReadOtherwise(n *yaml.Node) bool {
 func (doc *YAMLDocument) ApplyStrategicPatchesToDocument(patches []StrategicPatch, lookup KindLookup) error {
 	for _, smp := range patches {
 		if err := ApplyStrategicMergePatch(doc.Resource, smp.Patch, lookup); err != nil {
-			return fmt.Errorf("failed to apply strategic patch: %w", err)
+			return errors.Wrap(err, "failed to apply strategic patch")
 		}
 	}
 
 	// Re-marshal the patched resource and merge into the existing YAML node
 	patchedYAML, err := marshalResource(doc.Resource.Object)
 	if err != nil {
-		return fmt.Errorf("failed to marshal patched resource: %w", err)
+		return errors.Wrap(err, "failed to marshal patched resource")
 	}
 
 	var patchedNode yaml.Node
 	if err := yaml.Unmarshal(patchedYAML, &patchedNode); err != nil {
-		return fmt.Errorf("failed to parse patched YAML: %w", err)
+		return errors.Wrap(err, "failed to parse patched YAML")
 	}
 
 	return doc.mergeBack(patchedYAML, &patchedNode, touchedStrategicPaths(patches))
@@ -302,7 +302,7 @@ func (doc *YAMLDocument) ApplyStrategicPatchesToDocument(patches []StrategicPatc
 // This is a best-effort attempt to preserve comments and formatting
 func mergeYAMLNodes(original, patched *yaml.Node) error {
 	if original.Kind != patched.Kind {
-		return fmt.Errorf("node kinds don't match: %v vs %v", original.Kind, patched.Kind)
+		return errors.Errorf("node kinds don't match: %v vs %v", original.Kind, patched.Kind)
 	}
 
 	switch original.Kind {
@@ -381,7 +381,7 @@ func mergeMappingNodes(original, patched *yaml.Node) error {
 // mergeMappingNodesAt is mergeMappingNodes, with root true for the root mapping of a document.
 func mergeMappingNodesAt(original, patched *yaml.Node, root bool) error {
 	if len(patched.Content)%2 != 0 {
-		return fmt.Errorf("invalid mapping node: odd number of content items")
+		return errors.New("invalid mapping node: odd number of content items")
 	}
 	pairKey := func(n *yaml.Node) string {
 		if root {
@@ -1041,7 +1041,7 @@ func (set *YAMLDocumentSet) WriteToFile(filename string) error {
 		encoder.SetIndent(2)
 
 		if err := encoder.Encode(doc.Node); err != nil {
-			return fmt.Errorf("failed to encode document %d: %w", i, err)
+			return errors.Wrapf(err, "failed to encode document %d", i)
 		}
 
 		_ = encoder.Close()
@@ -1053,7 +1053,7 @@ func (set *YAMLDocumentSet) WriteToFile(filename string) error {
 	content = strings.TrimSuffix(content, "\n") + "\n"
 
 	if err := writeFile(filename, []byte(content)); err != nil {
-		return fmt.Errorf("failed to write file %s: %w", filename, err)
+		return errors.Wrapf(err, "failed to write file %s", filename)
 	}
 
 	return nil
@@ -1119,13 +1119,13 @@ func (doc *YAMLDocument) updateDocumentFromResource(touched [][]string) error {
 	// Marshal the updated resource to YAML
 	updatedYAML, err := marshalResource(doc.Resource.Object)
 	if err != nil {
-		return fmt.Errorf("failed to marshal updated resource: %w", err)
+		return errors.Wrap(err, "failed to marshal updated resource")
 	}
 
 	// Parse the updated YAML back into a node structure
 	var updatedNode yaml.Node
 	if err := yaml.Unmarshal(updatedYAML, &updatedNode); err != nil {
-		return fmt.Errorf("failed to parse updated YAML: %w", err)
+		return errors.Wrap(err, "failed to parse updated YAML")
 	}
 
 	// For now, use the updated node directly to ensure correctness
@@ -1161,7 +1161,7 @@ func (set *YAMLDocumentSet) Copy() (*YAMLDocumentSet, error) {
 		// Deep copy the YAML node
 		copiedNode, err := copyYAMLNode(doc.Node)
 		if err != nil {
-			return nil, fmt.Errorf("failed to copy YAML node for document %d: %w", i, err)
+			return nil, errors.Wrapf(err, "failed to copy YAML node for document %d", i)
 		}
 
 		// Deep copy the unstructured resource
@@ -1203,7 +1203,7 @@ func copyYAMLNode(node *yaml.Node) (*yaml.Node, error) {
 	for i, child := range node.Content {
 		copiedChild, err := copyYAMLNode(child)
 		if err != nil {
-			return nil, fmt.Errorf("failed to copy child node %d: %w", i, err)
+			return nil, errors.Wrapf(err, "failed to copy child node %d", i)
 		}
 		copied.Content[i] = copiedChild
 	}
