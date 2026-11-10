@@ -86,6 +86,7 @@ spelling are refused by the YAML decoder, like any two keys with the same spelli
 of decoded values do not look at the value under a null key. The refusal of anchors, aliases
 and merge keys reads the whole document before the decoding, so it applies under a null key
 too.
+The path in an error names a key as it decodes: `!!binary aW1hZ2U=` appears as `image`.
 
 ## CEL environment (`celEnv: "1"`)
 
