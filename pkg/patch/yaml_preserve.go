@@ -411,6 +411,7 @@ func mergeMappingNodesAt(original, patched *yaml.Node, root bool) error {
 				}
 			} else {
 				// Replace the value node but keep the key node (preserves comments on key)
+				keepScalarAnchor(original.Content[i+1], patchedValue)
 				original.Content[i+1] = patchedValue
 			}
 			delete(patchedMap, key) // Mark as processed
@@ -827,6 +828,21 @@ func comparableScalar(v any) any {
 		return int(f)
 	}
 	return f
+}
+
+// keepScalarAnchor gives next the anchor of the authored scalar it replaces, when both hold the
+// same data. An alias key (`*k`) that reads the anchor then still finds it, so the merged text
+// loads. A value that changes keeps no anchor: an alias key that read it would read the new value,
+// and the load check then sends the write-back to the patched resource. The authored node is
+// never resolved through an alias: a value that is an alias (`*v`) has no anchor of its own, and
+// copying the anchor of its target would declare it twice.
+func keepScalarAnchor(authored, next *yaml.Node) {
+	if authored.Kind != yaml.ScalarNode || authored.Anchor == "" || next.Kind != yaml.ScalarNode {
+		return
+	}
+	if sameItemData(authored, next) {
+		next.Anchor = authored.Anchor
+	}
 }
 
 // keepAuthoredTimestampStyle gives each scalar under next the tag and style of the authored
