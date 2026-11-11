@@ -768,7 +768,7 @@ type unreadData struct{}
 type nanData struct{}
 
 // itemData reads a node as the data the resource holds: mappings keyed by resource spelling, lists,
-// and scalars as their decoded value. A scalar that does not decode reads as null: the loaders refuse
+// and scalars as their decoded value, a timestamp as its text. A scalar that does not decode reads as null: the loaders refuse
 // such a document before a write-back runs. The value of a merge entry is not read, because the
 // loader skips a merged entry that the mapping holds as its own, so a merge source can hold
 // anything, a cycle included. A cycle through any other alias reads as unreadData, and so no shape
@@ -806,6 +806,11 @@ func itemDataAt(node *yaml.Node, onPath map[*yaml.Node]bool) any {
 	case yaml.ScalarNode:
 		var v any
 		_ = n.Decode(&v)
+		if _, isTime := v.(time.Time); isTime {
+			// The loader hands a timestamp to the resource as its text, so the written item holds a
+			// string. Both sides read as that text.
+			return n.Value
+		}
 		return comparableScalar(v)
 	default:
 		// resolveAlias leaves no alias node, and a document node never reaches here.
