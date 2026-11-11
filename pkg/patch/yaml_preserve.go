@@ -206,7 +206,8 @@ func (doc *YAMLDocument) ApplyPatchesToDocument(patches []PatchOp) error {
 
 // mergeBack merges the patched node into the document. The document is written from the patched
 // resource as it stands, and so loses its comments, in two cases: the merge reports an error, or the
-// merged text would not load (an alias key whose anchor now sits after it, after a list is reordered).
+// merged text does not load to the data of the patched resource (an alias key whose anchor now sits
+// after it, or reads another declaration of one anchor name, after a list is reordered).
 // The merge changes the patched node (it gives its keys and items the authored text and comments), so
 // the fallback is a second parse of the same bytes, made before the merge: it holds nothing of the
 // document, and it loads.
@@ -217,20 +218,59 @@ func (doc *YAMLDocument) mergeBack(patchedYAML []byte, patched *yaml.Node, touch
 	}
 	keepAuthoredTimestampStyle(doc.Node, patched, touched)
 	keepAuthoredTimestampStyle(doc.Node, &fallback, touched)
-	if err := mergeYAMLNodes(doc.Node, patched); err != nil || !loadsAgain(doc.Node) {
+	if err := mergeYAMLNodes(doc.Node, patched); err != nil || !keepsTheData(doc.Node, patchedYAML) {
 		doc.Node = &fallback
 	}
 	return nil
 }
 
-// loadsAgain reports whether the document node, written out, loads again through the loader.
-func loadsAgain(node *yaml.Node) bool {
+// keepsTheData reports whether the document node, written out, loads again to the data of the
+// patched resource (patchedYAML is that resource, written). A document with no alias, no anchor and
+// no two keys that read alike cannot load to other data or fail to load, so it is not written out:
+// the check costs a write and a load of the whole document.
+func keepsTheData(node *yaml.Node, patchedYAML []byte) bool {
+	if !mayReadOtherwise(node) {
+		return true
+	}
 	out, err := yaml.Marshal(node)
 	if err != nil {
 		return false
 	}
-	_, err = LoadResourcesWithStructure(bytes.NewReader(out))
-	return err == nil
+	set, err := LoadResourcesWithStructure(bytes.NewReader(out))
+	if err != nil || len(set.Documents) != 1 {
+		return false
+	}
+	again, err := marshalResource(set.Documents[0].Resource.Object)
+	return err == nil && bytes.Equal(again, patchedYAML)
+}
+
+// mayReadOtherwise reports whether a node holds an alias, an anchor, or a mapping with two keys that
+// read alike: the three things a merge of authored key text can turn into another reading or into
+// text that does not load.
+func mayReadOtherwise(n *yaml.Node) bool {
+	if n.Kind == yaml.AliasNode || n.Anchor != "" {
+		return true
+	}
+	if n.Kind == yaml.MappingNode {
+		seen := make(map[string]bool, len(n.Content)/2)
+		for i := 0; i < len(n.Content)-1; i += 2 {
+			if !isScalarKey(n.Content[i]) {
+				continue
+			}
+			// The decoder refuses two keys of one authored text, and the loader two of one reading.
+			read, raw := "r:"+keyText(n.Content[i]), "w:"+rawKeyText(n.Content[i])
+			if seen[read] || seen[raw] {
+				return true
+			}
+			seen[read], seen[raw] = true, true
+		}
+	}
+	for _, c := range n.Content {
+		if mayReadOtherwise(c) {
+			return true
+		}
+	}
+	return false
 }
 
 // ApplyStrategicPatchesToDocument applies strategic merge patches to a YAML
