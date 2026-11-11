@@ -5,15 +5,41 @@ package builtin
 import (
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // strictCase reports whether options, the part of a json tag after its first
-// comma, holds case:strict. The jsonv2-backed decoder fills such a field only
-// from a key spelled exactly as its name, and never through a key that differs
-// from it in case (encoding/json/v2/fields.go, matchFoldedName). Quoted
-// spellings of the option are not read.
+// comma, makes the field strict. The jsonv2-backed decoder fills such a field
+// only from a key spelled exactly as its name, and never through a key that
+// differs from it in case (encoding/json/v2/fields.go, matchFoldedName). It reads
+// the value of case: as the identifier that follows the colon, so case:strict
+// followed by a space is still strict. A field with both case:strict and
+// case:ignore is not strict, because the parser holds both bits and its matcher
+// then folds. Quoted spellings of the option are not read.
 func strictCase(options string) bool {
-	return slices.Contains(strings.Split(options, ","), "case:strict")
+	var strict, ignore bool
+	for _, opt := range strings.Split(options, ",") {
+		v, ok := strings.CutPrefix(opt, "case:")
+		if !ok {
+			continue
+		}
+		switch identifier(v) {
+		case "strict":
+			strict = true
+		case "ignore":
+			ignore = true
+		}
+	}
+	return strict && !ignore
+}
+
+// identifier returns the leading run of letters, digits and underscores of s,
+// the way the decoder's tag parser reads an option name.
+func identifier(s string) string {
+	n := len(s) - len(strings.TrimLeftFunc(s, func(r rune) bool {
+		return r == '_' || unicode.IsLetter(r) || unicode.IsNumber(r)
+	}))
+	return s[:n]
 }
 
 // foldedBefore reports whether the field at index a is looked up before the
