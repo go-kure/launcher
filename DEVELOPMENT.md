@@ -333,6 +333,7 @@ each other, not with upstream.
 - `precommit` - Run all pre-commit checks
 - `ci` - Run full CI pipeline
 - `verify-merge PR=<n>` - Build and test the PR's merge ref (`refs/pull/<n>/merge`), the tree its CI builds
+- `check-go-version` - Check that `go.mod`, `site/go.mod`, `site/scripts/kuredepsync/go.mod` and `AGENTS.md` carry the Go version of `mise.toml` (also part of `mise run verify`)
 - `test-verify-merge` - Self-test `scripts/verify-merge.sh`
 - `test-pin-impact` - Run `scripts/check-pin-impact.sh`'s hermetic cases (`bash scripts/test/run-tests.sh`)
 - `test-forbidden-terms` - Self-test the guard matcher the CRD vendor scripts read (`scripts/forbidden-terms-lib.sh`) and `cliff.toml`'s changelog scrub against the forbidden-terms guard (`bash scripts/test/forbidden-terms-test.sh`; needs `git-cliff` on `PATH`, which mise installs)
