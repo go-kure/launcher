@@ -2,8 +2,8 @@
 # Licensed under the Apache License, Version 2.0 (each Go file carries its header; each CRD is generated from the project's types);
 # LICENSE is the project's copy of the licence and NOTICE its notice file, at the same tag.
 # The components tests check each file against its git blob id below.
-tag v0.95.1
-tag-object 96b62b0ffdbe273b80ccf61c7f368d8ea96fc582
+tag v0.95.2
+tag-object 54f4845dbfe34deda0395ebc90c07d8d54a436b8
 licence LICENSE 74e6ec6963979ae506d5a6b1d59adb7f3bdaf045
 notice NOTICE e520005cdda30b725b5534ce120ee905fd40b55a
 file pkg/alertmanager/amcfg.go 9c671771ddf65232f3843abd2b2a7ab8c388c467
@@ -30,10 +30,10 @@ file pkg/thanos/rules.go f7e29b44f089e3c2b3fadde2adcf2f25a4f8ef82
 file pkg/thanos/statefulset.go 4466c6a93034a9a54f5c934a058b2fefae1ef778
 file pkg/operator/defaults.go f6162d09bbabbe68aac05fd7c2d27d4efeac1973
 file pkg/operator/validations.go 7811b1a21bdb283ec265a5ffe7f40fe571e6b93b
-file example/prometheus-operator-crd/monitoring.coreos.com_alertmanagers.yaml f2790471fca5f8112ca575d0a98db02a62c5bb0a
-file example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml 38fa5cca2eb35363c323fcd9950e6f124c8449ba
-file example/prometheus-operator-crd/monitoring.coreos.com_probes.yaml e50d1d4e1a646fd66fd0832c0f80b1dff6a3039b
-file example/prometheus-operator-crd/monitoring.coreos.com_prometheuses.yaml 4f854c68d3acefe08e84325faef3af5bddc9cf4d
-file example/prometheus-operator-crd/monitoring.coreos.com_prometheusrules.yaml 022887025db9392e0debace2cbbb8ac3d0967598
-file example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml f9277ecf8bf88e499803acab102d4c95dda3bd92
-file example/prometheus-operator-crd/monitoring.coreos.com_thanosrulers.yaml a032676575d32ed1f14f2803d4d40a9ff8c6c0db
+file example/prometheus-operator-crd/monitoring.coreos.com_alertmanagers.yaml be7820f184dc1d3cde50a9295aef0298a26fdf0c
+file example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml 63c90e502137e24b7ac270c72e6ab3d00abaaeae
+file example/prometheus-operator-crd/monitoring.coreos.com_probes.yaml 22440891afb95e8735f4438a4d0894dd8db3b6a2
+file example/prometheus-operator-crd/monitoring.coreos.com_prometheuses.yaml 335999154e8f4f7d8b9ed05df0472becad6d19e5
+file example/prometheus-operator-crd/monitoring.coreos.com_prometheusrules.yaml 3fb6904cbd5dcb90e4eb3efdfaa439ea40e6a3bf
+file example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml abfcfac25c2ccf141194bf89eb80432fde010c64
+file example/prometheus-operator-crd/monitoring.coreos.com_thanosrulers.yaml 0c2968f8847b309e29c9a6f26ebcafb12621d451
