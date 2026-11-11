@@ -3,8 +3,11 @@ package patch
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"math"
 	"math/big"
+	"slices"
+	"strconv"
 	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
@@ -70,6 +73,11 @@ func ApplyStrategicMergePatch(
 // normalized copies of the resource map and the patch. On error the resource is
 // left untouched.
 func applyTypedSMP(resource *unstructured.Unstructured, patch map[string]any, typedObj any) error {
+	// Both inputs go through JSON, which has no NaN and no infinity: name the number
+	// before the marshal fails without a path.
+	if err := refuseNonFinite(resource.Object, patch); err != nil {
+		return err
+	}
 	// Merge two inputs of the same types. The merge compares list merge keys by
 	// type, so an int in the patch would not match the int64 an earlier patch left
 	// in the resource. The round trip also copies, as the merge mutates its inputs.
@@ -292,6 +300,74 @@ func hasNilContainer(v any, depth int) (bool, error) {
 
 var errTooDeep = errors.New("the document is nested too deeply or contains itself")
 
+// refuseNonFinite returns an error that names the first NaN or infinity in the
+// resource or the patch, as "<where> holds the non-finite number <number> at <path>"
+// with where "the resource" or "the patch", or nil when neither holds one. The
+// strategic merge goes through JSON, which cannot carry such a number, so the merge
+// could not keep it and refuses it. The inputs are read in the order the
+// normalization reads them, the resource first. Each is first checked for structure
+// with normalizeNil, the check the normalization makes: an input that nests deeper
+// than maxDepth, or contains itself, ends the whole check with no finding, so that the
+// normalization that follows reports that error first, as it did before, and the walk
+// below never meets a cycle. The walk goes through chains of map[string]any and []any,
+// in sorted key order, so the path does not depend on the order a map is read; the
+// path is spelled as the ResolveTOMLPath field path is (keys joined by a dot, a list
+// index as [n]). Any other container type is left to encoding/json, as normalizeNil
+// leaves it.
+func refuseNonFinite(resource, patch map[string]any) error {
+	for _, in := range []struct {
+		where string
+		m     map[string]any
+	}{{"the resource", resource}, {"the patch", patch}} {
+		m, err := normalizeNil(in.m)
+		if err != nil {
+			//nolint:nilerr // a structure error is not ours to report: the normalization that follows reports it first
+			return nil
+		}
+		if path, number, found := findNonFinite(m, "", 0); found {
+			return errors.Errorf("%s holds the non-finite number %s at %s, and a strategic merge patch goes through JSON, which has no NaN or Inf", in.where, number, path)
+		}
+	}
+	return nil
+}
+
+// findNonFinite returns the path and the text (NaN, +Inf or -Inf) of the first
+// non-finite float in v, and whether there is one. It reads a value that
+// normalizeNil accepted, so no chain of []any and map[string]any in it is deeper than
+// maxDepth or contains itself; the depth test only keeps the walk bounded.
+func findNonFinite(v any, path string, depth int) (string, string, bool) {
+	if depth > maxDepth {
+		return "", "", false
+	}
+	switch t := v.(type) {
+	case float64:
+		if math.IsNaN(t) || math.IsInf(t, 0) {
+			return path, strconv.FormatFloat(t, 'g', -1, 64), true
+		}
+	case float32:
+		if f := float64(t); math.IsNaN(f) || math.IsInf(f, 0) {
+			return path, strconv.FormatFloat(f, 'g', -1, 64), true
+		}
+	case map[string]any:
+		for _, k := range slices.Sorted(maps.Keys(t)) {
+			at := k
+			if path != "" {
+				at = path + "." + k
+			}
+			if p, n, found := findNonFinite(t[k], at, depth+1); found {
+				return p, n, true
+			}
+		}
+	case []any:
+		for i, e := range t {
+			if p, n, found := findNonFinite(e, path+"["+strconv.Itoa(i)+"]", depth+1); found {
+				return p, n, true
+			}
+		}
+	}
+	return "", "", false
+}
+
 // emptied returns a copy of v in which a nil []any or nil map[string]any, at any
 // depth through chains of those two types, is an empty one. Other values, an
 // explicit nil and any other container type among them, are kept as they are.
@@ -327,6 +403,11 @@ func emptied(v any, depth int) (any, error) {
 // applyJSONMergePatch applies RFC 7386 JSON merge patch as a fallback for
 // CRDs that lack Go struct tags.
 func applyJSONMergePatch(resource *unstructured.Unstructured, patch map[string]any) error {
+	// Both inputs go through JSON, which has no NaN and no infinity: name the number
+	// before the marshal fails without a path.
+	if err := refuseNonFinite(resource.Object, patch); err != nil {
+		return err
+	}
 	// A nil slice or map in the resource is an empty one, as on a known kind
 	// (jsonTyped), not the null that json.Marshal would write. The resource is
 	// only read here, so it is not copied unless it holds a nil container, and
