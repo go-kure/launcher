@@ -1,8 +1,8 @@
 # Launcher delivery scope: ordering, naming, Helm values and template security
 
-*Date: 2026-10-04 | Status: development, a dated design record. A section marked **Shipped**
-states what the code does on `main` (development, or a published prerelease once a tag carries
-it); one marked **Target** is proposed and not in the code; §8 says which tickets have shipped*
+*Date: 2026-10-04 | Status: published prerelease, a dated design record. A section marked
+**Shipped** states what the code does, and `v0.2.0-beta.5` carries it; one marked **Target** is
+proposed and not in the code; §8 says which tickets have shipped*
 
 This document records the target scope of the launcher library and `kurel` after a
 cross-library scope review of kure, launcher and a downstream cluster engine that consumes

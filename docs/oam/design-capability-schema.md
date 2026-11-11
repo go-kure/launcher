@@ -1,6 +1,6 @@
 # Design: Capability Rendering Schema
 
-*Status: Final | Issue: [go-kure/launcher#60](https://github.com/go-kure/launcher/issues/60)*
+*Status: published prerelease for §2, built-in handler schema; proposed for §3, custom capability schema | Issue: [go-kure/launcher#60](https://github.com/go-kure/launcher/issues/60)*
 
 | Version | Date | Summary |
 |---|---|---|
