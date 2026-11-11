@@ -280,6 +280,12 @@ type (
 	foldCaseIgnore struct {
 		Ign string `json:"name,case:ignore"`
 	}
+	// foldCaseBoth names both options. The jsonv2 tag parser holds both bits,
+	// so the field is not strict.
+	foldCaseBoth struct {
+		Strict string `json:"name,case:strict,case:ignore"`
+		Loose  string `json:"NAME"`
+	}
 	foldCaseStrictEmbed struct {
 		Strict string `json:"name,case:strict"`
 	}
@@ -498,6 +504,15 @@ func TestFoldedDuplicateFieldPath_CaseOptions(t *testing.T) {
 			t.Fatalf("premise: the decoder filled Ign %q, want a", got.Ign)
 		}
 		wantWalk[foldCaseIgnore](t, src, "name", "Name")
+	})
+	t.Run("case:strict with case:ignore is not strict", func(t *testing.T) {
+		src := pair("name", "Name", "a", "b")
+		got := decodeLikeTheDecoder[foldCaseBoth](t, src)
+		// Both keys fill Strict, and the exact one wins: b is dropped.
+		if got.Strict != "a" || got.Loose != "" {
+			t.Fatalf("premise: the decoder filled Strict %q and Loose %q, want a and empty", got.Strict, got.Loose)
+		}
+		wantWalk[foldCaseBoth](t, src, "name", "Name")
 	})
 	t.Run("a strict field promoted from an embedded struct", func(t *testing.T) {
 		src := pair("name", "Name", "a", "b")
