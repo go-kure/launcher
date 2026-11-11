@@ -25,13 +25,13 @@ require (
 	github.com/blang/semver/v4 v4.0.0
 	github.com/cert-manager/cert-manager v1.21.3
 	github.com/cilium/cilium v1.20.4
-	github.com/cloudnative-pg/barman-cloud v0.6.0
+	github.com/cloudnative-pg/barman-cloud v0.7.0
 	github.com/cloudnative-pg/cloudnative-pg v1.30.1
 	github.com/cloudnative-pg/machinery v0.6.1
-	github.com/cloudnative-pg/plugin-barman-cloud v0.15.1
+	github.com/cloudnative-pg/plugin-barman-cloud v0.16.0
 	github.com/controlplaneio-fluxcd/flux-operator v0.62.1
 	github.com/evanphx/json-patch/v5 v5.9.11
-	github.com/external-secrets/external-secrets/apis v0.0.0-20261023150316-e932f3a3f6f2
+	github.com/external-secrets/external-secrets/apis v0.0.0-20261110094301-b872cf4b508f
 	github.com/fluxcd/helm-controller/api v1.7.1
 	github.com/fluxcd/image-automation-controller/api v1.3.0
 	github.com/fluxcd/image-reflector-controller/api v1.3.0
@@ -41,11 +41,11 @@ require (
 	github.com/fluxcd/pkg/apis/meta v1.38.0
 	github.com/fluxcd/source-controller/api v1.10.1
 	github.com/fluxcd/source-watcher/api/v2 v2.3.1
-	github.com/go-kure/kure v0.2.0-rc.0
+	github.com/go-kure/kure v0.2.0-rc.1
 	github.com/google/cel-go v0.31.0
 	github.com/google/go-containerregistry v0.22.1
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
-	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.95.1
+	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.95.2
 	github.com/prometheus/common v0.73.1
 	github.com/robfig/cron v1.2.0
 	github.com/spf13/cobra v1.10.2
@@ -61,7 +61,7 @@ require (
 	k8s.io/apiserver v0.37.2
 	k8s.io/client-go v0.37.2
 	k8s.io/kube-aggregator v0.37.2
-	k8s.io/kube-openapi v0.0.0-20261014044854-ca3452a79603
+	k8s.io/kube-openapi v0.0.0-20261104182252-5bee61fc5225
 	sigs.k8s.io/controller-runtime v0.25.2
 	sigs.k8s.io/gateway-api v1.7.0
 	sigs.k8s.io/kustomize/api v0.21.2
@@ -70,7 +70,7 @@ require (
 )
 
 require (
-	cel.dev/expr v0.25.2 // indirect
+	cel.dev/expr v0.25.3 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
@@ -103,7 +103,7 @@ require (
 	github.com/fluxcd/pkg/sourceignore v0.22.0 // indirect
 	github.com/fluxcd/pkg/tar v1.4.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
-	github.com/fxamacker/cbor/v2 v2.9.6 // indirect
+	github.com/fxamacker/cbor/v2 v2.10.0 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -162,13 +162,13 @@ require (
 	github.com/oklog/ulid/v2 v2.1.2 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
-	github.com/pandatix/go-abnf v0.5.3 // indirect
+	github.com/pandatix/go-abnf v0.5.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/petermattis/goid v0.0.0-20250813065127-a731cc31b4fe // indirect
 	github.com/prometheus/client_golang v1.25.0 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
-	github.com/prometheus/procfs v0.22.0 // indirect
+	github.com/prometheus/procfs v0.23.0 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/sasha-s/go-deadlock v0.3.9 // indirect
@@ -198,7 +198,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.5 // indirect
-	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e // indirect
@@ -213,7 +213,7 @@ require (
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260928230214-8a89bd6388cc // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b // indirect
-	google.golang.org/grpc v1.84.0 // indirect
+	google.golang.org/grpc v1.85.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
