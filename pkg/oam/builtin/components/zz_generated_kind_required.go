@@ -1145,6 +1145,8 @@ var kindRequiredPaths = map[string][]string{
 		"configuration.s3Credentials.secretAccessKey.name",
 		"configuration.s3Credentials.sessionToken.key",
 		"configuration.s3Credentials.sessionToken.name",
+		"configuration.s3Credentials.sseCustomerKey.key",
+		"configuration.s3Credentials.sseCustomerKey.name",
 		"instanceSidecarConfiguration.env[].name",
 		"instanceSidecarConfiguration.env[].valueFrom.configMapKeyRef.key",
 		"instanceSidecarConfiguration.env[].valueFrom.fieldRef.fieldPath",
