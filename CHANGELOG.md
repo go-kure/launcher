@@ -1,6 +1,212 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.5] - 2026-11-11
+
+### Added
+
+- Add a disruption trait for a PodDisruptionBudget without an autoscaler
+- Add the name@version type identity, its grammar and resolver
+- Declare the identity of every built-in type
+- Resolve authored type identities to the registered type
+- Report policy defaults in the property provenance
+- Report values launcher fills after the policy as builtin
+- Honour bootstrap.initdb on a postgresql component
+- Add TypeID.Canonical and state which version form the registry returns
+- Let a component declare the names of the objects it generates
+- Hold a component's declared outputs against the names the build gives
+- Declare outputs for configmap, secret and postgresql
+- Declare outputs for webservice, worker and their volume claims
+
+### Build
+
+- Update module github.com/spf13/pflag to v1.1.0
+- Update go-kure/kure to v0.2.0-rc.0 and refresh the prometheus-operator excerpt to v0.95.1
+- Update toolchain
+- Hold github.com/google/cel-go below v0.32.0
+- Move Go to 1.27.4 to clear GO-2026-6859
+- Run check-go-version in mise run verify
+- Update dependency goreleaser to v2.20.1
+
+### CI
+
+- Rebase Renovate PRs only on conflict
+- Check the format scope on commits that change app.yaml acceptance
+- Require the colon after the format scope and document the guard
+- Test that the format-scope guard covers pkg/oam/builtin
+- Require the format scope on pkg/oam/builtin changes
+- Read changed paths NUL-delimited in the format-scope guard
+- Keep path boundaries in the format-scope guard
+- Cover the validation, lowering and internal refusal code
+- Cover the collision, ownership, reserved-key, kind-policy and raw-lowering checks
+- Cover the rest of the pkg/oam refusal code
+- Give the left-out files one list
+- Count the nine files that feed a refusal
+
+### Changed
+
+- Build the loader errors with pkg/errors
+
+### Document Format
+
+- Accept name@version component, trait and policy types in app.yaml
+- Reject an unknown policy type in app.yaml at parse
+- Let app.yaml author the prometheus-operator v0.95.0 and metallb v0.16.2 fields
+- Refuse invalid volumeMount rules in alertmanager, prometheus and thanosruler properties
+- Admit the scaler trait on a statefulset component
+- Refuse gated fields in pod and pod-template components
+- Refuse gated fields whatever the case of the key
+- Refuse a gated field in a cnpg-pooler template below its release
+- Refuse a feature-gated enum value below the ClusterProfile's kubernetesVersion
+- Add the component model document format and loader
+- Refuse YAML indirection and empty type entries in Load
+- Refuse null list entries and duplicate free-form keys in Load
+- Match struct keys and free-form keys the way yaml.v3 does
+- Refuse malformed unions and duplicate decoded string keys in Load
+- Skip null keys when checking duplicate string keys in Load
+- Skip the value under a null key of a typed string map in Load
+- Say that the anchor refusal also covers a value under a null key
+- State the rules of the strict-loading paragraph and pin each claim
+- Say that an alias without an earlier anchor is a YAML parser error
+- Add the celEnv 1 CEL environment
+- Compile the expressions of a model against celEnv 1
+- Skip comments in holes, follow local scopes, keep nullable aliases
+- Skip escaped identifiers in holes and state the bind and nullable rules
+- Refuse a digit-first Service name in app.yaml below Kubernetes 1.36
+- Refuse one field authored under two spellings in every strict decode
+- State the key order of a folded pair as byte order
+- Collision checks skip objects kustomize drops and return a typed error
+- Accept a "<<" value in a model document
+- Refuse malformed exclusive groups in a model's input schemas at load
+
+### Documentation
+
+- Document the disruption trait
+- Document the type identity in the registry, kurel and errors READMEs
+- State which source a postgresql size reports
+- Say how to get the operator default bootstrap on a postgresql component
+- Qualify the topology-spread count on the scaler that scales it
+- Correct what the provenance report costs when it is not asked for
+- Narrow the check-order comments to the paths they describe
+- Say a named int32 to int64 change reads copied under an integer schema
+- Say provenance assumes a 64-bit int
+- Say what checks a ValueGates key and cite the raw-kind follow-up
+- Document value types in loaded resources and their limits
+- Document declared outputs and the build's check of them
+- Show the TOML patch examples in the form the loader accepts
+- Show the YAML shapes the loader accepts and a Quick Start that works
+- Say what pkg/patch is for and which checks run where
+- Add DeclareTypes to the registration example
+- State the library, CLI and consumer boundary in one place
+- Give launcher a homepage and an install example that tracks the latest tag
+- Add a model-and-layers page and a library quickstart with a tested example
+- Show each page title once
+- Say what is shipped, what is history and what is not implemented
+- Name the loader collision error among the plain errors
+- Say the build error covers keys that neither a handler declares nor the engine reads
+- Say the naming-role table's last column is a scope, not a call count
+- State what the output probe copy shares with the document
+- Take out the paragraph on the output probe copy
+- Say the collision checks skip objects kustomize drops and return a typed error
+- Correct two passages the code contradicts
+- Name the ValidationError exceptions and pin the strategic WriteToFile chain
+
+### Fixed
+
+- Refuse a container name used twice in raw pod kinds and rendered objects
+- Refuse an initContainers or sidecars name that is not a DNS-1123 label
+- Say that a cnpg endpoint selector follows objectName
+- Refuse a non-string pdbName on the disruption trait
+- Read a typed null as absent in the disruption trait
+- Wrap the cause in identity errors and use the current gateway GroupVersion
+- Keep API versions off launcher types and resolve identities before the authored check
+- Resolve declared type identities before plain-name dispatch
+- Make ResolveTypes output valid input to Transform
+- Refuse an unresolved reference in the endpoint and lookup APIs
+- Keep registered names as they are where no type is declared
+- Order type versions by major, stage and number
+- Return the validated copy instead of editing the caller's property maps
+- Refuse the keys a postgresql bootstrap.pg_basebackup dropped
+- Re-validate the disruption config and container names at generation
+- Apply the lifecycle-sleep and init-container rules to chart and passthrough workloads
+- Return the readable branch's result in refuseWorkloadPodRules (nilerr)
+- Compare an integer by value when provenance tells copied from rendered
+- Check a manifests source object by object, in the typed pod reader's order
+- Refuse a commit range that a shallow clone cut short
+- Report a copied named scalar as copied when validation unnames it
+- Read a named integer handed on in another width as copied
+- Turn YAML integers in base resources into int64
+- Keep authored timestamps and convert non-string-key maps in loaded YAML
+- Check timestamp tags and refuse colliding non-string keys
+- Keep the value of a NaN key and state the key order honestly
+- Build the new loader errors with pkg/errors
+- Hold the output query to its contract
+- Isolate the output query fully and ask a handler what the build gives it
+- Hold a handler's declared output kind against the kind of its object
+- Refuse a declared output kind that has no kind name
+- Refuse a derived output that derives from a derived one
+- Re-apply a derivation in the output check and refuse a declaration the allocator would
+- Name the kind in the derivation mismatch and correct the held-derivation and hook-count docs
+- Keep quoted strings as strings when loading a base resource
+- Keep the authored style of an untouched timestamp on write-back
+- Keep the type a patch value was given
+- Treat a nested mapping in the simple form as a plain map
+- Substitute variables in a mapping with a non-string key
+- Type a TOML line with a name-less key from the header's field
+- A TOML header that spells a shorthand path no longer repeats it
+- Keep the authored style of a list item that is an alias of a timestamp
+- Split a key at its first list selector so a second selector applies
+- Refuse a patch value with colliding non-string keys
+- Refuse two non-string keys that read the same at load
+- Wrap the equivalent-key refusals with pkg/errors
+- Write-back keeps an authored non-string key as authored
+- Print the name once in the digit-first Service name refusal
+- Name the decoded key in an error path of a model
+- Name the line of a YAML tag error in a model
+- Check an aliased mapping where the alias is used
+
+### Performance
+
+- Pair scalar list items in write-back in linear time
+
+### Testing
+
+- Cover where a disruption conflict can come from
+- Take the union of handler and rule keys without a shared value type
+- Give the Transform identity tests the TypeMeta a lowered document needs
+- Pin that every type-reference lookup agrees with Transform
+- Pin the authored checks and Parse to the lookup answers
+- Pin the version order with inputs a text compare gets wrong
+- Drop the stable-order claim from the version-order header
+- Cover the trait and policy copies, and bound the normalization claim
+- Pin the spread selector check under a scaler, and word the count's source
+- Pin that provenance reads an integer by value and not by Go kind
+- Pin that provenance reads a copied named scalar as copied
+- Pin that provenance reads a named integer in another width as copied
+- Add tests for malformed unions and duplicate decoded string keys
+- Add a test for null keys in typed string maps
+- Add a test for values under null keys of typed string maps
+- Resolve a base resource that has integer fields
+- Pin that base resources and patch values keep authored timestamps and non-string-key maps
+- Pin timestamp tags, write-back quoting and key collisions in the loaders
+- Pin that a NaN key keeps its value and collides with its string spelling
+- Pin what the output check and the builtin providers must hold
+- Pin that an output query is isolated from the document and sees what the build sees
+- Pin that a handler's declared output kind is the kind of its object
+- Pin that a declared output kind needs a kind name
+- Pin that a derived output names an allocated one
+- Pin that the build re-applies a derivation and the query refuses a declaration the allocator would
+- Pin the celEnv 1 environment and its compile refusals
+- Freeze the function set of celEnv 1 in a golden file
+- Require the not-computed-yet text for a later value
+- Pin CEL comments, local scopes, nullable aliases and disabled declarations
+- Freeze celEnv 1 with its deprecated declarations marked disabled
+- Pin escaped identifiers with slashes, generated bind nesting and nullable binds
+- Load every example the patch README shows
+- Pin the version-dependent Service-name check
+- Pin the pkg/oam refusal files the format-scope guard misses
+- Pin which call paths return a PatchError
+
 ## [0.2.0-beta.4] - 2026-11-06
 
 ### Added
