@@ -22,12 +22,12 @@ func (failingMarshaler) MarshalYAML() (any, error) { return nil, errors.New("boo
 // fmt.Errorf as well: the change moves the call and keeps the text. A row holds the exact text,
 // or its prefix where the tail comes from another package.
 //
-// Sites with no row here, each with the reason no public call reaches it: parsing YAML that was just
-// marshaled never fails; copyYAMLNode and Copy fail only on an error from a child copy, which has none
-// at the base; the merge in mergeYAMLNodes returns its errors to callers that discard them; a patch
-// that reaches the marshal after a strategic merge has gone through JSON, which leaves nothing that
-// yaml cannot marshal; and a resource that holds such a value panics in the deep copy that
-// WritePatchedFilesWithOptions makes before it updates a document. The pull request lists them.
+// Sites with no row here, each with the reason no public call reaches it: copyYAMLNode and Copy fail
+// only on an error from a child copy, which has none at the base; the merge in mergeYAMLNodes returns
+// its errors to callers that discard them; and a resource that holds a value yaml cannot marshal
+// panics in the deep copy that WritePatchedFilesWithOptions makes before it updates a document. A
+// resource value that yaml marshals badly or parses badly reaches the marshal and parse sites through
+// a document method called directly, and the rows above pin them. The pull request lists the rest.
 func TestPatchErrorText(t *testing.T) {
 	dir := t.TempDir()
 	missingPatch := filepath.Join(dir, "missing.yaml")
@@ -99,6 +99,17 @@ func TestPatchErrorText(t *testing.T) {
 		}
 		doc := docSet.Documents[0]
 		doc.Resource.Object["data"].(map[string]any)["bad"] = failingMarshaler{}
+		return doc, nil
+	}
+	// danglingAliasConfigMap loads the ConfigMap and puts an alias node into its resource: it marshals as
+	// "*missing", and parsing that text back fails on the undefined anchor.
+	danglingAliasConfigMap := func() (*YAMLDocument, error) {
+		docSet, err := LoadResourcesWithStructure(strings.NewReader(patchErrorConfigMap))
+		if err != nil {
+			return nil, err
+		}
+		doc := docSet.Documents[0]
+		doc.Resource.Object["data"].(map[string]any)["bad"] = &yaml.Node{Kind: yaml.AliasNode, Value: "missing"}
 		return doc, nil
 	}
 	noTargetPatch := writePatchFile("no-target.yaml", "- type: strategic\n  patch:\n    data:\n      x: y\n")
@@ -238,6 +249,35 @@ func TestPatchErrorText(t *testing.T) {
 			}
 			return doc.UpdateDocumentFromResource()
 		}, want: "failed to marshal updated resource: boom"},
+		{name: "apply strategic patch to document marshal", call: func() error {
+			doc, err := unmarshalableConfigMap()
+			if err != nil {
+				return err
+			}
+			// An empty patch list skips the JSON round trip, so the value reaches the marshal.
+			return doc.ApplyStrategicPatchesToDocument(nil, nil)
+		}, want: "failed to marshal patched resource: boom"},
+		{name: "apply patch to document parse", call: func() error {
+			doc, err := danglingAliasConfigMap()
+			if err != nil {
+				return err
+			}
+			return doc.ApplyPatchesToDocument(nil)
+		}, prefix: "failed to parse patched YAML: "},
+		{name: "apply strategic patch to document parse", call: func() error {
+			doc, err := danglingAliasConfigMap()
+			if err != nil {
+				return err
+			}
+			return doc.ApplyStrategicPatchesToDocument(nil, nil)
+		}, prefix: "failed to parse patched YAML: "},
+		{name: "update document from resource parse", call: func() error {
+			doc, err := danglingAliasConfigMap()
+			if err != nil {
+				return err
+			}
+			return doc.UpdateDocumentFromResource()
+		}, prefix: "failed to parse updated YAML: "},
 		{name: "encode document", call: func() error {
 			set := &YAMLDocumentSet{Documents: []*YAMLDocument{{Node: &yaml.Node{Kind: 999}}}}
 			return set.WriteToFile(filepath.Join(dir, "encoded.yaml"))
