@@ -12310,6 +12310,20 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   the API server puts the default (`true`) in the place of the null.
   `TestKindComponents_NullRequired` derives the three from the CRD and shows
   each answer by running the CRD's schema validator on the object.
+  **Four fields the linked Go type holds and the Cluster CRD does not are
+  refused when authored**, under `backup.barmanObjectStore` and under each
+  `externalClusters[].barmanObjectStore`: `s3Credentials.sseCustomerKey`
+  (with its `name` and `key`) and `s3AddressingStyle` (for example
+  `backup.barmanObjectStore.s3AddressingStyle: no field of the
+  postgresql.cnpg.io/v1 Cluster API: its CRD has no such property`). The
+  barman-cloud type the strict decode reads is newer than the Cluster CRD of
+  cloudnative-pg v1.30.1 (its `clusters.yaml`), which has no property for
+  either, so the API server would name each as unknown and prune it. A `null`
+  or an empty `s3AddressingStyle` is not authored and builds. The kind's row
+  in `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the eight
+  paths from the CRD in both directions, and
+  `TestCnpgClusterHandler_AbsentFromCRD` shows each refusal. Remove the
+  refusals when cloudnative-pg ships a CRD that carries the fields.
   **The kind's required list is generated** (go-kure/launcher#883; see
   "Required fields a kind writes unauthored and does not refuse"): every
   field the Cluster CRD requires that the Go type writes whether or not it

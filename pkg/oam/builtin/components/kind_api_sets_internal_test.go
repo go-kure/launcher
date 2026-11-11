@@ -461,6 +461,11 @@ var apiSetKinds = []apiSetKind{
 				map[string]any{"podCertificate": map[string]any{"signerName": "example.com/workload", "keyType": "ECDSAP384"}},
 			}}}
 		}},
+		// The linked barman-cloud type holds sseCustomerKey and s3AddressingStyle;
+		// the cloudnative-pg v1.30.1 clusters.yaml CRD has no property for them.
+		// Remove this when cloudnative-pg ships a CRD that carries them.
+		// TestCnpgClusterHandler_AbsentFromCRD shows the refusal of each.
+		absent: cnpgClusterAbsentFields(),
 		refused: []string{
 			"projectedVolumeTemplate.sources[].podCertificate.keyType",
 			"projectedVolumeTemplate.sources[].podCertificate.signerName",
