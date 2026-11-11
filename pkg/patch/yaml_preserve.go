@@ -546,7 +546,8 @@ func buildMergeKeyIndex(seq *yaml.Node, mergeKey string) map[string]*yaml.Node {
 	return index
 }
 
-// extractMergeKeyValue extracts the value of the merge key from a mapping node.
+// extractMergeKeyValue extracts the value of the merge key from a mapping node, as the resource
+// reads it (see mergeKeyReading). "" means the item has no usable value.
 func extractMergeKeyValue(node *yaml.Node, mergeKey string) string {
 	if node.Kind != yaml.MappingNode {
 		return ""
@@ -554,11 +555,36 @@ func extractMergeKeyValue(node *yaml.Node, mergeKey string) string {
 	for i := 0; i < len(node.Content)-1; i += 2 {
 		if node.Content[i].Kind == yaml.ScalarNode && node.Content[i].Value == mergeKey {
 			if node.Content[i+1].Kind == yaml.ScalarNode {
-				return node.Content[i+1].Value
+				return mergeKeyReading(node.Content[i+1])
 			}
 		}
 	}
 	return ""
+}
+
+// mergeKeyReading reads a scalar merge-key value the way the resource holds it, so that the authored
+// `port: 0x50` and the written `port: 80` read as one value. A number reads as the number, a whole
+// float as the int the marshaler writes (`80.0` as 80), a NaN as "NaN", and a timestamp as its text,
+// which is what the loader hands to the resource. A null, an empty scalar and an empty string read
+// as "", the value that pairs nothing. A quoted "80" and a plain 80 read alike, as the raw text did.
+func mergeKeyReading(n *yaml.Node) string {
+	if n.Value == "" {
+		return ""
+	}
+	var v any
+	if err := n.Decode(&v); err != nil {
+		return n.Value
+	}
+	switch x := comparableScalar(v).(type) {
+	case nil:
+		return ""
+	case time.Time:
+		return n.Value
+	case nanData:
+		return "NaN"
+	default:
+		return fmt.Sprint(x)
+	}
 }
 
 // preserveComments copies comments from src (original) to dst (patched) by
