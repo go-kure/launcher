@@ -1913,13 +1913,14 @@ A provider is asked about a copy of the component, in a query and in the build: 
 to the properties, trait properties or annotations stays in the answer and never reaches the
 document or the lowering. The copy covers every map, slice, array and interface in the
 properties and in each trait's properties. A pointer and a struct are shared, with everything
-behind them. A document parsed from YAML or JSON holds none, so a write never reaches it. A
-component that a Go program builds can hold a pointer, and a provider that writes through
-that pointer changes the caller's value. A provider must not do this. The copy that authored
+behind them. A document parsed from YAML or JSON holds no pointer, but it can hold a struct: an
+unquoted timestamp becomes a `time.Time`, and the copy shares it. A component that a Go program
+builds can also hold a pointer, and a provider that writes through a pointer or a struct
+changes the caller's value. A provider must not do this. The copy that authored
 validation makes of the document (`ValidateAuthoredPropertiesWithCapabilities` and the
 feature-gate check) follows the same rule: it shares a pointer or a struct with the caller's
 `Application`, and a caller that writes through one in the returned copy changes its own
-document. No component built in Go holds a pointer today. For a handler of a kind component the query and the build give it
+document. For a handler of a kind component the query and the build give it
 the same component: its object's name resolved and its `labels` and `annotations` taken off
 its properties. The build prepares the metadata before it holds the outputs, so a component
 with both a refused `labels` or `annotations` value and a failing provider reports the
