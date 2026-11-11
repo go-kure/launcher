@@ -23,7 +23,9 @@ match case-insensitively, so one value would be dropped)`. Keys compare in byte 
 first byte where they differ. An upper-case ASCII letter sorts before its lower-case letter, and a
 non-ASCII character sorts after every ASCII character. So in `Suspend` and `suspend` the later key
 is `suspend`, and with the Kelvin sign (U+212A) in place of `k` the Kelvin spelling is the later
-key. The walk reads the declared field a key reaches, so it
+key. A field tagged `case:strict` is filled only by a key spelled exactly as its name, so the
+walk pairs no other spelling with it. The v1 decoder (`GOEXPERIMENT=nojsonv2`) ignores that option.
+The walk reads the declared field a key reaches, so it
 does not look inside a type that decodes itself, an `any` or a `json.RawMessage`, and does not
 treat the keys of a free-key map as field names. A null never forms a pair: it is absent, as in the
 null contract. Two keys that name two different declared fields (`Foo` and `foo`) are no pair. A caller

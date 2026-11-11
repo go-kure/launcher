@@ -55,8 +55,10 @@ func DecodeStrict[T any](src map[string]any) (*T, error) {
 // Known gap: encoding/json does not apply DisallowUnknownFields inside a type with
 // its own UnmarshalJSON, so unknown keys nested in such a field are still dropped.
 // Key matching is case-insensitive, as in encoding/json, and so is the owned split.
-// The tag options case:strict and case:ignore are not modelled. No type read here
-// carries them.
+// The tag option case:strict is modelled: the jsonv2-backed decoder fills a field
+// tagged so only from a key spelled exactly as its name, and the walk does the same.
+// The v1 decoder reads no case option. The option case:ignore changes nothing, because
+// matching already ignores case. No type read here carries either option.
 // Two keys that encoding/json files under one field of T, such as url and URL, are
 // refused with a *FoldedFieldError (FoldedDuplicateFieldPath): the decoder would
 // keep one of the two values and drop the other without a message.
@@ -406,7 +408,8 @@ func jsonFieldType(t reflect.Type, fields []jsonField, key string) (reflect.Type
 // encoding/json the package is built with, which differs between the jsonv2-backed
 // decoder (shallowest first) and the v1 decoder (index order). A name that no
 // field keeps is skipped, so a key falls to the next name that matches it
-// ignoring case.
+// ignoring case. So is a field the decoder matches only by its exact name
+// (strictCase): a key that differs from it in case never reaches it.
 func jsonFieldFor(fields []jsonField, key string) (jsonField, bool) {
 	if f, ok := keptJSONField(fields, key); ok {
 		return f, true
@@ -417,7 +420,7 @@ func jsonFieldFor(fields []jsonField, key string) (jsonField, bool) {
 			continue
 		}
 		f, ok := keptJSONField(fields, o.key)
-		if !ok {
+		if !ok || f.strict {
 			continue
 		}
 		if first == nil || foldedBefore(f.index, first.index) {
@@ -519,13 +522,15 @@ func UnreachableJSONFields(t reflect.Type, owned ...string) []string {
 }
 
 // jsonField is a field encoding/json keys by name: its key, its reflect index from
-// the root, its dotted Go path, the name it is reported by, and whether its key
-// comes from a json tag.
+// the root, its dotted Go path, the name it is reported by, whether its key
+// comes from a json tag, and whether the decoder matches it only by its exact
+// name (strictCase).
 type jsonField struct {
 	key    string
 	index  []int
 	path   string
 	tagged bool
+	strict bool
 }
 
 // embeddedStruct is a struct embedded without a name, which encoding/json
@@ -550,7 +555,7 @@ func scanStruct(t reflect.Type, index []int, prefix string, hidden *[]string) (o
 			}
 			continue
 		}
-		name, _, _ := strings.Cut(tag, ",")
+		name, options, _ := strings.Cut(tag, ",")
 		if !validTagName(name) {
 			name = "" // v1 encoding/json falls back to the Go name (and flattens an embed)
 		}
@@ -564,7 +569,7 @@ func scanStruct(t reflect.Type, index []int, prefix string, hidden *[]string) (o
 		case embedded && name == "":
 			embeds = append(embeds, embeddedStruct{typ: ft, index: idx, prefix: prefix + f.Name + "."})
 		case f.IsExported() || embedded:
-			own = append(own, jsonField{key: cmp.Or(name, f.Name), index: idx, path: prefix + f.Name, tagged: name != ""})
+			own = append(own, jsonField{key: cmp.Or(name, f.Name), index: idx, path: prefix + f.Name, tagged: name != "", strict: strictCase(options)})
 		}
 	}
 	return own, embeds
