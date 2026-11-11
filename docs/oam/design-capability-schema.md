@@ -22,8 +22,8 @@ This document answers two questions deferred from `design-cluster-profile.md §2
 - App-facing property schema for custom traits or components (application developer concern,
   different ownership boundary from rendering schema)
 - Plugin-style external handler dispatch (Phase 4+)
-- Editor integration for `cluster.yaml` (future; enabled by the JSON Schema output described
-  in §2)
+- Editor integration for `cluster.yaml` (future; enabled by the `PropertySchema` publishing
+  described in §2.3)
 
 ---
 
@@ -59,7 +59,7 @@ type ExposeRendering struct {
     GatewayName string `yaml:"gatewayName,omitempty" json:"gatewayName,omitempty"`
 
     // GatewayNamespace is the namespace of the Gateway resource.
-    // Optional when ControllerType is "gateway"; defaults to the application namespace.
+    // Optional when ControllerType is "gateway"; defaults to "gateway-system".
     GatewayNamespace string `yaml:"gatewayNamespace,omitempty" json:"gatewayNamespace,omitempty"`
 }
 ```
@@ -374,8 +374,9 @@ built remains quiet.
 
 **`ErrUnknownTrait` is a separate error** from schema warnings. If no handler is registered
 for a trait type used in an Application, the build fails at dispatch regardless of whether
-a `CapabilityDefinition` exists. Schema validation is only meaningful when a handler is
-registered.
+a `CapabilityDefinition` exists. A definition alone supplies schema
+validation for its profile rendering (a definition-only type). Using the type as a
+component or trait still needs a registered handler or lowering rule.
 
 ### 3.5 Conflict resolution
 
@@ -401,6 +402,6 @@ The per-slot struct was renamed from `CapabilityDefinition` to `CapabilityBindin
 
 | Concern | Deferred to |
 |---|---|
-| App-facing property schema for custom traits | Future (schema-provider interface or separate document kinds) |
+| App-facing property schema for custom traits | Future (separate document kinds). Built-in handlers already declare theirs through `PropertySchemaProvider`. |
 | Plugin-style external handler dispatch | Phase 4+ |
 | Editor integration for `cluster.yaml` (schema publishing) | Phase 3+ (enabled by `PropertySchema()` output, published via `Transformer.HandlerSchemas()`) |
