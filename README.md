@@ -1,7 +1,7 @@
 # launcher
 
 [![CI](https://github.com/go-kure/launcher/actions/workflows/ci.yml/badge.svg)](https://github.com/go-kure/launcher/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/badge/go-1.27.3-blue)](go.mod)
+[![Go Version](https://img.shields.io/badge/go-1.27.4-blue)](go.mod)
 
 launcher is a Go library that translates OAM-style application documents into Kubernetes objects (through [kure](https://github.com/go-kure/kure)), and `kurel` is the supported command-line tool built on it. A downstream consumer can call the library directly and add its own components, traits and policies.
 

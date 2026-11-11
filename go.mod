@@ -1,6 +1,6 @@
 module github.com/go-kure/launcher
 
-go 1.27.3
+go 1.27.4
 
 // Replace directives mirrored from kure's go.mod. A replace applies only in the
 // main module, so launcher carries kure's own; they move or go when kure's do.
