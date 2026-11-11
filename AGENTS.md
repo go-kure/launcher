@@ -10,7 +10,7 @@ See `docs/design.md` for the full vision and architecture.
 
 ### Technology Stack
 
-- **Language**: Go 1.27.3
+- **Language**: Go 1.27.4
 - **CLI Tool**: kurel (OAM-native package manager)
 - **Build System**: Makefile + mise for cross-repo consistency
 - **CI/CD**: GitHub Actions (autops-kube-kure runner)
