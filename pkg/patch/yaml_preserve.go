@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"reflect"
 	"regexp"
@@ -427,8 +428,10 @@ func mergeSequenceNodes(original, patched *yaml.Node) error {
 		return nil
 	}
 
-	// Build index of original items by merge key value
-	origIndex := buildMergeKeyIndex(original, mergeKey)
+	// Build index of original items by merge key value. A value that more than one item holds names
+	// no item: the index is only read to copy comments and key text, and neither item can be shown
+	// to be the item the resource holds. The merged items are the patched items either way.
+	origIndex := buildUniqueMergeKeyIndex(original, mergeKey)
 
 	// Process patched items: merge into existing or append
 	var merged []*yaml.Node
@@ -683,32 +686,75 @@ func sameItemData(a, b *yaml.Node) bool {
 	return reflect.DeepEqual(itemData(a), itemData(b))
 }
 
+// unreadData stands for what itemData does not read: the value of a merge entry, and a node that
+// holds itself through an alias. A written item never holds it, so an item that does equals nothing.
+type unreadData struct{}
+
+// nanData stands for a NaN. reflect.DeepEqual never equals two NaNs, and an unchanged `.nan` must
+// equal itself.
+type nanData struct{}
+
 // itemData reads a node as the data the resource holds: mappings keyed by resource spelling, lists,
 // and scalars as their decoded value. A scalar that does not decode reads as null: the loaders refuse
-// such a document before a write-back runs.
+// such a document before a write-back runs. The value of a merge entry is not read, because the
+// loader skips a merged entry that the mapping holds as its own, so a merge source can hold
+// anything, a cycle included. A cycle through any other alias reads as unreadData, and so no shape
+// of document can loop here.
 func itemData(node *yaml.Node) any {
+	return itemDataAt(node, map[*yaml.Node]bool{})
+}
+
+func itemDataAt(node *yaml.Node, onPath map[*yaml.Node]bool) any {
 	n := resolveAlias(node)
+	if onPath[n] {
+		return unreadData{}
+	}
 	switch n.Kind {
 	case yaml.MappingNode:
+		onPath[n] = true
+		defer delete(onPath, n)
 		out := make(map[string]any, len(n.Content)/2)
 		for i := 0; i+1 < len(n.Content); i += 2 {
-			out[keyText(n.Content[i])] = itemData(n.Content[i+1])
+			if n.Content[i].Kind == yaml.ScalarNode && n.Content[i].ShortTag() == "!!merge" {
+				out[keyText(n.Content[i])] = unreadData{}
+				continue
+			}
+			out[keyText(n.Content[i])] = itemDataAt(n.Content[i+1], onPath)
 		}
 		return out
 	case yaml.SequenceNode:
+		onPath[n] = true
+		defer delete(onPath, n)
 		out := make([]any, 0, len(n.Content))
 		for _, c := range n.Content {
-			out = append(out, itemData(c))
+			out = append(out, itemDataAt(c, onPath))
 		}
 		return out
 	case yaml.ScalarNode:
 		var v any
 		_ = n.Decode(&v)
-		return v
+		return comparableScalar(v)
 	default:
 		// resolveAlias leaves no alias node, and a document node never reaches here.
 		return nil
 	}
+}
+
+// comparableScalar gives a decoded scalar the form the marshaler's output decodes to. The marshaler
+// writes the float 1.0 as `1`, which decodes as an int, so a whole float reads as that int on both
+// sides, and a NaN reads as one value that equals itself.
+func comparableScalar(v any) any {
+	f, ok := v.(float64)
+	if !ok {
+		return v
+	}
+	if math.IsNaN(f) {
+		return nanData{}
+	}
+	if f > -(1<<53) && f < 1<<53 && f == math.Trunc(f) {
+		return int(f)
+	}
+	return f
 }
 
 // keepAuthoredTimestampStyle gives each scalar under next the tag and style of the authored
