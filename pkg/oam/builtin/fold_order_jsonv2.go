@@ -2,7 +2,19 @@
 
 package builtin
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
+
+// strictCase reports whether options, the part of a json tag after its first
+// comma, holds case:strict. The jsonv2-backed decoder fills such a field only
+// from a key spelled exactly as its name, and never through a key that differs
+// from it in case (encoding/json/v2/fields.go, matchFoldedName). Quoted
+// spellings of the option are not read.
+func strictCase(options string) bool {
+	return slices.Contains(strings.Split(options, ","), "case:strict")
+}
 
 // foldedBefore reports whether the field at index a is looked up before the
 // field at index b when one key matches both names ignoring case.

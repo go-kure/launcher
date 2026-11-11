@@ -13363,7 +13363,9 @@ case-insensitively, so one value would be dropped)`. Keys compare in byte order,
 byte where they differ. An upper-case ASCII letter sorts before its lower-case letter, and a
 non-ASCII character sorts after every ASCII character. So in `Suspend` and `suspend` the later key
 is `suspend`, and with the Kelvin sign (U+212A) in place of `k` the Kelvin spelling is the later
-key. The refusal comes after the strict decode, so an unknown
+key. A field tagged `case:strict` is filled only by a key spelled exactly as its name, so the
+refusal pairs no other spelling with it. The v1 decoder (`GOEXPERIMENT=nojsonv2`) ignores that
+option. The refusal comes after the strict decode, so an unknown
 key or a wrong type is still the first error, and a null never forms a pair.
 
 `kurel build` reaches the decode only after the authored-property check, which holds each

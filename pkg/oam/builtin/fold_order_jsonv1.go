@@ -4,6 +4,11 @@ package builtin
 
 import "slices"
 
+// strictCase reports false for every tag. The v1 decoder reads no case option,
+// so it fills a field from a key that differs from its name in case whatever the
+// tag says. The other answer is in fold_order_jsonv2.go.
+func strictCase(string) bool { return false }
+
 // foldedBefore reports whether the field at index a is looked up before the
 // field at index b when one key matches both names ignoring case.
 //
