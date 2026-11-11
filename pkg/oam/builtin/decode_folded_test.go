@@ -283,7 +283,7 @@ type (
 	// foldCaseBoth names both options. The jsonv2 tag parser holds both bits,
 	// so the field is not strict.
 	foldCaseBoth struct {
-		Strict string `json:"name,case:strict,case:ignore"`
+		Strict string `json:"name,case:strict,case:ignore"` //nolint:staticcheck // SA5008: the repeated option is the case under test
 		Loose  string `json:"NAME"`
 	}
 	foldCaseStrictEmbed struct {
