@@ -336,6 +336,23 @@ func TestWriteBack_DoesNotPairItemsThatShareAMergeKeyValue(t *testing.T) {
 	requireLoads(t, out)
 }
 
+// Two items of the written list that share one merge-key value cannot be told apart either, so
+// neither pairs with the authored item that holds the same value: the added item takes neither the
+// key text nor the comment of the authored one. Here the patch replaces the list and adds a second
+// inner item named `shared`.
+func TestWriteBack_DoesNotPairAnItemWhenTheWrittenListRepeatsAMergeKey(t *testing.T) {
+	const src = widgetHead + "spec:\n  items:\n    - name: parent\n      inner:\n        - name: shared\n          # ck\n          0x10: x\n"
+	doc := loadOneDocument(t, src)
+	items := []any{map[string]any{"name": "parent", "inner": []any{
+		map[string]any{"name": "shared", "16": "x"},
+		map[string]any{"name": "shared", "16": "z"},
+	}}}
+	out := writeBack(t, doc, "patch", []string{"spec", "items"}, items)
+	requireExact(t, out, widgetOut+"spec:\n    items:\n        - inner:\n            - \"16\": x\n              name: shared\n"+
+		"            - \"16\": z\n              name: shared\n          name: parent\n")
+	requireLoads(t, out)
+}
+
 // An alias key in one list item keeps the anchor that another item declares on its key. Before the
 // anchor was kept, the item with `*k` was written and the item with `&k 0x10` was written without
 // its anchor, so the document did not load (unknown anchor).
