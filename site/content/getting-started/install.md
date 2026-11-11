@@ -18,7 +18,7 @@ checksums and only then install `kurel` (into `~/.local/bin`; use any directory
 on your `PATH`). Each step runs only if the one before it succeeded:
 
 ```bash
-VERSION=0.2.0-beta.4   # a release tag without the leading v; the latest when written, so check the releases page
+VERSION=0.2.0-beta.5   # a release tag without the leading v; the latest published prerelease when written, so check the releases page
 ARCH=amd64             # or arm64
 gh release download "v${VERSION}" -R go-kure/launcher \
     -p "kurel_${VERSION}_linux_${ARCH}.tar.gz" -p 'checksums.txt*' &&
@@ -38,7 +38,7 @@ gh release download "v${VERSION}" -R go-kure/launcher \
 ```bash
 git clone https://github.com/go-kure/launcher
 cd launcher
-git checkout v0.2.0-beta.4   # optional: any release tag; the latest when written
+git checkout v0.2.0-beta.5   # optional: any release tag; the latest published prerelease when written
 go install ./cmd/kurel
 ```
 

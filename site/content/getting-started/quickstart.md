@@ -48,6 +48,10 @@ kurel build app.yaml --profile profile.yaml -o out/
 `kurel` resolves the application against the profile and emits ready-to-apply
 Kubernetes manifests (here a Deployment, Service, and ServiceAccount).
 
+Tested version: CI builds the application above with `kurel` from the same source revision
+as this site. The latest published prerelease is `v0.2.0-beta.5`; see the
+[status words](../../#status-words) for what that means.
+
 ## Next steps
 
 - Add traits (ingress, certificate, scaler) — see the [Trait Handlers](../api-reference/oam-traits/).

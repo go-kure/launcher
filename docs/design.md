@@ -1,6 +1,6 @@
 # Launcher — Design Document
 
-*Date: 2026-04-19 | Updated: 2026-10-04 | Status: Phase 3 shipped, Phase 5 gate met*
+*Date: 2026-04-19 | Updated: 2026-10-04 | Status: published prerelease (Phase 3 shipped, Phase 5 gate met)*
 
 | Version | Date | Summary |
 |---|---|---|

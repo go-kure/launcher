@@ -1,6 +1,6 @@
 # Design: Parameter Syntax for Kurel Packages
 
-*Status: **Final — Option A selected** | Issue go-kure/launcher#36*
+*Status: published prerelease (Option A selected) | Issue go-kure/launcher#36*
 
 | Version | Date | Summary |
 |---|---|---|

@@ -13,18 +13,18 @@ output on this page are tested.
 ```bash
 mkdir hello && cd hello
 go mod init example.com/hello
-go get github.com/go-kure/launcher@main
+go get github.com/go-kure/launcher@v0.2.0-beta.5
 ```
 
-Then copy the `replace` lines of launcher's `go.mod` at that revision into your own
+Then copy the `replace` lines of launcher's `go.mod` at that version into your own
 `go.mod`, as [Install](../install/#use-launcher-as-a-go-library) explains. Without them the
 build fails.
 
-This program needs `registry.DeclareTypes` and the two-value
-`ValidateAuthoredPropertiesForTarget`, which the latest
-[release](https://github.com/go-kure/launcher/releases), `v0.2.0-beta.4`, does not have. So
-the command uses `main`, the revision the test suite runs. When a tag after `v0.2.0-beta.4`
-exists, pin that tag instead.
+Tested version: the program is the same file at `v0.2.0-beta.5` and at `main`. It needs
+`registry.DeclareTypes` and the two-value `ValidateAuthoredPropertiesForTarget`. The
+earlier prerelease, `v0.2.0-beta.4`, does not have them. `v0.2.0-beta.5` is a published
+prerelease (see [Status words](../../#status-words)). When a newer tag exists, you can pin that tag
+instead.
 
 ## The program
 
