@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	barmanapi "github.com/cloudnative-pg/barman-cloud/pkg/api"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	machineryapi "github.com/cloudnative-pg/machinery/pkg/api"
 	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -1058,6 +1060,29 @@ func TestCnpgClusterConfig_GenerateRevalidates(t *testing.T) {
 		want := fmt.Sprintf("instances: must be <= %d, got %d", math.MaxInt32, over)
 		if err == nil || err.Error() != want {
 			t.Errorf("err = %v, want %q", err, want)
+		}
+	})
+	t.Run("barman fields the Cluster CRD has no property for", func(t *testing.T) {
+		const absent = "no field of the postgresql.cnpg.io/v1 Cluster API: its CRD has no such property"
+		key := &machineryapi.SecretKeySelector{LocalObjectReference: machineryapi.LocalObjectReference{Name: "sse"}, Key: "key"}
+		cases := []struct {
+			name string
+			spec cnpgv1.ClusterSpec
+			want string
+		}{
+			{"backup sseCustomerKey", cnpgv1.ClusterSpec{Instances: 1, Backup: &cnpgv1.BackupConfiguration{
+				BarmanObjectStore: &cnpgv1.BarmanObjectStoreConfiguration{DestinationPath: "s3://bucket/db/", BarmanCredentials: barmanapi.BarmanCredentials{AWS: &barmanapi.S3Credentials{SSECustomerKey: key}}},
+			}}, "backup.barmanObjectStore.s3Credentials.sseCustomerKey: " + absent},
+			{"external cluster s3AddressingStyle", cnpgv1.ClusterSpec{Instances: 1, ExternalClusters: []cnpgv1.ExternalCluster{
+				{Name: "origin", BarmanObjectStore: &cnpgv1.BarmanObjectStoreConfiguration{DestinationPath: "s3://bucket/db/", S3AddressingStyle: "path"}},
+			}}, "externalClusters[0].barmanObjectStore.s3AddressingStyle: " + absent},
+		}
+		for _, tc := range cases {
+			c := &components.CnpgClusterConfig{Name: "db", Namespace: "data", Spec: tc.spec}
+			_, err := c.Generate(stack.NewApplication("db", "data", c))
+			if err == nil || err.Error() != tc.want {
+				t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
+			}
 		}
 	})
 }
