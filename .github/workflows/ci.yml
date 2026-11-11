@@ -866,6 +866,10 @@ jobs:
         fi
 
     - name: Upload coverage to Codecov
+      # A stalled upload ends this step, never the job: the coverage threshold above
+      # stays blocking, and the 5-minute job limit no longer cancels the check (go-kure/launcher#1427).
+      continue-on-error: true
+      timeout-minutes: 2
       uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
       with:
         files: ./coverage/coverage.out
