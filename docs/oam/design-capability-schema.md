@@ -1,6 +1,6 @@
 # Design: Capability Rendering Schema
 
-*Status: published prerelease for §2, built-in handler schema; proposed for §3, custom capability schema | Issue: [go-kure/launcher#60](https://github.com/go-kure/launcher/issues/60)*
+*Status: published prerelease | Issue: [go-kure/launcher#60](https://github.com/go-kure/launcher/issues/60)*
 
 | Version | Date | Summary |
 |---|---|---|
@@ -294,7 +294,8 @@ at dispatch — the `CapabilityDefinition` does not replace the handler.
 
 ### 3.2 CapabilityDefinition document kind (Phase 2/3)
 
-The `CapabilityDefinition` document kind will be added in Phase 2/3. It declares the
+The `CapabilityDefinition` document kind is implemented in `v0.2.0-beta.5` (`pkg/oam/types.go`,
+`pkg/oam/capability.go`). It declares the
 rendering schema for a custom capability in the same vocabulary used by `kurel.yaml`
 parameters (`type`, `required`, `default`, `description`).
 
@@ -401,7 +402,6 @@ this PR.
 
 | Concern | Deferred to |
 |---|---|
-| `CapabilityDefinition` document kind implementation | Phase 3 follow-up implementation issue ([go-kure/launcher#66](https://github.com/go-kure/launcher/issues/66)) |
 | `CapabilityBinding` rename in `pkg/oam` | go-kure/launcher#45 (Phase 1) |
 | App-facing property schema for custom traits | Future (schema-provider interface or separate document kinds) |
 | Plugin-style external handler dispatch | Phase 4+ |
