@@ -750,6 +750,11 @@ func repeatedMergeKeyValues(seq *yaml.Node, mergeKey string) map[string]bool {
 // expanded, so an authored item that uses one differs from the written item, which holds the
 // expanded entries, and pairs with nothing.
 func sameItemData(a, b *yaml.Node) bool {
+	// Two scalars of one tag and one text read alike, so the unchanged items of a long list are not decoded.
+	if x, y := resolveAlias(a), resolveAlias(b); x.Kind == yaml.ScalarNode && y.Kind == yaml.ScalarNode &&
+		x.ShortTag() == y.ShortTag() && x.Value == y.Value {
+		return true
+	}
 	return reflect.DeepEqual(itemData(a), itemData(b))
 }
 
