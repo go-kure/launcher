@@ -1909,18 +1909,19 @@ must equal the declared one; for a handler, which names one object, the declared
 whose query errs fails the build with its error: a malformed declaration is a defect of the
 provider, not a quiet empty list.
 
-A provider is asked about a copy of the component, in a query and in the build: what it writes
-to the properties, trait properties or annotations stays in the answer and never reaches the
-document or the lowering. The copy covers every map, slice, array and interface in the
-properties and in each trait's properties. A pointer and a struct are shared, with everything
-behind them. A document parsed from YAML or JSON holds no pointer, but it can hold a struct: an
-unquoted timestamp becomes a `time.Time`, and the copy shares it. A component that a Go program
-builds can also hold a pointer, and a provider that writes through a pointer or a struct
-changes the caller's value. A provider must not do this. The copy that authored
+A provider is asked about a copy of the component, in a query and in the build. The copy covers
+every map, slice, array and interface that it reaches in the properties and in each trait's
+properties. A write to one of these stays in the answer and never reaches the document or the
+lowering. A pointer is shared, with everything behind it. A struct is copied by value, so a scalar
+field of a struct is not shared, but a pointer, a map or a slice inside a struct is. A document
+parsed from YAML or JSON holds no pointer, but it can hold a struct: an unquoted timestamp becomes
+a `time.Time`, and the copy shares the pointer inside it. A component that a Go program builds can
+also hold a pointer, and a provider that writes through a pointer, or through a map or a slice
+inside a struct, changes the caller's value. A provider must not do this. The copy that authored
 validation makes of the document (`ValidateAuthoredPropertiesWithCapabilities` and the
-feature-gate check) follows the same rule: it shares a pointer or a struct with the caller's
-`Application`, and a caller that writes through one in the returned copy changes its own
-document. For a handler of a kind component the query and the build give it
+feature-gate check) follows the same rule: it shares a pointer, and what a struct holds by
+reference, with the caller's `Application`, and a caller that writes through one in the returned
+copy changes its own document. For a handler of a kind component the query and the build give it
 the same component: its object's name resolved and its `labels` and `annotations` taken off
 its properties. The build prepares the metadata before it holds the outputs, so a component
 with both a refused `labels` or `annotations` value and a failing provider reports the
