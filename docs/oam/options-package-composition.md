@@ -1,6 +1,6 @@
 # Design: Package Composition — Optional Sections, Multi-Instance, Split Files
 
-*Status: **Final — deferred to Phase 2 (issue go-kure/launcher#39)** | Issue go-kure/launcher#36*
+*Status: proposed (deferred to Phase 2, issue go-kure/launcher#39) | Issue go-kure/launcher#36*
 
 | Version | Date | Summary |
 |---|---|---|

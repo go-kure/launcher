@@ -1,6 +1,6 @@
 # Design: Policy Interface
 
-*Status: **Final — Option A selected** | Issue go-kure/launcher#38*
+*Status: published prerelease (Option A selected) | Issue go-kure/launcher#38*
 
 | Version | Date | Summary |
 |---|---|---|

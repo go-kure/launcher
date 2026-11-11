@@ -11,6 +11,12 @@ kurel build examples/01-webservice-minimal.yaml \
   --profile examples/cluster-profiles/minimal.yaml
 ```
 
+Tested version: CI builds 14 of the 15 numbered examples with `kurel` from the same source
+revision as this site, and checks the generated manifests against the Flux schemas. It does
+not build `12-daemonset`, because that example needs a policy the command line cannot
+supply. The latest published prerelease is `v0.2.0-beta.5`; see the
+[status words](../../#status-words).
+
 ## Application examples
 
 | Example | Shows |

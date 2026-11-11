@@ -1,6 +1,6 @@
 # Design: operator custom-resource components
 
-Status: accepted (go-kure/launcher#281). First instance: the `cnpg-cluster`
+Status: published prerelease (go-kure/launcher#281). First instance: the `cnpg-cluster`
 component, a projection of the CloudNativePG `postgresql.cnpg.io/v1` `Cluster`.
 go-kure/launcher#573 adds `cnpg-pooler` (`Pooler`), `cnpg-database`
 (`Database`) and `cnpg-objectstore` (the Barman Cloud plugin's

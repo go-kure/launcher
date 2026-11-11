@@ -37,6 +37,20 @@ spec:
 This one `webservice` component builds a `Deployment`, a `Service` and a `ServiceAccount`,
 each named `web`, as plain Kubernetes YAML.
 
+Tested version: CI builds this example with `kurel` from the same source revision as this
+site. The latest published prerelease is `v0.2.0-beta.5`.
+
+## Status words
+
+Each page that states a status uses one of these four words and no other:
+
+- **development**: the work is on `main` and no published release carries it.
+- **published prerelease**: a published prerelease tag carries it, such as `v0.2.0-beta.5`.
+  The API can still change before the first stable release.
+- **proposed**: a design that no shipped code implements yet.
+- **current supported behavior**: a stable release carries it. No release is stable yet, so no
+  page uses this word today.
+
 ## What launcher does not do
 
 launcher has no install, upgrade or registry-resolution command, and `kurel build` does not

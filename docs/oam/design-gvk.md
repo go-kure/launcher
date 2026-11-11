@@ -1,6 +1,6 @@
 # Design: API Group and Document Ownership
 
-*Status: Final | Prerequisite for: design-cluster-profile.md, design-kurel-package.md,
+*Status: published prerelease | Prerequisite for: design-cluster-profile.md, design-kurel-package.md,
 options-policy-interface.md*
 
 | Version | Date | Summary |

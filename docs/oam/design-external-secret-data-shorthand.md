@@ -1,6 +1,6 @@
 # Design spike: external-secret `data[]` shorthand
 
-Status: accepted (go-kure/launcher#199). Companion downstream: a downstream runtime's
+Status: published prerelease (go-kure/launcher#199). Companion downstream: a downstream runtime's
 external-secret migration.
 
 ## Problem
