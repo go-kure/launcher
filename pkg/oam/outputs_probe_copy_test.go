@@ -351,6 +351,43 @@ func TestOutputCheck_ProbeCopyKeepsADefinedAndAnOrdinaryPointerAliased(t *testin
 	}
 }
 
+// probeRecSlice is a slice type whose elements are slices of itself, so a pointer to
+// its first element and the slice that element holds can share one address.
+type probeRecSlice []probeRecSlice
+
+// C11: a pointer to the first element of a slice, and the empty slice that element
+// holds, have the same address and the same element type. The probe keeps them as two
+// copies and does not panic. A panic fails the test on its own text, so it is a red
+// test and not an invalid run.
+func TestOutputCheck_ProbeCopyKeepsAPointerAndASliceAtOneAddressApart(t *testing.T) {
+	var seen string
+	var reached bool
+	tr := probeWriteTransformer(probeWriteRule{
+		write: func(c *Component) {
+			p, ok := c.Properties["p"].(*probeRecSlice)
+			reached = ok && p != nil && len(*p) == 0
+		},
+		read: func(*Component) string { return "" },
+		seen: &seen,
+	})
+	s := make(probeRecSlice, 1)
+	s[0] = s[:0]
+	comp := Component{Name: "pg", Type: "db", Properties: map[string]any{"p": &s[0]}}
+	var panicked any
+	func() {
+		defer func() { panicked = recover() }()
+		if _, err := tr.Transform(terminalApp(comp), TransformContext{}); err != nil {
+			t.Errorf("Transform: %v", err)
+		}
+	}()
+	if panicked != nil {
+		t.Fatalf("the probe copy panicked on a pointer and a slice at one address: %v", panicked)
+	}
+	if !reached {
+		t.Errorf("the provider did not see the pointer, or it did not point at an empty slice")
+	}
+}
+
 // C6: two keys that hold one pointer to a type with a DeepCopy method still hold one
 // pointer in the probe.
 func TestOutputCheck_ProbeCopyKeepsDeepCopyAliasesAliased(t *testing.T) {

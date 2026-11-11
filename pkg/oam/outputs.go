@@ -187,7 +187,7 @@ func copyProbeValue(v reflect.Value, seen map[propertyCopyKey]reflect.Value) ref
 		if v.IsNil() {
 			return v
 		}
-		key := propertyCopyKey{ptr: v.Pointer(), typ: v.Type()}
+		key := propertyCopyKey{ptr: v.Pointer(), typ: v.Type(), kind: reflect.Map}
 		if out, ok := seen[key]; ok {
 			return out
 		}
@@ -201,7 +201,7 @@ func copyProbeValue(v reflect.Value, seen map[propertyCopyKey]reflect.Value) ref
 		if v.IsNil() {
 			return v
 		}
-		key := propertyCopyKey{ptr: v.Pointer(), len: v.Len(), typ: v.Type()}
+		key := propertyCopyKey{ptr: v.Pointer(), len: v.Len(), typ: v.Type(), kind: reflect.Slice}
 		if out, ok := seen[key]; ok {
 			return out
 		}
@@ -238,8 +238,9 @@ func copyProbeValue(v reflect.Value, seen map[propertyCopyKey]reflect.Value) ref
 		// The key names the pointee and not the pointer type, so a defined
 		// pointer type (type P *T) and *T that reference one pointee get one
 		// copy. The copy is held as *T and converted to the type of each
-		// reference.
-		key := propertyCopyKey{ptr: v.Pointer(), typ: v.Type().Elem()}
+		// reference. The kind keeps the key apart from a slice that starts at
+		// the same address (type S []S, with &s[0] and s[0] = s[:0]).
+		key := propertyCopyKey{ptr: v.Pointer(), typ: v.Type().Elem(), kind: reflect.Pointer}
 		if out, ok := seen[key]; ok {
 			return out.Convert(v.Type())
 		}
@@ -288,7 +289,7 @@ func probeDeepCopy(v reflect.Value, seen map[propertyCopyKey]reflect.Value) (ref
 	if v.Kind() != reflect.Pointer {
 		return m.Call(nil)[0], true
 	}
-	key := propertyCopyKey{ptr: v.Pointer(), typ: v.Type().Elem()}
+	key := propertyCopyKey{ptr: v.Pointer(), typ: v.Type().Elem(), kind: reflect.Pointer}
 	if out, ok := seen[key]; ok {
 		return out.Convert(v.Type()), true
 	}

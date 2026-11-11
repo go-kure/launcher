@@ -1651,11 +1651,15 @@ func copyPropertyMap(m map[string]any) map[string]any {
 }
 
 // propertyCopyKey identifies a map or slice copyPropertyValue has already copied: two
-// slices are the same only with the same backing array, length and type.
+// slices are the same only with the same backing array, length and type. kind is set
+// only by the output probe's copier (copyProbeValue), which keeps maps, slices and
+// pointers in one table: a pointer to the first element of a slice has the same
+// address as the slice, so without the kind the two could be one key.
 type propertyCopyKey struct {
-	ptr uintptr
-	len int
-	typ reflect.Type
+	ptr  uintptr
+	len  int
+	typ  reflect.Type
+	kind reflect.Kind
 }
 
 func copyPropertyValue(v reflect.Value, seen map[propertyCopyKey]reflect.Value) reflect.Value {
