@@ -116,3 +116,18 @@ func TestWriteBack_DoesNotPairDirectItemsThatShareAMergeKeyValue(t *testing.T) {
 	requireExact(t, out, widgetOut+"spec:\n    items:\n        - \"16\": x\n          name: shared\n        - \"16\": z\n          name: shared\n    other: z\n")
 	requireLoads(t, out)
 }
+
+// The same rule holds for the written list: when a patch adds a second item with the merge-key value
+// of an authored item, neither written item pairs with it, so the added item takes no key text and
+// no comment of the authored one. Here the list sits directly under the field.
+func TestWriteBack_DoesNotPairDirectItemsWhenTheWrittenListRepeatsAMergeKey(t *testing.T) {
+	const src = widgetHead + "spec:\n  items:\n    - name: shared\n      # ck\n      0x10: x\n"
+	doc := loadOneDocument(t, src)
+	items := []any{
+		map[string]any{"name": "shared", "16": "x"},
+		map[string]any{"name": "shared", "16": "z"},
+	}
+	out := writeBack(t, doc, "patch", []string{"spec", "items"}, items)
+	requireExact(t, out, widgetOut+"spec:\n    items:\n        - \"16\": x\n          name: shared\n        - \"16\": z\n          name: shared\n")
+	requireLoads(t, out)
+}

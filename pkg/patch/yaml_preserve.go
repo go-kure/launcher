@@ -430,8 +430,11 @@ func mergeSequenceNodes(original, patched *yaml.Node) error {
 
 	// Build index of original items by merge key value. A value that more than one item holds names
 	// no item: the index is only read to copy comments and key text, and neither item can be shown
-	// to be the item the resource holds. The merged items are the patched items either way.
+	// to be the item the resource holds. The same holds for a value that more than one patched item
+	// holds: each of them would take the comments of the one original item. The merged items are the
+	// patched items either way.
 	origIndex := buildUniqueMergeKeyIndex(original, mergeKey)
+	repeated := repeatedMergeKeyValues(patched, mergeKey)
 
 	// Process patched items: merge into existing or append
 	var merged []*yaml.Node
@@ -441,7 +444,7 @@ func mergeSequenceNodes(original, patched *yaml.Node) error {
 		keyVal := extractMergeKeyValue(patchedItem, mergeKey)
 		if keyVal != "" {
 			seen[keyVal] = true
-			if origItem, exists := origIndex[keyVal]; exists {
+			if origItem, exists := origIndex[keyVal]; exists && !repeated[keyVal] {
 				// Use patched item as the base (correct field set),
 				// but preserve comments from the original item.
 				preserveComments(origItem, patchedItem)
@@ -630,15 +633,22 @@ func preserveAt(src, dst *yaml.Node, comments bool) {
 // preserveSequence pairs the items of two lists and restores what preserveAt restores. Items pair
 // by merge key when the authored list has one, and then comments follow as in mergeSequenceNodes.
 // A merge-key value that more than one authored item holds pairs nothing: neither item can be shown
-// to be the item the resource holds. Without a merge key an item pairs by position only when the two
+// to be the item the resource holds. The same holds for a value that more than one written item
+// holds: each of them would take the text and the comments of the one authored item, and at most one
+// of them is that item. Without a merge key an item pairs by position only when the two
 // lists have the same length and the two items hold the same data. After an add, a delete, a reorder
 // or a change of the item, a position can name another item, so no pair is made and each item keeps
 // the text the resource gave it. The rule is no pair rather than a wrong pair.
 func preserveSequence(src, dst *yaml.Node, comments bool) {
 	if mergeKey := detectMergeKey(src); mergeKey != "" {
 		index := buildUniqueMergeKeyIndex(src, mergeKey)
+		repeated := repeatedMergeKeyValues(dst, mergeKey)
 		for _, item := range dst.Content {
-			if match, ok := index[extractMergeKeyValue(item, mergeKey)]; ok {
+			val := extractMergeKeyValue(item, mergeKey)
+			if repeated[val] {
+				continue
+			}
+			if match, ok := index[val]; ok {
 				// A list below an item that paired by position copies no comment either: a merge key
 				// names the child, and cannot show that the parent is the same item.
 				preserveAt(match, item, comments)
@@ -675,6 +685,23 @@ func buildUniqueMergeKeyIndex(seq *yaml.Node, mergeKey string) map[string]*yaml.
 		index[val] = item
 	}
 	return index
+}
+
+// repeatedMergeKeyValues returns the merge-key values that more than one item of the list holds.
+func repeatedMergeKeyValues(seq *yaml.Node, mergeKey string) map[string]bool {
+	count := make(map[string]int)
+	repeated := make(map[string]bool)
+	for _, item := range seq.Content {
+		val := extractMergeKeyValue(item, mergeKey)
+		if val == "" {
+			continue
+		}
+		count[val]++
+		if count[val] > 1 {
+			repeated[val] = true
+		}
+	}
+	return repeated
 }
 
 // sameItemData reports whether an authored list item and a written list item hold the same data, as
