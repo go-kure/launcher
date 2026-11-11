@@ -1002,6 +1002,9 @@ func (c *CnpgClusterConfig) Generate(app *stack.Application) ([]*client.Object, 
 	if c.Spec.Instances > math.MaxInt32 {
 		return nil, errors.Errorf("instances: must be <= %d, got %d", math.MaxInt32, c.Spec.Instances)
 	}
+	if err := refuseCnpgClusterAbsentFields(&c.Spec); err != nil {
+		return nil, err
+	}
 	if err := refuseOmittedClusterFields(&c.Spec); err != nil {
 		return nil, err
 	}
