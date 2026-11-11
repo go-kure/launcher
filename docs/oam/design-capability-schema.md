@@ -292,7 +292,7 @@ A `CapabilityDefinition` document (§3.2) validates the rendering map for a regi
 custom handler. Without a registered handler, the build still fails with `ErrUnknownTrait`
 at dispatch — the `CapabilityDefinition` does not replace the handler.
 
-### 3.2 CapabilityDefinition document kind (Phase 2/3)
+### 3.2 CapabilityDefinition document kind
 
 The `CapabilityDefinition` document kind is implemented in `v0.2.0-beta.5` (`pkg/oam/types.go`,
 `pkg/oam/capability.go`). It declares the
@@ -333,7 +333,7 @@ semantic identifier.
 (what the application developer writes in `app.yaml`) is a separate concern with a
 different owner; it is not in scope for this document kind.
 
-### 3.3 Package layout and discovery (Phase 2/3)
+### 3.3 Package layout and discovery
 
 A package author ships `CapabilityDefinition` files in a `definitions/` directory alongside
 `kurel.yaml` and `app.yaml`:
@@ -392,9 +392,8 @@ The per-slot entry in `ClusterProfile.spec.capabilities` is named `CapabilityBin
 attachment (what rendering values to inject); the definition is the schema document (what
 keys are accepted). These are distinct concepts with distinct Go types.
 
-The rename from `CapabilityDefinition` → `CapabilityBinding` for the per-slot struct is
-tracked in [go-kure/launcher#45](https://github.com/go-kure/launcher/issues/45) and happens there, not in
-this PR.
+The per-slot struct was renamed from `CapabilityDefinition` to `CapabilityBinding`, and
+`v0.2.0-beta.5` carries the rename (`pkg/oam/profile.go`).
 
 ---
 
@@ -402,7 +401,6 @@ this PR.
 
 | Concern | Deferred to |
 |---|---|
-| `CapabilityBinding` rename in `pkg/oam` | go-kure/launcher#45 (Phase 1) |
 | App-facing property schema for custom traits | Future (schema-provider interface or separate document kinds) |
 | Plugin-style external handler dispatch | Phase 4+ |
 | Editor integration for `cluster.yaml` (schema publishing) | Phase 3+ (enabled by `PropertySchema()` output, published via `Transformer.HandlerSchemas()`) |
