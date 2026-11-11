@@ -101,3 +101,22 @@ func TestWriteBack_DropsNoAnchorOfAnUntouchedScalarInAList(t *testing.T) {
 		t.Errorf("the written text keeps the comment, so it is not the fallback:\n%s", out)
 	}
 }
+
+// An anchored timestamp that a patch sets to the string of the same text keeps its anchor. The
+// document loads a plain timestamp as its text, and the write-back compares a timestamp as its
+// text too, so the two read as one value, the anchor is kept and the alias key still finds it
+// (go-kure/launcher#1422).
+func TestWriteBack_KeepsTheAnchorOfAnAnchoredTimestamp(t *testing.T) {
+	const src = keyHead + "  annotations:\n    source: &k 2026-11-07\n# about data\ndata:\n  *k : a\n  other: s\n"
+	for _, route := range []string{"patch", "strategic"} {
+		t.Run(route, func(t *testing.T) {
+			doc := loadOneDocument(t, src)
+			out := writeBack(t, doc, route, []string{"metadata", "annotations", "source"}, "2026-11-07")
+			if !strings.Contains(out, "# about data") {
+				t.Fatalf("the write-back lost the comment, so it fell back to the patched resource:\n%s", out)
+			}
+			again := requireLoads(t, out)
+			requireString(t, again.Documents[0].Resource.Object, "a", "data", "2026-11-07")
+		})
+	}
+}
