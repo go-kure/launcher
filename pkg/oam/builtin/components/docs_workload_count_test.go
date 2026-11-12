@@ -3,6 +3,7 @@ package components_test
 import (
 	"bufio"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -43,27 +44,35 @@ var spelledNumbers = map[string]int{
 // elsewhere in the package asserting the old count, and each stale sentence is
 // found one at a time by a reviewer rather than by the suite. Every such count
 // is checked against the real number of workload kinds, in the README and in
-// every Go file of the package, so the next kind fails the suite at each site
+// the pages that hold the rest of the README text, and in every Go file of the
+// package, so the next kind fails the suite at each site
 // it did not reach instead of shipping a document that contradicts itself.
 func TestDocs_WorkloadKindCountIsCurrent(t *testing.T) {
 	want := len(workloadKinds)
 
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read package directory: %v", err)
+	// The README is an overview. Its sections and entries live in the part pages.
+	var paths []string
+	for _, dir := range []string{".", "../../../../site/content/api-reference/oam-components"} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read directory %s: %v", dir, err)
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || (!strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, ".md")) {
+				continue
+			}
+			// This file carries the pattern itself and the counts in its own
+			// documentation; scanning it would match the regexp source.
+			if name == "docs_workload_count_test.go" {
+				continue
+			}
+			paths = append(paths, filepath.Join(dir, name))
+		}
 	}
 
 	checked := 0
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || (!strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, ".md")) {
-			continue
-		}
-		// This file carries the pattern itself and the counts in its own
-		// documentation; scanning it would match the regexp source.
-		if name == "docs_workload_count_test.go" {
-			continue
-		}
+	for _, name := range paths {
 		checked++
 
 		f, err := os.Open(name)
