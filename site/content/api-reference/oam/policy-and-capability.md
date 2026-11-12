@@ -228,8 +228,8 @@ Authored validation checks nested `Required` on the merged properties too
 override that omits a required nested key the rendering supplies is accepted. The
 profile-less `ValidateAuthoredProperties` still refuses it.
 
-A component handler that implements `ComponentCapabilityDefaults` (see Transform &
-extension) gets the same precedence for the properties it lists, and only those.
+A component handler that implements `ComponentCapabilityDefaults` (see [Transform &
+extension](transform-and-lowering.md#transform--extension)) gets the same precedence for the properties it lists, and only those.
 Each value it fills is then validated against the component's own `PropertySchema`
 (go-kure/launcher#751): a value the trait handler's schema accepted can still be
 refused here, with an error naming the component, the capability and the property
@@ -272,7 +272,7 @@ and are now refused:
   converted a struct or pointer to its JSON form, and failed on a channel or
   function, which the trait merge then handed out uncopied.
 
-This is a large internal builder surface; the tables above cover the entry points.
+This is a large internal builder surface; the tables on this page and in [Transform, extension and lowering](transform-and-lowering.md#transform--extension) cover the entry points.
 See [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) for the full
 type reference, the design notes under the Concepts section, and `examples/` for
 runnable applications.
