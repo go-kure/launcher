@@ -332,3 +332,52 @@ func TestChargeWrappersGiveWhatCelGoGives(t *testing.T) {
 		})
 	}
 }
+
+// A map comparison reads the keys of cel-go's map in Go map order. The budget made the outcome
+// depend on that order: a comparison that a cheap key decides gave false when it came first and
+// ErrCostLimit when a deep key came first. The walk now reads every key, so the spend and the
+// outcome do not depend on the order.
+func TestMapComparisonDoesNotDependOnKeyOrder(t *testing.T) {
+	for name, expr := range map[string]string{
+		"a cheap key that differs":   nested4(60, "{'cheap': 0, 'deep': d} == {'cheap': 1, 'deep': d}"),
+		"a key that the other lacks": nested4(60, "{'cheap': 0, 'deep': d} == {'other': 0, 'deep': d}"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := mustCompile(t, oneValue(t, "${"+expr+"}"))
+			for i := 0; i < 60; i++ {
+				got, _, err := c.Eval("spec.values[0].expr", stdScope())
+				if !errors.Is(err, ErrCostLimit) {
+					t.Fatalf("run %d gave %v, %v: every run must wrap ErrCostLimit", i, got, err)
+				}
+			}
+		})
+	}
+}
+
+// A string nested in an input is exported as it is, so it is held to the cap of one value, as a
+// string that is read by name is.
+func TestNestedInputStringIsCapped(t *testing.T) {
+	over := strings.Repeat("x", maxValueSize+1)
+	at := strings.Repeat("x", maxValueSize)
+	for _, tc := range []struct {
+		name   string
+		input  any
+		expr   string
+		refuse bool
+	}{
+		{"list element over the cap", []any{over}, "inputs.tags", true},
+		{"map value over the cap", map[string]any{"k": over}, "inputs.tags", true},
+		{"deep element over the cap", []any{[]any{map[string]any{"k": over}}}, "inputs.tags", true},
+		{"element read by index", []any{over}, "inputs.tags[0]", true},
+		{"list element at the cap", []any{at}, "inputs.tags", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := stdScope()
+			s.Inputs["tags"] = tc.input
+			_, _, err := mustCompile(t, oneValue(t, "${"+tc.expr+"}")).Eval("spec.values[0].expr", s)
+			if tc.refuse != errors.Is(err, ErrCostLimit) || (!tc.refuse && err != nil) {
+				t.Errorf("gave %v, refuse = %v", err, tc.refuse)
+			}
+		})
+	}
+}
