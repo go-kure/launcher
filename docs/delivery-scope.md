@@ -421,9 +421,10 @@ Decided in the ticket:
     `<component>-recovery-source`; no property names it. The Cluster's recovery source
     names the store by it. A source naming an existing store generates none, and the hook
     is not asked.
-- **Hook-group names** (`site/content/api-reference/oam/pipeline.md` "Pipeline" and "Name roles and the `Naming`
-  hook"). Role `hook-group` names the prefix of a `helmtemplate` component's hook-group
-  layouts, `<prefix>-<NN>-<phase>`, by `hookGroupNamePrefix` on `helmtemplate` and on `helm`
+- **Hook-group names** (`site/content/api-reference/oam/pipeline.md` "Pipeline" and
+  `site/content/api-reference/oam/names-and-overrides.md` "Name roles and the `Naming` hook").
+  Role `hook-group` names the prefix of a `helmtemplate` component's hook-group layouts,
+  `<prefix>-<NN>-<phase>`, by `hookGroupNamePrefix` on `helmtemplate` and on `helm`
   under `delivery: template`, else the hook, else `<application>-<component>`.
   - It is the one role whose answer is a prefix: the group count is known only after the
     render, and the prefix is resolved before it. Two components resolving to one prefix are
@@ -444,8 +445,9 @@ Decided in the ticket:
   - **Breaking** (go-kure/launcher#941): under per-layout placement a default child's
     Kustomization is `<bundle's Kustomization>-<child>` (`shop-shop-db-01-main`) again; from
     go-kure/launcher#787 it was `shop-db-01-main`, shortened to 63 by launcher's rule.
-- **A chart's layout Kustomization** (`site/content/api-reference/oam/pipeline.md` "Pipeline" and "Name roles and the
-  `Naming` hook"). Role `layout` names the Flux Kustomization kure generates under per-layout
+- **A chart's layout Kustomization** (`site/content/api-reference/oam/pipeline.md` "Pipeline" and
+  `site/content/api-reference/oam/names-and-overrides.md` "Name roles and the `Naming` hook").
+  Role `layout` names the Flux Kustomization kure generates under per-layout
   placement for the layout of a chart (`helmtemplate`, or `helm` under `delivery: template`),
   by `layoutKustomizationName`, else the hook, else kure's own `<bundle>-<component>`.
   - The default is never set: kure makes it and shortens it past 63 characters by its own
