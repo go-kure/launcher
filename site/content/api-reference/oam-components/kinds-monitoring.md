@@ -486,7 +486,8 @@ weight: 8
   "alerts.v1" is not a valid Service name, which must be a DNS-1123 label:
   …`). A name starting with a digit (`1alerts`) is accepted by that rule and
   refused when `spec.kubernetesVersion` is below 1.36, where
-  RelaxedServiceNameValidation is off by default (go-kure/launcher#959,
+  RelaxedServiceNameValidation is off by default, unless `spec.featureGates` sets
+  that gate on (go-kure/launcher#959,
   go-kure/launcher#1230). `retention`, `clusterGossipInterval`, `clusterPushpullInterval` and
   `clusterPeerTimeout` are refused where they parse as a duration of 0 or
   less (`retention: "0s" is not a positive duration: …`): the operator
@@ -815,8 +816,9 @@ weight: 8
     `listenLocal` is set), and a port name that leaves two of one name is
     refused, as on `alertmanager`. A `serviceName` must be a DNS-1123 label,
     the package's Service-name rule; a leading digit is refused when
-    `spec.kubernetesVersion` is below 1.36 (RelaxedServiceNameValidation;
-    go-kure/launcher#959, go-kure/launcher#1230, `docs/delivery-scope.md` §3.5).
+    `spec.kubernetesVersion` is below 1.36, unless `spec.featureGates` sets
+    RelaxedServiceNameValidation on (go-kure/launcher#959, go-kure/launcher#1230,
+    `docs/delivery-scope.md` §3.5).
   - a negative `replicas`: the operator copies the count into the
     StatefulSet as written (:507), which the API refuses.
   - the storage rules of `alertmanager` (:92-133, :441-450): a claim of the
@@ -1179,8 +1181,8 @@ weight: 8
   `pkg/prometheus/promcfg.go:1398-1451` at prometheus-operator v0.94.1). Two
   `volumes` of one name are refused, and so is a `serviceName` that is not a DNS-1123 label (a
   leading digit is refused when `spec.kubernetesVersion` is below 1.36,
-  RelaxedServiceNameValidation; go-kure/launcher#959, go-kure/launcher#1230,
-  `docs/delivery-scope.md` §3.5).
+  RelaxedServiceNameValidation, unless `spec.featureGates` sets that gate on;
+  go-kure/launcher#959, go-kure/launcher#1230, `docs/delivery-scope.md` §3.5).
   A nonempty `externalUrl` that Prometheus exits on at
   startup is refused too, though the operator and the API accept it: the
   operator passes it unchanged as `--web.external-url`

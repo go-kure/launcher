@@ -15,7 +15,7 @@ consumer-owned group via `RawDocumentAPIVersioner` (see [Lowering](https://www.g
 |------|------|---------|
 | `Application` | `Application` | The app: `components[]` (each with `type` + `properties`) and `traits[]`. |
 | `Package` | `Package` | A package's `kurel.yaml` descriptor: the declarations of its build-time parameters (`ParameterDecl`). The application is the separate `app.yaml`. |
-| `ClusterProfile` | `ClusterProfile` | Platform choices (trait implementations, capabilities) supplied at build time. |
+| `ClusterProfile` | `ClusterProfile` | Platform choices (trait implementations, capabilities) supplied at build time, and the cluster's Kubernetes release and per-gate feature-gate overrides (`spec.kubernetesVersion`, `spec.featureGates`; a library caller passes the overrides to `ValidateAuthoredPropertiesForTargetWithGates` and `TransformContext.FeatureGates`, see [Property schemas and contract metadata](https://www.gokure.dev/launcher/api-reference/oam/schemas-and-contract/)). |
 | `CapabilityDefinition` | `CapabilityDefinition` | Declares the schema of a capability's rendering: the keys a `ClusterProfile` binding for it may hold. |
 
 ## Parts

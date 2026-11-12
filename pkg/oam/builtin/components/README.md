@@ -336,8 +336,9 @@ applied is out of the build's reach, and each kind's entry states it:
   admission policy's validations, audit annotations, variables and mutations.
 - **An admission policy kind is served from a Kubernetes version:** ValidatingAdmissionPolicy
   and its binding at `admissionregistration.k8s.io/v1` from 1.30, MutatingAdmissionPolicy and
-  its binding from 1.36. A cluster below that refuses the object at apply. The build has no
-  target version and does not check it; each kind's schema and entry state it.
+  its binding from 1.36. A cluster below that refuses the object at apply. The build does
+  not check it, even for a `ClusterProfile` that states `spec.kubernetesVersion`, which
+  reaches only the feature-gated properties; each kind's schema and entry state it.
 
 An RBAC grant, which launcher also emits, differs: it names its subjects, and the document
 that makes the grant states it. These kinds act on objects no document of the build names.

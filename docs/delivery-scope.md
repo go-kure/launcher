@@ -2284,8 +2284,9 @@ and by scope, whatever component or trait emits it.
     one of `name` and `selector` with its `parameterNotFoundAction`.
   - The API server serves the validating pair at `admissionregistration.k8s.io/v1` from
     Kubernetes 1.30 and the mutating pair from 1.36; a cluster below refuses the object
-    at apply. The build has no target version and does not check it; each kind's schema
-    and README entry state it.
+    at apply. The build does not check it, even for a `ClusterProfile` that states
+    `spec.kubernetesVersion`, which reaches only the feature-gated properties; each
+    kind's schema and README entry state it.
   - Stated limits, in each kind's README entry: a policy applies to the requests of any
     namespace once bound; a mutating policy changes objects after the build; neither the
     policy a binding names nor its parameters are resolved at build; CEL is compiled by
