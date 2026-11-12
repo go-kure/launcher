@@ -234,8 +234,9 @@ bytes. The bound is the length of the format string, plus the length of each str
 duration or a type, 20 for every other scalar (130 when the format string has a clause with a
 precision, `%f`, `%b` or `%o`, which print a number in more digits), 4 for each list element and 6 for each
 map entry. A list
-or map argument is walked as a tree, so a shared nest is stopped by the bound after at most 250,000
-values and never walked in full. The bound is above the real
+or map argument is walked as a tree. The walk spends one step of the comparison budget (1,000,000
+values for one evaluation) for each value it reads, so a shared nest is never walked in full and a
+loop of calls cannot walk without limit. The bound is above the real
 size, so a `format` whose real result is within that slack of 1,000,000 bytes can be refused though
 it would fit. The result and the errors are those of cel-go.
 

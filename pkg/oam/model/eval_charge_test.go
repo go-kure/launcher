@@ -673,9 +673,9 @@ func nestedN(depth, n int, final string) string {
 	return expr
 }
 
-// The walk of the arguments stops when the running total passes the cap. A shared nest of depth 6
-// holds 30^6 = 729,000,000 values, and a walk that summed the whole tree and compared at the end
-// would run for minutes before it refused. The walk allocates nothing, so the allocation rows above
+// The walk of the arguments stops when it has spent the budget. A shared nest of depth 6 holds
+// 30^6 = 729,000,000 values, and a walk that read the whole tree would run for minutes before it
+// refused. The walk allocates nothing, so the allocation rows above
 // cannot see it: this row reads the time.
 func TestChargeFormatWalkStopsEarly(t *testing.T) {
 	start := time.Now()
@@ -683,6 +683,19 @@ func TestChargeFormatWalkStopsEarly(t *testing.T) {
 	wantCostLimit(t, got, err)
 	if d := time.Since(start); d > 5*time.Second {
 		t.Errorf("the refusal took %v, want under 5s: the walk of a shared nest did not stop early", d)
+	}
+}
+
+// The walk spends the shared budget of the evaluation, one step for each value it reads. A format
+// that cel-go refuses at once, in a loop whose error an || drops, walks its argument before each
+// refusal: 20,000 calls over a nest of 12^4 values would read 4*10^8 values with nothing counting
+// them (a hosted review of go-kure/launcher#1487).
+func TestChargeFormatWalkSpendsTheSharedBudget(t *testing.T) {
+	start := time.Now()
+	got, err := evalValue(t, nested4(12, "cel.bind(args, [d], lists.range(20000).all(i, '%z'.format(args) == '' || true))"))
+	wantCostLimit(t, got, err)
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("the refusal took %v, want under 5s: the walks did not spend the budget", d)
 	}
 }
 
@@ -736,7 +749,7 @@ func TestFormatBoundIsAnUpperBound(t *testing.T) {
 			if !ok {
 				t.Fatalf("test bug: %v is no list", args)
 			}
-			if bound := formatBound(types.String(r.format), list); bound < len(got) {
+			if bound := formatBound(types.String(r.format), list, newCompareBudget()); bound < len(got) {
 				t.Errorf("bound %d is below the %d bytes that cel-go prints: %q", bound, len(got), got)
 			}
 		})

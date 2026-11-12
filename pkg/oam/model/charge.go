@@ -336,7 +336,7 @@ func (e *budgetedFormat) Eval(a interpreter.Activation) ref.Val {
 	// with its own error text and builds nothing, so the cost it reports is its own.
 	if str, ok := vals[0].(types.String); ok {
 		if list, ok := vals[1].(traits.Lister); ok {
-			formatBound(str, list)
+			formatBound(str, list, budgetOf(a))
 		}
 	}
 	prog, err := formatProgram()
@@ -365,18 +365,18 @@ var formatProgram = sync.OnceValues(func() (cel.Program, error) {
 })
 
 // formatBound gives the most that the clauses of str over the arguments in list can print, and
-// stops the evaluation when that passes maxValueSize. It is the length of the format string plus the
+// stops the evaluation when that passes maxValueSize or the walk spends the budget. It is the length of the format string plus the
 // most each argument can print (printer.bound). A %x or %X prints two characters for each byte of a
 // string or bytes argument, so a format string that holds an x or an X counts those arguments twice,
 // which is above the real size when the x is only text. A clause with a precision (cel-go allows up
 // to 100 digits), %f (six decimals), %b or %o prints a number in up to 130 bytes, so a format
 // string with such a clause counts every number that wide.
-func formatBound(str types.String, list traits.Lister) int {
+func formatBound(str types.String, list traits.Lister, budget *compareBudget) int {
 	factor := 1
 	if strings.ContainsAny(string(str), "xX") {
 		factor = 2
 	}
-	pr := printer{factor: factor, scalar: 20}
+	pr := printer{factor: factor, scalar: 20, budget: budget}
 	if hasWideClause(string(str)) {
 		pr.scalar = 130
 	}
@@ -395,13 +395,17 @@ func formatBound(str types.String, list traits.Lister) int {
 }
 
 // printer holds what the walk of bound needs about one format string: factor is how many
-// characters a byte of a string or bytes argument prints, and scalar is the most a number prints.
-type printer struct{ factor, scalar int }
+// characters a byte of a string or bytes argument prints, scalar is the most a number prints, and
+// budget is the steps of the evaluation, of which the walk spends one for each value it reads.
+type printer struct {
+	factor, scalar int
+	budget         *compareBudget
+}
 
 // hasWideClause reports whether str holds a clause that prints a number in more than 20 bytes: a
 // precision (%.100f, which prints 20 digits, a point and 100 more), %f (20 digits and 6 decimals),
-// %b (64 digits and a sign) or %o (22 digits and a sign). The scan skips %% and reads only the clause that follows a %, so a point in
-// plain text does not count.
+// %b (64 digits and a sign) or %o (22 digits and a sign). The scan skips %% and reads only the
+// clause that follows a %, so a point in plain text does not count.
 func hasWideClause(str string) bool {
 	for i := 0; i < len(str); i++ {
 		if str[i] != '%' || i+1 == len(str) {
@@ -422,11 +426,16 @@ func hasWideClause(str string) bool {
 // value can be an empty list or map that prints its two brackets and holds nothing else.
 // cel-go v0.31.0 prints a value inside a list or map as it prints it alone (stringFormatterV2,
 // strings version 5), so the walk adds no quotes.
-// A list or map is walked as a tree and the walk stops when the total passes maxValueSize, so a
-// shared nest, which holds many more values than it has elements, is never walked in full: at most
-// 250,000 values are read. TestFormatBoundIsAnUpperBound compares the bound with what cel-go prints,
-// so a cel-go that prints more fails it.
+// A list or map is walked as a tree, and the walk spends one step of the budget of the evaluation
+// for each value it reads and stops the evaluation when the budget is gone, so a shared nest, which
+// holds many more values than it has elements, is never walked in full, and neither is a loop of
+// calls that walk the same nest. formatBound checks the total after each argument.
+// TestFormatBoundIsAnUpperBound compares the bound with what cel-go prints, so a cel-go that prints
+// more fails it.
 func (p printer) bound(v ref.Val, total *int) {
+	if p.budget.left--; p.budget.left < 0 {
+		chargeStop()
+	}
 	switch x := v.(type) {
 	case types.String:
 		*total += p.factor * len(x)
@@ -443,26 +452,17 @@ func (p printer) bound(v ref.Val, total *int) {
 		}
 		for i := types.IntZero; i < sz; i++ {
 			*total += 4
-			if *total > maxValueSize {
-				chargeStop()
-			}
 			p.bound(x.Get(i), total)
 		}
 	case traits.Mapper:
 		for it := x.Iterator(); it.HasNext() == types.True; {
 			k := it.Next()
 			*total += 6
-			if *total > maxValueSize {
-				chargeStop()
-			}
 			p.bound(k, total)
 			p.bound(x.Get(k), total)
 		}
 	default:
 		*total += p.scalar
-	}
-	if *total > maxValueSize {
-		chargeStop()
 	}
 }
 
