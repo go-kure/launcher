@@ -773,8 +773,17 @@ func joinPropertyTypes(types []PropertyType) string {
 // wherever it is declared rather than only at the top level (go-kure/launcher#635). No schema
 // declares a nested reserved field today; the walk exists so declaring one later is
 // enforcement, not documentation — the exact gap D3 was written to close.
-func enforcePlatformReserved(schema map[string]PropertySchema, props map[string]any, rendered renderedValues, path string) error {
-	return enforceReservedObject(schema, props, rendered, "", path)
+//
+// where is the position of the properties checked: an authored component or trait
+// passes its Position and names, and the refusal is located there. A rule-emitted
+// element passes the zero value, and its refusal carries the kind and no position,
+// as every emission refusal does (go-kure/launcher#1469).
+func enforcePlatformReserved(schema map[string]PropertySchema, props map[string]any, rendered renderedValues, path string, where PropertyError) error {
+	err := enforceReservedObject(schema, props, rendered, "", path)
+	if err != nil && where.Position != "" {
+		return locate(err, path, where)
+	}
+	return err
 }
 
 // enforceReservedObject is enforcePlatformReserved over one declared object. at is
@@ -797,8 +806,10 @@ func enforceReservedObject(schema map[string]PropertySchema, props map[string]an
 			if keyRendered.exempts(keyAt, field, props[key]) {
 				continue
 			}
-			return errors.Wrapf(ErrPlatformReserved,
-				"%s: %q is platform-reserved and may only be set via ClusterProfile capability rendering", path, key)
+			pe := propertyErrorf(PropertyErrorPlatformReserved, path,
+				"%q is platform-reserved and may only be set via ClusterProfile capability rendering: %v", key, ErrPlatformReserved).withKey(key)
+			pe.cause = ErrPlatformReserved
+			return pe
 		}
 		if err := enforceReservedValue(field, props[key], keyRendered, keyAt, path+"."+key); err != nil {
 			return err

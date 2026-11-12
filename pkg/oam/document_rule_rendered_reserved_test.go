@@ -381,10 +381,10 @@ func TestComponentRenderReserved_CopyOnWrite(t *testing.T) {
 	}
 	// The write is in place, so the original's shared properties map now holds the
 	// value too — and without a record it is refused there.
-	if err := enforcePlatformReserved(schema, authored.Properties, authored.rendered, "properties"); !stderrors.Is(err, ErrPlatformReserved) {
+	if err := enforcePlatformReserved(schema, authored.Properties, authored.rendered, "properties", PropertyError{}); !stderrors.Is(err, ErrPlatformReserved) {
 		t.Fatalf("expected the original, which recorded nothing, to be refused, got: %v", err)
 	}
-	if err := enforcePlatformReserved(schema, rendered.Properties, rendered.rendered, "properties"); err != nil {
+	if err := enforcePlatformReserved(schema, rendered.Properties, rendered.rendered, "properties", PropertyError{}); err != nil {
 		t.Fatalf("expected the copy that recorded the value to be accepted, got: %v", err)
 	}
 
@@ -503,7 +503,7 @@ func TestEnforcePlatformReserved_HonoursTheRecord(t *testing.T) {
 			if schema == nil {
 				schema = reservedSchema()
 			}
-			err := enforcePlatformReserved(schema, tc.props, tc.rendered, "properties")
+			err := enforcePlatformReserved(schema, tc.props, tc.rendered, "properties", PropertyError{})
 			if tc.accept {
 				if err != nil {
 					t.Fatalf("expected the recorded value to be accepted, got: %v", err)
@@ -811,10 +811,10 @@ func TestTraitRenderReserved_WritesRecordsAndCopiesOnWrite(t *testing.T) {
 	if authored.rendered != nil {
 		t.Fatalf("recording on a copy recorded on the original: %#v", authored.rendered)
 	}
-	if err := enforcePlatformReserved(schema, authored.Properties, authored.rendered, "properties"); !stderrors.Is(err, ErrPlatformReserved) {
+	if err := enforcePlatformReserved(schema, authored.Properties, authored.rendered, "properties", PropertyError{}); !stderrors.Is(err, ErrPlatformReserved) {
 		t.Fatalf("expected the original, which shares the written map but recorded nothing, to be refused, got: %v", err)
 	}
-	if err := enforcePlatformReserved(schema, rendered.Properties, rendered.rendered, "properties"); err != nil {
+	if err := enforcePlatformReserved(schema, rendered.Properties, rendered.rendered, "properties", PropertyError{}); err != nil {
 		t.Fatalf("expected the copy that recorded the value to be accepted, got: %v", err)
 	}
 }

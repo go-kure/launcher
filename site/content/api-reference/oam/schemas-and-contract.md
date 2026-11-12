@@ -75,8 +75,8 @@ schema node is left without a description.
 A schema field may also be marked `PlatformReserved`: its value may arrive only via
 `ClusterProfile` capability rendering, never authored inline. `enforcePlatformReserved`
 (`property_validate.go`) rejects an authored value for such a field — including an
-explicit `null` — before capability rendering is merged in, wrapping
-`ErrPlatformReserved`; it walks declared nested object fields and the items of a
+explicit `null` — before capability rendering is merged in, with a `*PropertyError` of
+kind `platform-reserved` that wraps `ErrPlatformReserved`; it walks declared nested object fields and the items of a
 declared array of objects too (named `properties.items[0]`), so a reservation on an
 inner field is enforced wherever it is declared, not only at the top level
 (go-kure/launcher#635).
@@ -209,17 +209,17 @@ The refusal text itself is unchanged at every depth.
 **Where a refusal is, as data.** Every refusal the property validators make is a
 `*PropertyError` (go-kure/launcher#1466): `errors.As` finds it in the error the call
 returns, a hinted refusal included, and `Error()` is the text above, byte for byte.
-The one exception is the platform-reservation check described below: its refusal
-wraps `ErrPlatformReserved`, which `errors.Is` finds, and it names its location in
-its text only. A caller that maps a refusal to a reply of its own reads these fields
-and parses no text:
+The platform-reservation check described below is one of them (go-kure/launcher#1469).
+Its refusal has the kind `platform-reserved`, and it also wraps `ErrPlatformReserved`,
+so `errors.Is` finds the sentinel too. A caller that maps a refusal to a reply of its
+own reads these fields and parses no text:
 
 | Field | Holds |
 |---|---|
-| `Kind` | `unsupported-field`, `required`, `exclusive`, `type`, `enum`, `range`, `null-element`, or `schema` (the handler's own schema is malformed, so the document is not at fault) |
+| `Kind` | `unsupported-field`, `required`, `exclusive`, `type`, `enum`, `range`, `null-element`, `platform-reserved` (an authored value for a `PlatformReserved` key), or `schema` (the handler's own schema is malformed, so the document is not at fault) |
 | `Position` | `component`, `trait` or `policy`; empty where the refusal was made on no authored document (a schema, a property a rule emitted) |
 | `Component`, `Trait`, `Policy` | the component's name (for a trait, the one it sits on), the trait's type, the policy's name; empty where they do not apply |
-| `Field` | the location below `properties`: dotted keys, array elements as `[n]`, as in `probes.httpGet[0].port`. For `unsupported-field` and `required` it is the key itself; for `exclusive` the object holding the group, empty at the top level; for `schema` the node whose declaration is wrong |
+| `Field` | the location below `properties`: dotted keys, array elements as `[n]`, as in `probes.httpGet[0].port`. For `unsupported-field`, `required` and `platform-reserved` it is the key itself; for `exclusive` the object holding the group, empty at the top level; for `schema` the node whose declaration is wrong |
 
 ```go
 var pe *oam.PropertyError

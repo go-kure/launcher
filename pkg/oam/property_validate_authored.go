@@ -227,7 +227,7 @@ func (t *Transformer) enforceDocumentReservations(app *Application) error {
 		if comp.synthesized {
 			continue
 		}
-		if err := t.enforceComponentReservations(comp, "properties"); err != nil {
+		if err := t.enforceComponentReservations(comp, "properties", PropertyError{Position: "component", Component: comp.Name}); err != nil {
 			return &TransformError{Message: fmt.Sprintf("component %q", comp.Name), Cause: err}
 		}
 	}
@@ -237,7 +237,7 @@ func (t *Transformer) enforceDocumentReservations(app *Application) error {
 			if comp.Traits[j].sealed && comp.Traits[j].synthesized {
 				continue
 			}
-			if err := t.enforceTraitReservations(&comp.Traits[j], "properties"); err != nil {
+			if err := t.enforceTraitReservations(&comp.Traits[j], "properties", PropertyError{Position: "trait", Component: comp.Name, Trait: comp.Traits[j].Type}); err != nil {
 				return &TransformError{Message: fmt.Sprintf("component %q trait %q", comp.Name, comp.Traits[j].Type), Cause: err}
 			}
 		}

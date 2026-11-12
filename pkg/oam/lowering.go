@@ -1433,7 +1433,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// unchecked, so its output stays authored and is checked downstream.
 			p, declaresSchema := rule.(PropertySchemaProvider)
 			if declaresSchema && !comp.synthesized {
-				if err := enforcePlatformReserved(p.PropertySchema(), comp.Properties, comp.rendered, "properties"); err != nil {
+				if err := enforcePlatformReserved(p.PropertySchema(), comp.Properties, comp.rendered, "properties", PropertyError{Position: "component", Component: comp.Name}); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
@@ -1636,7 +1636,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				// trait.Properties (the pre-merge original), not resolvedTrait, with only
 				// the trait's own record (Trait.RenderReserved) exempt.
 				if declaresSchema {
-					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties"); err != nil {
+					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties", PropertyError{Position: "trait", Component: comp.Name, Trait: trait.Type}); err != nil {
 						return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 					}
 					// Nested Required on the merged properties, as applyTraits checks it
@@ -1654,7 +1654,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				// schema-less rule may have copied an authored reserved value into it.
 				// Its Properties are final, so they are checked as they stand, a value
 				// the rule recorded with Trait.RenderReserved exempt.
-				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties"); err != nil {
+				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties", PropertyError{Position: "trait", Component: comp.Name, Trait: trait.Type}); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
 			}
@@ -2032,7 +2032,7 @@ func (t *Transformer) enforceAuthoredReservations(doc *Application, docOrigin Or
 			compOrigin = Origin{Document: docOrigin.Document, DocumentKind: docOrigin.DocumentKind, Namespace: docOrigin.Namespace, Component: comp.Name, ComponentType: comp.Type, Index: i}
 		}
 		if !comp.synthesized {
-			if err := t.enforceComponentReservations(comp, "properties"); err != nil {
+			if err := t.enforceComponentReservations(comp, "properties", PropertyError{Position: "component", Component: comp.Name}); err != nil {
 				return errors.Wrapf(err, "%s", compOrigin)
 			}
 		}
@@ -2043,7 +2043,7 @@ func (t *Transformer) enforceAuthoredReservations(doc *Application, docOrigin Or
 			if trait.synthesized {
 				continue
 			}
-			if err := t.enforceTraitReservations(trait, "properties"); err != nil {
+			if err := t.enforceTraitReservations(trait, "properties", PropertyError{Position: "trait", Component: comp.Name, Trait: trait.Type}); err != nil {
 				traitOrigin, stamped := trait.Origin()
 				if !stamped {
 					traitOrigin = compOrigin
@@ -2064,7 +2064,10 @@ func (t *Transformer) enforceAuthoredReservations(doc *Application, docOrigin Or
 // business. The caller decides whether the component is exempt (synthesized); a
 // reserved value it records as rendered (Component.RenderReserved) is exempt here, as
 // is a trait's (Trait.RenderReserved) in enforceTraitReservations.
-func (t *Transformer) enforceComponentReservations(comp *Component, path string) error {
+//
+// where is the position of an authored component, and the zero value for one a rule
+// emitted (enforcePlatformReserved).
+func (t *Transformer) enforceComponentReservations(comp *Component, path string, where PropertyError) error {
 	var provider any
 	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
 		provider = rule
@@ -2075,7 +2078,7 @@ func (t *Transformer) enforceComponentReservations(comp *Component, path string)
 	if !ok {
 		return nil
 	}
-	return enforcePlatformReserved(p.PropertySchema(), comp.Properties, comp.rendered, path)
+	return enforcePlatformReserved(p.PropertySchema(), comp.Properties, comp.rendered, path, where)
 }
 
 // enforceEmittedComponentReservations is the D3 check on the components one lowering
@@ -2095,7 +2098,7 @@ func (t *Transformer) enforceEmittedComponentReservations(comps []Component, rul
 			continue
 		}
 		path := fmt.Sprintf("component %q (type %q) emitted by rule %s: properties", comp.Name, comp.Type, rule)
-		if err := t.enforceComponentReservations(comp, path); err != nil {
+		if err := t.enforceComponentReservations(comp, path, PropertyError{}); err != nil {
 			return err
 		}
 	}
@@ -2104,7 +2107,7 @@ func (t *Transformer) enforceEmittedComponentReservations(comps []Component, rul
 
 // enforceTraitReservations is enforceComponentReservations for a trait: its schema is
 // its TraitLoweringRule's when one is registered, else its dispatchable handler's.
-func (t *Transformer) enforceTraitReservations(trait *Trait, path string) error {
+func (t *Transformer) enforceTraitReservations(trait *Trait, path string, where PropertyError) error {
 	var provider any
 	if rule, ok := t.traitLoweringRules[trait.Type]; ok {
 		provider = rule
@@ -2115,7 +2118,7 @@ func (t *Transformer) enforceTraitReservations(trait *Trait, path string) error 
 	if !ok {
 		return nil
 	}
-	return enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, path)
+	return enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, path, where)
 }
 
 // enforceEmittedTraitReservations is enforceEmittedComponentReservations for the
@@ -2133,7 +2136,7 @@ func (t *Transformer) enforceEmittedTraitReservations(comps []Component, traits 
 			continue
 		}
 		path := fmt.Sprintf("trait %q emitted by rule %s: properties", trait.Type, rule)
-		if err := t.enforceTraitReservations(trait, path); err != nil {
+		if err := t.enforceTraitReservations(trait, path, PropertyError{}); err != nil {
 			return err
 		}
 	}
@@ -2144,7 +2147,7 @@ func (t *Transformer) enforceEmittedTraitReservations(comps []Component, traits 
 				continue
 			}
 			path := fmt.Sprintf("trait %q of component %q emitted by rule %s: properties", trait.Type, comps[i].Name, rule)
-			if err := t.enforceTraitReservations(trait, path); err != nil {
+			if err := t.enforceTraitReservations(trait, path, PropertyError{}); err != nil {
 				return err
 			}
 		}

@@ -28,6 +28,10 @@ const (
 	PropertyErrorNullElement PropertyErrorKind = "null-element"
 	// PropertyErrorSchema is a defect in the handler's own schema, not in the document.
 	PropertyErrorSchema PropertyErrorKind = "schema"
+	// PropertyErrorPlatformReserved is an authored value for a property the platform
+	// reserves for ClusterProfile capability rendering (go-kure/launcher#1469). It
+	// wraps ErrPlatformReserved, so errors.Is finds that too.
+	PropertyErrorPlatformReserved PropertyErrorKind = "platform-reserved"
 )
 
 // PropertyError is the refusal of a property the author wrote, or of the schema it is
@@ -35,7 +39,8 @@ const (
 // the location in prose; the fields below hold the same location for a caller that
 // maps it, so none has to read it back out of the text. Find one with errors.As; the
 // error ValidateAuthoredProperties returns may wrap it. The platform-reservation
-// refusal is not one: it wraps ErrPlatformReserved and is found with errors.Is.
+// refusal is one too, of kind PropertyErrorPlatformReserved: it is also found with
+// errors.Is against ErrPlatformReserved.
 type PropertyError struct {
 	Kind PropertyErrorKind
 	// Position is where in the document the refused properties sit: "component",
@@ -62,9 +67,16 @@ type PropertyError struct {
 	// An unsupported-field refusal also keeps what a handler's hint reads.
 	allowed string
 	parents []string
+	// cause is the sentinel a platform-reserved refusal wraps. Only that refusal sets
+	// it, so Unwrap is nil for every other kind.
+	cause error
 }
 
 func (e *PropertyError) Error() string { return e.msg }
+
+// Unwrap returns the sentinel a platform-reserved refusal wraps, ErrPlatformReserved,
+// and nil for every other kind.
+func (e *PropertyError) Unwrap() error { return e.cause }
 
 // propertyErrorf is a refusal at path, worded "<path>: <text>".
 func propertyErrorf(kind PropertyErrorKind, path, format string, args ...any) *PropertyError {

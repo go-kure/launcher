@@ -1145,7 +1145,7 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// except a reserved value the rule recorded with Component.RenderReserved while
 		// it still holds the recorded value.
 		if p, ok := handler.(PropertySchemaProvider); ok && !component.synthesized {
-			if err := enforcePlatformReserved(p.PropertySchema(), component.Properties, component.rendered, "properties"); err != nil {
+			if err := enforcePlatformReserved(p.PropertySchema(), component.Properties, component.rendered, "properties", PropertyError{Position: "component", Component: component.Name}); err != nil {
 				return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 			}
 		}
@@ -1756,7 +1756,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 				// invisible to this check, and cannot make an authored value exempt: only
 				// a value the trait itself recorded (Trait.RenderReserved) is.
 				if p, ok := handler.(PropertySchemaProvider); ok {
-					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties"); err != nil {
+					if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties", PropertyError{Position: "trait", Component: entry.component.Name, Trait: trait.Type}); err != nil {
 						return nil, &TransformError{
 							Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
 							Cause:   err,
@@ -1781,7 +1781,7 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 				// schema-less rule may have copied an authored reserved value into it.
 				// Its Properties are final, so they are checked as they stand, a value
 				// the rule recorded with Trait.RenderReserved exempt.
-				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties"); err != nil {
+				if err := enforcePlatformReserved(p.PropertySchema(), trait.Properties, trait.rendered, "properties", PropertyError{Position: "trait", Component: entry.component.Name, Trait: trait.Type}); err != nil {
 					return nil, &TransformError{
 						Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
 						Cause:   err,
