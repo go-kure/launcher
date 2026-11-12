@@ -238,6 +238,8 @@ func TestRule_InputDefaultAndOverride(t *testing.T) {
 	}{
 		{"default", nil, "dflt"},
 		{"override", map[string]any{"key": "set"}, "set"},
+		// An explicit null on an optional input reads as absent, so the default applies.
+		{"null", map[string]any{"key": nil}, "dflt"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			objs := objectsOK(t, tr, []oam.Component{{Name: "orders", Type: webappType, Properties: tc.props}}, nil)

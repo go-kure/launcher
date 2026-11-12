@@ -50,6 +50,11 @@ func (r *Rule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 		}
 	}
 	for k, v := range comp.Properties {
+		// An explicit null reads as absent (the authored path keeps the key, the emitted path
+		// deletes it), so it never overwrites a default.
+		if oam.IsNullValue(v) {
+			continue
+		}
 		inputs[k] = v
 	}
 	// The name a Naming hook is asked in the build: the document as it stands at this round
