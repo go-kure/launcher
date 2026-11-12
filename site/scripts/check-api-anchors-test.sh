@@ -192,17 +192,51 @@ pins "$d/pins.txt" 'api-reference/a/ a-one'
 expect "dot-dot path into the site is read" 1 "no id \"ghost\"" -- \
     --site "$d/site" --pins "$d/pins.txt"
 
-# 15: a read error is exit 2, never an empty scan. A stub grep fails on one page.
+# 15: a read error is exit 2, never an empty scan. A stub sed, the first reader of a page, fails on one page.
 d="$WORK/read-error"
 page "$d/site" api-reference/a '<h2 id=a-one>One</h2>'
 page "$d/site" bad-page '<p>x</p>'
 pins "$d/pins.txt" 'api-reference/a/ a-one'
 mkdir -p "$d/bin"
-printf '#!/bin/sh\nfor a in "$@"; do case "$a" in *bad-page*) exit 2 ;; esac; done\nexec %s "$@"\n' "$(command -v grep)" > "$d/bin/grep"
-chmod +x "$d/bin/grep"
-PATH="$d/bin:$PATH" expect "grep read error is exit 2" 2 "read failed" -- --site "$d/site" --pins "$d/pins.txt"
+printf '#!/bin/sh\nfor a in "$@"; do case "$a" in *bad-page*) exit 2 ;; esac; done\nexec %s "$@"\n' "$(command -v sed)" > "$d/bin/sed"
+chmod +x "$d/bin/sed"
+PATH="$d/bin:$PATH" expect "read error is exit 2" 2 "read failed" -- --site "$d/site" --pins "$d/pins.txt"
 
-# 16 to 23: input errors exit 2 and never pass. An empty pin list and an empty site
+# 16: a quoted attribute value can hold `>`. The tag ends at its own `>`.
+d="$WORK/quoted-gt"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2><a title="a > b" href=#missing>x</a><p title="x id=ghost > y">t</p>'
+pins "$d/pins.txt" 'api-reference/a/ ghost'
+expect "link after a quoted > is read" 1 "link #missing" -- --site "$d/site" --pins "$d/pins.txt"
+expect "id inside a quoted > is no id" 1 "api-reference/a/ ghost: no element" -- --site "$d/site" --pins "$d/pins.txt"
+
+# 17: markup in a comment or a script element is no element.
+d="$WORK/raw-text"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2><!-- <h2 id=ghost>gone</h2> -->
+  <script>const s = "<h2 id=ghost2>example</h2>"; // </div></script><h3 id=a-two>Two</h3>'
+pins "$d/pins.txt" 'api-reference/a/ ghost'
+expect "id in a comment is no id" 1 "api-reference/a/ ghost: no element" -- --site "$d/site" --pins "$d/pins.txt"
+pins "$d/pins.txt" 'api-reference/a/ ghost2'
+expect "id in a script string is no id" 1 "api-reference/a/ ghost2: no element" -- --site "$d/site" --pins "$d/pins.txt"
+pins "$d/pins.txt" 'api-reference/a/ a-two'
+expect "element after a script is read" 0 "1 pinned anchors found" -- --site "$d/site" --pins "$d/pins.txt"
+
+# 18: character references are decoded before a link is filtered or split.
+d="$WORK/refs"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2><a href="&num;missing">x</a><a href=/laun&#99;her/api-reference/a/#gone>y</a><a href="&#35;a-one">ok</a><a href="&#x23;a-one">ok</a>'
+pins "$d/pins.txt" 'api-reference/a/ a-one'
+expect "&num; link is read" 1 'link #missing' -- --site "$d/site" --pins "$d/pins.txt"
+expect "numeric reference in a path is read" 1 'no id "gone"' -- --site "$d/site" --pins "$d/pins.txt"
+page "$d/ok" api-reference/a '<h2 id=a-one>One</h2><a href="&#35;a-one">ok</a><a href="&#x23;a-one">ok</a>'
+expect "numeric references for # resolve" 0 "1 fragment links resolved" -- --site "$d/ok" --pins "$d/pins.txt"
+
+# 19: a percent escape for a newline or a NUL byte alters no fragment.
+d="$WORK/pct-bytes"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2><a href="#a-one%0A">x</a><a href="#a-one%00">y</a>'
+pins "$d/pins.txt" 'api-reference/a/ a-one'
+expect "encoded newline is no match" 1 "link #a-one%0A" -- --site "$d/site" --pins "$d/pins.txt"
+expect "encoded NUL is no match" 1 'no id "a-one%00"' -- --site "$d/site" --pins "$d/pins.txt"
+
+# 20 to 27: input errors exit 2 and never pass. An empty pin list and an empty site
 # would otherwise read as a clean run.
 d="$WORK/inputs"
 page "$d/site" api-reference/a '<h2 id=a-one>One</h2>'

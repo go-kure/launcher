@@ -15,7 +15,9 @@
 # that leave the site are not read. They are counted in the last line.
 #
 # A read error is exit 2, never an empty scan. Ids and hrefs come from real tag attributes,
-# with HTML entities and percent escapes decoded.
+# with HTML entities and percent escapes decoded. Comments and script elements are cut out
+# first. The reads work on the minified page Hugo writes with --minify, which the docs build
+# uses: a tag, comment or script split over several lines is not read as one.
 #
 # Usage: bash site/scripts/check-api-anchors.sh [options]
 #   --site DIR            Built site. Default: site/public.
@@ -60,15 +62,37 @@ done
 SITE="$(cd "$SITE" && pwd)"
 [[ "$BASE" == /* && "$BASE" == */ ]] || die "--base-path must start and end with a slash: $BASE"
 
-# An attribute value is quoted or, in a minified build, bare.
+# An attribute value is quoted or, in a minified build, bare. A quoted value can hold `>`.
 VALUE="(\"[^\"]*\"|'[^']*'|[^[:space:]>\"']+)"
 ATTR="[[:space:]][^[:space:]=>/\"']+(=$VALUE)?"
+INTAG="([^>\"']|\"[^\"]*\"|'[^']*')*"
+ANYTAG="<[A-Za-z]$INTAG>"
+HEADTAG="<h[1-6]([[:space:]]$INTAG)?>"
 unquote() { sed -E "s/^[[:space:]]*[a-z-]+=//; s/^[\"']//; s/[\"']\$//"; }
+
+# htmldec: the HTML character references in each line decoded: the numeric ones, and the few
+# names an attribute value carries. Any other name stays as written.
 htmldec() {
-    sed -E "s/&quot;|&#34;|&#x22;/\"/g; s/&apos;|&#39;|&#x27;/'/g; s/&lt;/</g; s/&gt;/>/g; s/&amp;/\&/g"
+    local l n c
+    while IFS= read -r l; do
+        while [[ "$l" =~ \&#([0-9]+)\; || "$l" =~ \&#[xX]([0-9a-fA-F]+)\; ]]; do
+            n="${BASH_REMATCH[1]}"
+            if [[ "${BASH_REMATCH[0]}" == *[xX]* ]]; then n=$((16#$n)); else n=$((10#$n)); fi
+            c="$(printf "\\U$(printf '%08x' "$n")" 2>/dev/null)" || c="?"
+            l="${l/"${BASH_REMATCH[0]}"/"$c"}"
+        done
+        printf '%s\n' "$l"
+    done | sed -E "s/&quot;/\"/g; s/&apos;/'/g; s/&lt;/</g; s/&gt;/>/g; s/&num;/#/g; s/&amp;/\&/g"
 }
-# pctdec STRING: the string with its %XX escapes decoded.
-pctdec() { local s="${1//\\/\\\\}"; printf '%b' "${s//%/\\x}"; }
+
+# pctdec STRING: sets REPLY to the string with its %XX escapes decoded. A decoded newline
+# stays, and %00 stays as text, because a shell cannot hold a NUL byte.
+pctdec() {
+    local s="${1//%00/%2500}" out
+    s="${s//\\/\\\\}"
+    out="$(printf '%b' "${s//%/\\x}"; printf x)"
+    REPLY="${out%x}"
+}
 
 # gr ARGS: grep, where no match is no error and a read error ends the run with exit 2.
 # The callers read through a command substitution, so the exit reaches the script.
@@ -78,21 +102,29 @@ gr() {
     [[ $rc -le 1 ]] || { echo "check-api-anchors: read failed (grep exit $rc): $*" >&2; exit 2; }
 }
 
+# strip FILE: the page with its comments and script elements cut out. A minified page is one
+# line, so the cut works line by line. A read error ends the run with exit 2.
+strip() {
+    local rc=0
+    sed -E 's/<!--([^-]|-[^-])*-->//g; s#<script([^>]*)>([^<]|<[^/]|</[^s]|</s[^c])*</script>##g' "$1" || rc=$?
+    [[ $rc -eq 0 ]] || { echo "check-api-anchors: read failed (sed exit $rc): $1" >&2; exit 2; }
+}
+
 # attrs_of FILE TAG_PATTERN NAME: the value of every NAME attribute on the tags that match
 # TAG_PATTERN, one per line. Each attribute is read whole, with its quoted value, so
 # text such as `title="x id=y"` or `<p>id=y</p>` gives no id.
 attrs_of() {
-    gr -o -E "$2" "$1" | gr -o -E "$ATTR" | gr -E "^[[:space:]]$3=" | unquote | htmldec
+    strip "$1" | gr -o -E "$2" | gr -o -E "$ATTR" | gr -E "^[[:space:]]$3=" | unquote | htmldec
 }
 
 # ids_of FILE: every id on the page, one per line.
-ids_of() { attrs_of "$1" '<[A-Za-z][^>]*>' id; }
+ids_of() { attrs_of "$1" "$ANYTAG" id; }
 
 # heading_ids_of FILE: the ids of the h1 to h6 elements, in page order.
-heading_ids_of() { attrs_of "$1" '<h[1-6]([[:space:]][^>]*)?>' id; }
+heading_ids_of() { attrs_of "$1" "$HEADTAG" id; }
 
 # hrefs_of FILE: every href that carries a fragment, one per line.
-hrefs_of() { attrs_of "$1" '<[A-Za-z][^>]*>' href | gr -F '#'; }
+hrefs_of() { attrs_of "$1" "$ANYTAG" href | gr -F '#'; }
 
 page_file() { echo "$SITE/${1%/}/index.html"; }
 
@@ -153,9 +185,9 @@ for f in "${PAGES[@]}"; do
         if [[ "$href" =~ ^[A-Za-z][A-Za-z0-9+.-]*: || "$href" == //* ]]; then
             noutside=$((noutside + 1)); continue
         fi
-        frag="$(pctdec "${href#*#}")"
+        pctdec "${href#*#}"; frag="$REPLY"
         path="${href%%#*}"
-        path="$(pctdec "${path%%\?*}")"
+        pctdec "${path%%\?*}"; path="$REPLY"
         [[ -n "$frag" ]] || continue
         if [[ -z "$path" ]]; then
             target="$f"
