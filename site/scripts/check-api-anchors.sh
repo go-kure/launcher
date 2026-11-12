@@ -11,8 +11,10 @@
 #      an id on the page it points at. The shared link check does not read fragments, so
 #      a missing anchor passes it.
 #
-# Links to another site, root-relative links outside the base path and relative links
-# that leave the site are not read. They are counted in the last line.
+# An absolute link to the published site (--site-url plus the base path) is read against the
+# local build, as if it were root-relative. A README links its parts that way. Links to another
+# site, root-relative links outside the base path and relative links that leave the site are not
+# read. They are counted in the last line.
 #
 # A read error is exit 2, never an empty scan. Ids and hrefs come from real tag attributes,
 # with HTML entities and percent escapes decoded. Comments and script elements are cut out
@@ -23,6 +25,7 @@
 #   --site DIR            Built site. Default: site/public.
 #   --pins FILE           Pin list. Default: site/api-reference-anchors.txt.
 #   --base-path PATH      Path the site is served under. Default: /launcher/.
+#   --site-url URL        Origin the site is published at. Default: https://www.gokure.dev.
 #   --print-pins PAGE...  Print one `<page> <id>` line for each heading id on each built
 #                         page (for example api-reference/oam/) and exit. This writes a pin list.
 # Exit 0 when every pin and every fragment link resolves, 1 when one does not, 2 on a usage
@@ -34,6 +37,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SITE="$REPO_ROOT/site/public"
 PINS="$REPO_ROOT/site/api-reference-anchors.txt"
 BASE="/launcher/"
+SITEURL="https://www.gokure.dev"
+CONTENT="$REPO_ROOT/site/content"
+DOCSMAP="$REPO_ROOT/site/docs-map.yaml"
 PRINT=()
 
 die() { echo "check-api-anchors: $*" >&2; exit 2; }
@@ -42,12 +48,15 @@ die() { echo "check-api-anchors: $*" >&2; exit 2; }
 # option (a value starting with `--`). `${2:?}` would end the shell with 1.
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --site|--pins|--base-path)
+        --site|--pins|--base-path|--site-url|--content|--docs-map)
             [[ $# -ge 2 && "$2" != --* ]] || die "$1 needs a value"
             case "$1" in
                 --site)      SITE="$2" ;;
                 --pins)      PINS="$2" ;;
                 --base-path) BASE="$2" ;;
+                --site-url)  SITEURL="${2%/}" ;;
+                --content)   CONTENT="$2" ;;
+                --docs-map)  DOCSMAP="$2" ;;
             esac
             shift 2 ;;
         --print-pins)
@@ -61,6 +70,11 @@ done
 [[ -d "$SITE" ]] || die "built site not found: $SITE"
 SITE="$(cd "$SITE" && pwd)"
 [[ "$BASE" == /* && "$BASE" == */ ]] || die "--base-path must start and end with a slash: $BASE"
+if [[ ${#PRINT[@]} -eq 0 ]]; then
+    command -v yq >/dev/null 2>&1 || die "yq (mikefarah v4) is required to read the docs map"
+    [[ -d "$CONTENT/api-reference" ]] || die "content tree not found: $CONTENT/api-reference"
+    [[ -f "$DOCSMAP" ]] || die "docs map not found: $DOCSMAP"
+fi
 
 # An attribute value is quoted or, in a minified build, bare. A quoted value can hold `>`.
 VALUE="(\"[^\"]*\"|'[^']*'|[^[:space:]>\"']+)"
@@ -181,6 +195,12 @@ for f in "${PAGES[@]}"; do
     hrefs="$(hrefs_of "$f" | sort -u)"
     [[ -n "$hrefs" ]] || continue
     while IFS= read -r href; do
+        # The published site is read as root-relative. The origin must end at `/`, `?` or `#`,
+        # so a longer host that starts with it stays another site.
+        if [[ "$href" == "$SITEURL"[/?#]* ]]; then
+            href="${href#"$SITEURL"}"
+            [[ "$href" == /* ]] || href="/$href"
+        fi
         # A scheme, or `//host`, is another site.
         if [[ "$href" =~ ^[A-Za-z][A-Za-z0-9+.-]*: || "$href" == //* ]]; then
             noutside=$((noutside + 1)); continue
@@ -216,7 +236,19 @@ for f in "${PAGES[@]}"; do
     done <<<"$hrefs"
 done
 
+# 3. Parts. A hand-written part of a package page sits at <content>/api-reference/<package>/<part>.md
+# and must be a `guides` entry (`api-reference/<package>/<part>`) of a package in the docs map.
+# The doc gate counts a guide as the package's docs and counts nothing else.
+guides="$(yq '.packages[]?.guides[]?' "$DOCSMAP")" || die "cannot read guides from $DOCSMAP"
+nparts=0
+while IFS= read -r part; do
+    [[ -n "$part" ]] || continue
+    nparts=$((nparts + 1))
+    slug="${part#"$CONTENT"/}"; slug="${slug%.md}"
+    grep -Fxq -- "$slug" <<<"$guides" || report "$slug: part is in no package guides in $(basename "$DOCSMAP")"
+done < <(find "$CONTENT/api-reference" -mindepth 2 -maxdepth 2 -name '*.md' ! -name '_index.md' -type f | sort)
+
 if [[ $fail -ne 0 ]]; then
     exit 1
 fi
-echo "check-api-anchors: $npins pinned anchors found, $nlinks fragment links resolved on ${#PAGES[@]} pages ($noutside outside the site, not read)"
+echo "check-api-anchors: $npins pinned anchors found, $nlinks fragment links resolved on ${#PAGES[@]} pages ($noutside outside the site, not read), $nparts parts registered"

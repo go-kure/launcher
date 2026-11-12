@@ -18,6 +18,14 @@ GATE="$REPO_ROOT/site/scripts/check-api-anchors.sh"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# Every run reads an empty content tree and an empty docs map unless the case names its own, so
+# no case reads the repository it sits in.
+NOCONTENT="$WORK/nocontent"
+NOMAP="$WORK/nomap.yaml"
+mkdir -p "$NOCONTENT/api-reference"
+printf 'packages: []\n' > "$NOMAP"
+DEFAULTS=(--content "$NOCONTENT" --docs-map "$NOMAP")
+
 pass=0
 fail=0
 n=0
@@ -41,7 +49,7 @@ expect() {
     shift 4
     n=$((n + 1))
     local out rc=0
-    out="$(bash "$GATE" "$@" 2>&1)" || rc=$?
+    out="$(bash "$GATE" "${DEFAULTS[@]}" "$@" 2>&1)" || rc=$?
     if [[ "$rc" -ne "$want_rc" ]]; then
         fail=$((fail + 1))
         printf 'FAIL %s: exit %s, want %s\n%s\n' "$name" "$rc" "$want_rc" "$out" | sed 's/^/    /'
@@ -61,7 +69,7 @@ expect_out() {
     shift 4
     n=$((n + 1))
     local out rc=0
-    out="$(bash "$GATE" "$@" 2>&1)" || rc=$?
+    out="$(bash "$GATE" "${DEFAULTS[@]}" "$@" 2>&1)" || rc=$?
     if [[ "$rc" -ne "$want_rc" || "$out" != "$want_out" ]]; then
         fail=$((fail + 1))
         printf 'FAIL %s: exit %s, want %s\n%s\n' "$name" "$rc" "$want_rc" "$out" | sed 's/^/    /'
@@ -141,6 +149,68 @@ page "$d/site" api-reference/a '<h2 id=a-one>One</h2><a href=/x/api-reference/a/
 pins "$d/pins.txt" 'api-reference/a/ a-one'
 expect "--base-path" 0 "1 fragment links resolved" -- \
     --site "$d/site" --pins "$d/pins.txt" --base-path /x/
+
+# 9b: an absolute link to the published site is read against the local build. A README links
+# its parts that way, because Hugo does not rewrite a repository path and a relative form
+# breaks on one of the two surfaces (go-kure/launcher#1335).
+d="$WORK/siteurl"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2>
+  <a href="https://www.gokure.dev/launcher/api-reference/b/#b-one" rel=external>ok</a>'
+page "$d/site" api-reference/b '<h2 id=b-one>One</h2>'
+pins "$d/pins.txt" 'api-reference/a/ a-one'
+expect_out "absolute site link to a present anchor passes" 0 \
+    "check-api-anchors: 1 pinned anchors found, 1 fragment links resolved on 2 pages (0 outside the site, not read), 0 parts registered" -- \
+    --site "$d/site" --pins "$d/pins.txt"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2>
+  <a href="https://www.gokure.dev/launcher/api-reference/b/#b-gone" rel=external>bad</a>'
+expect "absolute site link to a missing anchor fails" 1 'no id "b-gone"' -- \
+    --site "$d/site" --pins "$d/pins.txt"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2>
+  <a href="https://www.gokure.dev/launcher/api-reference/c/#c-one" rel=external>bad</a>'
+expect "absolute site link to a missing page fails" 1 "target page not found" -- \
+    --site "$d/site" --pins "$d/pins.txt"
+# Another host that starts with the site host, and a path outside the base path, are other sites.
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2>
+  <a href="https://www.gokure.dev.example.org/launcher/api-reference/b/#nope">host</a>
+  <a href="https://www.gokure.dev/other/#nope">path</a>'
+expect "a longer host and a path outside the base are not read" 0 "2 outside the site, not read" -- \
+    --site "$d/site" --pins "$d/pins.txt"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2>
+  <a href="https://docs.test/launcher/api-reference/b/#b-gone">bad</a>'
+expect "--site-url names the published origin" 1 'no id "b-gone"' -- \
+    --site "$d/site" --pins "$d/pins.txt" --site-url https://docs.test
+expect "--site-url without a value is refused" 2 "--site-url needs a value" -- --site-url
+
+# 9c: a hand-written part of a package page (site/content/api-reference/<package>/<part>.md)
+# must be listed in the `guides` of a package in the docs map. The doc gate counts a guide as
+# the package's docs and counts nothing else, so an unlisted part would never satisfy it.
+d="$WORK/parts"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2>'
+pins "$d/pins.txt" 'api-reference/a/ a-one'
+mkdir -p "$d/content/api-reference/a"
+printf '# index\n' > "$d/content/api-reference/_index.md"
+printf '# one\n' > "$d/content/api-reference/a/p1.md"
+printf '# two\n' > "$d/content/api-reference/a/p2.md"
+printf 'packages:\n  - path: pkg/a\n    guides: [api-reference/a/p1, api-reference/a/p2]\n' > "$d/map.yaml"
+expect "parts listed in guides pass and are counted" 0 "2 parts registered" -- \
+    --site "$d/site" --pins "$d/pins.txt" --content "$d/content" --docs-map "$d/map.yaml"
+printf 'packages:\n  - path: pkg/a\n    guides:\n      - api-reference/a/p1\n' > "$d/map1.yaml"
+expect "a part missing from guides fails" 1 "api-reference/a/p2: part is in no package guides" -- \
+    --site "$d/site" --pins "$d/pins.txt" --content "$d/content" --docs-map "$d/map1.yaml"
+printf 'packages:\n  - path: pkg/a\n    mount: {target: api-reference/a.md}\n' > "$d/map0.yaml"
+expect "a package with no guides fails for every part" 1 "api-reference/a/p1: part is in no package guides" -- \
+    --site "$d/site" --pins "$d/pins.txt" --content "$d/content" --docs-map "$d/map0.yaml"
+printf '# overview\n' > "$d/content/api-reference/a/_index.md"
+expect "an _index.md is the overview, not a part" 0 "2 parts registered" -- \
+    --site "$d/site" --pins "$d/pins.txt" --content "$d/content" --docs-map "$d/map.yaml"
+expect "missing content tree is refused" 2 "content tree not found" -- \
+    --site "$d/site" --pins "$d/pins.txt" --content "$d/none" --docs-map "$d/map.yaml"
+expect "missing docs map is refused" 2 "docs map not found" -- \
+    --site "$d/site" --pins "$d/pins.txt" --content "$d/content" --docs-map "$d/none.yaml"
+printf 'packages: [\n' > "$d/bad.yaml"
+expect "unreadable docs map is refused" 2 "cannot read guides" -- \
+    --site "$d/site" --pins "$d/pins.txt" --content "$d/content" --docs-map "$d/bad.yaml"
+expect "--content without a value is refused" 2 "--content needs a value" -- --content
 
 # 10: --print-pins lists the heading ids, in order, and nothing else. Its output is a
 # valid pin list for the same site.
