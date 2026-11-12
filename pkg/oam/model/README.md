@@ -252,7 +252,10 @@ so a sort that fails after it compared, in `xs.sort() == [] || true`, is paid fo
 string before it writes the first byte, so a join that fails copies nothing, and it checks its buffer
 before each write, against the bytes that the next write adds (the first element has no separator before it).
 `replace` is replaced by a version that computes the size of its result from the number of matches
-and stops before it builds a result over the cap. An identifier that is the key of an index, as in
+and stops before it builds a result over the cap. `indexOf` and `lastIndexOf` are replaced by a version that refuses a search
+before it runs when cel-go would charge it over the cost limit: cel-go runs two nested loops and charges one tenth of a step for each
+pair of characters, but only after the call returns, so a string of 1,000,000 bytes and a search text of 500,000 ran 250 billion
+comparisons first. The replacement gives the result and the cost that cel-go gives for every search under that limit. An identifier that is the key of an index, as in
 `m[k]`, is charged by its size at every lookup, because cel-go reads it through the attribute and not
 as a value. So is every other key attribute, such as `m[c ? k : k]` and `m[(xs + [])[0]]`: the key is
 resolved once, and the cost that the evaluation reports does not change. A map comparison charges the length of each key. `&&`, `||`, the conditional and the

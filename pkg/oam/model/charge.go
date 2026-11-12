@@ -4,7 +4,9 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/google/cel-go/common"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
@@ -28,7 +30,7 @@ import (
 // cel-go counts each as one element. The charge comes before the sort runs, so a sort that
 // fails after it compared is paid for too. The calls that build a big output from small operands
 // check it before they build it: join (equality.go), replace and lists.range, which cel-go caps
-// itself.
+// itself. indexOf and lastIndexOf check the work of their two nested loops before they run.
 // testdata/celenv1-charges.txt names a class for every function of the pinned environment.
 //
 // `&&`, `||`, the conditional and a comprehension are no calls, so no node of them is wrapped and
@@ -98,6 +100,8 @@ func chargeDecorator(i interpreter.Interpretable) (interpreter.Interpretable, er
 			call = &budgetedReplace{InterpretableCall: x}
 		case "sort", "@sortByAssociatedKeys":
 			call = &budgetedSort{InterpretableCall: x}
+		case "indexOf", "lastIndexOf":
+			call = &budgetedSearch{InterpretableCall: x}
 		}
 		return &chargedCall{InterpretableCall: call}, nil
 	case interpreter.InterpretableAttribute:
@@ -212,6 +216,97 @@ func (e *budgetedReplace) Eval(a interpreter.Activation) ref.Val {
 		return chargeStop()
 	}
 	return types.String(strings.Replace(string(str), string(old), string(repl), int(n)))
+}
+
+// budgetedSearch is indexOf and lastIndexOf with the work of the search checked before it runs.
+// cel-go runs two nested loops over the runes of the string and of the search text and charges the
+// product of the two lengths at a tenth of a step each, but it observes that cost only after the
+// call returns, so a string of 1,000,000 bytes and a search text of 500,000 ran 250 billion
+// comparisons before it stopped. The node evaluates its own operands, as budgetedReplace does,
+// refuses the search that cel-go would refuse once it had run, and gives the result that cel-go
+// gives (ext/strings.go, indexOfOffset and lastIndexOfOffset). It covers these two functions only:
+// the general mechanism belongs to the redesign of the charge in go-kure/launcher#1461.
+type budgetedSearch struct {
+	interpreter.InterpretableCall
+}
+
+func (e *budgetedSearch) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
+
+func (e *budgetedSearch) Eval(a interpreter.Activation) ref.Val {
+	args := e.Args()
+	vals := make([]ref.Val, len(args))
+	for i, arg := range args {
+		if vals[i] = arg.Eval(a); types.IsError(vals[i]) {
+			return vals[i]
+		}
+	}
+	str, ok1 := vals[0].(types.String)
+	sub, ok2 := vals[1].(types.String)
+	last := e.Function() == "lastIndexOf"
+	off := types.Int(0)
+	ok3 := true
+	if len(vals) == 3 {
+		off, ok3 = vals[2].(types.Int)
+	} else if last {
+		off = types.Int(utf8.RuneCountInString(string(str)) - 1)
+	}
+	if !ok1 || !ok2 || !ok3 {
+		return types.NewErr("no such overload: %v.%s", vals[0].Type(), e.Function())
+	}
+	runes, subrunes := utf8.RuneCountInString(string(str)), utf8.RuneCountInString(string(sub))
+	if float64(runes)*float64(subrunes)*common.StringTraversalCostFactor > maxExpressionCost {
+		panic(interpreter.EvalCancelledError{Cause: interpreter.CostLimitExceeded, Message: "a search over more characters than the cost limit allows"})
+	}
+	if last && len(vals) == 2 {
+		// without an offset, cel-go answers the empty text and a text longer than the string first
+		if len(sub) == 0 {
+			return types.Int(runes)
+		}
+		if len(str) < len(sub) {
+			return types.IntNegOne
+		}
+	}
+	return searchRunes([]rune(string(str)), []rune(string(sub)), int(off), last)
+}
+
+// searchRunes is the result of indexOf, or of lastIndexOf when last is set, from the offset off,
+// and the errors that cel-go gives.
+func searchRunes(runes, subrunes []rune, off int, last bool) ref.Val {
+	if off < 0 {
+		return types.NewErr("index out of range: %d", off)
+	}
+	if len(subrunes) == 0 {
+		// the empty text matches at the offset, clamped to the end of the string
+		if off > len(runes) {
+			return types.Int(len(runes))
+		}
+		return types.Int(off)
+	}
+	if off >= len(runes) {
+		return types.IntNegOne
+	}
+	matches := func(i int) bool {
+		for j, r := range subrunes {
+			if runes[i+j] != r {
+				return false
+			}
+		}
+		return true
+	}
+	if last {
+		for i := min(off, len(runes)-len(subrunes)); i >= 0; i-- {
+			if matches(i) {
+				return types.Int(i)
+			}
+		}
+		return types.IntNegOne
+	}
+	for i := off; i < len(runes)-(len(subrunes)-1); i++ {
+		if matches(i) {
+			return types.Int(i)
+		}
+	}
+	return types.IntNegOne
 }
 
 // budgetedSort is sort and sortBy with the keys charged before they are compared. cel-go
