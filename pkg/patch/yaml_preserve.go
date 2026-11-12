@@ -216,12 +216,74 @@ func (doc *YAMLDocument) mergeBack(patchedYAML []byte, patched *yaml.Node, touch
 	if err := yaml.Unmarshal(patchedYAML, &fallback); err != nil {
 		return errors.Wrap(err, "failed to parse patched YAML")
 	}
+	// The marshaled resource writes a string key `<<` as a merge key, and the merge can give it
+	// its authored quotes back, so the text that has to load is the one the document ends with.
+	// A resource with a merge key keeps a copy of the document to restore: the merge changes it.
+	var authored *yaml.Node
+	if hasMergeKey(patched) {
+		var err error
+		if authored, err = snapshotNode(doc.Node); err != nil {
+			return err
+		}
+	}
 	keepAuthoredTimestampStyle(doc.Node, patched, touched)
 	keepAuthoredTimestampStyle(doc.Node, &fallback, touched)
 	if err := mergeYAMLNodes(doc.Node, patched); err != nil || !keepsTheData(doc.Node, patchedYAML) {
 		doc.Node = &fallback
 	}
+	if authored != nil {
+		if err := refuseUnloadableMergeKey(doc.Node); err != nil {
+			doc.Node = authored
+			return err
+		}
+	}
 	return nil
+}
+
+// snapshotNode returns a copy of a node made by writing it and reading it again, so that the
+// aliases of the copy point at the nodes of the copy.
+func snapshotNode(n *yaml.Node) (*yaml.Node, error) {
+	out, err := yaml.Marshal(n)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to write the document")
+	}
+	var copied yaml.Node
+	if err := yaml.Unmarshal(out, &copied); err != nil {
+		return nil, errors.Wrap(err, "failed to read the document again")
+	}
+	return &copied, nil
+}
+
+// refuseUnloadableMergeKey returns an error when the document node, written, does not load.
+// The loader refuses a merge key (`<<`) whose value is not a mapping or a list of mappings, and
+// yaml.v3 writes a string key `<<` as a merge key, so a patch that sets `<<` to a scalar has no
+// loadable text. A caller restores the document it held before it returns the error.
+func refuseUnloadableMergeKey(node *yaml.Node) error {
+	out, err := yaml.Marshal(node)
+	if err == nil {
+		_, err = LoadResourcesWithStructure(bytes.NewReader(out))
+	}
+	if err != nil {
+		return errors.Wrap(err, "the patched resource has a merge key (<<) that does not load again")
+	}
+	return nil
+}
+
+// hasMergeKey reports whether a node holds a mapping key that is a merge key.
+func hasMergeKey(n *yaml.Node) bool {
+	if n.Kind == yaml.MappingNode {
+		for i := 0; i < len(n.Content)-1; i += 2 {
+			if k := n.Content[i]; k.Kind == yaml.ScalarNode && k.ShortTag() == "!!merge" {
+				return true
+			}
+		}
+	}
+	for _, c := range n.Content {
+		if hasMergeKey(c) {
+			return true
+		}
+	}
+	return false
 }
 
 // keepsTheData reports whether the document node, written out, loads again to the data of the
@@ -1173,6 +1235,12 @@ func (doc *YAMLDocument) updateDocumentFromResource(touched [][]string) error {
 	var updatedNode yaml.Node
 	if err := yaml.Unmarshal(updatedYAML, &updatedNode); err != nil {
 		return errors.Wrap(err, "failed to parse updated YAML")
+	}
+
+	if hasMergeKey(&updatedNode) {
+		if err := refuseUnloadableMergeKey(&updatedNode); err != nil {
+			return err
+		}
 	}
 
 	// For now, use the updated node directly to ensure correctness
