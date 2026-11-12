@@ -128,6 +128,15 @@ how a trait builds the same object as its kind twin, is set out in
 `docs/oam/design-lowering-engine.md`, section "Where a lowering rule places each
 object".
 
+After each lowering round, the engine resolves the types that a rule emitted. A type
+written as a declared identity becomes the registered name. A plain name that a handler or
+a rule is registered under stays as written, so a rule that emits plain names changes
+nothing. A rule reads the Naming hook of the run through `LoweringContext.NamingHook`.
+`Transformer.CheckComponentTypes` is a dry run of `DeclareComponentTypes`. It checks that
+the declaration is valid and declares nothing. It does not need the handler or rule to be
+registered yet, and `DeclareComponentTypes` does. A component model registers its rule
+only after this check passes (see [Component Models](https://www.gokure.dev/launcher/api-reference/oam-models/)).
+
 Full text: [Transform, extension and lowering](https://www.gokure.dev/launcher/api-reference/oam/transform-and-lowering/#lowering).
 
 ## Property schemas
