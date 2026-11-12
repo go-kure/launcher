@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -358,5 +359,140 @@ func TestWrittenForm(t *testing.T) {
 	}
 	if _, err := writtenForm(unencodableSpec{C: make(chan int)}); err == nil {
 		t.Error("a struct holding a channel must be an error")
+	}
+}
+
+// selfPtr is a pointer type whose element type is itself. A nil one, and a pointer to a
+// nil one, are acyclic and encode to null; selfPtrA and selfPtrB are the same shape over
+// two types (go-kure/launcher#1450).
+type (
+	selfPtr  *selfPtr
+	selfPtrA *selfPtrB
+	selfPtrB *selfPtrA
+)
+
+// addrShared holds a pointer to itself in a field the writer skips, so its first field and
+// the struct share one address.
+type addrShared struct {
+	P *addrShared `json:"-"`
+}
+
+// restartRules is a named slice with its own JSON form, so a nil one encodes to a
+// non-null array, where an unnamed nil slice encodes to null.
+type restartRules []corev1.ContainerRestartRule
+
+func (restartRules) MarshalJSON() ([]byte, error) { return []byte(`[{"action":"Restart"}]`), nil }
+
+// plainRules is the same slice type with no MarshalJSON: a nil one encodes to null.
+type plainRules []corev1.ContainerRestartRule
+
+// withinSeconds runs fn and reports an error for the case when it has not returned in five
+// seconds, so a hang is a red case and not a wait for the package timeout. ok is false on
+// a timeout, and the case is then skipped.
+func withinSeconds(t *testing.T, name string, fn func() error) (ok bool, err error) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	select {
+	case err := <-done:
+		return true, err
+	case <-time.After(5 * time.Second):
+		t.Errorf("%s: the gate check did not return in 5s", name)
+		return false, nil
+	}
+}
+
+// TestCheckGatedValue_SelfReferentialPointerTypeIsRead: a pointer type that is its own
+// element type does not hang the classifier. An acyclic value encodes to null and is
+// absent, so it passes below the gate; a value that really points at itself does not
+// encode, so it is refused there (go-kure/launcher#1450).
+func TestCheckGatedValue_SelfReferentialPointerTypeIsRead(t *testing.T) {
+	below := KubernetesVersion{1, 34}
+	var nilSelf selfPtr
+	var nilA selfPtrA
+	var cyclic selfPtr
+	cyclic = selfPtr(&cyclic)
+	// A struct and its first field share an address: the chain **S, *S, S repeats one
+	// address and no pointer, and the writer writes {} for it.
+	sharedAddr := &addrShared{}
+	sharedAddr.P = sharedAddr
+	var cycA selfPtrA
+	var cycB selfPtrB
+	cycA, cycB = selfPtrA(&cycB), selfPtrB(&cycA)
+	gated := PropertySchema{Type: PropertyTypeObject, Gate: "HostnameOverride"}
+	paths := PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true,
+		GatedPaths: map[string]string{"hostnameOverride": "HostnameOverride"}}
+	for name, tc := range map[string]struct {
+		schema  PropertySchema
+		value   any
+		refused bool
+	}{
+		"nil value, own gate":                {gated, &nilSelf, false},
+		"nil value, gated path":              {paths, map[string]any{"hostnameOverride": &nilSelf}, false},
+		"two-type cycle, nil":                {gated, &nilA, false},
+		"nil slice of the type":              {gated, []selfPtr(nil), false},
+		"slice of the type, one nil element": {gated, []selfPtr{nil}, true},
+		"really cyclic, own gate":            {gated, &cyclic, true},
+		"really cyclic, gated path":          {paths, map[string]any{"hostnameOverride": &cyclic}, true},
+		"two-type really cyclic":             {gated, &cycA, true},
+	} {
+		ok, err := withinSeconds(t, name, func() error { return checkGatedValue(tc.schema, tc.value, "spec", below) })
+		if !ok {
+			continue
+		}
+		if tc.refused && (err == nil || !strings.Contains(err.Error(), "spec")) {
+			t.Errorf("%s: want a refusal naming spec, got %v", name, err)
+		}
+		if !tc.refused && err != nil {
+			t.Errorf("%s: want absent (encodes to null), got %v", name, err)
+		}
+	}
+	// The writer writes {} for this value, an object that is present, so the gate refuses
+	// it as a present value. It is no pointer cycle, and must not be refused as one.
+	ok, err := withinSeconds(t, "first field shares its struct's address", func() error {
+		return checkGatedValue(paths, map[string]any{"hostnameOverride": &sharedAddr.P}, "spec", below)
+	})
+	if ok && (err == nil || strings.Contains(err.Error(), "points at itself")) {
+		t.Errorf("first field shares its struct's address: want the gate refusal for a present value, got %v", err)
+	}
+}
+
+// TestCheckGatedValue_NilSliceWithOwnMarshalerIsRead: the null shortcut runs after the
+// value is read as written, so a nil named slice whose MarshalJSON writes an array is
+// present, at the top of the check and under a gated path alike (go-kure/launcher#1450).
+func TestCheckGatedValue_NilSliceWithOwnMarshalerIsRead(t *testing.T) {
+	below, atGate := KubernetesVersion{1, 34}, KubernetesVersion{1, 35}
+	var nilRaw *runtime.RawExtension
+	var nilPtrPtr = &nilRaw
+	gated := PropertySchema{Type: PropertyTypeObject, Gate: "ContainerRestartRules"}
+	paths := PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true,
+		GatedPaths: map[string]string{"rules": "ContainerRestartRules"}}
+	items := PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true,
+		GatedPaths: map[string]string{"entries[].rules": "ContainerRestartRules"}}
+	for name, tc := range map[string]struct {
+		schema  PropertySchema
+		value   any
+		refused bool
+	}{
+		"own gate, nil slice with marshaler":   {gated, restartRules(nil), true},
+		"gated path, nil slice with marshaler": {paths, map[string]any{"rules": restartRules(nil)}, true},
+		"gated path, under an array":           {items, map[string]any{"entries": []any{map[string]any{"rules": restartRules(nil)}}}, true},
+		"own gate, empty slice with marshaler": {gated, restartRules{}, true},
+		"own gate, nil slice, no marshaler":    {gated, plainRules(nil), false},
+		"gated path, nil slice, no marshaler":  {paths, map[string]any{"rules": plainRules(nil)}, false},
+		"own gate, nil pointer to a struct":    {gated, nilRaw, false},
+		"gated path, pointer to a nil pointer": {paths, map[string]any{"rules": nilPtrPtr}, false},
+		"gated path, untyped nil":              {paths, map[string]any{"rules": nil}, false},
+	} {
+		err := checkGatedValue(tc.schema, tc.value, "spec", below)
+		if tc.refused && (err == nil || !strings.Contains(err.Error(), "ContainerRestartRules")) {
+			t.Errorf("%s: want a refusal naming ContainerRestartRules below the gate, got %v", name, err)
+		}
+		if !tc.refused && err != nil {
+			t.Errorf("%s: want absent, got %v", name, err)
+		}
+		if err := checkGatedValue(tc.schema, tc.value, "spec", atGate); err != nil {
+			t.Errorf("%s: at the gate a present value passes, got %v", name, err)
+		}
 	}
 }
