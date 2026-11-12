@@ -5,8 +5,10 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
+	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -105,6 +107,8 @@ func chargeDecorator(i interpreter.Interpretable) (interpreter.Interpretable, er
 			call = &budgetedSearch{InterpretableCall: x}
 		case "matches":
 			call = &budgetedMatches{InterpretableCall: x}
+		case "format":
+			call = &budgetedFormat{InterpretableCall: x}
 		}
 		return &chargedCall{InterpretableCall: call}, nil
 	case interpreter.InterpretableAttribute:
@@ -304,6 +308,162 @@ func (e *budgetedMatches) Eval(a interpreter.Activation) ref.Val {
 		panic(interpreter.EvalCancelledError{Cause: interpreter.CostLimitExceeded, Message: "a match over more characters than the cost limit allows"})
 	}
 	return str.Match(pat)
+}
+
+// budgetedFormat is format with the size of its result checked before it is built. cel-go prints
+// every clause into a string and charges the result after it exists, so a list of 150 references to
+// a string of 400,000 bytes built 60,000,000 bytes, and a shared nested list printed once for each
+// value it holds (go-kure/launcher#1462). The node evaluates its own operands once, as budgetedReplace
+// does, adds the most each argument can print, and stops when that bound passes maxValueSize. The
+// result is cel-go's own: the node runs `s.format(a)` as a program of the same environment, without
+// this decorator, on the operands it already holds. The bound is loose, so a format whose result
+// is within the slack of maxValueSize can be refused though it would fit (printer.bound).
+type budgetedFormat struct {
+	interpreter.InterpretableCall
+}
+
+func (e *budgetedFormat) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
+
+func (e *budgetedFormat) Eval(a interpreter.Activation) ref.Val {
+	args := e.Args()
+	vals := make([]ref.Val, len(args))
+	for i, arg := range args {
+		if vals[i] = arg.Eval(a); types.IsError(vals[i]) {
+			return vals[i]
+		}
+	}
+	// Operands that are no string and list are given to cel-go as they are, which refuses them at once
+	// with its own error text and builds nothing, so the cost it reports is its own.
+	if str, ok := vals[0].(types.String); ok {
+		if list, ok := vals[1].(traits.Lister); ok {
+			formatBound(str, list)
+		}
+	}
+	prog, err := formatProgram()
+	if err != nil {
+		return types.NewErr("model: build the format program: %v", err)
+	}
+	out, _, err := prog.Eval(map[string]any{"s": vals[0], "a": vals[1]})
+	if err != nil {
+		return types.NewErr("%s", err.Error())
+	}
+	return out
+}
+
+// formatProgram is `s.format(a)` in the environment of the model without the charge decorator. It
+// is built once.
+var formatProgram = sync.OnceValues(func() (cel.Program, error) {
+	env, err := newEnv(cel.Variable("s", cel.DynType), cel.Variable("a", cel.DynType))
+	if err != nil {
+		return nil, err
+	}
+	ast, iss := env.Compile("s.format(a)")
+	if iss.Err() != nil {
+		return nil, iss.Err()
+	}
+	return env.Program(ast)
+})
+
+// formatBound gives the most that the clauses of str over the arguments in list can print, and
+// stops the evaluation when that passes maxValueSize. It is the length of the format string plus the
+// most each argument can print (printer.bound). A %x or %X prints two characters for each byte of a
+// string or bytes argument, so a format string that holds an x or an X counts those arguments twice,
+// which is above the real size when the x is only text. A clause with a precision (cel-go allows up
+// to 100 digits), %f (six decimals), %b or %o prints a number in up to 130 bytes, so a format
+// string with such a clause counts every number that wide.
+func formatBound(str types.String, list traits.Lister) int {
+	factor := 1
+	if strings.ContainsAny(string(str), "xX") {
+		factor = 2
+	}
+	pr := printer{factor: factor, scalar: 20}
+	if hasWideClause(string(str)) {
+		pr.scalar = 130
+	}
+	total := len(str)
+	sz, ok := list.Size().(types.Int)
+	if !ok {
+		return total
+	}
+	for i := types.IntZero; i < sz; i++ {
+		pr.bound(list.Get(i), &total)
+		if total > maxValueSize {
+			chargeStop()
+		}
+	}
+	return total
+}
+
+// printer holds what the walk of bound needs about one format string: factor is how many
+// characters a byte of a string or bytes argument prints, and scalar is the most a number prints.
+type printer struct{ factor, scalar int }
+
+// hasWideClause reports whether str holds a clause that prints a number in more than 20 bytes: a
+// precision (%.100f, which prints 20 digits, a point and 100 more), %f (20 digits and 6 decimals),
+// %b (64 digits and a sign) or %o (22 digits and a sign). The scan skips %% and reads only the clause that follows a %, so a point in
+// plain text does not count.
+func hasWideClause(str string) bool {
+	for i := 0; i < len(str); i++ {
+		if str[i] != '%' || i+1 == len(str) {
+			continue
+		}
+		i++
+		if c := str[i]; c == '.' || c == 'b' || c == 'f' || c == 'o' {
+			return true
+		}
+	}
+	return false
+}
+
+// bound adds to *total the most that v can print as one argument of format. A string or bytes
+// value prints its own length (factor times it for %x), a double at most 420 bytes (%.100f of
+// 1e308), a timestamp, a duration and a type at most 64, every other scalar at most scalar, and
+// each element of a list or entry of a map 4 more for its separators, 6 for a map entry, whose
+// value can be an empty list or map that prints its two brackets and holds nothing else.
+// cel-go v0.31.0 prints a value inside a list or map as it prints it alone (stringFormatterV2,
+// strings version 5), so the walk adds no quotes.
+// A list or map is walked as a tree and the walk stops when the total passes maxValueSize, so a
+// shared nest, which holds many more values than it has elements, is never walked in full: at most
+// 250,000 values are read. TestFormatBoundIsAnUpperBound compares the bound with what cel-go prints,
+// so a cel-go that prints more fails it.
+func (p printer) bound(v ref.Val, total *int) {
+	switch x := v.(type) {
+	case types.String:
+		*total += p.factor * len(x)
+	case types.Bytes:
+		*total += p.factor * len(x)
+	case types.Double:
+		*total += 420
+	case types.Timestamp, types.Duration, *types.Type:
+		*total += 64
+	case traits.Lister:
+		sz, ok := x.Size().(types.Int)
+		if !ok {
+			return
+		}
+		for i := types.IntZero; i < sz; i++ {
+			*total += 4
+			if *total > maxValueSize {
+				chargeStop()
+			}
+			p.bound(x.Get(i), total)
+		}
+	case traits.Mapper:
+		for it := x.Iterator(); it.HasNext() == types.True; {
+			k := it.Next()
+			*total += 6
+			if *total > maxValueSize {
+				chargeStop()
+			}
+			p.bound(k, total)
+			p.bound(x.Get(k), total)
+		}
+	default:
+		*total += p.scalar
+	}
+	if *total > maxValueSize {
+		chargeStop()
+	}
 }
 
 // searchRunes is the result of indexOf, or of lastIndexOf when last is set, from the offset off,

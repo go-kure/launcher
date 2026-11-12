@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/traits"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -595,6 +597,8 @@ func TestChargeFormatAllowsWhatFits(t *testing.T) {
 		"lists.range(100).map(i, '%d').join(',').format(lists.range(100)).size()",
 		fmt.Sprintf("cel.bind(a, %s, '%%s'.format([a]).size())", long400k),
 		fmt.Sprintf("cel.bind(a, %s, '%%s%%s%%s'.format([a, a, a]).size())", long300k),
+		// an operand that is no list: cel-go refuses it, and the cost is that of one evaluation
+		"cel.bind(m, {'a': 1, 'b': 'x'}, '%s'.format(m['a']) == '' || true)",
 		fmt.Sprintf("cel.bind(a, %s, '%%x'.format([a.substring(0, 1000)]).size())", long400k),
 	}
 	for _, expr := range corpus {
@@ -624,6 +628,9 @@ func TestChargeFormatKeepsItsErrors(t *testing.T) {
 		"cel.bind(args, ['a'], '%s %s'.format(args))",
 		"cel.bind(args, [1], '%z'.format(args))",
 		"cel.bind(args, [1], '%'.format(args))",
+		// an operand that is no list or no string, which a dyn-typed map value lets through the compile
+		"cel.bind(m, {'a': 1, 'b': 'x'}, '%s'.format(m['a']))",
+		"cel.bind(m, {'a': 1, 'b': 'x'}, m['a'].format([1]))",
 	} {
 		t.Run(expr, func(t *testing.T) {
 			env, err := newEnv()
@@ -676,5 +683,62 @@ func TestChargeFormatWalkStopsEarly(t *testing.T) {
 	wantCostLimit(t, got, err)
 	if d := time.Since(start); d > 5*time.Second {
 		t.Errorf("the refusal took %v, want under 5s: the walk of a shared nest did not stop early", d)
+	}
+}
+
+// formatBound is a bound, so it must not be below what cel-go prints. Each row is a format string and
+// the CEL source of one argument. The rows with a string, bytes or a double inside a list or map are
+// the ones a printer that quotes or pads would exceed.
+func TestFormatBoundIsAnUpperBound(t *testing.T) {
+	env, err := newEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(expr string) (string, any) {
+		t.Helper()
+		ast, iss := env.Compile(expr)
+		if iss.Err() != nil {
+			t.Fatalf("test bug: %s: %v", expr, iss.Err())
+		}
+		prog, err := env.Program(ast)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, _, err := prog.Eval(map[string]any{})
+		if err != nil {
+			t.Fatalf("test bug: cel-go gives %v for %s", err, expr)
+		}
+		return fmt.Sprint(out.Value()), out
+	}
+	rows := []struct{ format, arg string }{
+		{"%s", `'plain'`}, {"%s", `b'abc'`}, {"%s", `1`}, {"%s", `-9223372036854775808`}, {"%s", `18446744073709551615u`},
+		{"%s", `1e308`}, {"%s", `1.7976931348623157e308`}, {"%s", `double('NaN')`}, {"%s", `null`}, {"%s", `false`},
+		{"%s", `timestamp('2026-01-02T03:04:05.123456789Z')`}, {"%s", `duration('90000h1m1.123456789s')`}, {"%s", `type(1)`},
+		{"%x", `'hello'`}, {"%X", `b'\x80\xff'`}, {"%x", `255`}, {"%d", `-9223372036854775808`},
+		{"%.100f", `1.7976931348623157e308`}, {"%e", `1.7976931348623157e308`}, {"%.100e", `1.7976931348623157e308`},
+		// values inside a list or map
+		{"%s", `['a"b\\c']`}, {"%s", `['\u0080\u0081']`}, {"%s", `[b'\x80\x81\xff\x00']`}, {"%s", `[b'\x80' + b'\x80']`},
+		{"%s", `{'k"': b'\xfe', 'a': ['\x01']}`}, {"%s", `[1.5, 1e300, double('NaN'), double('-Infinity')]`},
+		{"%s", `[null, true, 1u, -9223372036854775808]`}, {"%s", `[[[[1], 2], [3]], {}]`},
+		{"%s", `[timestamp('2026-01-02T03:04:05.123456789Z'), duration('90000h1m1.123456789s'), type(1)]`},
+		// a precision and a base print more than the operand holds (go-kure/launcher#1462 review)
+		{"%.100f", `1`}, {"%.100e", `1u`}, {"%.30f", `-9223372036854775808`}, {"%b", `18446744073709551615u`}, {"%b", `-9223372036854775808`},
+		{"%%%.100f", `1`}, {"%o", `-9223372036854775808`}, {"%b", `true`},
+		{"%f", `18446744073709551615u`}, {"%f", `-9223372036854775808`}, {"%f", `1`}, {"%e", `18446744073709551615u`},
+		// an empty list or map is a value of a map entry too
+		{"%s", `{'a': [], 'b': []}`}, {"%s", `[{'a': [], 'b': {}}]`}, {"%s", `{'a': {'b': {}}}`},
+	}
+	for _, r := range rows {
+		t.Run(r.format+" "+r.arg, func(t *testing.T) {
+			got, _ := run(fmt.Sprintf("'%s'.format([%s])", r.format, r.arg))
+			_, args := run("[" + r.arg + "]")
+			list, ok := args.(traits.Lister)
+			if !ok {
+				t.Fatalf("test bug: %v is no list", args)
+			}
+			if bound := formatBound(types.String(r.format), list); bound < len(got) {
+				t.Errorf("bound %d is below the %d bytes that cel-go prints: %q", bound, len(got), got)
+			}
+		})
 	}
 }
