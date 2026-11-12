@@ -1,0 +1,67 @@
+!_: scalar-out
+-_: scalar-out
+@in: scalar-out
+@not_strictly_false: scalar-out
+@sortByAssociatedKeys: bounded (the result costs the bytes of its elements: scanCalls in charge.go)
+_!=_: scalar-out
+_%_: scalar-out
+_&&_: scalar-out
+_*_: scalar-out
+_+_: amplifying (the result is charged by size and capped at 1000000: string, bytes and list)
+_-_: scalar-out
+_/_: scalar-out
+_<=_: scalar-out
+_<_: scalar-out
+_==_: scalar-out
+_>=_: scalar-out
+_>_: scalar-out
+_?_:_: bounded (gives one of its branches)
+_[_]: bounded (gives one element)
+__not_strictly_false__ [disabled]: scalar-out
+_in_ [disabled]: scalar-out
+_||_: scalar-out
+bool: scalar-out
+bytes: bounded (same size as its operand)
+cel.@block: bounded (gives its body)
+charAt: bounded (one character)
+contains: scalar-out
+distinct: bounded (no more elements than its operand; budgeted by equality.go)
+double: scalar-out
+duration: scalar-out
+dyn: bounded (gives its operand)
+endsWith: scalar-out
+flatten: amplifying (budgetedFlatten in equality.go spends one step for each element)
+format: amplifying (go-kure/launcher#1462: not bounded yet, the result is refused after it is built)
+getDate: scalar-out
+getDayOfMonth: scalar-out
+getDayOfWeek: scalar-out
+getDayOfYear: scalar-out
+getFullYear: scalar-out
+getHours: scalar-out
+getMilliseconds: scalar-out
+getMinutes: scalar-out
+getMonth: scalar-out
+getSeconds: scalar-out
+in [disabled]: scalar-out
+indexOf: scalar-out
+int: scalar-out
+join: amplifying (budgetedJoin in equality.go stops before the buffer passes the cap; TestChargeStopsBeforeTheAllocation)
+lastIndexOf: scalar-out
+lists.range: amplifying (cel-go caps it at 1000000 elements and charges it by size; TestReplaceGrowth pins the cap)
+lowerAscii: bounded (same size as its operand)
+matches: scalar-out
+replace: amplifying (cel-go charges it by the result size and the result cap stops it; TestReplaceGrowth)
+reverse: bounded (same elements as its operand)
+size: scalar-out
+slice: bounded (no more elements than its operand)
+sort: bounded (the result costs the bytes of its elements: scanCalls in charge.go)
+split: bounded (no more bytes than its operand)
+startsWith: scalar-out
+string: bounded (same size as its operand, or a number)
+strings.quote: bounded (at most six times its operand, then charged by the result cap)
+substring: bounded (no more bytes than its operand)
+timestamp: scalar-out
+trim: bounded (no more bytes than its operand)
+type: scalar-out
+uint: scalar-out
+upperAscii: bounded (same size as its operand)
