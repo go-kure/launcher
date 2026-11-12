@@ -131,9 +131,9 @@ func TestRule_BoundNameFollowsTheNamingHook(t *testing.T) {
 	}
 }
 
-// Case 2b: a kind part (a Secret) is named by the hook when the build makes it, and a later part
-// reads that name.
-func TestRule_BoundNameOfAKindPartFollowsTheHook(t *testing.T) {
+// Case 2b: the hook is not asked for the object of an emitted kind part (a Secret), so the name a
+// later part reads equals the name the build gives.
+func TestRule_BoundNameOfAKindPartIsTheBuiltName(t *testing.T) {
 	doc := modelHeader + `
     - id: creds
       name: creds

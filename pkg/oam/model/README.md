@@ -219,8 +219,9 @@ A component of the model type lowers into the components of its parts.
   one name fail the build, and the error names the name.
 - `parts.<id>.<key>` reads the name that the build gives, under the Naming hook of the run where one
   is set (`LoweringContext.NamingHook`). The hook sees the name of the document as it stands in that
-  round. The build names the object of a kind part (a Secret or a ConfigMap) after the part and never
-  asks the hook for it, so the read does not ask the hook for the role `object` either.
+  round. The lowering rule emits a kind part (a Secret or a ConfigMap), and the build names its object
+  after the part and never asks the hook for it. So the rule's read does not ask the hook for the
+  role `object` either. A direct `Expand` keeps the hook, because a later `Transform` asks it.
 - A part type and a trait type stay as the model wrote them. The engine resolves an identity to the
   registered name after each round, as it does for an authored component. A plain name that a handler
   or a rule is registered under stays as written. A model that emits no component is refused with

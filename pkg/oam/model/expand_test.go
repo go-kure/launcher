@@ -317,6 +317,32 @@ func TestCompile_RefusesAPartThatIsNotReadable(t *testing.T) {
 	}
 }
 
+// A direct Expand keeps the hook for the object of a kind part: its components are not emitted
+// members, so a Transform asks the hook for them, and the bound name is the built name.
+func TestExpand_KindPartObjectNameFollowsTheHook(t *testing.T) {
+	c := compileParts(t, `
+    - id: creds
+      name: creds
+      type: `+secretType+`
+      properties: {}
+    - id: cfg
+      name: cfg
+      type: configmap@v1
+      properties:
+        data:
+          secret: "${ parts.creds.object }"
+`)
+	naming := hookedNaming(oam.NameRoleObject)
+	comps := expandOK(t, c, naming)
+	got := prop(t, comps[1].Properties, "data", "secret")
+	if got != "h-creds" {
+		t.Fatalf("data.secret = %v, want h-creds", got)
+	}
+	if !built(t, comps, naming)[[2]string{"Secret", "h-creds"}] {
+		t.Fatalf("the build made no Secret named h-creds")
+	}
+}
+
 // Case 6: the Naming hook moves the bound name the same as it moves the built name.
 func TestExpand_NamingHookMovesTheBinding(t *testing.T) {
 	naming := hookedNaming(oam.NameRolePostgresqlCluster)

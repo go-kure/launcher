@@ -167,7 +167,7 @@ func (c *Compiled) expandPart(tr *oam.Transformer, base string, p Part, sc Scope
 			comp.Name = name
 		}
 		if p.ForEach == nil && p.When == "" {
-			outs, err := tr.ComponentOutputsNamed(sc.Self.Application, &comp, objectNameUnhooked(naming))
+			outs, err := tr.ComponentOutputsNamed(sc.Self.Application, &comp, naming)
 			if err != nil {
 				return nil, errors.Wrapf(err, "model: %s: part %q", base, p.ID)
 			}
@@ -180,21 +180,6 @@ func (c *Compiled) expandPart(tr *oam.Transformer, base string, p Part, sc Scope
 		comps = append(comps, comp)
 	}
 	return comps, nil
-}
-
-// objectNameUnhooked is naming without its answers for the role object. The build names the
-// object of a kind part (a Secret, a ConfigMap) after its component and never asks the hook,
-// because a lowering rule emitted it, so the query must not ask either.
-func objectNameUnhooked(naming func(oam.NameRequest) (string, bool)) func(oam.NameRequest) (string, bool) {
-	if naming == nil {
-		return nil
-	}
-	return func(r oam.NameRequest) (string, bool) {
-		if r.Role == oam.NameRoleObject {
-			return "", false
-		}
-		return naming(r)
-	}
 }
 
 // buildComponent evaluates the name, the properties, the traits and the annotations of p in sc.
