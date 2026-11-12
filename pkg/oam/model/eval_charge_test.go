@@ -119,18 +119,23 @@ func TestChargeListCapIsOneMillion(t *testing.T) {
 
 // A refusal reaches the caller as an error of Eval, and never as a panic of the process. cel-go
 // recovers the cancellation that the evaluation raises (cel/program.go, the deferred recover of
-// (*prog).Eval), and an all() loop must end at once instead of reading an error value 15,000 times.
+// (*prog).Eval), and an all() loop must end at once instead of reading an error value 100,000 times.
+// Each iteration reads a value of 100,000 bytes, 97 steps, so the budget of 1,000,000 steps is gone
+// after about 10,300 iterations, at a cost of about 392,000. A loop that ran on would pass the cost
+// limit of 1,000,000 of cel-go, or end with the budget exhausted, and Compiled.Eval would refuse
+// either from the budget, so the bound on the cost is what tells the stop from the end.
 func TestChargeStopIsAnErrorFromEval(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("the evaluation panicked: %v", r)
 		}
 	}()
-	c := mustCompile(t, oneValue(t, "${cel.bind(s, "+long100k+", lists.range(15000).all(i, s.size() == 100000))}"))
+	c := mustCompile(t, oneValue(t, "${cel.bind(s, "+long100k+", lists.range(100000).all(i, s.size() == 100000))}"))
 	_, cost, err := c.Eval("spec.values[0].expr", stdScope())
 	wantCostLimit(t, nil, err)
-	if cost > 2000000 {
-		t.Errorf("the evaluation went on to a cost of %d after the stop", cost)
+	t.Logf("cost at the stop: %d", cost)
+	if cost > 600000 {
+		t.Errorf("the evaluation went on to a cost of %d after the stop, want under 600000", cost)
 	}
 }
 
@@ -198,5 +203,127 @@ func TestChargeClassCoversEveryFunction(t *testing.T) {
 		if !slices.Contains(want, name) {
 			t.Errorf("the charge list names %q, which the environment lacks", name)
 		}
+	}
+}
+
+const (
+	// long2k is a string of 2,000 bytes.
+	long2k = "lists.range(200).map(i, 'xxxxxxxxxx').join('')"
+	// key100k is a string of 100,000 bytes that is not equal to long100k.
+	key100k = "lists.range(10000).map(i, 'kkkkkkkkkk').join('')"
+)
+
+// replace builds its result before cel-go charges it. s.replace('x', t) with a s of 100,000 bytes
+// and a t of 2,000 bytes builds 200,000,000 bytes from two small operands, so the evaluation checks
+// the size of the result first (finding 1 of the review of go-kure/launcher#1461).
+func TestChargeReplaceStopsBeforeTheAllocation(t *testing.T) {
+	rows := []struct{ name, expr string }{
+		{"replace all", fmt.Sprintf("cel.bind(s, %s, cel.bind(t, %s, s.replace('x', t).size() > 0))", long100k, long2k)},
+		{"replace with a count", fmt.Sprintf("cel.bind(s, %s, cel.bind(t, %s, s.replace('x', t, 100000).size() > 0))", long100k, long2k)},
+	}
+	for _, tc := range rows {
+		t.Run(tc.name, func(t *testing.T) {
+			var got any
+			var err error
+			mb := allocMB(func() { got, err = evalValue(t, tc.expr) })
+			wantCostLimit(t, got, err)
+			if mb > 50 {
+				t.Errorf("the refusal came after %d MB of allocation, want less than 50", mb)
+			}
+		})
+	}
+}
+
+// A result of replace that cel-go lets through stays allowed. cel-go charges the result of replace by
+// its length, so a result near the cap of 1,000,000 stops at the cost limit of cel-go first.
+func TestChargeReplaceCap(t *testing.T) {
+	allowed := []struct {
+		name, expr string
+		want       any
+	}{
+		{"a result of 500,000 bytes", fmt.Sprintf("cel.bind(s, %s, s.replace('x', 'yyyyy').size())", long100k), int64(500000)},
+		{"a result smaller than the string", fmt.Sprintf("cel.bind(s, %s, s.replace('xx', '').size())", long100k), int64(0)},
+		{"a count that keeps the result under the cap", fmt.Sprintf("cel.bind(s, %s, s.replace('x', 'yyyyyyyyyyyyyyyyyyyy', 1000).size())", long100k), int64(100000 + 1000*19)},
+	}
+	for _, tc := range allowed {
+		t.Run("allowed/"+tc.name, func(t *testing.T) {
+			got, err := evalValue(t, tc.expr)
+			if err != nil || got != tc.want {
+				t.Errorf("got %v, %v, want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// A map or list key that is an identifier is not read through Exec: cel-go calls the Qualify of the
+// key attribute, which resolves the value by itself. A key of 100,000 bytes is hashed at every lookup,
+// so the evaluation charges the key where cel-go reads it (finding 2 of the review of
+// go-kure/launcher#1461).
+func TestChargeStopsALongKeyOfAnIndex(t *testing.T) {
+	rows := []struct{ name, expr string }{
+		{"m[k] in a loop", fmt.Sprintf("cel.bind(k, %s, cel.bind(m, {k: 1}, lists.range(15000).all(i, m[k] == 1)))", key100k)},
+		{"a conditional key in a loop", fmt.Sprintf("cel.bind(k, %s, cel.bind(m, {k: 1}, lists.range(15000).all(i, m[i >= 0 ? k : k] == 1)))", key100k)},
+	}
+	for _, tc := range rows {
+		t.Run("refused/"+tc.name, func(t *testing.T) {
+			got, err := evalValue(t, tc.expr)
+			wantCostLimit(t, got, err)
+		})
+	}
+	t.Run("allowed/one lookup", func(t *testing.T) {
+		got, err := evalValue(t, fmt.Sprintf("cel.bind(k, %s, cel.bind(m, {k: 1}, m[k]))", key100k))
+		if err != nil || got != int64(1) {
+			t.Errorf("got %v, %v, want 1", got, err)
+		}
+	})
+}
+
+// join writes n-1 separators. The check of its buffer counts the bytes that the next write adds
+// and no more, so one element and a separator of 1,000,000 bytes is a result of one byte (finding 3 of the review of go-kure/launcher#1461).
+func TestChargeJoinChecksWhatItWrites(t *testing.T) {
+	allowed := []struct {
+		name, expr string
+		want       any
+	}{
+		{"one element and a separator of 1,000,000 bytes", fmt.Sprintf("cel.bind(a, %s, ['x'].join(%s).size())", long100k, chain10), int64(1)},
+		{"two elements and one separator", fmt.Sprintf("cel.bind(a, %s, cel.bind(h, a + a, [h, h].join('-').size()))", long100k), int64(400001)},
+	}
+	for _, tc := range allowed {
+		t.Run("allowed/"+tc.name, func(t *testing.T) {
+			got, err := evalValue(t, tc.expr)
+			if err != nil || got != tc.want {
+				t.Errorf("got %v, %v, want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// The replacements give what cel-go gives, with the cost cel-go reports: the evaluation builds the
+// result of replace itself, and it reads a key through the Qualify of the wrapper.
+func TestChargeWrappersGiveWhatCelGoGives(t *testing.T) {
+	corpus := []string{
+		"'hello'.replace('l', 'L')", "'hello'.replace('l', 'L', 1)", "'hello'.replace('l', 'L', 0)", "'hello'.replace('l', 'L', -1)",
+		"'hello'.replace('', '-')", "'hello'.replace('', '-', 2)", "'aaa'.replace('a', '', 2)", "'héllo'.replace('', '.')", "''.replace('', 'x')", "'abc'.replace('d', 'x')",
+		"'a.b.c'.replace('.', '').size()",
+		"{'a': 1}['a']", "[1, 2, 3][1]", "{'a': 1}['a' + '']", "[10, 20][1 + 0]", "cel.bind(k, 'a', {'a': 1}[k])", "cel.bind(k, 'a', {'a': 1}[true ? k : 'b'])",
+		"[0, 1, 2].map(i, [10, 20, 30][i])", "cel.bind(m, {'a': {'b': 2}}, m['a']['b'])", "cel.bind(k, 'b', {'a': {'b': 2}}['a'][k])",
+	}
+	for _, expr := range corpus {
+		t.Run(expr, func(t *testing.T) {
+			want, wantCost := stockResult(t, expr)
+			if strings.HasPrefix(want, "compile error") || want == "error" {
+				t.Fatalf("test bug: cel-go gives %q for the corpus expression", want)
+			}
+			got, cost, err := evalValueCost(t, expr)
+			if err != nil {
+				t.Fatalf("Eval: %v, cel-go gives %s", err, want)
+			}
+			if have := fmt.Sprintf("%T %v", got, got); have != want {
+				t.Errorf("gave %s, cel-go gives %s", have, want)
+			}
+			if cost != wantCost {
+				t.Errorf("reported cost %d, cel-go reports %d", cost, wantCost)
+			}
+		})
 	}
 }
