@@ -13,8 +13,9 @@ unless a line says another file.
 - **Implementation:** Each is built on `policyFreeKind` (see the **storageclass**
   entry) with the Flux namespace, the check of its durations and, where a field
   names a host the environment policy holds or holds a credential, a check under
-  that policy (`fluxKind`), and emits that one object. ("the **storageclass**
-  entry" is on the reference page
+  that policy (`fluxKind`), and emits that one object, named after the component
+  unless `objectName` names it; the handler adds no label, no annotation and no
+  default. ("the **storageclass** entry" is on the reference page
   [Kinds: core workloads](../../api-reference/oam-components/kinds-core-workloads.md).)
 - **History:**
   - go-kure/launcher#790 (the kind-named projections).
@@ -35,16 +36,16 @@ unless a line says another file.
 - **Tests:**
   - `TestFluxKinds_DefaultedZeros` holds each kind's list of such fields to the
     numbers, booleans and strings that are omitted when zero and that the API
-    defaults to something else ("such fields" are the reference's fields that the
+    defaults to something else. ("such fields" are the reference's fields that the
     type omits when empty and the API defaults, as `eventSeverity` and
-    `filter.limit`).
+    `filter.limit`.)
   - `TestFluxKinds_MarkersClassified` fails on a field the type writes unauthored
-    that neither a marker nor that rule classifies ("that rule" is the
+    that neither a marker nor that rule classifies. ("that rule" is the
     reference's "schema generators' rule" for a field with no marker whose json
-    tag keeps it when empty).
-  - A dependency bump that adds, drops or moves one fails there ("there" is
+    tag keeps it when empty.)
+  - A dependency bump that adds, drops or moves one fails there. ("there" is
     `TestFluxKinds_MarkersClassified`, and "one" is a field the type writes
-    unauthored that a marker or that rule classifies).
+    unauthored that a marker or that rule classifies.)
   - `TestKindComponents_GeneratedRequiredBothWays` (the test the reference's
     "the list of a `resourcesetinputprovider` is derived from its CRD instead, and
     held to that CRD by the API server" names; it is in
@@ -58,23 +59,24 @@ unless a line says another file.
     type that holds a generated path, the same test creates the object with one
     such path authored, which the API server accepts, and without it, which the
     API server refuses as missing a required field; and every generated path is
-    one the CRD declares ("The other kinds here" are the kinds of the reference
+    one the CRD declares. ("The other kinds here" are the kinds of the reference
     entry other than `resourcesetinputprovider`; "the required fields" are the
     reference's [Required fields a kind writes unauthored and does not refuse](../../api-reference/oam-components/conventions.md#required-fields-a-kind-writes-unauthored-and-does-not-refuse);
-    "the same test" is `TestVendoredCRDs_MatchSource`, which is in
-    `vendored_crds_internal_test.go`).
+    "the same test" is `TestKindComponents_GeneratedRequiredBothWays`, which is in
+    `kind_required_internal_test.go`; `TestVendoredCRDs_MatchSource`, which checks
+    each vendored file, is in `vendored_crds_internal_test.go`.)
   - `TestFluxKinds_ExpressionRules` reads every such rule from the markers of the
     linked source and holds the list (`fluxRulesLeft`) to them, and
     `TestFluxOperatorKinds_ExpressionRulesMatchCRD` holds the
     ResourceSetInputProvider's list to the `x-kubernetes-validations` of the
     shipped CRD, in both directions, so a dependency bump that adds, drops or
-    rewords one fails there ("such rule", "the list" and "one" are the API
+    rewords one fails there. ("such rule", "the list" and "one" are the API
     expression rules the reference lists under "The APIs' expression rules are
-    not checked"; "the ResourceSetInputProvider's list" is its seventeen rules).
+    not checked"; "the ResourceSetInputProvider's list" is its seventeen rules.)
   - `TestProviderAddressCredentialTypes_InUpstreamEnum` holds the list to the
-    API's values of `type` ("the list" is the reference's list of Provider types
+    API's values of `type`. ("the list" is the reference's list of Provider types
     whose `address` is the credential, or can be; the test is in
-    `fluxcd_provider_internal_test.go`).
+    `fluxcd_provider_internal_test.go`.)
 
 ## fluxcd-kustomization
 
@@ -91,9 +93,9 @@ unless a line says another file.
     refused).
 - **Tests:**
   - a test ties the published schema to that struct, so a bump that adds or drops
-    a spec field fails the suite until the schema follows ("that struct" is
+    a spec field fails the suite until the schema follows. ("that struct" is
     `KustomizationSpec`, of the reference's "Its properties are exactly the
-    top-level JSON keys of `KustomizationSpec`"; the sentence names no test).
+    top-level JSON keys of `KustomizationSpec`"; the sentence names no test.)
 
 ## helmrepository, ocirepository, gitrepository, bucket, helmchart
 
@@ -120,10 +122,10 @@ unless a line says another file.
     refused).
 - **Tests:**
   - a test ties each published schema to its struct, so a bump that adds or drops
-    a spec field fails the suite until the schema follows ("its struct" is the
+    a spec field fails the suite until the schema follows. ("its struct" is the
     source-controller spec type of the reference's "Each component's properties
     are exactly the top-level JSON keys of its source-controller spec type"; the
-    sentence names no test).
+    sentence names no test.)
   - A reflection test asserts, per kind, that no spec field is unreachable through
-    that decode, against an explicit exclusion list that is empty ("that decode"
-    is the strict decode of the reference's "Decoding").
+    that decode, against an explicit exclusion list that is empty. ("that decode"
+    is the strict decode of the reference's "Decoding".)

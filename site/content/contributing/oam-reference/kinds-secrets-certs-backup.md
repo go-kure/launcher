@@ -10,8 +10,10 @@ named here is in `pkg/oam/builtin/components/`, in the file the note beside it n
 ## issuer, clusterissuer, certificate
 
 - **Implementation:** Each is built on `policyHeldKind` (`policyFreeKind` with a
-  policy check, see the **storageclass** entry) ("Each" is `issuer`,
-  `clusterissuer` and `certificate`).
+  policy check, see the **storageclass** entry) and emits that one object, named
+  after the component unless `objectName` names it; the handler adds no label, no
+  annotation and no default. ("Each" is `issuer`, `clusterissuer` and
+  `certificate`.)
 - **History:** go-kure/launcher#790 (the kind-named projections);
   go-kure/launcher#922 (the object kind policy, `oam.ObjectKindPolicy`).
 - **Tests:**
@@ -107,8 +109,10 @@ named here is in `pkg/oam/builtin/components/`, in the file the note beside it n
 ## replicationsource, replicationdestination
 
 - **Implementation:** Each is built on `policyHeldKind` (`policyFreeKind` with a
-  policy check, see above) ("Each" is `replicationsource` and
-  `replicationdestination`).
+  policy check, see above) and emits that one object in the build namespace,
+  named after the component unless `objectName` names it, and declares it as
+  namespaced; the handler adds no label, no annotation and no default. ("Each" is
+  `replicationsource` and `replicationdestination`.)
 - **History:** go-kure/launcher#790 (the kind-named projections);
   go-kure/launcher#922 (the object kind policy, `oam.ObjectKindPolicy`);
   go-kure/launcher#883 (the kinds' required lists are generated from the linked
