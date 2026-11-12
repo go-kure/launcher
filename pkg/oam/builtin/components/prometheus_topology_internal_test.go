@@ -58,15 +58,16 @@ func TestPrometheusTopologyNodeZone_MatchVendoredSource(t *testing.T) {
 		}
 	}
 
-	readme, err := os.ReadFile("README.md")
+	const monitoringPage = "../../../../site/content/api-reference/oam-components/kinds-monitoring.md"
+	page, err := os.ReadFile(monitoringPage)
 	if err != nil {
-		t.Fatalf("read README.md: %v", err)
+		t.Fatalf("read %s: %v", monitoringPage, err)
 	}
-	doc := strings.Join(strings.Fields(string(readme)), " ")
+	doc := strings.Join(strings.Fields(string(page)), " ")
 	if s := "every PodMonitor from Prometheus " + prometheusTopologyNodeZonePodMonitor + " and every ServiceMonitor from " + prometheusTopologyNodeZoneServiceMonitor; !strings.Contains(doc, s) {
-		t.Errorf("README.md does not state %q", s)
+		t.Errorf("%s does not state %q", monitoringPage, s)
 	}
 	if s := "runs Prometheus " + prometheusTopologyNodeZoneServiceMonitor + " or later"; !strings.Contains(doc, s) {
-		t.Errorf("README.md does not state %q", s)
+		t.Errorf("%s does not state %q", monitoringPage, s)
 	}
 }
