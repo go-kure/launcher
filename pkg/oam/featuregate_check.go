@@ -456,3 +456,8 @@ func foldedKeys(obj map[string]any, key string) []string {
 	slices.Sort(out)
 	return out
 }
+
+// ValidateAuthoredPropertiesForTargetWithGates is a stub: go-kure/launcher#1231.
+func (t *Transformer) ValidateAuthoredPropertiesForTargetWithGates(app *Application, capabilities map[string]CapabilityBinding, target *KubernetesVersion, gates map[string]bool) (*Application, error) {
+	return t.ValidateAuthoredPropertiesForTarget(app, capabilities, target)
+}
