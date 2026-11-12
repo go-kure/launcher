@@ -46,8 +46,7 @@ toleration, topology spread constraint, the affinity, and the main, init and sid
 containers as it adds them — an `append` alone copies the element structs but shares the
 pointers, maps and slices they carry. The `postgresql` Cluster follows it for
 `spec.inheritedMetadata`: its `labels` and `annotations` are clones of the config's
-`InheritedLabels`/`InheritedAnnotations`, not the maps themselves
-(go-kure/launcher#396). Without that, editing the first rendered object — the same in-place
+`InheritedLabels`/`InheritedAnnotations`, not the maps themselves. Without that, editing the first rendered object — the same in-place
 customization the label rule above assumes — writes back into the config and reappears in
 every later render, with the symptom surfacing on a different object than the one that was
 edited.
@@ -67,7 +66,7 @@ is a DNS-1123 subdomain (up to 253 characters), a label value at most 63: the fu
 returns a name of 63 characters or fewer unchanged, so output for those names is
 byte-identical, and projects a longer one onto a readable prefix of at most 52 characters
 (its first 52, with trailing `-` and `.` trimmed) plus `-` and
-a 10-hex-character sha256 digest (go-kure/launcher#572). The workload kinds and `service` never reach
+a 10-hex-character sha256 digest. The workload kinds and `service` never reach
 the projection, since their container name or Service name already refuses a name over 63
 characters; the `helm` values ConfigMap and values Secret do (a values
 ConfigMap that previously omitted `app` past 63 characters now carries the projected value). Object names are not projected. A custom handler
@@ -76,9 +75,9 @@ built-in traits' selectors (a PodDisruptionBudget, a NetworkPolicy `podSelector`
 
 The component label (`<domain>/component`) is not this package's to write: the transform
 adds it to every object a component's config generates, and to its pod templates, with the
-authored component's value, where the key is absent (go-kure/launcher#788). Where the key is
-there with another value, the transform's output is refused when it is generated
-(go-kure/launcher#790): that holds for what a component type of this package emits from
+authored component's value, where the key is absent. Where the key is
+there with another value, the transform's output is refused when it is generated:
+that holds for what a component type of this package emits from
 authored objects or a rendered chart (`passthrough`, `manifests`, `helmtemplate`, `helm`
 under template delivery) as for any other, so the key is one nothing else writes. A lowered part
 named differently from its component (the `postgresql` pooler, a database, an object store)
@@ -91,7 +90,7 @@ See "Component label and ownership" in the
 ### The object name (`objectName`)
 
 Every kind component takes `objectName`, which names its one object in place of the component
-name (go-kure/launcher#787): every component type with a handler
+name: every component type with a handler
 (`builtinComponentHandlers`) but four, as `TestObjectName_EveryComponentTypeChooses`
 (`pkg/cmd/kurel`) holds; a type that is lowered to others has none. `helmtemplate`,
 `manifests`, `crd` and `passthrough` generate no
@@ -101,8 +100,7 @@ a kind component" in the
 [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam).
 
 The property is not in any handler's `PropertySchema`: the engine adds it to the schema of
-every type whose handler declares its object (`ComponentObject`, in `object_name.go` or, for
-a kind added since, in the kind's own file),
+every type whose handler declares its object,
 reads it, and hands `ToApplicationConfig` the resolved name as `Component.ObjectName()`. A
 handler's config carries it as `ObjectName`, empty when it is the component's name, and
 `Generate` names the object with it. Everything else the handler writes keeps the component
@@ -122,7 +120,7 @@ component name, so the release does not.
 ### The object's labels and annotations (`labels`, `annotations`)
 
 Every kind component, the same types that take `objectName`, takes two optional properties,
-`labels` and `annotations`, each a map of strings (go-kure/launcher#790). They go on the
+`labels` and `annotations`, each a map of strings. They go on the
 metadata of the component's one object and nowhere else. On a workload kind the pod template
 keeps the labels of the kind, its `app` label and what `template.metadata` authors, and no
 selector reads an authored label. `helmtemplate`, `manifests`, `crd` and `passthrough`
@@ -175,17 +173,16 @@ from the properties and hands `ToApplicationConfig` the result as
 `Component.ObjectMetadata()`. A handler's config carries it as `Metadata` and `Generate` puts
 it on the object through `kindObject`, the one helper every kind returns its object through
 (the Flux sources through `emitFluxSource`, which does the same before it writes a long
-`spec.timeout`). `TestObjectMetadata_EveryKindComponentTakesIt` holds every registered kind
-to the two properties, so a kind added later cannot ship without them.
+`spec.timeout`).
 
 ### The pod template's labels and annotations (`podMetadata`)
 
 `labels` and `annotations` above go on the object and never on a pod template. The five kinds
 whose spec holds a pod template the author does not write whole (`deployment`, `statefulset`,
 `daemonset`, `job` and `cronjob`) take a fourth property, `podMetadata`, for the pod template's
-own metadata (go-kure/launcher#1178). On a `cronjob` it is the pod template inside the job
+own metadata. On a `cronjob` it is the pod template inside the job
 template, not the CronJob's or the job template's metadata. `webservice` and `worker` take it
-too (go-kure/launcher#1216), with the same name and shape as `deployment`: the rule hands it to
+too, with the same name and shape as `deployment`: the rule hands it to
 its deployment member, so it lands on that Deployment's pod template and nowhere else. The
 Service a `webservice` generates selects on the component's `app` label alone, so an authored
 label is on the pods and not in the Service's selector. A document moves a workload between
@@ -235,7 +232,7 @@ A kind component whose spec holds a Kubernetes label selector (`metav1.LabelSele
 it strictly, and the strict decode refuses nothing of a match expression: the Go type writes
 `key` and `operator` whether or not they were authored, and reads any string as an operator.
 Three defects of an expression are therefore refused where the component is read, with or
-without an environment policy, each named by its path (go-kure/launcher#790):
+without an environment policy, each named by its path:
 
 - **An expression without its `key` or its `operator`**
   (`selector.matchExpressions[0].operator: required (the operator of the expression: In, NotIn,
@@ -251,8 +248,7 @@ without an environment policy, each named by its path (go-kure/launcher#790):
 
 The API server refuses each of the three on every selector listed below, through one function,
 `ValidateLabelSelectorRequirement` of `k8s.io/apimachinery`, and under every option it passes
-that function. `TestValidateLabelSelector_MatchesAPIMachinery` holds launcher's check to the
-linked function on those three.
+that function.
 
 **That function judges more, and these kinds do not.** It also refuses an expression `key` that
 is no label name, an expression value that is no label value (on the objects that still check
@@ -314,9 +310,7 @@ module ship no CRD to read, so the ground of their kinds is the source of the li
 held to both, to its CRD and, as the other Flux kinds are, to that source: the schema generators
 require a field that carries no optional marker and whose json tag keeps it when empty, and
 `key` and `operator` are such fields
-where `values` is not. `TestExternalSecretsKinds_RequiredMatchSource` derives the two from
-that source by that rule, beside the fields the operator's own types mark required, and holds
-each kind's list to them. The monitoring and Flux kinds' lists are generated from the same
+where `values` is not. The monitoring and Flux kinds' lists are generated from the same
 source by the same rule
 ([Required fields a kind writes unauthored and does not refuse](#required-fields-a-kind-writes-unauthored-and-does-not-refuse)),
 which also requires every other field of an embedded Kubernetes type the rule requires (a
@@ -378,7 +372,8 @@ nine Cilium kinds other than the two network policies (`cilium-bgpadvertisement`
 `cilium-cidrgroup`, `cilium-egressgatewaypolicy`, `cilium-loadbalancerippool`,
 `cilium-localredirectpolicy`, `cilium-nodeconfig`) is generated:
 every field the kind's API requires and its Go type writes unauthored is refused where the
-author leaves it out under an authored parent, whatever type declares it. The paths are in
+author leaves it out under an authored parent, whatever type declares it.
+The paths are in
 `zz_generated_kind_required.go` (`kindRequiredPaths`), read through the same derivation as the
 measurement below (`deriveRequiredWritten`), so the two cannot drift.
 `TestKindComponents_RequiredIsGenerated` fails where the file differs from the derivation, a
@@ -438,17 +433,17 @@ also holds each directory to the tag of the module `go.mod` links:
 
 - the seven `monitoring.coreos.com` CRDs of the monitoring kinds, from
   `example/prometheus-operator-crd/` of prometheus-operator `v0.95.1`, beside the operator
-  excerpt in `testdata/upstream/prometheus-operator/` (`scripts/vendor-prometheus-operator-gates.sh`);
+  excerpt in `testdata/upstream/prometheus-operator/`;
 - the CRDs of the fourteen Flux kinds, from `config/crd/bases/` of each controller's repository
   at the tag of its API module (`api/v1.7.1` of helm-controller, `api/v1.10.1` of
   kustomize-controller and source-controller, `api/v1.10.0` of notification-controller,
   `api/v1.3.0` of image-reflector-controller and image-automation-controller, `api/v2.3.1` of
   source-watcher), one directory per repository under `testdata/upstream/` with its `LICENSE`
-  (`scripts/vendor-flux-crds.sh`). The one addition to their bytes is an `allow-term` pragma
+  (`scripts/vendor-flux-crds.sh`).
+  The one addition to their bytes is an `allow-term` pragma
   comment line above an upstream line that names a term the repository's forbidden-terms guard
   lists (a receiver type of the `Receiver` CRD), as a whole word or inside an identifier: the
-  script reads the guard's own matcher (`scripts/forbidden-terms-lib.sh`, self-tested by `make
-  test-forbidden-terms`), so it marks every line the guard would refuse, under the C locale or
+  script reads the guard's own matcher, so it marks every line the guard would refuse, under the C locale or
   C.UTF-8. Each `file` pin in `SOURCE` is the blob id of
   the committed file; a file carrying pragma lines also has an `# upstream` line naming
   upstream's blob id, which the file must hash to with those lines stripped. A file with an
@@ -458,7 +453,7 @@ also holds each directory to the tag of the module `go.mod` links:
   `externalsecret`, `clusterexternalsecret`), unmodified from `config/crds/bases/` of
   external-secrets `v2.14.0`, under the same path in `testdata/upstream/external-secrets/` with
   its `LICENSE` (`scripts/vendor-external-secrets-crds.sh`, `mise run
-  vendor-external-secrets-crds vX.Y.Z`; go-kure/launcher#1108). `go.mod` links the API module
+  vendor-external-secrets-crds vX.Y.Z`). `go.mod` links the API module
   at a pseudo-version of a commit, not at a tag of its own, and that commit is the release tag
   `v2.14.0`, a lightweight tag: its ref names the commit, with no tag object. So the
   `tag-object` line of `SOURCE` is the object the tag ref names, the commit, and the test
@@ -532,10 +527,7 @@ kinds, whose list is kept by hand. `metallb-bfdprofile` and `metallb-community` 
 measured: their CRDs require no field, and `TestMetalLBKinds_RequiredMatchCRD` holds each kind's
 empty list to its CRD. Nor is `apiservice`: no CRD serves it, the API server's aggregation layer
 does.
-`TestRequiredWrittenKinds_CoverEveryCRDKind` holds the measured kinds to the kind inventory:
-every `kind` row whose API group client-go's scheme does not register, so a CRD serves it, is
-measured or named as not measured with its reason, so a new kind component of such an API
-fails there until it is one or the other. Most members are written
+Most members are written
 `""`; the rest are `0` (mostly a preferred term's `weight` or a `port`), `{}`, `[]`, `null` or
 an object of such values.
 
@@ -546,10 +538,6 @@ It creates each workload kind of the Prometheus operator with an owner reference
 ephemeral claim template's metadata authored whole, and with the field taken out: the API
 server names that `ownerReferences` an unknown field in both, and nothing else, and accepts
 the object it prunes it from, so it drops the owner reference whatever it holds.
-Before go-kure/launcher#883 generated their lists, the same was shown of `imageCatalogRef` on
-`cnpg-cluster` and `pgbouncer.imageCatalogRef` on `cnpg-pooler`: a `kind` written `""` refused
-by the CRD's own rule on the reference, a `name` written `""` and a `major` written `0` accepted.
-All three are refused now.
 
 **Excluded as valid values.** A member whose written value the API takes as authored is not
 listed: `cnpg-cluster`'s `instances` (`1`, the CRD's default) and
@@ -589,8 +577,7 @@ the file, and is refused where `CI` is set.
 
 At this pin the file holds 25 members, every one an exception: the accepted
 `cnpg-pooler template.spec.containers` and the 24 pruned owner reference fields. The External
-Secrets kinds' generated paths are held to the API server too, on their vendored CRDs
-(go-kure/launcher#1108).
+Secrets kinds' generated paths are held to the API server too, on their vendored CRDs.
 
 ### Every spec field is this package's to write
 
@@ -626,7 +613,7 @@ authors it (see [Container fields](common-config.md#container-fields)); what fol
 the omitted case. Kubernetes defaults an omitted
 value from the image reference and keys that decision on the `latest` tag, so
 what matters here is that no accepted image can carry one: `ValidateImageRef`
-(`common.go`) refuses an untagged reference and an explicit `:latest` tag on
+refuses an untagged reference and an explicit `:latest` tag on
 every main, init and sidecar image — including a digest reference that still
 carries the tag (`repo:latest@sha256:...`), which it rejects for exactly this
 reason. A digest reference with *no* tag is the case this argument does not
@@ -648,11 +635,6 @@ label value (`<component>`, projected when the name exceeds 63 characters — se
 [The `app` label](#the-app-label)), matching every other object this package emits. A consumer
 selecting that ConfigMap by `app=<component>-values` must be repointed.
 
-The `obj.Annotations = nil`
-assignments scattered through the handlers, which existed to strip the `app:`
-annotation the constructors used to stamp, are now no-ops — kept so the field
-stays at a known value regardless of what a future constructor does.
-
 **`postgresql` writes every CNPG value itself (kure `v0.2.0-beta.13`).** kure's
 release-2 builder contract retired the CNPG config-struct layer
 (`cnpg.Cluster`/`Pooler`/`ObjectStore`/`Database` and their `*Options` types) that
@@ -666,8 +648,7 @@ The values that layer used to inject are written explicitly, so the emitted
 manifests are unchanged byte for byte: `enablePDB` (true only for more than one
 instance), `primaryUpdateStrategy: unsupervised`, the `ACCESS_KEY_ID` /
 `SECRET_ACCESS_KEY` key names on backup and objectStore credentials, the
-barman-cloud WAL-archiver plugin entry when an `objectStore` is declared (its
-plugin name and parameters were corrected afterwards by go-kure/launcher#643),
+barman-cloud WAL-archiver plugin entry when an `objectStore` is declared,
 the pooler `type` (`rw` unless `ro` was authored) and its always-present
 `pgbouncer` block, and `ensure: present` on every extension not authored `absent`.
 The layer's guards are kept too: `inheritedMetadata`, `managed`, `bootstrap`,
