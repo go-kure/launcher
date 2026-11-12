@@ -370,6 +370,8 @@ func TestNestedInputStringIsCapped(t *testing.T) {
 		{"deep element over the cap", []any{[]any{map[string]any{"k": over}}}, "inputs.tags", true},
 		{"element read by index", []any{over}, "inputs.tags[0]", true},
 		{"list element at the cap", []any{at}, "inputs.tags", false},
+		{"map key over the cap", map[string]any{over: 1}, "inputs.tags", true},
+		{"map key at the cap", map[string]any{at: 1}, "inputs.tags", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := stdScope()
@@ -379,5 +381,23 @@ func TestNestedInputStringIsCapped(t *testing.T) {
 				t.Errorf("gave %v, refuse = %v", err, tc.refuse)
 			}
 		})
+	}
+}
+
+// A map comparison spends a step for every key it visits, also a key that the other map lacks.
+// Two inner maps of 10,000 keys with no key in common held a step for the maps and none for the
+// keys, so 1,000 comparisons read 10,000,000 entries for the price of 2,000 steps.
+func TestMapComparisonSpendsForAMissingKey(t *testing.T) {
+	a, b := map[string]any{}, map[string]any{}
+	for i := 0; i < 10000; i++ {
+		a[fmt.Sprintf("a%d", i)] = int64(i)
+		b[fmt.Sprintf("b%d", i)] = int64(i)
+	}
+	s := stdScope()
+	s.Inputs["a"], s.Inputs["b"] = a, b
+	c := mustCompile(t, oneValue(t, "${lists.range(1000).all(i, {'x': inputs.a} != {'x': inputs.b})}"))
+	got, _, err := c.Eval("spec.values[0].expr", s)
+	if !errors.Is(err, ErrCostLimit) {
+		t.Fatalf("gave %v, %v: the comparisons read 10,000,000 entries and must wrap ErrCostLimit", got, err)
 	}
 }
