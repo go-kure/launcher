@@ -788,7 +788,8 @@ weight: 10
   **An additional Service's name** is the `serviceTemplate.metadata.name` of a
   `managed.services.additional[]` entry, and CloudNativePG creates the Service
   under it: a name with a leading digit is refused when `spec.kubernetesVersion`
-  is below 1.36, RelaxedServiceNameValidation, naming the entry by its index
+  is below 1.36, RelaxedServiceNameValidation, unless `spec.featureGates` sets
+  that gate on, naming the entry by its index
   (go-kure/launcher#1230; `docs/delivery-scope.md` §3.5).
   **The Pooler's and the Databases' names** (go-kure/launcher#787) are
   resolved in the order of every name role (see "Name roles and the `Naming`
@@ -796,7 +797,8 @@ weight: 10
   `Naming` hook, else the default. `poolerName` names the Pooler (role
   `pooler`, default `<name>-pooler`) and must be a DNS-1123 label, since
   CloudNativePG names the pooler's Service after it (a leading digit is refused when
-  `spec.kubernetesVersion` is below 1.36, RelaxedServiceNameValidation, the default
+  `spec.kubernetesVersion` is below 1.36, RelaxedServiceNameValidation, unless
+  `spec.featureGates` sets that gate on, the default
   `<name>-pooler` included; `docs/delivery-scope.md` §3.5); it is refused when
   `pooler.enabled` is not true. `databases[].objectName` names that entry's
   Database object (role `database`, default `<name>-<db>`) and must be a
@@ -1212,8 +1214,9 @@ weight: 10
   open object, so its schema names the gated pod fields in `gatedPaths`, as the
   pod template kinds do: a gated field under `template.spec` is refused when the
   ClusterProfile's `kubernetesVersion` is below the release where its feature
-  gate is on by default (go-kure/launcher#1321). A document with no
-  `kubernetesVersion` is unchanged.
+  gate is on by default, unless the profile's `spec.featureGates` sets that gate
+  on, and refused at any version when it sets the gate off (go-kure/launcher#1321).
+  A document with no `kubernetesVersion` is unchanged.
   **The required lists of the three kinds are generated**
   (go-kure/launcher#883), as `cnpg-cluster`'s is: every field each CRD
   requires that the Go type writes whether or not it was authored is refused
@@ -1241,7 +1244,7 @@ weight: 10
   `cnpg-pooler` writes no type or instance count of its own, so the operator's
   defaults (`rw`, `1`) apply. Its component name is the Pooler's name and its
   Service's, so it must be a DNS-1123 label of at most 63 characters (a
-  leading digit is refused when `spec.kubernetesVersion` is below 1.36, RelaxedServiceNameValidation; CloudNativePG's Pooler
+  leading digit is refused when `spec.kubernetesVersion` is below 1.36, RelaxedServiceNameValidation, unless `spec.featureGates` sets that gate on; CloudNativePG's Pooler
   webhook checks no name syntax, go-kure/launcher#959,
   `docs/delivery-scope.md` §3.5), and a pooler named like its cluster is refused, as CloudNativePG's webhook does:
   by the build, and where its endpoint is collected in the same words

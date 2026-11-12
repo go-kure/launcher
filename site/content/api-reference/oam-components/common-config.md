@@ -150,7 +150,8 @@ changing the emitted unit),
 `fileKeyRef` (`volumeName`/`path`/`key` required, `optional` accepted (same
 non-boolean rejection as above); corev1's `EnvFiles` feature (refused when the
 `ClusterProfile`'s `kubernetesVersion` is below 1.35, where the gate turns on by
-default); `volumeName`
+default, unless its `spec.featureGates` sets `EnvFiles` on, and refused at any
+version when it sets the gate off); `volumeName`
 must be a valid DNS-1123 label and `key` a valid (relaxed) env var name,
 matching real admission's own `validateFileKeySelector`; `path` must be
 relative and must not contain a `..` backstep component, per this repo's own
@@ -929,7 +930,9 @@ An `initContainers` entry also reads its own `restartPolicy` and
   refuses the `Never` and `OnFailure` values of `restartPolicy` below 1.35,
   naming the value, the gate and the version; the schema names the gate per
   value (`valueGates`), so `Always` is accepted at every version
-  (go-kure/launcher#1230). With no version stated nothing is checked.
+  (go-kure/launcher#1230). A profile whose `spec.featureGates` sets
+  `ContainerRestartRules` on accepts them below 1.35, and one that sets it off
+  refuses them at any version. With no version stated nothing is checked.
 
 On a `sidecars` entry neither key is read, and both are refused as unknown
 keys. At the top level neither is a container key either.

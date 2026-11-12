@@ -67,9 +67,11 @@ weight: 5
   ValidatingAdmissionPolicy and ValidatingAdmissionPolicyBinding at `v1`
   from Kubernetes 1.30, and MutatingAdmissionPolicy and
   MutatingAdmissionPolicyBinding from 1.36. A cluster below that refuses the
-  object at apply. The build has no target version and does not check it;
-  the description of each kind's `matchConstraints` or `policyName` states
-  the same.
+  object at apply. The build does not check it, even for a `ClusterProfile`
+  that states `spec.kubernetesVersion`: that version reaches only the
+  feature-gated properties, never the version a kind is served from. The
+  description of each kind's `matchConstraints` or `policyName` states the
+  same.
 
   From the markers, a validation's `expression`, an audit annotation's `key`
   and `valueExpression`, a match condition's and a variable's `name` and
