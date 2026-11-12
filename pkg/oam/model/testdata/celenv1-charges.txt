@@ -50,7 +50,7 @@ lastIndexOf: scalar-out
 lists.range: amplifying (cel-go caps it at 1000000 elements and charges it by size; TestReplaceGrowth pins the cap)
 lowerAscii: bounded (same size as its operand)
 matches: scalar-out
-replace: amplifying (cel-go charges it by the result size and the result cap stops it; TestReplaceGrowth)
+replace: amplifying (budgetedReplace in charge.go stops before it builds a result over the cap; TestChargeReplaceStopsBeforeTheAllocation)
 reverse: bounded (same elements as its operand)
 size: scalar-out
 slice: bounded (no more elements than its operand)

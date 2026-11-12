@@ -209,8 +209,8 @@ escape `$${`.
 
 **Cost.** One hole has a cost limit of 1,000,000. An evaluation that spends more fails with
 `ErrCostLimit`, which names the site and the limit. The cost of a site is the sum of its holes.
-The cost also stops a `replace` or a `join` that would build a result of several megabytes (a
-test pins both). `lists.range(1000000)` is stopped by the cost limit. A list of more than
+The charge by size stops a `replace` or a `join` that would build a result of more than 1,000,000
+bytes before it builds it (a test pins both). `lists.range(1000000)` is stopped by the cost limit. A list of more than
 1,000,000 elements is refused by cel-go, which has its own cap for `lists.range`, and not by the
 cost limit. The charge by size (see "Charge by size") also bounds every value. The one call it does not
 bound is `format`: a `format` that builds a result of 2,000,000 bytes is refused only after it is built.
@@ -246,7 +246,12 @@ and no list or map more than 1,000,000 elements: a value at the cap is allowed, 
 the evaluation with `ErrCostLimit`. A list or a map costs nothing more, because cel-go charges a call by
 the element count of its operands. The result of `sort` and `sortBy` costs the bytes of the string and
 bytes elements it holds, because a sort compares them by content. `join` checks its buffer before it
-writes, and a map comparison charges the length of each key. `&&`, `||`, the conditional and the
+writes, against the bytes that the next write adds (the first element has no separator before it).
+`replace` is replaced by a version that computes the size of its result from the number of matches
+and stops before it builds a result over the cap. An identifier that is the key of an index, as in
+`m[k]`, is charged by its size at every lookup, because cel-go reads it through the attribute and not
+as a value. So is a conditional of identifiers, as in `m[c ? k : k]`: its condition runs once more
+under the charge, so the cost that the evaluation reports counts the condition twice. A map comparison charges the length of each key. `&&`, `||`, the conditional and the
 comprehensions are not calls, so they stay lazy: a branch that does not run is not charged. **A value over
 the cap is refused even where stock cel-go finishes it.** A test names a class for every function of the
 pinned environment, so that a new cel-go version fails two lists and not one. The wrapper of an
