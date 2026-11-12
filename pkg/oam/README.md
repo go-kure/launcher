@@ -131,7 +131,8 @@ object".
 After each lowering round, the engine resolves the types that a rule emitted. A type
 written as a declared identity becomes the registered name. A plain name that a handler or
 a rule is registered under stays as written, so a rule that emits plain names changes
-nothing. A rule reads the Naming hook of the run through `LoweringContext.NamingHook`.
+nothing. The properties of an emitted component, trait or policy are checked against the
+schema of the registered name, also when the rule wrote the type as an identity. A rule reads the Naming hook of the run through `LoweringContext.NamingHook`.
 `Transformer.CheckComponentTypes` is a dry run of `DeclareComponentTypes`. It checks that
 the declaration is valid and declares nothing. It does not need the handler or rule to be
 registered yet, and `DeclareComponentTypes` does. A component model registers its rule

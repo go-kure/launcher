@@ -13,14 +13,13 @@ import (
 // name only a model registered before it, and no cycle exists. It is safe for concurrent use.
 type Registry struct {
 	t     *oam.Transformer
-	cache *Cache
 	mu    sync.Mutex
 	rules map[string]*Rule
 }
 
 // NewRegistry returns a registry for t.
 func NewRegistry(t *oam.Transformer) *Registry {
-	return &Registry{t: t, cache: CreateCache(), rules: map[string]*Rule{}}
+	return &Registry{t: t, rules: map[string]*Rule{}}
 }
 
 // Register compiles m, checks that its type is not declared yet, that every part type and trait
@@ -37,7 +36,9 @@ func (g *Registry) Register(m *Model) (err error) {
 	if _, err := g.t.ResolveComponentType(key); err == nil {
 		return errors.Errorf("model: the type %s is already declared", key)
 	}
-	c, err := g.cache.Compile(m)
+	// A cache of its own for each model: a refused registration leaves no compiled site for a
+	// later definition of the same identity to read.
+	c, err := Compile(m)
 	if err != nil {
 		return err
 	}
