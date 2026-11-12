@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/cel-go/cel"
+	"cel.dev/cel-go/cel"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -184,7 +184,7 @@ func TestComparisonGivesWhatCelGoGives(t *testing.T) {
 	}
 }
 
-// The evaluation replaces five calls that compare or copy values, and join. They were read from cel-go v0.31.0: the callers of
+// The evaluation replaces five calls that compare or copy values, and join. They were read from cel-go v0.32.0: the callers of
 // Equal in common/types (Contains, behind `in`), in ext (distinct) and in interpreter (the
 // == and != nodes). A new cel-go version, or a new version of a pinned extension library, can
 // add a caller, and a caller that is not replaced is the gap of go-kure/launcher#1451 again.
@@ -201,12 +201,12 @@ func TestComparisonCallSetIsReadFromCelGo(t *testing.T) {
 	}
 	var version string
 	for _, d := range bi.Deps {
-		if d.Path == "github.com/google/cel-go" {
+		if d.Path == "cel.dev/cel-go" {
 			version = d.Version
 		}
 	}
-	if version != "v0.31.0" {
-		t.Fatalf("cel-go is %q. The budgeted calls were read from v0.31.0. Search common/types, ext and interpreter for every caller of Equal in the new version, extend budgetedCalls, then change this version (go-kure/launcher#1413 moves cel-go)", version)
+	if version != "v0.32.0" {
+		t.Fatalf("cel-go is %q. The budgeted calls were read from v0.32.0. Search common/types, ext and interpreter for every caller of Equal in the new version, extend budgetedCalls, then change this version (go-kure/launcher#1491 moves cel-go to v0.33)", version)
 	}
 }
 

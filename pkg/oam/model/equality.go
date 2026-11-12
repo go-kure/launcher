@@ -3,11 +3,11 @@ package model
 import (
 	"strings"
 
-	"github.com/google/cel-go/common/operators"
-	"github.com/google/cel-go/common/types"
-	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/common/types/traits"
-	"github.com/google/cel-go/interpreter"
+	"cel.dev/cel-go/common/operators"
+	"cel.dev/cel-go/common/types"
+	"cel.dev/cel-go/common/types/ref"
+	"cel.dev/cel-go/common/types/traits"
+	"cel.dev/cel-go/interpreter"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -38,13 +38,13 @@ const compareBudgetName = "@compare-budget"
 // budgetedCalls are the calls that the evaluation replaces, because cel-go compares, copies or
 // prints nested values in them and charges the outer length only: `==`, `!=`, `in`, `distinct`,
 // `flatten` and `join`. The join of a list that holds a non-string builds its error from the
-// text of the whole tree. The first four are every caller of Equal in cel-go v0.31.0, read in common/types
+// text of the whole tree. The first four are every caller of Equal in cel-go v0.32.0, read in common/types
 // (Contains, behind `in`), ext (distinct) and interpreter (the == and != nodes). flatten is
 // the one list function of the pinned extension that copies nested elements under the legacy
 // cost tracker (ext/lists.go, trackListFlattenLegacy). A new cel-go version, or a new version
 // of a pinned extension library, can add a call. TestComparisonCallSetIsReadFromCelGo fails
-// on any other version, so that someone reads the calls again (go-kure/launcher#1413 moves
-// cel-go).
+// on any other version, so that someone reads the calls again when cel-go moves (the move
+// to v0.33 is go-kure/launcher#1491).
 var budgetedCalls = []string{operators.Equals, operators.NotEquals, operators.In, "distinct", "flatten", "join"}
 
 // compareBudget is the steps left to the comparisons of one site evaluation.

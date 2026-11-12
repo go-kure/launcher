@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/cel-go/cel"
+	"cel.dev/cel-go/cel"
 )
 
 const goldenFunctions = "testdata/celenv1-functions.txt"
@@ -58,8 +58,8 @@ func firstDifference(got, want string) string {
 // adds a function or an overload must fail here, so a model written today means the
 // same later.
 //
-// On cel-go v0.31.0 alone this test cannot tell a pinned library from an unpinned one,
-// because every pin equals the library default at that release. It passes with or
+// On cel-go v0.31.0 and v0.32.0 alone this test cannot tell a pinned library from an unpinned one,
+// because every pin equals the library default at those releases. It passes with or
 // without the pins and discriminates nothing about them. It earns its place on an older
 // release (v0.30.0, run with -modfile) and after a later move of cel-go. The golden file
 // is written with CELENV_GOLDEN_OUT=<path>, never by hand.
