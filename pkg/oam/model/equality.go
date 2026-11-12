@@ -329,14 +329,18 @@ func (e *budgetedJoin) Eval(a interpreter.Activation) ref.Val {
 	if !ok {
 		return types.ValOrErr(c, "no such overload: %v.join()", c.Type())
 	}
-	var sb strings.Builder
 	n := list.Size().(types.Int)
+	// every element is checked before the first byte is written: a join that fails after it copied
+	// a long prefix would be charged for none of it, and `|| true` hides the failure
 	for i := types.IntZero; i < n; i++ {
 		elem := list.Get(i)
-		str, ok := elem.(types.String)
-		if !ok {
+		if _, ok := elem.(types.String); !ok {
 			return types.WrapErr(errors.Errorf("join: invalid input of type %s", elem.Type().TypeName()))
 		}
+	}
+	var sb strings.Builder
+	for i := types.IntZero; i < n; i++ {
+		str := list.Get(i).(types.String)
 		// the buffer is checked before it grows, against the bytes that the next writes add: cel-go
 		// would build all of it and charge it after. The first element has no separator before it.
 		add := len(str)

@@ -248,8 +248,9 @@ and no list or map more than 1,000,000 elements: a value at the cap is allowed, 
 the evaluation with `ErrCostLimit`. A list or a map costs nothing more, because cel-go charges a call by
 the element count of its operands. The keys of `sort` and `sortBy` cost the bytes of the string and
 bytes elements they hold, because a sort compares them by content. The charge comes before the sort runs,
-so a sort that fails after it compared, in `xs.sort() == [] || true`, is paid for too. `join` checks its buffer before it
-writes, against the bytes that the next write adds (the first element has no separator before it).
+so a sort that fails after it compared, in `xs.sort() == [] || true`, is paid for too. `join` checks that every element is a
+string before it writes the first byte, so a join that fails copies nothing, and it checks its buffer
+before each write, against the bytes that the next write adds (the first element has no separator before it).
 `replace` is replaced by a version that computes the size of its result from the number of matches
 and stops before it builds a result over the cap. An identifier that is the key of an index, as in
 `m[k]`, is charged by its size at every lookup, because cel-go reads it through the attribute and not
