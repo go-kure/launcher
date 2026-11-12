@@ -286,7 +286,7 @@ are open.
 Every other member of this class found so far is bounded (`sortBy`, `join`, `replace`, comparisons,
 `flatten`, the keys of a typed `sort` and the keys of a result copy), and a test pins each. These
 limits are not reachable today, because no code registers a model's CEL for evaluation by default.
-go-kure/launcher#1461 stays open for them: the fix is to charge the bytes and the elements of a
+The list may not be complete; go-kure/launcher#1461 holds the current set. It stays open for them: the fix is to charge the bytes and the elements of a
 container on every read, so that no call needs its own charge. **go-kure/launcher#1461 must close
 before step 4a of go-kure/launcher#1261 or any public wiring of the evaluator.** The size of a
 successful `format` result is the separate go-kure/launcher#1462.
