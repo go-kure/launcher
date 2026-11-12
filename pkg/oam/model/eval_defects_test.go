@@ -87,6 +87,50 @@ func TestResultSizeIsBounded(t *testing.T) {
 	})
 }
 
+// Defect 1b: the text of a template that mixes text and holes has no size cap. Each hole is its own
+// evaluation, so a short template that repeats one large string builds a result of any size. The
+// single-hole path refuses a string over 1,000,000 bytes, and the text path owes the same limit.
+func TestMixedTextSizeIsBounded(t *testing.T) {
+	// The input image holds 500,000 bytes. A hole that reads it costs a few units, far under the
+	// cost limit, so only the size of the text can stop the repeats.
+	const big = "${inputs.image}"
+	sc := stdScope()
+	sc.Inputs["image"] = strings.Repeat("x", 500000)
+	repeat := func(n int) string {
+		return "a" + strings.Repeat(big, n)
+	}
+	t.Run("a text of exactly the limit is built", func(t *testing.T) {
+		// "a" and two holes make 1,000,001 bytes, so use no leading text for the exact case.
+		c := mustCompile(t, propModel(t, strings.Repeat(big, 2)))
+		got, _ := mustEval(t, c, propSite, sc)
+		if s, ok := got.(string); !ok || len(s) != 1000000 {
+			t.Fatalf("gave %T of length %d, want a string of 1000000 bytes", got, len(s))
+		}
+	})
+	t.Run("a text over the limit fails and wraps ErrCostLimit", func(t *testing.T) {
+		c := mustCompile(t, propModel(t, repeat(3)))
+		got, _, err := c.Eval(propSite, sc)
+		if err == nil {
+			t.Fatalf("a text of 1,500,001 bytes was built: %T", got)
+		}
+		if !errors.Is(err, ErrCostLimit) {
+			t.Errorf("error %q must wrap ErrCostLimit", err)
+		}
+		// The words rule out a stop by the cost of a hole, which also wraps ErrCostLimit.
+		if !strings.Contains(err.Error(), "the text holds more than 1000000 bytes") || !strings.Contains(err.Error(), propSite) {
+			t.Errorf("error %q must say the text holds more than 1000000 bytes and name the site %q", err, propSite)
+		}
+	})
+	t.Run("the literal text counts too", func(t *testing.T) {
+		// Two holes make exactly the limit, so the one byte of literal text pushes it over.
+		c := mustCompile(t, propModel(t, repeat(2)))
+		_, _, err := c.Eval(propSite, sc)
+		if err == nil || !errors.Is(err, ErrCostLimit) || !strings.Contains(err.Error(), "the text holds more than 1000000 bytes") {
+			t.Errorf("a text of 1,000,001 bytes gave error %v, want one that wraps ErrCostLimit and says the text holds more than 1000000 bytes", err)
+		}
+	})
+}
+
 // Defect 2: a bytes result shares its backing array with the cached literal. A write to the
 // result changes what the next evaluation of the site returns, for every Compiled that shares
 // the cache.
