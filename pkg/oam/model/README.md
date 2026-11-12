@@ -265,6 +265,17 @@ on a computed value. Three rows of the comparison test guard the name: `[1, 1.0]
 `[1u, 1][0] == [1u, 1][1]` and `[[1], {'a': 1}][0] == [[1], {'a': 1}][1]` must report the cost of cel-go
 (25, 25 and 105, and 27, 27 and 107 without the skip). A cel-go version that renames the type fails them.
 
+**Known limit: a `format` that fails after it copies.** A `format` that copies a long string argument and
+then fails on a later clause, as in `'%s%d'.format([s, 'x']) == '' || true`, is charged nothing for the
+copy, because the charge reads the result and a failure has none. A loop that drops the failure can
+process at least 2 GB below both budgets. Every other member of this class found so far is bounded
+(`sort`, `sortBy`, `join`, `replace`, comparisons, `flatten` and the keys of a result copy), and a
+test pins each. This limit is not reachable today, because no code registers a model's CEL for
+evaluation by default. go-kure/launcher#1461 stays open for it: the fix is to charge the bytes of
+a container on every read, so that no call needs its own charge. **go-kure/launcher#1461 must close
+before step 4a of go-kure/launcher#1261 or any public wiring of the evaluator.** The size of a
+successful `format` result is the separate go-kure/launcher#1462.
+
 **Result size.** The Go copy of a single-hole result holds at most 1,000,000 units, counted at every
 depth. A list element or a map entry is one unit, and so is each byte of a bytes value. A map key
 costs a further unit for each 1,024 bytes, twice, because the copy hashes it to read the entry and to insert it. The copy is
