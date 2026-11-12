@@ -1,0 +1,154 @@
+package model
+
+import (
+	"fmt"
+	"reflect"
+	"runtime/debug"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/google/cel-go/cel"
+
+	"github.com/go-kure/launcher/pkg/errors"
+)
+
+// go-kure/launcher#1451: cel-go compares two lists element by element at every depth, and
+// the cost limit charges the outer lengths only, so a shared nested list made a comparison
+// of N^4 steps cost O(N). The evaluation bounds the values a site compares.
+
+// nested4 builds a list of depth 4 whose levels share one list, so it holds n^4 values when
+// it is read as a tree. final is the expression that reads d.
+func nested4(n int, final string) string {
+	return fmt.Sprintf("cel.bind(a, lists.range(%d), cel.bind(b, lists.range(%d).map(i, a), cel.bind(c, lists.range(%d).map(i, b), cel.bind(d, lists.range(%d).map(i, c), %s))))", n, n, n, n, final)
+}
+
+func evalValue(t *testing.T, expr string) (any, error) {
+	t.Helper()
+	c := mustCompile(t, oneValue(t, "${"+expr+"}"))
+	got, _, err := c.Eval("spec.values[0].expr", stdScope())
+	return got, err
+}
+
+func TestComparisonOfSharedNestedValuesIsBounded(t *testing.T) {
+	refused := []struct{ name, expr string }{
+		{"==", nested4(60, "d == d")},
+		{"!=", nested4(60, "d != d")},
+		{"in a list", nested4(60, "d in [d]")},
+		{"distinct", nested4(60, "[d, d].distinct().size() == 1")},
+		{"exists", nested4(60, "[d].exists(x, x == d)")},
+		{"all", nested4(60, "[d].all(x, x == d)")},
+		{"maps", nested4(60, "{'k': d} == {'k': d}")},
+		{"many comparisons share one budget", nested4(20, "lists.range(100).map(i, d == d).size()")},
+		{"one value over the limit", "cel.bind(a, lists.range(999), cel.bind(b, lists.range(1000).map(i, a), b == b))"},
+	}
+	for _, tc := range refused {
+		t.Run("refused/"+tc.name, func(t *testing.T) {
+			got, err := evalValue(t, tc.expr)
+			if err == nil {
+				t.Fatalf("the comparison gave %v, want a refusal", got)
+			}
+			if !errors.Is(err, ErrCostLimit) || !strings.Contains(err.Error(), "spec.values[0].expr") {
+				t.Errorf("error %q must wrap ErrCostLimit and name the site", err)
+			}
+		})
+	}
+	allowed := []struct {
+		name, expr string
+		want       any
+	}{
+		{"a flat comparison of 100000 values", "lists.range(100000) == lists.range(100000)", true},
+		{"a nested comparison of 837,930 values", nested4(30, "d == d"), true},
+		{"distinct of 837,930 values", nested4(30, "[d, d].distinct().size() == 1"), true},
+		{"one value just under the limit", "cel.bind(a, lists.range(999), cel.bind(b, lists.range(999).map(i, a), b == b))", true},
+		{"different values stop early", nested4(60, "d == [d[0]]"), false},
+	}
+	for _, tc := range allowed {
+		t.Run("allowed/"+tc.name, func(t *testing.T) {
+			got, err := evalValue(t, tc.expr)
+			if err != nil || got != tc.want {
+				t.Errorf("got %v, %v, want %v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// stockResult is what cel-go gives with no change to its comparison.
+func stockResult(t *testing.T, expr string) string {
+	t.Helper()
+	env, err := newEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ast, iss := env.Compile("(" + expr + ")")
+	if iss.Err() != nil {
+		return "compile error: " + iss.Err().Error()
+	}
+	prog, err := env.Program(ast, cel.CostLimit(maxExpressionCost))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := prog.Eval(map[string]any{})
+	if err != nil {
+		return "error"
+	}
+	g, err := toGo(out)
+	if err != nil {
+		return "error"
+	}
+	return fmt.Sprintf("%T %v", g, g)
+}
+
+func TestComparisonGivesWhatCelGoGives(t *testing.T) {
+	corpus := []string{
+		"[1, 1.0][0] == [1, 1.0][1]", "[1u, 1][0] == [1u, 1][1]", "[1, 'x'] == [1.0, 'x']", "[1, 2] == [1, 2]", "[1, 2] == [2, 1]", "[1] != [1, 2]", "[] == []",
+		"{'a': 1, 'b': 'x'} == {'a': 1.0, 'b': 'x'}", "{'a': 1} == {'b': 1}", "{'a': [1, {'b': 2}]} == {'a': [1, {'b': 2}]}",
+		"[double('NaN')] == [double('NaN')]", "[[1], {'a': 1}][0] == [[1], {'a': 1}][1]", "[1u, 1] == [1, 1u]", "'x' == 'x'", "null == null", "[null] == [null]",
+		"[[1], [2]] != [[1], [3]]", "1 in [1, 2]", "1.0 in [1, 'x']", "[1] in [[1], [2]]", "[3] in [[1], [2]]", "'a' in {'a': 1}",
+		"2 in {1: 'a', 2: 'b'}", "[1, 1, 2, 1.0, 'a'].distinct()", "[[1], [1], [2]].distinct()", "[].distinct()",
+		"[{'a': 1, 'b': 'x'}, {'a': 1.0, 'b': 'x'}].distinct().size()", "b'ab' == b'ab'", "[b'a'] == [b'a']", "duration('1s') == duration('1000ms')",
+		"[1, 'x'] != [1, 'y']", "{1: 'a', 'k': 'b'} == {1u: 'a', 'k': 'b'}", "[1, 2, 3].exists(x, x == 2)", "[[1], [2]].all(x, x != [3])",
+		"[1, 2].distinct() == [1, 2]", "[[1, [2]]] in [[[1, [2]]]]", "{'a': {'b': [1]}} != {'a': {'b': [2]}}",
+	}
+	for _, expr := range corpus {
+		t.Run(expr, func(t *testing.T) {
+			want := stockResult(t, expr)
+			if strings.HasPrefix(want, "compile error") || want == "error" {
+				t.Fatalf("test bug: cel-go gives %q for the corpus expression", want)
+			}
+			got, err := evalValue(t, expr)
+			if err != nil {
+				t.Fatalf("Eval: %v, cel-go gives %s", err, want)
+			}
+			if have := fmt.Sprintf("%T %v", got, got); have != want {
+				t.Errorf("gave %s, cel-go gives %s", have, want)
+			}
+		})
+	}
+}
+
+// The comparison replaces four calls. They were read from cel-go v0.31.0: the callers of
+// Equal in common/types (Contains, behind `in`), in ext (distinct) and in interpreter (the
+// == and != nodes). A new cel-go version, or a new version of a pinned extension library, can
+// add a caller, and a caller that is not replaced is the gap of go-kure/launcher#1451 again.
+func TestComparisonCallSetIsReadFromCelGo(t *testing.T) {
+	want := []string{"@in", "_!=_", "_==_", "distinct"}
+	got := slices.Clone(budgetedCalls)
+	slices.Sort(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the budgeted calls are %v, want %v", got, want)
+	}
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		t.Fatal("no build info: the cel-go version cannot be read")
+	}
+	var version string
+	for _, d := range bi.Deps {
+		if d.Path == "github.com/google/cel-go" {
+			version = d.Version
+		}
+	}
+	if version != "v0.31.0" {
+		t.Fatalf("cel-go is %q. The four budgeted calls were read from v0.31.0. Search common/types, ext and interpreter for every caller of Equal in the new version, extend budgetedCalls, then change this version (go-kure/launcher#1413 moves cel-go)", version)
+	}
+}
