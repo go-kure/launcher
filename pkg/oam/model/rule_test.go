@@ -131,6 +131,95 @@ func TestRule_BoundNameFollowsTheNamingHook(t *testing.T) {
 	}
 }
 
+// Case 2b: a kind part (a Secret) is named by the hook when the build makes it, and a later part
+// reads that name.
+func TestRule_BoundNameOfAKindPartFollowsTheHook(t *testing.T) {
+	doc := modelHeader + `
+    - id: creds
+      name: creds
+      type: ` + secretType + `
+      properties: {}
+    - id: cfg
+      name: cfg
+      type: configmap@v1
+      properties:
+        data:
+          secret: "${ parts.creds.object }"
+`
+	tr, _ := registered(t, doc)
+	objs := objectsOK(t, tr, orders(), hookedNaming(oam.NameRoleObject))
+	secrets := names(objs, "Secret")
+	if len(secrets) != 1 {
+		t.Fatalf("the build made Secrets %v, want one", secrets)
+	}
+	var cm map[string]any
+	for k, o := range objs {
+		if k[0] == "ConfigMap" {
+			cm = o
+		}
+	}
+	if got := prop(t, cm, "data", "secret"); got != secrets[0] {
+		t.Fatalf("the ConfigMap reads the Secret %v, but the build made it %s", got, secrets[0])
+	}
+}
+
+// renamerRule lowers a document of kind Renamer into an Application named "<name>-new".
+type renamerRule struct{}
+
+func (renamerRule) Kind() string { return "Renamer" }
+
+func (renamerRule) LowerDocument(doc *oam.Application, _ oam.LoweringContext) (oam.LoweringResult, error) {
+	return oam.LoweringResult{Documents: []oam.Application{{
+		APIVersion: oam.SupportedAPIVersion, Kind: "Application",
+		Metadata: oam.Metadata{Name: doc.Metadata.Name + "-new", Namespace: doc.Metadata.Namespace},
+		Spec:     oam.ApplicationSpec{Components: doc.Spec.Components},
+	}}}, nil
+}
+
+// Case 2c: a document rule renames the document, and a hook that names by the document reads
+// the new name in the build, so the bound name reads it too.
+func TestRule_BoundNameUsesTheRenamedDocument(t *testing.T) {
+	tr, _ := registered(t, modelHeader+dbThenWorker)
+	tr.RegisterDocumentLowering(renamerRule{})
+	naming := func(r oam.NameRequest) (string, bool) {
+		if r.Role != oam.NameRolePostgresqlCluster {
+			return "", false
+		}
+		return r.Application + "-" + r.Default, true
+	}
+	app := &oam.Application{
+		APIVersion: oam.SupportedAPIVersion, Kind: "Renamer",
+		Metadata: oam.Metadata{Name: "shop", Namespace: "demo"},
+		Spec:     oam.ApplicationSpec{Components: orders()},
+	}
+	cluster, err := tr.Transform(app, oam.TransformContext{Namespace: "demo", Naming: naming})
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	apps, err := oam.GenerateApplications(cluster)
+	if err != nil {
+		t.Fatalf("GenerateApplications: %v", err)
+	}
+	var clusterName, secret string
+	for _, a := range apps {
+		for _, o := range a.Objects {
+			obj := *o
+			raw, _ := json.Marshal(obj)
+			var m map[string]any
+			_ = json.Unmarshal(raw, &m)
+			switch m["kind"] {
+			case "Cluster":
+				clusterName = obj.GetName()
+			case "Deployment":
+				secret, _ = workerSecretName(t, map[[2]string]map[string]any{{"Deployment", obj.GetName()}: m}).(string)
+			}
+		}
+	}
+	if clusterName == "" || secret != clusterName+"-app" {
+		t.Fatalf("the worker reads the Secret %q, but the Cluster is %q", secret, clusterName)
+	}
+}
+
 // Case 3: an input takes its default, and the component's own property overrides it.
 func TestRule_InputDefaultAndOverride(t *testing.T) {
 	doc := strings.Replace(modelHeader, "  parts:\n", "  inputs:\n    key:\n      type: string\n      default: dflt\n  parts:\n", 1) + `
@@ -391,6 +480,64 @@ func TestRegistry_RefusesADeclaredType(t *testing.T) {
 	}
 	if got := reg.Rule(m.Key()); got == nil {
 		t.Error("the refused second registration removed the first rule")
+	}
+}
+
+// The depth is the Transformer's, so a second Registry of it counts the models of the first.
+func TestRegistry_SecondRegistryCountsTheDepth(t *testing.T) {
+	tr := expandTransformer(t)
+	first := model.NewRegistry(tr)
+	below := "configmap@v1"
+	for i := 1; i <= 4; i++ {
+		m, err := model.Load([]byte(nested(i, below)))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if err := first.Register(m); err != nil {
+			t.Fatalf("depth %d: %v", i, err)
+		}
+		below = fmt.Sprintf("level%d.acme.example@v1", i)
+	}
+	m, err := model.Load([]byte(nested(5, below)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := model.NewRegistry(tr).Register(m); !errors.Is(err, model.ErrLimit) {
+		t.Fatalf("a second Registry took a model nested 5 deep: %v", err)
+	}
+}
+
+// A model whose type the Transformer refuses to declare (its short name is a built-in type) fails
+// at Register with no rule left on the Transformer, so the same refusal comes again.
+func TestRegistry_RefusedDeclarationLeavesNoRule(t *testing.T) {
+	tr := expandTransformer(t)
+	reg := model.NewRegistry(tr)
+	m, err := model.Load([]byte(strings.Replace(modelHeader, "webapp.acme.example", "configmap.acme.example", 1) + `
+    - id: p
+      name: p
+      type: configmap@v1
+      properties: {}
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	var first string
+	for i := 0; i < 2; i++ {
+		err := reg.Register(m)
+		if err == nil {
+			t.Fatal("a model whose type clashes with a built-in type was registered")
+		}
+		if strings.Contains(err.Error(), "already") || strings.Contains(err.Error(), "panic") {
+			t.Fatalf("attempt %d fails for another reason: %v", i+1, err)
+		}
+		if i == 0 {
+			first = err.Error()
+		} else if err.Error() != first {
+			t.Errorf("the second refusal %q differs from the first %q", err, first)
+		}
+		if _, ok := tr.ComponentLoweringRuleFor(m.Key()); ok {
+			t.Fatal("a refused model left its rule on the Transformer")
+		}
 	}
 }
 

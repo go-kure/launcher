@@ -1049,8 +1049,9 @@ func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext) ([]l
 				if docChanged {
 					// A rule may emit a type by its declared identity, as an author may. The next
 					// round and the settled check dispatch on the registered name, so the emitted
-					// types are resolved to it here, as the authored ones are before round 0.
-					resolved, err := t.resolveTypes(doc)
+					// types are resolved to it here, as the authored ones are before round 0. A plain
+					// name a handler or rule is registered under stays as written.
+					resolved, err := t.resolveEmitted(doc)
 					if err != nil {
 						return nil, &LoweringError{Origin: d.origin, Chain: chain, Cause: err}
 					}

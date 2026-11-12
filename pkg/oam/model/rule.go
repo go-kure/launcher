@@ -21,9 +21,10 @@ var ErrLimit = errors.New("model: limit exceeded")
 // the components of its parts. A Registry makes it. It is safe for concurrent use, and the
 // model it was made from must not change.
 type Rule struct {
-	m *Model
-	c *Compiled
-	t *oam.Transformer
+	m     *Model
+	c     *Compiled
+	t     *oam.Transformer
+	depth int // 1 plus the depth of the deepest part that is a model
 }
 
 // ComponentType is the registry key of the model.
@@ -51,8 +52,10 @@ func (r *Rule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 	for k, v := range comp.Properties {
 		inputs[k] = v
 	}
+	// The name a Naming hook is asked in the build: the document as it stands at this round
+	// (a document rule may have renamed it), else the one the origin names.
 	application := lctx.Origin.Document
-	if application == "" && lctx.Document != nil {
+	if lctx.Document != nil {
 		application = lctx.Document.Metadata.Name
 	}
 	sc := Scope{Inputs: inputs, Self: Self{Name: comp.Name, Application: application}}
