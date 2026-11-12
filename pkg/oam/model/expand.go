@@ -94,9 +94,14 @@ func (s *site) checkPartReads(path string, parts map[string]map[string]string) e
 // type identities of the parts (registry.DeclareTypes for the built-in types): a part type that
 // does not resolve declares no output, so a read of it fails as an undeclared key.
 //
+// partName turns the name of a part (its evaluated name, or its id) into the name of the
+// component. A lowering rule passes the allocator here, so that a collision fails the build and
+// the name a later part reads is the one the build uses. A nil partName keeps the name as it is.
+// More than MaxParts components fail with ErrLimit, counted after when and forEach.
+//
 // It does not run the transform and does not check the traits against a capability: the
 // components are the input of a later step. A failure returns no component.
-func (c *Compiled) Expand(tr *oam.Transformer, sc Scope, naming func(oam.NameRequest) (string, bool)) ([]oam.Component, error) {
+func (c *Compiled) Expand(tr *oam.Transformer, sc Scope, naming func(oam.NameRequest) (string, bool), partName func(string) (string, error)) ([]oam.Component, error) {
 	sc.Values = make(map[string]any, len(c.values))
 	sc.Parts = map[string]map[string]string{}
 	sc.Loop = nil
@@ -110,7 +115,7 @@ func (c *Compiled) Expand(tr *oam.Transformer, sc Scope, naming func(oam.NameReq
 	var comps []oam.Component
 	for i, p := range c.parts {
 		base := "spec.parts[" + strconv.Itoa(i) + "]"
-		out, err := c.expandPart(tr, base, p, sc, naming)
+		out, err := c.expandPart(tr, base, p, sc, naming, partName, len(comps))
 		if err != nil {
 			return nil, err
 		}
@@ -123,8 +128,8 @@ func (c *Compiled) Expand(tr *oam.Transformer, sc Scope, naming func(oam.NameReq
 }
 
 // expandPart builds the components of one part and, for a part that is read, binds its outputs
-// in sc.Parts.
-func (c *Compiled) expandPart(tr *oam.Transformer, base string, p Part, sc Scope, naming func(oam.NameRequest) (string, bool)) ([]oam.Component, error) {
+// in sc.Parts. have is the number of components the earlier parts gave.
+func (c *Compiled) expandPart(tr *oam.Transformer, base string, p Part, sc Scope, naming func(oam.NameRequest) (string, bool), partName func(string) (string, error), have int) ([]oam.Component, error) {
 	if p.When != "" {
 		on, _, err := c.Eval(base+".when", sc)
 		if err != nil {
@@ -143,6 +148,9 @@ func (c *Compiled) expandPart(tr *oam.Transformer, base string, p Part, sc Scope
 		list, _ := in.([]any)
 		instances = list
 	}
+	if have+len(instances) > MaxParts {
+		return nil, errors.Errorf("%w: %s gives more than %d parts in one render", ErrLimit, base, MaxParts)
+	}
 	var comps []oam.Component
 	for _, el := range instances {
 		is := sc
@@ -150,6 +158,13 @@ func (c *Compiled) expandPart(tr *oam.Transformer, base string, p Part, sc Scope
 		comp, err := c.buildComponent(base, p, is)
 		if err != nil {
 			return nil, err
+		}
+		if partName != nil {
+			name, err := partName(comp.Name)
+			if err != nil {
+				return nil, errors.Wrapf(err, "model: %s: part %q", base, p.ID)
+			}
+			comp.Name = name
 		}
 		if p.ForEach == nil && p.When == "" {
 			outs, err := tr.ComponentOutputsNamed(sc.Self.Application, &comp, naming)

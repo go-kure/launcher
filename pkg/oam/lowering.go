@@ -327,6 +327,17 @@ func (l LoweringContext) HasNamingHook() bool {
 	return l.Namer != nil && l.Namer.hook != nil
 }
 
+// NamingHook returns the TransformContext.Naming hook of the run, or nil where none is set.
+// A rule hands it to Transformer.ComponentOutputsNamed, so that it learns the name another
+// component's object takes under the hook. It only reads: the hook is asked by whoever names
+// an object, never on a rule's behalf.
+func (l LoweringContext) NamingHook() func(NameRequest) (string, bool) {
+	if l.Namer == nil {
+		return nil
+	}
+	return l.Namer.hook
+}
+
 // WithCapabilities returns a copy of l whose Capability reads look up m. It is for a
 // test driver that calls a rule directly; the engine wires the context it hands a rule
 // itself. The copy records nothing: a read through it is counted nowhere.
@@ -1035,6 +1046,16 @@ func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext) ([]l
 				changed = true
 			}
 			for _, doc := range expanded {
+				if docChanged {
+					// A rule may emit a type by its declared identity, as an author may. The next
+					// round and the settled check dispatch on the registered name, so the emitted
+					// types are resolved to it here, as the authored ones are before round 0.
+					resolved, err := t.resolveTypes(doc)
+					if err != nil {
+						return nil, &LoweringError{Origin: d.origin, Chain: chain, Cause: err}
+					}
+					doc = resolved
+				}
 				next = append(next, loweringDoc{doc: doc, origin: d.origin, slot: d.slot, apiVersion: d.apiVersion})
 			}
 		}
