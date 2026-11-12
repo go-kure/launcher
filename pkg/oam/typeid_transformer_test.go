@@ -60,19 +60,56 @@ func declared(t *testing.T) (*Transformer, *[]string) {
 	return tr, seen
 }
 
+// declareRefusals is the input sets DeclareComponentTypes refuses. CheckComponentTypes is held to
+// the same table, so the dry run cannot drift from the real declaration.
+var declareRefusals = map[string]map[string]TypeID{
+	"a name with no handler or rule": {"nothing": {Name: "nothing.acme.example", Version: "v1"}},
+	"an invalid identity":            {"widget": {Name: "Widget.acme.example", Version: "v1"}},
+	"two names, one identity": {
+		"widget": {Name: "widget.acme.example", Version: "v1"},
+		"gadget": {Name: "widget.acme.example", Version: "v1.0.0"},
+	},
+	"a short name that equals another qualified name": {
+		"widget": {Name: "gadget", Version: "v1"},
+		"gadget": {Name: "gadget.acme.example", Version: "v1"},
+	},
+}
+
+// CheckComponentTypes gives the refusal DeclareComponentTypes gives, for every input set of the
+// table and for the sets it takes, once a handler is registered under each name (the dry run is
+// for a name whose rule is not registered yet, so it does not look for one).
+func TestCheckComponentTypes_AgreesWithDeclare(t *testing.T) {
+	sets := map[string]map[string]TypeID{
+		"a set it takes":                 {"later": {Name: "later.acme.example", Version: "v1"}},
+		"a short name that clashes":      {"later": {Name: "widget", Version: "v1"}},
+		"a version declared twice":       {"later": {Name: "widget.acme.example", Version: "v1.0.0"}},
+		"a short name of a declared one": {"later": {Name: "widget.other.example", Version: "v1"}},
+	}
+	for name, ids := range declareRefusals {
+		sets[name] = ids
+	}
+	for name, ids := range sets {
+		t.Run(name, func(t *testing.T) {
+			tr, _ := declared(t)
+			for key := range ids {
+				if !tr.isComponentKey(key) {
+					tr.RegisterComponent(key, &stubComponentHandler{typ: key})
+				}
+			}
+			check := tr.CheckComponentTypes(ids)
+			if _, err := tr.ResolveComponentType("later"); err == nil {
+				t.Fatal("the dry run declared a type")
+			}
+			declare := tr.DeclareComponentTypes(ids)
+			if (check == nil) != (declare == nil) || (check != nil && check.Error() != declare.Error()) {
+				t.Fatalf("CheckComponentTypes = %v, DeclareComponentTypes = %v", check, declare)
+			}
+		})
+	}
+}
+
 func TestDeclareComponentTypes_Refuses(t *testing.T) {
-	for name, ids := range map[string]map[string]TypeID{
-		"a name with no handler or rule": {"nothing": {Name: "nothing.acme.example", Version: "v1"}},
-		"an invalid identity":            {"widget": {Name: "Widget.acme.example", Version: "v1"}},
-		"two names, one identity": {
-			"widget": {Name: "widget.acme.example", Version: "v1"},
-			"gadget": {Name: "widget.acme.example", Version: "v1.0.0"},
-		},
-		"a short name that equals another qualified name": {
-			"widget": {Name: "gadget", Version: "v1"},
-			"gadget": {Name: "gadget.acme.example", Version: "v1"},
-		},
-	} {
+	for name, ids := range declareRefusals {
 		t.Run(name, func(t *testing.T) {
 			tr := NewTransformer(map[string]ComponentHandler{"widget": &stubComponentHandler{typ: "widget"}}, nil)
 			tr.RegisterComponentLowering(stubComponentLoweringRule{typ: "gadget"})
