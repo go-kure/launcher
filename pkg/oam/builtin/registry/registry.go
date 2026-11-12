@@ -8,7 +8,7 @@
 //
 // A type that is a lowering rule is never also a handler of the same position:
 // RegisterComponentLowering and RegisterTraitLowering (which
-// RegisterBuiltinTraitLowering calls) panic on that collision. A consumer that
+// RegisterBuiltinComponentLowering and RegisterBuiltinTraitLowering call) panic on that collision. A consumer that
 // replaces a handler sets its own under the same key; one that replaces a
 // lowered type with a handler deletes the type from the lowering-rule map.
 //
@@ -16,7 +16,7 @@
 //
 //	t := oam.NewTransformer(registry.ComponentHandlers(), nil)
 //	for _, r := range registry.ComponentLoweringRules() {
-//		t.RegisterComponentLowering(r)
+//		t.RegisterBuiltinComponentLowering(r)
 //	}
 //	for name, h := range registry.TraitHandlers() {
 //		t.RegisterBuiltinTrait(name, h)
@@ -175,7 +175,9 @@ func ComponentHandlers() map[string]oam.ComponentHandler {
 
 // ComponentLoweringRules returns the built-in component-position lowering rules
 // (oam.ComponentLoweringRule) keyed by the component type they claim, for
-// RegisterComponentLowering. No type here is also a key of ComponentHandlers.
+// RegisterBuiltinComponentLowering, which marks them as launcher's own so the
+// capability lists do not judge the traits they write. No type here is also a key
+// of ComponentHandlers.
 //
 // Each call returns a new map: a caller may drop or replace entries without
 // affecting another caller, and a rule launcher adds later appears here

@@ -34,7 +34,7 @@ func expandTransformer(t *testing.T) *oam.Transformer {
 	t.Helper()
 	tr := oam.NewTransformer(registry.ComponentHandlers(), nil)
 	for _, r := range registry.ComponentLoweringRules() {
-		tr.RegisterComponentLowering(r)
+		tr.RegisterBuiltinComponentLowering(r)
 	}
 	for name, h := range registry.TraitHandlers() {
 		tr.RegisterBuiltinTrait(name, h)

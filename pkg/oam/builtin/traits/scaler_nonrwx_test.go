@@ -26,8 +26,8 @@ func nonRWXScalerTransformer() *oam.Transformer {
 		"service":        &components.ServiceHandler{},
 		"serviceaccount": &components.ServiceAccountHandler{},
 	}, nil)
-	tr.RegisterComponentLowering(components.WebserviceRule{})
-	tr.RegisterComponentLowering(components.WorkerRule{})
+	tr.RegisterBuiltinComponentLowering(components.WebserviceRule{})
+	tr.RegisterBuiltinComponentLowering(components.WorkerRule{})
 	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})
 	tr.RegisterBuiltinTrait("pvc", &traits.PVCHandler{})
 	tr.RegisterBuiltinTrait("scaler", &traits.ScalerHandler{})

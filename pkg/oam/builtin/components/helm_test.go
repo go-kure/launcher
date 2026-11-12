@@ -861,7 +861,7 @@ func TestHelmRule_InlineSourceAddressShape(t *testing.T) {
 func TestHelmRule_InlineBucketProviderEnum(t *testing.T) {
 	validate := func(provider string) error {
 		tr := oam.NewTransformer(nil, nil)
-		tr.RegisterComponentLowering(components.HelmRule{})
+		tr.RegisterBuiltinComponentLowering(components.HelmRule{})
 		_, err := tr.ValidateAuthoredProperties(&oam.Application{Spec: oam.ApplicationSpec{
 			Components: []oam.Component{{Name: "web", Type: "helm", Properties: map[string]any{
 				"chart":  "charts/a",

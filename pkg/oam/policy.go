@@ -45,7 +45,12 @@ type Policy interface {
 	AllowHostIPC() bool
 	AllowHostPathVolumes() bool
 
-	// Capability constraints — nil means unconstrained.
+	// Capability constraints — nil means unconstrained. They judge the trait types
+	// an author wrote and those a component-position lowering rule wrote onto a part
+	// it emitted, so an emitted trait also counts toward RequiredCapabilities.
+	// Launcher's own component rules (RegisterBuiltinComponentLowering) are exempt:
+	// their traits are launcher's opinions. A trait-position rule's output is not
+	// judged: its authored type is.
 	AllowedCapabilities() []string
 	ForbiddenCapabilities() []string
 	RequiredCapabilities() []string

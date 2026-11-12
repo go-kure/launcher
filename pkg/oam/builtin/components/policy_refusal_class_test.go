@@ -498,7 +498,7 @@ func TestPolicyRefusalClass_ComponentApplyPolicy(t *testing.T) {
 // the storage class, in the text it had as a transform error.
 func TestPolicyRefusalClass_PostgresqlStorageFallback(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponentLowering(components.PostgresqlRule{})
+	tr.RegisterBuiltinComponentLowering(components.PostgresqlRule{})
 	tr.RegisterComponent("cnpg-cluster", &components.CnpgClusterHandler{})
 	tr.RegisterComponent("cnpg-objectstore", &components.CnpgObjectStoreHandler{})
 	tr.RegisterComponent("cnpg-pooler", &components.CnpgPoolerHandler{})

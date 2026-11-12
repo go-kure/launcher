@@ -377,7 +377,7 @@ func TestHelmRule_EndpointsNeverForwarded(t *testing.T) {
 // build gives it, and checks the endpoints it gets back.
 func TestChartEndpoints_ThroughTheTransformer(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponentLowering(components.HelmRule{})
+	tr.RegisterBuiltinComponentLowering(components.HelmRule{})
 	tr.RegisterComponent("helmrelease", &components.HelmReleaseHandler{})
 	tr.RegisterComponent("helmtemplate", &components.HelmTemplateHandler{})
 	for _, k := range chartEndpointKinds() {

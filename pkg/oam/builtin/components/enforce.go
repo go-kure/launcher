@@ -125,8 +125,8 @@ func enforceMaxStorageSize(current, max string) error {
 // ForbiddenCapabilities/RequiredCapabilities, but those gate OAM trait-type
 // usage (e.g. "ingress", "autoscaling"), not corev1 Linux capability strings
 // (e.g. "NET_ADMIN") — their only call site is
-// enforceCapabilityConstraints(authoredTraitTypes, policy) in transform.go,
-// operating on Component.Traits[].Type. Wiring securityContext.capabilities.
+// enforceCapabilityConstraints in transform.go, operating on the authored
+// Component.Traits[].Type plus the traits a component-position rule emitted. Wiring securityContext.capabilities.
 // add/drop through those three methods, as suggested in a go-kure/launcher#278 review
 // round, would check container capability strings against a policy list of
 // trait-type names — always-fail or always-no-op depending on the data, never

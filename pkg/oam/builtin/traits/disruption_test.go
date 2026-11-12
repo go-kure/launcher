@@ -46,7 +46,7 @@ func (o *opaqueScalerConfig) Generate(app *stack.Application) ([]*client.Object,
 func disruptionTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(registry.ComponentHandlers(), nil)
 	for _, r := range registry.ComponentLoweringRules() {
-		tr.RegisterComponentLowering(r)
+		tr.RegisterBuiltinComponentLowering(r)
 	}
 	for name, h := range registry.TraitHandlers() {
 		tr.RegisterBuiltinTrait(name, h)
