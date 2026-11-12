@@ -213,7 +213,12 @@ Runs on main and `release/*` branches only (not PRs):
   two API-reference pages before they were split, so a link from outside that names an old section
   still lands on a page that has it. Second, every link with a `#fragment` on every built page must
   point at an id that exists on the target page. The shared link check does not read fragments.
-  The check counts links to other sites and links outside the base path, and does not read them.
+  A link to the published site (`https://www.gokure.dev/launcher/...`) is read against the local
+  build. A README links its parts that way, so the link goes to the live site and not to the
+  version the reader has checked out. The check counts links to other sites and links outside the
+  base path, and does not read them. Third, every hand-written part of an API-reference page
+  (`site/content/api-reference/<package>/<part>.md`) must be a `guides` entry of a package in
+  `site/docs-map.yaml`. The doc gate counts a guide as the package docs and counts nothing else.
   The target runs the self-test (`site/scripts/check-api-anchors-test.sh`) first, so a check
   that can no longer fail goes red as well.
 - **Issue-reference guard** — `issue-refs` runs `make check-issue-refs`'s first two steps
