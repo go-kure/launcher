@@ -2,7 +2,7 @@
 -_: scalar-out
 @in: scalar-out
 @not_strictly_false: scalar-out
-@sortByAssociatedKeys: bounded (the result costs the bytes of its elements: scanCalls in charge.go)
+@sortByAssociatedKeys: bounded (budgetedSort in charge.go charges the bytes of the keys before it sorts)
 _!=_: scalar-out
 _%_: scalar-out
 _&&_: scalar-out
@@ -54,7 +54,7 @@ replace: amplifying (budgetedReplace in charge.go stops before it builds a resul
 reverse: bounded (same elements as its operand)
 size: scalar-out
 slice: bounded (no more elements than its operand)
-sort: bounded (the result costs the bytes of its elements: scanCalls in charge.go)
+sort: bounded (budgetedSort in charge.go charges the bytes of the keys before it sorts)
 split: bounded (no more bytes than its operand)
 startsWith: scalar-out
 string: bounded (same size as its operand, or a number)

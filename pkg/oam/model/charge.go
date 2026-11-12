@@ -1,7 +1,9 @@
 package model
 
 import (
+	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/google/cel-go/common/types"
@@ -20,10 +22,12 @@ import (
 // is charged against the budget of the comparisons: a string or bytes value costs one step for
 // each 1,024 bytes, and no string, bytes value, list or map may hold more than maxValueSize
 // bytes or elements. A list or map costs nothing more, because cel-go charges a call by the
-// element count of its operands. The one exception is the result of sort and sortBy, which
-// costs the bytes of the string and bytes elements it holds: a sort compares them by content
-// and cel-go counts each as one element. The calls that build a big output from small operands
-// check it before they build it: join (equality.go) and lists.range, which cel-go caps itself.
+// element count of its operands. The one exception is the keys of sort and sortBy, which cost
+// the bytes of the string and bytes elements they hold: a sort compares them by content and
+// cel-go counts each as one element. The charge comes before the sort runs, so a sort that
+// fails after it compared is paid for too. The calls that build a big output from small operands
+// check it before they build it: join (equality.go), replace and lists.range, which cel-go caps
+// itself.
 // testdata/celenv1-charges.txt names a class for every function of the pinned environment.
 //
 // `&&`, `||`, the conditional and a comprehension are no calls, so no node of them is wrapped and
@@ -43,9 +47,6 @@ const chargeStopMessage = "a value holds more than 1000000 bytes or elements, or
 func chargeStop() ref.Val {
 	panic(interpreter.EvalCancelledError{Cause: interpreter.CostLimitExceeded, Message: chargeStopMessage})
 }
-
-// scanCalls are the calls whose result costs the bytes of its elements.
-var scanCalls = map[string]bool{"sort": true, "@sortByAssociatedKeys": true}
 
 // charge spends the size of v on the budget and stops the evaluation when v is too large or
 // the budget is gone. scan adds the bytes of the string and bytes elements of a list.
@@ -91,10 +92,13 @@ func chargeDecorator(i interpreter.Interpretable) (interpreter.Interpretable, er
 	switch x := i.(type) {
 	case interpreter.InterpretableCall:
 		var call interpreter.InterpretableCall = x
-		if x.Function() == "replace" {
+		switch x.Function() {
+		case "replace":
 			call = &budgetedReplace{InterpretableCall: x}
+		case "sort", "@sortByAssociatedKeys":
+			call = &budgetedSort{InterpretableCall: x}
 		}
-		return &chargedCall{InterpretableCall: call, scan: scanCalls[x.Function()]}, nil
+		return &chargedCall{InterpretableCall: call}, nil
 	case interpreter.InterpretableAttribute:
 		// The planner decorates a relative attribute twice, once when it makes the node and once
 		// when it returns it. cel-go's own observer skips a node that it already watches, and a
@@ -116,11 +120,10 @@ func chargeDecorator(i interpreter.Interpretable) (interpreter.Interpretable, er
 // function, the arguments and the attribute from it and reports the cost cel-go reports.
 type chargedCall struct {
 	interpreter.InterpretableCall
-	scan bool
 }
 
 func (c *chargedCall) Exec(f *interpreter.ExecutionFrame) ref.Val {
-	return budgetOf(f).charge(c.InterpretableCall.Exec(f), c.scan)
+	return budgetOf(f).charge(c.InterpretableCall.Exec(f), false)
 }
 
 func (c *chargedCall) Eval(a interpreter.Activation) ref.Val { return c.Exec(interpreter.AsFrame(a)) }
@@ -208,4 +211,78 @@ func (e *budgetedReplace) Eval(a interpreter.Activation) ref.Val {
 		return chargeStop()
 	}
 	return types.String(strings.Replace(string(str), string(old), string(repl), int(n)))
+}
+
+// budgetedSort is sort and sortBy with the keys charged before they are compared. cel-go
+// compares the keys by content until it finds one that cannot be compared and then fails, and
+// the charge of a result never sees a sort that failed, so `xs.sort() == [] || true` on a list
+// of two long strings and an int compared both strings for no step. The node evaluates its own
+// operands, as budgetedJoin does, charges the bytes of the keys, and sorts as cel-go does
+// (ext/lists.go, sortListByAssociatedKeys). For sort the keys are the list itself, and for
+// sortBy they are the second operand.
+type budgetedSort struct {
+	interpreter.InterpretableCall
+}
+
+func (e *budgetedSort) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
+
+func (e *budgetedSort) Eval(a interpreter.Activation) ref.Val {
+	args := e.Args()
+	vals := make([]ref.Val, len(args))
+	for i, arg := range args {
+		if vals[i] = arg.Eval(a); types.IsError(vals[i]) {
+			return vals[i]
+		}
+	}
+	list, ok := vals[0].(traits.Lister)
+	keys := list
+	if len(vals) == 2 {
+		keys, ok = vals[1].(traits.Lister)
+		if _, first := vals[0].(traits.Lister); !first {
+			ok = false
+		}
+	}
+	if !ok {
+		return types.NewErr("no such overload: %v.%s", vals[0].Type(), e.Function())
+	}
+	budgetOf(a).charge(keys, true)
+	return sortByKeys(list, keys)
+}
+
+// sortByKeys gives the list in the order of its keys and the errors that cel-go gives.
+func sortByKeys(list, keys traits.Lister) ref.Val {
+	listLength := list.Size().(types.Int)
+	keysLength := keys.Size().(types.Int)
+	if listLength != keysLength {
+		return types.NewErr("@sortByAssociatedKeys() expected a list of the same size as the associated keys list, but got %d and %d elements respectively", listLength, keysLength)
+	}
+	if listLength == 0 {
+		return list
+	}
+	elem := keys.Get(types.IntZero)
+	if _, ok := elem.(traits.Comparer); !ok {
+		return types.NewErr("list elements must be comparable")
+	}
+	sortedIndices := make([]ref.Val, 0, listLength)
+	for i := types.IntZero; i < listLength; i++ {
+		sortedIndices = append(sortedIndices, i)
+	}
+	var err error
+	sort.Slice(sortedIndices, func(i, j int) bool {
+		iKey := keys.Get(sortedIndices[i])
+		jKey := keys.Get(sortedIndices[j])
+		if iKey.Type() != elem.Type() || jKey.Type() != elem.Type() {
+			err = fmt.Errorf("list elements must have the same type")
+			return false
+		}
+		return iKey.(traits.Comparer).Compare(jKey) == types.IntNegOne
+	})
+	if err != nil {
+		return types.WrapErr(err)
+	}
+	sorted := make([]ref.Val, 0, listLength)
+	for _, sortedIdx := range sortedIndices {
+		sorted = append(sorted, list.Get(sortedIdx))
+	}
+	return types.DefaultTypeAdapter.NativeToValue(sorted)
 }
