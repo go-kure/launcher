@@ -447,7 +447,7 @@ name collision: Database.postgresql.cnpg.io "db-orders" is named by component "d
 This knows only the names resolved this way: the roles above. An object of a component that
 is not a kind component, one a lowering rule names without a role, and the object of a trait that is not in the table (an
 authored `configmap` trait's ConfigMap, an authored `secret` trait's Secret) are not in it, so
-`CheckInDocumentCollisions` (below) is still what compares every generated object: a
+`CheckInDocumentCollisions` (see [Lowering](transform-and-lowering.md#lowering)) is still what compares every generated object: a
 `configmap` component given the `objectName` of a `configmap` trait's ConfigMap is refused
 there, and so is a `secret` component that names the Secret of a `secret` trait:
 
@@ -826,7 +826,7 @@ The engine refuses, as a `TransformError` naming the component, the property and
   which the kinds that set `app` select by;
 - the component label key (`ComponentLabelKey`, or the key derived from `Domain`) with
   another value than the one launcher gives the component. The ownership wrapper refuses
-  that value on every generated object ("Component label and ownership"); here the refusal
+  that value on every generated object ([Component label and ownership](labels-and-ownership.md#component-label-and-ownership)); here the refusal
   names the property that holds it.
 
 A key in `ReservedMetadataKeys` is refused where every reserved key is, when the object is

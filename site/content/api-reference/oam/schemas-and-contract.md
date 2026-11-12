@@ -439,7 +439,7 @@ Two things this deliberately does not do:
   properties are the ones the strip touches — is exempt from reservation; the output
   of a rule whose input was not checked stays authored, and its components and
   traits are checked as they are emitted, before the strip (see the rule-output
-  contract above).
+  contract in [Lowering](transform-and-lowering.md#lowering)).
 - **A key the schema does not declare is untouched**, including inside an object
   that sets `AdditionalProperties`. Nothing describes such a value, so nothing
   here can normalise it, and a null inside an opaque object still reaches the
