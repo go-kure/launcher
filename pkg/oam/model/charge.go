@@ -107,7 +107,7 @@ func chargeDecorator(i interpreter.Interpretable) (interpreter.Interpretable, er
 		if reflect.TypeOf(i).String() == "*interpreter.evalWatchAttr" {
 			return i, nil
 		}
-		return &chargedAttr{InterpretableAttribute: x}, nil
+		return &chargedAttr{InterpretableAttribute: x, fac: interpreter.NewAttributeFactory(nil, x.Adapter(), nil)}, nil
 	}
 	return i, nil
 }
@@ -127,44 +127,45 @@ func (c *chargedCall) Eval(a interpreter.Activation) ref.Val { return c.Exec(int
 
 type chargedAttr struct {
 	interpreter.InterpretableAttribute
+	fac interpreter.AttributeFactory // makes the qualifier of a key; the type of the object is not read
 }
 
 func (c *chargedAttr) Exec(f *interpreter.ExecutionFrame) ref.Val {
 	return budgetOf(f).charge(c.InterpretableAttribute.Exec(f), false)
 }
 
-// cel-go reads an identifier that is the key of an index, as in m[k], through the Qualify of the
-// attribute: the attribute resolves its own value and Exec never runs. The key is hashed at every
-// lookup, so it is charged here, as Exec charges a read. Two attributes are charged: one that an
-// identifier names, and a conditional of attributes, as in m[c ? k : k]. The planner builds the
-// conditional from the bare attributes of its branches, so no wrapper of a branch ever runs.
-// The condition runs once more under the charge, and its cost counts twice. A relative
-// attribute, such as the key of m[f(x)], holds a call as its operand, and the wrapper of that
-// call charges the result, so resolving it again here would run the call twice.
+// cel-go reads the key of an index, as in m[k], through the Qualify of the key attribute, and never
+// through its Exec: attrQualify (interpreter/attributes.go) resolves the attribute, makes a qualifier
+// of the value and applies it. The key is hashed at every lookup, so it is charged here, as Exec
+// charges a read. This is the same three steps as attrQualify with one charge between them, so
+// the key is resolved once and the cost cel-go reports does not change. Every attribute kind
+// qualifies this way: an identifier, a conditional of attributes such as m[c ? k : k] (the planner
+// builds it from the bare attributes of its branches, so no wrapper of a branch ever runs) and
+// a relative attribute such as m[(xs + [])[0]] (the call wrapper charges the list, never the
+// string that is picked from it).
 func (c *chargedAttr) Qualify(vars interpreter.Activation, obj any) (any, error) {
-	c.chargeKey(vars)
-	return c.InterpretableAttribute.Qualify(vars, obj)
+	qual, err := c.keyQualifier(vars)
+	if err != nil {
+		return nil, err
+	}
+	return qual.Qualify(vars, obj)
 }
 
 func (c *chargedAttr) QualifyIfPresent(vars interpreter.Activation, obj any, presenceOnly bool) (any, bool, error) {
-	c.chargeKey(vars)
-	return c.InterpretableAttribute.QualifyIfPresent(vars, obj, presenceOnly)
+	qual, err := c.keyQualifier(vars)
+	if err != nil {
+		return nil, false, err
+	}
+	return qual.QualifyIfPresent(vars, obj, presenceOnly)
 }
 
-func (c *chargedAttr) chargeKey(vars interpreter.Activation) {
-	if _, ok := c.Attr().(interpreter.NamespacedAttribute); !ok && !isConditionalAttribute(c.Attr()) {
-		return
+func (c *chargedAttr) keyQualifier(vars interpreter.Activation) (interpreter.Qualifier, error) {
+	key, err := c.InterpretableAttribute.Resolve(vars)
+	if err != nil {
+		return nil, err
 	}
-	if key, err := c.InterpretableAttribute.Resolve(vars); err == nil {
-		budgetOf(vars).charge(c.Adapter().NativeToValue(key), false)
-	}
-}
-
-// isConditionalAttribute matches the type by name, as chargeDecorator does for evalWatchAttr,
-// because it is unexported. A test row of TestChargeStopsALongKeyOfAnIndex fails on a cel-go
-// version that renames it.
-func isConditionalAttribute(a interpreter.Attribute) bool {
-	return reflect.TypeOf(a).String() == "*interpreter.conditionalAttribute"
+	budgetOf(vars).charge(c.Adapter().NativeToValue(key), false)
+	return c.fac.NewQualifier(nil, c.ID(), key, c.IsOptional())
 }
 
 func (c *chargedAttr) Eval(a interpreter.Activation) ref.Val { return c.Exec(interpreter.AsFrame(a)) }

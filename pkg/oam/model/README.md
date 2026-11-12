@@ -250,8 +250,8 @@ writes, against the bytes that the next write adds (the first element has no sep
 `replace` is replaced by a version that computes the size of its result from the number of matches
 and stops before it builds a result over the cap. An identifier that is the key of an index, as in
 `m[k]`, is charged by its size at every lookup, because cel-go reads it through the attribute and not
-as a value. So is a conditional of identifiers, as in `m[c ? k : k]`: its condition runs once more
-under the charge, so the cost that the evaluation reports counts the condition twice. A map comparison charges the length of each key. `&&`, `||`, the conditional and the
+as a value. So is every other key attribute, such as `m[c ? k : k]` and `m[(xs + [])[0]]`: the key is
+resolved once, and the cost that the evaluation reports does not change. A map comparison charges the length of each key. `&&`, `||`, the conditional and the
 comprehensions are not calls, so they stay lazy: a branch that does not run is not charged. **A value over
 the cap is refused even where stock cel-go finishes it.** A test names a class for every function of the
 pinned environment, so that a new cel-go version fails two lists and not one. The wrapper of an
