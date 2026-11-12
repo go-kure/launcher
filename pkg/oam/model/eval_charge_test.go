@@ -310,6 +310,9 @@ func TestChargeWrappersGiveWhatCelGoGives(t *testing.T) {
 		"'a.b.c'.replace('.', '').size()",
 		"{'a': 1}['a']", "[1, 2, 3][1]", "{'a': 1}['a' + '']", "[10, 20][1 + 0]", "cel.bind(k, 'a', {'a': 1}[k])", "cel.bind(k, 'a', {'a': 1}[true ? k : 'b'])",
 		"[0, 1, 2].map(i, [10, 20, 30][i])", "cel.bind(m, {'a': {'b': 2}}, m['a']['b'])", "cel.bind(k, 'b', {'a': {'b': 2}}['a'][k])",
+		// sort and sortBy are evaluated by budgetedSort and must give what cel-go gives
+		"[3, 1, 2].sort()", "['b', 'a', 'c'].sort()", "[1.5, 0.5, 1.0].sort()", "[b'b', b'a'].sort()", "[true, false].sort()", "[7].sort()", "lists.range(0).sort()",
+		"[2, 1].sortBy(x, -x)", "['b', 'a'].sortBy(x, x)", "[{'n': 2}, {'n': 1}].sortBy(m, m.n).map(m, m.n)", "['x', 'y', 'z'].sortBy(s, size(s) == 1 ? 3 - s.indexOf(s) : 0)",
 		// a key that holds a call or an index is resolved once: a second resolution reports more cost than cel-go
 		"cel.bind(xs, ['a'], {'a': 1}[xs[0 + 0]])", "cel.bind(xs, ['a'], {'a': 1}[(xs + [])[0]])", "cel.bind(k, 'a', cel.bind(c, 1, {'a': 1}[c + 0 > 0 ? k : k]))",
 	}
@@ -399,5 +402,38 @@ func TestMapComparisonSpendsForAMissingKey(t *testing.T) {
 	got, _, err := c.Eval("spec.values[0].expr", s)
 	if !errors.Is(err, ErrCostLimit) {
 		t.Fatalf("gave %v, %v: the comparisons read 10,000,000 entries and must wrap ErrCostLimit", got, err)
+	}
+}
+
+// sort and sortBy compare the keys by content and can fail after they compared: a list that
+// holds two long equal strings and an int is sorted until the int is met, and the error goes
+// away in `|| true`. The charge spends the bytes of the keys before the sort runs, so a sort
+// that fails is paid for as a sort that succeeds is.
+func TestChargeFailedSortSpendsForItsCompares(t *testing.T) {
+	s := stdScope()
+	s.Inputs["image"] = strings.Repeat("x", maxValueSize)
+	s.Inputs["nick"] = strings.Repeat("x", maxValueSize)
+	for _, body := range []string{"xs.sort() == []", "xs.sortBy(x, x) == []"} {
+		t.Run(body, func(t *testing.T) {
+			expr := "cel.bind(xs, [inputs.image, inputs.nick, 0], lists.range(15000).all(i, (" + body + ") || true))"
+			got, _, err := mustCompile(t, oneValue(t, "${"+expr+"}")).Eval("spec.values[0].expr", s)
+			if !errors.Is(err, ErrCostLimit) {
+				t.Fatalf("gave %v, %v: 15,000 failed sorts compare 30 GB and must wrap ErrCostLimit", got, err)
+			}
+		})
+	}
+}
+
+// A sort that fails gives the failure that cel-go gives, so `|| true` and `.orValue` read the same.
+func TestChargeSortFailsLikeCelGo(t *testing.T) {
+	for _, expr := range []string{"[1, 'b'].sort()", "[1, 'b'].sortBy(x, x)", "[1, 'b', 2].sort()"} {
+		t.Run(expr, func(t *testing.T) {
+			if want, _ := stockResult(t, expr); want != "error" {
+				t.Fatalf("test bug: cel-go gives %q for %s, want an error", want, expr)
+			}
+			if got, _, err := evalValueCost(t, expr); err == nil {
+				t.Errorf("gave %v, cel-go gives an error", got)
+			}
+		})
 	}
 }
