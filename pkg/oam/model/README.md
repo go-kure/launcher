@@ -223,7 +223,9 @@ on four levels of shared lists of 200 elements reports a cost of 8,739 and runs 
 every element it reaches and charges the outer length times the depth. So the evaluation replaces five
 calls, `==`, `!=`, `in`, `distinct` and `flatten`, with versions that count the values they visit: a list,
 a map, a list element and a map value are one step each, and a string or bytes value costs one more step for
-each 1,024 bytes it holds, because cel-go compares it by its content. All of them in one site evaluation
+each 1,024 bytes it holds, because cel-go compares it by its content. A map comparison reads every key,
+also after one differs, because cel-go gives the keys in Go map order and an early stop would make a stop by the budget
+depend on that order. All of them in one site evaluation
 share a budget of 1,000,000 steps with the charge by size. It also replaces `join`, only for its error: the `join` of a list that
 holds a non-string fails in cel-go with an error built from the text of the whole list, which prints every
 shared child and reached 7 GB, so the replacement names the type of the element and prints no value. That
@@ -265,7 +267,8 @@ on a computed value. Three rows of the comparison test guard the name: `[1, 1.0]
 depth. A list element or a map entry is one unit, and so is each byte of a bytes value. The copy is
 made after the evaluation. An expression can share one list or one bytes value in many places at a
 small cost, and the copy counts it once for each place. So the cost limit does not bound the copy. A result over the limit fails with `ErrCostLimit`, which names the
-site.
+site. A string in the result, at any depth, holds at most 1,000,000 bytes, as a string read by name does: an
+input that nests a longer string fails when the result exports it.
 
 **Cache.** `Cache.Compile` keeps a compiled site under the model identity (`Model.Key()`), the
 site path and the template text. A second compile of a model reuses the sites. The same text at

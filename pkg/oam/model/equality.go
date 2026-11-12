@@ -123,10 +123,13 @@ func (b *compareBudget) equalLists(l, r traits.Lister) (ref.Val, bool) {
 	return types.True, true
 }
 
+// equalMaps reads every key, also after one differs. cel-go gives the keys in Go map order, so
+// an early stop would make the spend, and with it a stop by the budget, depend on that order.
 func (b *compareBudget) equalMaps(l, r traits.Mapper) (ref.Val, bool) {
 	if l.Size() != r.Size() {
 		return types.False, true
 	}
+	same := true
 	for it := l.Iterator(); it.HasNext() == types.True; {
 		k := it.Next()
 		// both maps hash the key: a long key costs one step for each 1,024 bytes, twice
@@ -136,14 +139,16 @@ func (b *compareBudget) equalMaps(l, r traits.Mapper) (ref.Val, bool) {
 		lv, _ := l.Find(k)
 		rv, found := r.Find(k)
 		if !found {
-			return types.False, true
+			same = false
+			continue
 		}
 		v, ok := b.equal(lv, rv)
-		if !ok || v != types.True {
+		if !ok {
 			return v, ok
 		}
+		same = same && v == types.True
 	}
-	return types.True, true
+	return types.Bool(same), true
 }
 
 // compareDecorator replaces the budgeted calls in a program.
