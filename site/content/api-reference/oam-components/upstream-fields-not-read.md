@@ -10,8 +10,7 @@ Kubernetes type: `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`,
 `service`, `persistentvolumeclaim`, `configmap`, `secret` and `serviceaccount`. The first
 five build pods and are "the five pod-building kinds" below. For such
 a kind an upstream field its parser does not know is no decode error; it is a
-key the parser never looks at. The rule that closes that gap
-(go-kure/launcher#790):
+key the parser never looks at. The rule that closes that gap:
 
 > Every field of the upstream type that such a kind does not read, under its
 > name or in another shape, is an entry of one of the kind's refusal maps with
@@ -20,7 +19,7 @@ key the parser never looks at. The rule that closes that gap
 `webservice` and `worker` lower to a `deployment` and refuse what it refuses;
 the `pvc` trait reads a claim through the `persistentvolumeclaim` kind's
 parser and refuses what that kind refuses, and the `secret` trait reads its
-Secret through the `secret` kind's parser (`ParseSecretProperties`).
+Secret through the `secret` kind's parser.
 
 ### The two paths
 
@@ -43,7 +42,7 @@ An authored key reaches a kind on one of two paths, and both give the reason:
 sits inside a property the kind declares reaches a caller of the handler with
 its reason. In a document, the check refuses the key at that position with its
 own text and appends the same reason, which the kind gives through
-`NestedUnsupportedFieldHint` (go-kure/launcher#790):
+`NestedUnsupportedFieldHint`:
 `properties.affinity: unsupported field "nodeAffinity" (allowed: …); affinity.nodeAffinity: not read — …`.
 The positions are:
 
@@ -153,19 +152,5 @@ refuses an undeclared key whatever its value, null included.
 
 ### What holds this
 
-- `TestHandParsedKinds_CoverEveryUpstreamField` walks the upstream type of
-  each of the ten kinds, from the object down every level whose fields are
-  the component's properties, and fails on a field that is neither read, nor
-  refused, nor placed in one of the classes above — so a field a later
-  `k8s.io/api` adds cannot be dropped in silence. It stops at the properties:
-  what a property holds inside is held to the upstream type only for a
-  container's `resources` and the pod's `podResources`.
-- `TestRefusedKeys_BothPathsGiveTheReason` holds every entry of every refusal
-  map to the two texts above; `TestRefusedKeys_OneLevelDown` holds the two
-  refusals inside a declared property.
-- `TestHandParsedKinds_MatchExpressionsAtEverySelector` runs a match
-  expression through each of the 47 label selectors these kinds read, to the
-  generated object, and five defective ones to their refusal.
-- `TestHandParsedKinds_TemplateMetadataAndContainerName` and
-  `TestHandParsedKinds_ServicePortFieldsReachTheObject` pin the template's
-  metadata, the main container's name and the six fields of a Service port.
+The tests that hold this rule are on the
+[contributor page](../../contributing/oam-reference/upstream-fields-not-read.md).
