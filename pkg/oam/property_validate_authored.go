@@ -119,7 +119,13 @@ func (t *Transformer) validateAuthoredCopy(app *Application, capabilities map[st
 
 // copyAuthoredDocument returns app with its own component, trait and policy slices
 // and its own copy of every property tree (copyPropertyMap), which is everything
-// authored validation writes. Everything else is shared with app and only read.
+// authored validation writes. Everything else is shared with app and only read,
+// a pointer or a struct value in a property tree included: validation's own code reads
+// through either and writes through neither, for a value under an open object
+// (TestValidateAuthoredProperties_NeverWritesThroughAPointerOrStruct). A formatting
+// method that a value supplies (String, Error or Format) runs when an error message
+// formats the value, and that method is outside this promise. So the sharing concerns a caller who edits
+// the returned copy, which the README states (go-kure/launcher#1365).
 func copyAuthoredDocument(app *Application) *Application {
 	out := *app
 	out.Spec.Components = slices.Clone(app.Spec.Components)

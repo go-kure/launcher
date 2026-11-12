@@ -1921,7 +1921,12 @@ inside a struct, changes the caller's value. A provider must not do this. The co
 validation makes of the document (`ValidateAuthoredPropertiesWithCapabilities` and the
 feature-gate check) follows the same rule: it shares a pointer, and what a struct holds by
 reference, with the caller's `Application`, and a caller that writes through one in the returned
-copy changes its own document. For a handler of a kind component the query and the build give it
+copy changes its own document. Validation's own code only reads through a pointer or a struct and
+never writes through either, for a value under an open object. A test pins this
+(`TestValidateAuthoredProperties_NeverWritesThroughAPointerOrStruct`). An error message formats
+the value it refuses, or the object that holds it, with `%v`, so a `String`, `Error` or `Format`
+method that the value supplies runs, and such a method can write. For a handler of a kind
+component the query and the build give it
 the same component: its object's name resolved and its `labels` and `annotations` taken off
 its properties. The build prepares the metadata before it holds the outputs, so a component
 with both a refused `labels` or `annotations` value and a failing provider reports the
