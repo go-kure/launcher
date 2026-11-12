@@ -437,3 +437,62 @@ func TestChargeSortFailsLikeCelGo(t *testing.T) {
 		})
 	}
 }
+
+// The class of a call that works and then fails: the failure is dropped by `|| true`, and a charge
+// of the result sees nothing. Each row runs one budgeted node on strings of 1,000,000 bytes
+// 2,000 times, which is 2,000,000 steps if the node pays for the bytes it touches. A node that
+// fails before it touches anything (touches false) must let the whole loop finish.
+func TestChargeFailAfterWorkSweep(t *testing.T) {
+	s := stdScope()
+	s.Inputs["image"] = strings.Repeat("x", maxValueSize)
+	s.Inputs["nick"] = strings.Repeat("x", maxValueSize)
+	rows := []struct {
+		node, body string
+		touches    bool
+	}{
+		{"==", "ys == zs", true},
+		{"in", "ys in [zs]", true},
+		{"distinct", "xs.distinct() == []", true},
+		{"flatten", "xs.flatten(-1) == []", false},
+		{"replace", "inputs.image.replace('x', 'yy') == ''", true},
+		{"join", "ys.join() == ''", false},
+		{"sort", "xs.sort() == []", true},
+		{"sortBy", "xs.sortBy(x, x) == []", true},
+	}
+	for _, tc := range rows {
+		t.Run(tc.node, func(t *testing.T) {
+			// the lists are bound once: reading inputs.image in the loop would be charged, and stop it
+			expr := "cel.bind(xs, [inputs.image, inputs.nick, 0], cel.bind(ys, [inputs.image, 0], cel.bind(zs, [inputs.nick, 1], " +
+				"lists.range(2000).all(i, (" + tc.body + ") || true))))"
+			c := mustCompile(t, oneValue(t, "${"+expr+"}"))
+			var got any
+			var err error
+			mb := allocMB(func() { got, _, err = c.Eval("spec.values[0].expr", s) })
+			if tc.touches {
+				if !errors.Is(err, ErrCostLimit) {
+					t.Fatalf("gave %v, %v: 2,000 failed calls touch 2 GB and must wrap ErrCostLimit", got, err)
+				}
+				return
+			}
+			// the loop finishes, and the failing calls built nothing: 2,000 copies of the string are 2 GB
+			if err != nil || got != true || mb > 64 {
+				t.Fatalf("gave %v, %v after allocating %d MB: a call that fails before it touches anything must run to the end and copy nothing", got, err, mb)
+			}
+		})
+	}
+}
+
+// A join that meets a non-string gives the failure that cel-go gives, after any number of strings.
+func TestChargeJoinFailsLikeCelGo(t *testing.T) {
+	for _, expr := range []string{"['a', 1].join()", "['a', 'b', 2.5].join(',')", "[1, 'a'].join()"} {
+		t.Run(expr, func(t *testing.T) {
+			if want, _ := stockResult(t, expr); want != "error" {
+				t.Fatalf("test bug: cel-go gives %q for %s, want an error", want, expr)
+			}
+			_, _, err := evalValueCost(t, expr)
+			if err == nil || !strings.Contains(err.Error(), "join: invalid input of type") {
+				t.Errorf("error %v, want the type error of join", err)
+			}
+		})
+	}
+}
