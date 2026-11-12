@@ -151,7 +151,7 @@ self-test (`make test-verify-merge`).
 | `issue-refs` | `issue-refs` | 2 min | — | Self-tests then runs `scripts/check-issue-refs.sh` over the whole tracked tree, and on a pull request over its commit messages: rejects a bare `#N` or an ownerless `name#N` reference (go-kure/launcher#400, go-kure/launcher#732; `make check-issue-refs`). Also self-tests `scripts/check-format-scope.sh` and, on a pull request, requires the `(format)` scope on commits that change what `app.yaml` accepts (go-kure/launcher#1279; `make check-format-scope`) |
 | `coverage-check` | `Coverage Check` | 5 min | test | 80% threshold, Codecov upload (it cannot fail the job: it stops after 2 min and a failure there is ignored, so a stalled upload does not hit the job's 5 min limit), PR sticky comment (same-repository PRs only: a fork PR has a read-only token, so the comment step is skipped while the threshold check still applies) |
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
-| `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the forbidden-terms self-test of the CRD vendor scripts' matcher and `cliff.toml`'s scrub, run with git-cliff installed at `mise.toml`'s pin by the release installer from the same go-kure/.github checkout (`make test-forbidden-terms`) + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) + the source-revision check on the built site (`make check-revision-shown`) |
+| `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the forbidden-terms self-test of the CRD vendor scripts' matcher and `cliff.toml`'s scrub, run with git-cliff installed at `mise.toml`'s pin by the release installer from the same go-kure/.github checkout (`make test-forbidden-terms`) + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) + the source-revision check on the built site (`make check-revision-shown`) + the API-reference anchor and fragment-link check on the built site (`make check-api-anchors`) |
 | `pin-impact` | `pin-impact` | 3 min | — | On a merge-queue run, only checks that every `go-kure/.github` reference in the merged tree pins the same commit. On a PR, renders and gates on the real impact of a `go-kure/.github` pin bump: resolves each referenced action's `$GITHUB_ACTION_PATH` script (and the siblings those `source` or run), intersects against the compare diff, fails if a consumed path changed and refuses any shape it cannot resolve (go-kure/launcher#358) |
 | `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check, action-pins, security, pin-impact, issue-refs | Aggregation gate |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
@@ -207,6 +207,15 @@ Runs on main and `release/*` branches only (not PRs):
   that carries a commit other than HEAD's, and it reports the overlay cause apart from a missing
   line. The target runs the gate's self-test (`site/scripts/check-revision-shown-test.sh`) first,
   so a gate that can no longer fail goes red as well.
+- **API-reference anchor check** — `docs-build` runs `make check-api-anchors` after the source-revision
+  check (go-kure/launcher#1335). The check reads the built site. First, each anchor in
+  `site/api-reference-anchors.txt` must exist on its page. The list holds the heading ids of the
+  two API-reference pages before they were split, so a link from outside that names an old section
+  still lands on a page that has it. Second, every link with a `#fragment` on every built page must
+  point at an id that exists on the target page. The shared link check does not read fragments.
+  The check counts links to other sites and links outside the base path, and does not read them.
+  The target runs the self-test (`site/scripts/check-api-anchors-test.sh`) first, so a check
+  that can no longer fail goes red as well.
 - **Issue-reference guard** — `issue-refs` runs `make check-issue-refs`'s first two steps
   (go-kure/launcher#400): the self-test (`scripts/check-issue-refs-test.sh`, fixtures that must
   fail and must pass, each in a throwaway git repository), then `scripts/check-issue-refs.sh` on
