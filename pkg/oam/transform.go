@@ -266,13 +266,17 @@ func noHandlerMessage(position, typ, where string, delivery map[string]bool) str
 // CapabilityDefinition purposes. Use RegisterBuiltinTrait for launcher's own
 // built-in handlers; built-in types are never checked against CapabilityDefinition files.
 type Transformer struct {
-	componentHandlers  map[string]ComponentHandler
-	traitHandlers      map[string]TraitHandler
-	policyHandlers     map[string]PolicyHandler
-	builtinTraitTypes  map[string]bool
-	capabilityDefs     map[string]*CapabilityDefinition
-	strictCapabilities bool
-	warnHandler        func(string)
+	componentHandlers map[string]ComponentHandler
+	traitHandlers     map[string]TraitHandler
+	policyHandlers    map[string]PolicyHandler
+	builtinTraitTypes map[string]bool
+	// builtinComponentRuleTypes holds the types of launcher's own component-position
+	// lowering rules (RegisterBuiltinComponentLowering). The traits such a rule writes
+	// are launcher's opinions, so the capability check does not judge them.
+	builtinComponentRuleTypes map[string]bool
+	capabilityDefs            map[string]*CapabilityDefinition
+	strictCapabilities        bool
+	warnHandler               func(string)
 
 	// Lowering rule registries (lowering.go). Kept separate from the dispatchable
 	// handler maps above: a lowerable type must never also be dispatchable (see
@@ -308,15 +312,16 @@ type Transformer struct {
 // CapabilityDefinition purposes; use RegisterBuiltinTrait for launcher built-ins.
 func NewTransformer(componentHandlers map[string]ComponentHandler, traitHandlers map[string]TraitHandler) *Transformer {
 	t := &Transformer{
-		componentHandlers:      make(map[string]ComponentHandler),
-		traitHandlers:          make(map[string]TraitHandler),
-		policyHandlers:         make(map[string]PolicyHandler),
-		builtinTraitTypes:      make(map[string]bool),
-		docLoweringRules:       make(map[string]DocumentLoweringRule),
-		componentLoweringRules: make(map[string]ComponentLoweringRule),
-		traitLoweringRules:     make(map[string]TraitLoweringRule),
-		policyLoweringRules:    make(map[string]PolicyLoweringRule),
-		rawDocLoweringRules:    make(map[rawDocRuleKey]RawDocumentLoweringRule),
+		componentHandlers:         make(map[string]ComponentHandler),
+		traitHandlers:             make(map[string]TraitHandler),
+		policyHandlers:            make(map[string]PolicyHandler),
+		builtinTraitTypes:         make(map[string]bool),
+		builtinComponentRuleTypes: make(map[string]bool),
+		docLoweringRules:          make(map[string]DocumentLoweringRule),
+		componentLoweringRules:    make(map[string]ComponentLoweringRule),
+		traitLoweringRules:        make(map[string]TraitLoweringRule),
+		policyLoweringRules:       make(map[string]PolicyLoweringRule),
+		rawDocLoweringRules:       make(map[rawDocRuleKey]RawDocumentLoweringRule),
 	}
 	for typeName, h := range componentHandlers {
 		t.RegisterComponent(typeName, h)
@@ -1006,7 +1011,9 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 	// Phase 1.5: validate capability constraints declared by the Policy. Uses
 	// authoredTraitTypes (captured before t.lower() ran), not a fresh
 	// collectTraitTypes(app) call here — see the comment at that capture site.
-	if err := enforceCapabilityConstraints(authoredTraitTypes, ctx.Policy); err != nil {
+	// The traits a component-position rule wrote onto its emitted parts count as
+	// well, for forbidden, allowed and required alike: the policy judges the output.
+	if err := enforceCapabilityConstraints(withEmittedTraitTypes(authoredTraitTypes, ctx.nameClaims.emittedTraitTypes), ctx.Policy); err != nil {
 		return nil, nil, NewViolationError(app.Metadata.Name, err)
 	}
 
@@ -2372,8 +2379,33 @@ func collectTraitTypes(app *Application) []string {
 	return types
 }
 
+// withEmittedTraitTypes returns authored followed by the emitted types it does not
+// already hold, in sorted order. A trait-position rule's output is never in
+// emitted: a rename such as expose to ingress is judged by the authored type, as the
+// capture of authoredTraitTypes before lowering explains.
+func withEmittedTraitTypes(authored []string, emitted map[string]struct{}) []string {
+	if len(emitted) == 0 {
+		return authored
+	}
+	seen := make(map[string]bool, len(authored))
+	for _, t := range authored {
+		seen[t] = true
+	}
+	extra := make([]string, 0, len(emitted))
+	for t := range emitted {
+		if !seen[t] {
+			extra = append(extra, t)
+		}
+	}
+	sort.Strings(extra)
+	return append(append([]string(nil), authored...), extra...)
+}
+
 // enforceCapabilityConstraints checks that the application's trait types satisfy the
-// capability constraints from the active Policy. Returns nil when all constraint slices
+// capability constraints from the active Policy. The types are the authored ones plus
+// those a non-builtin component-position rule wrote onto its emitted parts
+// (withEmittedTraitTypes), so an emitted trait is forbidden, outside the allowed list, or counts toward
+// required exactly as an authored one does. Returns nil when all constraint slices
 // are empty (which is always true for NoopPolicy).
 func enforceCapabilityConstraints(traitTypes []string, policy Policy) error {
 	forbidden := policy.ForbiddenCapabilities()

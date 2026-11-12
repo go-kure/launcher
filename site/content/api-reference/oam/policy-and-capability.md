@@ -14,7 +14,15 @@ per-environment **enforced limits** (`MaxReplicas`, `MaxCPU`, `MaxMemory`, `MaxS
 and the workload-shape defaults `DefaultStorageSize`, `DefaultScalerMinReplicas`,
 `DefaultScalerMaxReplicas`), security flags, and two distinct capability-constraint families:
 `AllowedCapabilities`/`ForbiddenCapabilities`/`RequiredCapabilities` gate **OAM trait-type**
-strings (e.g. "ingress", "autoscaling"), while `AllowedContainerCapabilities`/
+strings (e.g. "ingress", "autoscaling"). They judge the trait types an author wrote and the
+traits a component-position lowering rule wrote onto a part it emitted, so an emitted trait is
+refused when forbidden or outside the allowed list, and it counts toward `RequiredCapabilities`
+because the policy judges the output. Launcher's own component rules are exempt: the traits they
+write (`topology-spread`, `pvc`, `configmap`, `secret`) are launcher's opinions, so a policy sees
+the same outcome for them as before. A rule registered with `RegisterBuiltinComponentLowering`
+is exempt, and one registered with `RegisterComponentLowering` (an embedder's or a model's) is
+judged. A trait-position rule's output is not judged: the authored type is, so a rule that
+renames `expose` to `ingress` leaves the policy reading `expose`. `AllowedContainerCapabilities`/
 `ForbiddenContainerCapabilities` gate Linux capabilities on a container's
 `securityContext.capabilities.add` (e.g. "NET_ADMIN"). Both families share the same nil/empty
 constraint-list convention under `NoopPolicy` — no `Allowed`/`Forbidden`/`Required` entries means

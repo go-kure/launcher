@@ -156,7 +156,7 @@ for the registered types, such as `deployment.apps@v1` or `webservice@v1` (see
 ```go
 t := oam.NewTransformer(registry.ComponentHandlers(), nil)
 for _, r := range registry.ComponentLoweringRules() {
-	t.RegisterComponentLowering(r)
+	t.RegisterBuiltinComponentLowering(r)
 }
 for name, h := range registry.TraitHandlers() {
 	t.RegisterBuiltinTrait(name, h)

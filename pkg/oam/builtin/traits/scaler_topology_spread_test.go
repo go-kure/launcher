@@ -32,8 +32,8 @@ func spreadScalerTransformer(spread oam.TraitHandler) *oam.Transformer {
 		"serviceaccount": &components.ServiceAccountHandler{},
 		"manifests":      &components.ManifestsHandler{},
 	}, nil)
-	tr.RegisterComponentLowering(components.WebserviceRule{})
-	tr.RegisterComponentLowering(components.WorkerRule{})
+	tr.RegisterBuiltinComponentLowering(components.WebserviceRule{})
+	tr.RegisterBuiltinComponentLowering(components.WorkerRule{})
 	tr.RegisterBuiltinTrait("topology-spread", spread)
 	tr.RegisterBuiltinTrait("pvc", &traits.PVCHandler{})
 	tr.RegisterBuiltinTrait("scaler", &traits.ScalerHandler{})

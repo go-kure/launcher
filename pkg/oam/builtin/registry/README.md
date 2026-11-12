@@ -10,7 +10,7 @@ library instead of keeping its own list. `kurel build` registers exactly these
 | Function | Holds | Register with |
 |---|---|---|
 | `ComponentHandlers()` | every kind component of `pkg/oam/builtin/components` | `oam.NewTransformer` or `RegisterComponent` |
-| `ComponentLoweringRules()` | `webservice`, `worker`, `helm`, `postgresql`, `oci` | `RegisterComponentLowering` |
+| `ComponentLoweringRules()` | `webservice`, `worker`, `helm`, `postgresql`, `oci` | `RegisterBuiltinComponentLowering` |
 | `TraitHandlers()` | every trait of `pkg/oam/builtin/traits` | `RegisterBuiltinTrait` |
 | `TraitLoweringRules()` | `expose` | `RegisterBuiltinTraitLowering` |
 | `PolicyHandlers()` | `dependency`, `placement` | `RegisterPolicy` |

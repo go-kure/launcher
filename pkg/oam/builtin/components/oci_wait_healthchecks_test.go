@@ -256,7 +256,7 @@ func TestOCIHandler_WaitAndHealthChecksSchema(t *testing.T) {
 func TestOCIHandler_WaitAndHealthChecksAuthoredPipeline(t *testing.T) {
 	build := func(props map[string]any) error {
 		tr := oam.NewTransformer(nil, nil)
-		tr.RegisterComponentLowering(components.OCIRule{})
+		tr.RegisterBuiltinComponentLowering(components.OCIRule{})
 		comp := oam.Component{Name: "checkout", Type: "oci", Properties: props}
 		app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{comp}}}
 		validated, err := tr.ValidateAuthoredProperties(app)

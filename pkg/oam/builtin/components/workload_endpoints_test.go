@@ -234,7 +234,7 @@ func TestWorkloadEndpoints_NamingHookIsPure(t *testing.T) {
 // A worker lowers into a deployment with no ports, so it reports none (go-kure/launcher#225).
 func TestWorkloadEndpoints_LoweredWorkerReportsNone(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	tr.RegisterComponentLowering(components.WorkerRule{})
+	tr.RegisterBuiltinComponentLowering(components.WorkerRule{})
 	eps, err := tr.ComponentEndpoints(workloadComponent("worker", "jobs", nil))
 	if err != nil || len(eps) != 0 {
 		t.Errorf("endpoints = %+v, err = %v; want none", eps, err)
