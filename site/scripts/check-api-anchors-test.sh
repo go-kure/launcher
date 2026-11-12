@@ -54,6 +54,23 @@ expect() {
     fi
 }
 
+# expect_out NAME WANT_RC WANT_OUTPUT -- GATE_ARGS...: run the check, assert exit status and the
+# whole output, line for line.
+expect_out() {
+    local name="$1" want_rc="$2" want_out="$3"
+    shift 4
+    n=$((n + 1))
+    local out rc=0
+    out="$(bash "$GATE" "$@" 2>&1)" || rc=$?
+    if [[ "$rc" -ne "$want_rc" || "$out" != "$want_out" ]]; then
+        fail=$((fail + 1))
+        printf 'FAIL %s: exit %s, want %s\n%s\n' "$name" "$rc" "$want_rc" "$out" | sed 's/^/    /'
+    else
+        pass=$((pass + 1))
+        printf 'PASS %s\n' "$name"
+    fi
+}
+
 # 1: every pin is there and every fragment link resolves. The markup mixes the minified
 # form (no attribute quotes) and the quoted form, an in-page link, a root-relative link
 # with the base path and a relative link.
@@ -129,7 +146,7 @@ expect "--base-path" 0 "1 fragment links resolved" -- \
 # valid pin list for the same site.
 d="$WORK/print"
 page "$d/site" api-reference/a '<h1 id=a-title>A</h1><div id=not-a-heading>x</div><h2 id="a-one">One</h2><h3 id=a-sub>Sub</h3>'
-expect "--print-pins lists headings in order" 0 "api-reference/a/ a-title
+expect_out "--print-pins lists headings in order" 0 "api-reference/a/ a-title
 api-reference/a/ a-one
 api-reference/a/ a-sub" -- --site "$d/site" --print-pins api-reference/a/
 bash "$GATE" --site "$d/site" --print-pins api-reference/a/ > "$d/pins.txt"
@@ -141,7 +158,51 @@ else
     pass=$((pass + 1)); n=$((n + 1)); echo "PASS --print-pins skips non-heading ids"
 fi
 
-# 11 to 16: input errors exit 2 and never pass. An empty pin list and an empty site
+# 11: text that reads like an id is no id: not page text, not another attribute's value.
+d="$WORK/fake-id"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2><p>example id=ghost text</p><a title="x id=ghost2" href=#a-one>y</a>'
+pins "$d/pins.txt" 'api-reference/a/ ghost'
+expect "id= in page text is no id" 1 "api-reference/a/ ghost: no element" -- \
+    --site "$d/site" --pins "$d/pins.txt"
+pins "$d/pins.txt" 'api-reference/a/ ghost2'
+expect "id= inside another attribute is no id" 1 "api-reference/a/ ghost2: no element" -- \
+    --site "$d/site" --pins "$d/pins.txt"
+
+# 12: a page that is not an index.html is read too.
+d="$WORK/not-index"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2>'
+printf '<html><body><a href=/launcher/api-reference/a/#nope>x</a></body></html>\n' > "$d/site/404.html"
+pins "$d/pins.txt" 'api-reference/a/ a-one'
+expect "broken link on a page that is not index.html" 1 "404.html: link /launcher/api-reference/a/#nope" -- \
+    --site "$d/site" --pins "$d/pins.txt"
+
+# 13: percent escapes and HTML entities in an href are decoded before the link is read.
+d="$WORK/encoded"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2>
+  <a href="/launcher/api-reference/%61/#a%2Done">pct</a> <a href="/launcher/api-reference/a/?q=&#34;#a-one">entity</a>
+  <a href="/launcher/api-reference/a/?x=1&amp;y=2#a-one">amp</a>'
+pins "$d/pins.txt" 'api-reference/a/ a-one'
+expect "encoded links resolve" 0 "3 fragment links resolved" -- \
+    --site "$d/site" --pins "$d/pins.txt"
+
+# 14: a path with `..` is normalized before it is classed as inside or outside the base path.
+d="$WORK/dotdot"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2><a href=/else/../launcher/api-reference/a/#ghost>x</a>'
+pins "$d/pins.txt" 'api-reference/a/ a-one'
+expect "dot-dot path into the site is read" 1 "no id \"ghost\"" -- \
+    --site "$d/site" --pins "$d/pins.txt"
+
+# 15: a read error is exit 2, never an empty scan. A stub grep fails on one page.
+d="$WORK/read-error"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2>'
+page "$d/site" bad-page '<p>x</p>'
+pins "$d/pins.txt" 'api-reference/a/ a-one'
+mkdir -p "$d/bin"
+printf '#!/bin/sh\nfor a in "$@"; do case "$a" in *bad-page*) exit 2 ;; esac; done\nexec %s "$@"\n' "$(command -v grep)" > "$d/bin/grep"
+chmod +x "$d/bin/grep"
+PATH="$d/bin:$PATH" expect "grep read error is exit 2" 2 "read failed" -- --site "$d/site" --pins "$d/pins.txt"
+
+# 16 to 23: input errors exit 2 and never pass. An empty pin list and an empty site
 # would otherwise read as a clean run.
 d="$WORK/inputs"
 page "$d/site" api-reference/a '<h2 id=a-one>One</h2>'
