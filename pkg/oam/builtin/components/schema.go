@@ -95,7 +95,7 @@ func schemaEnv(reserved bool) oam.PropertySchema {
 						"fileKeyRef": {
 							Type:        oam.PropertyTypeObject,
 							Gate:        "EnvFiles",
-							Description: "Select a key of an env file mounted via a volume (corev1 EnvFiles feature; requires the cluster's EnvFiles feature gate, on by default from Kubernetes 1.35: a ClusterProfile with an earlier kubernetesVersion refuses it).",
+							Description: "Select a key of an env file mounted via a volume (corev1 EnvFiles feature; requires the cluster's EnvFiles feature gate, on by default from Kubernetes 1.35: a ClusterProfile with an earlier kubernetesVersion refuses it unless its spec.featureGates sets the gate on, and refuses it at any version when that map sets the gate off).",
 							Properties: map[string]oam.PropertySchema{
 								"volumeName": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the volume mount containing the env file."},
 								"path":       {Type: oam.PropertyTypeString, Required: true, Description: "Path within the volume to the env file."},
@@ -350,7 +350,7 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 	podResources.Properties["limits"] = oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true,
 		Description: "Maximum pod-level resources the pod as a whole may use. Only cpu, memory and hugepages-<size> keys are accepted; ephemeral-storage and extended resources are rejected.",
 		Properties:  podResources.Properties["limits"].Properties}
-	podResources.Description = "Pod-level compute resources shared by all containers (corev1.PodSpec.resources). Only cpu, memory and hugepages-<size> are valid here; requires the cluster's PodLevelResources feature gate, on by default from Kubernetes 1.34: a ClusterProfile with an earlier kubernetesVersion refuses it. Distinct from the container-level `resources` property."
+	podResources.Description = "Pod-level compute resources shared by all containers (corev1.PodSpec.resources). Only cpu, memory and hugepages-<size> are valid here; requires the cluster's PodLevelResources feature gate, on by default from Kubernetes 1.34: a ClusterProfile with an earlier kubernetesVersion refuses it unless its spec.featureGates sets the gate on, and refuses it at any version when that map sets the gate off. Distinct from the container-level `resources` property."
 	podResources.Gate = "PodLevelResources"
 
 	m := map[string]oam.PropertySchema{
@@ -467,7 +467,7 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 			},
 		},
 		"podResources":     podResources,
-		"hostnameOverride": gated("HostnameOverride", str("Fully overrides the pod's hostname (a DNS-1123 subdomain of at most 64 characters). Mutually exclusive with hostNetwork and setHostnameAsFQDN; requires the cluster's HostnameOverride feature gate, on by default from Kubernetes 1.35: a ClusterProfile with an earlier kubernetesVersion refuses it.")),
+		"hostnameOverride": gated("HostnameOverride", str("Fully overrides the pod's hostname (a DNS-1123 subdomain of at most 64 characters). Mutually exclusive with hostNetwork and setHostnameAsFQDN; requires the cluster's HostnameOverride feature gate, on by default from Kubernetes 1.35: a ClusterProfile with an earlier kubernetesVersion refuses it unless its spec.featureGates sets the gate on, and refuses it at any version when that map sets the gate off.")),
 		"schedulingGroup": {
 			Type: oam.PropertyTypeObject, PlatformReserved: reserved, Description: "Gang-scheduling group the pod belongs to (requires the cluster's scheduling-group support).",
 			Properties: map[string]oam.PropertySchema{
