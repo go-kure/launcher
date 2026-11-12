@@ -538,6 +538,9 @@ func TestRegistry_RefusedDeclarationLeavesNoRule(t *testing.T) {
 		if _, ok := tr.ComponentLoweringRuleFor(m.Key()); ok {
 			t.Fatal("a refused model left its rule on the Transformer")
 		}
+		if id, err := tr.ResolveComponentType(m.Key()); err == nil {
+			t.Fatalf("a refused model left its type declared as %s", id)
+		}
 	}
 }
 
