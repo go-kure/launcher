@@ -259,9 +259,10 @@ program ends. **A comparison or flatten of more than 1,000,000 values is refused
 finishes it**: `d == d` on four levels of shared lists of 50 elements holds 6.25 million values, and cel-go
 answers it in about 0.2 s. Every other call gives what cel-go gives, with the cost cel-go reports: a test
 compares 52 expressions with cel-go's own result and cost. The first four calls are every caller of `Equal`
-in cel-go v0.32.0 and in the pinned extension versions, `flatten` is the one list function that copies
+that a model reaches in cel-go v0.33.2 and in the pinned extension versions, `flatten` is the one list function that copies
 nested elements under the legacy cost tracker, and `join` is the one call whose error prints a nested value. A test reads the cel-go version and fails on another one,
-so that the calls are read again when cel-go moves (the move to v0.33 is go-kure/launcher#1491).
+so that the calls are read again when cel-go moves. Since v0.33 each cel-go node reports its own cost from its own `Exec`,
+so every replacement node reports its cost to the cost tracker of the evaluation with the operands and the result that cel-go's node would pass.
 
 **Charge by size.** cel-go charges a call by the length of its operands and reads the cost after the call
 returns, so a value that many places share, or a call that builds a big output from small operands, ran

@@ -145,6 +145,17 @@ func TestChargeStopIsAnErrorFromEval(t *testing.T) {
 	}
 }
 
+// A read of an element of a bound list charges the string once. The planner decorates the relative
+// attribute of xs[0] twice, and a read that is decorated twice spends its steps twice. Each read here
+// is 97 steps of the 1,000,000, so 8,000 reads fit once (776,000) and do not fit twice (1,552,000).
+func TestChargeReadOfAnIndexedElementIsChargedOnce(t *testing.T) {
+	expr := fmt.Sprintf("cel.bind(xs, [%s], lists.range(8000).all(i, xs[0].size() == 100000))", long100k)
+	got, err := evalValue(t, expr)
+	if err != nil || got != true {
+		t.Errorf("8,000 reads of a string of 100,000 bytes gave %v, %v, want true and no error", got, err)
+	}
+}
+
 // What a model may do stays allowed, and the lazy operators do not read what they skip.
 func TestChargeAllowsAndKeepsLaziness(t *testing.T) {
 	over := fmt.Sprintf("cel.bind(a, %s, (%s + 'x').size() > 0)", long100k, chain10)

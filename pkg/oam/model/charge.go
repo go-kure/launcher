@@ -2,14 +2,13 @@ package model
 
 import (
 	"math"
-	"reflect"
 	"sort"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
 	"cel.dev/cel-go/cel"
-	"cel.dev/cel-go/common"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
@@ -112,15 +111,13 @@ func chargeDecorator(i interpreter.Interpretable) (interpreter.Interpretable, er
 		}
 		return &chargedCall{InterpretableCall: call}, nil
 	case interpreter.InterpretableAttribute:
-		// The planner decorates a relative attribute twice, once when it makes the node and once
-		// when it returns it. cel-go's own observer skips a node that it already watches, and a
-		// wrapper around that node would hide it, so the observer would watch the node twice and
-		// report one more step of cost. The node already holds the wrapper made at the first pass.
-		// The type is matched by name because it is unexported. The guard is three rows of
-		// TestComparisonGivesWhatCelGoGives, `[1, 1.0][0] == [1, 1.0][1]`, `[1u, 1][0] == [1u, 1][1]`
-		// and `[[1], {'a': 1}][0] == [[1], {'a': 1}][1]`: without the skip they report a cost of 27,
-		// 27 and 107 against 25, 25 and 105. A cel-go version that renames the type fails those rows.
-		if reflect.TypeOf(i).String() == "*interpreter.evalWatchAttr" {
+		// The planner decorates a relative attribute twice: xs[0] hands the already decorated node
+		// of xs to the decorator again. A second wrapper would charge the same read twice, so a
+		// node that this decorator made is returned as it is. The guard is
+		// TestChargeReadOfAnIndexedElementIsChargedOnce: without it 8,000 reads of a string of
+		// 100,000 bytes spend 1,552,000 steps of the 1,000,000 budget and fail, and one wrapper
+		// spends 776,000.
+		if _, done := i.(*chargedAttr); done {
 			return i, nil
 		}
 		return &chargedAttr{InterpretableAttribute: x, fac: interpreter.NewAttributeFactory(nil, x.Adapter(), nil)}, nil
@@ -128,8 +125,9 @@ func chargeDecorator(i interpreter.Interpretable) (interpreter.Interpretable, er
 	return i, nil
 }
 
-// A wrapper embeds the node it wraps, so that the cost tracker of cel-go still reads the
-// function, the arguments and the attribute from it and reports the cost cel-go reports.
+// A wrapper embeds the node it wraps, and runs that node's own Exec, which reports the cost
+// cel-go reports to the cost tracker of the frame. The replacement nodes below do not run cel-go's
+// Exec, so each reports its own cost (execCall in equality.go).
 type chargedCall struct {
 	interpreter.InterpretableCall
 }
@@ -138,7 +136,9 @@ func (c *chargedCall) Exec(f *interpreter.ExecutionFrame) ref.Val {
 	return budgetOf(f).charge(c.InterpretableCall.Exec(f), false)
 }
 
-func (c *chargedCall) Eval(a interpreter.Activation) ref.Val { return c.Exec(interpreter.AsFrame(a)) }
+func (c *chargedCall) Eval(a interpreter.Activation) ref.Val {
+	return interpreter.EvalActivation(a, c.Exec)
+}
 
 type chargedAttr struct {
 	interpreter.InterpretableAttribute
@@ -183,7 +183,9 @@ func (c *chargedAttr) keyQualifier(vars interpreter.Activation) (interpreter.Qua
 	return c.fac.NewQualifier(nil, c.ID(), key, c.IsOptional())
 }
 
-func (c *chargedAttr) Eval(a interpreter.Activation) ref.Val { return c.Exec(interpreter.AsFrame(a)) }
+func (c *chargedAttr) Eval(a interpreter.Activation) ref.Val {
+	return interpreter.EvalActivation(a, c.Exec)
+}
 
 // budgetedReplace is replace with the size of its result checked before it is built. cel-go calls
 // strings.Replace and charges the result after it exists, so two operands of 100,000 and 2,000
@@ -194,16 +196,15 @@ type budgetedReplace struct {
 	interpreter.InterpretableCall
 }
 
-func (e *budgetedReplace) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
-
 func (e *budgetedReplace) Eval(a interpreter.Activation) ref.Val {
-	args := e.Args()
-	vals := make([]ref.Val, len(args))
-	for i, arg := range args {
-		if vals[i] = arg.Eval(a); types.IsError(vals[i]) {
-			return vals[i]
-		}
-	}
+	return interpreter.EvalActivation(a, e.Exec)
+}
+
+func (e *budgetedReplace) Exec(f *interpreter.ExecutionFrame) ref.Val {
+	return execCall(f, e, e.run)
+}
+
+func (e *budgetedReplace) run(vals []ref.Val) ref.Val {
 	str, ok1 := vals[0].(types.String)
 	old, ok2 := vals[1].(types.String)
 	repl, ok3 := vals[2].(types.String)
@@ -237,16 +238,15 @@ type budgetedSearch struct {
 	interpreter.InterpretableCall
 }
 
-func (e *budgetedSearch) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
-
 func (e *budgetedSearch) Eval(a interpreter.Activation) ref.Val {
-	args := e.Args()
-	vals := make([]ref.Val, len(args))
-	for i, arg := range args {
-		if vals[i] = arg.Eval(a); types.IsError(vals[i]) {
-			return vals[i]
-		}
-	}
+	return interpreter.EvalActivation(a, e.Exec)
+}
+
+func (e *budgetedSearch) Exec(f *interpreter.ExecutionFrame) ref.Val {
+	return execCall(f, e, e.run)
+}
+
+func (e *budgetedSearch) run(vals []ref.Val) ref.Val {
 	str, ok1 := vals[0].(types.String)
 	sub, ok2 := vals[1].(types.String)
 	last := e.Function() == "lastIndexOf"
@@ -261,7 +261,7 @@ func (e *budgetedSearch) Eval(a interpreter.Activation) ref.Val {
 		return types.NewErr("no such overload: %v.%s", vals[0].Type(), e.Function())
 	}
 	runes, subrunes := utf8.RuneCountInString(string(str)), utf8.RuneCountInString(string(sub))
-	if float64(runes)*float64(subrunes)*common.StringTraversalCostFactor > maxExpressionCost {
+	if float64(runes)*float64(subrunes)*cost.StringTraversalCostFactor > maxExpressionCost {
 		panic(interpreter.EvalCancelledError{Cause: interpreter.CostLimitExceeded, Message: "a search over more characters than the cost limit allows"})
 	}
 	if last && len(vals) == 2 {
@@ -287,23 +287,22 @@ type budgetedMatches struct {
 	interpreter.InterpretableCall
 }
 
-func (e *budgetedMatches) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
-
 func (e *budgetedMatches) Eval(a interpreter.Activation) ref.Val {
-	args := e.Args()
-	vals := make([]ref.Val, len(args))
-	for i, arg := range args {
-		if vals[i] = arg.Eval(a); types.IsError(vals[i]) {
-			return vals[i]
-		}
-	}
+	return interpreter.EvalActivation(a, e.Exec)
+}
+
+func (e *budgetedMatches) Exec(f *interpreter.ExecutionFrame) ref.Val {
+	return execCall(f, e, e.run)
+}
+
+func (e *budgetedMatches) run(vals []ref.Val) ref.Val {
 	str, ok1 := vals[0].(types.String)
 	pat, ok2 := vals[1].(types.String)
 	if !ok1 || !ok2 {
 		return types.NewErr("no such overload: %v.matches", vals[0].Type())
 	}
-	strCost := math.Ceil((1.0 + float64(utf8.RuneCountInString(string(str)))) * common.StringTraversalCostFactor)
-	patCost := math.Ceil(float64(utf8.RuneCountInString(string(pat))) * common.RegexStringLengthCostFactor)
+	strCost := math.Ceil((1.0 + float64(utf8.RuneCountInString(string(str)))) * cost.StringTraversalCostFactor)
+	patCost := math.Ceil(float64(utf8.RuneCountInString(string(pat))) * cost.RegexStringLengthCostFactor)
 	if strCost*patCost > maxExpressionCost {
 		panic(interpreter.EvalCancelledError{Cause: interpreter.CostLimitExceeded, Message: "a match over more characters than the cost limit allows"})
 	}
@@ -322,21 +321,20 @@ type budgetedFormat struct {
 	interpreter.InterpretableCall
 }
 
-func (e *budgetedFormat) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
-
 func (e *budgetedFormat) Eval(a interpreter.Activation) ref.Val {
-	args := e.Args()
-	vals := make([]ref.Val, len(args))
-	for i, arg := range args {
-		if vals[i] = arg.Eval(a); types.IsError(vals[i]) {
-			return vals[i]
-		}
-	}
+	return interpreter.EvalActivation(a, e.Exec)
+}
+
+func (e *budgetedFormat) Exec(f *interpreter.ExecutionFrame) ref.Val {
+	return execCall(f, e, func(vals []ref.Val) ref.Val { return e.run(f, vals) })
+}
+
+func (e *budgetedFormat) run(f *interpreter.ExecutionFrame, vals []ref.Val) ref.Val {
 	// Operands that are no string and list are given to cel-go as they are, which refuses them at once
 	// with its own error text and builds nothing, so the cost it reports is its own.
 	if str, ok := vals[0].(types.String); ok {
 		if list, ok := vals[1].(traits.Lister); ok {
-			formatBound(str, list, budgetOf(a))
+			formatBound(str, list, budgetOf(f))
 		}
 	}
 	prog, err := formatProgram()
@@ -517,16 +515,15 @@ type budgetedSort struct {
 	interpreter.InterpretableCall
 }
 
-func (e *budgetedSort) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
-
 func (e *budgetedSort) Eval(a interpreter.Activation) ref.Val {
-	args := e.Args()
-	vals := make([]ref.Val, len(args))
-	for i, arg := range args {
-		if vals[i] = arg.Eval(a); types.IsError(vals[i]) {
-			return vals[i]
-		}
-	}
+	return interpreter.EvalActivation(a, e.Exec)
+}
+
+func (e *budgetedSort) Exec(f *interpreter.ExecutionFrame) ref.Val {
+	return execCall(f, e, func(vals []ref.Val) ref.Val { return e.run(f, vals) })
+}
+
+func (e *budgetedSort) run(f *interpreter.ExecutionFrame, vals []ref.Val) ref.Val {
 	list, ok := vals[0].(traits.Lister)
 	keys := list
 	if len(vals) == 2 {
@@ -538,7 +535,7 @@ func (e *budgetedSort) Eval(a interpreter.Activation) ref.Val {
 	if !ok {
 		return types.NewErr("no such overload: %v.%s", vals[0].Type(), e.Function())
 	}
-	budgetOf(a).charge(keys, true)
+	budgetOf(f).charge(keys, true)
 	return sortByKeys(list, keys)
 }
 
