@@ -327,20 +327,29 @@ and rejects any other non-null type rather than letting it be silently ignored. 
 ahead of the type switch, `pkg/oam/property_validate.go`), and resolves against the unscoped
 binding exactly as omitting the key does.
 
-### Required fields are checked at nested levels only
+### Required fields are checked at every level
 
-`Required` on a *top-level* authored property is deliberately not enforced at parse time. A
-trait's top-level property map is merged with the ClusterProfile's capability rendering after
-parsing (`applyTraits` → `resolveCapability`, `pkg/oam/transform.go`), so a
-capability-aware trait may legitimately author a document in which the platform, not the
-author, supplies a required property. Enforcing `Required` before that merge would reject it.
-Nested `Required` — inside an object- or array-typed property — *is* enforced. Capability
-rendering merges into nested objects too (go-kure/launcher#750), so on a trait a capability
-binding matches it is enforced on the merged properties: by
-`ValidateAuthoredPropertiesWithCapabilities`, and by `Transform` at both merge sites
-(go-kure/launcher#765). A partial nested override that relies on the rendering for a required
-sibling is therefore accepted. A required key inside an array element is checked as written,
-because a rendering never merges into a list.
+`Required` is enforced on authored properties at the top level and in nested objects
+(go-kure/launcher#1463). A key the document omits, or sets to null, is refused by name before
+any handler runs: `component "web" (type "webservice"): properties: "image" is required`.
+At the top level, unknown keys are reported first, so a misspelt key shows the allowed list
+before the key it should have been is reported missing. Inside a nested object, a missing
+required key is reported before an unknown key.
+
+Two cases are not refused at authoring time, because the platform may supply the key:
+
+- A trait that a capability binding matches. Capability rendering merges into the trait's
+  properties after parsing (`applyTraits` → `resolveCapability`, `pkg/oam/transform.go`), at the
+  top level and into nested objects (go-kure/launcher#750). For such a trait `Required` is
+  checked on the merged properties instead: by `ValidateAuthoredPropertiesWithCapabilities`, and
+  by `Transform` at both merge sites (go-kure/launcher#765 for nested keys). A key neither the
+  trait nor the rendering sets is refused, and the message names the capability.
+- A component key that the handler lists in `ComponentCapabilityDefaults`. The capability fills
+  it, so its absence is accepted.
+
+A required key inside an array element is checked as written, because a rendering never merges
+into a list. A group's "at least one of" rule (`ExclusiveGroups`) is not a `Required` rule and
+is not enforced for the capability case at authoring time.
 
 ---
 

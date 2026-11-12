@@ -63,9 +63,9 @@ import (
 //
 // It knows no ClusterProfile, so it enforces nested Required on every trait as
 // written: a required key missing from a nested object the author wrote is refused
-// here even when a capability rendering would supply it. An object the author
-// leaves out entirely is not refused, whatever its own Required flag says, as at the
-// top level. ValidateAuthoredPropertiesWithCapabilities is the profile-aware
+// here even when a capability rendering would supply it. An optional object the
+// author leaves out entirely is not checked, and a Required one is refused as a
+// missing key, as at the top level. ValidateAuthoredPropertiesWithCapabilities is the profile-aware
 // variant: the rendering merges into nested objects (mergeRenderedProperties,
 // go-kure/launcher#750), and the variant accepts a partial nested override that
 // relies on it for a required sibling.
@@ -247,9 +247,9 @@ func (t *Transformer) enforceDocumentReservations(app *Application) error {
 
 // validateAuthoredPolicy is validateAuthoredComponent for the policy position, with
 // validateEmittedPolicy's lookup: the registered PolicyHandler first, then a
-// PolicyLoweringRule claiming the type. Top-level Required is not enforced, exactly
-// as for components (see validateAuthoredProperties): each built-in handler already
-// rejects a missing property it needs, with a message written for that property.
+// PolicyLoweringRule claiming the type. Top-level Required is enforced as written,
+// as for a component (see validateAuthoredProperties): a policy has no capability
+// merge that could supply a key.
 func (t *Transformer) validateAuthoredPolicy(pol *ApplicationPolicy) error {
 	path := fmt.Sprintf("policy %q (type %q): properties", pol.Name, pol.Type)
 	if h, ok := t.policyHandlers[pol.Type]; ok {
@@ -287,7 +287,27 @@ func validateAuthoredComponentAgainst(handler ComponentHandler, props map[string
 	if !ok {
 		return nil
 	}
-	return validateAuthoredTopLevel(withObjectProperties(handler, p.PropertySchema()), exclusiveProperties(handler), props, path)
+	schema := withObjectProperties(handler, p.PropertySchema())
+	if d, ok := handler.(ComponentCapabilityDefaults); ok {
+		// The capability fills these keys when the author leaves them out, so their
+		// absence is not refused here (ComponentCapabilityDefaults).
+		_, keys := d.CapabilityDefaults()
+		schema = withoutRequired(schema, keys)
+	}
+	return validateAuthoredTopLevel(schema, exclusiveProperties(handler), props, path)
+}
+
+// withoutRequired returns schema with Required cleared on keys. schema is never
+// mutated, as in withEngineTraitProperties.
+func withoutRequired(schema map[string]PropertySchema, keys []string) map[string]PropertySchema {
+	out := maps.Clone(schema)
+	for _, key := range keys {
+		if field, ok := out[key]; ok {
+			field.Required = false
+			out[key] = field
+		}
+	}
+	return out
 }
 
 // unsupportedFieldHinter is implemented by a component handler, a component
@@ -368,10 +388,11 @@ func withUnsupportedFieldHint(handler any, err error) error {
 // engineTraitProperties.
 //
 // Given capabilities, a trait whose handler declares a schema is checked against it
-// with nested Required cleared (relaxObjectRequired), and then for nested Required on
-// the properties merged as resolveCapability merges them (checkNestedRequired), so a
-// required key the rendering supplies is not refused (go-kure/launcher#765). A trait
-// no binding matches is checked on its properties as written.
+// with Required cleared, top level and nested (relaxObjectRequired), and then for
+// Required on the properties merged as resolveCapability merges them
+// (checkNestedRequired), so a required key the rendering supplies is not refused
+// (go-kure/launcher#765, go-kure/launcher#1463). A trait no binding matches is
+// checked on its properties as written.
 func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait, capabilities map[string]CapabilityBinding) error {
 	path := fmt.Sprintf("component %q: trait %q: properties", componentName, trait.Type)
 	var handler any
@@ -403,17 +424,17 @@ func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait, 
 	return checkNestedRequired(schema, exclusive, merged.Properties, path, matchedKey)
 }
 
-// relaxObjectRequired returns schema with Required cleared on every field of an
-// object reached from the top level through object fields alone, the objects a
+// relaxObjectRequired returns schema with Required cleared at the top level, on
+// every field of an object reached from it through object fields alone, the objects a
 // capability rendering merges into, and on that object's exclusive groups: the
-// rendering may supply a group's key too. The top level keeps its flags (authored
-// validation ignores them), and so does everything under an array's Items: a list
-// is authored whole, never merged into, so a required key of one of its elements is
-// genuinely missing when the author leaves it out. schema is never mutated, as in
-// withEngineTraitProperties.
+// rendering may supply a group's key too. Everything under an array's Items keeps its
+// flags: a list is authored whole, never merged into, so a required key of one of its
+// elements is genuinely missing when the author leaves it out. schema is never
+// mutated, as in withEngineTraitProperties.
 func relaxObjectRequired(schema map[string]PropertySchema) map[string]PropertySchema {
 	out := make(map[string]PropertySchema, len(schema))
 	for key, field := range schema {
+		field.Required = false
 		if field.Type == PropertyTypeObject && len(field.Properties) > 0 {
 			field.Properties = relaxObjectRequired(field.Properties)
 			for k, sub := range field.Properties {
@@ -557,38 +578,32 @@ func validateAuthoredAgainst(handler any, props map[string]any, path string) err
 	return validateAuthoredTopLevel(p.PropertySchema(), exclusiveProperties(handler), props, path)
 }
 
-// validateAuthoredProperties is validateProperties minus the top-level Required
-// sweep: it rejects a key the schema does not declare and checks the shape of every
-// key it does, but never reports a declared Required field that the document omits.
+// validateAuthoredProperties is validateProperties for an authored document: it
+// rejects a key the schema does not declare, checks the shape of every key it does,
+// then reports the first declared Required key the document omits, at the top level
+// and nested (go-kure/launcher#1463). A null counts as absent.
 //
-// Required is deliberately not enforced HERE, at the top level — the nested case
-// is enforced by whatever schema the caller passes, because validatePropertyValue
-// recurses into validateObjectProperties for a declared object field. The
-// distinction is not cosmetic:
+// Required is enforced as written, with one exception: a trait a capability binding
+// matches. ClusterProfile capability rendering merges into a trait's properties later
+// (applyTraits → resolveCapability), at the top level and into nested objects
+// (mergeRenderedProperties, go-kure/launcher#750), so a required property the
+// platform supplies is legitimately absent from what the user wrote. For such a trait
+// validateAuthoredTrait passes a schema with Required cleared (relaxObjectRequired)
+// and checks the merged properties instead (checkNestedRequired, go-kure/launcher#765
+// for nested keys and go-kure/launcher#1463 for the top level), as applyTraits and
+// the lowering fixpoint do after their own merge. A component key a
+// ComponentCapabilityDefaults handler lists is left to the capability the same way
+// (validateAuthoredComponentAgainst). A key an author leaves out of a component or a
+// policy is refused here, naming the key, before a handler could refuse it with its
+// own message at transform time.
 //
-//   - A trait's top-level properties are not complete at this point. ClusterProfile
-//     capability rendering merges into them later (applyTraits → resolveCapability),
-//     so a required property the platform supplies is legitimately absent from what
-//     the user wrote. Enforcing Required here would reject exactly the
-//     capability-aware traits the profile exists to complete — the same spurious
-//     "is required" failure recorded against the emitted path in
-//     validateEmittedDocument's note on forwarded traits.
-//   - A nested object's Required is checked here, as written, when no capability
-//     binding matches the trait: nothing will merge into it, so a required field of
-//     an object the user wrote is genuinely missing, and reporting it names the line
-//     they wrote. When a binding matches, the rendering merges into nested objects
-//     too (mergeRenderedProperties, go-kure/launcher#750), so validateAuthoredTrait
-//     passes a schema with nested Required cleared (relaxObjectRequired) and checks
-//     the merged properties instead (checkNestedRequired, go-kure/launcher#765), as
-//     applyTraits and the lowering fixpoint do after their own merge.
-//   - Nothing is lost at the component top level either. A handler that needs a
-//     property already fails without it, with a message written for that property;
-//     a second gate here would only change which error surfaces first.
-//
-// The undeclared-key half is what this check exists for, and it applies at every
-// level: nested objects are covered by validateObjectProperties through
-// validatePropertyValue, under the same AdditionalProperties rule the emitted path
-// uses.
+// At the top level the undeclared-key half is checked first, so a misspelt key is
+// reported with the allowed list before the key it should have been is reported
+// missing. Inside a nested object the order is the other way, as on the emitted path:
+// validateObjectProperties reports a missing Required key first. The undeclared-key
+// rule applies at every level: nested objects are covered by validateObjectProperties
+// through validatePropertyValue, under the same AdditionalProperties rule the emitted
+// path uses.
 //
 // Values are written back for the same reason validateObjectProperties writes them
 // back: validatePropertyValue may normalize an array or object into a fresh
@@ -603,9 +618,10 @@ func validateAuthoredProperties(schema map[string]PropertySchema, props map[stri
 // validateAuthoredTopLevel is validateAuthoredProperties with the handler's top-level
 // exclusive groups (ExclusivePropertiesProvider). A malformed group anywhere in the
 // schema, under an object or array props leaves out included, is reported first, as
-// the schema's error (checkObjectGroups); the groups are held to at most one after
-// every key is checked, and their Required is not enforced, for the reasons
-// top-level Required is not.
+// the schema's error (checkObjectGroups); then every key is checked, then
+// Required (checkTopLevelRequired); the groups are held to at most one last, and
+// their Required is not enforced: a group's "at least one" is a rule of the whole
+// document that the capability merge may complete.
 func validateAuthoredTopLevel(schema map[string]PropertySchema, exclusive []ExclusiveGroup, props map[string]any, path string) error {
 	if err := checkObjectGroups(schema, exclusive, path); err != nil {
 		return err
@@ -620,6 +636,9 @@ func validateAuthoredTopLevel(schema map[string]PropertySchema, exclusive []Excl
 			return withUnsupportedFieldParent(err, key)
 		}
 		props[key] = normalized
+	}
+	if err := checkTopLevelRequired(schema, props, path, ""); err != nil {
+		return err
 	}
 	return checkExclusive(exclusive, schema, props, false, path, "")
 }

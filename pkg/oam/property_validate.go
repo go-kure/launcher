@@ -179,26 +179,29 @@ func validateObjectProperties(schema map[string]PropertySchema, exclusive []Excl
 }
 
 // checkNestedRequired reports the first Required key missing (absent, or a null as
-// isNullValue reads it) from an object props holds under a declared object field,
-// at any depth, the objects of an array whose Items declare them included. Top-level
-// Required is not checked: authored validation never enforces it on a trait, and a
-// handler that needs a property already refuses its absence.
+// isNullValue reads it) from props at the top level, then from an object props holds
+// under a declared object field, at any depth, the objects of an array whose Items
+// declare them included.
 //
-// It is the after-merge half of nested Required (go-kure/launcher#765). Authored
-// validation of a trait a capability binds clears nested Required
-// (relaxObjectRequired), because the rendering merged in later may supply a key the
-// author left out; applyTraits and the lowering fixpoint then call this on the
-// merged properties. It checks presence only: a value's shape is validation's
-// business, so a value of the wrong type is passed over here.
+// It is the after-merge half of Required (go-kure/launcher#765 for the nested keys,
+// go-kure/launcher#1463 for the top level). Authored validation of a trait a
+// capability binds clears Required (relaxObjectRequired), because the rendering
+// merged in later may supply a key the author left out; applyTraits and the
+// lowering fixpoint then call this on the merged properties. It checks presence
+// only: a value's shape is validation's business, so a value of the wrong type is
+// passed over here.
 //
 // capability is the matched binding's key, "" when none matched; it only words the
 // error.
 //
 // exclusive is the top level's groups, held to at most one: the rendering may set a
-// top-level key the author also set. Their Required is not checked, as top-level
-// Required is not; a nested object's groups are checked in full, with its Required.
+// top-level key the author also set. Their Required is not checked; a nested
+// object's groups are checked in full, with its Required.
 func checkNestedRequired(schema map[string]PropertySchema, exclusive []ExclusiveGroup, props map[string]any, path, capability string) error {
 	if err := checkExclusive(exclusive, schema, props, false, path, capability); err != nil {
+		return err
+	}
+	if err := checkTopLevelRequired(schema, props, path, capability); err != nil {
 		return err
 	}
 	for _, key := range slices.Sorted(maps.Keys(schema)) {
@@ -211,6 +214,31 @@ func checkNestedRequired(schema map[string]PropertySchema, exclusive []Exclusive
 		}
 	}
 	return nil
+}
+
+// checkTopLevelRequired reports the first Required key of schema that props leaves
+// out, in sorted order, an explicit null counted as absent as validateObjectProperties
+// counts it. It checks presence only. capability is the matched binding's key, ""
+// when none matched, and only words the error.
+func checkTopLevelRequired(schema map[string]PropertySchema, props map[string]any, path, capability string) error {
+	for _, key := range slices.Sorted(maps.Keys(schema)) {
+		if !schema[key].Required {
+			continue
+		}
+		if v, present := props[key]; !present || isNullValue(v) {
+			return requiredError(path, key, capability)
+		}
+	}
+	return nil
+}
+
+// requiredError is the refusal of a missing Required key: the plain wording, or the
+// wording that names the capability whose rendering did not supply it either.
+func requiredError(path, key, capability string) error {
+	if capability == "" {
+		return errors.Errorf("%s: %q is required", path, key)
+	}
+	return errors.Errorf("%s: %q is required; neither the trait nor capability %q's rendering sets it", path, key, capability)
 }
 
 // checkRequiredIn is checkNestedRequired for one present value: an object's
@@ -234,10 +262,7 @@ func checkRequiredIn(field PropertySchema, value any, path, capability string) e
 				continue
 			}
 			if v, present := obj[key]; !present || isNullValue(v) {
-				if capability == "" {
-					return errors.Errorf("%s: %q is required", path, key)
-				}
-				return errors.Errorf("%s: %q is required; neither the trait nor capability %q's rendering sets it", path, key, capability)
+				return requiredError(path, key, capability)
 			}
 		}
 		if err := checkExclusive(field.Exclusive, field.Properties, obj, true, path, capability); err != nil {
