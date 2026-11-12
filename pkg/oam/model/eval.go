@@ -480,7 +480,7 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 		if s.single {
 			out, err := toGo(val)
 			if errors.Is(err, errResultSize) {
-				return nil, cost, errors.Errorf("%w: %s: the result holds more than %d elements", ErrCostLimit, path, maxResultElements)
+				return nil, cost, errors.Errorf("%w: %s: the result holds more than %d elements or bytes", ErrCostLimit, path, maxResultElements)
 			}
 			if err != nil {
 				return nil, cost, errors.Errorf("model: evaluate %s: %w", path, err)
@@ -539,7 +539,12 @@ type converter struct{ left int }
 
 // take counts one element and reports errResultSize when the budget is spent.
 func (c *converter) take() error {
-	c.left--
+	return c.takeN(1)
+}
+
+// takeN counts n units and reports errResultSize when the budget is spent.
+func (c *converter) takeN(n int) error {
+	c.left -= n
 	if c.left < 0 {
 		return errResultSize
 	}
@@ -547,8 +552,9 @@ func (c *converter) take() error {
 }
 
 // toGo converts a CEL result to plain Go data. Lists and maps convert at every depth, and
-// together they hold at most maxResultElements elements. A map key must be a string, a
-// double must be finite, and a bytes value is a copy.
+// together they hold at most maxResultElements elements, and each byte of a bytes value counts
+// as one element. A map key must be a string, a double must be finite, and a bytes value is a
+// copy.
 func toGo(v ref.Val) (any, error) {
 	c := converter{left: maxResultElements}
 	return c.toGo(v)
@@ -573,6 +579,9 @@ func (c *converter) toGo(v ref.Val) (any, error) {
 	case types.String:
 		return string(x), nil
 	case types.Bytes:
+		if err := c.takeN(len(x)); err != nil {
+			return nil, err
+		}
 		return append([]byte{}, x...), nil
 	case traits.Mapper:
 		out := map[string]any{}
