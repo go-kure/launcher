@@ -49,3 +49,9 @@ trait on a component with separators and key with separators	component "we.b: x"
 policy name and key with separators	policy "po.l: x" (type "perr-pol"): properties.obj.i.n: k: expected integer, got string (s)
 unsupported empty key below an object	component "web" (type "perr-empty-key"): properties.o: unsupported field "" (allowed: ok)
 required empty key below an object	component "web" (type "perr-empty-key"): properties.r: "" is required
+component reserved top	component "web": properties: "locked" is platform-reserved and may only be set via ClusterProfile capability rendering: oam: property is platform-reserved
+component reserved top null	component "web": properties: "locked" is platform-reserved and may only be set via ClusterProfile capability rendering: oam: property is platform-reserved
+component reserved nested	component "web": properties.box: "sealed" is platform-reserved and may only be set via ClusterProfile capability rendering: oam: property is platform-reserved
+component reserved in array element	component "web": properties.items[0]: "k" is platform-reserved and may only be set via ClusterProfile capability rendering: oam: property is platform-reserved
+trait reserved top	component "web" trait "perr-rsv-trait": properties: "locked" is platform-reserved and may only be set via ClusterProfile capability rendering: oam: property is platform-reserved
+trait reserved nested	component "web" trait "perr-rsv-trait": properties.box: "sealed" is platform-reserved and may only be set via ClusterProfile capability rendering: oam: property is platform-reserved
