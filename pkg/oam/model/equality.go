@@ -323,17 +323,22 @@ func (e *budgetedJoin) Eval(a interpreter.Activation) ref.Val {
 	var sb strings.Builder
 	n := list.Size().(types.Int)
 	for i := types.IntZero; i < n; i++ {
-		if i != 0 {
-			sb.WriteString(string(sep))
-		}
 		elem := list.Get(i)
 		str, ok := elem.(types.String)
 		if !ok {
 			return types.WrapErr(errors.Errorf("join: invalid input of type %s", elem.Type().TypeName()))
 		}
-		// the buffer is checked before it grows: cel-go would build all of it and charge it after
-		if sb.Len()+len(sep)+len(str) > maxValueSize {
+		// the buffer is checked before it grows, against the bytes that the next writes add: cel-go
+		// would build all of it and charge it after. The first element has no separator before it.
+		add := len(str)
+		if i != 0 {
+			add += len(sep)
+		}
+		if sb.Len()+add > maxValueSize {
 			return chargeStop()
+		}
+		if i != 0 {
+			sb.WriteString(string(sep))
 		}
 		sb.WriteString(string(str))
 	}
