@@ -7,7 +7,7 @@ validator, and the transform pipeline that turns an `Application` + `ClusterProf
 into Kubernetes manifests. Every document this package parses uses
 `apiVersion: launcher.gokure.dev/v1alpha1` (`SupportedAPIVersion`); the one exception is
 the raw-document lowering seam, where a `RawDocumentLoweringRule` may claim a kind under a
-consumer-owned group via `RawDocumentAPIVersioner` (see "Lowering entry points" below).
+consumer-owned group via `RawDocumentAPIVersioner` (see [Lowering](https://www.gokure.dev/launcher/api-reference/oam/transform-and-lowering/#lowering)).
 
 ## Document kinds
 
