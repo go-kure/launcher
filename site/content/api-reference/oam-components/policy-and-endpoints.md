@@ -10,7 +10,7 @@ tiers, in precedence order:
 
 1. **Authored** — whatever the component's `resources` property set explicitly.
    The string `unlimited` under `limits.cpu` or `limits.memory` is an authored
-   opt-out (go-kure/launcher#1181): the container gets no limit for that
+   opt-out: the container gets no limit for that
    resource, because neither a policy default limit (tier 2) nor, for memory,
    the limit mirror (tier 3) is applied to it. It is accepted where a built-in
    default exists to opt out of: the main container of the five controller
@@ -24,43 +24,28 @@ tiers, in precedence order:
    policy default is not provided.
 2. **Policy default** — `ApplyPolicy` fills any request/limit the author left
    unset from `oam.Policy.DefaultCPURequest()`/`DefaultMemoryRequest()`/
-   `DefaultCPULimit()`/`DefaultMemoryLimit()` (`enforce.go`'s
-   `applyDefaultQuantity`). A negative policy default fails the build, as a
+   `DefaultCPULimit()`/`DefaultMemoryLimit()`. A negative policy default fails the build, as a
    negative authored quantity does, since Kubernetes would refuse it at apply;
    zero is accepted. Each default that fills a value is reported to the
-   provenance report as a `policy` entry (`oam.PolicyDefaultReporter`: the
-   workload kinds, `cnpg-cluster`, `persistentvolumeclaim` and the `pvc` trait
-   embed an `oam.PolicyDefaultLog`; the `scaler` trait implements the interface
-   itself, so that its config stays comparable); a request lowered to the
+   provenance report as a `policy` entry; a request lowered to the
    authored limit (tier 3 below) carries the detail `capped-to-limit`. What
    the postgresql defaults step fills after the policy (`enablePDB`, and the
-   `1Gi` `storage.size` fallback) is reported as a `builtin` entry
-   (`oam.BuiltinDefaultReporter`, embedded `oam.BuiltinDefaultLog` in
-   `cnpg-cluster`), not as `policy`.
-3. **Intrinsic handler default** — `buildResourceRequirements` (`common.go`)
+   `1Gi` `storage.size` fallback) is reported as a `builtin` entry, not as `policy`.
+3. **Intrinsic handler default** — `buildResourceRequirements`
    fills anything still unset at `Generate()` time: 100m CPU request, 128Mi
    memory request, and a memory limit mirroring the (possibly just-defaulted)
    memory request. A defaulted request never exceeds the limit authored for the
    same resource: it is the lower of the default and that limit, so
-   `limits.memory: 64Mi` with no request renders a 64Mi request, not 128Mi
-   (go-kure/launcher#1217; the apiserver refuses a request above its limit).
+   `limits.memory: 64Mi` with no request renders a 64Mi request, not 128Mi.
    A limit at or above the default leaves the default request in place. The
    same holds for a policy default request (tier 2): it is held to the authored
-   limit for that resource (`capPolicyRequestDefaults`, `resource_policy_defaults.go`),
-   and an authored request is never changed. Two
+   limit for that resource, and an authored request is never changed. Two
    consequences are easy to miss: a policy `DefaultMemoryRequest()` flows into
    the mirrored memory limit, and the handler never defaults a CPU limit.
 
 `oam.Policy.MaxCPU()`/`MaxMemory()` are enforced against the *effective*
 value — what `Generate()` will actually emit, after all three tiers — not
-just the authored/policy-defaulted `resources` field. Prior to go-kure/launcher#251
-the enforcement check ran before the intrinsic tier was computed, so an
-application that omitted `spec.resources` entirely could ship a Deployment
-whose 100m CPU / 128Mi memory intrinsic defaults exceeded the enforced
-maximum. `enforceMaxResources` (`enforce.go`) closes this by calling the same
-`buildResourceRequirements` the generator calls, enforcing against its
-result, and discarding it — `buildResourceRequirements` deep-copies its
-maps, so this is read-only and generated output is unchanged. When a value
+just the authored/policy-defaulted `resources` field. When a value
 came from the intrinsic tier specifically (absent from the authored/policy-
 defaulted value, present only after the intrinsic fallback), the error names
 it as a "generated default" so the mismatch isn't mysterious.
@@ -70,17 +55,16 @@ components that call `buildResourceRequirements` on their main container
 (`webservice`, `worker`, `deployment`, `cronjob`, `job`, `statefulset`,
 `daemonset`).
 **`postgresql` is exempt**: its lowering rule copies every entry of
-`c.Resources` straight onto the Cluster spec (`cnpgResourceList`) and never calls
+`c.Resources` straight onto the Cluster spec and never calls
 `buildResourceRequirements`, so it has no intrinsic tier for its existing
 direct-form checks to diverge from.
 
-Init containers and sidecars receive the same intrinsic defaults
-(`common.go`'s `buildResourceRequirements` call sites at the init-container
-and sidecar builders), and `ApplyPolicy` enforces them too (go-kure/launcher#312):
+Init containers and sidecars receive the same intrinsic defaults,
+and `ApplyPolicy` enforces them too:
 each entry's resources, image registry, `securityContext.privileged`, and
 `securityContext.capabilities.add` are checked against the same policy
 methods the main container uses, via the shared `enforceExtraContainer`
-helper (`enforce.go`). All seven kind components enforce their
+helper. All seven kind components enforce their
 `initContainers`; only `webservice`, `worker`, `deployment`, `statefulset`
 and, since go-kure/launcher#790, `daemonset` have a
 `sidecars` schema key at all (`cronjob`/`job` have no sidecars support,
@@ -90,11 +74,11 @@ loop. Errors name the authored list position and container, e.g.
 registry [...]`.
 
 The twelve JobSpec-level properties (see ["Per-type highlights"](https://www.gokure.dev/launcher/api-reference/oam-components/#per-type-highlights)) are parsed
-and applied by a dedicated `JobSpecConfig`/`parseJobSpec`/`applyJobSpec`
-(`common.go`), factored out separately from the fields above because
+and applied by a dedicated `JobSpecConfig`/`parseJobSpec`/`applyJobSpec`,
+factored out separately from the fields above because
 `batchv1.CronJob.Spec.JobTemplate.Spec` and a bare `batchv1.Job.Spec` are the
 same `batchv1.JobSpec` type. `cronjob` projects them onto
-`spec.jobTemplate.spec` and `job` (go-kure/launcher#344) onto its own
+`spec.jobTemplate.spec` and `job` onto its own
 `spec`; both publish the identical key set, pinned by
 `TestJobSpecSchemaMatchesParser` against `jobSpecPropertyKeys`.
 
@@ -107,29 +91,19 @@ different API fields, and would silently overwrite `cronjob`'s own schema entry,
 since each handler merges the shared fragment with `maps.Copy` *after* its own
 literal map. So `job` publishes and parses its own JobSpec-level `suspend`
 instead, and `cronjob`'s stays CronJobSpec-level with no key for the job-template
-one. Both halves are pinned: `TestSchemaJobSpec_HasNoSuspendKey` on the schema,
-`TestCronjobHandler_SuspendWritesCronJobSpecOnly` and
-`TestJobHandler_SuspendWritesJobSpec` on the generated objects.
-
-`applyJobSpec` copies every value it writes rather than assigning the config's
-own pointers (`copyPtr` for the scalars, `DeepCopy` for `successPolicy` and
-`podFailurePolicy`, which each own a slice of rules). A handler config outlives one `Generate` call and
-`Generate` may run more than once, so an aliased pointer would leave a mutable
-path from the generated object back into the config — a writer through the
-object would change what the next `Generate` emits.
+one.
 
 ## Policy refusal classes
 
 Every refusal by the environment policy this package raises is an `oam.PolicyRefusal` with
-a class, which a consumer reads from `oam.ViolationError.Class` instead of matching text
-(go-kure/launcher#849). The classes, what each covers and what stays unclassified are in
+a class, which a consumer reads from `oam.ViolationError.Class` instead of matching text.
+The classes, what each covers and what stays unclassified are in
 `site/content/api-reference/oam/policy-and-capability.md`, "Refusal classes". What is particular to this package:
 
 - **The class does not depend on the path.** A privileged container is
   `oam.RefusalPrivileged` on a workload kind's own `ApplyPolicy`, on an operator CR's pod
   template, on an object a chart renders, and on a `passthrough` or `manifests` object, at
-  the transform and at generation: one check raises it (`enforce.go`,
-  `enforcePodTemplatePolicy`, `enforceRenderedObjectPolicy`).
+  the transform and at generation: one check raises it.
 - **cpu and memory are one class, storage another.** The comparison with a maximum is
   shared and its text is the same for every resource, so the class comes from the caller:
   `oam.RefusalResourceMaximum` for a cpu or memory request or limit (a container's, a
@@ -169,7 +143,7 @@ constant; `TestBuiltinPolicyRefusalsCarryAClass` (`pkg/oam`) fails on one that d
 An object from which the Prometheus operator builds pods, the `Alertmanager`, `Prometheus` and
 `ThanosRuler` of the `alertmanager`, `prometheus` and `thanosruler` kinds, has no pod template:
 its pod fields sit under `spec` in the operator's own type, so a consumer that scans the pods of
-the rendered output finds none to scan (go-kure/launcher#974). `MonitoringPodSpec(obj)` returns them as a `corev1.PodSpec`, with the
+the rendered output finds none to scan. `MonitoringPodSpec(obj)` returns them as a `corev1.PodSpec`, with the
 prefix its paths sit under in the object (`spec`) and whether the object is of such a kind:
 
 ```go
@@ -197,16 +171,12 @@ if pod, prefix, ok := components.MonitoringPodSpec(obj); ok {
 - **Typed objects only:** an unstructured monitoring object is converted to its typed object
   first. Any other object, a nil one included, gives `nil, "", false`.
 
-Each monitoring workload kind adds its case from its own `monitoringWorkload` mapping;
-`TestMonitoringPodSpec_CoversEveryRegisteredWorkloadKind` (`pkg/oam/builtin/registry`) fails on a
-registered kind of the operator's API whose spec lists containers and that has no case.
-
 ## Declared endpoints of a chart
 
 `helm`, `helmrelease` and `helmtemplate` implement `oam.EndpointProvider` from an
-`endpoints` property (go-kure/launcher#1132). A chart renders pods this package cannot see,
+`endpoints` property. A chart renders pods this package cannot see,
 so the author declares the pods a consumer connects to; nothing is derived from the chart.
-One shared schema and parser (`chartEndpoints`) serve the three types.
+One shared schema and parser serve the three types.
 
 - **An entry** is `{name?, protocol?, port, selector}`. `name` is empty or an IANA service
   name, unique among the component's non-empty names. `protocol` is `TCP` (the default),
@@ -214,8 +184,7 @@ One shared schema and parser (`chartEndpoints`) serve the three types.
   digits is not a name). `selector` is required and has `matchLabels` alone, not empty: an
   empty selector would match every pod of the namespace. No other key is taken.
 - **Not a chart value.** The key is split off before any strict decode and never forwarded:
-  `helmrelease` decodes the rest as its `HelmReleaseSpec` (the schema-parity test names
-  `endpoints` as its one exception), `helmtemplate` splits it off as it does `scopeOverrides`,
+  `helmrelease` decodes the rest as its `HelmReleaseSpec`, `helmtemplate` splits it off as it does `scopeOverrides`,
   and `helm` does not put it in `helmOwnedKeys`, which are forwarded, so the lowered members
   are the same with and without it, under either delivery.
 - **The type's parse runs first.** A component the type refuses has no endpoint and is
@@ -242,8 +211,8 @@ One shared schema and parser (`chartEndpoints`) serve the three types.
 
 ## Declared outputs
 
-`configmap`, `secret`, `postgresql`, `webservice` and `worker` implement `oam.OutputProvider`
-(go-kure/launcher#1259): the names of the objects a component generates, read through
+`configmap`, `secret`, `postgresql`, `webservice` and `worker` implement `oam.OutputProvider`:
+the names of the objects a component generates, read through
 `Transformer.ComponentOutputs` before the document is built, and held by the build against
 the names it gives (see "Outputs" in `site/content/api-reference/oam/names-and-overrides.md`). A name is the author's property,
 else the `Naming` hook's, else the default, resolved by the code that names the object in the
