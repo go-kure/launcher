@@ -265,7 +265,7 @@ on a computed value. Three rows of the comparison test guard the name: `[1, 1.0]
 `[1u, 1][0] == [1u, 1][1]` and `[[1], {'a': 1}][0] == [[1], {'a': 1}][1]` must report the cost of cel-go
 (25, 25 and 105, and 27, 27 and 107 without the skip). A cel-go version that renames the type fails them.
 
-**Known limits: calls that work and then fail, or that cel-go cannot cost.** Two members of this class
+**Known limits: calls that work and then fail, or that cel-go cannot cost.** Three members of this class
 are open.
 - A `format` that copies a long string argument and then fails on a later clause is charged nothing for
   the copy, because the charge reads the result and a failure has none. The argument list must be
@@ -273,12 +273,15 @@ are open.
   `cel.bind(args, [inputs.image, 'x'], lists.range(2000).all(i, '%s%d'.format(args) == '' || true))`
   with a 1,000,000-byte `inputs.image` gives `true` and allocates about 5.7 GB in 1.6 s below both
   budgets.
-- A `sort` of a list whose element type is not known when the model compiles (a `dyn` element, as
-  in `[0, 'bad'] + lists.range(10000)`) has an ambiguous overload, so cel-go charges it one step and
-  the lists extension never reads its elements. 2,000 sorts of such a list of 10,002 elements give
-  `true` at a cost of 22,044, allocating about 1 GB in 3 s. A `sort` of a typed list is stopped, and
-  so are `sortBy`, `reverse`, `slice`, `distinct` and `flatten` of the same dyn list, by the cost
-  limit or the budget, in the same loop.
+- A call on a receiver whose type is not known when the model compiles (a `dyn` receiver) has an
+  ambiguous overload, so cel-go charges it one step and the lists extension never reads its elements.
+  Two calls copy without a charge. A `sort` of `[0, 'bad'] + lists.range(10000)`: 2,000 sorts give
+  `true` at a cost of 22,044, allocating about 1 GB in 3 s. A `reverse` of a list read from a mixed map,
+  `cel.bind(xs, {'xs': lists.range(10000), 'other': 0}.xs, lists.range(2000).all(i, xs.reverse().size() == 10000))`:
+  `true` at a cost of 26,065, allocating about 1.4 GB in 0.8 s. A `sort` or `reverse` of a typed list
+  is stopped, and so is `reverse` of the `list(dyn)` in the `sort` example. A `dyn` receiver of `slice`, `distinct`, `flatten` or `==` is
+  stopped by the cost limit or the budget in the same loop, and `size`, `in`, an index and `+` copy
+  nothing.
 
 Every other member of this class found so far is bounded (`sortBy`, `join`, `replace`, comparisons,
 `flatten`, the keys of a typed `sort` and the keys of a result copy), and a test pins each. These
