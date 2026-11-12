@@ -30,7 +30,7 @@ The rest of this page is split into parts. Each part holds the full text of its 
 - [Property schemas and contract metadata](https://www.gokure.dev/launcher/api-reference/oam/schemas-and-contract/): Property schemas, what an explicit null means and the contract metadata.
 - [Policy defaults and capability system](https://www.gokure.dev/launcher/api-reference/oam/policy-and-capability/): Policy defaults, refusal classes and how a capability renders.
 
-The headings below stay so that a link to an old section still lands here. Each one links to the part that holds the text.
+The headings below stay so that a link to an old section still lands here. Each one links to the part that holds the text. Some also keep the opening lines of the section.
 
 ## Pipeline
 
@@ -38,11 +38,22 @@ See [Pipeline](https://www.gokure.dev/launcher/api-reference/oam/pipeline/#pipel
 
 ## Component label and ownership
 
-See [Component label and ownership](https://www.gokure.dev/launcher/api-reference/oam/labels-and-ownership/#component-label-and-ownership).
+Every application of a transformed document belongs to one authored component, or to the
+document as a whole (go-kure/launcher#788). The transform records that as its last step, and
+two things follow from it: each application reports its owner, and each object it generates
+carries the owner's component label.
+
+Full text: [Component label and ownership](https://www.gokure.dev/launcher/api-reference/oam/labels-and-ownership/#component-label-and-ownership).
 
 ## Reserved metadata keys
 
-See [Component label and ownership](https://www.gokure.dev/launcher/api-reference/oam/labels-and-ownership/#reserved-metadata-keys).
+A consumer that keeps label and annotation keys to itself names them in
+`TransformContext.ReservedMetadataKeys` (go-kure/launcher#790). One rule holds every
+application the transform returns to the list, whatever wrote the key: a kind component, a
+`passthrough` or `manifests` object, a chart rendered at build time, a trait's `annotations`,
+a `postgresql` or `cnpg-cluster` component's `inheritedMetadata`.
+
+Full text: [Component label and ownership](https://www.gokure.dev/launcher/api-reference/oam/labels-and-ownership/#reserved-metadata-keys).
 
 ## Names and overrides
 
@@ -54,7 +65,17 @@ See [Names and overrides](https://www.gokure.dev/launcher/api-reference/oam/name
 
 ### Outputs: the names a component's objects get
 
-See [Names and overrides](https://www.gokure.dev/launcher/api-reference/oam/names-and-overrides/#outputs-the-names-a-components-objects-get).
+A consumer that wants to refer to an object a component generates (a Secret an operator
+reads, a Service a route points at) needs the object's name before the document is built.
+A component type answers with the optional `OutputProvider` interface, which the
+`ComponentLoweringRule` claiming the type implements, or the handler when no rule claims it,
+as for `EndpointProvider`. `Transformer.ComponentOutputs(comp)` returns one `Output` per
+declaration, in the provider's order: a `Key`, the object's `Kind` (a `schema.GroupKind`) and
+its `Name`. A key is one identifier (a letter or underscore, then letters, digits and
+underscores), so a document can address it as `parts.<part>.<key>`. A type that provides no
+outputs answers `(nil, nil)`.
+
+Full text: [Names and overrides](https://www.gokure.dev/launcher/api-reference/oam/names-and-overrides/#outputs-the-names-a-components-objects-get).
 
 ### `objectName`: the object of a kind component
 
@@ -98,11 +119,30 @@ See [Transform, extension and lowering](https://www.gokure.dev/launcher/api-refe
 
 ## Lowering
 
-See [Transform, extension and lowering](https://www.gokure.dev/launcher/api-reference/oam/transform-and-lowering/#lowering).
+Some documents, components, traits, and policies are authored in a higher-level
+vocabulary that has no direct dispatchable handler — a type a platform wants expanded
+into one or more terminal types before the transform's own component/trait dispatch
+runs. Where a component lowering rule places each object it emits (a same-name
+sibling member, a trait on one member, or a separately named kind component), and
+how a trait builds the same object as its kind twin, is set out in
+`docs/oam/design-lowering-engine.md`, section "Where a lowering rule places each
+object".
+
+Full text: [Transform, extension and lowering](https://www.gokure.dev/launcher/api-reference/oam/transform-and-lowering/#lowering).
 
 ## Property schemas
 
-See [Property schemas and contract metadata](https://www.gokure.dev/launcher/api-reference/oam/schemas-and-contract/#property-schemas).
+Handlers may implement `PropertySchemaProvider` (`PropertySchema() map[string]PropertySchema`)
+to declare a constrained schema for their user-facing properties. `PropertySchema` is launcher's
+single schema vocabulary — the same type also backs `kurel.yaml` parameters (`ParameterDecl`) and
+`CapabilityDefinition` rendering properties. It has `Type` (string/integer/boolean/number/array/object),
+`Types`, `Description`, `Required`, `Default`, `Enum`, nested `Properties`, `Items`, `AdditionalProperties`
+(default false; escape-hatch fields set it true), and `Exclusive`. The rich fields (`Types`, `Enum`, `Properties`, `Items`,
+`AdditionalProperties`, `Exclusive`) are meaningful only for handler properties: the two flat call sites (kurel
+parameters, capability rendering) reject them at decode time, so unifying the type does not widen
+their accepted behavior.
+
+Full text: [Property schemas and contract metadata](https://www.gokure.dev/launcher/api-reference/oam/schemas-and-contract/#property-schemas).
 
 ### What an explicit `null` means on the emitted path
 
