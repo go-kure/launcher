@@ -4,10 +4,10 @@
 # go.mod links the API module at a pseudo-version of the tag's commit, and the tag is lightweight: its
 # ref names that commit, with no tag object, so tag-object is the commit, and the components tests
 # require its first 12 hex digits to be the pseudo-version's.
-tag v2.15.0
-tag-object b872cf4b508f98af6dd9f2ced39c183438ce8f0d
+tag v2.13.0
+tag-object a82d14894fbca270a5e87610fa1efd907dbae341
 licence LICENSE 7a4a3ea2424c09fbe48d455aed1eaa94d9124835
-file config/crds/bases/external-secrets.io_clusterexternalsecrets.yaml 6f23900ccc1b213fc5050c392b611648e3427075
-file config/crds/bases/external-secrets.io_clustersecretstores.yaml 72dc5cca9c5998cce46ded7a9534394883b3c8da
-file config/crds/bases/external-secrets.io_externalsecrets.yaml d3aed525d9b15ef2f507671e8543d1ef4c36373b
-file config/crds/bases/external-secrets.io_secretstores.yaml e62bc6e08c4cebce5e3844b4a5859b7aa775860b
+file config/crds/bases/external-secrets.io_clusterexternalsecrets.yaml b91f0ff3bf8b132ccb225dffabf564a54b044509
+file config/crds/bases/external-secrets.io_clustersecretstores.yaml a2d749263b8dede6269765be61bba006ca1c1eb9
+file config/crds/bases/external-secrets.io_externalsecrets.yaml 51aa7e2adde26e6802254df6cfaea5e801092137
+file config/crds/bases/external-secrets.io_secretstores.yaml 0b35f11e290b87e301546ec96b60420c69fb220b
