@@ -115,7 +115,7 @@ func TestEnforcePlatformReserved_WalksArrayItems(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := enforcePlatformReserved(tc.schema, tc.props, nil, "properties")
+			err := enforcePlatformReserved(tc.schema, tc.props, nil, "properties", PropertyError{})
 			if tc.wantPath == "" {
 				if err != nil {
 					t.Fatalf("expected acceptance, got: %v", err)

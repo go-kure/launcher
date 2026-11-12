@@ -33,6 +33,7 @@ func TestAuthoredPropertyRefusalsAreTyped(t *testing.T) {
 	all := []PropertyErrorKind{
 		PropertyErrorUnsupportedField, PropertyErrorRequired, PropertyErrorExclusive, PropertyErrorType,
 		PropertyErrorEnum, PropertyErrorRange, PropertyErrorNullElement, PropertyErrorSchema,
+		PropertyErrorPlatformReserved,
 	}
 	for _, k := range all {
 		if !slices.Contains(kinds, string(k)) {
