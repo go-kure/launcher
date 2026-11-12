@@ -607,6 +607,11 @@ func (c *converter) toGo(v ref.Val) (any, error) {
 			if len(k) > maxValueSize {
 				return nil, errors.Errorf("%w: a map key holds more than %d bytes", ErrCostLimit, maxValueSize)
 			}
+			// the copy hashes the key twice, to read the entry and to insert it, so a long key costs
+			// a step for each 1,024 bytes twice, as in a map comparison. A key under 1,024 bytes is free.
+			if err := c.takeN(2 * (len(k) / compareBytesPerStep)); err != nil {
+				return nil, err
+			}
 			e, err := c.toGo(x.Get(k))
 			if err != nil {
 				return nil, err
