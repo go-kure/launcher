@@ -1,7 +1,6 @@
 package model
 
 import (
-	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -10,6 +9,8 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/interpreter"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // The class of this file is the one of equality.go: a cel-go path must be charged by the size
@@ -272,7 +273,7 @@ func sortByKeys(list, keys traits.Lister) ref.Val {
 		iKey := keys.Get(sortedIndices[i])
 		jKey := keys.Get(sortedIndices[j])
 		if iKey.Type() != elem.Type() || jKey.Type() != elem.Type() {
-			err = fmt.Errorf("list elements must have the same type")
+			err = errors.New("list elements must have the same type")
 			return false
 		}
 		return iKey.(traits.Comparer).Compare(jKey) == types.IntNegOne
