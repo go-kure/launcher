@@ -45,11 +45,14 @@ func (t *Transformer) stampSiblingGroups(components []Component) error {
 		types := make(map[string]bool, len(byName[name]))
 		for _, i := range byName[name] {
 			c := &components[i]
-			if types[c.Type] {
+			// A rule may write a member's type as a declared identity, which
+			// resolveEmitted has not yet turned into the registered name.
+			typ := emittedKey(t.componentTypes, t.isComponentKey, c.Type)
+			if types[typ] {
 				return errors.Errorf("sibling group %q: more than one member of type %q", name, c.Type)
 			}
-			types[c.Type] = true
-			if _, terminal := t.componentHandlers[c.Type]; !terminal {
+			types[typ] = true
+			if _, terminal := t.componentHandlers[typ]; !terminal {
 				return errors.Errorf("sibling group %q: member type %q has no component handler; every member must be a terminal component type", name, c.Type)
 			}
 			c.siblingGroup = group

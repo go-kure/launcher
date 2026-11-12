@@ -180,3 +180,102 @@ func TestLowering_EmittedIdentityGetsTheEmissionChecks(t *testing.T) {
 		})
 	}
 }
+
+// traitEmitRule emits one widget component carrying one trait of the type emits, with the
+// properties props.
+type traitEmitRule struct {
+	typ, emits string
+	props      map[string]any
+}
+
+func (r traitEmitRule) ComponentType() string { return r.typ }
+func (r traitEmitRule) LowerComponent(c *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{
+		Name: c.Name + "-part", Type: "widget", Properties: map[string]any{},
+		Traits: []Trait{{Type: r.emits, Properties: r.props}},
+	}}}, nil
+}
+
+// A platform-reserved key a rule writes as null is refused when the rule wrote the type as an
+// identity, as it is for the plain name. Emission validation turns a null into absence, so the
+// reservation check must find the schema by the registered name before that happens.
+func TestLowering_EmittedIdentityReservedNullIsRefused(t *testing.T) {
+	build := func(t *testing.T, rule ComponentLoweringRule) error {
+		t.Helper()
+		tr, _ := declared(t)
+		tr.RegisterComponent("resv", reservedComponent{typ: "resv"})
+		tr.RegisterTrait("reserved-trait", reservedTraitHandler{})
+		tr.RegisterComponentLowering(rule)
+		if err := tr.DeclareComponentTypes(map[string]TypeID{
+			"resv":  mustID(t, "resv.acme.example@v1"),
+			"maker": mustID(t, "maker.acme.example@v1"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := tr.DeclareTraitTypes(map[string]TypeID{"reserved-trait": mustID(t, "rtrait.acme.example@v1")}); err != nil {
+			t.Fatal(err)
+		}
+		app := &Application{
+			APIVersion: SupportedAPIVersion, Kind: "Application",
+			Metadata: Metadata{Name: "shop", Namespace: "demo"},
+			Spec:     ApplicationSpec{Components: []Component{{Name: "orders", Type: "maker.acme.example@v1", Properties: map[string]any{}}}},
+		}
+		_, err := tr.Transform(app, TransformContext{Namespace: "demo"})
+		return err
+	}
+	for _, tc := range []struct {
+		name string
+		rule ComponentLoweringRule
+	}{
+		{"component, plain name", propsRule{typ: "maker", emits: "resv", props: map[string]any{"registry": nil}}},
+		{"component, identity", propsRule{typ: "maker", emits: "resv.acme.example@v1", props: map[string]any{"registry": nil}}},
+		{"trait, plain name", traitEmitRule{typ: "maker", emits: "reserved-trait", props: map[string]any{"networkPolicy": nil}}},
+		{"trait, identity", traitEmitRule{typ: "maker", emits: "rtrait.acme.example@v1", props: map[string]any{"networkPolicy": nil}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := build(t, tc.rule)
+			if !errors.Is(err, ErrPlatformReserved) {
+				t.Fatalf("a rule emitted a reserved null and the build gave %v, want ErrPlatformReserved", err)
+			}
+		})
+	}
+}
+
+// Two same-name members a rule wrote as declared identities form a sibling group like two
+// written as plain names: the group reads each member's registered name.
+func TestLowering_EmittedIdentitySiblingGroup(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		types []string
+		want  string
+	}{
+		{"identities", []string{"widget.acme.example@v1", "gizmo.acme.example@v1"}, ""},
+		{"plain names", []string{"widget", "gizmo"}, ""},
+		{"identity and plain name", []string{"widget.acme.example@v1", "gizmo"}, ""},
+		{"one type twice, as identity and plain name", []string{"widget.acme.example@v1", "widget"}, "more than one member"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr, _ := declared(t)
+			tr.RegisterComponent("gizmo", &recordingComponentHandler{typ: "gizmo", seen: &[]string{}})
+			tr.RegisterComponentLowering(emitRule{typ: "maker", fn: pair(tc.types...)})
+			if err := tr.DeclareComponentTypes(map[string]TypeID{
+				"gizmo": mustID(t, "gizmo.acme.example@v1"),
+				"maker": mustID(t, "maker.acme.example@v1"),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			app := &Application{
+				APIVersion: SupportedAPIVersion, Kind: "Application",
+				Metadata: Metadata{Name: "shop", Namespace: "demo"},
+				Spec:     ApplicationSpec{Components: []Component{{Name: "orders", Type: "maker.acme.example@v1", Properties: map[string]any{}}}},
+			}
+			_, err := tr.Transform(app, TransformContext{Namespace: "demo"})
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("Transform: %v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("error %v, want one that names %q", err, tc.want)
+			}
+		})
+	}
+}
