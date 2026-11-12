@@ -1,6 +1,93 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.6] - 2026-11-12
+
+### Added
+
+- Return a typed PropertyError for authored property refusals
+
+### Build
+
+- Update module golang.org/x/mod to v0.43.0
+- Update module golang.org/x/crypto to v0.59.0 [security]
+- Update module github.com/go-kure/kure to v0.2.0-rc.1
+- Check the API-reference anchors and fragment links
+- Read real tag attributes and decode links in the anchor check
+- Respect quoted attributes, raw text and encodings in the anchor check
+- End the anchor check with exit 2 when find fails and read an unterminated last pin
+
+### CI
+
+- Make the Codecov upload non-blocking in coverage-check
+
+### Changed
+
+- Build the other pkg/patch errors with pkg/errors
+
+### Document Format
+
+- Gate raw-PodSpec restartPolicy in app.yaml below the ContainerRestartRules release
+- Honor case:strict in the folded-spelling walk
+- Read the case option of a json tag as the decoder does
+- Require the sseCustomerKey paths on cnpg-objectstore components after the barman bump
+- Refuse the barman fields the cnpg-cluster CRD has no property for
+- Refuse the absent barman fields when Generate builds a cnpg-cluster
+- Collision checks read a raw local-config value as kustomize does
+- Refuse an unfilled top-level Required key at authoring time
+
+### Documentation
+
+- Show the source revision a published docs build comes from
+- State that the probe copy and the authored-validation copy share pointers
+- Say that a parsed timestamp is a shared struct and drop the claim about Go-built pointers
+- Name the tested version in examples and use one status vocabulary
+- Use the status words on delivery-scope and capability-schema
+- Mark the capability schema design published prerelease
+- Update the capability schema design for the shipped rename
+- Fix four stale statements in the capability schema design
+- Limit the no-write promise and say a struct is shallow-copied
+
+### Fixed
+
+- Treat an option followed by another option as missing its value
+- Refuse a NaN or Inf in a strategic merge patch with a named path
+- Write an alias key back as authored
+- Fall back when a renamed tagged key would repeat a key
+- Keep the authored key text in nested and plain lists
+- Read no merge entry, compare numbers as the resource reads them, pair no shared direct item
+- Pair no written item that shares a merge-key value, and list the two comparison limits
+- Compare the data a merged document loads to, and only when it can differ
+- Keep the anchor of a scalar value the write-back rewrites
+- Read Go-built struct values as written in the feature-gate check
+- Compare a timestamp item by its text in the write-back
+- Read a merge-key value as the resource reads it
+- Refuse a repeated key in the strict JSON decode
+- Refuse a merge key that no text can write
+- Pair a root alias key by the text the loader reads
+- Restore key text against the texts the keys hold now
+- Read Go-built values before the null shortcut and bound the pointer walk
+
+### Performance
+
+- Do not decode list items that are the same scalar
+
+### Testing
+
+- Pin the scaler and topology-spread interaction across the public paths
+- Pin the case:strict tag option in the folded-spelling walk
+- Pin case:strict with case:ignore in the folded-spelling walk
+- Allow the repeated case option in the both-options fixture
+- Pin the message-equality guard of the tag-error line lookup
+- Re-vendor prometheus-operator gates at v0.95.2
+- Re-vendor external-secrets CRDs at v2.15.0
+- Pin that Generate refuses the absent barman fields of a Go-built cnpg-cluster
+- Pin the text of four error sites that a constructed resource reaches
+- Pin that authored validation does not write through a pointer or a struct value
+- Pin how droppedByKustomize reads a raw local-config value
+- Pin that authored validation refuses an absent top-level Required key
+- Record every authored property refusal's message and location cases
+
 ## [0.2.0-beta.5] - 2026-11-11
 
 ### Added
