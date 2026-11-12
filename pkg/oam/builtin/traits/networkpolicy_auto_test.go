@@ -841,7 +841,7 @@ func TestTransform_IngressPeers_SynthesizesEndpointIngressNetworkPolicy(t *testi
 	// postgresql lowers onto cnpg-cluster, with a post-policy step for its defaults.
 	// The rest are the rule's other targets, which this document does not reach: a
 	// registry without them is refused.
-	tr.RegisterComponentLowering(components.PostgresqlRule{})
+	tr.RegisterBuiltinComponentLowering(components.PostgresqlRule{})
 	tr.RegisterComponent("cnpg-cluster", &components.CnpgClusterHandler{})
 	tr.RegisterComponent("cnpg-objectstore", &components.CnpgObjectStoreHandler{})
 	tr.RegisterComponent("cnpg-pooler", &components.CnpgPoolerHandler{})

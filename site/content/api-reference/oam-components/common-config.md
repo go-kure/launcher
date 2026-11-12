@@ -467,7 +467,9 @@ literally). `add` is checked against the environment policy's
 (`enforceContainerCapabilities` in `enforce.go`) — a separate pair from
 `oam.Policy`'s `AllowedCapabilities`/`ForbiddenCapabilities`/
 `RequiredCapabilities`, which gate OAM trait-type usage (e.g. "ingress"), not
-container Linux capability strings (e.g. "NET_ADMIN"); see `enforce.go`'s
+container Linux capability strings (e.g. "NET_ADMIN"), and which judge both the
+traits an author wrote and the traits a non-builtin component-position lowering
+rule wrote onto a part it emitted (launcher's own rules are exempt); see `enforce.go`'s
 `enforcePrivileged` doc comment for the naming-collision detail.
 Default-allow, forbidden-list-first semantics: a nil/empty `Allowed` list
 means no restriction and a nil/empty `Forbidden` list means no forbids, but a

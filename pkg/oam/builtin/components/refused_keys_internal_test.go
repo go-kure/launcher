@@ -39,8 +39,8 @@ func refusedKeyTransformer() *oam.Transformer {
 		"serviceaccount":        &ServiceAccountHandler{},
 		"configmap":             &ConfigMapHandler{},
 	}, nil)
-	tr.RegisterComponentLowering(WebserviceRule{})
-	tr.RegisterComponentLowering(WorkerRule{})
+	tr.RegisterBuiltinComponentLowering(WebserviceRule{})
+	tr.RegisterBuiltinComponentLowering(WorkerRule{})
 	return tr
 }
 

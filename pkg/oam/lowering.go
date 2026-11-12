@@ -345,6 +345,11 @@ func (l LoweringContext) WithCapabilities(m map[string]CapabilityBinding) Loweri
 // terminal-type shared element only — see EmitOrAdopt).
 type NameAllocator struct {
 	taken map[string]nameClaim
+	// emittedTraitTypes collects the type of every trait a component-position
+	// rule wrote itself onto a part it emitted, so the capability check judges the
+	// output as well as the input. Made on the first write: a run whose rules emit
+	// no trait of their own allocates nothing for it.
+	emittedTraitTypes map[string]struct{}
 	// round is the fixpoint round currently being processed, set by runLowering
 	// before it dispatches any rule in that round (lowerRawRound, which runs round 0
 	// only, sets 0). Recorded on every claim purely
@@ -384,6 +389,15 @@ type nameClaim struct {
 	origin   Origin
 	round    int
 	identity string
+}
+
+// recordEmittedTrait notes the type of a trait a component-position rule wrote
+// onto a part it emitted. The capability check reads the set once lowering is done.
+func (a *NameAllocator) recordEmittedTrait(typ string) {
+	if a.emittedTraitTypes == nil {
+		a.emittedTraitTypes = make(map[string]struct{})
+	}
+	a.emittedTraitTypes[typ] = struct{}{}
 }
 
 // NewNameAllocator returns an empty NameAllocator — the same constructor the
@@ -837,6 +851,18 @@ func (t *Transformer) RegisterComponentLowering(r ComponentLoweringRule) {
 		panic("oam: type " + typeName + " is already a dispatchable component handler; a lowerable type must not also be terminal")
 	}
 	t.componentLoweringRules[typeName] = r
+}
+
+// RegisterBuiltinComponentLowering is RegisterComponentLowering for launcher's own
+// built-in component-position lowering rules (worker, webservice, helm, postgresql,
+// oci). The traits such a rule writes onto its parts (topology-spread, pvc,
+// configmap, secret) are launcher's own opinions, which a policy author neither
+// wrote nor can predict, so the capability check does not judge them. A rule
+// registered through RegisterComponentLowering is an embedder's or a model's, and
+// the traits it writes are judged.
+func (t *Transformer) RegisterBuiltinComponentLowering(r ComponentLoweringRule) {
+	t.RegisterComponentLowering(r)
+	t.builtinComponentRuleTypes[r.ComponentType()] = true
 }
 
 // RegisterTraitLowering registers a trait-position lowering rule. Same duplicate/
@@ -1507,6 +1533,14 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				}
 				if err := t.sealEmittedNestedTraits(&result.Components[j], compOrigin, originalTraits, inputChecked); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
+				}
+				// A trait a non-builtin rule wrote itself is part of the output the
+				// capability check judges; one it forwarded is an authored type already
+				// judged, and a builtin rule's own traits are launcher's opinions.
+				for k := range result.Components[j].Traits {
+					if trait := &result.Components[j].Traits[k]; !t.builtinComponentRuleTypes[comp.Type] && !isForwardedTrait(trait, originalTraits) {
+						namer.recordEmittedTrait(trait.Type)
+					}
 				}
 			}
 			// What the component became waits as the component did, whether or not

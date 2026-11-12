@@ -17,7 +17,7 @@ import (
 // it, so they run the production path — the same-name sibling group, its trait
 // routing and its NetworkPolicy synthesis — rather than a handler stand-in.
 func registerWebservice(tr *oam.Transformer) {
-	tr.RegisterComponentLowering(components.WebserviceRule{})
+	tr.RegisterBuiltinComponentLowering(components.WebserviceRule{})
 	tr.RegisterComponent("deployment", &components.DeploymentHandler{})
 	tr.RegisterComponent("service", &components.ServiceHandler{})
 	tr.RegisterComponent("serviceaccount", &components.ServiceAccountHandler{})

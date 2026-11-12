@@ -19,7 +19,7 @@ import (
 func outputsTransformer() *oam.Transformer {
 	t := oam.NewTransformer(registry.ComponentHandlers(), nil)
 	for _, r := range registry.ComponentLoweringRules() {
-		t.RegisterComponentLowering(r)
+		t.RegisterBuiltinComponentLowering(r)
 	}
 	for name, h := range registry.TraitHandlers() {
 		t.RegisterBuiltinTrait(name, h)

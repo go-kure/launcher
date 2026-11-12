@@ -37,7 +37,7 @@ pins the set, `TestBuiltinRegistries_TypesUnchanged`), alongside the built-in lo
 (`builtinTraitLoweringRules()` — currently just `expose`, registered via
 `RegisterBuiltinTraitLowering` rather than `RegisterBuiltinTrait`) and the
 component-position ones (`builtinComponentLoweringRules()` — `worker`,
-`webservice`, `postgresql`, `helm` and `oci`, registered via `RegisterComponentLowering`).
+`webservice`, `postgresql`, `helm` and `oci`, registered via `RegisterBuiltinComponentLowering`).
 `worker` lowers to a `deployment` component plus, unless `topologySpread: false`, a
 synthesized `topology-spread` trait. `webservice` lowers to a same-name `deployment`
 and `service` pair, deployed as one component, with the same `topology-spread`

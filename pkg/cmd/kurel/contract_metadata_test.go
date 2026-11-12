@@ -200,7 +200,7 @@ func TestTransform_WebserviceWithoutServiceIsRefused(t *testing.T) {
 	handlers := builtinComponentHandlers()
 	delete(handlers, "service")
 	tr := oam.NewTransformer(handlers, nil)
-	tr.RegisterComponentLowering(builtinComponentLoweringRules()["webservice"])
+	tr.RegisterBuiltinComponentLowering(builtinComponentLoweringRules()["webservice"])
 	for name, h := range builtinTraitHandlers() {
 		tr.RegisterBuiltinTrait(name, h)
 	}
@@ -226,7 +226,7 @@ func TestTransform_BuiltinsRegisterInAnyOrder(t *testing.T) {
 		tr.RegisterBuiltinTraitLowering(r)
 	}
 	for _, r := range builtinComponentLoweringRules() {
-		tr.RegisterComponentLowering(r)
+		tr.RegisterBuiltinComponentLowering(r)
 	}
 	for name, h := range builtinPolicyHandlers() {
 		tr.RegisterPolicy(name, h)
@@ -254,7 +254,7 @@ func onlyDeclaredTargets(t *testing.T, rules ...string) *oam.Transformer {
 	var targets oam.LoweringTargets
 	for _, name := range rules {
 		r := builtinComponentLoweringRules()[name]
-		tr.RegisterComponentLowering(r)
+		tr.RegisterBuiltinComponentLowering(r)
 		declared := r.(oam.LoweringTargetDeclarer).LoweringTargets()
 		targets.ComponentTypes = append(targets.ComponentTypes, declared.ComponentTypes...)
 		targets.TraitTypes = append(targets.TraitTypes, declared.TraitTypes...)

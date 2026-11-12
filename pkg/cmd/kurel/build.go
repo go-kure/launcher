@@ -356,10 +356,10 @@ func newBuiltinTransformer() *oam.Transformer {
 	// and "fluxcd-kustomization" pair, or into the "fluxcd-kustomization" alone
 	// beside a generated "ocirepository" that several "oci" components share.
 	// None may also appear in
-	// builtinComponentHandlers — RegisterComponentLowering panics on that
+	// builtinComponentHandlers — RegisterBuiltinComponentLowering panics on that
 	// collision.
 	for _, r := range builtinComponentLoweringRules() {
-		t.RegisterComponentLowering(r)
+		t.RegisterBuiltinComponentLowering(r)
 	}
 	for name, h := range builtinTraitHandlers() {
 		t.RegisterBuiltinTrait(name, h)
