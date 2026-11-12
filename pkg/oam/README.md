@@ -3393,13 +3393,19 @@ component or trait type no handler and no lowering rule claims (rejected separat
 by the type allowlists and by `validateSettled`); a custom trait type from a
 `CapabilityDefinition`, which declares that the type *exists* but not what properties
 it accepts; and a policy type nothing is registered for, which the transform rejects
-with `no handler for policy type`. Top-level `Required` is also deliberately not enforced
-here — `ClusterProfile` capability rendering merges into a trait's top-level property
-map after this runs, so a required property the platform supplies is legitimately
-absent from what the author wrote.
+with `no handler for policy type`.
+
+`Required` is enforced at the top level too, as written, and a null counts as absent
+(go-kure/launcher#1463): `component "web" (type "webservice"): properties: "image" is
+required`. Two cases are left to the platform and are not refused here. A trait a
+capability binding matches is checked on the merged properties, as described below, because
+`ClusterProfile` capability rendering merges into its top-level property map after this
+runs. A component key that its handler lists in `ComponentCapabilityDefaults` is filled by
+the capability, so its absence is accepted.
 
 Nested `Required`, inside an object the author did write, is enforced
-(go-kure/launcher#765):
+(go-kure/launcher#765), and top-level `Required` on a matched trait follows the same
+rule:
 
 - `ValidateAuthoredProperties` knows no profile, so it checks nested `Required` as
   written, on every trait.
@@ -3428,9 +3434,10 @@ Nested `Required`, inside an object the author did write, is enforced
   handler and is now refused. `kurel build` already ran the validator, so its output
   is unchanged.
 
-Required is enforced only inside an object that is present after the merge; an
-object property left out entirely is not refused, whatever its own `Required` flag
-says, as at the top level.
+The Required keys inside an object are checked only when that object is present after
+the merge. An optional object property that is left out entirely is not checked, as at
+the top level. An object property that is itself Required and is left out is refused as
+a missing key, like any other.
 
 One property is legal on **every** trait regardless of what its handler declares:
 `scope`. It is read by the transform engine rather than by a handler —

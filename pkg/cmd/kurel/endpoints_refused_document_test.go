@@ -130,8 +130,8 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 		{
 			name:       "cnpg-pooler: no pgbouncer",
 			components: component("cnpg-pooler", "        cluster:\n          name: main\n"),
-			stage:      "transform", want: `pgbouncer: required`,
-			answer: endpointRefused,
+			stage:      "validation", want: `properties: "pgbouncer" is required`,
+			answer: endpointRefusedOtherwise, otherwise: `pgbouncer: required`,
 		},
 		{
 			name:       "cnpg-pooler: a misspelt key below a declared one",
@@ -179,8 +179,8 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 		{
 			name:       "webservice: no image",
 			components: component("webservice", "        port: 8080\n"),
-			stage:      "transform", want: `required property 'image' missing or not a string`,
-			answer: endpointRefused,
+			stage:      "validation", want: `properties: "image" is required`,
+			answer: endpointRefusedOtherwise, otherwise: `required property 'image' missing or not a string`,
 		},
 		{
 			name:       "webservice: an image tagged latest",
