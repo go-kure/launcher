@@ -280,9 +280,11 @@ does not refuse"](conventions.md#required-fields-a-kind-writes-unauthored-and-do
 ### Outputs
 
 It is built at `metallb.io/v1beta2`, not at the `v1beta1` of the five kinds
-above. It emits that one object, named after the component unless
-`objectName` names it; the handler adds no label, no annotation and no
-default of its own.
+above: that is the version the linked module's CRD stores, `v1beta1` is
+served and marked deprecated there, and the base library's constructor
+builds the peer at `v1beta2`. It emits that one object, named after the
+component unless `objectName` names it; the handler adds no label, no
+annotation and no default of its own.
 
 **The object is namespaced, and MetalLB reads it in one namespace only**,
 as it reads a pool: it is written in the build namespace, and a peer of an
