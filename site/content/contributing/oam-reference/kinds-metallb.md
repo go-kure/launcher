@@ -58,8 +58,9 @@ unless a line says another file.
   - `TestMetalLBKinds_ExpressionRules` holds the kind's answer to the API
     server's for the linked CRD, on properties that break each rule and on
     properties that keep it, and fails on a rule that is added or reworded.
-  - `TestMetalLBBGPPeerKind_SessionPassword` (`metallb_bgppeer_test.go`) holds
-    this ("this" is the reference's account of `password` under each policy).
+  - `TestMetalLBBGPPeerKind_SessionPassword` holds this ("this" is the
+    reference's account of `password` under each policy; the test is in
+    `metallb_bgppeer_test.go`).
 
 ## metallb-community
 
@@ -89,11 +90,11 @@ unless a line says another file.
     that: one that is not the field's empty value, on a field that is no
     pointer, fails there ("that" is the reference's account of `autoAssign`
     and `avoidBuggyIPs`).
-  - So a dependency bump that adds, drops or moves one fails until it is
+  - …so a dependency bump that adds, drops or moves one fails until it is
     regenerated; `TestMetalLBKinds_RequiredMatchCRD` holds it to that CRD as
-    well ("one" and "it" are the fields of the Required list, generated from
-    the fields the linked module's `v1beta1` CRD requires and the type writes
-    unauthored).
+    well ("one" is a required field, and "it" is the Required list, generated
+    from the fields the linked module's `v1beta1` CRD requires and the type
+    writes unauthored).
   - The CRD declares none; `TestMetalLBKinds_ExpressionRules` fails on one that
     is added ("none" is the CRD's expression rules).
 
