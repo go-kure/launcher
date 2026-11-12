@@ -123,7 +123,8 @@ another upstream field of the same name. On `job` and `cronjob`,
 `restartPolicy` is the pod's, so the main container's own `restartPolicy`
 cannot be authored and cannot be refused. On `cronjob`, `suspend` is the
 CronJob's, so the job template's `suspend` cannot either (see "One JobSpec
-field is deliberately not shared" above).
+field is deliberately not shared" in
+[Policy defaults, endpoints and outputs](policy-and-endpoints.md)).
 
 ### Outside the properties
 

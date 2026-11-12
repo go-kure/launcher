@@ -706,7 +706,7 @@ weight: 8
 
   **One field is renamed: the spec's `labels` is the `externalLabels`
   property.** Every kind component's `labels` property is its object's own
-  labels (see "The object's labels and annotations" below): the engine reads
+  labels (see ["The object's labels and annotations"](conventions.md#the-objects-labels-and-annotations-labels-annotations)): the engine reads
   it before the handler sees it, so the spec's field cannot be authored
   under its own name. These are the ThanosRuler's Prometheus external
   labels, a map of label names to values (upstream: the operator always adds
