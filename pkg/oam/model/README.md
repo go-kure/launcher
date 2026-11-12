@@ -255,7 +255,9 @@ before each write, against the bytes that the next write adds (the first element
 and stops before it builds a result over the cap. `indexOf` and `lastIndexOf` are replaced by a version that refuses a search
 before it runs when cel-go would charge it over the cost limit: cel-go runs two nested loops and charges one tenth of a step for each
 pair of characters, but only after the call returns, so a string of 1,000,000 bytes and a search text of 500,000 ran 250 billion
-comparisons first. The replacement gives the result and the cost that cel-go gives for every search under that limit. An identifier that is the key of an index, as in
+comparisons first. `matches` has the same replacement, in its member and its global form: cel-go charges the length of the string
+times a quarter of the length of the pattern, only after the match ran, so a string of 100,000 bytes and a pattern of 40,000 that an
+input holds ran for minutes. Each replacement gives the result and the cost that cel-go gives for every call under that limit. An identifier that is the key of an index, as in
 `m[k]`, is charged by its size at every lookup, because cel-go reads it through the attribute and not
 as a value. So is every other key attribute, such as `m[c ? k : k]` and `m[(xs + [])[0]]`: the key is
 resolved once, and the cost that the evaluation reports does not change. A map comparison charges the length of each key. `&&`, `||`, the conditional and the

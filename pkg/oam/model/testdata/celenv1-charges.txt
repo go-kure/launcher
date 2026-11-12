@@ -49,7 +49,7 @@ join: amplifying (budgetedJoin in equality.go checks every element before it wri
 lastIndexOf: bounded (budgetedSearch in charge.go refuses a search that cel-go would charge over the cost limit before it runs; TestSearchIsRefusedBeforeItRuns)
 lists.range: amplifying (cel-go caps it at 1000000 elements and charges it by size; TestReplaceGrowth pins the cap)
 lowerAscii: bounded (same size as its operand)
-matches: scalar-out
+matches: bounded (budgetedMatches in charge.go refuses a match that cel-go would charge over the cost limit before it runs; TestMatchesIsRefusedBeforeItRuns)
 replace: amplifying (budgetedReplace in charge.go stops before it builds a result over the cap; TestChargeReplaceStopsBeforeTheAllocation)
 reverse: bounded (same elements as its operand)
 size: scalar-out
