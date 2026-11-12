@@ -8,6 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/cel-go/cel"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -549,5 +552,129 @@ func TestResultCopyChargesTheBytesOfMapKeys(t *testing.T) {
 				t.Fatalf("gave %v, want the result", err)
 			}
 		})
+	}
+}
+
+// go-kure/launcher#1462: cel-go builds the whole result of format before it charges it, and the
+// operands of a format can be small next to the result. The evaluation checks the largest result
+// the operands can print before it runs format.
+const (
+	// long400k is a string of 400,000 bytes, built below the cost limit.
+	long400k = "lists.range(40000).map(i, 'xxxxxxxxxx').join('')"
+	// long300k is a string of 300,000 bytes.
+	long300k = "lists.range(30000).map(i, 'xxxxxxxxxx').join('')"
+)
+
+// A format of 150 clauses over one string of 400,000 bytes prints 60,000,000 bytes, and a shared
+// nested list prints once for each value it holds, so cel-go built the result before it was charged.
+func TestChargeFormatStopsBeforeTheAllocation(t *testing.T) {
+	rows := []struct{ name, expr string }{
+		{"150 clauses over one long string", fmt.Sprintf("cel.bind(a, %s, lists.range(150).map(i, '%%s').join('').format(lists.range(150).map(i, a)).size() > 0)", long400k)},
+		{"a shared nested list", nested4(60, "'%s'.format([d]).size() > 0")},
+		{"a shared nested map value", nested4(60, "'%s'.format([{'k': d}]).size() > 0")},
+	}
+	for _, tc := range rows {
+		t.Run(tc.name, func(t *testing.T) {
+			var got any
+			var err error
+			mb := allocMB(func() { got, err = evalValue(t, tc.expr) })
+			wantCostLimit(t, got, err)
+			if mb > 50 {
+				t.Errorf("the refusal came after %d MB of allocation, want less than 50", mb)
+			}
+		})
+	}
+}
+
+// A format that fits gives what cel-go gives, with the cost cel-go reports.
+func TestChargeFormatAllowsWhatFits(t *testing.T) {
+	corpus := []string{
+		"'%s and %d'.format(['a', 1])", "'%.100f'.format([1.5])", "'%x'.format([b'abc'])", "'%X'.format(['hi'])", "'%e'.format([12345.678])",
+		"'%s'.format([[1, [2, 'x']]])", "'%s'.format([{'a': 1, 'b': [true]}])", "'%s %s %s'.format([null, 1u, 2.5])",
+		"'%s'.format([timestamp('2026-01-02T03:04:05Z')])", "'%s'.format([duration('90s')])", "'%s'.format([type(1)])", "'%%'.format([])", "'no clause'.format([])",
+		"lists.range(100).map(i, '%d').join(',').format(lists.range(100)).size()",
+		fmt.Sprintf("cel.bind(a, %s, '%%s'.format([a]).size())", long400k),
+		fmt.Sprintf("cel.bind(a, %s, '%%s%%s%%s'.format([a, a, a]).size())", long300k),
+		fmt.Sprintf("cel.bind(a, %s, '%%x'.format([a.substring(0, 1000)]).size())", long400k),
+	}
+	for _, expr := range corpus {
+		t.Run(expr, func(t *testing.T) {
+			want, wantCost := stockResult(t, expr)
+			if strings.HasPrefix(want, "compile error") || want == "error" {
+				t.Fatalf("test bug: cel-go gives %q for the corpus expression", want)
+			}
+			got, cost, err := evalValueCost(t, expr)
+			if err != nil {
+				t.Fatalf("Eval: %v, cel-go gives %s", err, want)
+			}
+			if have := fmt.Sprintf("%T %v", got, got); have != want {
+				t.Errorf("gave %s, cel-go gives %s", have, want)
+			}
+			if cost != wantCost {
+				t.Errorf("reported cost %d, cel-go reports %d", cost, wantCost)
+			}
+		})
+	}
+}
+
+// A format that cel-go rejects is rejected with the error of cel-go, and never with a stop.
+func TestChargeFormatKeepsItsErrors(t *testing.T) {
+	for _, expr := range []string{
+		"cel.bind(args, ['x'], '%d'.format(args))",
+		"cel.bind(args, ['a'], '%s %s'.format(args))",
+		"cel.bind(args, [1], '%z'.format(args))",
+		"cel.bind(args, [1], '%'.format(args))",
+	} {
+		t.Run(expr, func(t *testing.T) {
+			env, err := newEnv()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ast, iss := env.Compile(expr)
+			if iss.Err() != nil {
+				t.Fatalf("test bug: cel-go rejects %s: %v", expr, iss.Err())
+			}
+			prog, err := env.Program(ast, cel.CostLimit(maxExpressionCost))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, stockErr := prog.Eval(map[string]any{})
+			if stockErr == nil {
+				t.Fatalf("test bug: cel-go accepts %s", expr)
+			}
+			_, err = evalValue(t, expr)
+			if err == nil || errors.Is(err, ErrCostLimit) || !strings.Contains(err.Error(), stockErr.Error()) {
+				t.Errorf("error %v, want one that holds %q and is no cost limit", err, stockErr.Error())
+			}
+		})
+	}
+}
+
+// nestedN is nested4 with a depth the caller picks: a list of the given depth whose levels share one
+// list, so it holds n^depth values when it is read as a tree. final is the expression that reads
+// the outermost list, which is bound to the name of the last level.
+func nestedN(depth, n int, final string) string {
+	names := "abcdefgh"
+	expr := final
+	for i := depth - 1; i >= 0; i-- {
+		src := fmt.Sprintf("lists.range(%d)", n)
+		if i > 0 {
+			src = fmt.Sprintf("lists.range(%d).map(i, %c)", n, names[i-1])
+		}
+		expr = fmt.Sprintf("cel.bind(%c, %s, %s)", names[i], src, expr)
+	}
+	return expr
+}
+
+// The walk of the arguments stops when the running total passes the cap. A shared nest of depth 6
+// holds 30^6 = 729,000,000 values, and a walk that summed the whole tree and compared at the end
+// would run for minutes before it refused. The walk allocates nothing, so the allocation rows above
+// cannot see it: this row reads the time.
+func TestChargeFormatWalkStopsEarly(t *testing.T) {
+	start := time.Now()
+	got, err := evalValue(t, nestedN(6, 30, "'%s'.format([f]).size() > 0"))
+	wantCostLimit(t, got, err)
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("the refusal took %v, want under 5s: the walk of a shared nest did not stop early", d)
 	}
 }
