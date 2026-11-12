@@ -213,7 +213,7 @@ declaration first (`Transformer.CheckComponentTypes`), so a refused model leaves
 
 A component of the model type lowers into the components of its parts.
 
-- An input that the component does not set takes its default. `self.name` is the component name and
+- An input that the component does not set, or sets to an explicit null, takes its default. `self.name` is the component name and
   `self.application` is the name of its document.
 - A part is named `<component>-<part>`. The name allocator of the run gives it, so two parts that want
   one name fail the build, and the error names the name.
