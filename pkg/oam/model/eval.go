@@ -246,7 +246,7 @@ func (w *walker) build(path, text string, spec siteSpec) (*site, error) {
 		if s.single {
 			s.out = out
 		}
-		prog, err := env.Program(ast, cel.CostLimit(maxExpressionCost))
+		prog, err := env.Program(ast, cel.CostLimit(maxExpressionCost), cel.CustomDecorator(compareDecorator))
 		if err != nil {
 			return nil, invalid(path, "%s", err)
 		}
@@ -451,10 +451,11 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 	if s == nil {
 		return nil, 0, errors.Errorf("model: %s is not an expression site", path)
 	}
-	act := make(map[string]any, len(c.inputs)+len(sc.Values)+3)
+	act := make(map[string]any, len(c.inputs)+len(sc.Values)+4)
 	for _, n := range c.inputs {
 		act["inputs."+n] = sc.Inputs[n]
 	}
+	act[compareBudgetName] = newCompareBudget()
 	act["self.name"] = sc.Self.Name
 	act["self.application"] = sc.Self.Application
 	for n, v := range sc.Values {
