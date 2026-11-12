@@ -16,12 +16,11 @@ type Registry struct {
 	cache *Cache
 	mu    sync.Mutex
 	rules map[string]*Rule
-	depth map[string]int
 }
 
 // NewRegistry returns a registry for t.
 func NewRegistry(t *oam.Transformer) *Registry {
-	return &Registry{t: t, cache: CreateCache(), rules: map[string]*Rule{}, depth: map[string]int{}}
+	return &Registry{t: t, cache: CreateCache(), rules: map[string]*Rule{}}
 }
 
 // Register compiles m, checks that its type is not declared yet, that every part type and trait
@@ -49,8 +48,12 @@ func (g *Registry) Register(m *Model) (err error) {
 		if err != nil {
 			return errors.Errorf("model: %s.type: %w", base, err)
 		}
-		if d := g.depth[id.Canonical().String()] + 1; d > depth {
-			depth = d
+		// The depth is read from the rule the Transformer holds, so a model registered through
+		// another Registry of the same Transformer counts too.
+		if sub, ok := g.t.ComponentLoweringRuleFor(id.String()); ok {
+			if mr, isModel := sub.(*Rule); isModel && mr.depth+1 > depth {
+				depth = mr.depth + 1
+			}
 		}
 		for j, t := range p.Traits {
 			if _, err := g.t.ResolveTraitType(t.Type); err != nil {
@@ -61,7 +64,13 @@ func (g *Registry) Register(m *Model) (err error) {
 	if depth > MaxNestingDepth {
 		return errors.Errorf("%w: %s nests models %d deep, the limit is %d", ErrLimit, key, depth, MaxNestingDepth)
 	}
-	r := &Rule{m: m, c: c, t: g.t}
+	// The Transformer cannot unregister a rule, so the declaration is checked before the rule
+	// is registered, and it is the only step that can refuse after it.
+	ids := map[string]oam.TypeID{key: m.Identity()}
+	if err := g.t.CheckComponentTypes(ids); err != nil {
+		return errors.Wrapf(err, "model: declare %s", key)
+	}
+	r := &Rule{m: m, c: c, t: g.t, depth: depth}
 	// The Transformer panics on a type it cannot take, before it holds any of it.
 	defer func() {
 		if p := recover(); p != nil {
@@ -69,11 +78,10 @@ func (g *Registry) Register(m *Model) (err error) {
 		}
 	}()
 	g.t.RegisterComponentLowering(r)
-	if err := g.t.DeclareComponentTypes(map[string]oam.TypeID{key: m.Identity()}); err != nil {
+	if err := g.t.DeclareComponentTypes(ids); err != nil {
 		return errors.Wrapf(err, "model: declare %s", key)
 	}
 	g.rules[key] = r
-	g.depth[key] = depth
 	return nil
 }
 

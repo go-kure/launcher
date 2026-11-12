@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -60,10 +61,37 @@ func TestLowering_EmittedUnregisteredIdentityFailsTheBuild(t *testing.T) {
 	if err == nil {
 		t.Fatal("a rule emitted an identity that nothing declares, and the build passed")
 	}
-	for _, want := range []string{"ghost.acme.example@v1", "orders"} {
+	// The settled check refuses an unknown type too, in other words, so the cause must be the
+	// resolver's: it names the emitted component and the identity, and wraps the sentinel.
+	if !errors.Is(err, ErrTypeReferenceUnknown) {
+		t.Errorf("error %q does not wrap ErrTypeReferenceUnknown", err)
+	}
+	for _, want := range []string{`component "orders-part"`, "ghost.acme.example@v1"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name %q", err, want)
 		}
+	}
+}
+
+// A rule that emits a plain name a handler is registered under is dispatched as it was, also when
+// two declared identities share that short name: only an identity a rule wrote is resolved.
+func TestLowering_EmittedPlainRegisteredNameIsLeftAlone(t *testing.T) {
+	tr, seen := declared(t)
+	tr.RegisterComponent("widget2", &recordingComponentHandler{typ: "widget2", seen: seen})
+	if err := tr.DeclareComponentTypes(map[string]TypeID{"widget2": mustID(t, "widget.other.example@v1")}); err != nil {
+		t.Fatal(err)
+	}
+	tr.RegisterComponentLowering(identityRule{typ: "maker", emits: "widget"})
+	app := &Application{
+		APIVersion: SupportedAPIVersion, Kind: "Application",
+		Metadata: Metadata{Name: "shop", Namespace: "demo"},
+		Spec:     ApplicationSpec{Components: []Component{{Name: "orders", Type: "maker", Properties: map[string]any{}}}},
+	}
+	if _, err := tr.Transform(app, TransformContext{Namespace: "demo"}); err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	if !slices.Equal(*seen, []string{"widget"}) {
+		t.Fatalf("the widget handler saw the types %v, want [widget]", *seen)
 	}
 }
 
