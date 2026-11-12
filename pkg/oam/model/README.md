@@ -273,15 +273,16 @@ are open.
   `cel.bind(args, [inputs.image, 'x'], lists.range(2000).all(i, '%s%d'.format(args) == '' || true))`
   with a 1,000,000-byte `inputs.image` gives `true` and allocates about 5.7 GB in 1.6 s below both
   budgets.
-- A call on a receiver whose type is not known when the model compiles (a `dyn` receiver) has an
-  ambiguous overload, so cel-go charges it one step and the lists extension never reads its elements.
-  Two calls copy without a charge. A `sort` of `[0, 'bad'] + lists.range(10000)`: 2,000 sorts give
+- A `sort` or a `reverse` whose type is not fully known when the model compiles has an ambiguous
+  overload, so cel-go charges it one step and the lists extension never reads its elements. For `sort`
+  the cause is an unknown element type (a `dyn` element); for `reverse` it is a receiver of type `dyn`,
+  because a string has a `reverse` too. A `sort` of `[0, 'bad'] + lists.range(10000)`: 2,000 sorts give
   `true` at a cost of 22,044, allocating about 1 GB in 3 s. A `reverse` of a list read from a mixed map,
   `cel.bind(xs, {'xs': lists.range(10000), 'other': 0}.xs, lists.range(2000).all(i, xs.reverse().size() == 10000))`:
   `true` at a cost of 26,065, allocating about 1.4 GB in 0.8 s. A `sort` or `reverse` of a typed list
-  is stopped, and so is `reverse` of the `list(dyn)` in the `sort` example. A `dyn` receiver of `slice`, `distinct`, `flatten` or `==` is
-  stopped by the cost limit or the budget in the same loop, and `size`, `in`, an index and `+` copy
-  nothing.
+  is stopped, and so is `reverse` of the `list(dyn)` in the `sort` example. A `dyn` receiver of `slice`
+  (one overload, which charges its output), `distinct`, `flatten` or `==` is stopped by the cost limit
+  or the budget in the same loop, and `size`, `in`, an index and `+` copy nothing.
 
 Every other member of this class found so far is bounded (`sortBy`, `join`, `replace`, comparisons,
 `flatten`, the keys of a typed `sort` and the keys of a result copy), and a test pins each. These
