@@ -661,7 +661,9 @@ omission (`service: {}`) and the API server refuse it.
 
 ### Outputs
 
-**All four are cluster-scoped**: the object carries no namespace, whatever
+Each is built on `policyFreeKind` and emits that one object, named after the
+component unless `objectName` names it; the handler adds no label, no
+annotation and no default. **All four are cluster-scoped**: the object carries no namespace, whatever
 namespace the application is built for, and its name is claimed cluster-wide.
 
 **Labels and annotations** are the `labels` and `annotations` properties. **A
@@ -827,7 +829,9 @@ well.
 
 ### Outputs
 
-**The first three are cluster-scoped**: the object carries no namespace,
+Each is built on `policyFreeKind` and emits that one object, named after the
+component unless `objectName` names it; the handler adds no label, no
+annotation and no default of its own. **The first three are cluster-scoped**: the object carries no namespace,
 whatever namespace the application is built for, and its name is claimed
 cluster-wide. **The redirect policy and the node configuration are namespaced**
 and are written in the build namespace.
@@ -1173,7 +1177,9 @@ application of the objects referred to.
 
 ### Outputs
 
-A `gatewayclass` is emitted with no namespace and declares its object as
+Each is built on `policyFreeKind` (see the **storageclass** entry) and emits that
+one object, named after the component unless `objectName` names it; the handler
+adds no label, no annotation and no default. A `gatewayclass` is emitted with no namespace and declares its object as
 cluster-scoped, so its name is claimed in no namespace. The other four are
 emitted in the build namespace and declare their object as namespaced.
 
@@ -1312,7 +1318,10 @@ and the refused omissions are held to them, as for the infrastructure kinds.
 
 ### Outputs
 
-The object is written at `v1`, the version the CRDs of both channels store; the
+Each is built on `policyFreeKind` (above), as the kinds of the API's
+infrastructure objects are, and emits that one object in the build namespace,
+named after the component unless `objectName` names it; the handler adds no
+label, no annotation and no default. The object is written at `v1`, the version the CRDs of both channels store; the
 older versions (`v1alpha2`, and `v1alpha3` of a TLSRoute) are served by the
 experimental channel's CRDs only, as deprecated.
 
