@@ -1084,13 +1084,15 @@ set the Linux-only pod and container fields, a `linux` pod may not set
 `windowsOptions`); checks needing cluster state (host ports under
 `hostNetwork`, RuntimeClass existence) are left to the cluster, and so are feature
 gates, with one exception: a `ClusterProfile` that states `spec.kubernetesVersion` has
-a property whose gate is off by default at that release refused (go-kure/launcher#1183):
+a property whose gate is off by default at that release (or set off in `spec.featureGates`) refused (go-kure/launcher#1183):
 `hostnameOverride` below 1.35 (`HostnameOverride`) and `podResources` below 1.34
 (`PodLevelResources`), and a container's `env[].valueFrom.fileKeyRef` below 1.35
 (`EnvFiles`) and an init container's `restartPolicyRules` below 1.35
 (`ContainerRestartRules`), on the kinds whose schema declares them. The gate and the
 release are in the property's published schema (`gate`). With no version stated nothing
-is checked. The `Never` and `OnFailure` values of an init container's `restartPolicy`
+is checked, and a profile's `spec.featureGates` replaces the release default for a gate it
+names: set on, the property is accepted below its release; set off, it is refused at any
+release (go-kure/launcher#1231). The `Never` and `OnFailure` values of an init container's `restartPolicy`
 are refused below 1.35 by the same gate, and `service`'s `trafficDistribution` values
 `PreferSameZone` and `PreferSameNode` below 1.34 (`PreferSameTrafficDistribution`); the
 other values are accepted at every version, and the gate is named per value in the

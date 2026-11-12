@@ -41,7 +41,13 @@ type ClusterProfileSpec struct {
 	// unknown: nothing is checked, and the build is what it was before the field
 	// existed. See docs/oam/design-cluster-profile.md.
 	KubernetesVersion string `yaml:"kubernetesVersion,omitempty" json:"kubernetesVersion,omitempty"`
-	// FeatureGates is a stub: go-kure/launcher#1231 gives it meaning.
+	// FeatureGates sets Kubernetes feature gates by hand, gate name to on or off, for a
+	// cluster that runs a gate against the default its release implies (a managed
+	// distribution that enables a beta gate early, or switches one off). A gate named
+	// here is on or off as stated when a build checks the gated fields; every other
+	// gate follows kubernetesVersion (go-kure/launcher#1231). A name launcher's
+	// lifecycle table does not know is refused, and so is a map with no
+	// kubernetesVersion: ParseClusterProfile reports both.
 	FeatureGates map[string]bool `yaml:"featureGates,omitempty" json:"featureGates,omitempty"`
 }
 

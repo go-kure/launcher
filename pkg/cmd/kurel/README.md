@@ -245,8 +245,8 @@ types. See the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oa
 Parsing and Lowering sections for the general mechanism.
 
 Once the application is parsed and the profile evaluated, `build` calls
-`ValidateAuthoredPropertiesForTarget` with the evaluated bindings and the profile's
-`spec.kubernetesVersion`, so a component or trait property that neither its handler or
+`ValidateAuthoredPropertiesForTargetWithGates` with the evaluated bindings and the profile's
+`spec.kubernetesVersion` and `spec.featureGates`, so a component or trait property that neither its handler or
 lowering rule declares nor the engine reads itself (`scope` on a trait; `objectName`,
 `labels` and `annotations` on a component whose type declares an object) is a build
 error naming the field and the allowed set, rather than being silently dropped
@@ -254,7 +254,10 @@ error naming the field and the allowed set, rather than being silently dropped
 unchecked. With a version set, a property whose Kubernetes feature gate
 is off by default at that release is refused too, naming the property, the gate, the
 release where it turns on and the profile's version (go-kure/launcher#1183); with no
-version nothing is checked, as before. The call returns the document it validated, a
+version nothing is checked, as before. The profile's `spec.featureGates`, which needs
+`spec.kubernetesVersion`, overrides a gate's state in both directions, so a cluster that
+differs from its release's defaults says so (go-kure/launcher#1231); a refusal it causes
+names `spec.featureGates`. The call returns the document it validated, a
 copy with each explicit nested `null` stripped and each value normalized under the
 schema-declared fields, and `build` transforms that copy; the parsed application is
 never edited (go-kure/launcher#1282). A key accepted through `AdditionalProperties`
@@ -282,7 +285,8 @@ before that point would reject a document that is correct. See the OAM model's
 Property schemas section for what the check does and does not cover.
 
 `build` also hands the profile's `spec.kubernetesVersion` to the transformer as its
-target version. Below Kubernetes 1.36, where the `RelaxedServiceNameValidation` feature
+target version, with `spec.featureGates` beside it: a gate set there replaces the
+release's answer for the Service name check too. Below Kubernetes 1.36, where the `RelaxedServiceNameValidation` feature
 gate is off by default, the build refuses an application that would generate a Service
 name starting with a digit: a core Service, the Services a CloudNativePG Pooler or
 Cluster declares, and the `spec.serviceName` of a Prometheus, PrometheusAgent,

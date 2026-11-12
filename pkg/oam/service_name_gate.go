@@ -14,7 +14,8 @@ import (
 
 // serviceNameGate is the Kubernetes feature gate that lets a Service name start
 // with a digit: off by default below the release the lifecycle table names for
-// it, when the API server refuses such a name (go-kure/launcher#1230).
+// it, when the API server refuses such a name, unless the profile's spec.featureGates
+// sets it (go-kure/launcher#1230, go-kure/launcher#1231).
 const serviceNameGate = "RelaxedServiceNameValidation"
 
 // CodeCheckedGates returns the lifecycle-table gates that code checks on the
@@ -26,20 +27,24 @@ func CodeCheckedGates() []string {
 }
 
 // serviceNameGateProblem is the refusal of a Service name that starts with a
-// digit when target is below the release where serviceNameGate is on by default,
-// nil otherwise. field says where the name is written. Only the first byte is
+// digit when serviceNameGate is off for target (below the release where it is on by
+// default, or set off by the profile's spec.featureGates), nil otherwise. field says where the name is written. Only the first byte is
 // read: the rest of the name is the DNS label rule's, which the handlers apply
 // first, so a name that breaks it is refused for that reason before it gets here.
-func serviceNameGateProblem(field, name string, target KubernetesVersion) error {
+func serviceNameGateProblem(field, name string, target gateTarget) error {
 	if name == "" || name[0] < '0' || name[0] > '9' {
 		return nil
 	}
-	on, err := gateEnabled(serviceNameGate, target, nil)
+	on, err := target.enabled(serviceNameGate)
 	if err != nil {
 		return err
 	}
 	if on {
 		return nil
+	}
+	if target.setOff(serviceNameGate) {
+		return errors.Errorf("%s %q: a Service name may start with a digit only with the Kubernetes feature gate %s, and the ClusterProfile's spec.featureGates sets it to false; start the name with a letter or set the gate to true",
+			field, name, serviceNameGate)
 	}
 	release, _ := FeatureGateOnByDefault(serviceNameGate)
 	return errors.Errorf("%s %q: a Service name may start with a digit only with the Kubernetes feature gate %s, on by default from %s, and the ClusterProfile's kubernetesVersion is %s; start the name with a letter or raise spec.kubernetesVersion",
@@ -89,16 +94,22 @@ func ServiceNameCheckedKinds() []schema.GroupKind {
 	return kinds
 }
 
+// gate is the target the checks hold a Service name to: the wrapper's release and
+// the profile's spec.featureGates. Only called with a target set.
+func (o *ownedConfig) gate() gateTarget {
+	return gateTarget{version: *o.target, overrides: o.gates}
+}
+
 // checkServiceNames holds obj, and every object it stands for when Flux applies
 // it, to serviceNameGateProblem under the wrapper's target. A wrapper with no
-// target, or with a target at or above the release where the gate is on by
-// default, checks nothing: the rule has no say there, so an object it cannot read
+// target, or with a target for which the gate is on (at or above the release where it
+// is on by default, or set on by the profile's spec.featureGates), checks nothing: the rule has no say there, so an object it cannot read
 // is not refused for it either.
 func (o *ownedConfig) checkServiceNames(obj client.Object) error {
 	if o.target == nil {
 		return nil
 	}
-	on, err := gateEnabled(serviceNameGate, *o.target, nil)
+	on, err := o.gate().enabled(serviceNameGate)
 	if err != nil {
 		return o.serviceNameViolation(err)
 	}
@@ -141,15 +152,15 @@ func (o *ownedConfig) checkServiceName(obj client.Object) error {
 		case b.each != nil:
 			for i, item := range serviceNameItemFields(m, b.each, b.path) {
 				field := fmt.Sprintf("%s %s[%d].%s", object, strings.Join(b.each, "."), i, strings.Join(b.path, "."))
-				if refusal := o.serviceNameViolation(serviceNameGateProblem(field, item, *o.target)); refusal != nil {
+				if refusal := o.serviceNameViolation(serviceNameGateProblem(field, item, o.gate())); refusal != nil {
 					return refusal
 				}
 			}
 			return nil
 		case b.path == nil:
-			return o.serviceNameViolation(serviceNameGateProblem(gvk.Kind+" metadata.name", name, *o.target))
+			return o.serviceNameViolation(serviceNameGateProblem(gvk.Kind+" metadata.name", name, o.gate()))
 		default:
-			return o.serviceNameViolation(serviceNameGateProblem(object+" "+strings.Join(b.path, "."), serviceNameField(m, b.path), *o.target))
+			return o.serviceNameViolation(serviceNameGateProblem(object+" "+strings.Join(b.path, "."), serviceNameField(m, b.path), o.gate()))
 		}
 	}
 	return nil

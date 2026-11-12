@@ -9,7 +9,7 @@ weight: 4
 |----------|---------|
 | `Parse` / `ParseMulti` / `MustParse` | Parse one / many Application documents. |
 | `ParsePackage` | Parse a `Package` (the `kurel.yaml` parameter declarations; the application is read separately). |
-| `ParseClusterProfile` | Parse a `ClusterProfile`. `spec.kubernetesVersion`, when set, must be `1.N`, `v1.N` or `v1.N.P`; see `ValidateAuthoredPropertiesForTarget`. |
+| `ParseClusterProfile` | Parse a `ClusterProfile`. `spec.kubernetesVersion`, when set, must be `1.N`, `v1.N` or `v1.N.P`; see `ValidateAuthoredPropertiesForTarget`. `spec.featureGates` (gate name to bool) overrides a gate's state; a name the gate table lacks is refused, and the map needs `spec.kubernetesVersion`; see `ValidateAuthoredPropertiesForTargetWithGates`. |
 | `LoadCapabilityDefinitions` | Load `CapabilityDefinition`s for capability validation. |
 | `ParseWithExtraTraitTypes` | Parse allowing additional (custom) trait types. |
 | `ParseWithExtraTypes` | Parse allowing custom trait types **and** a `LowerableTypes` set — the document kinds, component types, trait types and policy types claimed by a transformer's registered lowering rules, and the policy types it has a handler for. |

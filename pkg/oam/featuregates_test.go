@@ -111,8 +111,8 @@ func TestGateEnabled(t *testing.T) {
 			t.Errorf("gateEnabled(EnvFiles, %v) = %v, %v; want %v", c.v, got, err, c.want)
 		}
 	}
-	// An override wins over the table in both directions (go-kure/launcher#1231 will
-	// feed it from the profile; nothing does yet).
+	// An override wins over the table in both directions; a ClusterProfile feeds it
+	// through spec.featureGates (go-kure/launcher#1231).
 	if on, err := gateEnabled("EnvFiles", KubernetesVersion{1, 30}, map[string]bool{"EnvFiles": true}); err != nil || !on {
 		t.Errorf("override on: got %v, %v", on, err)
 	}

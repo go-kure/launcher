@@ -134,8 +134,7 @@ func lookupFeatureGate(name string) (featureGate, bool) {
 }
 
 // gateEnabled reports whether gate is on by default at version. overrides is the
-// per-gate setting a profile may add later (go-kure/launcher#1231); it is nil
-// today, and an entry would win over the table. An unknown gate is an error: a
+// profile's spec.featureGates (go-kure/launcher#1231); an entry wins over the table. An unknown gate is an error: a
 // schema naming a gate the table lacks is a launcher defect, never a pass.
 func gateEnabled(gate string, version KubernetesVersion, overrides map[string]bool) (bool, error) {
 	if on, ok := overrides[gate]; ok {
@@ -148,10 +147,26 @@ func gateEnabled(gate string, version KubernetesVersion, overrides map[string]bo
 	return version.AtLeast(g.OnByDefault), nil
 }
 
-// gateTarget is a stub: go-kure/launcher#1231.
+// gateTarget is the cluster a document is built for, as far as the gate checks read
+// it: the release its profile states and the gates the profile sets by hand
+// (spec.featureGates, go-kure/launcher#1231). A gate in overrides is as it says; any
+// other follows the lifecycle table at version. The zero overrides is the table.
 type gateTarget struct {
 	version   KubernetesVersion
 	overrides map[string]bool
 }
 
-func (g gateTarget) enabled(gate string) (bool, error) { return gateEnabled(gate, g.version, nil) }
+// String is the release, the form the refusals have always printed.
+func (g gateTarget) String() string { return g.version.String() }
+
+// enabled reports whether gate is on for this cluster (gateEnabled).
+func (g gateTarget) enabled(gate string) (bool, error) {
+	return gateEnabled(gate, g.version, g.overrides)
+}
+
+// setOff reports whether the profile sets gate off by hand, so a refusal names that
+// setting and not the release it would not have followed.
+func (g gateTarget) setOff(gate string) bool {
+	on, set := g.overrides[gate]
+	return set && !on
+}

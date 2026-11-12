@@ -19,8 +19,10 @@ The `kurel build` pipeline checks authored input in its own stages, none of whic
 package:
 
 1. Parameters are substituted into the authored document.
-2. `ValidateAuthoredPropertiesForTarget` checks the authored properties: the keys, their types,
-   nested required fields and, when the profile names a Kubernetes version, feature gates. It
+2. `ValidateAuthoredPropertiesForTargetWithGates` checks the authored properties: the keys, their types,
+   nested required fields and, when the profile names a Kubernetes version, feature gates, with
+   the profile's `spec.featureGates` overriding the release default (`ValidateAuthoredPropertiesForTarget`
+   is the same call with no overrides). It
    does not require a top-level property to be present; a handler or a capability supplies and
    checks those. It returns the validated copy.
 3. `Transform` runs on that copy, then manifest generation and the in-document collision check.

@@ -82,6 +82,8 @@ type ownedConfig struct {
 	// holds a Service name to the release's rule only when it is set
 	// (service_name_gate.go).
 	target *KubernetesVersion
+	// gates is the profile's spec.featureGates, read with target (go-kure/launcher#1231).
+	gates map[string]bool
 	// emitted is the objects the latest Generate returned under kinds, which
 	// AugmentLayout reads again (recheckEmitted); each Generate replaces it, so
 	// no earlier generation's objects are kept. emittedMu guards it.
@@ -120,7 +122,14 @@ func wrapOwnedEntryConfigKinds(inner stack.ApplicationConfig, component, entry, 
 // release the objects are for, which the wrapper holds the Service names of the
 // application's objects to (go-kure/launcher#1230).
 func wrapOwnedEntryConfigTarget(inner stack.ApplicationConfig, component, entry, labelKey string, reserved *reservedMetadataKeys, kinds *objectKindRules, target *KubernetesVersion) stack.ApplicationConfig {
-	owned := &ownedConfig{inner: inner, component: component, entry: entry, labelKey: labelKey, reserved: reserved, kinds: kinds, target: target}
+	return wrapOwnedEntryConfigGates(inner, component, entry, labelKey, reserved, kinds, target, nil)
+}
+
+// wrapOwnedEntryConfigGates is wrapOwnedEntryConfigTarget with the profile's
+// spec.featureGates, which win over the release for each gate they name
+// (go-kure/launcher#1231).
+func wrapOwnedEntryConfigGates(inner stack.ApplicationConfig, component, entry, labelKey string, reserved *reservedMetadataKeys, kinds *objectKindRules, target *KubernetesVersion, gates map[string]bool) stack.ApplicationConfig {
+	owned := &ownedConfig{inner: inner, component: component, entry: entry, labelKey: labelKey, reserved: reserved, kinds: kinds, target: target, gates: gates}
 	augmenter, ok := inner.(layout.LayoutAugmenter)
 	if !ok {
 		return owned
@@ -450,8 +459,9 @@ var (
 // component's label value through for (checkEntryLabelValues). kinds is the
 // policy's object kind rules, nil when it has none. target is the Kubernetes
 // release the wrapper holds a Service name to (TransformContext.TargetVersion),
-// nil when the transform was given none.
-func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subApps []traitSubApps, labelKey string, reserved *reservedMetadataKeys, kinds *objectKindRules, target *KubernetesVersion) error {
+// nil when the transform was given none, and gates the profile's spec.featureGates
+// (TransformContext.FeatureGates).
+func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subApps []traitSubApps, labelKey string, reserved *reservedMetadataKeys, kinds *objectKindRules, target *KubernetesVersion, gates map[string]bool) error {
 	if cluster == nil {
 		return nil
 	}
@@ -498,7 +508,7 @@ func markComponentOwnership(cluster *stack.Cluster, order *componentOrder, subAp
 				entry := synthesizedPolicyComponent(app.Config)
 				own = owner{component: byEntryName[entry], entry: entry}
 			}
-			app.Config = wrapOwnedEntryConfigTarget(app.Config, own.component, own.entry, labelKey, reserved, kinds, target)
+			app.Config = wrapOwnedEntryConfigGates(app.Config, own.component, own.entry, labelKey, reserved, kinds, target, gates)
 		}
 	})
 	return nil

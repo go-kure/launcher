@@ -47,10 +47,14 @@ type TransformContext struct {
 	// refused below the release where the RelaxedServiceNameValidation feature
 	// gate is on by default, because the API server would refuse the Service. The
 	// check runs when the objects are generated (GenerateApplications), not in
-	// Transform, and it reads this field only: a caller that leaves it nil gets no
-	// check. Non-authorable platform input, like EgressPeers.
+	// Transform, and it reads this field with FeatureGates below: a caller that leaves
+	// this one nil gets no check. Non-authorable platform input, like EgressPeers.
 	TargetVersion *KubernetesVersion
-	// FeatureGates is a stub: go-kure/launcher#1231 gives it meaning.
+	// FeatureGates is the ClusterProfile's spec.featureGates (go-kure/launcher#1231):
+	// each gate it names is on or off as it says, whatever release TargetVersion
+	// implies, for the Service name check above. It is read only with TargetVersion:
+	// a caller that leaves TargetVersion nil gets no check, whatever it sets here.
+	// Non-authorable platform input, like TargetVersion.
 	FeatureGates map[string]bool
 	// EgressPeers carries downstream-supplied, graph-derived egress destinations keyed
 	// by OAM component name. Non-authorable: never sourced from OAM YAML or
@@ -1095,7 +1099,7 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 	// generates with its component (go-kure/launcher#788) and holds it to the
 	// consumer's reserved metadata keys (go-kure/launcher#790) and to the
 	// policy's object kinds (go-kure/launcher#922).
-	if err := markComponentOwnership(cluster, order, *ctx.traitSubApps, labelKey, reservedKeys, objectKinds, ctx.TargetVersion); err != nil {
+	if err := markComponentOwnership(cluster, order, *ctx.traitSubApps, labelKey, reservedKeys, objectKinds, ctx.TargetVersion, ctx.FeatureGates); err != nil {
 		return nil, nil, err
 	}
 
