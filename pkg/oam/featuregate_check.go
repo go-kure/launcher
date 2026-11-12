@@ -119,16 +119,18 @@ func checkGatedProperties(schema map[string]PropertySchema, props map[string]any
 }
 
 func checkGatedValue(field PropertySchema, value any, path string, target KubernetesVersion) error {
+	// Everything below reads the value as the writer writes it, so a struct is read as
+	// the map, array or scalar it encodes to, and one that encodes to null is absent.
+	// The read comes before the null check: a nil named slice with its own MarshalJSON
+	// is nil to the check and an array to the writer (go-kure/launcher#1450).
+	value, ok, err := readWritten(value, path, func() (bool, error) { return fieldGateOff(field, target) })
+	if err != nil || !ok {
+		return err
+	}
 	// A null is absent at every depth (the null contract, property_validate.go),
 	// so it uses no gate.
 	if isNullValue(value) {
 		return nil
-	}
-	// Everything below reads the value as the writer writes it, so a struct is read as
-	// the map, array or scalar it encodes to, and one that encodes to null is absent.
-	value, ok, err := readWritten(value, path, func() (bool, error) { return fieldGateOff(field, target) })
-	if err != nil || !ok {
-		return err
 	}
 	if field.Gate != "" {
 		if err := refuseGateBelow(field.Gate, path, target); err != nil {
@@ -244,13 +246,13 @@ func checkValueGatedPaths(paths map[string]map[string]string, value any, path st
 // a struct below the path that does not encode is refused only where one of them is off
 // at target, because where all are on nothing below it would be refused.
 func walkGatedPath(keys []string, value any, path string, gates []string, target KubernetesVersion, leaf func(value any, path string) error) error {
-	if isNullValue(value) {
-		return nil
-	}
 	off := func() (bool, error) { return anyGateOff(gates, target) }
 	value, ok, err := readWritten(value, path, off)
 	if err != nil || !ok {
 		return err
+	}
+	if isNullValue(value) {
+		return nil
 	}
 	if len(keys) == 0 {
 		return leaf(value, path)
@@ -367,7 +369,10 @@ func fieldGateOff(field PropertySchema, target KubernetesVersion) (bool, error) 
 // type decides, never the value, so a pointer to a nil pointer is converted and written
 // as null. A slice is converted whole, never element by element, because the writer
 // marshals its elements in place, where a MarshalJSON on the pointer type applies, and a
-// copy of an element would lose it.
+// copy of an element would lose it. A pointer type can be its own element type
+// (`type P *P`), so the walk keeps the types it has passed and, on a repeat, reports true
+// and leaves the value to the writer: it writes null for an acyclic one, and for a value
+// that points at itself it fails, which readWritten refuses (go-kure/launcher#1450).
 func isGoBuiltValue(value any) bool {
 	t := reflect.TypeOf(value)
 	if t == nil {
@@ -376,7 +381,12 @@ func isGoBuiltValue(value any) bool {
 	if t.Kind() == reflect.Slice {
 		t = t.Elem()
 	}
+	seen := map[reflect.Type]bool{}
 	for t.Kind() == reflect.Pointer {
+		if seen[t] {
+			return true
+		}
+		seen[t] = true
 		t = t.Elem()
 	}
 	return t.Kind() == reflect.Struct
@@ -385,8 +395,13 @@ func isGoBuiltValue(value any) bool {
 // writtenForm returns value as the writer writes it: a struct read back from its JSON
 // as a map, every number kept as its text (json.Number), so a 64-bit integer survives
 // and the walk reads the same keys a decoded document has. The error is non-nil when
-// value does not encode. value is not edited.
+// value does not encode. value is not edited. A value whose pointer chain returns to
+// itself is refused before the encoder sees it: the encoder follows such a chain until
+// the stack is gone, which no caller can recover from.
 func writtenForm(value any) (any, error) {
+	if pointerCycle(reflect.ValueOf(value)) {
+		return nil, errors.New("the value points at itself")
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return nil, errors.Wrap(err, "the value does not encode as JSON")
@@ -398,6 +413,31 @@ func writtenForm(value any) (any, error) {
 		return nil, errors.Wrap(err, "the value does not decode from its JSON")
 	}
 	return out, nil
+}
+
+// pointerCycle reports whether v is a chain of pointers that comes back to a pointer it
+// has passed: `type P *P` holding its own address. A pointer is the same one only when
+// its type and its address both repeat, because a struct and its first field share an
+// address and are not a cycle. It follows the value's own pointer chain only, so each
+// step adds one pointer to the set and the walk ends after at most as many steps as the
+// chain has distinct pointers. A pointer type has no methods, so the encoder follows this
+// chain with no marshaler in the way. A cycle further down, through a slice element or a
+// struct field, is left to the encoder, as it was before.
+func pointerCycle(v reflect.Value) bool {
+	type pointer struct {
+		typ  reflect.Type
+		addr uintptr
+	}
+	seen := map[pointer]bool{}
+	for v.Kind() == reflect.Pointer && !v.IsNil() {
+		p := pointer{v.Type(), v.Pointer()}
+		if seen[p] {
+			return true
+		}
+		seen[p] = true
+		v = v.Elem()
+	}
+	return false
 }
 
 // foldedKeys returns, in sorted order, every key of obj that equals key ignoring case.

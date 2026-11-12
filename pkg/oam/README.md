@@ -3255,7 +3255,10 @@ hold a struct from the Kubernetes API types (a `corev1.PodSpec` in a template, a
 pointer to one, or a slice of either, through its JSON form, so it is held to the same
 gates as the decoded document. A struct that encodes to null is absent, as a decoded null
 is. A struct that does not encode as JSON is refused, with its path, where a gate
-below it is off at the target (go-kure/launcher#1320).
+below it is off at the target (go-kure/launcher#1320). The read comes before the null
+check, so a nil slice of a named type whose own `MarshalJSON` writes an array is present,
+and a pointer type that is its own element type (`type P *P`) is read through its JSON
+form like any other (go-kure/launcher#1450).
 
 A gate may also cover single values of an enum property: `ValueGates` (published as
 `valueGates`) maps an `Enum` value to the gate that value alone needs, and the property is
