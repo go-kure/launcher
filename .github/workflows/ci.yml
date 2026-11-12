@@ -1223,6 +1223,11 @@ jobs:
     - name: Check the built site shows its source revision
       run: make check-revision-shown
 
+    # The API-reference pages keep their old anchors, and no fragment link on the built
+    # site dangles (go-kure/launcher#1335). The self-test runs first, as above.
+    - name: Check the API-reference anchors and fragment links
+      run: make check-api-anchors
+
     - name: Upload docs artifact
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:

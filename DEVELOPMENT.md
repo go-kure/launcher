@@ -313,6 +313,7 @@ each other, not with upstream.
 - `validate-manifests` - Build example manifests and validate against flux-schema
 - `check-doc-fences` - Check the documentation's marked YAML fences (self-test, then the tree)
 - `check-revision-shown` - Check the built site (`site/public`) shows its source commit (self-test, then the tree)
+- `check-api-anchors` - Check the built site keeps the pinned API-reference anchors and has no broken fragment link (self-test, then the tree)
 
 ### Testing
 - `test` - Run all tests
@@ -338,6 +339,7 @@ each other, not with upstream.
 - `test-verify-merge` - Self-test `scripts/verify-merge.sh`
 - `test-pin-impact` - Run `scripts/check-pin-impact.sh`'s hermetic cases (`bash scripts/test/run-tests.sh`)
 - `test-forbidden-terms` - Self-test the guard matcher the CRD vendor scripts read (`scripts/forbidden-terms-lib.sh`) and `cliff.toml`'s changelog scrub against the forbidden-terms guard (`bash scripts/test/forbidden-terms-test.sh`; needs `git-cliff` on `PATH`, which mise installs)
+- `test-api-anchors` - Self-test `site/scripts/check-api-anchors.sh` against throwaway built sites (`bash site/scripts/check-api-anchors-test.sh`)
 - `check-issue-refs` - Reject bare `#N` and ownerless `name#N` references (self-test, the tree, then commit messages since `ISSUE_REFS_BASE`, default `origin/main`; `AGENTS.md` § "Issue references")
 - `check-format-scope` - Require the `(format)` scope, or a `Format-Scope: none (<reason>)` body line, on commits that change the files deciding what `app.yaml` accepts (self-test, then commits since `ISSUE_REFS_BASE`; `AGENTS.md` "Document-format changes")
 

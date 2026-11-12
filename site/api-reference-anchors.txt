@@ -1,0 +1,85 @@
+# api-reference-anchors.txt: the heading anchors of the two oversized API-reference pages,
+# one `<page> <id>` pair per line (go-kure/launcher#1335).
+#
+# Source: the heading ids on the built pages /api-reference/oam/ and
+# /api-reference/oam-components/ at commit 0d262ef3, before the split. The list is written
+# with `bash site/scripts/check-api-anchors.sh --print-pins api-reference/oam/
+# api-reference/oam-components/` on a site built from that commit. It is not computed
+# from the tree under test.
+#
+# site/scripts/check-api-anchors.sh fails when a pinned id is missing from its page. A
+# section that moves to its own page keeps a stub heading with the same text on the old
+# page, so a link from outside that names the old anchor still lands on a page that has it.
+# Do not delete a line to make the check pass. Add lines when a page gains anchors worth keeping.
+api-reference/oam/ oam-model
+api-reference/oam/ document-kinds
+api-reference/oam/ pipeline
+api-reference/oam/ component-label-and-ownership
+api-reference/oam/ reserved-metadata-keys
+api-reference/oam/ names-and-overrides
+api-reference/oam/ name-roles-and-the-naming-hook
+api-reference/oam/ outputs-the-names-a-components-objects-get
+api-reference/oam/ objectname-the-object-of-a-kind-component
+api-reference/oam/ labels-and-annotations-the-metadata-of-a-kind-components-object
+api-reference/oam/ parsing
+api-reference/oam/ component-type-allowlist
+api-reference/oam/ type-identity
+api-reference/oam/ grammar
+api-reference/oam/ resolution
+api-reference/oam/ declaring-and-resolving
+api-reference/oam/ transform--extension
+api-reference/oam/ registering-the-builtins
+api-reference/oam/ lowering
+api-reference/oam/ property-schemas
+api-reference/oam/ what-an-explicit-null-means-on-the-emitted-path
+api-reference/oam/ contract-metadata
+api-reference/oam/ lowering-targets-and-seal
+api-reference/oam/ the-no-handler-error
+api-reference/oam/ policy-defaults--enforcement
+api-reference/oam/ refusal-classes
+api-reference/oam/ capability-system
+api-reference/oam/ capability-rendering-types-and-nulls
+api-reference/oam/ rendering-merge-authored-values-and-nulls
+api-reference/oam-components/ component-handlers
+api-reference/oam-components/ traits-a-lowering-rule-forwards
+api-reference/oam-components/ how-to-read-the-wrong-type-notes-below
+api-reference/oam-components/ component-types
+api-reference/oam-components/ kind-inventory
+api-reference/oam-components/ adding-a-kind-component-where-its-lines-go
+api-reference/oam-components/ common-config
+api-reference/oam-components/ container-fields
+api-reference/oam-components/ referencing-an-existing-claim-pvcclaimname
+api-reference/oam-components/ raw-block-volumes-volumemode-block
+api-reference/oam-components/ pod-level-properties
+api-reference/oam-components/ deployment-level-properties-deployment-webservice-worker
+api-reference/oam-components/ main-container-ports
+api-reference/oam-components/ raw-scheduling-properties
+api-reference/oam-components/ what-tolerations-changed-for-daemonset
+api-reference/oam-components/ policy-defaults--enforcement-ordering
+api-reference/oam-components/ policy-refusal-classes
+api-reference/oam-components/ pod-view-of-a-monitoring-workload-object-monitoringpodspec
+api-reference/oam-components/ declared-endpoints-of-a-chart
+api-reference/oam-components/ declared-outputs
+api-reference/oam-components/ per-type-highlights
+api-reference/oam-components/ statefulset-level-and-claim-template-properties
+api-reference/oam-components/ upstream-fields-a-hand-parsed-kind-does-not-read
+api-reference/oam-components/ the-two-paths
+api-reference/oam-components/ below-the-top-level
+api-reference/oam-components/ refused-with-the-reason
+api-reference/oam-components/ read-in-another-shape
+api-reference/oam-components/ one-level-down
+api-reference/oam-components/ not-authorable-and-not-refusable-by-name
+api-reference/oam-components/ outside-the-properties
+api-reference/oam-components/ an-explicit-null-on-a-refused-key
+api-reference/oam-components/ what-holds-this
+api-reference/oam-components/ extending
+api-reference/oam-components/ the-null-contract
+api-reference/oam-components/ two-spellings-of-one-field
+api-reference/oam-components/ conventions
+api-reference/oam-components/ the-app-label
+api-reference/oam-components/ the-object-name-objectname
+api-reference/oam-components/ the-objects-labels-and-annotations-labels-annotations
+api-reference/oam-components/ the-pod-templates-labels-and-annotations-podmetadata
+api-reference/oam-components/ a-label-selectors-match-expressions
+api-reference/oam-components/ required-fields-a-kind-writes-unauthored-and-does-not-refuse
+api-reference/oam-components/ every-spec-field-is-this-packages-to-write
