@@ -33,12 +33,15 @@ type Self struct {
 }
 
 // Scope is what one evaluation reads: the inputs, `self`, the values computed so far,
-// and the loop variable of a forEach part. An input that is absent from Inputs is null.
+// the loop variable of a forEach part and the outputs of the parts built so far. An input
+// that is absent from Inputs is null. Parts maps a part id to its output keys and the
+// object name of each (`parts.<id>.<key>`); Expand fills it.
 type Scope struct {
 	Inputs map[string]any
 	Self   Self
 	Values map[string]any
 	Loop   any
+	Parts  map[string]map[string]string
 }
 
 // segment is one piece of a template: literal text, or a compiled hole when prog is set.
@@ -54,6 +57,7 @@ type site struct {
 	single bool
 	loop   string    // the loop variable the site reads, or empty
 	out    *cel.Type // the type of the result
+	reads  []partRead
 }
 
 // Compiled is a model whose expression sites are compiled and typed. It is safe for
@@ -61,6 +65,8 @@ type site struct {
 type Compiled struct {
 	inputs []string // the declared input names, sorted
 	sites  map[string]*site
+	values []Value // the values of the model, in document order, for Expand
+	parts  []Part  // the parts of the model, in document order, for Expand
 }
 
 // Cache holds compiled sites keyed by the model identity (Model.Key), the site path and
@@ -120,9 +126,21 @@ func (c *Cache) Compile(m *Model) (*Compiled, error) {
 			return nil, errors.Wrapf(err, "model: declare value %q", v.Name)
 		}
 	}
+	// A part reads the outputs of an earlier part that has no when and no forEach: a
+	// skipped or repeated part has no one answer. Every other part is refused by name.
+	for _, p := range m.Spec.Parts {
+		w.notYet["parts."+p.ID] = true
+	}
 	for i, p := range m.Spec.Parts {
 		if err := w.part("spec.parts["+strconv.Itoa(i)+"]", p); err != nil {
 			return nil, err
+		}
+		if p.When != "" || p.ForEach != nil {
+			continue
+		}
+		delete(w.notYet, "parts."+p.ID)
+		if err := w.declare("parts."+p.ID, cel.MapType(cel.StringType, cel.StringType)); err != nil {
+			return nil, errors.Wrapf(err, "model: declare part %q", p.ID)
 		}
 	}
 	inputs := make([]string, 0, len(m.Spec.Inputs))
@@ -130,7 +148,7 @@ func (c *Cache) Compile(m *Model) (*Compiled, error) {
 		inputs = append(inputs, name)
 	}
 	sort.Strings(inputs)
-	return &Compiled{inputs: inputs, sites: w.sites}, nil
+	return &Compiled{inputs: inputs, sites: w.sites, values: m.Spec.Values, parts: m.Spec.Parts}, nil
 }
 
 // siteSpec says how one site is read: strict is the exactly-one-hole form of values,
@@ -246,6 +264,7 @@ func (w *walker) build(path, text string, spec siteSpec) (*site, error) {
 		if s.single {
 			s.out = out
 		}
+		s.reads = appendPartReads(s.reads, ast)
 		prog, err := env.Program(ast, cel.CostLimit(maxExpressionCost), cel.CustomDecorator(compareDecorator), cel.CustomDecorator(chargeDecorator))
 		if err != nil {
 			return nil, invalid(path, "%s", err)
@@ -451,7 +470,10 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 	if s == nil {
 		return nil, 0, errors.Errorf("model: %s is not an expression site", path)
 	}
-	act := make(map[string]any, len(c.inputs)+len(sc.Values)+4)
+	if err := s.checkPartReads(path, sc.Parts); err != nil {
+		return nil, 0, err
+	}
+	act := make(map[string]any, len(c.inputs)+len(sc.Values)+len(sc.Parts)+4)
 	for _, n := range c.inputs {
 		act["inputs."+n] = sc.Inputs[n]
 	}
@@ -459,6 +481,9 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 	act["self.application"] = sc.Self.Application
 	for n, v := range sc.Values {
 		act["values."+n] = v
+	}
+	for id, outs := range sc.Parts {
+		act["parts."+id] = outs
 	}
 	if s.loop != "" {
 		act[s.loop] = sc.Loop

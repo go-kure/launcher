@@ -206,6 +206,9 @@ func scanForm(e celast.Expr, shadowed bool, notYet map[string]bool) string {
 		if !shadowed && op.Kind() == celast.IdentKind && op.AsIdent() == "values" && notYet[sel.FieldName()] {
 			return "values." + sel.FieldName() + " is not computed yet: a value reads inputs and earlier values only"
 		}
+		if !shadowed && op.Kind() == celast.IdentKind && op.AsIdent() == "parts" && notYet["parts."+sel.FieldName()] {
+			return "parts." + sel.FieldName() + " is not readable here: a part reads only an earlier part that has no when and no forEach"
+		}
 		return first(op)
 	case celast.CallKind:
 		call := e.AsCall()
@@ -237,8 +240,9 @@ func scanForm(e celast.Expr, shadowed bool, notYet map[string]bool) string {
 		if msg := first(c.IterRange(), c.AccuInit()); msg != "" {
 			return msg
 		}
-		inLoop := shadowed || c.IterVar() == "values" || c.IterVar2() == "values" || c.AccuVar() == "values"
-		inResult := shadowed || c.AccuVar() == "values"
+		hides := func(name string) bool { return c.IterVar() == name || c.IterVar2() == name || c.AccuVar() == name }
+		inLoop := shadowed || hides("values") || hides("parts")
+		inResult := shadowed || c.AccuVar() == "values" || c.AccuVar() == "parts"
 		if msg := scanForm(c.LoopCondition(), inLoop, notYet); msg != "" {
 			return msg
 		}

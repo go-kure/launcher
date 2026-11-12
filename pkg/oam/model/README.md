@@ -10,8 +10,9 @@ A user can add a component type without writing Go.
 This release step covers the format, the CEL environment and the evaluation of one expression.
 `model.Load` decodes a document and checks its shape. It does not compile or run any expression.
 `model.Compile` compiles every expression of a loaded model against the environment below, and
-`Compiled.Eval` runs one of them. The lowering rule and the engine hooks arrive in later steps of
-go-kure/launcher#1261. A document that loads today keeps its meaning then.
+`Compiled.Eval` runs one of them. `Compiled.Expand` builds the components of the parts and binds the
+outputs that a later part reads. The lowering rule, the engine hooks and the capability check on the
+traits of a model arrive in later steps of go-kure/launcher#1261. A document that loads today keeps its meaning then.
 
 ## Document
 
@@ -48,7 +49,7 @@ spec:
 | `spec.inputs` | Map of input name to `oam.PropertySchema`. Each name is a CEL identifier. Each schema has a `type` or `types`. |
 | `spec.values` | Ordered list of `{name, expr}`. A value reads inputs and earlier values only. Each name is a CEL identifier and is unique. |
 | `spec.parts` | At least one part. A model that expands to nothing is an error. |
-| `parts[].id` | A CEL identifier, unique in the model. Other parts read `parts.<id>`. |
+| `parts[].id` | A CEL identifier, unique in the model. A later part reads `parts.<id>.<key>`, the object name of one output that the part declares. A part reads only an earlier part, and never a part with `when` or `forEach`. A read of any other part, or of the part itself, fails when the model compiles, and the error names the site and the part. A key the part does not declare fails when `Expand` runs, and the error names the site, the part and the key. |
 | `parts[].type`, `traits[].type` | A full identity, `name@version`. A short name and a missing version are refused. |
 | `parts[].when` | Optional. Exactly one `${ }` hole that gives a bool. The part is emitted only when it is true. It does not see the loop variable. |
 | `parts[].forEach` | Optional `{as, in}`. `in` is exactly one `${ }` hole that gives a list. `as` is the loop variable, a CEL identifier. A filter per element goes in `in`. |
@@ -173,9 +174,22 @@ path, so a map that holds both is refused.
 `Compile` returns the first failure, which wraps `ErrInvalid` and names the site. The order is the
 values, then for each part: `when`, `forEach.in`, `name`, the properties (keys sorted at every
 level), the trait properties and the annotations. The scope of a site is the inputs, `self`, the
-earlier values and, for `name`, the properties, the traits and the annotations of a `forEach`
+earlier values, the earlier parts that have no `when` and no `forEach` (`parts.<id>`) and, for `name`, the properties, the traits and the annotations of a `forEach`
 part, the loop variable. `when` and `forEach.in` do not see the loop variable. The loop variable
 has the element type of `forEach.in`.
+
+**Parts.** `Compiled.Expand(tr, scope, naming)` evaluates the values, then each part in document
+order. A part whose `when` is false emits nothing. A part with `forEach` emits one component for
+each element. A part without a `name` takes its id. After it builds a part that has no `when` and
+no `forEach`, `Expand` asks the Transformer for the outputs of that component
+(`ComponentOutputsNamed`, with `naming` as the Naming hook) and stores the object name of each under
+the part id. A later part reads it as `parts.<id>.<key>`, so the name follows an authored object
+name and the Naming hook, as the name of the built object does. `tr` must declare the type
+identities of the parts (`registry.DeclareTypes`): a type that does not resolve declares no output,
+so a read of it fails as an undeclared key. `Eval` takes the same outputs in `Scope.Parts`, and it
+refuses a key that is not there with the same error. `Expand` reads the inputs and `self` from the
+scope and sets the other fields itself. It checks no trait against a capability and runs no
+transform.
 
 **Result.** A string that is exactly one hole gives the value with its type: `int64`, `uint64`,
 `float64`, `bool`, `string`, `[]byte`, `[]any` (in order), `map[string]any` or `nil`. A string
@@ -319,6 +333,7 @@ identity names one definition: a changed model under the same identity must use 
 | `model.Compile(m)` | Compiles every expression site of `m` with a cache of its own. |
 | `(*Cache).Compile(m)` | The same, with a shared cache from `model.CreateCache()`. `Len()` counts the cached sites. |
 | `(*Compiled).Eval(path, scope)` | Runs one site. Returns the Go value, the actual cost and an error. |
+| `(*Compiled).Expand(tr, scope, naming)` | Builds the components of the parts in document order and binds `parts.<id>.<key>` from `Transformer.ComponentOutputs`. It runs no transform. |
 | `model.Load(data)` | Decodes one document and checks it. A failure of a decoded document wraps `model.ErrInvalid` and names the field, for example `spec.parts[1].id`. A YAML, `apiVersion` or `kind` failure does not wrap it. A YAML type error, such as a list where a string belongs, names the line of the field and not its path. An explicit tag that does not fit its value, such as `!!bool notabool`, names its line too, when one tagged value is at fault; with two or more, the error has no line. |
 | `(*Model).Identity()` | The model identity as written in `metadata`. |
 | `(*Model).Key()` | The identity with the version in the canonical form (`name@v2.0.0`). The registry returns a version as it was registered, so compare and store this form (`oam.TypeID.Canonical`). |
