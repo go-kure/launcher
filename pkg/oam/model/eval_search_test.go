@@ -123,3 +123,102 @@ func TestSearchGivesWhatCelGoGives(t *testing.T) {
 		})
 	}
 }
+
+// matches has the same fault as the two searches. cel-go compiles the pattern and runs the
+// match, and it charges the product of the string length and a quarter of the pattern length
+// only after the call returns. A pattern that an input holds is not charged when it is read, so
+// a string of 100,000 bytes and a pattern of 40,000 bytes run for minutes before the evaluation
+// stops. A row must be refused in a short time, and a run with no refusal fails it.
+func TestMatchesIsRefusedBeforeItRuns(t *testing.T) {
+	s := stdScope()
+	s.Inputs["image"] = strings.Repeat("x", 100000)
+	s.Inputs["labels"] = map[string]any{"k": strings.Repeat("x?", 20000) + "y"}
+	for _, expr := range []string{"inputs.image.matches(inputs.labels.k)", "matches(inputs.image, inputs.labels.k)"} {
+		t.Run(expr, func(t *testing.T) {
+			c := mustCompile(t, oneValue(t, "${"+expr+"}"))
+			type result struct {
+				got any
+				err error
+			}
+			done := make(chan result, 1)
+			go func() {
+				got, _, err := c.Eval("spec.values[0].expr", s)
+				done <- result{got, err}
+			}()
+			select {
+			case r := <-done:
+				wantCostLimit(t, r.got, r.err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("no refusal in 5 seconds: the match runs before anything charges it")
+			}
+		})
+	}
+}
+
+// The bound is cel-go's own: the cost of a match is a tenth of the string length plus one, times
+// a quarter of the pattern length. A string of 1,000 bytes and a pattern of 39,000 costs 984,750
+// and runs. The same string and a pattern of 40,000 costs 1,010,000 and is refused.
+func TestMatchesBoundIsTheCostLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		pairs int
+		fails bool
+	}{
+		{"under the limit", 19500, false},
+		{"over the limit", 20000, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := stdScope()
+			s.Inputs["image"] = strings.Repeat("x", 1000)
+			s.Inputs["labels"] = map[string]any{"k": strings.Repeat("x?", tc.pairs) + "y"}
+			c := mustCompile(t, oneValue(t, "${inputs.image.matches(inputs.labels.k)}"))
+			got, _, err := c.Eval("spec.values[0].expr", s)
+			if tc.fails {
+				wantCostLimit(t, got, err)
+				return
+			}
+			if err != nil || got != false {
+				t.Fatalf("gave %v, %v, want false", got, err)
+			}
+		})
+	}
+}
+
+// The node gives the value, the failure and the cost that cel-go gives, as the rows of the
+// search do.
+func TestMatchesGivesWhatCelGoGives(t *testing.T) {
+	for _, expr := range []string{
+		"'hello'.matches('h.*o')",
+		"'hello'.matches('^e')",
+		"'hello'.matches('ell')",
+		"'hello'.matches('[')",
+		"'hello'.matches('')",
+		"''.matches('')",
+		"''.matches('a')",
+		"''.matches('a*')",
+		"matches('hello', 'ell')",
+		"matches('hello', '(')",
+		"'héllo wörld'.matches('é.*ö')",
+		"'日本語'.matches('^日本.$')",
+	} {
+		t.Run(expr, func(t *testing.T) {
+			want, wantCost := stockResult(t, expr)
+			got, cost, err := evalValueCost(t, expr)
+			if want == "error" {
+				if err == nil {
+					t.Fatalf("gave %v, cel-go gives an error", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("failed with %v, cel-go gives %s", err, want)
+			}
+			if have := fmt.Sprintf("%T %v", got, got); have != want {
+				t.Errorf("gave %s, cel-go gives %s", have, want)
+			}
+			if cost != wantCost {
+				t.Errorf("cost %d, cel-go reports %d", cost, wantCost)
+			}
+		})
+	}
+}
