@@ -31,7 +31,7 @@ require (
 	github.com/cloudnative-pg/plugin-barman-cloud v0.16.0
 	github.com/controlplaneio-fluxcd/flux-operator v0.62.1
 	github.com/evanphx/json-patch/v5 v5.9.11
-	github.com/external-secrets/external-secrets/apis v0.0.0-20261110094301-b872cf4b508f
+	github.com/external-secrets/external-secrets/apis v0.0.0-20261016092056-a82d14894fbc
 	github.com/fluxcd/helm-controller/api v1.7.1
 	github.com/fluxcd/image-automation-controller/api v1.3.0
 	github.com/fluxcd/image-reflector-controller/api v1.3.0
@@ -41,7 +41,7 @@ require (
 	github.com/fluxcd/pkg/apis/meta v1.38.0
 	github.com/fluxcd/source-controller/api v1.10.1
 	github.com/fluxcd/source-watcher/api/v2 v2.3.1
-	github.com/go-kure/kure v0.2.0-rc.1
+	github.com/go-kure/kure v0.2.0-rc.2
 	github.com/google/cel-go v0.31.0
 	github.com/google/go-containerregistry v0.22.1
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
@@ -61,7 +61,7 @@ require (
 	k8s.io/apiserver v0.37.2
 	k8s.io/client-go v0.37.2
 	k8s.io/kube-aggregator v0.37.2
-	k8s.io/kube-openapi v0.0.0-20261104182252-5bee61fc5225
+	k8s.io/kube-openapi v0.0.0-20260821135717-be32def86098
 	sigs.k8s.io/controller-runtime v0.25.2
 	sigs.k8s.io/gateway-api v1.7.0
 	sigs.k8s.io/kustomize/api v0.21.2
