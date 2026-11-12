@@ -17,10 +17,10 @@ unless a line says another file.
 - **Tests:**
   - `TestMetalLBKinds_NoDefaultIsLost` fails on a default a dependency bump
     adds to a field that could not carry an authored empty value.
-  - `TestMetalLBKinds_RequiredMatchCRD` holds "Required: nothing" to the linked
-    module's `v1beta1` CRD.
-  - `TestMetalLBKinds_ExpressionRules` fails on an expression rule that is
-    added; the CRD declares none.
+  - `TestMetalLBKinds_RequiredMatchCRD` holds that to the linked module's
+    `v1beta1` CRD ("that" is the reference's "Required: nothing").
+  - The CRD declares none; `TestMetalLBKinds_ExpressionRules` fails on one that
+    is added ("none" is the CRD's expression rules).
 
 ## metallb-bgpadvertisement
 
@@ -31,9 +31,10 @@ unless a line says another file.
   `v1beta1` CRD); go-kure/launcher#922 (the object kind policy).
 - **Tests:**
   - `TestMetalLBKinds_NoDefaultIsLost` holds the defaults of the linked CRD to
-    the two aggregation lengths being pointers.
-  - `TestMetalLBKinds_RequiredMatchCRD` holds the Required list to the linked
-    module's `v1beta1` CRD.
+    that ("that" is the reference's account of the two aggregation lengths:
+    pointers, whose API defaults are 32 and 128, one route per address).
+  - `TestMetalLBKinds_RequiredMatchCRD` holds it to that CRD as well ("it" is
+    the Required list, generated from the linked module's `v1beta1` CRD).
   - `TestMetalLBKinds_ExpressionRules` holds the kind's answer to the API
     server's for the linked CRD, on properties that break the rule and on
     properties that keep it, and fails on a rule that is added or reworded.
@@ -41,25 +42,24 @@ unless a line says another file.
 ## metallb-bgppeer
 
 - **Implementation:** built on `policyHeldKind`, the helper of the kinds above
-  with one check under the environment policy, and emits that one object. It is
-  built at `metallb.io/v1beta2` because that is the version the linked module's
-  CRD stores, `v1beta1` is served and marked deprecated there, and the base
-  library's constructor builds the peer at `v1beta2`.
+  with one check under the environment policy, and emits that one object. The
+  version it is built at, and why, are in the reference.
 - **History:** go-kure/launcher#790 (the kind-named projection);
   go-kure/launcher#883 (the Required list is generated from the linked module's
   `v1beta2` CRD); go-kure/launcher#922 (the object kind policy).
 - **Tests:**
   - `TestMetalLBKinds_EmitTheServedVersion` holds each kind to the version its
     CRD serves and stores.
-  - `TestMetalLBKinds_NoDefaultIsLost` holds the kind's list of fields with a
-    default the type cannot carry to the linked CRD.
-  - `TestMetalLBKinds_RequiredMatchCRD` holds the Required list to the linked
-    module's `v1beta2` CRD.
+  - `TestMetalLBKinds_NoDefaultIsLost` holds the kind's list of such fields to
+    the linked CRD ("such fields" are the reference's fields with a default
+    the type cannot carry, as `peerPort`).
+  - `TestMetalLBKinds_RequiredMatchCRD` holds it to that CRD as well ("it" is
+    the Required list, generated from the linked module's `v1beta2` CRD).
   - `TestMetalLBKinds_ExpressionRules` holds the kind's answer to the API
     server's for the linked CRD, on properties that break each rule and on
     properties that keep it, and fails on a rule that is added or reworded.
   - `TestMetalLBBGPPeerKind_SessionPassword` (`metallb_bgppeer_test.go`) holds
-    the `password` behaviour under the environment policy.
+    this ("this" is the reference's account of `password` under each policy).
 
 ## metallb-community
 
@@ -70,10 +70,10 @@ unless a line says another file.
 - **Tests:**
   - `TestMetalLBKinds_NoDefaultIsLost` fails on a default a dependency bump
     adds to a field that could not carry an authored empty value.
-  - `TestMetalLBKinds_RequiredMatchCRD` holds "Required: nothing" to the linked
-    module's `v1beta1` CRD.
-  - `TestMetalLBKinds_ExpressionRules` fails on an expression rule that is
-    added; the CRD declares none.
+  - `TestMetalLBKinds_RequiredMatchCRD` holds that to the linked module's
+    `v1beta1` CRD ("that" is the reference's "Required: nothing").
+  - The CRD declares none; `TestMetalLBKinds_ExpressionRules` fails on one that
+    is added ("none" is the CRD's expression rules).
 
 ## metallb-ipaddresspool
 
@@ -86,14 +86,16 @@ unless a line says another file.
   go-kure/launcher#922 (the object kind policy).
 - **Tests:**
   - `TestMetalLBKinds_NoDefaultIsLost` holds the defaults of the linked CRD to
-    the reference's account of `autoAssign` and `avoidBuggyIPs`: a default
-    that is not the field's empty value, on a field that is no pointer, fails
-    there.
-  - `TestMetalLBKinds_RequiredMatchCRD` holds the Required list to the linked
-    module's `v1beta1` CRD. A dependency bump that adds, drops or moves a
-    required field fails until the list is regenerated.
-  - `TestMetalLBKinds_ExpressionRules` fails on an expression rule that is
-    added; the CRD declares none.
+    that: one that is not the field's empty value, on a field that is no
+    pointer, fails there ("that" is the reference's account of `autoAssign`
+    and `avoidBuggyIPs`).
+  - So a dependency bump that adds, drops or moves one fails until it is
+    regenerated; `TestMetalLBKinds_RequiredMatchCRD` holds it to that CRD as
+    well ("one" and "it" are the fields of the Required list, generated from
+    the fields the linked module's `v1beta1` CRD requires and the type writes
+    unauthored).
+  - The CRD declares none; `TestMetalLBKinds_ExpressionRules` fails on one that
+    is added ("none" is the CRD's expression rules).
 
 ## metallb-l2advertisement
 
@@ -103,7 +105,7 @@ unless a line says another file.
   go-kure/launcher#883 (the Required list is generated from the linked module's
   `v1beta1` CRD); go-kure/launcher#922 (the object kind policy).
 - **Tests:**
-  - `TestMetalLBKinds_RequiredMatchCRD` holds the Required list to the linked
-    module's `v1beta1` CRD.
-  - `TestMetalLBKinds_ExpressionRules` fails on an expression rule that is
-    added; the CRD declares none.
+  - `TestMetalLBKinds_RequiredMatchCRD` holds it to that CRD as well ("it" is
+    the Required list, generated from the linked module's `v1beta1` CRD).
+  - The CRD declares none; `TestMetalLBKinds_ExpressionRules` fails on one that
+    is added ("none" is the CRD's expression rules).
