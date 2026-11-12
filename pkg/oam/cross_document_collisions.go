@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -53,7 +54,20 @@ const localConfigAnnotation = "config.kubernetes.io/local-config"
 // output: the local-config annotation is present and is not the string "false"
 // (kustomize/api resource/factory.go, DropLocalNodes). An empty value drops the
 // object too. A dropped object is never applied, so it generates nothing.
+//
+// Kustomize reads the value as the text it is written as, so a boolean true, a
+// number or a null authored in YAML drops the object, and only the text "false"
+// (the string, or the boolean false) keeps it. An unstructured object holds the
+// value as authored and GetAnnotations returns no annotations at all when one
+// value is not a string, so such an object is read from its content. A typed
+// object's annotations are strings.
 func droppedByKustomize(obj client.Object) bool {
+	if u, ok := obj.(runtime.Unstructured); ok {
+		metadata, _ := u.UnstructuredContent()["metadata"].(map[string]any)
+		annotations, _ := metadata["annotations"].(map[string]any)
+		v, ok := annotations[localConfigAnnotation]
+		return ok && v != false && v != "false"
+	}
 	v, ok := obj.GetAnnotations()[localConfigAnnotation]
 	return ok && v != "false"
 }

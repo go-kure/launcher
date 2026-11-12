@@ -289,7 +289,8 @@ also generates is a collision, reported by the item's own kind and name; and the
 no object, so two Lists with different items, or none, do not collide. The three comparisons
 also leave out what Kustomize's build drops: an object whose
 `config.kubernetes.io/local-config` annotation is present with any value but `"false"` (an
-empty value drops it too) is never applied, so it generates nothing and collides with nothing,
+empty value, a boolean `true`, a number or a null drops it too, as authored in an unstructured
+object; a boolean `false` keeps it) is never applied, so it generates nothing and collides with nothing,
 and the claim it would make for a controller goes with it (go-kure/launcher#1338). That is
 judged on each item once a `List` is inlined, so a `List`'s own annotation is not read; an
 envelope whose kind does not end in `List` is one object for Kustomize and is dropped with all
