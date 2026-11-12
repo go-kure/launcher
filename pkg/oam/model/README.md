@@ -209,12 +209,21 @@ escape `$${`.
 
 **Cost.** One hole has a cost limit of 1,000,000. An evaluation that spends more fails with
 `ErrCostLimit`, which names the site and the limit. The cost of a site is the sum of its holes.
-The charge by size stops a `replace` or a `join` that would build a result of more than 1,000,000
-bytes before it builds it (a test pins both). `lists.range(1000000)` is stopped by the cost limit. A list of more than
+The charge by size stops a `replace`, a `join` or a `format` that would build a result of more than
+1,000,000 bytes before it builds it (a test pins each). `lists.range(1000000)` is stopped by the cost limit. A list of more than
 1,000,000 elements is refused by cel-go, which has its own cap for `lists.range`, and not by the
-cost limit. The charge by size (see "Charge by size") also bounds every value. The one call it does not
-bound is `format`: a `format` that builds a result of 2,000,000 bytes is refused only after it is built.
-go-kure/launcher#1462 tracks a size limit for `format`.
+cost limit. The charge by size (see "Charge by size") also bounds every value.
+
+**Format.** A `format` is refused before it runs when the most its arguments can print passes 1,000,000
+bytes. The bound is the length of the format string, plus the length of each string or bytes argument
+(twice it when the format string holds an `x`, for `%x`), 420 for a double, 64 for a timestamp, a
+duration or a type, 20 for every other scalar (130 when the format string has a clause with a
+precision, `%f`, `%b` or `%o`, which print a number in more digits), 4 for each list element and 6 for each
+map entry. A list
+or map argument is walked as a tree, so a shared nest is stopped by the bound after at most 250,000
+values and never walked in full. The bound is above the real
+size, so a `format` whose real result is within that slack of 1,000,000 bytes can be refused though
+it would fit. The result and the errors are those of cel-go.
 
 **Comparisons and flatten.** The cost does not bound a comparison of nested lists that share their elements:
 cel-go compares them element by element at every depth and charges the outer length only, so `d == d`
@@ -289,13 +298,13 @@ are open.
   (one overload, which charges its output), `distinct`, `flatten` or `==` is stopped by the cost limit
   or the budget in the same loop, and `size`, `in`, an index and `+` copy nothing.
 
-Every other member of this class found so far is bounded (`sortBy`, `join`, `replace`, comparisons,
+Every other member of this class found so far is bounded (`sortBy`, `join`, `replace`, `format`, comparisons,
 `flatten`, the keys of a typed `sort` and the keys of a result copy), and a test pins each. These
 limits are not reachable today, because no code registers a model's CEL for evaluation by default.
 The list may not be complete; go-kure/launcher#1461 holds the current set. It stays open for them: the fix is to charge the bytes and the elements of a
 container on every read, so that no call needs its own charge. **go-kure/launcher#1461 must close
 before step 4a of go-kure/launcher#1261 or any public wiring of the evaluator.** The size of a
-successful `format` result is the separate go-kure/launcher#1462.
+successful `format` result is bounded by the check above.
 
 **Result size.** The Go copy of a single-hole result holds at most 1,000,000 units, counted at every
 depth. A list element or a map entry is one unit, and so is each byte of a bytes value. A map key

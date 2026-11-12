@@ -31,7 +31,7 @@ duration: scalar-out
 dyn: bounded (gives its operand)
 endsWith: scalar-out
 flatten: amplifying (budgetedFlatten in equality.go spends one step for each element)
-format: amplifying (go-kure/launcher#1462: not bounded yet, the result is refused after it is built)
+format: amplifying (budgetedFormat in charge.go refuses a result its operands can print above 1000000 bytes before it builds it; TestChargeFormatStopsBeforeTheAllocation)
 getDate: scalar-out
 getDayOfMonth: scalar-out
 getDayOfWeek: scalar-out
