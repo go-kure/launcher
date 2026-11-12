@@ -131,7 +131,7 @@ check-revision-shown: ## Check the built site shows its source commit (self-test
 # Self-test first, for the same reason (go-kure/launcher#1335). The tree is the built site,
 # as for check-revision-shown.
 .PHONY: check-api-anchors
-check-api-anchors: ## Check the built site keeps its pinned API-reference anchors and has no broken fragment link (self-test, then site/public)
+check-api-anchors: ## Check the built site keeps its pinned API-reference anchors and has no broken fragment link, and lists every hand-written part in the docs map (self-test, then site/public)
 	@bash site/scripts/check-api-anchors-test.sh
 	@bash site/scripts/check-api-anchors.sh
 
