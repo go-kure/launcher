@@ -544,6 +544,67 @@ func TestRegistry_RefusedDeclarationLeavesNoRule(t *testing.T) {
 	}
 }
 
+// A part type is an identity, so the part is emitted under it and the engine resolves it after
+// the round. The properties of the part are still checked against the schema of its handler: a
+// misspelled key fails the build, as it does for a plain type name.
+func TestRule_EmittedIdentityPartIsCheckedAgainstItsSchema(t *testing.T) {
+	doc := modelHeader + `
+    - id: cfg
+      name: cfg
+      type: configmap@v1
+      properties:
+        datta:
+          k: v
+`
+	tr, _ := registered(t, doc)
+	_, err := objects(t, tr, []oam.Component{{Name: "orders", Type: webappType}}, nil)
+	if err == nil {
+		t.Fatal("a part with the misspelled property datta was built")
+	}
+	if !strings.Contains(err.Error(), "datta") {
+		t.Fatalf("the refusal does not name the property: %v", err)
+	}
+}
+
+// A failed registration leaves no compiled site that the next registration reads. The second
+// definition has the same identity, and the input that the unchanged `when` reads is now a
+// string, so the compile must refuse it.
+func TestRegistry_FailedRegistrationLeavesNoCompiledSite(t *testing.T) {
+	tr := expandTransformer(t)
+	reg := model.NewRegistry(tr)
+	withInput := func(typ, partB string) string {
+		return strings.Replace(modelHeader, "  parts:\n", "  inputs:\n    flag:\n      type: "+typ+"\n  parts:\n", 1) + `
+    - id: a
+      name: a
+      type: configmap@v1
+      when: "${ inputs.flag }"
+      properties: {}
+    - id: b
+      name: b
+      type: ` + partB + `
+      properties: {}
+`
+	}
+	first, err := model.Load([]byte(withInput("boolean", "ghost.acme.example@v1")))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := reg.Register(first); err == nil {
+		t.Fatal("a model with an undeclared part type was registered")
+	}
+	second, err := model.Load([]byte(withInput("string", "configmap@v1")))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	err = reg.Register(second)
+	if err == nil {
+		t.Fatal("a model whose when reads a string was registered: the compile read a site cached from the refused model")
+	}
+	if !strings.Contains(err.Error(), "bool") {
+		t.Fatalf("the refusal is not about the when: %v", err)
+	}
+}
+
 // A model with a part of the wrong kind of expression fails at Register, and leaves nothing
 // registered: the type is not declared and a second try with the repaired model works.
 func TestRegistry_FailedRegisterLeavesNothingBehind(t *testing.T) {

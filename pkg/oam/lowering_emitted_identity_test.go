@@ -129,3 +129,54 @@ func TestLoweringContext_NamingHookWithoutAllocator(t *testing.T) {
 		t.Fatal("a context with no allocator holds a hook")
 	}
 }
+
+// propsRule emits one component of the type emits, with the properties props.
+type propsRule struct {
+	typ, emits string
+	props      map[string]any
+}
+
+func (r propsRule) ComponentType() string { return r.typ }
+func (r propsRule) LowerComponent(c *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: c.Name + "-part", Type: r.emits, Properties: r.props}}}, nil
+}
+
+// The checks of an emitted component read the registered name of its type, so a type the rule
+// wrote as an identity gets the same checks as a plain name: a platform-reserved property is
+// refused, and an unsupported one is refused.
+func TestLowering_EmittedIdentityGetsTheEmissionChecks(t *testing.T) {
+	for _, tc := range []struct {
+		name, emits string
+		props       map[string]any
+		want        string
+	}{
+		{"reserved, plain name", "resv", map[string]any{"registry": "evil.example"}, "registry"},
+		{"reserved, identity", "resv.acme.example@v1", map[string]any{"registry": "evil.example"}, "registry"},
+		{"unsupported, plain name", "resv", map[string]any{"imaeg": "x"}, "imaeg"},
+		{"unsupported, identity", "resv.acme.example@v1", map[string]any{"imaeg": "x"}, "imaeg"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr, _ := declared(t)
+			tr.RegisterComponent("resv", reservedComponent{typ: "resv"})
+			tr.RegisterComponentLowering(propsRule{typ: "maker", emits: tc.emits, props: tc.props})
+			if err := tr.DeclareComponentTypes(map[string]TypeID{
+				"resv":  mustID(t, "resv.acme.example@v1"),
+				"maker": mustID(t, "maker.acme.example@v1"),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			app := &Application{
+				APIVersion: SupportedAPIVersion, Kind: "Application",
+				Metadata: Metadata{Name: "shop", Namespace: "demo"},
+				Spec:     ApplicationSpec{Components: []Component{{Name: "orders", Type: "maker.acme.example@v1", Properties: map[string]any{}}}},
+			}
+			_, err := tr.Transform(app, TransformContext{Namespace: "demo"})
+			if err == nil {
+				t.Fatal("a rule emitted a refused property and the build passed")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q does not name %q", err, tc.want)
+			}
+		})
+	}
+}

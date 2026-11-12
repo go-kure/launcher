@@ -1598,7 +1598,8 @@ func (t *Transformer) validateEmittedComponent(comp *Component) error {
 // call the key unsupported.
 func (t *Transformer) validateEmittedComponentAs(comp *Component, member bool) error {
 	path := fmt.Sprintf("emitted component %q (type %q): properties", comp.Name, comp.Type)
-	if h, ok := t.componentHandlers[comp.Type]; ok {
+	typ := emittedKey(t.componentTypes, t.isComponentKey, comp.Type)
+	if h, ok := t.componentHandlers[typ]; ok {
 		if _, takes := h.(ComponentObjectProvider); takes {
 			if _, set := objectNameSet(comp.Properties); set && member {
 				return errors.Errorf("%s: %w", path, emittedObjectNameError(nil))
@@ -1609,19 +1610,35 @@ func (t *Transformer) validateEmittedComponentAs(comp *Component, member bool) e
 		}
 		return validateEmittedProperties(h, &comp.Properties, path)
 	}
-	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
+	if rule, ok := t.componentLoweringRules[typ]; ok {
 		return validateEmittedProperties(rule, &comp.Properties, path)
 	}
 	return nil
 }
 
+// emittedKey is the registered name an emitted type reference dispatches on: a plain name a
+// handler or rule is registered under as written, a declared identity as its registered name.
+// A reference that does not resolve is returned as it is, and resolveEmitted refuses it after
+// the round.
+func emittedKey(ix *typeIndex, registered func(string) bool, ref string) string {
+	if registered(ref) {
+		return ref
+	}
+	out, _, err := resolveRef(ix, ref, byKey)
+	if err != nil {
+		return ref
+	}
+	return out
+}
+
 // validateEmittedTrait is validateEmittedComponent for the trait position.
 func (t *Transformer) validateEmittedTrait(trait *Trait) error {
 	path := fmt.Sprintf("emitted trait %q: properties", trait.Type)
-	if h, ok := t.traitHandlers[trait.Type]; ok {
+	typ := emittedKey(t.traitTypes, t.isTraitKey, trait.Type)
+	if h, ok := t.traitHandlers[typ]; ok {
 		return validateEmittedProperties(h, &trait.Properties, path)
 	}
-	if rule, ok := t.traitLoweringRules[trait.Type]; ok {
+	if rule, ok := t.traitLoweringRules[typ]; ok {
 		return validateEmittedProperties(rule, &trait.Properties, path)
 	}
 	return nil
@@ -1638,10 +1655,11 @@ func (t *Transformer) validateEmittedTrait(trait *Trait) error {
 // properties could mis-lower or panic.
 func (t *Transformer) validateEmittedPolicy(pol *ApplicationPolicy) error {
 	path := fmt.Sprintf("emitted policy %q (type %q): properties", pol.Name, pol.Type)
-	if h, ok := t.policyHandlers[pol.Type]; ok {
+	typ := emittedKey(t.policyTypes, t.isPolicyKey, pol.Type)
+	if h, ok := t.policyHandlers[typ]; ok {
 		return validateEmittedProperties(h, &pol.Properties, path)
 	}
-	if rule, ok := t.policyLoweringRules[pol.Type]; ok {
+	if rule, ok := t.policyLoweringRules[typ]; ok {
 		return validateEmittedProperties(rule, &pol.Properties, path)
 	}
 	return nil
