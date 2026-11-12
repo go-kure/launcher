@@ -1,0 +1,49 @@
+component unsupported top	component "web" (type "perr"): properties: unsupported field "nope" (allowed: a.b: c, count, ex1, ex2, grp, list, mode, name, obj, objs, on, ratio, rq1, rq2, scopeish, u)
+component unsupported nested	component "web" (type "perr"): properties.obj: unsupported field "bad" (allowed: deep, i.n: k, inner)
+component unsupported in array element	component "web" (type "perr"): properties.objs[1]: unsupported field "zz" (allowed: x, y)
+trait unsupported top	component "web": trait "perr-trait": properties: unsupported field "nope" (allowed: a.b: c, count, ex1, ex2, grp, list, mode, name, obj, objs, on, ratio, rq1, rq2, scope, scopeish, u)
+policy unsupported top	policy "order" (type "perr-pol"): properties: unsupported field "nope" (allowed: a.b: c, count, ex1, ex2, grp, list, mode, name, obj, objs, on, ratio, rq1, rq2, scopeish, u)
+component unsupported top with a hint	component "web" (type "perr-hint"): properties: unsupported field "nope" (allowed: a.b: c, count, ex1, ex2, grp, list, mode, name, obj, objs, on, ratio, rq1, rq2, scopeish, u); hint for nope
+component unsupported nested with a hint	component "web" (type "perr-hint"): properties.obj: unsupported field "bad" (allowed: deep, i.n: k, inner); nested hint for bad
+component required top	component "web" (type "perr"): properties: "name" is required
+component required nested	component "web" (type "perr"): properties.obj.deep: "k" is required
+component required in array element	component "web" (type "perr"): properties.objs[0]: "x" is required
+trait required top	component "web": trait "perr-trait": properties: "name" is required
+trait required top with capability	component "web": trait "perr-trait": properties: "name" is required; neither the trait nor capability "perr-trait"'s rendering sets it
+trait required nested with capability	component "web": trait "perr-trait": properties.obj.deep: "k" is required; neither the trait nor capability "perr-trait"'s rendering sets it
+policy required top	policy "order" (type "perr-pol"): properties: "name" is required
+component exclusive nested mutual	component "web" (type "perr"): properties.grp: "g1" and "g2" are mutually exclusive
+component exclusive nested exactly one	component "web" (type "perr"): properties.grp: exactly one of "h1" and "h2" is required
+component exclusive top mutual	component "web" (type "perr"): properties: "ex1" and "ex2" are mutually exclusive
+trait exclusive top mutual with capability	component "web": trait "perr-trait": properties: "ex1" and "ex2" are mutually exclusive; the trait merged with capability "perr-trait"'s rendering sets them together
+trait exclusive nested exactly one with capability	component "web": trait "perr-trait": properties.grp: exactly one of "h1" and "h2" is required; neither the trait nor capability "perr-trait"'s rendering sets one
+component type string	component "web" (type "perr"): properties.name: expected string, got int
+component type boolean	component "web" (type "perr"): properties.on: expected boolean, got string
+component type integer	component "web" (type "perr"): properties.count: expected integer, got string (x)
+component type number	component "web" (type "perr"): properties.ratio: expected number, got string
+component type array	component "web" (type "perr"): properties.list: expected array, got string
+component type object	component "web" (type "perr"): properties.obj: expected object, got string
+component type union	component "web" (type "perr"): properties.u: expected one of string, integer, got bool
+component type array element	component "web" (type "perr"): properties.list[0]: expected string, got int
+trait type engine key on a schema handler	component "web": trait "perr-trait": properties.scope: expected string, got int
+trait type engine key on a handler with no schema	component "web": trait "perr-trait-bare": properties.scope: expected string, got int
+policy type string	policy "order" (type "perr-pol"): properties.name: expected string, got int
+component enum	component "web" (type "perr"): properties.mode: value c not in allowed set [a b]
+component range	component "web" (type "perr"): properties.count: integer 9223372036854775808 out of range (max 9223372036854775807)
+component null array element	component "web" (type "perr"): properties.list[0]: null is not a valid array element
+schema group with one key	component "web" (type "perr-grp-small"): properties: schema declares exclusive group 0 with 1 key(s); a group needs at least two
+schema group key undeclared	component "web" (type "perr-grp-undeclared"): properties: schema declares exclusive key "zz", which is not a declared property
+schema group key twice	component "web" (type "perr-grp-twice"): properties: schema lists exclusive key "b" twice
+schema group key required	component "web" (type "perr-grp-required"): properties: schema declares exclusive key "a" Required; a group's keys are optional, and the group's Required says one is set
+schema nested group with one key	component "web" (type "perr-grp-nested"): properties.o: schema declares exclusive group 0 with 1 key(s); a group needs at least two
+schema group on a non-object node	component "web" (type "perr-grp-nonobject"): properties.s: schema declares exclusive groups on a non-object node; they name keys of an object
+schema both type and types	component "web" (type "perr-both"): properties.t: schema declares both type "string" and types [string integer]; set exactly one
+schema unsupported type	component "web" (type "perr-blob"): properties.t: schema declares unsupported property type "blob"
+schema enum member null	component "web" (type "perr-enum-null"): properties.t: schema declares Enum member 0 holding a null, which no validated value can match
+schema union of one member	component "web" (type "perr-union-one"): properties.t: schema declares types [string]: a union needs at least two members (use type for one)
+schema union member not scalar	component "web" (type "perr-union-array"): properties.t: schema declares types member "array", but union members must be scalar types (string, integer, number, boolean)
+schema union member twice	component "web" (type "perr-union-duplicate"): properties.t: schema declares types member "string" more than once
+component name and key with separators	component "we.b: x" (type "perr"): properties.a.b: c: expected integer, got string (s)
+component name and nested key with separators	component "we.b: x" (type "perr"): properties.obj.i.n: k: expected integer, got string (s)
+trait on a component with separators and key with separators	component "we.b: x": trait "perr-trait": properties.a.b: c: expected integer, got string (s)
+policy name and key with separators	policy "po.l: x" (type "perr-pol"): properties.obj.i.n: k: expected integer, got string (s)
