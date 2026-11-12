@@ -40,7 +40,7 @@ weight: 4
     under the same terms. A consumer that restricts routing restricts the
     component types it registers.
 
-  **The name** is the component's, or its `objectName` ("The object name"
+  **The name** is the component's, or its `objectName` (["The object name"](conventions.md#the-object-name-objectname)
   below). An `ingress` trait names its own Ingress (`<component>-ingress`, or
   its `name`); a component and a trait whose Ingress would carry one name are
   refused, with both named.

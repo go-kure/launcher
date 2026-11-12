@@ -971,8 +971,8 @@ claim. The rule turns each one into a synthesized `pvc` trait on its
 `deployment` member, named `<component>-<volume>` as before, and rewrites the
 volume to reference it by `claimName`. The output is unchanged. The volume's
 `claimObjectName` names that claim instead (go-kure/launcher#787, role
-`workload-volume-claim`; see "`deploymentObjectName`, `serviceObjectName` and
-`serviceAccountObjectName`" below).
+`workload-volume-claim`; see the `deploymentObjectName` entry of
+[Kinds: core workloads](kinds-core-workloads.md)).
 
 Such a volume that leaves `storageClass` unauthored (absent or `null`) takes
 the ClusterProfile `pvc` capability's `storageClassName`, as an authored `pvc`
@@ -1280,8 +1280,8 @@ unchanged, and so does the rest of `DeploymentSpec` below: it is parsed by
 `parseDeploymentSpec` (`deployment_spec.go`) into real `appsv1` types and
 written by its `apply` onto the built object, from one fragment all three
 handlers compose (go-kure/launcher#341). The pod template's `podMetadata` is the
-same on all three (go-kure/launcher#1216; see "The pod template's labels and
-annotations").
+same on all three (go-kure/launcher#1216; see ["The pod template's labels and
+annotations"](conventions.md#the-pod-templates-labels-and-annotations-podmetadata)).
 
 Sharing the fragment is the point rather than a convenience. These fields are
 properties of the API kind, not of the role a component plays, so a document
@@ -1851,4 +1851,4 @@ reason rather than silently ignored:
 The three claim-level refusals sit inside a `volumeClaimTemplates` entry, so
 their reason reaches a caller of the handler; in a document the
 authored-property check refuses the key first, with its own text and no reason
-(see the section below).
+(see ["Upstream fields a hand-parsed kind does not read"](upstream-fields-not-read.md#upstream-fields-a-hand-parsed-kind-does-not-read)).

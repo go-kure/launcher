@@ -6,8 +6,8 @@ weight: 3
 - **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
   plus the full `DeploymentSpec`-level surface they share with `deployment` —
   `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
-  `progressDeadlineSeconds` (go-kure/launcher#341, see "Deployment-level
-  properties" above). What still separates them from `deployment` is launcher's
+  `progressDeadlineSeconds` (go-kure/launcher#341, see ["Deployment-level
+  properties"](common-config.md#deployment-level-properties-deployment-webservice-worker)). What still separates them from `deployment` is launcher's
   own opinions, which these two keep: `topologySpread` and the four-key
   `affinity` shorthand, and on `webservice` the `port` that drives the Service.
   Note the shorthand is what they keep — neither publishes the raw `corev1`
@@ -168,8 +168,8 @@ weight: 3
     and that addresses it by any other `portName` is refused at build time
     (`cannot route implicit backend to port "name"`), just as a numbered
     `port` other than the component's `port` is (go-kure/launcher#545).
-- **deployment** — the kind-named Deployment (see "Deployment-level
-  properties" above): the shared container-level, pod-level and
+- **deployment** — the kind-named Deployment (see ["Deployment-level
+  properties"](common-config.md#deployment-level-properties-deployment-webservice-worker)): the shared container-level, pod-level and
   `DeploymentSpec`-level surface, the last of which it now shares with
   `webservice` and `worker` rather than owning. What distinguishes it is mostly
   what it leaves out: no `topologySpread`, no four-key `affinity` shorthand, no
@@ -365,7 +365,7 @@ weight: 3
     comes from the EnvironmentPolicy storage default; with neither, the build
     fails with `size: required …`. The policy's maximum storage size applies
     either way. A workload mounts the claim through a `pvc` volume's
-    `claimName` (see "Referencing an existing claim" below). A claim name
+    `claimName` (see ["Referencing an existing claim"](common-config.md#referencing-an-existing-claim-pvcclaimname)). A claim name
     another component also generates (for example a `pvc` trait of the same
     name) is refused as a generated-object collision.
 
@@ -477,7 +477,7 @@ weight: 3
   component, they are in no tier unless a tier annotation or placement policy
   places them.
   The properties are the spec fields, and `labels` and `annotations` for the
-  object's metadata ("The object's labels and annotations" below).
+  object's metadata (["The object's labels and annotations"](conventions.md#the-objects-labels-and-annotations-labels-annotations)).
   - `namespace` publishes `finalizers`, the one field of
     `corev1.NamespaceSpec`. A Namespace is cluster-scoped: the object carries
     no namespace, whatever namespace the application is built for. The
@@ -1058,7 +1058,7 @@ weight: 3
     and an empty `description`.
 
   **The object's name** is the component's unless `objectName`, or the
-  `Naming` hook under role `object`, names it otherwise (see "The object name"
+  `Naming` hook under role `object`, names it otherwise (see ["The object name"](conventions.md#the-object-name-objectname)
   below). Each handler declares its object as cluster-scoped, so the name is
   claimed in no namespace: two `storageclass` components given one object
   name are refused, whatever namespace the application is built for. What
@@ -1163,7 +1163,7 @@ weight: 3
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
   `size`, `storageClass`, `accessModes`, plus the rest of
-  `corev1.PersistentVolumeClaimSpec`; see "Raw block volumes" above). The
+  `corev1.PersistentVolumeClaimSpec`; see ["Raw block volumes"](common-config.md#raw-block-volumes-volumemode-block)). The
   StatefulSetSpec-level and
   claim-template field sets are classified in ["StatefulSet-level and
   claim-template properties"](common-config.md#statefulset-level-and-claim-template-properties). `ports` declares the main container's
@@ -1558,7 +1558,7 @@ weight: 3
   Job**: a component's own annotations, the ones beside its `type` and
   `properties`, are read only for the tier annotation. The `annotations`
   property is another matter: it goes on the Job's own metadata, as on every
-  kind component ("The object's labels and annotations" below). The Flux force
+  kind component (["The object's labels and annotations"](conventions.md#the-objects-labels-and-annotations-labels-annotations)). The Flux force
   annotation written there is on the Job as authored, and kustomize-controller
   reads it as it reads the workflow's; the trait is the way that names no
   delivery engine. See the
