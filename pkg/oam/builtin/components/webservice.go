@@ -151,6 +151,10 @@ func (WebserviceRule) PropertySchema() map[string]oam.PropertySchema {
 		"initContainers":  schemaInitContainers(),
 		"sidecars":        schemaSidecars(),
 		"affinity":        schemaAffinity(),
+		// The raw corev1 shapes `deployment` takes; `affinity` stays the
+		// four-key shorthand (go-kure/launcher#1473).
+		"tolerations":               schemaTolerations(),
+		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
 	}
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
@@ -371,6 +375,12 @@ func parseWebservice(comp *oam.Component) (webserviceOpinions, error) {
 		return out, err
 	}
 	out.affinity = affinity
+	if _, err := parseTolerations(props); err != nil {
+		return out, err
+	}
+	if _, err := parseTopologySpreadConstraints(props); err != nil {
+		return out, err
+	}
 
 	sidecars, err := parseSidecars(props)
 	if err != nil {
