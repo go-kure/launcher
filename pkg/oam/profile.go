@@ -41,6 +41,8 @@ type ClusterProfileSpec struct {
 	// unknown: nothing is checked, and the build is what it was before the field
 	// existed. See docs/oam/design-cluster-profile.md.
 	KubernetesVersion string `yaml:"kubernetesVersion,omitempty" json:"kubernetesVersion,omitempty"`
+	// FeatureGates is a stub: go-kure/launcher#1231 gives it meaning.
+	FeatureGates map[string]bool `yaml:"featureGates,omitempty" json:"featureGates,omitempty"`
 }
 
 // TargetVersion returns the parsed spec.kubernetesVersion, and false when the

@@ -147,3 +147,11 @@ func gateEnabled(gate string, version KubernetesVersion, overrides map[string]bo
 	}
 	return version.AtLeast(g.OnByDefault), nil
 }
+
+// gateTarget is a stub: go-kure/launcher#1231.
+type gateTarget struct {
+	version   KubernetesVersion
+	overrides map[string]bool
+}
+
+func (g gateTarget) enabled(gate string) (bool, error) { return gateEnabled(gate, g.version, nil) }

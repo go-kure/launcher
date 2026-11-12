@@ -50,6 +50,8 @@ type TransformContext struct {
 	// Transform, and it reads this field only: a caller that leaves it nil gets no
 	// check. Non-authorable platform input, like EgressPeers.
 	TargetVersion *KubernetesVersion
+	// FeatureGates is a stub: go-kure/launcher#1231 gives it meaning.
+	FeatureGates map[string]bool
 	// EgressPeers carries downstream-supplied, graph-derived egress destinations keyed
 	// by OAM component name. Non-authorable: never sourced from OAM YAML or
 	// capability rendering, and never merged into trait properties. nil on the
