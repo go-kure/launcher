@@ -185,6 +185,12 @@ See [Policy defaults and capability system](https://www.gokure.dev/launcher/api-
 
 See [Policy defaults and capability system](https://www.gokure.dev/launcher/api-reference/oam/policy-and-capability/#capability-system).
 
+The `AllowedCapabilities`, `ForbiddenCapabilities` and `RequiredCapabilities` lists of a `Policy`
+judge the trait types an author wrote. They also judge the traits that a component rule writes onto
+the parts it emits. Launcher's own component rules are exempt, because their traits are launcher's
+opinions. A library consumer registers those rules with `RegisterBuiltinComponentLowering`. Any other
+rule goes through `RegisterComponentLowering`, and its emitted traits count.
+
 ### Capability rendering: types and nulls
 
 See [Policy defaults and capability system](https://www.gokure.dev/launcher/api-reference/oam/policy-and-capability/#capability-rendering-types-and-nulls).
