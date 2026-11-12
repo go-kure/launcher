@@ -43,10 +43,10 @@ getMinutes: scalar-out
 getMonth: scalar-out
 getSeconds: scalar-out
 in [disabled]: scalar-out
-indexOf: scalar-out
+indexOf: bounded (budgetedSearch in charge.go refuses a search that cel-go would charge over the cost limit before it runs; TestSearchIsRefusedBeforeItRuns)
 int: scalar-out
 join: amplifying (budgetedJoin in equality.go checks every element before it writes and stops before the buffer passes the cap; TestChargeStopsBeforeTheAllocation, TestChargeFailAfterWorkSweep)
-lastIndexOf: scalar-out
+lastIndexOf: bounded (budgetedSearch in charge.go refuses a search that cel-go would charge over the cost limit before it runs; TestSearchIsRefusedBeforeItRuns)
 lists.range: amplifying (cel-go caps it at 1000000 elements and charges it by size; TestReplaceGrowth pins the cap)
 lowerAscii: bounded (same size as its operand)
 matches: scalar-out
