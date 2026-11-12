@@ -884,6 +884,16 @@ weight: 10
   new one: the old one is pruned with its data unless it is protected. Every
   address or Secret reference written with the old name is the author's to
   change.**
+  A model part that reads this component writes no name by hand: `parts.<part>.app_secret`
+  gives the name of the Secret `<cluster>-app` (go-kure/launcher#1261), and
+  `parts.<part>.cluster` gives the Cluster's name. A part that sets `recovery.secret.name`
+  declares no `app_secret`, because CloudNativePG does not generate that Secret then, and a read
+  of it fails. The name follows `clusterObjectName` and the
+  `Naming` hook, like the name of the Cluster the build makes. The Secret is
+  of type `kubernetes.io/basic-auth`. CloudNativePG writes these keys into it (cloudnative-pg
+  v1.30.1, `pkg/specs/secrets.go`): `username`, `user`, `password`, `dbname`, `host`, `port`,
+  `pgpass`, `uri`, `jdbc-uri`, `fqdn-uri` and `fqdn-jdbc-uri`. A consumer reads one of these as
+  the `key` of a `secretKeyRef`. Only a part later in the document reads the output.
   Its rule implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
   data-plane endpoint (`cnpg.io/cluster: <Cluster name>`, the component name unless the
   Cluster is named apart, on port `5432`) so a downstream
