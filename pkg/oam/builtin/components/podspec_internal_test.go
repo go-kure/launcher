@@ -103,9 +103,10 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		// serviceAccountObjectName on both, serviceObjectName on the
 		// webservice). None is in a shared list, so the merged count rises by
 		// as many. 21 and 19 since go-kure/launcher#1216 gave both `podMetadata`,
-		// in no shared list.
-		{"webservice", WebserviceRule{}.PropertySchema(), 21, deploymentSpecPropertyKeys, false},
-		{"worker", WorkerRule{}.PropertySchema(), 19, deploymentSpecPropertyKeys, false},
+		// in no shared list. 23 and 21 since go-kure/launcher#1473 gave both
+		// `tolerations` and `topologySpreadConstraints`, in neither shared list.
+		{"webservice", WebserviceRule{}.PropertySchema(), 23, deploymentSpecPropertyKeys, false},
+		{"worker", WorkerRule{}.PropertySchema(), 21, deploymentSpecPropertyKeys, false},
 		// 18 and 14: go-kure/launcher#690 removed `port` from both kinds.
 		// Each of the five kinds below counts one more own key since
 		// go-kure/launcher#1178: `podMetadata`, in no shared list.

@@ -38,7 +38,9 @@ func TestWorkerRule_ComponentType(t *testing.T) {
 // (schemaRoleObjectNames); go-kure/launcher#1172 closed the volumeMounts item of
 // an init container and of a sidecar; go-kure/launcher#1183 added the gate of
 // each property that needs a Kubernetes feature gate, and go-kure/launcher#1230
-// the gate of each enum value that needs one (an init container's restartPolicy).
+// the gate of each enum value that needs one (an init container's restartPolicy);
+// go-kure/launcher#1473 added `tolerations` and `topologySpreadConstraints`, the
+// same entries `deployment` publishes.
 func TestWorkerRule_PropertySchemaUnchanged(t *testing.T) {
 	want, err := os.ReadFile("testdata/worker-property-schema.json")
 	if err != nil {
@@ -117,8 +119,9 @@ func TestWorkerRule_EmitsServiceAccountMember(t *testing.T) {
 // The emitted component is a deployment of the same name carrying the authored
 // properties, with the two opinions replaced: topologySpread removed and the
 // affinity shorthand evaluated into the raw corev1 shape. Annotations are
-// forwarded, the authored map is not written to, and a key worker does not
-// declare is dropped rather than handed to deployment.
+// forwarded, the authored map is not written to, `tolerations` is forwarded as
+// declared, and a key worker does not declare (`ports`) is dropped rather than
+// handed to deployment.
 func TestWorkerRule_EmitsDeployment(t *testing.T) {
 	authored := map[string]any{
 		"image":          "ghcr.io/org/app:v1",
@@ -130,6 +133,7 @@ func TestWorkerRule_EmitsDeployment(t *testing.T) {
 		},
 		"env":         []any{map[string]any{"name": "A", "value": "b"}},
 		"tolerations": []any{map[string]any{"operator": "Exists"}},
+		"ports":       []any{map[string]any{"name": "http", "containerPort": 80}},
 	}
 	before := maps.Clone(authored)
 	comp := &oam.Component{
@@ -147,12 +151,12 @@ func TestWorkerRule_EmitsDeployment(t *testing.T) {
 	if !reflect.DeepEqual(authored, before) {
 		t.Errorf("the authored properties were modified: %v", authored)
 	}
-	for _, k := range []string{"topologySpread", "tolerations"} {
+	for _, k := range []string{"topologySpread", "ports"} {
 		if _, ok := got.Properties[k]; ok {
 			t.Errorf("emitted properties carry %q; want it removed", k)
 		}
 	}
-	for _, k := range []string{"image", "replicas", "env"} {
+	for _, k := range []string{"image", "replicas", "env", "tolerations"} {
 		if !reflect.DeepEqual(got.Properties[k], authored[k]) {
 			t.Errorf("emitted %s = %v, want the authored %v", k, got.Properties[k], authored[k])
 		}

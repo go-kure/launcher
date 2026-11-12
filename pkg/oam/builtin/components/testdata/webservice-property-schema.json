@@ -2349,10 +2349,154 @@
       "FallbackToLogsOnError"
     ]
   },
+  "tolerations": {
+    "type": "array",
+    "description": "Node taint tolerations allowing the pod to schedule onto tainted nodes.",
+    "items": {
+      "type": "object",
+      "description": "A single taint toleration.",
+      "properties": {
+        "effect": {
+          "type": "string",
+          "description": "Taint effect to tolerate (empty matches all effects).",
+          "enum": [
+            "NoSchedule",
+            "PreferNoSchedule",
+            "NoExecute",
+            ""
+          ]
+        },
+        "key": {
+          "type": "string",
+          "description": "Taint key to tolerate."
+        },
+        "operator": {
+          "type": "string",
+          "description": "How the taint key/value are matched. Defaults to Equal, or to Exists when key is empty — an empty key requires Exists. Lt and Gt compare numerically and need the cluster's TaintTolerationComparisonOperators feature gate.",
+          "enum": [
+            "Exists",
+            "Equal",
+            "Lt",
+            "Gt"
+          ]
+        },
+        "tolerationSeconds": {
+          "type": "integer",
+          "description": "Seconds the pod tolerates a NoExecute taint before eviction. Unset means tolerate forever; 0 or negative means evict immediately. Only meaningful with effect NoExecute, and upstream validation is documented as refusing it under any other effect, so set that effect explicitly."
+        },
+        "value": {
+          "type": "string",
+          "description": "Taint value to match when operator is Equal, Lt or Gt; must be a canonical decimal integer for Lt and Gt (no leading zeros, no plus sign, no \"-0\" — any other form matches nothing at all), and must be empty for Exists."
+        }
+      }
+    }
+  },
   "topologySpread": {
     "type": "boolean",
     "description": "Whether default topology spread constraints are applied across nodes.",
     "default": true
+  },
+  "topologySpreadConstraints": {
+    "type": "array",
+    "description": "How pods of this workload are spread across topology domains, as the corev1.TopologySpreadConstraint API shape.",
+    "items": {
+      "type": "object",
+      "description": "A single topology spread constraint.",
+      "properties": {
+        "labelSelector": {
+          "type": "object",
+          "description": "Label query selecting the pods counted per domain.",
+          "properties": {
+            "matchExpressions": {
+              "type": "array",
+              "description": "Set-based label requirements, ANDed with matchLabels.",
+              "items": {
+                "type": "object",
+                "description": "A single label requirement.",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "Label key.",
+                    "required": true
+                  },
+                  "operator": {
+                    "type": "string",
+                    "description": "How the key relates to values. In/NotIn need at least one value, Exists/DoesNotExist none.",
+                    "required": true,
+                    "enum": [
+                      "In",
+                      "NotIn",
+                      "Exists",
+                      "DoesNotExist"
+                    ]
+                  },
+                  "values": {
+                    "type": "array",
+                    "description": "A list of string values (e.g. command or args).",
+                    "items": {
+                      "type": "string",
+                      "description": "A single string value."
+                    }
+                  }
+                }
+              }
+            },
+            "matchLabels": {
+              "type": "object",
+              "description": "Label key/value pairs that must all match.",
+              "additionalProperties": true
+            }
+          }
+        },
+        "matchLabelKeys": {
+          "type": "array",
+          "description": "A list of string values (e.g. command or args).",
+          "items": {
+            "type": "string",
+            "description": "A single string value."
+          }
+        },
+        "maxSkew": {
+          "type": "integer",
+          "description": "Maximum permitted difference between the number of matching pods in any domain and the global minimum. Must be greater than 0.",
+          "required": true
+        },
+        "minDomains": {
+          "type": "integer",
+          "description": "Minimum number of eligible domains. Must be greater than 0, and requires whenUnsatisfiable DoNotSchedule."
+        },
+        "nodeAffinityPolicy": {
+          "type": "string",
+          "description": "Whether the pod's nodeAffinity/nodeSelector narrows the eligible domains. Unset behaves as Honor.",
+          "enum": [
+            "Honor",
+            "Ignore"
+          ]
+        },
+        "nodeTaintsPolicy": {
+          "type": "string",
+          "description": "Whether node taints narrow the eligible domains. Unset behaves as Ignore.",
+          "enum": [
+            "Honor",
+            "Ignore"
+          ]
+        },
+        "topologyKey": {
+          "type": "string",
+          "description": "Node label key defining the domain, e.g. `topology.kubernetes.io/zone`.",
+          "required": true
+        },
+        "whenUnsatisfiable": {
+          "type": "string",
+          "description": "What the scheduler does with a pod that would violate the constraint.",
+          "required": true,
+          "enum": [
+            "DoNotSchedule",
+            "ScheduleAnyway"
+          ]
+        }
+      }
+    }
   },
   "tty": {
     "type": "boolean",

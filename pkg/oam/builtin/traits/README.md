@@ -803,9 +803,11 @@ The trait is strict in five ways, each an error at build time:
   refused rather than merged, whatever put them there: the raw property on
   `deployment`, or the `topologySpread` default of `webservice`/`worker` at 2
   or more replicas (the `scaler`'s `minReplicas` when the component has one).
-  Set `topologySpread: false` on a role kind to use the trait instead. At one
-  replica, or a `minReplicas` of 1, the role kinds produce no constraints, so
-  there is nothing to conflict with.
+  The same holds for `topologySpreadConstraints` authored on a role kind
+  (go-kure/launcher#1473): set `topologySpread: false` to own the constraints,
+  or to use the trait instead. At one replica, or a `minReplicas` of 1, the
+  role kinds' own default produces no constraints, so it conflicts with
+  nothing; authored constraints conflict at any replica count.
 - **A typed Deployment is required.** The trait acts on the typed Deployment
   objects a component's `Generate` returns: the one `deployment`, `webservice`
   or `worker` builds, and any `apps/v1` Deployment in a `manifests` source or

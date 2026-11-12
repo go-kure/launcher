@@ -38,7 +38,9 @@ func TestWebserviceRule_ComponentType(t *testing.T) {
 // of a sidecar, and go-kure/launcher#1216 added podMetadata, the deployment's
 // own entry, and go-kure/launcher#1183 added the gate of each property that
 // needs a Kubernetes feature gate, and go-kure/launcher#1230 the gate of each
-// enum value that needs one (an init container's restartPolicy).
+// enum value that needs one (an init container's restartPolicy), and
+// go-kure/launcher#1473 added `tolerations` and `topologySpreadConstraints`, the
+// same entries `deployment` publishes.
 func TestWebserviceRule_PropertySchemaUnchanged(t *testing.T) {
 	want, err := os.ReadFile("testdata/webservice-property-schema.json")
 	if err != nil {

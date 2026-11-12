@@ -38,18 +38,25 @@ import (
 //     evaluated it (buildAffinity, over the component's own app label) and
 //     emitted as the raw corev1 shape `deployment` publishes; omitted when the
 //     shorthand evaluates to nothing.
+//
 //   - `topologySpread`: removed. Unless it was explicitly false, the rule
 //     attaches a `topology-spread` trait instead — the trait that applies the
 //     same default constraints (BuildTopologySpreadConstraints) to the same
 //     post-policy replica count, or the matching scaler's minReplicas under a
 //     scaler, and the same selector.
 //
-// Keys worker does not declare are dropped rather than forwarded: worker's
-// parse never read them, while `deployment` would honor two of them
-// (`tolerations`, `topologySpreadConstraints`) and refuse the rest. The kurel
-// CLI refuses such keys before lowering in any case
-// (Transformer.ValidateAuthoredProperties); dropping them keeps a caller that
-// skips that validation exactly where it was.
+//   - `tolerations` and `topologySpreadConstraints`: declared and forwarded, as
+//     `deployment` takes them (go-kure/launcher#1473). The rule parses both
+//     itself first, so a bad value is refused with the role's own text. Authored
+//     constraints with `topologySpread` left true are refused by the
+//     synthesized `topology-spread` trait: set `topologySpread: false` to own
+//     the constraints.
+//
+// Keys worker does not declare (`ports`, among others) are dropped rather than
+// forwarded: worker's parse never read them, while `deployment` would honor
+// them or refuse them. The kurel CLI refuses such keys before lowering in any
+// case (Transformer.ValidateAuthoredProperties); dropping them keeps a caller
+// that skips that validation exactly where it was.
 //
 // The authored traits are forwarded unchanged, and the synthesized
 // `topology-spread` goes in front of them: it is then the innermost trait
@@ -101,6 +108,10 @@ func (WorkerRule) PropertySchema() map[string]oam.PropertySchema {
 		"initContainers":  schemaInitContainers(),
 		"sidecars":        schemaSidecars(),
 		"affinity":        schemaAffinity(),
+		// The raw corev1 shapes `deployment` takes; `affinity` stays the
+		// four-key shorthand (go-kure/launcher#1473).
+		"tolerations":               schemaTolerations(),
+		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
 	}
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
@@ -270,6 +281,12 @@ func parseWorker(name string, props map[string]any) (workerOpinions, error) {
 		return out, err
 	}
 	out.affinity = affinity
+	if _, err := parseTolerations(props); err != nil {
+		return out, err
+	}
+	if _, err := parseTopologySpreadConstraints(props); err != nil {
+		return out, err
+	}
 
 	sidecars, err := parseSidecars(props)
 	if err != nil {

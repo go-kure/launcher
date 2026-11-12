@@ -1945,6 +1945,17 @@ published (go-kure/launcher#790):
 | `daemonset` | raw | yes | yes |
 | `job` | raw | yes | yes |
 | `cronjob` | raw | yes | yes |
+| `webservice`, `worker` | four-key shorthand | yes | yes |
+
+`webservice` and `worker` publish `tolerations` and `topologySpreadConstraints`
+as these same shapes, from the same schemas and parsers (go-kure/launcher#1473).
+Their `affinity` stays the four-key shorthand. The constraints cost one more
+property: both roles apply the default `topologySpread` through a synthesized
+`topology-spread` trait, which refuses a Deployment that already carries
+constraints, so authored `topologySpreadConstraints` need `topologySpread: false`.
+Without it the build is refused with the trait's message, which names that
+property. Each role's own parse checks both keys, so a bad value is refused with
+the role's text before lowering.
 
 **Breaking (go-kure/launcher#790): `statefulset` dropped the four-key `affinity`
 shorthand.** Its `affinity` is the raw `corev1` shape, as on the other kinds in
@@ -6098,7 +6109,10 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   own opinions, which these two keep: `topologySpread` and the four-key
   `affinity` shorthand, and on `webservice` the `port` that drives the Service.
   Note the shorthand is what they keep — neither publishes the raw `corev1`
-  `affinity`/`topologySpreadConstraints` that `deployment` does.
+  `affinity` that `deployment` does. Both publish `tolerations` and
+  `topologySpreadConstraints` as `deployment` does (go-kure/launcher#1473, see
+  "Raw scheduling properties" above); authored constraints need
+  `topologySpread: false`.
   The `webservice` rule implements the optional `oam.EndpointProvider`: it declares its own
   pods (`app: <component-name>`) on the declared `port` (its single `port` property drives both
   the container port and the Service port), letting a downstream platform synthesize generic
