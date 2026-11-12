@@ -1,6 +1,7 @@
 package model
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"runtime"
@@ -442,6 +443,13 @@ func TestChargeSortFailsLikeCelGo(t *testing.T) {
 // of the result sees nothing. Each row runs one budgeted node on strings of 1,000,000 bytes
 // 2,000 times, which is 2,000,000 steps if the node pays for the bytes it touches. A node that
 // fails before it touches anything (touches false) must let the whole loop finish.
+//
+// A row must fail when its own guard is removed, so two rows carry more than the stop:
+//   - replace stops at the first call, and the result cap would stop an unguarded replace too, after
+//     it built 16 MB. maxMB bounds what the guarded node may allocate.
+//   - sortBy reads x twice per iteration in the keys that its macro builds, 1,954 steps, and the
+//     charge of the keys adds the same. 400 iterations spend 782,000 steps for the reads alone, under
+//     the budget, and 1,564,000 with the charge, over it.
 func TestChargeFailAfterWorkSweep(t *testing.T) {
 	s := stdScope()
 	s.Inputs["image"] = strings.Repeat("x", maxValueSize)
@@ -449,28 +457,34 @@ func TestChargeFailAfterWorkSweep(t *testing.T) {
 	rows := []struct {
 		node, body string
 		touches    bool
+		iters      int    // 2,000 when 0
+		maxMB      uint64 // an allocation bound for a row that must stop before it builds, 0 for none
 	}{
-		{"==", "ys == zs", true},
-		{"in", "ys in [zs]", true},
-		{"distinct", "xs.distinct() == []", true},
-		{"flatten", "xs.flatten(-1) == []", false},
-		{"replace", "inputs.image.replace('x', 'yy') == ''", true},
-		{"join", "ys.join() == ''", false},
-		{"sort", "xs.sort() == []", true},
-		{"sortBy", "xs.sortBy(x, x) == []", true},
+		{"==", "ys == zs", true, 0, 0},
+		{"in", "ys in [zs]", true, 0, 0},
+		{"distinct", "xs.distinct() == []", true, 0, 0},
+		{"flatten", "xs.flatten(-1) == []", false, 0, 0},
+		{"replace", "inputs.image.replace('x', 'yyyyyyyyyyyyyyyy') == ''", true, 0, 8},
+		{"join", "ys.join() == ''", false, 0, 0},
+		{"sort", "xs.sort() == []", true, 0, 0},
+		{"sortBy", "xs.sortBy(x, x) == []", true, 400, 0},
 	}
 	for _, tc := range rows {
 		t.Run(tc.node, func(t *testing.T) {
 			// the lists are bound once: reading inputs.image in the loop would be charged, and stop it
-			expr := "cel.bind(xs, [inputs.image, inputs.nick, 0], cel.bind(ys, [inputs.image, 0], cel.bind(zs, [inputs.nick, 1], " +
-				"lists.range(2000).all(i, (" + tc.body + ") || true))))"
+			iters := cmp.Or(tc.iters, 2000)
+			expr := fmt.Sprintf("cel.bind(xs, [inputs.image, inputs.nick, 0], cel.bind(ys, [inputs.image, 0], cel.bind(zs, [inputs.nick, 1], "+
+				"lists.range(%d).all(i, (%s) || true))))", iters, tc.body)
 			c := mustCompile(t, oneValue(t, "${"+expr+"}"))
 			var got any
 			var err error
 			mb := allocMB(func() { got, _, err = c.Eval("spec.values[0].expr", s) })
 			if tc.touches {
 				if !errors.Is(err, ErrCostLimit) {
-					t.Fatalf("gave %v, %v: 2,000 failed calls touch 2 GB and must wrap ErrCostLimit", got, err)
+					t.Fatalf("gave %v, %v: the failed calls touch more than the budget pays for and must wrap ErrCostLimit", got, err)
+				}
+				if tc.maxMB != 0 && mb > tc.maxMB {
+					t.Fatalf("allocated %d MB, want at most %d: the node must stop before it builds", mb, tc.maxMB)
 				}
 				return
 			}
