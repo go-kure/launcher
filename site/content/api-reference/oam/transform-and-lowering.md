@@ -18,8 +18,8 @@ Extend the system by implementing:
 | `CapabilityAware` | Mark a handler as requiring a `ClusterProfile` capability. |
 | `ComponentCapabilityDefaults` | `CapabilityDefaults() (key string, properties []string)` — on a `ComponentHandler` whose properties take defaults from a `ClusterProfile` capability. Before `ToApplicationConfig`, the engine fills each listed property the component leaves unauthored (absent or `null`) from that binding's rendering; an authored value, `""` included, wins. It reads only the listed keys, never the rest of the rendering, and records the key in `ConsumedCapabilities` when the profile binds it. A component a lowering rule synthesized is skipped, as a sealed trait is. Each filled value is validated against the component's own `PropertySchema`, which must declare every listed key (go-kure/launcher#751): the trait side's schema may differ. A handler that declares no schema relies on `EvaluateProfile`, which validates the binding only through the trait handler or trait lowering rule of the key's type. Its fill is refused unless that handler or rule validates the rendering: it implements `ValidateAndApplyDefaults`, or the type is not built in and has a `CapabilityDefinition`, whose schema `EvaluateProfile` applies (go-kure/launcher#772). Implemented by `persistentvolumeclaim` (`pvc`, `storageClassName`; go-kure/launcher#742). |
 | `ComponentCapabilityFiller` | `FillCapabilityDefaults(props map[string]any, lctx LoweringContext) (map[string]any, error)` — on a `ComponentHandler` whose capability defaults land below the top level of its properties, where `ComponentCapabilityDefaults` cannot reach. The engine calls it right after `ComponentCapabilityDefaults`, on a component no lowering rule synthesized, and passes the result to `ToApplicationConfig`; an error fails the component. On a kind component `props` no longer holds `objectName`, which the engine took out. It must not mutate `props`, and reads a binding only through `lctx.Capability`, which records the key in `ConsumedCapabilities`; `lctx` carries nothing else. The handler validates the values it fills; the engine's schema check covers only `ComponentCapabilityDefaults` keys. Implemented by `statefulset` (`pvc`'s `storageClassName` into each `volumeClaimTemplates` entry that leaves `storageClass` unauthored; go-kure/launcher#761). |
-| `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see below). |
-| `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, prerequisites, readiness, deprecation info (see below). Every built-in handler and lowering rule implements it. |
+| `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see [Property schemas](schemas-and-contract.md#property-schemas)). |
+| `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, prerequisites, readiness, deprecation info (see [Contract metadata](schemas-and-contract.md#contract-metadata)). Every built-in handler and lowering rule implements it. |
 | `LoweringTargetDeclarer` | `LoweringTargets() LoweringTargets` — on a lowering rule of any kind: the component, trait and policy types it lowers into. `Transformer.Seal` refuses a registry in which one of them is not registered (see Contract metadata). Every built-in lowering rule implements it. |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. |
 | `ApplicationNameSetter` | `SetApplicationName(name string)` — on a component config that builds a name out of the OAM application it belongs to, so the name differs when two differently named applications each have a component of the same name (the application's namespace is not part of it). The transform calls it once, right after `ToApplicationConfig` and before policy and traits, with the name of the document it transforms (the name the application's bundle carries). A config built directly, outside a transform, is never told one. Implemented by `helmtemplate`, whose hook-group child layouts are named `<application>-<component>-NN-<phase-slug>` (go-kure/launcher#792). |
@@ -221,8 +221,7 @@ checked on its own copy of its properties, so checking it cannot strip a reserve
 shape-check trait properties either (it enforces only their platform-reserved keys): like
 any authored document, each parsed output document must go through
 `ValidateAuthoredProperties`, after parameter substitution, before `Transform`, which then
-takes the document the validator returned (see its paragraph under Property schemas
-below). Without it, a raw rule's `enablePDB: "true"` on
+takes the document the validator returned (see its paragraph under [Property schemas](schemas-and-contract.md#property-schemas)). Without it, a raw rule's `enablePDB: "true"` on
 a trait whose schema declares a boolean builds cleanly and is silently dropped. Before
 go-kure/launcher#357 `LowerRaws` schema-checked emitted traits itself; a caller that
 relied on that must now add the `ValidateAuthoredProperties` call.
@@ -434,7 +433,7 @@ element, which is not permitted. `Transformer.LowerableTypes()` reports every
 kind/component-type/trait-type/policy-type claimed by rules registered on a
 transformer (excluding raw-only rules, which are reachable only via `LowerRaws`), for
 a caller to pass into `ParseWithExtraTypes` ahead of a transform that will lower them
-(see Parsing above).
+(see [Parsing](parsing-and-types.md#parsing)).
 
 **Same-name sibling groups.** A `ComponentLoweringRule` may emit several components
 under one name, each of a distinct type that has a component handler (no lowering
@@ -525,7 +524,7 @@ synthesized cause, then the expansion chain (`LoweringStep`s) that produced it.
 `Origin.Rule` is the one field on `Origin` that is NOT copied verbatim: it identifies
 the lowering rule that most recently produced the element — `"<position>/<type>"`
 (e.g. `"trait/expose"`), suffixed with `"@<version>"` when the rule also implements
-`ContractDescriber` (see Contract metadata below) — and is re-derived at every hop, so
+`ContractDescriber` (see [Contract metadata](schemas-and-contract.md#contract-metadata)) — and is re-derived at every hop, so
 it always names the immediate producer rather than the first rule in a multi-hop
 chain. `""` means the element was never itself the direct output of a lowering rule
 (authored as-is, or carried through untouched).
@@ -694,5 +693,5 @@ platform-reserved properties rejected before capability rendering is merged into
 trait it receives. Independently of that — every lowering rule, whether or not it
 declares its own schema — has each element it emits (component, trait, or policy)
 validated against the TARGET handler's declared schema before the emitted element is
-accepted into the next round (see Property schemas below).
+accepted into the next round (see [Property schemas](schemas-and-contract.md#property-schemas)).
 

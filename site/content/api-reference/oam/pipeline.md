@@ -274,7 +274,8 @@ also generates is a collision, reported by the item's own kind and name; and the
 no object, so two Lists with different items, or none, do not collide. The three comparisons
 also leave out what Kustomize's build drops: an object whose
 `config.kubernetes.io/local-config` annotation is present with any value but `"false"` (an
-empty value drops it too) is never applied, so it generates nothing and collides with nothing,
+empty value, a boolean `true`, a number or a null drops it too, as authored in an unstructured
+object; a boolean `false` keeps it) is never applied, so it generates nothing and collides with nothing,
 and the claim it would make for a controller goes with it (go-kure/launcher#1338). That is
 judged on each item once a `List` is inlined, so a `List`'s own annotation is not read; an
 envelope whose kind does not end in `List` is one object for Kustomize and is dropped with all
@@ -337,7 +338,7 @@ created, in creation order, so a trait's objects are emitted with their own comp
 than after every component of the bundle (go-kure/launcher#712). A trait handler that moves
 an application or removes a sub-application keeps the order it left (go-kure/launcher#718); one
 that replaces, removes or renames a component's application fails the transform (go-kure/launcher#734,
-see `TraitHandler` below). A trait whose handler
+see `TraitHandler` in [Transform, extension and lowering](transform-and-lowering.md#transform--extension)). A trait whose handler
 implements `SubApplicationDecorator` (the built-in `prune-protection` and `force-replace`, which
 set a delivery intent) is also applied to those sub-applications, whatever order the traits were authored in: the last step of
 the transform, after the Phase-4 synthesis below, applies it to each of them. The NetworkPolicies
