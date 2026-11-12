@@ -510,3 +510,44 @@ func TestChargeJoinFailsLikeCelGo(t *testing.T) {
 		})
 	}
 }
+
+// The copy of a result hashes each key of a map twice, once to read the entry and once to insert it,
+// and a list of references to one map copies that map once for each reference. A map of ten keys of
+// 1,000,000 bytes copied 100 times hashes 6 GB for the one unit that the converter charged for each
+// entry. The converter charges the bytes of a key as the comparison does: a step for each 1,024
+// bytes, twice.
+func TestResultCopyChargesTheBytesOfMapKeys(t *testing.T) {
+	longKeys := func(n int) map[string]any {
+		m := map[string]any{}
+		for i := 0; i < n; i++ {
+			m[fmt.Sprintf("%02d", i)+strings.Repeat("k", maxValueSize-2)] = int64(i)
+		}
+		return m
+	}
+	for _, tc := range []struct {
+		name   string
+		labels map[string]any
+		expr   string
+		refuse bool
+	}{
+		{"long keys of a map copied 100 times", longKeys(10), "cel.bind(m, inputs.labels, lists.range(100).map(i, m))", true},
+		{"long keys of a map copied once", longKeys(10), "inputs.labels", false},
+		{"short keys of a map copied 1,000 times", map[string]any{"a": int64(1), "b": int64(2), "c": int64(3)}, "cel.bind(m, inputs.labels, lists.range(1000).map(i, m))", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := stdScope()
+			s.Inputs["labels"] = tc.labels
+			_, _, err := mustCompile(t, oneValue(t, "${"+tc.expr+"}")).Eval("spec.values[0].expr", s)
+			if tc.refuse {
+				// the result is never printed: it holds gigabytes of key text
+				if !errors.Is(err, ErrCostLimit) || !strings.Contains(err.Error(), "spec.values[0].expr") {
+					t.Fatalf("error %v must wrap ErrCostLimit and name the site", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("gave %v, want the result", err)
+			}
+		})
+	}
+}
