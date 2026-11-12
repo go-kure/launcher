@@ -145,7 +145,7 @@ self-test (`make test-verify-merge`).
 |-----|------------|---------|--------------|---------|
 | `changes` | `detect-changes` | 2 min | — | Path filter: `go:` and `docs:` outputs control downstream jobs |
 | `validate` | `lint` | 20 min | changes | go-version, fmt, tidy, vet, lint, tool-version parity (golangci-lint pin across Makefile/ci.yml/docs), govulncheck doc parity, verify-merge self-test, `check-pin-impact.sh` cases (`make test-pin-impact`); diff-based lint on PRs |
-| `test` | `test` | 25 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
+| `test` | `test` | 35 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
 | `security` | `Security` | 15 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
 | `action-pins` | `action-pins` | 2 min | — | Fails if any third-party `uses:` ref is not pinned to a 40-char commit SHA (`go-kure/.github` composite action) |
 | `issue-refs` | `issue-refs` | 2 min | — | Self-tests then runs `scripts/check-issue-refs.sh` over the whole tracked tree, and on a pull request over its commit messages: rejects a bare `#N` or an ownerless `name#N` reference (go-kure/launcher#400, go-kure/launcher#732; `make check-issue-refs`). Also self-tests `scripts/check-format-scope.sh` and, on a pull request, requires the `(format)` scope on commits that change what `app.yaml` accepts (go-kure/launcher#1279; `make check-format-scope`) |
@@ -452,7 +452,7 @@ Runs on main and `release/*` branches only (not PRs):
 - **CGO enabled** — test job installs `build-essential` for cgo-dependent packages, guarded by
   `command -v gcc && command -v make` (both, see below). The guard is not an optimisation: the
   unguarded form added a hard dependency on outbound apt reachability, and when the mirror stalls
-  the step produces no output until `timeout-minutes: 25` cancels the job — indistinguishable, from
+  the step produces no output until the job's `timeout-minutes` cancels it — indistinguishable, from
   the check list, from a genuinely slow test suite (go-kure/launcher#473). The guard must check
   **`make` as well as `gcc`**: `build-essential` pulls in `make`, and the `test` job runs
   `make deps` while carrying no `make` guard of its own, so this step is the only thing that

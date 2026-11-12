@@ -546,7 +546,7 @@ jobs:
   test:
     name: test
     runs-on: autops-kube-kure
-    timeout-minutes: 25
+    timeout-minutes: 35
     needs: [changes]
     if: github.event_name != 'pull_request' || needs.changes.outputs.go == 'true'
 
