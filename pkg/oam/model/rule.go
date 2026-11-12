@@ -60,9 +60,25 @@ func (r *Rule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 	}
 	sc := Scope{Inputs: inputs, Self: Self{Name: comp.Name, Application: application}}
 	name := func(part string) (string, error) { return lctx.Namer.Name(comp.Name, part, lctx.Origin) }
-	comps, err := r.c.Expand(r.t, sc, lctx.NamingHook(), name)
+	comps, err := r.c.Expand(r.t, sc, objectNameUnhooked(lctx.NamingHook()), name)
 	if err != nil {
 		return oam.LoweringResult{}, errors.Wrapf(err, "model: %s", r.m.Key())
 	}
 	return oam.LoweringResult{Components: comps}, nil
+}
+
+// objectNameUnhooked is naming without its answers for the role object. The build names the
+// object of a kind part (a Secret, a ConfigMap) after its component and never asks the hook,
+// because this rule emitted it, so the read of the name must not ask either. A direct Expand
+// keeps the hook: its components are not emitted members, and a Transform asks it for them.
+func objectNameUnhooked(naming func(oam.NameRequest) (string, bool)) func(oam.NameRequest) (string, bool) {
+	if naming == nil {
+		return nil
+	}
+	return func(r oam.NameRequest) (string, bool) {
+		if r.Role == oam.NameRoleObject {
+			return "", false
+		}
+		return naming(r)
+	}
 }

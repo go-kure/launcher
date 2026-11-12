@@ -75,36 +75,65 @@ var declareRefusals = map[string]map[string]TypeID{
 	},
 }
 
-// CheckComponentTypes gives the refusal DeclareComponentTypes gives, for every input set of the
-// table and for the sets it takes, once a handler is registered under each name (the dry run is
-// for a name whose rule is not registered yet, so it does not look for one).
+// CheckComponentTypes refuses each input set of the table with the error DeclareComponentTypes
+// gives, on a transformer where nothing is declared, so each row reaches its own cause. The
+// first row is left out: the dry run is for a name whose rule is not registered yet, so it does
+// not look for a handler (see the next test).
 func TestCheckComponentTypes_AgreesWithDeclare(t *testing.T) {
+	for name, ids := range declareRefusals {
+		if name == "a name with no handler or rule" {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			tr := NewTransformer(map[string]ComponentHandler{"widget": &stubComponentHandler{typ: "widget"}}, nil)
+			tr.RegisterComponentLowering(stubComponentLoweringRule{typ: "gadget"})
+			check := tr.CheckComponentTypes(ids)
+			declare := tr.DeclareComponentTypes(ids)
+			if !errors.Is(check, ErrTypeRegistration) || !errors.Is(declare, ErrTypeRegistration) {
+				t.Fatalf("CheckComponentTypes = %v, DeclareComponentTypes = %v; want both ErrTypeRegistration", check, declare)
+			}
+			if check.Error() != declare.Error() {
+				t.Fatalf("CheckComponentTypes = %q, DeclareComponentTypes = %q", check, declare)
+			}
+		})
+	}
+}
+
+// CheckComponentTypes agrees with DeclareComponentTypes against what is already declared, for
+// names that are not declared yet, and declares nothing itself.
+func TestCheckComponentTypes_AgreesWithDeclareAgainstDeclared(t *testing.T) {
 	sets := map[string]map[string]TypeID{
 		"a set it takes":                 {"later": {Name: "later.acme.example", Version: "v1"}},
 		"a short name that clashes":      {"later": {Name: "widget", Version: "v1"}},
 		"a version declared twice":       {"later": {Name: "widget.acme.example", Version: "v1.0.0"}},
 		"a short name of a declared one": {"later": {Name: "widget.other.example", Version: "v1"}},
 	}
-	for name, ids := range declareRefusals {
-		sets[name] = ids
-	}
 	for name, ids := range sets {
 		t.Run(name, func(t *testing.T) {
 			tr, _ := declared(t)
-			for key := range ids {
-				if !tr.isComponentKey(key) {
-					tr.RegisterComponent(key, &stubComponentHandler{typ: key})
-				}
-			}
 			check := tr.CheckComponentTypes(ids)
 			if _, err := tr.ResolveComponentType("later"); err == nil {
 				t.Fatal("the dry run declared a type")
 			}
+			tr.RegisterComponent("later", &stubComponentHandler{typ: "later"})
 			declare := tr.DeclareComponentTypes(ids)
 			if (check == nil) != (declare == nil) || (check != nil && check.Error() != declare.Error()) {
 				t.Fatalf("CheckComponentTypes = %v, DeclareComponentTypes = %v", check, declare)
 			}
 		})
+	}
+}
+
+// The dry run takes a name that has no handler or rule yet, and the declaration refuses it. A
+// registry checks the declaration first and registers the rule after, so it needs this.
+func TestCheckComponentTypes_TakesANameWithNoHandlerYet(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	ids := map[string]TypeID{"later": {Name: "later.acme.example", Version: "v1"}}
+	if err := tr.CheckComponentTypes(ids); err != nil {
+		t.Fatalf("CheckComponentTypes = %v, want nil", err)
+	}
+	if err := tr.DeclareComponentTypes(ids); !errors.Is(err, ErrTypeRegistration) {
+		t.Fatalf("DeclareComponentTypes = %v, want ErrTypeRegistration", err)
 	}
 }
 
