@@ -838,15 +838,49 @@ func TestWriteBack_ScalarItemDoesNotTakeAMapping(t *testing.T) {
 	}
 }
 
-// scalarListPairingBound is the time the write-back of a 50000-item scalar list may take. The
-// linear pairing needs 0.1 to 0.2 s plain and up to 1.4 s under the race detector, and the
-// quadratic scan needed 21 s plain, so the bound separates them in both runs.
-const scalarListPairingBound = 5 * time.Second
+// The write-back of a scalar list is timed at two sizes, n and 2n, and the test compares the
+// two times. Linear pairing makes the second about twice the first, and the old quadratic scan
+// made it about four times. An absolute bound failed on a slow runner (5.6 s against 5 s) and
+// would have passed a quadratic scan on a fast one, because the ratio of both runs does not
+// depend on the speed of the runner. Each size takes the best of scalarListRuns fresh runs, so
+// one stall does not count. A size whose time is under scalarListFloor is noise, and n doubles
+// until it is not or reaches scalarListMaxItems.
+const (
+	scalarListStartItems = 12500
+	scalarListMaxItems   = 100000
+	scalarListRuns       = 3
+	scalarListFloor      = 20 * time.Millisecond
+	scalarListRatioLimit = 3.0
+)
+
+// bestScalarListWriteBack returns the shortest of scalarListRuns write-backs of a list of items
+// scalar items, each on a freshly loaded document.
+func bestScalarListWriteBack(t *testing.T, items int, text func(i int) string) time.Duration {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("apiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: stamps\nspec:\n  list:\n")
+	for i := 0; i < items; i++ {
+		b.WriteString("  - " + text(i) + "\n")
+	}
+	var best time.Duration
+	for run := 0; run < scalarListRuns; run++ {
+		doc := loadOneDocument(t, b.String())
+		start := time.Now()
+		err := doc.ApplyPatchesToDocument(nil)
+		elapsed := time.Since(start)
+		if err != nil {
+			t.Fatalf("ApplyPatchesToDocument: %v", err)
+		}
+		if run == 0 || elapsed < best {
+			best = elapsed
+		}
+	}
+	return best
+}
 
 // The write-back of a scalar list takes time linear in the list length. The pairing of a list
 // item with its authored item scanned the whole authored list for every item.
 func TestWriteBack_LargeScalarListIsLinear(t *testing.T) {
-	const items = 50000
 	for _, c := range []struct {
 		name string
 		text func(i int) string
@@ -855,20 +889,17 @@ func TestWriteBack_LargeScalarListIsLinear(t *testing.T) {
 		{"one_repeated_timestamp", func(int) string { return "2026-11-07" }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			var b strings.Builder
-			b.WriteString("apiVersion: example.com/v1\nkind: Widget\nmetadata:\n  name: stamps\nspec:\n  list:\n")
-			for i := 0; i < items; i++ {
-				b.WriteString("  - " + c.text(i) + "\n")
+			items := scalarListStartItems
+			small := bestScalarListWriteBack(t, items, c.text)
+			for small < scalarListFloor && 2*items*2 <= scalarListMaxItems {
+				items *= 2
+				small = bestScalarListWriteBack(t, items, c.text)
 			}
-			doc := loadOneDocument(t, b.String())
-			start := time.Now()
-			err := doc.ApplyPatchesToDocument(nil)
-			elapsed := time.Since(start)
-			if err != nil {
-				t.Fatalf("ApplyPatchesToDocument: %v", err)
-			}
-			if elapsed > scalarListPairingBound {
-				t.Errorf("write-back of a %d-item scalar list took %v, bound %v: the pairing is no longer linear", items, elapsed, scalarListPairingBound)
+			large := bestScalarListWriteBack(t, 2*items, c.text)
+			ratio := float64(large) / float64(small)
+			t.Logf("scalar list write-back: %d items %v, %d items %v, ratio %.2f (limit %.1f)", items, small, 2*items, large, ratio, scalarListRatioLimit)
+			if ratio >= scalarListRatioLimit {
+				t.Errorf("write-back of a scalar list took %v at %d items and %v at %d items, ratio %.2f, limit %.1f: the pairing is no longer linear", small, items, large, 2*items, ratio, scalarListRatioLimit)
 			}
 		})
 	}
