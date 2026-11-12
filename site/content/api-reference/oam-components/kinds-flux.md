@@ -895,7 +895,7 @@ is refused, and a value with no host that holds an `@`. Its user is kept (`ssh:/
 `ssh://alice@gerrit:29418/…`): it is the SSH login, which Flux's Git client reads from the URL
 alone. Over SSH it reads no `username` from the Secret, and falls back to `git` when the URL
 names none. The refusal does not quote the value. These are build refusals that documents built
-before the change did not get. The `oci` component lowers onto an `ocirepository`, so its
+before this refusal existed did not get. The `oci` component lowers onto an `ocirepository`, so its
 `source.url` is refused the same way, in that kind's words (`ocirepository: url must not carry a
 user or password…`). A config built directly is refused by `Generate`. Only its `ApplyPolicy`
 still checks the host of such a url, without quoting the credential. Nothing else is checked or defaulted: enums (`type`, `provider`, `layerSelector.operation`,

@@ -116,12 +116,13 @@ carries both fields), `vault.auth.kubernetes.secretRef`, an RFC 2136
 solver's `tsigSecretSecretRef` and a Route 53 solver's
 `secretAccessKeySecretRef`. An HTTP01 solver's `podTemplate` carries
 `metadata: {}` and `spec: {}`, and its `ingressTemplate` `metadata: {}`.
-The CRDs accept each, and the same test holds every such field to its
+The CRDs accept each, and a test holds every such field to its
 schema: none is refused empty.
 
 ### Outputs
 
-and emits that one object, named after the component unless
+Each is built on `policyHeldKind` (`policyFreeKind` with a policy check) and
+emits that one object, named after the component unless
 `objectName` names it; the handler adds no label, no annotation and no
 default. An `issuer` and a `certificate` are emitted in the build namespace
 and declare their object as namespaced. A `clusterissuer` is emitted with no
@@ -661,7 +662,8 @@ or `restic` mover, which holds it by value. The CRDs accept it empty.
 
 ### Outputs
 
-and emits that one object in the build namespace, named after the component
+Each is built on `policyHeldKind` (`policyFreeKind` with a policy check) and
+emits that one object in the build namespace, named after the component
 unless `objectName` names it, and declares it as namespaced; the handler
 adds no label, no annotation and no default.
 

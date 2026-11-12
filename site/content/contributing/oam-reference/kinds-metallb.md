@@ -10,8 +10,10 @@ unless a line says another file.
 
 ## metallb-bfdprofile
 
-- **Implementation:** built on `policyFreeKind` as the kinds above are, and
-  emits that one object.
+- **Implementation:** built on `policyFreeKind` (see the **storageclass** entry
+  on the reference page
+  [Kinds: core workloads](../../api-reference/oam-components/kinds-core-workloads.md)),
+  and emits that one object.
 - **History:** go-kure/launcher#790 (the kind-named projection);
   go-kure/launcher#922 (the object kind policy, `oam.ObjectKindPolicy`).
 - **Tests:**
@@ -24,7 +26,7 @@ unless a line says another file.
 
 ## metallb-bgpadvertisement
 
-- **Implementation:** built on `policyFreeKind` as the two kinds above are, and
+- **Implementation:** built on `policyFreeKind` as `metallb-bfdprofile` is, and
   emits that one object.
 - **History:** go-kure/launcher#790 (the kind-named projection);
   go-kure/launcher#883 (the Required list is generated from the linked module's
@@ -41,7 +43,7 @@ unless a line says another file.
 
 ## metallb-bgppeer
 
-- **Implementation:** built on `policyHeldKind`, the helper of the kinds above
+- **Implementation:** built on `policyHeldKind`, the helper of `policyFreeKind`
   with one check under the environment policy, and emits that one object. The
   version it is built at, and why, are in the reference.
 - **History:** go-kure/launcher#790 (the kind-named projection);
@@ -64,7 +66,7 @@ unless a line says another file.
 
 ## metallb-community
 
-- **Implementation:** built on `policyFreeKind` as the kinds above are, and
+- **Implementation:** built on `policyFreeKind` as `metallb-bfdprofile` is, and
   emits that one object.
 - **History:** go-kure/launcher#790 (the kind-named projection);
   go-kure/launcher#922 (the object kind policy).
@@ -90,7 +92,7 @@ unless a line says another file.
     that: one that is not the field's empty value, on a field that is no
     pointer, fails there ("that" is the reference's account of `autoAssign`
     and `avoidBuggyIPs`).
-  - …so a dependency bump that adds, drops or moves one fails until it is
+  - A dependency bump that adds, drops or moves one fails until it is
     regenerated; `TestMetalLBKinds_RequiredMatchCRD` holds it to that CRD as
     well ("one" is a required field, and "it" is the Required list, generated
     from the fields the linked module's `v1beta1` CRD requires and the type
