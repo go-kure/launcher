@@ -11,8 +11,10 @@ This release step covers the format, the CEL environment and the evaluation of o
 `model.Load` decodes a document and checks its shape. It does not compile or run any expression.
 `model.Compile` compiles every expression of a loaded model against the environment below, and
 `Compiled.Eval` runs one of them. `Compiled.Expand` builds the components of the parts and binds the
-outputs that a later part reads. The lowering rule, the engine hooks and the capability check on the
-traits of a model arrive in later steps of go-kure/launcher#1261. A document that loads today keeps its meaning then.
+outputs that a later part reads. `model.Registry` registers a model as a component type, and its rule
+lowers a component of that type into the parts. The emit hook, the capability check on the traits of a
+model, the limits of a whole build and the hostile corpus arrive in later steps of
+go-kure/launcher#1261. A document that loads today keeps its meaning then.
 
 ## Document
 
@@ -178,7 +180,7 @@ earlier values, the earlier parts that have no `when` and no `forEach` (`parts.<
 part, the loop variable. `when` and `forEach.in` do not see the loop variable. The loop variable
 has the element type of `forEach.in`.
 
-**Parts.** `Compiled.Expand(tr, scope, naming)` evaluates the values, then each part in document
+**Parts.** `Compiled.Expand(tr, scope, naming, partName)` evaluates the values, then each part in document
 order. A part whose `when` is false emits nothing. A part with `forEach` emits one component for
 each element. A part without a `name` takes its id. After it builds a part that has no `when` and
 no `forEach`, `Expand` asks the Transformer for the outputs of that component
@@ -188,8 +190,39 @@ name and the Naming hook, as the name of the built object does. `tr` must declar
 identities of the parts (`registry.DeclareTypes`): a type that does not resolve declares no output,
 so a read of it fails as an undeclared key. `Eval` takes the same outputs in `Scope.Parts`, and it
 refuses a key that is not there with the same error. `Expand` reads the inputs and `self` from the
-scope and sets the other fields itself. It checks no trait against a capability and runs no
-transform.
+scope and sets the other fields itself. `partName` turns the name of a part into the name of its
+component. The lowering rule passes the name allocator here. A nil `partName` keeps the name. More
+than 50 components in one call fail with `model.ErrLimit`. The count comes after `when` and
+`forEach`. `Expand` checks no trait against a capability and runs no transform.
+
+## Lowering
+
+`model.NewRegistry(tr)` returns a registry for one Transformer. `Register(m)` compiles the model and
+refuses it in these cases. Each failure names the path of the part.
+
+- The type of the model is already declared.
+- A part type or a trait type is not declared on the Transformer. A model can name only a model
+  registered before it, so no cycle exists.
+- The models nest more than 4 deep. A model with no model part has depth 1.
+
+Then `Register` registers the rule and declares the type of the model. A refused model leaves nothing
+registered.
+
+A component of the model type lowers into the components of its parts.
+
+- An input that the component does not set takes its default. `self.name` is the component name and
+  `self.application` is the name of its document.
+- A part is named `<component>-<part>`. The name allocator of the run gives it, so two parts that want
+  one name fail the build, and the error names the name.
+- `parts.<id>.<key>` reads the name that the build gives, under the Naming hook of the run where one
+  is set (`LoweringContext.NamingHook`).
+- A part type and a trait type stay as the model wrote them. The engine resolves the identity to the
+  registered name after each round, as it does for an authored component. A model that emits no
+  component is refused with `model.ErrInvalid`.
+
+The rule enforces two limits. One render gives at most 50 components, and the models nest at most 4
+deep. The limits of a whole build (500 parts, 1 MiB of YAML and one second of run time) belong to the
+hostile-corpus step of go-kure/launcher#1261.
 
 **Result.** A string that is exactly one hole gives the value with its type: `int64`, `uint64`,
 `float64`, `bool`, `string`, `[]byte`, `[]any` (in order), `map[string]any` or `nil`. A string
@@ -333,7 +366,11 @@ identity names one definition: a changed model under the same identity must use 
 | `model.Compile(m)` | Compiles every expression site of `m` with a cache of its own. |
 | `(*Cache).Compile(m)` | The same, with a shared cache from `model.CreateCache()`. `Len()` counts the cached sites. |
 | `(*Compiled).Eval(path, scope)` | Runs one site. Returns the Go value, the actual cost and an error. |
-| `(*Compiled).Expand(tr, scope, naming)` | Builds the components of the parts in document order and binds `parts.<id>.<key>` from `Transformer.ComponentOutputs`. It runs no transform. |
+| `(*Compiled).Expand(tr, scope, naming, partName)` | Builds the components of the parts in document order and binds `parts.<id>.<key>` from `Transformer.ComponentOutputsNamed`. It runs no transform. |
+| `model.NewRegistry(tr)` | Returns a registry for one Transformer. |
+| `(*Registry).Register(m)` | Compiles `m`, refuses it as the Lowering section says, then registers its rule and declares its type. |
+| `(*Registry).Rule(key)` | Returns the rule registered under a `Key()`, or nil. |
+| `(*Rule).LowerComponent(comp, lctx)` | Lowers a component of the model type into the components of its parts. |
 | `model.Load(data)` | Decodes one document and checks it. A failure of a decoded document wraps `model.ErrInvalid` and names the field, for example `spec.parts[1].id`. A YAML, `apiVersion` or `kind` failure does not wrap it. A YAML type error, such as a list where a string belongs, names the line of the field and not its path. An explicit tag that does not fit its value, such as `!!bool notabool`, names its line too, when one tagged value is at fault; with two or more, the error has no line. |
 | `(*Model).Identity()` | The model identity as written in `metadata`. |
 | `(*Model).Key()` | The identity with the version in the canonical form (`name@v2.0.0`). The registry returns a version as it was registered, so compare and store this form (`oam.TypeID.Canonical`). |
