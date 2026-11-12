@@ -246,7 +246,7 @@ func (w *walker) build(path, text string, spec siteSpec) (*site, error) {
 		if s.single {
 			s.out = out
 		}
-		prog, err := env.Program(ast, cel.CostLimit(maxExpressionCost), cel.CustomDecorator(compareDecorator))
+		prog, err := env.Program(ast, cel.CostLimit(maxExpressionCost), cel.CustomDecorator(compareDecorator), cel.CustomDecorator(chargeDecorator))
 		if err != nil {
 			return nil, invalid(path, "%s", err)
 		}
@@ -505,6 +505,9 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 func siteError(path string, err error) error {
 	var stop interpreter.EvalCancelledError
 	if errors.As(err, &stop) && stop.Cause == interpreter.CostLimitExceeded {
+		if stop.Message == chargeStopMessage {
+			return errors.Errorf("%w: %s: %s", ErrCostLimit, path, chargeStopMessage)
+		}
 		return errors.Errorf("%w: %s: more than %d", ErrCostLimit, path, maxExpressionCost)
 	}
 	return errors.Errorf("model: evaluate %s: %w", path, err)
