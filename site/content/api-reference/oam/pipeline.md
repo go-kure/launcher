@@ -469,8 +469,8 @@ each a **separate** additive resource (the authored `networkpolicy` /
   policy). Two routers giving one external Service different selectors, or an external policy name
   colliding with a component's emitted inbound policy, **fails the transform** rather than emitting
   conflicting or duplicate allows. The name collision is refused once both names are resolved, so
-  a `Naming` hook that gives one of the two policies another name avoids it (see "Name roles and
-  the `Naming` hook").
+  a `Naming` hook that gives one of the two policies another name avoids it (see [Name roles and
+  the `Naming` hook](names-and-overrides.md#name-roles-and-the-naming-hook)).
 - **Egress** (`{comp}-allow-egress-traffic`) — from `TransformContext.EgressPeers`, a
   downstream-supplied, non-authorable synthesis input (graph-derived dependency peers; never
   set from OAM YAML or capability rendering). K8s `NetworkPolicy` only. Empty when a
