@@ -82,9 +82,9 @@ inner field is enforced wherever it is declared, not only at the top level
 (go-kure/launcher#635).
 `createApplications` and `applyTraits` (`transform.go`) run this check on the authored
 path, and the lowering engine runs it on a `TraitLoweringRule`'s input trait before
-capability rendering is resolved into it (see Lowering above). A value a lowering rule
+capability rendering is resolved into it (see [Lowering](transform-and-lowering.md#lowering)). A value a lowering rule
 recorded with `Component.RenderReserved` or `Trait.RenderReserved` is exempt while the
-key still holds it (see Lowering above).
+key still holds it (see [Lowering](transform-and-lowering.md#lowering)).
 
 A schema field may also name a Kubernetes feature gate in `Gate` (published as `gate`):
 the field needs that gate on the cluster. A `ClusterProfile` that states
@@ -467,8 +467,8 @@ fixed, so the note is historical rather than a live caveat:
   outside the contract by the scope sentence — it is a parallel implementation,
   not a call-through to `validatePropertyValue` — but it now agrees with the
   contract's own behaviour: a present null reads as absence, matching the handler
-  surface, and the type switch has a `default` arm. See "Capability rendering:
-  types and nulls" below for the current, authoritative description. Fixed as
+  surface, and the type switch has a `default` arm. See [Capability rendering:
+  types and nulls](policy-and-capability.md#capability-rendering-types-and-nulls) for the current, authoritative description. Fixed as
   `go-kure/launcher#431`.
 - **The networkpolicy peer parser** used to read a *typed* nil `namespaceSelector`
   differently from an untyped one. Fixed as `go-kure/launcher#430` — both parsers
@@ -507,7 +507,7 @@ type reachable only through a lowering rule must still publish its metadata.
 `Policies` field, so an unkeyed composite literal of it no longer compiles.
 
 A lowering rule that implements `ContractDescriber` also has its `Version` folded
-into the lowering-rule identity recorded on `Origin.Rule` (see Lowering above), e.g.
+into the lowering-rule identity recorded on `Origin.Rule` (see [Lowering](transform-and-lowering.md#lowering)), e.g.
 `"trait/expose@v1alpha1"`.
 
 Every built-in handler and lowering rule implements `ContractDescriber`
