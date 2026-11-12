@@ -265,14 +265,26 @@ on a computed value. Three rows of the comparison test guard the name: `[1, 1.0]
 `[1u, 1][0] == [1u, 1][1]` and `[[1], {'a': 1}][0] == [[1], {'a': 1}][1]` must report the cost of cel-go
 (25, 25 and 105, and 27, 27 and 107 without the skip). A cel-go version that renames the type fails them.
 
-**Known limit: a `format` that fails after it copies.** A `format` that copies a long string argument and
-then fails on a later clause, as in `'%s%d'.format([s, 'x']) == '' || true`, is charged nothing for the
-copy, because the charge reads the result and a failure has none. A loop that drops the failure can
-process at least 2 GB below both budgets. Every other member of this class found so far is bounded
-(`sort`, `sortBy`, `join`, `replace`, comparisons, `flatten` and the keys of a result copy), and a
-test pins each. This limit is not reachable today, because no code registers a model's CEL for
-evaluation by default. go-kure/launcher#1461 stays open for it: the fix is to charge the bytes of
-a container on every read, so that no call needs its own charge. **go-kure/launcher#1461 must close
+**Known limits: calls that work and then fail, or that cel-go cannot cost.** Two members of this class
+are open.
+- A `format` that copies a long string argument and then fails on a later clause is charged nothing for
+  the copy, because the charge reads the result and a failure has none. The argument list must be
+  bound outside the loop, because the compiler rejects a literal list that does not fit the format:
+  `cel.bind(args, [inputs.image, 'x'], lists.range(2000).all(i, '%s%d'.format(args) == '' || true))`
+  with a 1,000,000-byte `inputs.image` gives `true` and allocates about 5.7 GB in 1.6 s below both
+  budgets.
+- A `sort` of a list whose element type is not known when the model compiles (a `dyn` element, as
+  in `[0, 'bad'] + lists.range(10000)`) has an ambiguous overload, so cel-go charges it one step and
+  the lists extension never reads its elements. 2,000 sorts of such a list of 10,002 elements give
+  `true` at a cost of 22,044, allocating about 1 GB in 3 s. A `sort` of a typed list is stopped, and
+  so are `sortBy`, `reverse`, `slice`, `distinct` and `flatten` of the same dyn list, by the cost
+  limit or the budget, in the same loop.
+
+Every other member of this class found so far is bounded (`sortBy`, `join`, `replace`, comparisons,
+`flatten`, the keys of a typed `sort` and the keys of a result copy), and a test pins each. These
+limits are not reachable today, because no code registers a model's CEL for evaluation by default.
+go-kure/launcher#1461 stays open for them: the fix is to charge the bytes and the elements of a
+container on every read, so that no call needs its own charge. **go-kure/launcher#1461 must close
 before step 4a of go-kure/launcher#1261 or any public wiring of the evaluator.** The size of a
 successful `format` result is the separate go-kure/launcher#1462.
 
