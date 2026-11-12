@@ -53,11 +53,36 @@ func TestResultSizeIsBounded(t *testing.T) {
 		}
 	})
 	t.Run("a map result counts too", func(t *testing.T) {
-		expr := "${cel.bind(xs, lists.range(1100), lists.range(1100).map(i, {'k': xs}))}"
+		// The lists hold 1000 + 1000*999 = 1,000,000 elements, which the limit allows. Only the
+		// 1000 map entries push the result over it, so a copy that skips the entries passes.
+		expr := "${cel.bind(xs, lists.range(999), lists.range(1000).map(i, {'k': xs}))}"
 		c := mustCompile(t, propModel(t, expr))
 		_, _, err := c.Eval(propSite, stdScope())
 		if err == nil || !errors.Is(err, ErrCostLimit) {
-			t.Errorf("a list of maps that holds 1,210,000 elements gave error %v, want one that wraps ErrCostLimit", err)
+			t.Errorf("a result of 1,000,000 list elements and 1,000 map entries gave error %v, want one that wraps ErrCostLimit", err)
+		}
+	})
+	t.Run("a result of exactly the limit converts", func(t *testing.T) {
+		c := mustCompile(t, propModel(t, share(1000, 999)))
+		got, _ := mustEval(t, c, propSite, stdScope())
+		if outer, ok := got.([]any); !ok || len(outer) != 1000 {
+			t.Fatalf("gave %T of length %d, want a list of 1000", got, len(outer))
+		}
+	})
+	t.Run("a shared bytes value counts one unit for each byte", func(t *testing.T) {
+		// One value of 10,000 bytes shared by 150 places is 1,500,000 bytes once copied.
+		bytesIn := func(outer int) string {
+			return "${cel.bind(b, bytes(lists.range(1000).map(i, 'xxxxxxxxxx').join('')), lists.range(" + strconv.Itoa(outer) + ").map(i, b))}"
+		}
+		c := mustCompile(t, propModel(t, bytesIn(150)))
+		got, _, err := c.Eval(propSite, stdScope())
+		if err == nil || !errors.Is(err, ErrCostLimit) {
+			t.Errorf("a result of 1,500,000 bytes gave %T and error %v, want an error that wraps ErrCostLimit", got, err)
+		}
+		c = mustCompile(t, propModel(t, bytesIn(50)))
+		got, _ = mustEval(t, c, propSite, stdScope())
+		if outer, ok := got.([]any); !ok || len(outer) != 50 {
+			t.Fatalf("a result of 500,000 bytes gave %T of length %d, want a list of 50", got, len(outer))
 		}
 	})
 }
