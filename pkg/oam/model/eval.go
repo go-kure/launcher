@@ -469,6 +469,9 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 	var text strings.Builder
 	for _, seg := range s.segs {
 		if seg.prog == nil {
+			if text.Len()+len(seg.text) > maxValueSize {
+				return nil, cost, textSizeError(path)
+			}
 			text.WriteString(seg.text)
 			continue
 		}
@@ -496,9 +499,18 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 		if err != nil {
 			return nil, cost, errors.Errorf("model: evaluate %s: %w", path, err)
 		}
+		if text.Len()+len(t) > maxValueSize {
+			return nil, cost, textSizeError(path)
+		}
 		text.WriteString(t)
 	}
 	return text.String(), cost, nil
+}
+
+// textSizeError is the failure of a text that would hold more than maxValueSize bytes, the same
+// limit toGo applies to a string from a single hole.
+func textSizeError(path string) error {
+	return errors.Errorf("%w: %s: the text holds more than %d bytes", ErrCostLimit, path, maxValueSize)
 }
 
 // siteError names the site in an evaluation failure and marks a cost-limit stop.
