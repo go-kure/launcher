@@ -68,7 +68,7 @@ var expandScope = model.Scope{Self: model.Self{Name: "shop", Application: "shop"
 
 func expandOK(t *testing.T, c *model.Compiled, naming func(oam.NameRequest) (string, bool)) []oam.Component {
 	t.Helper()
-	comps, err := c.Expand(expandTransformer(t), expandScope, naming)
+	comps, err := c.Expand(expandTransformer(t), expandScope, naming, nil)
 	if err != nil {
 		t.Fatalf("Expand: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestExpand_BindsAfterThePropertiesAreEvaluated(t *testing.T) {
 	}
 	sc := expandScope
 	sc.Inputs = map[string]any{"dbname": "pg2"}
-	comps, err := c.Expand(expandTransformer(t), sc, nil)
+	comps, err := c.Expand(expandTransformer(t), sc, nil, nil)
 	if err != nil {
 		t.Fatalf("Expand: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestExpand_BindsAfterThePropertiesAreEvaluated(t *testing.T) {
 // key. It never reads as an empty string.
 func TestExpand_UndeclaredKeyFailsTheBuild(t *testing.T) {
 	c := compileParts(t, strings.Replace(dbThenWorker, "parts.db.app_secret", "parts.db.nope", 1))
-	comps, err := c.Expand(expandTransformer(t), expandScope, nil)
+	comps, err := c.Expand(expandTransformer(t), expandScope, nil, nil)
 	if err == nil {
 		t.Fatalf("Expand accepted a read of an undeclared key: %v", comps)
 	}
@@ -333,7 +333,7 @@ func TestExpand_NamingHookMovesTheBinding(t *testing.T) {
 // nothing, so a later read does not run against a missing answer.
 func TestExpand_InvalidPartFailsWithItsOwnError(t *testing.T) {
 	c := compileParts(t, strings.Replace(dbThenWorker, "properties: {}", "properties:\n        managedRoles:\n          - name: r\n            passwordSecret: 1", 1))
-	comps, err := c.Expand(expandTransformer(t), expandScope, nil)
+	comps, err := c.Expand(expandTransformer(t), expandScope, nil, nil)
 	if err == nil {
 		t.Fatalf("Expand accepted an invalid part: %v", comps)
 	}
@@ -394,7 +394,7 @@ func TestExpand_UndeclaredIndexedKeyFailsTheBuild(t *testing.T) {
         data:
           x: "`+expr+`"
 `)
-			comps, err := c.Expand(expandTransformer(t), expandScope, nil)
+			comps, err := c.Expand(expandTransformer(t), expandScope, nil, nil)
 			if err == nil {
 				t.Fatalf("Expand accepted an indexed read of an undeclared key: %v", comps)
 			}
@@ -416,7 +416,7 @@ func TestExpand_RefusesAModelThatEmitsNothing(t *testing.T) {
       when: "${ false }"
       properties: {}
 `)
-	comps, err := c.Expand(expandTransformer(t), expandScope, nil)
+	comps, err := c.Expand(expandTransformer(t), expandScope, nil, nil)
 	if err == nil {
 		t.Fatalf("Expand accepted a model that emits nothing: %v", comps)
 	}
