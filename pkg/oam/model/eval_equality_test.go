@@ -25,9 +25,14 @@ func nested4(n int, final string) string {
 
 func evalValue(t *testing.T, expr string) (any, error) {
 	t.Helper()
-	c := mustCompile(t, oneValue(t, "${"+expr+"}"))
-	got, _, err := c.Eval("spec.values[0].expr", stdScope())
+	got, _, err := evalValueCost(t, expr)
 	return got, err
+}
+
+func evalValueCost(t *testing.T, expr string) (any, int64, error) {
+	t.Helper()
+	c := mustCompile(t, oneValue(t, "${"+expr+"}"))
+	return c.Eval("spec.values[0].expr", stdScope())
 }
 
 func TestComparisonOfSharedNestedValuesIsBounded(t *testing.T) {
@@ -41,6 +46,14 @@ func TestComparisonOfSharedNestedValuesIsBounded(t *testing.T) {
 		{"maps", nested4(60, "{'k': d} == {'k': d}")},
 		{"many comparisons share one budget", nested4(20, "lists.range(100).map(i, d == d).size()")},
 		{"one value over the limit", "cel.bind(a, lists.range(999), cel.bind(b, lists.range(1000).map(i, a), b == b))"},
+		// CEL drops an error when the other operand of || or && decides the result. The stop must survive that.
+		{"a stop that || would swallow", "cel.bind(a, lists.range(999), cel.bind(b, lists.range(1000).map(i, a), (b == b) || true))"},
+		{"a stop that && would swallow", "cel.bind(a, lists.range(999), cel.bind(b, lists.range(1000).map(i, a), (b == b) && false))"},
+		// flatten copies every element it reaches and cel-go charges the outer length only (lists extension version 3).
+		{"flatten of shared lists", "cel.bind(a, lists.range(1100), lists.range(1100).map(i, a).flatten().size())"},
+		{"flatten to a depth of shared lists", nested4(40, "[d].flatten(4).size()")},
+		// the call is charged as in cel-go, and cel-go charges distinct by n^2.
+		{"distinct is charged by cel-go", "lists.range(1000).distinct().size()"},
 	}
 	for _, tc := range refused {
 		t.Run("refused/"+tc.name, func(t *testing.T) {
@@ -62,6 +75,8 @@ func TestComparisonOfSharedNestedValuesIsBounded(t *testing.T) {
 		{"distinct of 837,930 values", nested4(30, "[d, d].distinct().size() == 1"), true},
 		{"one value just under the limit", "cel.bind(a, lists.range(999), cel.bind(b, lists.range(999).map(i, a), b == b))", true},
 		{"different values stop early", nested4(60, "d == [d[0]]"), false},
+		{"flatten of a few lists", "[[1, 2], [3]].flatten().size()", int64(3)},
+		{"flatten of shared lists under the limit", nested4(30, "[d[0]].flatten(2).size()"), int64(900)},
 	}
 	for _, tc := range allowed {
 		t.Run("allowed/"+tc.name, func(t *testing.T) {
@@ -74,7 +89,7 @@ func TestComparisonOfSharedNestedValuesIsBounded(t *testing.T) {
 }
 
 // stockResult is what cel-go gives with no change to its comparison.
-func stockResult(t *testing.T, expr string) string {
+func stockResult(t *testing.T, expr string) (string, int64) {
 	t.Helper()
 	env, err := newEnv()
 	if err != nil {
@@ -82,21 +97,21 @@ func stockResult(t *testing.T, expr string) string {
 	}
 	ast, iss := env.Compile("(" + expr + ")")
 	if iss.Err() != nil {
-		return "compile error: " + iss.Err().Error()
+		return "compile error: " + iss.Err().Error(), 0
 	}
 	prog, err := env.Program(ast, cel.CostLimit(maxExpressionCost))
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, _, err := prog.Eval(map[string]any{})
+	out, det, err := prog.Eval(map[string]any{})
 	if err != nil {
-		return "error"
+		return "error", 0
 	}
 	g, err := toGo(out)
 	if err != nil {
-		return "error"
+		return "error", 0
 	}
-	return fmt.Sprintf("%T %v", g, g)
+	return fmt.Sprintf("%T %v", g, g), int64(*det.ActualCost())
 }
 
 func TestComparisonGivesWhatCelGoGives(t *testing.T) {
@@ -109,19 +124,24 @@ func TestComparisonGivesWhatCelGoGives(t *testing.T) {
 		"[{'a': 1, 'b': 'x'}, {'a': 1.0, 'b': 'x'}].distinct().size()", "b'ab' == b'ab'", "[b'a'] == [b'a']", "duration('1s') == duration('1000ms')",
 		"[1, 'x'] != [1, 'y']", "{1: 'a', 'k': 'b'} == {1u: 'a', 'k': 'b'}", "[1, 2, 3].exists(x, x == 2)", "[[1], [2]].all(x, x != [3])",
 		"[1, 2].distinct() == [1, 2]", "[[1, [2]]] in [[[1, [2]]]]", "{'a': {'b': [1]}} != {'a': {'b': [2]}}",
+		"[[1, 2], [3]].flatten()", "[[1, [2]], [3]].flatten(2)", "[[1], [2]].flatten(0)", "[[1, [2, [3]]]].flatten(1)", "[[1, [2, [3]]]].flatten(2)",
+		"[[1, 2], [3]].flatten().size()", "1 == 1", "[1, 2, 3].distinct().size()",
 	}
 	for _, expr := range corpus {
 		t.Run(expr, func(t *testing.T) {
-			want := stockResult(t, expr)
+			want, wantCost := stockResult(t, expr)
 			if strings.HasPrefix(want, "compile error") || want == "error" {
 				t.Fatalf("test bug: cel-go gives %q for the corpus expression", want)
 			}
-			got, err := evalValue(t, expr)
+			got, cost, err := evalValueCost(t, expr)
 			if err != nil {
 				t.Fatalf("Eval: %v, cel-go gives %s", err, want)
 			}
 			if have := fmt.Sprintf("%T %v", got, got); have != want {
 				t.Errorf("gave %s, cel-go gives %s", have, want)
+			}
+			if cost != wantCost {
+				t.Errorf("reported cost %d, cel-go reports %d", cost, wantCost)
 			}
 		})
 	}
@@ -132,7 +152,7 @@ func TestComparisonGivesWhatCelGoGives(t *testing.T) {
 // == and != nodes). A new cel-go version, or a new version of a pinned extension library, can
 // add a caller, and a caller that is not replaced is the gap of go-kure/launcher#1451 again.
 func TestComparisonCallSetIsReadFromCelGo(t *testing.T) {
-	want := []string{"@in", "_!=_", "_==_", "distinct"}
+	want := []string{"@in", "_!=_", "_==_", "distinct", "flatten"}
 	got := slices.Clone(budgetedCalls)
 	slices.Sort(got)
 	if !reflect.DeepEqual(got, want) {
@@ -150,5 +170,12 @@ func TestComparisonCallSetIsReadFromCelGo(t *testing.T) {
 	}
 	if version != "v0.31.0" {
 		t.Fatalf("cel-go is %q. The four budgeted calls were read from v0.31.0. Search common/types, ext and interpreter for every caller of Equal in the new version, extend budgetedCalls, then change this version (go-kure/launcher#1413 moves cel-go)", version)
+	}
+}
+
+func TestFlattenKeepsItsError(t *testing.T) {
+	_, err := evalValue(t, "[[1]].flatten(-1)")
+	if err == nil || !strings.Contains(err.Error(), "level must be non-negative") {
+		t.Errorf("flatten(-1) gave %v, want cel-go's error", err)
 	}
 }
