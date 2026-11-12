@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math"
 	"reflect"
 	"sort"
 	"strings"
@@ -30,7 +31,7 @@ import (
 // cel-go counts each as one element. The charge comes before the sort runs, so a sort that
 // fails after it compared is paid for too. The calls that build a big output from small operands
 // check it before they build it: join (equality.go), replace and lists.range, which cel-go caps
-// itself. indexOf and lastIndexOf check the work of their two nested loops before they run.
+// itself. indexOf, lastIndexOf and matches check the work of their loops before they run.
 // testdata/celenv1-charges.txt names a class for every function of the pinned environment.
 //
 // `&&`, `||`, the conditional and a comprehension are no calls, so no node of them is wrapped and
@@ -102,6 +103,8 @@ func chargeDecorator(i interpreter.Interpretable) (interpreter.Interpretable, er
 			call = &budgetedSort{InterpretableCall: x}
 		case "indexOf", "lastIndexOf":
 			call = &budgetedSearch{InterpretableCall: x}
+		case "matches":
+			call = &budgetedMatches{InterpretableCall: x}
 		}
 		return &chargedCall{InterpretableCall: call}, nil
 	case interpreter.InterpretableAttribute:
@@ -267,6 +270,40 @@ func (e *budgetedSearch) Eval(a interpreter.Activation) ref.Val {
 		}
 	}
 	return searchRunes([]rune(string(str)), []rune(string(sub)), int(off), last)
+}
+
+// budgetedMatches is matches, in its member and its global form, with the work of the match
+// checked before it runs. cel-go compiles the pattern and runs the match, and charges the length of
+// the string, plus one, at a tenth of a step each, times the length of the pattern at a quarter of
+// a step each, but it observes that cost only after the call returns. A pattern that an input
+// holds is not charged when it is read, so a string of 100,000 bytes and a pattern of 40,000 ran
+// for minutes before the evaluation stopped. The node refuses the match that cel-go would refuse
+// once it had run, and runs the rest as cel-go does (common/types/string.go, Match).
+type budgetedMatches struct {
+	interpreter.InterpretableCall
+}
+
+func (e *budgetedMatches) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
+
+func (e *budgetedMatches) Eval(a interpreter.Activation) ref.Val {
+	args := e.Args()
+	vals := make([]ref.Val, len(args))
+	for i, arg := range args {
+		if vals[i] = arg.Eval(a); types.IsError(vals[i]) {
+			return vals[i]
+		}
+	}
+	str, ok1 := vals[0].(types.String)
+	pat, ok2 := vals[1].(types.String)
+	if !ok1 || !ok2 {
+		return types.NewErr("no such overload: %v.matches", vals[0].Type())
+	}
+	strCost := math.Ceil((1.0 + float64(utf8.RuneCountInString(string(str)))) * common.StringTraversalCostFactor)
+	patCost := math.Ceil(float64(utf8.RuneCountInString(string(pat))) * common.RegexStringLengthCostFactor)
+	if strCost*patCost > maxExpressionCost {
+		panic(interpreter.EvalCancelledError{Cause: interpreter.CostLimitExceeded, Message: "a match over more characters than the cost limit allows"})
+	}
+	return str.Match(pat)
 }
 
 // searchRunes is the result of indexOf, or of lastIndexOf when last is set, from the offset off,
