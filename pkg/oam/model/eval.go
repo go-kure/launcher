@@ -455,7 +455,6 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 	for _, n := range c.inputs {
 		act["inputs."+n] = sc.Inputs[n]
 	}
-	act[compareBudgetName] = newCompareBudget()
 	act["self.name"] = sc.Self.Name
 	act["self.application"] = sc.Self.Application
 	for n, v := range sc.Values {
@@ -464,6 +463,8 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 	if s.loop != "" {
 		act[s.loop] = sc.Loop
 	}
+	budget := newCompareBudget()
+	act[compareBudgetName] = budget
 	var cost int64
 	var text strings.Builder
 	for _, seg := range s.segs {
@@ -474,6 +475,9 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 		val, det, err := seg.prog.Eval(act)
 		if n := det.ActualCost(); n != nil {
 			cost += int64(min(*n, math.MaxInt64))
+		}
+		if budget.exhausted() {
+			return nil, cost, siteError(path, compareStopError())
 		}
 		if err != nil {
 			return nil, cost, siteError(path, err)

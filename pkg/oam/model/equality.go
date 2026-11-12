@@ -10,24 +10,29 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 )
 
-// maxCompareSteps is the number of values the comparisons of one site evaluation may visit.
-// A list, a map, a list element and a map value each count one. It is the number of
-// maxResultElements. Stock cel-go compares nested lists at every depth, even when they share
-// one list, and its cost counts the outer lengths only, so n lists of n lists of n lists of
-// n elements cost O(n) and took n^4 steps (go-kure/launcher#1451).
+// maxCompareSteps is the number of values the comparisons and flattens of one site
+// evaluation may visit. A list, a map, a list element and a map value each count one. It is
+// the number of maxResultElements. Stock cel-go compares nested lists at every depth, even
+// when they share one list, and its cost counts the outer lengths only, so n lists of n lists
+// of n lists of n elements cost O(n) and took n^4 steps (go-kure/launcher#1451). The flatten
+// of the pinned lists extension copies every element it reaches and charges the outer length
+// only, in the same way.
 const maxCompareSteps = 1000000
 
 // compareBudgetName names the budget in the activation. It is no CEL identifier, so no
 // expression can read or shadow it.
 const compareBudgetName = "@compare-budget"
 
-// budgetedCalls are the calls that compare lists or maps and that the evaluation replaces:
-// `==`, `!=`, `in` and `distinct`. They are every caller of Equal in cel-go v0.31.0, read in
-// common/types (Contains, behind `in`), ext (distinct) and interpreter (the == and != nodes).
-// A new cel-go version, or a new version of a pinned extension library, can add a caller.
-// TestComparisonCallSetIsReadFromCelGo fails on any other version, so that someone reads the
-// callers again (go-kure/launcher#1413 moves cel-go).
-var budgetedCalls = []string{operators.Equals, operators.NotEquals, operators.In, "distinct"}
+// budgetedCalls are the calls that the evaluation replaces, because cel-go compares or copies
+// nested values in them and charges the outer length only: `==`, `!=`, `in`, `distinct` and
+// `flatten`. The first four are every caller of Equal in cel-go v0.31.0, read in common/types
+// (Contains, behind `in`), ext (distinct) and interpreter (the == and != nodes). flatten is
+// the one list function of the pinned extension that copies nested elements under the legacy
+// cost tracker (ext/lists.go, trackListFlattenLegacy). A new cel-go version, or a new version
+// of a pinned extension library, can add a call. TestComparisonCallSetIsReadFromCelGo fails
+// on any other version, so that someone reads the calls again (go-kure/launcher#1413 moves
+// cel-go).
+var budgetedCalls = []string{operators.Equals, operators.NotEquals, operators.In, "distinct", "flatten"}
 
 // compareBudget is the steps left to the comparisons of one site evaluation.
 type compareBudget struct{ left int }
@@ -44,9 +49,16 @@ func budgetOf(a interpreter.Activation) *compareBudget {
 	return newCompareBudget()
 }
 
-func compareStop() ref.Val {
-	return types.WrapErr(errors.Errorf("%w: the comparisons visit more than %d values", ErrCostLimit, maxCompareSteps))
+// exhausted reports that a comparison or flatten of the evaluation needed more than the
+// budget. It stays true: CEL drops an error when the other operand of || or && decides the
+// result, so the evaluation reads this after the program ends and never relies on the error.
+func (b *compareBudget) exhausted() bool { return b.left < 0 }
+
+func compareStopError() error {
+	return errors.Errorf("%w: the comparisons and flattens visit more than %d values", ErrCostLimit, maxCompareSteps)
 }
+
+func compareStop() ref.Val { return types.WrapErr(compareStopError()) }
 
 // equal compares l and r as cel-go does and spends one step for each value it visits. It
 // gives false and ok when the budget is gone. A list and a map are compared here, so that
@@ -110,11 +122,17 @@ func compareDecorator(i interpreter.Interpretable) (interpreter.Interpretable, e
 	args := call.Args()
 	switch call.Function() {
 	case operators.Equals, operators.NotEquals:
-		return &budgetedEq{id: i.ID(), lhs: args[0], rhs: args[1], negate: call.Function() == operators.NotEquals}, nil
+		return &budgetedEq{InterpretableCall: call, lhs: args[0], rhs: args[1], negate: call.Function() == operators.NotEquals}, nil
 	case operators.In:
-		return &budgetedIn{id: i.ID(), elem: args[0], list: args[1]}, nil
+		return &budgetedIn{InterpretableCall: call, elem: args[0], list: args[1]}, nil
 	case "distinct":
-		return &budgetedDistinct{id: i.ID(), list: args[0]}, nil
+		return &budgetedDistinct{InterpretableCall: call, list: args[0]}, nil
+	case "flatten":
+		f := &budgetedFlatten{InterpretableCall: call, list: args[0]}
+		if len(args) == 2 {
+			f.depth = args[1]
+		}
+		return f, nil
 	}
 	return i, nil
 }
@@ -132,13 +150,17 @@ func operands(a interpreter.Activation, x, y interpreter.Interpretable) (l, r, f
 	return l, r, nil
 }
 
+// A replacement node embeds the call it replaces, so that it keeps ID, Function, OverloadID
+// and Args. cel-go's cost tracker reads those from an InterpretableCall and charges the call
+// by its function, which keeps the reported cost the cel-go estimate. A node that is not an
+// InterpretableV2 is wrapped by cel-go in an adapter that hides them, so each node has Exec.
 type budgetedEq struct {
-	id       int64
+	interpreter.InterpretableCall
 	lhs, rhs interpreter.Interpretable
 	negate   bool
 }
 
-func (e *budgetedEq) ID() int64 { return e.id }
+func (e *budgetedEq) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
 
 func (e *budgetedEq) Eval(a interpreter.Activation) ref.Val {
 	l, r, failed := operands(a, e.lhs, e.rhs)
@@ -156,11 +178,11 @@ func (e *budgetedEq) Eval(a interpreter.Activation) ref.Val {
 }
 
 type budgetedIn struct {
-	id         int64
+	interpreter.InterpretableCall
 	elem, list interpreter.Interpretable
 }
 
-func (e *budgetedIn) ID() int64 { return e.id }
+func (e *budgetedIn) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
 
 func (e *budgetedIn) Eval(a interpreter.Activation) ref.Val {
 	x, c, failed := operands(a, e.elem, e.list)
@@ -189,11 +211,11 @@ func (e *budgetedIn) Eval(a interpreter.Activation) ref.Val {
 }
 
 type budgetedDistinct struct {
-	id   int64
+	interpreter.InterpretableCall
 	list interpreter.Interpretable
 }
 
-func (e *budgetedDistinct) ID() int64 { return e.id }
+func (e *budgetedDistinct) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
 
 func (e *budgetedDistinct) Eval(a interpreter.Activation) ref.Val {
 	c := e.list.Eval(a)
@@ -225,4 +247,64 @@ func (e *budgetedDistinct) Eval(a interpreter.Activation) ref.Val {
 		}
 	}
 	return types.DefaultTypeAdapter.NativeToValue(unique)
+}
+
+type budgetedFlatten struct {
+	interpreter.InterpretableCall
+	list  interpreter.Interpretable
+	depth interpreter.Interpretable // nil for flatten()
+}
+
+func (e *budgetedFlatten) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
+
+func (e *budgetedFlatten) Eval(a interpreter.Activation) ref.Val {
+	c := e.list.Eval(a)
+	if types.IsError(c) {
+		return c
+	}
+	depth := int64(1)
+	if e.depth != nil {
+		d := e.depth.Eval(a)
+		if types.IsError(d) {
+			return d
+		}
+		n, ok := d.(types.Int)
+		if !ok {
+			return types.ValOrErr(d, "no such overload: %v.flatten(%v)", c.Type(), d.Type())
+		}
+		depth = int64(n)
+	}
+	list, ok := c.(traits.Lister)
+	if !ok {
+		return types.ValOrErr(c, "no such overload: %v.flatten()", c.Type())
+	}
+	if depth < 0 {
+		return types.WrapErr(errors.New("level must be non-negative"))
+	}
+	out, ok := budgetOf(a).flatten(list, depth, nil)
+	if !ok {
+		return compareStop()
+	}
+	return types.DefaultTypeAdapter.NativeToValue(out)
+}
+
+// flatten gives the elements of l with the lists nested up to depth levels spliced in, as the
+// lists extension does, and spends one step for each element it reaches.
+func (b *compareBudget) flatten(l traits.Lister, depth int64, out []ref.Val) ([]ref.Val, bool) {
+	for it := l.Iterator(); it.HasNext() == types.True; {
+		v := it.Next()
+		if b.left--; b.left < 0 {
+			return nil, false
+		}
+		nested, isList := v.(traits.Lister)
+		if !isList || depth == 0 {
+			out = append(out, v)
+			continue
+		}
+		var ok bool
+		if out, ok = b.flatten(nested, depth-1, out); !ok {
+			return nil, false
+		}
+	}
+	return out, true
 }
