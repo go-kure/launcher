@@ -18,13 +18,23 @@ import (
 // capability variant checks is checked first and reported first; then each authored
 // value whose schema names a Gate (PropertySchema.Gate) that is off by default at
 // target is refused, with the property's path, the gate, the release where it turns
-// on and the target (go-kure/launcher#1183).
+// on and the target (go-kure/launcher#1183). It reads no spec.featureGates: a caller
+// whose profile sets gates calls ValidateAuthoredPropertiesForTargetWithGates.
 //
 // A nil target is an unknown version: no gate is consulted, and the result is the
 // capability variant's, so a document built without a version is judged as it was
 // before the version existed. The gate pass reads the document and changes nothing.
 // Like ValidateAuthoredProperties it returns the validated copy and never edits app.
 func (t *Transformer) ValidateAuthoredPropertiesForTarget(app *Application, capabilities map[string]CapabilityBinding, target *KubernetesVersion) (*Application, error) {
+	return t.ValidateAuthoredPropertiesForTargetWithGates(app, capabilities, target, nil)
+}
+
+// ValidateAuthoredPropertiesForTargetWithGates is ValidateAuthoredPropertiesForTarget
+// for a profile that also sets gates, its spec.featureGates (go-kure/launcher#1231).
+// A gate named in gates is on or off as it says, whatever release target implies;
+// every other gate follows the release. nil or empty gates make this the plain
+// variant, and a nil target still consults nothing, overrides or not.
+func (t *Transformer) ValidateAuthoredPropertiesForTargetWithGates(app *Application, capabilities map[string]CapabilityBinding, target *KubernetesVersion, gates map[string]bool) (*Application, error) {
 	// The gate pass below looks schemas up by plain type name, so it reads the
 	// resolved document too (a declared type identity becomes its plain name).
 	own, resolved, err := t.validateAuthoredCopy(app, capabilities)
@@ -34,16 +44,17 @@ func (t *Transformer) ValidateAuthoredPropertiesForTarget(app *Application, capa
 	if target == nil {
 		return own, nil
 	}
+	gt := gateTarget{version: *target, overrides: gates}
 	for i := range resolved.Spec.Components {
 		comp := &resolved.Spec.Components[i]
 		path := fmt.Sprintf("component %q (type %q): properties", comp.Name, comp.Type)
-		if err := checkGatedProperties(t.componentSchemaOf(comp.Type), comp.Properties, path, *target); err != nil {
+		if err := checkGatedProperties(t.componentSchemaOf(comp.Type), comp.Properties, path, gt); err != nil {
 			return nil, err
 		}
 		for j := range comp.Traits {
 			trait := &comp.Traits[j]
 			path := fmt.Sprintf("component %q: trait %q: properties", comp.Name, trait.Type)
-			if err := checkGatedProperties(t.traitSchemaOf(trait.Type), trait.Properties, path, *target); err != nil {
+			if err := checkGatedProperties(t.traitSchemaOf(trait.Type), trait.Properties, path, gt); err != nil {
 				return nil, err
 			}
 		}
@@ -51,7 +62,7 @@ func (t *Transformer) ValidateAuthoredPropertiesForTarget(app *Application, capa
 	for i := range resolved.Spec.Policies {
 		pol := &resolved.Spec.Policies[i]
 		path := fmt.Sprintf("policy %q (type %q): properties", pol.Name, pol.Type)
-		if err := checkGatedProperties(t.policySchemaOf(pol.Type), pol.Properties, path, *target); err != nil {
+		if err := checkGatedProperties(t.policySchemaOf(pol.Type), pol.Properties, path, gt); err != nil {
 			return nil, err
 		}
 	}
@@ -105,7 +116,7 @@ func schemaOf(handler any) map[string]PropertySchema {
 // value, in sorted key order, whose Gate is off at target. A key the schema does not
 // declare is not its business (the authored validation refused it already), and
 // neither is a value of the wrong shape.
-func checkGatedProperties(schema map[string]PropertySchema, props map[string]any, path string, target KubernetesVersion) error {
+func checkGatedProperties(schema map[string]PropertySchema, props map[string]any, path string, target gateTarget) error {
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		field, ok := schema[key]
 		if !ok {
@@ -118,7 +129,7 @@ func checkGatedProperties(schema map[string]PropertySchema, props map[string]any
 	return nil
 }
 
-func checkGatedValue(field PropertySchema, value any, path string, target KubernetesVersion) error {
+func checkGatedValue(field PropertySchema, value any, path string, target gateTarget) error {
 	// Everything below reads the value as the writer writes it, so a struct is read as
 	// the map, array or scalar it encodes to, and one that encodes to null is absent.
 	// The read comes before the null check: a nil named slice with its own MarshalJSON
@@ -163,15 +174,19 @@ func checkGatedValue(field PropertySchema, value any, path string, target Kubern
 	return nil
 }
 
-// refuseGateBelow refuses the authored value at path when gate is off by default at
-// target, naming the path, the gate, the release where it turns on and the target.
-func refuseGateBelow(gate, path string, target KubernetesVersion) error {
-	on, err := gateEnabled(gate, target, nil)
+// refuseGateBelow refuses the authored value at path when gate is off for
+// target (its release default, or the profile's override), naming the path, the gate, the release where it turns on and the target.
+func refuseGateBelow(gate, path string, target gateTarget) error {
+	on, err := target.enabled(gate)
 	if err != nil {
 		return err
 	}
 	if on {
 		return nil
+	}
+	if target.setOff(gate) {
+		return errors.Errorf("%s: requires the Kubernetes feature gate %s, and the ClusterProfile's "+
+			"spec.featureGates sets it to false; remove the field or set the gate to true", path, gate)
 	}
 	g, _ := lookupFeatureGate(gate)
 	return errors.Errorf("%s: requires the Kubernetes feature gate %s, which is on by default from %s, "+
@@ -180,11 +195,11 @@ func refuseGateBelow(gate, path string, target KubernetesVersion) error {
 }
 
 // refuseValueGateBelow refuses value at path when it is a string that gates names and
-// that gate is off by default at target, naming the path, the value, the gate, the
+// that gate is off for target (its release default, or the profile's override), naming the path, the value, the gate, the
 // release where it turns on and the target. Any other value is accepted: a value of
 // another type, and a string no key names. The match is exact, as the Enum a
 // ValueGates key is held to is (go-kure/launcher#1230).
-func refuseValueGateBelow(gates map[string]string, value any, path string, target KubernetesVersion) error {
+func refuseValueGateBelow(gates map[string]string, value any, path string, target gateTarget) error {
 	s, ok := value.(string)
 	if !ok {
 		return nil
@@ -193,12 +208,16 @@ func refuseValueGateBelow(gates map[string]string, value any, path string, targe
 	if !gated {
 		return nil
 	}
-	on, err := gateEnabled(gate, target, nil)
+	on, err := target.enabled(gate)
 	if err != nil {
 		return err
 	}
 	if on {
 		return nil
+	}
+	if target.setOff(gate) {
+		return errors.Errorf("%s: value %q requires the Kubernetes feature gate %s, and the ClusterProfile's "+
+			"spec.featureGates sets it to false; use another value or set the gate to true", path, s, gate)
 	}
 	g, _ := lookupFeatureGate(gate)
 	return errors.Errorf("%s: value %q requires the Kubernetes feature gate %s, which is on by default from %s, "+
@@ -210,7 +229,7 @@ func refuseValueGateBelow(gates map[string]string, value any, path string, targe
 // one of paths (PropertySchema.GatedPaths) below value and whose gate is off at target.
 // A path whose key is absent, null or of the wrong shape on the way is not its
 // business, as in checkGatedProperties.
-func checkGatedPaths(paths map[string]string, value any, path string, target KubernetesVersion) error {
+func checkGatedPaths(paths map[string]string, value any, path string, target gateTarget) error {
 	for _, p := range slices.Sorted(maps.Keys(paths)) {
 		gate := paths[p]
 		leaf := func(_ any, at string) error { return refuseGateBelow(gate, at, target) }
@@ -227,7 +246,7 @@ func checkGatedPaths(paths map[string]string, value any, path string, target Kub
 // The walk is checkGatedPaths's, so a key matches case-insensitively and the path the
 // refusal names carries the authored spelling. The value match is exact. A null, a
 // value that is not a string and a string the table does not name use no gate.
-func checkValueGatedPaths(paths map[string]map[string]string, value any, path string, target KubernetesVersion) error {
+func checkValueGatedPaths(paths map[string]map[string]string, value any, path string, target gateTarget) error {
 	for _, p := range slices.Sorted(maps.Keys(paths)) {
 		gates := paths[p]
 		leaf := func(v any, at string) error { return refuseValueGateBelow(gates, v, at, target) }
@@ -245,7 +264,7 @@ func checkValueGatedPaths(paths map[string]map[string]string, value any, path st
 // wrote. A null value ends the walk with no call. gates are the gates the walk reads:
 // a struct below the path that does not encode is refused only where one of them is off
 // at target, because where all are on nothing below it would be refused.
-func walkGatedPath(keys []string, value any, path string, gates []string, target KubernetesVersion, leaf func(value any, path string) error) error {
+func walkGatedPath(keys []string, value any, path string, gates []string, target gateTarget, leaf func(value any, path string) error) error {
 	off := func() (bool, error) { return anyGateOff(gates, target) }
 	value, ok, err := readWritten(value, path, off)
 	if err != nil || !ok {
@@ -318,7 +337,7 @@ func readWritten(value any, path string, off func() (bool, error)) (written any,
 
 // gateOffIn reports whether a gate the walk reads in schema, at any depth, is off at
 // target: a field's Gate, a GatedPaths gate or a ValueGates gate.
-func gateOffIn(schema map[string]PropertySchema, target KubernetesVersion) (bool, error) {
+func gateOffIn(schema map[string]PropertySchema, target gateTarget) (bool, error) {
 	for _, key := range slices.Sorted(maps.Keys(schema)) {
 		if off, err := fieldGateOff(schema[key], target); off || err != nil {
 			return off, err
@@ -327,10 +346,10 @@ func gateOffIn(schema map[string]PropertySchema, target KubernetesVersion) (bool
 	return false, nil
 }
 
-// anyGateOff reports whether any of gates is off by default at target.
-func anyGateOff(gates []string, target KubernetesVersion) (bool, error) {
+// anyGateOff reports whether any of gates is off for target (default or override).
+func anyGateOff(gates []string, target gateTarget) (bool, error) {
 	for _, gate := range gates {
-		on, err := gateEnabled(gate, target, nil)
+		on, err := target.enabled(gate)
 		if err != nil {
 			return false, err
 		}
@@ -341,7 +360,7 @@ func anyGateOff(gates []string, target KubernetesVersion) (bool, error) {
 	return false, nil
 }
 
-func fieldGateOff(field PropertySchema, target KubernetesVersion) (bool, error) {
+func fieldGateOff(field PropertySchema, target gateTarget) (bool, error) {
 	var gates []string
 	if field.Gate != "" {
 		gates = append(gates, field.Gate)
@@ -455,9 +474,4 @@ func foldedKeys(obj map[string]any, key string) []string {
 	}
 	slices.Sort(out)
 	return out
-}
-
-// ValidateAuthoredPropertiesForTargetWithGates is a stub: go-kure/launcher#1231.
-func (t *Transformer) ValidateAuthoredPropertiesForTargetWithGates(app *Application, capabilities map[string]CapabilityBinding, target *KubernetesVersion, gates map[string]bool) (*Application, error) {
-	return t.ValidateAuthoredPropertiesForTarget(app, capabilities, target)
 }

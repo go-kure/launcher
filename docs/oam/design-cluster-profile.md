@@ -44,6 +44,7 @@ spec:
 | `metadata.name` | string | Identifies the cluster; referenced in build tooling |
 | `spec.gitopsEngine` | string | GitOps engine whose delivery CRs the built-in components emit. Accepted: `"fluxcd"` (default, optional). |
 | `spec.kubernetesVersion` | string | The Kubernetes release the cluster runs, optional: `1.35`, `v1.35` or `v1.35.2`, the forms `helm template --kube-version` takes; a patch level is read and ignored, and only major `1` is accepted. When set, `kurel build` refuses an authored property whose Kubernetes feature gate is off by default at that release (see "Target Kubernetes version" below). Absent means unknown: nothing is checked and the build is what it was before the field existed. A release newer than the `k8s.io/api` version launcher is built against is a valid target and reads as every known gate on. |
+| `spec.featureGates` | map of string to bool | Optional. Overrides, per gate, the state `spec.kubernetesVersion` implies, for a cluster that sets a gate other than the release default. A gate set `true` is on and a gate set `false` is off, at any version. A name outside the gate table (see "Target Kubernetes version" below) is refused with the known names, and the field needs `spec.kubernetesVersion`: a profile that sets one without the other is refused with `spec.featureGates needs spec.kubernetesVersion`. |
 | `spec.capabilities` | map | Keys are trait types; values are capability bindings |
 | `capabilities.<type>.rendering` | map | Platform values merged into trait properties before handler invocation, and into the listed properties of a component whose handler implements `ComponentCapabilityDefaults` (the `persistentvolumeclaim` kind reads `pvc`'s `storageClassName`). A value `ComponentCapabilityDefaults` fills into a component is validated against that component's own property schema; a component handler with no schema is refused unless the trait handler or rule registered for the capability's type validates the rendering, by implementing `ValidateAndApplyDefaults` or, for a type that is not built in, through a loaded `CapabilityDefinition` (go-kure/launcher#751, go-kure/launcher#772). A lowering rule may read a binding through `LoweringContext.Capability`: `webservice` and `worker` fill `pvc`'s `storageClassName` into the claims their `pvc` volumes describe (go-kure/launcher#746). A component handler may read one through `ComponentCapabilityFiller`: `statefulset` fills it into its `volumeClaimTemplates` entries (go-kure/launcher#761) |
 
@@ -84,6 +85,19 @@ same string works in both.
   published as `valueGates`); the refusal then names the value as well
   (go-kure/launcher#1230).
 
+- **A cluster that differs from its release says so in `spec.featureGates`**
+  (go-kure/launcher#1231). An entry replaces the table's answer for that gate, in both
+  directions: `HostnameOverride: true` accepts the field at 1.34, and
+  `HostnameOverride: false` refuses it at 1.36. A refusal an entry caused names
+  `spec.featureGates` and the value it set, not the version. The override reaches the
+  authored-property check and the Service-name check on the generated objects alike. It
+  only refuses or accepts, so an accepted document renders the same with or without it.
+  The profile must state `spec.kubernetesVersion` too: with no version nothing is checked,
+  and a gate map next to no version would be a half-check, so the parse refuses it. There
+  is no lock or removal state: an entry is honoured on either side of a gate's upstream
+  lifecycle, including a release where Kubernetes has locked or removed the gate, and
+  launcher does not tell the author that the entry no longer changes the cluster.
+
 - **Open schemas name their gated paths.** The check walks the declared schema, so it stops
   at an object that declares no `Properties`. The raw-PodSpec kinds (`pod`, and the kinds
   that take a pod template: `podtemplate`, `replicaset`, `replicationcontroller`) leave
@@ -110,9 +124,9 @@ same string works in both.
 - **Newer than launcher knows.** A release above the `k8s.io/api` version launcher is built
   against is a valid target: a newer cluster is not wrong. The table then reads every gate
   it knows as on, and says nothing about a gate it does not know.
-- **A cluster that changed a gate** against its default is not modelled: the profile says
-  the release, not the gate settings. Per-gate overrides are a follow-up
-  (go-kure/launcher#1231), as is adapting instead of refusing (go-kure/launcher#1232).
+- **A cluster that changed a gate** against its default says so in `spec.featureGates`,
+  which overrides the table per gate (go-kure/launcher#1231, above). Adapting instead of
+  refusing is a follow-up (go-kure/launcher#1232).
 - **A Service name is checked on the objects, not on a property.** Below 1.36 the API
   server holds a Service name to a DNS-1035 label (`RelaxedServiceNameValidation` is off),
   which refuses a leading digit. The check reads the generated objects, so a default name, a
@@ -130,13 +144,15 @@ same string works in both.
   validates it as a DNS-1123 label at every release, and the Service it names is a
   `service` component's, which is. An Ingress backend naming such a Service is not checked
   separately.
-- **Where it runs.** `kurel build` reads the profile's version and passes it to
-  `ValidateAuthoredPropertiesForTarget`. A library caller passes the version to that method
-  itself; `ValidateAuthoredPropertiesWithCapabilities` takes none and checks no gate. The
-  Service name check runs later, when the objects are generated (`oam.GenerateApplications`),
-  from `TransformContext.TargetVersion`: a caller that leaves that field unset gets no
-  check, and a caller that transforms and never generates sees no refusal. `kurel build`
-  sets it from the same profile version.
+- **Where it runs.** `kurel build` reads the profile's version and its `spec.featureGates`
+  and passes both to `ValidateAuthoredPropertiesForTargetWithGates`. A library caller does
+  the same itself; `ValidateAuthoredPropertiesForTarget` is that call with no gates, so it
+  ignores a profile's overrides, and `ValidateAuthoredPropertiesWithCapabilities` takes no
+  version and checks no gate. The Service name check runs later, when the objects are
+  generated (`oam.GenerateApplications`), from `TransformContext.TargetVersion` and
+  `TransformContext.FeatureGates`: a caller that leaves `TargetVersion` unset gets no check,
+  and a caller that transforms and never generates sees no refusal. `kurel build` sets both
+  from the same profile.
 
 ### Capability schema
 

@@ -66,7 +66,7 @@ func TestServiceNameGateProblem(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := serviceNameGateProblem("name", c.svc, c.target)
+			err := serviceNameGateProblem("name", c.svc, gateTarget{version: c.target})
 			if c.refused != (err != nil) {
 				t.Fatalf("serviceNameGateProblem(%q, %s) = %v, want refused=%v", c.svc, c.target, err, c.refused)
 			}

@@ -14,13 +14,13 @@ var restartValuePaths = map[string]map[string]string{
 }
 
 func TestCheckValueGatedPaths(t *testing.T) {
-	below := KubernetesVersion{Major: 1, Minor: 34}
-	at := KubernetesVersion{Major: 1, Minor: 35}
+	below := gateTarget{version: KubernetesVersion{Major: 1, Minor: 34}}
+	at := gateTarget{version: KubernetesVersion{Major: 1, Minor: 35}}
 
 	cases := []struct {
 		name    string
 		value   any
-		target  KubernetesVersion
+		target  gateTarget
 		refused bool
 		want    []string
 	}{
@@ -75,7 +75,7 @@ func TestCheckValueGatedPaths_WalksEveryArrayElement(t *testing.T) {
 		map[string]any{"name": "a", "restartPolicy": "Always"},
 		map[string]any{"name": "b", "restartPolicy": "Never"},
 	}}}
-	below := KubernetesVersion{Major: 1, Minor: 34}
+	below := gateTarget{version: KubernetesVersion{Major: 1, Minor: 34}}
 	err := checkValueGatedPaths(paths, value, "template", below)
 	if err == nil {
 		t.Fatal("want the second element refused, got none")
@@ -91,7 +91,7 @@ func TestCheckValueGatedPaths_WalksEveryArrayElement(t *testing.T) {
 }
 
 func TestCheckValueGatedPaths_NilTable(t *testing.T) {
-	err := checkValueGatedPaths(nil, map[string]any{"restartPolicy": "Never"}, "x", KubernetesVersion{Major: 1, Minor: 1})
+	err := checkValueGatedPaths(nil, map[string]any{"restartPolicy": "Never"}, "x", gateTarget{version: KubernetesVersion{Major: 1, Minor: 1}})
 	if err != nil {
 		t.Fatalf("a schema with no ValueGatedPaths refuses nothing, got %v", err)
 	}

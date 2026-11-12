@@ -192,7 +192,9 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	//
 	// The profile's kubernetesVersion, when it states one, makes the same pass refuse
 	// an authored field whose Kubernetes feature gate is off by default at that release
-	// (go-kure/launcher#1183). A profile without one is judged as before.
+	// (go-kure/launcher#1183), unless its spec.featureGates sets that gate on, or sets
+	// a gate off that the release would enable (go-kure/launcher#1231). A profile
+	// without a version is judged as before.
 	var target *oam.KubernetesVersion
 	if v, ok := evaluatedProfile.Spec.TargetVersion(); ok {
 		target = &v
@@ -201,7 +203,7 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	// The validator returns the document it validated, with the nested nulls stripped
 	// and the values normalized, and leaves app alone: Transform takes that copy, since
 	// it does not strip or normalize authored properties itself (go-kure/launcher#1282).
-	validated, err := transformer.ValidateAuthoredPropertiesForTarget(app, evaluatedProfile.Spec.Capabilities, target)
+	validated, err := transformer.ValidateAuthoredPropertiesForTargetWithGates(app, evaluatedProfile.Spec.Capabilities, target, evaluatedProfile.Spec.FeatureGates)
 	if err != nil {
 		return errors.Wrapf(err, "validating application file %q", appPath)
 	}
@@ -214,6 +216,8 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 		// The same release the gate pass judged the authored properties by: the
 		// objects generated from them are held to it too (go-kure/launcher#1230).
 		TargetVersion: target,
+		// The profile's spec.featureGates ride with it (go-kure/launcher#1231).
+		FeatureGates: evaluatedProfile.Spec.FeatureGates,
 	}
 
 	cluster, err := transformer.Transform(validated, ctx)

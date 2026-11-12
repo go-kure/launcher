@@ -630,8 +630,10 @@ build for a cluster below Kubernetes 1.36 refuses it (the check, below).
   ownership wrapper, not at `Transform`; a caller that never generates sees no refusal. A
   caller that leaves `TransformContext.TargetVersion` unset gets no check, and so does a
   profile that states no `kubernetesVersion` (`kurel build` sets the field from it). A
-  cluster that enables the gate on an older release is not read (per-gate overrides,
-  go-kure/launcher#1231): the table's default decides. A `statefulset`'s `serviceName` is
+  cluster that runs the gate against its release's default says so in the profile's
+  `spec.featureGates`, which `kurel build` sets as `TransformContext.FeatureGates`
+  (go-kure/launcher#1231): an entry there replaces the table's default, and a caller that
+  leaves the field unset gets the table. A `statefulset`'s `serviceName` is
   not checked: it names a governing Service without emitting one, and the API server
   validates it as a DNS-1123 label at every release, which admits a leading digit. The
   Service it names is a `service` component's, which is checked. An Ingress backend that

@@ -90,7 +90,10 @@ A schema field may also name a Kubernetes feature gate in `Gate` (published as `
 the field needs that gate on the cluster. A `ClusterProfile` that states
 `spec.kubernetesVersion` below the release where the gate is on by default has an authored
 value refused by `ValidateAuthoredPropertiesForTarget`, naming the property's path, the gate,
-that release and the profile's version; with no version nothing is checked. The gates are
+that release and the profile's version; with no version nothing is checked. A profile's
+`spec.featureGates` overrides a gate's state in both directions (go-kure/launcher#1231); it
+needs `spec.kubernetesVersion`, refuses a name the table lacks, and has no lock or removal
+state. The gates are
 rows of one table in `featuregates.go` (name, first release with Default true, read from the
 Kubernetes feature gates reference), held to the schemas by tests in both directions: a `Gate`
 no row names, or a row no schema uses, fails (go-kure/launcher#1183). Only Kubernetes core
@@ -307,8 +310,14 @@ rule:
   profile's). Everything the capability variant refuses is refused first. A nil `target`
   is an unknown version, and the result is the capability variant's, the validated copy
   included. `Transform` does not
-  read the version: the check only refuses, so an accepted document renders the same at
-  any version. `ParseKubernetesVersion` takes `1.35`, `v1.35` and `v1.35.2` (patch ignored)
+  read the version for this check: it only refuses, so an accepted document renders the same at
+  any version. `ValidateAuthoredPropertiesForTargetWithGates(app, capabilities, target, gates)`
+  is the same call with the profile's `spec.featureGates` (`ClusterProfileSpec.FeatureGates`):
+  an entry replaces the table's answer for that gate in both directions, and a refusal it
+  causes names `spec.featureGates`. `ValidateAuthoredPropertiesForTarget` is this call with
+  nil `gates`. `TransformContext.FeatureGates` carries the same map, read with
+  `TargetVersion`, to the Service-name check (`RelaxedServiceNameValidation`); it is
+  ignored when `TargetVersion` is nil. `ParseKubernetesVersion` takes `1.35`, `v1.35` and `v1.35.2` (patch ignored)
   and refuses anything else, a major other than 1 included.
 - `Transform` makes the same check itself on every trait's merged properties, at both
   merge sites (trait dispatch and the lowering fixpoint), whether or not a binding

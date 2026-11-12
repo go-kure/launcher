@@ -165,7 +165,7 @@ func TestValidateAuthoredPropertiesForTarget_GoBuiltDeclaredItems(t *testing.T) 
 // TestCheckGatedValue_GoBuiltStruct: the value-level walk reads a struct at its own
 // node, not only below a map, with a declared Properties schema and with a gated path.
 func TestCheckGatedValue_GoBuiltStruct(t *testing.T) {
-	below := KubernetesVersion{1, 34}
+	below := gateTarget{version: KubernetesVersion{1, 34}}
 	pod := corev1.PodSpec{HostnameOverride: strPtr("h")}
 
 	byProperty := PropertySchema{Type: PropertyTypeObject, Properties: map[string]PropertySchema{
@@ -182,7 +182,7 @@ func TestCheckGatedValue_GoBuiltStruct(t *testing.T) {
 	if err := checkGatedValue(items, []corev1.PodSpec{pod}, "specs", below); err == nil || !strings.Contains(err.Error(), "specs[0].hostnameOverride") {
 		t.Errorf("Items: want specs[0].hostnameOverride refused, got %v", err)
 	}
-	if err := checkGatedValue(byProperty, pod, "spec", KubernetesVersion{1, 35}); err != nil {
+	if err := checkGatedValue(byProperty, pod, "spec", gateTarget{version: KubernetesVersion{1, 35}}); err != nil {
 		t.Errorf("at the release: want accepted, got %v", err)
 	}
 	// A struct that does not encode, under a declared Properties schema: refused while
@@ -192,7 +192,7 @@ func TestCheckGatedValue_GoBuiltStruct(t *testing.T) {
 		!strings.Contains(err.Error(), "does not encode as JSON") {
 		t.Errorf("declared Properties, unencodable: want spec refused as not encoding, got %v", err)
 	}
-	if err := checkGatedValue(byProperty, bad, "spec", KubernetesVersion{1, 35}); err != nil {
+	if err := checkGatedValue(byProperty, bad, "spec", gateTarget{version: KubernetesVersion{1, 35}}); err != nil {
 		t.Errorf("declared Properties, unencodable, at the release: want accepted, got %v", err)
 	}
 }
@@ -201,7 +201,7 @@ func TestCheckGatedValue_GoBuiltStruct(t *testing.T) {
 // met on the way down a GatedPaths or a ValueGatedPaths path, is refused while a gate
 // the path reads is off at target and accepted once every such gate is on.
 func TestCheckGatedValue_GoBuiltUnencodableUnderPaths(t *testing.T) {
-	below, at := KubernetesVersion{1, 34}, KubernetesVersion{1, 35}
+	below, at := gateTarget{version: KubernetesVersion{1, 34}}, gateTarget{version: KubernetesVersion{1, 35}}
 	bad := map[string]any{"spec": unencodableSpec{C: make(chan int)}}
 	for name, schema := range map[string]PropertySchema{
 		"GatedPaths": {Type: PropertyTypeObject, AdditionalProperties: true,
@@ -224,7 +224,7 @@ func TestCheckGatedValue_GoBuiltUnencodableUnderPaths(t *testing.T) {
 // on a ValueGates property; one that does not encode is refused at the same places
 // while a gate is off.
 func TestCheckGatedValue_GoBuiltStructEncodesToArrayOrScalar(t *testing.T) {
-	below, at := KubernetesVersion{1, 34}, KubernetesVersion{1, 35}
+	below, at := gateTarget{version: KubernetesVersion{1, 34}}, gateTarget{version: KubernetesVersion{1, 35}}
 	raw := func(s string) runtime.RawExtension { return runtime.RawExtension{Raw: []byte(s)} }
 	bad := unencodableSpec{C: make(chan int)}
 	valueGated := PropertySchema{Type: PropertyTypeString, Enum: []any{"Never", "Always"},
@@ -280,7 +280,7 @@ func TestCheckGatedValue_GoBuiltStructEncodesToArrayOrScalar(t *testing.T) {
 // TestCheckGatedValue_GoBuiltStructEncodingToNullIsAbsent: a struct that encodes to JSON
 // null (the zero runtime.RawExtension) uses no gate, as a decoded null uses none.
 func TestCheckGatedValue_GoBuiltStructEncodingToNullIsAbsent(t *testing.T) {
-	below := KubernetesVersion{1, 34}
+	below := gateTarget{version: KubernetesVersion{1, 34}}
 	null := runtime.RawExtension{}
 	var nilRaw *runtime.RawExtension
 	for name, tc := range map[string]struct {
@@ -326,7 +326,7 @@ func (*ptrMarshaledNull) MarshalJSON() ([]byte, error) { return []byte("null"), 
 // converted whole, so an element's MarshalJSON on the pointer type applies as it does
 // when the writer marshals the slice.
 func TestCheckGatedValue_GoBuiltSliceKeepsPointerMarshaler(t *testing.T) {
-	below := KubernetesVersion{1, 34}
+	below := gateTarget{version: KubernetesVersion{1, 34}}
 	schema := PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true,
 		GatedPaths: map[string]string{"entries[].hostnameOverride": "HostnameOverride"}}
 	// The struct's field is empty and its marshaler supplies the gated key: refused.
@@ -407,7 +407,7 @@ func withinSeconds(t *testing.T, name string, fn func() error) (ok bool, err err
 // absent, so it passes below the gate; a value that really points at itself does not
 // encode, so it is refused there (go-kure/launcher#1450).
 func TestCheckGatedValue_SelfReferentialPointerTypeIsRead(t *testing.T) {
-	below := KubernetesVersion{1, 34}
+	below := gateTarget{version: KubernetesVersion{1, 34}}
 	var nilSelf selfPtr
 	var nilA selfPtrA
 	var cyclic selfPtr
@@ -461,7 +461,7 @@ func TestCheckGatedValue_SelfReferentialPointerTypeIsRead(t *testing.T) {
 // value is read as written, so a nil named slice whose MarshalJSON writes an array is
 // present, at the top of the check and under a gated path alike (go-kure/launcher#1450).
 func TestCheckGatedValue_NilSliceWithOwnMarshalerIsRead(t *testing.T) {
-	below, atGate := KubernetesVersion{1, 34}, KubernetesVersion{1, 35}
+	below, atGate := gateTarget{version: KubernetesVersion{1, 34}}, gateTarget{version: KubernetesVersion{1, 35}}
 	var nilRaw *runtime.RawExtension
 	var nilPtrPtr = &nilRaw
 	gated := PropertySchema{Type: PropertyTypeObject, Gate: "ContainerRestartRules"}

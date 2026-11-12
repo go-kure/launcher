@@ -2,6 +2,7 @@ package oam
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strconv"
@@ -524,6 +525,20 @@ func validateClusterProfile(profile *ClusterProfile) error {
 	if profile.Spec.KubernetesVersion != "" {
 		if _, err := ParseKubernetesVersion(profile.Spec.KubernetesVersion); err != nil {
 			return profileValidationError("spec.kubernetesVersion", "spec.kubernetesVersion: "+err.Error())
+		}
+	}
+	// The overrides change what a stated release implies, so with no release they
+	// have nothing to change: the build checks no gate without one. A name the
+	// lifecycle table lacks would be a silent no-op, so it is refused.
+	if len(profile.Spec.FeatureGates) > 0 {
+		if profile.Spec.KubernetesVersion == "" {
+			return profileValidationError("spec.featureGates", "spec.featureGates needs spec.kubernetesVersion")
+		}
+		for _, name := range slices.Sorted(maps.Keys(profile.Spec.FeatureGates)) {
+			if _, known := lookupFeatureGate(name); !known {
+				return profileValidationError("spec.featureGates", fmt.Sprintf("spec.featureGates: unknown gate %q; known gates: %s",
+					name, strings.Join(FeatureGateNames(), ", ")))
+			}
 		}
 	}
 	return nil

@@ -112,8 +112,8 @@ weight: 3
     DNS-1123 label`) instead of building a manifest the cluster rejects on
     apply (go-kure/launcher#546). A leading digit (`1api`) is accepted: that
     is the rule under RelaxedServiceNameValidation, on by default from Kubernetes 1.36, and a
-    build whose `spec.kubernetesVersion` is below 1.36 refuses such a Service at generation
-    (go-kure/launcher#959, go-kure/launcher#1230, `docs/delivery-scope.md` §3.5). `Generate` applies the
+    build whose `spec.kubernetesVersion` is below 1.36 refuses such a Service at generation,
+    unless its `spec.featureGates` sets the gate on (go-kure/launcher#959, go-kure/launcher#1230, `docs/delivery-scope.md` §3.5). `Generate` applies the
     same rule to the Application name it is handed. `worker` emits no Service
     and keeps accepting such a name, within the container-name rule above.
     The rule holds for the component name whatever the Service is named:
@@ -286,8 +286,8 @@ weight: 3
     cluster rejects on apply. `Generate` applies the same rule to the
     Application name it is handed. A leading digit (`1api`) is accepted: that
     is the rule under RelaxedServiceNameValidation, on by default from Kubernetes 1.36, and a
-    build whose `spec.kubernetesVersion` is below 1.36 refuses such a Service at generation
-    (go-kure/launcher#959, go-kure/launcher#1230, `docs/delivery-scope.md` §3.5).
+    build whose `spec.kubernetesVersion` is below 1.36 refuses such a Service at generation,
+    unless its `spec.featureGates` sets the gate on (go-kure/launcher#959, go-kure/launcher#1230, `docs/delivery-scope.md` §3.5).
   - **Routing traits use the first port.** `ingress`, `httproute` and `expose`
     (which lowers to one of the two) on a `service` component resolve their
     implicit backend to `ports[0].port` and refuse any other port on it,

@@ -106,7 +106,9 @@ type PropertySchema struct {
 	// featuregates.go) the property needs on the cluster. When the ClusterProfile
 	// states a target version (spec.kubernetesVersion) below the version where the
 	// gate is on by default, an authored value is refused
-	// (go-kure/launcher#1183); with no target version nothing is checked. Like
+	// (go-kure/launcher#1183), unless the profile's spec.featureGates sets the gate on
+	// (go-kure/launcher#1231); a gate set off there refuses it at any version. With no
+	// target version nothing is checked. Like
 	// PlatformReserved, only meaningful for handler properties: the two flat call
 	// sites reject the key at decode time (flatschema.go's key allow-sets).
 	//

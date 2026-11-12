@@ -153,7 +153,12 @@ ServiceAccount/web
 4. **Validate.** `ValidateAuthoredPropertiesForTarget` checks every authored property against
    its type's schema, plus the properties the engine reads itself (a trait's `scope`, for
    example), and returns a normalized copy. Pass that copy to `Transform`. Calling
-   `Transform` on the parsed document skips this check.
+   `Transform` on the parsed document skips this check. A profile that sets
+   `spec.featureGates` needs `ValidateAuthoredPropertiesForTargetWithGates` instead, and
+   `TransformContext.TargetVersion` and `FeatureGates` on the `Transform` call, so the
+   overrides reach the Service name check too. `ValidateAuthoredPropertiesForTargetWithGates`
+   and `FeatureGates` are not in `v0.2.0-beta.5`: pin `main` or a newer tag to use them (see the
+   [OAM schemas and contract](../../api-reference/oam/schemas-and-contract/)).
 5. **Transform, generate, check.** `Transform` lowers the document into a kure `Cluster`.
    `GenerateApplications` builds the objects, and `CheckInDocumentCollisions` fails if two
    applications of the document generate the same object.
