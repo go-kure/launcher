@@ -3,6 +3,9 @@ title: "Parsing and type identity"
 weight: 4
 ---
 
+The implementation, history and tests of each section below are on the
+[contributor page](../../contributing/oam-reference/parsing-and-types.md).
+
 ## Parsing
 
 | Function | Purpose |
@@ -61,18 +64,12 @@ object and the details of each kind.
 `ingress`, `httproute`, `networkpolicy`, `cilium-networkpolicy` and `certificate` are
 also trait types: the two lists are separate, and a component of such a type is the
 authored object, not the trait.
-`pkg/cmd/kurel`'s `TestBuiltinComponentHandlers_AcceptedByParser` is the guard: it
-parses a minimal document for every registered built-in type through
-`ParseWithExtraTypes`, the same entry point `kurel build` uses. One other per-type
+One other per-type
 registry has the same shape and the same failure mode: `traitComponentRestrictions`
 (which traits a component type accepts; `scaler` is restricted to `webservice`, `worker`,
-`deployment` and `statefulset`, and `disruption` to the same four). The `scaler` entry is
-derived from the one table that also gives the scaler its HPA target kind (`Deployment`
-for the first three, `StatefulSet` for `statefulset`), so a type cannot be admitted without
-a target kind. The engine stamps the settled component type on the trait it applies
-(`Trait.ComponentType()`, empty outside a transform), which is where the scaler reads it.
+`deployment` and `statefulset`, and `disruption` to the same four).
 
-**A `scaler` refuses authored `replicas`** (go-kure/launcher#1179). The
+**A `scaler` refuses authored `replicas`**. The
 HorizontalPodAutoscaler owns the replica count, so the scaler builds the Deployment or
 StatefulSet without `spec.replicas`, and `validateTrait` refuses a component that sets `replicas`
 beside a `scaler`, naming the component and pointing to `minReplicas`/`maxReplicas` on the
@@ -82,7 +79,7 @@ properties a lowering rule emits too: while the component type is still lowerabl
 omission and the migration of an already-deployed object are in the components README,
 "Replicas under a `scaler`".
 
-**Tiers are declared, never derived from a type** (go-kure/launcher#783).
+**Tiers are declared, never derived from a type**.
 `ClassifyComponentWithDomain` returns the tier the component's `<domain>/tier` annotation
 names, or the empty tier when it carries none; a `placement` policy replaces it. A
 component in no tier is ordered after no tier (see [Pipeline](pipeline.md#pipeline)). A component a lowering
@@ -93,9 +90,7 @@ annotation or a `placement` policy, is refused.
 ### Component type allowlist
 
 The component types parsing accepts without a widening (`validComponentTypes`), in the order
-`sort.Strings` gives them. A change that adds a type adds its row at its position:
-`pkg/cmd/kurel`'s `TestKindLists_Complete` fails on a type of the list with no row here and
-on a row of no type of the list, and `TestKindLists_InOrder` on a row out of place.
+`sort.Strings` gives them. A change that adds a type adds its row at its position.
 
 | Type |
 |---|
@@ -223,7 +218,7 @@ on a row of no type of the list, and `TestKindLists_InOrder` on a row out of pla
 
 A type (a component, trait or policy type, or a configuration-defined model) is identified by
 `name@version`, lowercase. The registry is keyed by that pair, and each handler, lowering rule and
-model declares its name and version when it registers (go-kure/launcher#1258).
+model declares its name and version when it registers.
 
 ### Grammar
 
