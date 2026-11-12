@@ -1009,7 +1009,7 @@ and by scope, whatever component or trait emits it.
     authored metadata on a kind never existed without it.
 - **Shipped: object metadata on kind components.** Every kind component takes two optional
   properties, `labels` and `annotations`, each a map of strings
-  (`pkg/oam/builtin/components/README.md` "The object's labels and annotations";
+  (`site/content/api-reference/oam-components/conventions.md` "The object's labels and annotations";
   `object_metadata.go` in `pkg/oam`).
   - They go on the object's own metadata and nowhere else. The pod template of a workload
     kind is unchanged, and no selector reads an authored label.
@@ -2459,7 +2459,7 @@ list and the disposition of every item:
   - **Documented, no change:** `service`, `serviceaccount` and `configmap` have no
     `ApplyPolicy`, deliberately. None of their properties maps to an environment-policy
     method, so there is nothing to enforce; the policy makes no statement about a
-    Service's `type` (`pkg/oam/builtin/components/README.md`, the `service` and
+    Service's `type` (`site/content/api-reference/oam-components/kinds-core-workloads.md`, the `service` and
     `serviceaccount` entries).
 - **Pod-template labels (item 3): documented, no change.** `PodTemplateLabels` is
   implemented by `DeploymentConfig` only (`deployment.go`), not by `statefulset`,

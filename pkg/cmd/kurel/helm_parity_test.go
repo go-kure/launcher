@@ -32,7 +32,7 @@ func helmParityPath(name, suffix string) string {
 // diff between the frozen helmchart output and that build with
 // testdata/helm-parity/<name>.diff. Every hunk of a committed diff is one of the
 // approved deltas in the helmchart migration table
-// (pkg/oam/builtin/components/README.md), so a divergence outside that table
+// (site/content/api-reference/oam-components/kinds-helm.md), so a divergence outside that table
 // shows up as a change to a .diff file in review. An empty .diff records a pair
 // that builds identically (a referenced source has no generated-source delta).
 // Set UPDATE_GOLDEN=1 to regenerate the .diff files; the frozen output is never
