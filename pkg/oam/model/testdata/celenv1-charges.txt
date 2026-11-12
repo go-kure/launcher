@@ -45,7 +45,7 @@ getSeconds: scalar-out
 in [disabled]: scalar-out
 indexOf: scalar-out
 int: scalar-out
-join: amplifying (budgetedJoin in equality.go stops before the buffer passes the cap; TestChargeStopsBeforeTheAllocation)
+join: amplifying (budgetedJoin in equality.go checks every element before it writes and stops before the buffer passes the cap; TestChargeStopsBeforeTheAllocation, TestChargeFailAfterWorkSweep)
 lastIndexOf: scalar-out
 lists.range: amplifying (cel-go caps it at 1000000 elements and charges it by size; TestReplaceGrowth pins the cap)
 lowerAscii: bounded (same size as its operand)
