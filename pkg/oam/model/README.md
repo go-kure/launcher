@@ -198,15 +198,18 @@ than 50 components in one call fail with `model.ErrLimit`. The count comes after
 ## Lowering
 
 `model.NewRegistry(tr)` returns a registry for one Transformer. `Register(m)` compiles the model and
-refuses it in these cases. Each failure names the path of the part.
+refuses it in these cases.
 
-- The type of the model is already declared.
-- A part type or a trait type is not declared on the Transformer. A model can name only a model
-  registered before it, so no cycle exists.
-- The models nest more than 4 deep. A model with no model part has depth 1.
+- The type of the model is already declared, or the Transformer refuses to declare it. The error
+  names the model.
+- A part type or a trait type is not declared on the Transformer. The error names the path of the
+  part or the trait. A model can name only a model registered before it, so no cycle exists.
+- The models nest more than 4 deep. A model with no model part has depth 1. The depth is read from
+  the rules the Transformer holds, so it counts a model that another registry registered. The error
+  names the model.
 
-Then `Register` registers the rule and declares the type of the model. A refused model leaves nothing
-registered.
+Then `Register` registers the rule and declares the type of the model. The Transformer checks the
+declaration first (`Transformer.CheckComponentTypes`), so a refused model leaves nothing registered.
 
 A component of the model type lowers into the components of its parts.
 
@@ -215,13 +218,16 @@ A component of the model type lowers into the components of its parts.
 - A part is named `<component>-<part>`. The name allocator of the run gives it, so two parts that want
   one name fail the build, and the error names the name.
 - `parts.<id>.<key>` reads the name that the build gives, under the Naming hook of the run where one
-  is set (`LoweringContext.NamingHook`).
-- A part type and a trait type stay as the model wrote them. The engine resolves the identity to the
-  registered name after each round, as it does for an authored component. A model that emits no
-  component is refused with `model.ErrInvalid`.
+  is set (`LoweringContext.NamingHook`). The hook sees the name of the document as it stands in that
+  round. The build names the object of a kind part (a Secret or a ConfigMap) after the part and never
+  asks the hook for it, so the read does not ask the hook for the role `object` either.
+- A part type and a trait type stay as the model wrote them. The engine resolves an identity to the
+  registered name after each round, as it does for an authored component. A plain name that a handler
+  or a rule is registered under stays as written. A model that emits no component is refused with
+  `model.ErrInvalid`.
 
-The rule enforces two limits. One render gives at most 50 components, and the models nest at most 4
-deep. The limits of a whole build (500 parts, 1 MiB of YAML and one second of run time) belong to the
+The rule enforces one limit and `Register` enforces the other. One render gives at most 50 components,
+and the models nest at most 4 deep. The limits of a whole build (500 parts, 1 MiB of YAML and one second of run time) belong to the
 hostile-corpus step of go-kure/launcher#1261.
 
 **Result.** A string that is exactly one hole gives the value with its type: `int64`, `uint64`,

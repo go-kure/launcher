@@ -121,6 +121,13 @@ func (t *Transformer) DeclareComponentTypes(ids map[string]TypeID) error {
 	return nil
 }
 
+// CheckComponentTypes returns the refusal DeclareComponentTypes would give ids, and nil when it
+// would take them, for names whose handler or rule is not registered yet. It declares nothing.
+func (t *Transformer) CheckComponentTypes(ids map[string]TypeID) error {
+	_, err := t.componentTypes.with("component", ids, func(string) bool { return true })
+	return err
+}
+
 // DeclareTraitTypes is DeclareComponentTypes for trait types.
 func (t *Transformer) DeclareTraitTypes(ids map[string]TypeID) error {
 	ix, err := t.traitTypes.with("trait", ids, t.isTraitKey)
@@ -254,7 +261,15 @@ func resolveRef(ix *typeIndex, ref string, form typeForm) (string, bool, error) 
 // Transformer.
 type typeIdentities struct {
 	components, traits, policies *typeIndex
+	// keep, when set, names a reference that stays as written: a plain name a handler or a
+	// rule is registered under, per position. Resolving what a lowering rule emitted sets it,
+	// because dispatch has always taken such a name as it stands, where an authored reference
+	// is refused when more than one declared type claims it.
+	keep *keptTypes
 }
+
+// keptTypes says, for each position, whether a reference is registered as it is written.
+type keptTypes struct{ component, trait, policy func(string) bool }
 
 func (t *Transformer) identities() *typeIdentities {
 	return &typeIdentities{components: t.componentTypes, traits: t.traitTypes, policies: t.policyTypes}
@@ -279,9 +294,28 @@ func (t *Transformer) resolveTypes(app *Application) (*Application, error) {
 	return t.identities().resolve(app, byKey)
 }
 
+// resolveEmitted is resolveTypes for the output of a lowering round: a plain name that a
+// handler or a rule is registered under stays as written, so only an identity a rule wrote
+// changes, and a name that dispatch took before still dispatches.
+func (t *Transformer) resolveEmitted(app *Application) (*Application, error) {
+	ids := t.identities()
+	ids.keep = &keptTypes{component: t.isComponentKey, trait: t.isTraitKey, policy: t.isPolicyKey}
+	return ids.resolve(app, byKey)
+}
+
 func (ids *typeIdentities) resolve(app *Application, form typeForm) (*Application, error) {
 	if ids == nil || (ids.components == nil && ids.traits == nil && ids.policies == nil) {
 		return app, nil
+	}
+	resolveRef := func(ix *typeIndex, keep func(string) bool, ref string, form typeForm) (string, bool, error) {
+		if keep != nil && keep(ref) {
+			return ref, false, nil
+		}
+		return resolveRef(ix, ref, form)
+	}
+	var keepComponent, keepTrait, keepPolicy func(string) bool
+	if ids.keep != nil {
+		keepComponent, keepTrait, keepPolicy = ids.keep.component, ids.keep.trait, ids.keep.policy
 	}
 	var out *Application
 	own := func() {
@@ -294,7 +328,7 @@ func (ids *typeIdentities) resolve(app *Application, form typeForm) (*Applicatio
 	}
 	for i := range app.Spec.Components {
 		c := &app.Spec.Components[i]
-		key, changed, err := resolveRef(ids.components, c.Type, form)
+		key, changed, err := resolveRef(ids.components, keepComponent, c.Type, form)
 		if err != nil {
 			return nil, errors.Errorf("component %q: %w", c.Name, err)
 		}
@@ -303,7 +337,7 @@ func (ids *typeIdentities) resolve(app *Application, form typeForm) (*Applicatio
 			out.Spec.Components[i].Type = key
 		}
 		for j := range c.Traits {
-			key, changed, err := resolveRef(ids.traits, c.Traits[j].Type, form)
+			key, changed, err := resolveRef(ids.traits, keepTrait, c.Traits[j].Type, form)
 			if err != nil {
 				return nil, errors.Errorf("component %q trait[%d]: %w", c.Name, j, err)
 			}
@@ -317,7 +351,7 @@ func (ids *typeIdentities) resolve(app *Application, form typeForm) (*Applicatio
 	}
 	for i := range app.Spec.Policies {
 		p := &app.Spec.Policies[i]
-		key, changed, err := resolveRef(ids.policies, p.Type, form)
+		key, changed, err := resolveRef(ids.policies, keepPolicy, p.Type, form)
 		if err != nil {
 			return nil, errors.Errorf("policy %q: %w", p.Name, err)
 		}
