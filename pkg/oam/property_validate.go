@@ -115,7 +115,7 @@ func validateObjectProperties(schema map[string]PropertySchema, exclusive []Excl
 		// interface value is non-nil even though the data it holds is, and that
 		// value still serializes to JSON `null` — so isNullValue is needed here too.
 		if v, present := props[key]; !present || isNullValue(v) {
-			return errors.Errorf("%s: %q is required", path, key)
+			return requiredError(path, key, "")
 		}
 	}
 	if err := checkExclusive(exclusive, schema, props, true, path, ""); err != nil {
@@ -127,7 +127,7 @@ func validateObjectProperties(schema map[string]PropertySchema, exclusive []Excl
 			if additionalAllowed {
 				continue
 			}
-			return &unsupportedFieldError{path: path, key: key, allowed: declaredFields(schema)}
+			return newUnsupportedField(path, key, schema)
 		}
 		// Normalize an explicit null under an optional declared key to absence, so
 		// the classification the Required loop above already makes is what a
@@ -235,10 +235,11 @@ func checkTopLevelRequired(schema map[string]PropertySchema, props map[string]an
 // requiredError is the refusal of a missing Required key: the plain wording, or the
 // wording that names the capability whose rendering did not supply it either.
 func requiredError(path, key, capability string) error {
-	if capability == "" {
-		return errors.Errorf("%s: %q is required", path, key)
+	e := propertyErrorf(PropertyErrorRequired, path, "%q is required", key).withKey(key)
+	if capability != "" {
+		e.msg = fmt.Sprintf("%s; neither the trait nor capability %q's rendering sets it", e.msg, capability)
 	}
-	return errors.Errorf("%s: %q is required; neither the trait nor capability %q's rendering sets it", path, key, capability)
+	return e
 }
 
 // checkRequiredIn is checkNestedRequired for one present value: an object's
@@ -319,15 +320,15 @@ func checkExclusive(groups []ExclusiveGroup, schema map[string]PropertySchema, p
 		}
 		if len(set) > 1 {
 			if capability == "" {
-				return errors.Errorf("%s: %s are mutually exclusive", path, quotedKeys(set))
+				return propertyErrorf(PropertyErrorExclusive, path, "%s are mutually exclusive", quotedKeys(set))
 			}
-			return errors.Errorf("%s: %s are mutually exclusive; the trait merged with capability %q's rendering sets them together", path, quotedKeys(set), capability)
+			return propertyErrorf(PropertyErrorExclusive, path, "%s are mutually exclusive; the trait merged with capability %q's rendering sets them together", quotedKeys(set), capability)
 		}
 		if len(set) == 0 && required && group.Required {
 			if capability == "" {
-				return errors.Errorf("%s: exactly one of %s is required", path, quotedKeys(group.Keys))
+				return propertyErrorf(PropertyErrorExclusive, path, "exactly one of %s is required", quotedKeys(group.Keys))
 			}
-			return errors.Errorf("%s: exactly one of %s is required; neither the trait nor capability %q's rendering sets one", path, quotedKeys(group.Keys), capability)
+			return propertyErrorf(PropertyErrorExclusive, path, "exactly one of %s is required; neither the trait nor capability %q's rendering sets one", quotedKeys(group.Keys), capability)
 		}
 	}
 	return nil
@@ -340,17 +341,17 @@ func checkExclusiveGroups(groups []ExclusiveGroup, schema map[string]PropertySch
 	seen := make(map[string]bool)
 	for i, group := range groups {
 		if len(group.Keys) < 2 {
-			return errors.Errorf("%s: schema declares exclusive group %d with %d key(s); a group needs at least two", path, i, len(group.Keys))
+			return propertyErrorf(PropertyErrorSchema, path, "schema declares exclusive group %d with %d key(s); a group needs at least two", i, len(group.Keys))
 		}
 		for _, key := range group.Keys {
 			field, declared := schema[key]
 			switch {
 			case !declared:
-				return errors.Errorf("%s: schema declares exclusive key %q, which is not a declared property", path, key)
+				return propertyErrorf(PropertyErrorSchema, path, "schema declares exclusive key %q, which is not a declared property", key)
 			case seen[key]:
-				return errors.Errorf("%s: schema lists exclusive key %q twice", path, key)
+				return propertyErrorf(PropertyErrorSchema, path, "schema lists exclusive key %q twice", key)
 			case field.Required:
-				return errors.Errorf("%s: schema declares exclusive key %q Required; a group's keys are optional, and the group's Required says one is set", path, key)
+				return propertyErrorf(PropertyErrorSchema, path, "schema declares exclusive key %q Required; a group's keys are optional, and the group's Required says one is set", key)
 			}
 			seen[key] = true
 		}
@@ -388,7 +389,7 @@ func CheckSchemaNodeGroups(field PropertySchema, path string) error {
 	case field.Type == PropertyTypeObject:
 		return checkExclusiveGroups(field.Exclusive, field.Properties, path)
 	case len(field.Exclusive) > 0:
-		return errors.Errorf("%s: schema declares exclusive groups on a non-object node; they name keys of an object", path)
+		return propertyErrorf(PropertyErrorSchema, path, "schema declares exclusive groups on a non-object node; they name keys of an object")
 	}
 	return nil
 }
@@ -493,10 +494,10 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 	if schema.Type != "" && len(schema.Types) > 0 {
 		// A schema, not a document, is wrong here — the same loud failure as an
 		// unsupported Type below.
-		return value, errors.Errorf("%s: schema declares both type %q and types %v; set exactly one", path, schema.Type, schema.Types)
+		return value, propertyErrorf(PropertyErrorSchema, path, "schema declares both type %q and types %v; set exactly one", schema.Type, schema.Types)
 	}
 	if len(schema.Exclusive) > 0 && schema.Type != PropertyTypeObject {
-		return value, errors.Errorf("%s: schema declares exclusive groups on a non-object node; they name keys of an object", path)
+		return value, propertyErrorf(PropertyErrorSchema, path, "schema declares exclusive groups on a non-object node; they name keys of an object")
 	}
 
 	switch schema.Type {
@@ -513,17 +514,17 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// schema built for a call site that leaves Type empty (flatschema.go).
 	case PropertyTypeString:
 		if !isStringValue(value) {
-			return value, errors.Errorf("%s: expected string, got %T", path, value)
+			return value, propertyErrorf(PropertyErrorType, path, "expected string, got %T", value)
 		}
 		value = unnamedScalar(value)
 	case PropertyTypeBoolean:
 		if !isBooleanValue(value) {
-			return value, errors.Errorf("%s: expected boolean, got %T", path, value)
+			return value, propertyErrorf(PropertyErrorType, path, "expected boolean, got %T", value)
 		}
 		value = unnamedScalar(value)
 	case PropertyTypeInteger:
 		if !isIntegerValue(value) {
-			return value, errors.Errorf("%s: expected integer, got %T (%v)", path, value, value)
+			return value, propertyErrorf(PropertyErrorType, path, "expected integer, got %T (%v)", value, value)
 		}
 		normalized, err := normalizeIntegerValue(value, path)
 		if err != nil {
@@ -532,13 +533,13 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		value = normalized
 	case PropertyTypeNumber:
 		if !isNumberValue(value) {
-			return value, errors.Errorf("%s: expected number, got %T", path, value)
+			return value, propertyErrorf(PropertyErrorType, path, "expected number, got %T", value)
 		}
 		value = unnamedScalar(value)
 	case PropertyTypeArray:
 		items, ok := asArrayValue(value)
 		if !ok {
-			return value, errors.Errorf("%s: expected array, got %T", path, value)
+			return value, propertyErrorf(PropertyErrorType, path, "expected array, got %T", value)
 		}
 		for i, item := range items {
 			elemPath := fmt.Sprintf("%s[%d]", path, i)
@@ -559,7 +560,7 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 			// handler parser as a nil in a []any, which is the shape the contract
 			// exists to keep out.
 			if isNullValue(item) {
-				return value, errors.Errorf("%s: null is not a valid array element", elemPath)
+				return value, propertyErrorf(PropertyErrorNullElement, elemPath, "null is not a valid array element")
 			}
 			if schema.Items == nil {
 				continue
@@ -574,7 +575,7 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 	case PropertyTypeObject:
 		obj, ok := asObjectValue(value)
 		if !ok {
-			return value, errors.Errorf("%s: expected object, got %T", path, value)
+			return value, propertyErrorf(PropertyErrorType, path, "expected object, got %T", value)
 		}
 		// Run unconditionally, even when schema.Properties is nil: a nil map has no
 		// declared keys, so every key in obj is "not declared" by definition, and
@@ -591,7 +592,7 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// outside the PropertyType vocabulary. Silently accepting it would make the
 		// field unvalidated forever, so it fails loudly at the one place that reads
 		// the schema.
-		return value, errors.Errorf("%s: schema declares unsupported property type %q", path, schema.Type)
+		return value, propertyErrorf(PropertyErrorSchema, path, "schema declares unsupported property type %q", schema.Type)
 	}
 
 	if len(schema.Enum) > 0 {
@@ -641,13 +642,13 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// per-TYPE property any more, and this arm does not need it to be true.
 		for i, member := range schema.Enum {
 			if enumMemberHoldsStrippedNull(schema, member, 0) {
-				return value, errors.Errorf(
-					"%s: schema declares Enum member %d holding a null, which no validated value can match",
-					path, i)
+				return value, propertyErrorf(
+					PropertyErrorSchema, path,
+					"schema declares Enum member %d holding a null, which no validated value can match", i)
 			}
 		}
 		if !enumContainsValue(schema.Enum, value) {
-			return value, errors.Errorf("%s: value %v not in allowed set %v", path, value, schema.Enum)
+			return value, propertyErrorf(PropertyErrorEnum, path, "value %v not in allowed set %v", value, schema.Enum)
 		}
 	}
 	return value, nil
@@ -675,15 +676,15 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 // differently.
 func validateUnionValue(types []PropertyType, value any, path string) (any, error) {
 	if len(types) < 2 {
-		return value, errors.Errorf("%s: schema declares types %v: a union needs at least two members (use type for one)", path, types)
+		return value, propertyErrorf(PropertyErrorSchema, path, "schema declares types %v: a union needs at least two members (use type for one)", types)
 	}
 	seen := make(map[PropertyType]bool, len(types))
 	for _, typ := range types {
 		if _, ok := unionMemberMatches[typ]; !ok {
-			return value, errors.Errorf("%s: schema declares types member %q, but union members must be scalar types (string, integer, number, boolean)", path, typ)
+			return value, propertyErrorf(PropertyErrorSchema, path, "schema declares types member %q, but union members must be scalar types (string, integer, number, boolean)", typ)
 		}
 		if seen[typ] {
-			return value, errors.Errorf("%s: schema declares types member %q more than once", path, typ)
+			return value, propertyErrorf(PropertyErrorSchema, path, "schema declares types member %q more than once", typ)
 		}
 		seen[typ] = true
 	}
@@ -703,7 +704,7 @@ func validateUnionValue(types []PropertyType, value any, path string) (any, erro
 	if firstErr != nil {
 		return value, firstErr
 	}
-	return value, errors.Errorf("%s: expected one of %s, got %T", path, joinPropertyTypes(types), value)
+	return value, propertyErrorf(PropertyErrorType, path, "expected one of %s, got %T", joinPropertyTypes(types), value)
 }
 
 // unionMemberMatches is the set of types a Types union may list, each with the kind
@@ -923,7 +924,7 @@ func normalizeIntegerValue(value any, path string) (any, error) {
 		}
 		i := rv.Int()
 		if int64(int(i)) != i {
-			return value, errors.Errorf("%s: integer %d out of range (min %d, max %d)", path, i, math.MinInt, math.MaxInt)
+			return value, propertyErrorf(PropertyErrorRange, path, "integer %d out of range (min %d, max %d)", i, math.MinInt, math.MaxInt)
 		}
 		return int(i), nil
 	case reflect.Int8, reflect.Int16:
@@ -931,7 +932,7 @@ func normalizeIntegerValue(value any, path string) (any, error) {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		u := rv.Uint()
 		if u > math.MaxInt {
-			return value, errors.Errorf("%s: integer %d out of range (max %d)", path, u, math.MaxInt)
+			return value, propertyErrorf(PropertyErrorRange, path, "integer %d out of range (max %d)", u, math.MaxInt)
 		}
 		return int(u), nil
 	default:

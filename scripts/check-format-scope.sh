@@ -165,6 +165,7 @@ LEFT_OUT_PATHS=(
   # Go API only, never a document: error types and their text, a provider's output declarations
   # (go-kure/launcher#1367).
   pkg/oam/errors.go
+  pkg/oam/property_error.go
   pkg/oam/name_collision.go
   pkg/oam/generated_object_collision.go
   pkg/oam/outputs.go

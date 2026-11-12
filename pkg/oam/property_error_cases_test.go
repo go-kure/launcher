@@ -130,6 +130,10 @@ func newPerrTransformer() *Transformer {
 			"perr-union-one":       perrBadComp("perr-union-one", one(PropertySchema{Types: []PropertyType{PropertyTypeString}})),
 			"perr-union-array":     perrBadComp("perr-union-array", one(PropertySchema{Types: []PropertyType{PropertyTypeString, PropertyTypeArray}})),
 			"perr-union-duplicate": perrBadComp("perr-union-duplicate", one(PropertySchema{Types: []PropertyType{PropertyTypeString, PropertyTypeString}})),
+			"perr-empty-key": perrBadComp("perr-empty-key", map[string]PropertySchema{
+				"o": {Type: PropertyTypeObject, Properties: map[string]PropertySchema{"ok": str}},
+				"r": {Type: PropertyTypeObject, Properties: map[string]PropertySchema{"": {Type: PropertyTypeString, Required: true}}},
+			}),
 		},
 		map[string]TraitHandler{
 			"perr-trait":      perrTrait{typ: "perr-trait", perrSchema: perrFullSchema()},
@@ -262,5 +266,10 @@ func perrCases() []perrCase {
 			kind: "type", pos: "trait", comp: "we.b: x", trait: "perr-trait", field: "a.b: c"},
 		{name: "policy name and key with separators", app: perrPolicyApp("po.l: x", with(map[string]any{"obj": map[string]any{"i.n: k": "s"}})),
 			kind: "type", pos: "policy", pol: "po.l: x", field: "obj.i.n: k"},
+		// An empty key is a key: its dot stays in the field.
+		{name: "unsupported empty key below an object", app: perrNamedApp("web", "perr-empty-key", map[string]any{"o": map[string]any{"": 1}}),
+			kind: "unsupported-field", pos: "component", comp: "web", field: "o."},
+		{name: "required empty key below an object", app: perrNamedApp("web", "perr-empty-key", map[string]any{"r": map[string]any{}}),
+			kind: "required", pos: "component", comp: "web", field: "r."},
 	}
 }

@@ -252,6 +252,10 @@ func (t *Transformer) enforceDocumentReservations(app *Application) error {
 // merge that could supply a key.
 func (t *Transformer) validateAuthoredPolicy(pol *ApplicationPolicy) error {
 	path := fmt.Sprintf("policy %q (type %q): properties", pol.Name, pol.Type)
+	return locate(t.validateAuthoredPolicyAt(pol, path), path, PropertyError{Position: "policy", Policy: pol.Name})
+}
+
+func (t *Transformer) validateAuthoredPolicyAt(pol *ApplicationPolicy, path string) error {
 	if h, ok := t.policyHandlers[pol.Type]; ok {
 		return validateAuthoredAgainst(h, pol.Properties, path)
 	}
@@ -267,6 +271,10 @@ func (t *Transformer) validateAuthoredPolicy(pol *ApplicationPolicy) error {
 // checked against the rule that will consume it.
 func (t *Transformer) validateAuthoredComponent(comp *Component) error {
 	path := fmt.Sprintf("component %q (type %q): properties", comp.Name, comp.Type)
+	return locate(t.validateAuthoredComponentAt(comp, path), path, PropertyError{Position: "component", Component: comp.Name})
+}
+
+func (t *Transformer) validateAuthoredComponentAt(comp *Component, path string) error {
 	if h, ok := t.componentHandlers[comp.Type]; ok {
 		return withUnsupportedFieldHint(h, validateAuthoredComponentAgainst(h, comp.Properties, path))
 	}
@@ -332,25 +340,23 @@ type nestedUnsupportedFieldHinter interface {
 	NestedUnsupportedFieldHint(parents []string, key string) string
 }
 
-// unsupportedFieldError is the refusal of an undeclared key, at any depth:
+// newUnsupportedField is the refusal of an undeclared key, at any depth:
 // validateAuthoredProperties' at the top level, validateObjectProperties'
-// below it. parents are the declared keys above the refused one, nil at the
+// below it. Its parents are the declared keys above the refused one, nil at the
 // top level; each object level that returns the error prepends its own key
 // (withUnsupportedFieldParent).
-type unsupportedFieldError struct {
-	path, key, allowed string
-	parents            []string
-}
-
-func (e *unsupportedFieldError) Error() string {
-	return fmt.Sprintf("%s: unsupported field %q (allowed: %s)", e.path, e.key, e.allowed)
+func newUnsupportedField(path, key string, schema map[string]PropertySchema) *PropertyError {
+	allowed := declaredFields(schema)
+	e := propertyErrorf(PropertyErrorUnsupportedField, path, "unsupported field %q (allowed: %s)", key, allowed).withKey(key)
+	e.allowed = allowed
+	return e
 }
 
 // withUnsupportedFieldParent records key as the parent of the undeclared key
 // err refuses, when it refuses one, and returns err.
 func withUnsupportedFieldParent(err error, key string) error {
-	var uerr *unsupportedFieldError
-	if errors.As(err, &uerr) {
+	var uerr *PropertyError
+	if errors.As(err, &uerr) && uerr.Kind == PropertyErrorUnsupportedField {
 		uerr.parents = append([]string{key}, uerr.parents...)
 	}
 	return err
@@ -361,8 +367,8 @@ func withUnsupportedFieldParent(err error, key string) error {
 // a top-level key, NestedUnsupportedFieldHint for one below it. Any other err
 // is returned unchanged.
 func withUnsupportedFieldHint(handler any, err error) error {
-	var uerr *unsupportedFieldError
-	if !errors.As(err, &uerr) {
+	var uerr *PropertyError
+	if !errors.As(err, &uerr) || uerr.Kind != PropertyErrorUnsupportedField {
 		return err
 	}
 	var hint string
@@ -395,6 +401,10 @@ func withUnsupportedFieldHint(handler any, err error) error {
 // checked on its properties as written.
 func (t *Transformer) validateAuthoredTrait(componentName string, trait *Trait, capabilities map[string]CapabilityBinding) error {
 	path := fmt.Sprintf("component %q: trait %q: properties", componentName, trait.Type)
+	return locate(t.validateAuthoredTraitAt(trait, capabilities, path), path, PropertyError{Position: "trait", Component: componentName, Trait: trait.Type})
+}
+
+func (t *Transformer) validateAuthoredTraitAt(trait *Trait, capabilities map[string]CapabilityBinding, path string) error {
 	var handler any
 	if h, ok := t.traitHandlers[trait.Type]; ok {
 		handler = h
@@ -629,7 +639,7 @@ func validateAuthoredTopLevel(schema map[string]PropertySchema, exclusive []Excl
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		field, ok := schema[key]
 		if !ok {
-			return &unsupportedFieldError{path: path, key: key, allowed: declaredFields(schema)}
+			return newUnsupportedField(path, key, schema)
 		}
 		normalized, err := validatePropertyValue(field, props[key], path+"."+key)
 		if err != nil {

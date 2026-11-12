@@ -3352,6 +3352,35 @@ takes (`destinationPath`, `endpointURL`, `secretName`) and the reason `backup.ob
 (`serverName`, `azureCredentials`, `googleCredentials`; go-kure/launcher#1001). Before go-kure/launcher#790 a nested refusal carried no hint.
 The refusal text itself is unchanged at every depth.
 
+**Where a refusal is, as data.** Every refusal the property validators make is a
+`*PropertyError` (go-kure/launcher#1466): `errors.As` finds it in the error the call
+returns, a hinted refusal included, and `Error()` is the text above, byte for byte.
+The one exception is the platform-reservation check described below: its refusal
+wraps `ErrPlatformReserved`, which `errors.Is` finds, and it names its location in
+its text only. A caller that maps a refusal to a reply of its own reads these fields
+and parses no text:
+
+| Field | Holds |
+|---|---|
+| `Kind` | `unsupported-field`, `required`, `exclusive`, `type`, `enum`, `range`, `null-element`, or `schema` (the handler's own schema is malformed, so the document is not at fault) |
+| `Position` | `component`, `trait` or `policy`; empty where the refusal was made on no authored document (a schema, a property a rule emitted) |
+| `Component`, `Trait`, `Policy` | the component's name (for a trait, the one it sits on), the trait's type, the policy's name; empty where they do not apply |
+| `Field` | the location below `properties`: dotted keys, array elements as `[n]`, as in `probes.httpGet[0].port`. For `unsupported-field` and `required` it is the key itself; for `exclusive` the object holding the group, empty at the top level; for `schema` the node whose declaration is wrong |
+
+```go
+var pe *oam.PropertyError
+if errors.As(err, &pe) && pe.Kind == oam.PropertyErrorRequired {
+    // pe.Component, pe.Trait and pe.Field name the missing key
+}
+```
+
+`Field` is the path as the refusal builds it, so a key that itself holds a dot
+reads the same as a nested one (`a.b` is one key or two); the kind and the
+position are exact either way. A refusal that names a document position is made
+by the three boundaries of this check; the same refusal made by `Transform`'s
+emission checks carries a kind and no position. The exported helper
+`CheckSchemaNodeGroups` returns the `schema` kind too.
+
 Before any of that, it runs `Transform`'s own reservation check
 (`enforcePlatformReserved`) over the document, with the same schemas and the same
 error text `Transform` would report for it. It has to come first: validation drops an
