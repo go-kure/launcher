@@ -140,7 +140,7 @@ fi
 
 [[ -f "$PINS" ]] || die "pin list not found: $PINS"
 
-found="$(find "$SITE" -name '*.html' -type f | sort)"
+found="$(find "$SITE" -name '*.html' -type f | sort)" || die "cannot read $SITE"
 [[ -n "$found" ]] || die "no pages (*.html) under $SITE"
 mapfile -t PAGES <<<"$found"
 
@@ -159,7 +159,7 @@ report() { echo "FAIL $*"; fail=1; }
 
 # 1. Pins.
 npins=0
-while read -r page id _; do
+while read -r page id _ || [[ -n "${page:-}" ]]; do
     [[ -z "${page:-}" || "$page" == \#* ]] && continue
     [[ -n "${id:-}" ]] || die "pin list line has a page and no id: $page"
     npins=$((npins + 1))

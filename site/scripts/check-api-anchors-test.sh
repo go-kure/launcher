@@ -236,7 +236,22 @@ pins "$d/pins.txt" 'api-reference/a/ a-one'
 expect "encoded newline is no match" 1 "link #a-one%0A" -- --site "$d/site" --pins "$d/pins.txt"
 expect "encoded NUL is no match" 1 'no id "a-one%00"' -- --site "$d/site" --pins "$d/pins.txt"
 
-# 20 to 27: input errors exit 2 and never pass. An empty pin list and an empty site
+# 20: a pin on the last line of the list is read when the file has no trailing newline.
+d="$WORK/no-newline"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2>'
+printf 'api-reference/a/ a-one\napi-reference/a/ a-gone' > "$d/pins.txt"
+expect "last pin without a newline is checked" 1 "api-reference/a/ a-gone: no element" -- --site "$d/site" --pins "$d/pins.txt"
+
+# 21: a find that fails is exit 2, never a broken anchor. A stub find fails.
+d="$WORK/find-error"
+page "$d/site" api-reference/a '<h2 id=a-one>One</h2>'
+pins "$d/pins.txt" 'api-reference/a/ a-one'
+mkdir -p "$d/bin"
+printf '#!/bin/sh\nexit 1\n' > "$d/bin/find"
+chmod +x "$d/bin/find"
+PATH="$d/bin:$PATH" expect "find error is exit 2" 2 "cannot read" -- --site "$d/site" --pins "$d/pins.txt"
+
+# 22 to 29: input errors exit 2 and never pass. An empty pin list and an empty site
 # would otherwise read as a clean run.
 d="$WORK/inputs"
 page "$d/site" api-reference/a '<h2 id=a-one>One</h2>'
