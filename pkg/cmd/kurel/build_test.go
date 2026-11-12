@@ -1000,7 +1000,7 @@ func sortedSchemaKeys(m map[string]oam.PropertySchema) []string {
 // Enum declared on an array- or object-typed node is legal and keeps matching, as long
 // as no member holds a null. This test previously asserted the per-type rule and said
 // validatePropertyValue rejected it at runtime. It does not — see the Enum arm in
-// pkg/oam/property_validate.go and the matching paragraph in pkg/oam/README.md, which
+// pkg/oam/property_validate.go and the matching paragraph in site/content/api-reference/oam/schemas-and-contract.md, which
 // record why the rule was narrowed — so that assertion would eventually have failed a
 // legal schema for a reason that was not true.
 func TestBuiltinHandlerSchemaEnumMembersHoldNoNull(t *testing.T) {

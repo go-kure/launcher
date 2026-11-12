@@ -74,13 +74,14 @@ var kindTables = []struct {
 	{"../../../docs/oam/design-kurel-package.md", "### 4.2 Supported component types (Phase 1)"},
 }
 
-// allowlistTable is the table of pkg/oam/README.md that names every type of
-// pkg/oam's validComponentTypes, one row each. TestKindLists_Complete holds
-// its rows to that list, which holds more than the registered types: it also
-// names the types a lowering rule lowers away (webservice, helm, postgresql).
+// allowlistTable is the table of the "Parsing and type identity" part of the OAM
+// page that names every type of pkg/oam's validComponentTypes, one row each.
+// TestKindLists_Complete holds its rows to that list, which holds more than the
+// registered types: it also names the types a lowering rule lowers away
+// (webservice, helm, postgresql).
 var allowlistTable = struct {
 	file, heading, list string
-}{"../../oam/README.md", "### Component type allowlist", "../../oam/validate.go"}
+}{"../../../site/content/api-reference/oam/parsing-and-types.md", "### Component type allowlist", "../../oam/validate.go"}
 
 // The reasons more than one component type gives for having no row.
 const (

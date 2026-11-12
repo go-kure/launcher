@@ -109,7 +109,7 @@ The references name the code before that change.
 ### 2.2 Shipped (go-kure/launcher#783): explicit ordering, one bundle shape
 
 What the code does now (`pkg/oam/ordering.go`, `buildCluster` in `pkg/oam/transform.go`,
-`pkg/oam/README.md` "Pipeline"):
+`site/content/api-reference/oam/pipeline.md` "Pipeline"):
 
 1. **No automatic category.** The type table and the generated-source rule are gone.
    `classify.go` keeps `DefaultDomain`, `TierAnnotationKey`, `ComponentLabelKeyForDomain`
@@ -258,7 +258,7 @@ Decided in the ticket:
     kinds: a name with a colon, which a cluster accepts, is refused.
   - `networkpolicy` `name` (`NetworkPolicyHandler`, `traits/networkpolicy.go`).
 - **Shipped: a consumer naming hook** on `TransformContext` (`Naming`, a
-  `func(NameRequest) (string, bool)`; `pkg/oam/naming.go`, `pkg/oam/README.md` "Name roles
+  `func(NameRequest) (string, bool)`; `pkg/oam/naming.go`, `site/content/api-reference/oam/names-and-overrides.md` "Name roles
   and the `Naming` hook"). A name is the author's property, else the hook's answer, else
   the default.
   - The roles are a closed set (`NameRoles`): the application's bundle, each ordered
@@ -306,7 +306,7 @@ Decided in the ticket:
   other role names resolves it under role `generated`, and it is then held apart as
   every other.
 - **Shipped: two applications of one name in one bundle are refused** (`pkg/oam/bundle_application_names.go`,
-  `pkg/oam/README.md` "Name roles and the `Naming` hook"). A sub-application's name is not
+  `site/content/api-reference/oam/names-and-overrides.md` "Name roles and the `Naming` hook"). A sub-application's name is not
   claimed when it is resolved, since its `ApplyPolicy` may still rename it; once every
   trait of a bundle and every sub-application's policy has run, two applications of one
   name in the bundle (a component's own and a trait's sub-application, or two
@@ -323,7 +323,7 @@ Decided in the ticket:
   endpoint selector follows the chosen name. `poolerName` without `pooler.enabled: true`
   is refused, and so is either name when it is already a component of the document.
 - **Shipped: `objectName` on every kind component** (`pkg/oam/object_name.go`,
-  `pkg/oam/README.md` "`objectName`: the object of a kind component"). It names the
+  `site/content/api-reference/oam/names-and-overrides.md` "`objectName`: the object of a kind component"). It names the
   component's one object and nothing else: labels, selectors and trait-derived names keep
   the component name, except the endpoint selector of a `cnpg-cluster` or `cnpg-pooler`
   component, which matches the pods the object owns and follows the object name. The engine reads it and asks the hook under role `object`; a handler
@@ -421,7 +421,7 @@ Decided in the ticket:
     `<component>-recovery-source`; no property names it. The Cluster's recovery source
     names the store by it. A source naming an existing store generates none, and the hook
     is not asked.
-- **Hook-group names** (`pkg/oam/README.md` "Pipeline" and "Name roles and the `Naming`
+- **Hook-group names** (`site/content/api-reference/oam/pipeline.md` "Pipeline" and "Name roles and the `Naming`
   hook"). Role `hook-group` names the prefix of a `helmtemplate` component's hook-group
   layouts, `<prefix>-<NN>-<phase>`, by `hookGroupNamePrefix` on `helmtemplate` and on `helm`
   under `delivery: template`, else the hook, else `<application>-<component>`.
@@ -444,7 +444,7 @@ Decided in the ticket:
   - **Breaking** (go-kure/launcher#941): under per-layout placement a default child's
     Kustomization is `<bundle's Kustomization>-<child>` (`shop-shop-db-01-main`) again; from
     go-kure/launcher#787 it was `shop-db-01-main`, shortened to 63 by launcher's rule.
-- **A chart's layout Kustomization** (`pkg/oam/README.md` "Pipeline" and "Name roles and the
+- **A chart's layout Kustomization** (`site/content/api-reference/oam/pipeline.md` "Pipeline" and "Name roles and the
   `Naming` hook"). Role `layout` names the Flux Kustomization kure generates under per-layout
   placement for the layout of a chart (`helmtemplate`, or `helm` under `delivery: template`),
   by `layoutKustomizationName`, else the hook, else kure's own `<bundle>-<component>`.
@@ -502,7 +502,7 @@ Decided in the ticket:
 
 - **go-kure/launcher#793, one shortening rule:** `ShortenName(name, limit)` and
   `ShortenNameWithSuffix(name, suffix, limit)` (`pkg/oam/shorten_name.go`;
-  `pkg/oam/README.md` "Names and overrides"). A name that fits is returned unchanged. A
+  `site/content/api-reference/oam/names-and-overrides.md` "Names and overrides"). A name that fits is returned unchanged. A
   longer one keeps a prefix, a `-` and the first 10 hex characters of the sha256 of the
   whole name; a fixed suffix is kept whole, unless it leaves less room than the digest
   needs (a long routing `scope`): name and suffix are then shortened together. The caller
@@ -543,7 +543,7 @@ Decided in the ticket:
 - **Now:** the transform's last step records the owner of every application, and launcher
   stamps `<ComponentLabelKey>: ComponentLabelValue(c)` on every object and pod template a
   component owns, where the key is absent (`pkg/oam/component_ownership.go`,
-  `pkg/oam/README.md` "Component label and ownership"). The label is authoritative
+  `site/content/api-reference/oam/labels-and-ownership.md` "Component label and ownership"). The label is authoritative
   (go-kure/launcher#790): where the key is there with a value that is not the component's,
   generation is refused (`pkg/oam/component_label_check.go`). That holds for an object's own
   labels, a pod template's, the labels a CloudNativePG Cluster or Pooler and the Prometheus
@@ -865,7 +865,7 @@ its text:
   registries stays a fetch failure and no violation; its error holds the refusal with the
   registry class.
 - **Breaking** for an unkeyed `oam.ViolationError` literal only.
-- The table of classes is in `pkg/oam/README.md`, "Refusal classes".
+- The table of classes is in `site/content/api-reference/oam/policy-and-capability.md`, "Refusal classes".
 
 ### 5.4 Shipped (go-kure/launcher#934): object kind policy
 
@@ -919,7 +919,7 @@ and by scope, whatever component or trait emits it.
 - **Before:** no builtin implemented `ContractDescriber`, so `HandlerContracts()` returned
   empty maps. A missing co-registration was found only when a lowered component was
   dispatched, and the message named the type, not the authored component or the rule.
-- **Now** (`pkg/oam/README.md` "Contract metadata"):
+- **Now** (`site/content/api-reference/oam/schemas-and-contract.md` "Contract metadata"):
   - Every built-in handler and lowering rule implements `ContractDescriber`
     (`pkg/oam/handler.go`; one `contract.go` in each of the components, traits and
     policies packages, or the kind's own file for a kind component added since).
@@ -955,7 +955,7 @@ and by scope, whatever component or trait emits it.
 - **Shipped: reserved metadata keys.** A consumer names the label and annotation keys it
   keeps to itself in `TransformContext.ReservedMetadataKeys` (exact keys, or a prefix ending
   in `/`), and one rule refuses such a key on every object that reaches the output, whatever
-  component type or trait carries it (`pkg/oam/README.md` "Reserved metadata keys";
+  component type or trait carries it (`site/content/api-reference/oam/labels-and-ownership.md` "Reserved metadata keys";
   `reserved_metadata.go`). The refusal is a `*ReservedMetadataKeyError`, found with
   `errors.As` and answering to `ErrReservedMetadataKey`: it says the owning component, the
   object, where on it the key is, the key and the entry that reserves it, and its text names
@@ -2464,7 +2464,7 @@ list and the disposition of every item:
   `daemonset`, `cronjob` or `job`. Its one reader is the sibling-group check
   (`podTemplateLabeler`, `pkg/oam/sibling_group.go`), and `deployment` is the only pod kind
   a lowering rule emits into a group. A rule that emits another pod kind into a group must
-  add the method to that kind's config (`pkg/oam/README.md` "Same-name sibling groups").
+  add the method to that kind's config (`site/content/api-reference/oam/transform-and-lowering.md` "Same-name sibling groups").
   The component label of go-kure/launcher#788 (§3.4) is stamped on the pod template of
   every workload kind without it, and is not among the labels it returns.
 - **Namespace on template output (item 4): shipped** (§5.1). An object of unknown scope
@@ -2567,7 +2567,7 @@ section says which part), or **open** (nothing of it).
 | [go-kure/launcher#784](https://github.com/go-kure/launcher/issues/784) | `oci` as an upper-level component; new `fluxcd-kustomization` kind | §2.3 | Shipped | — |
 | [go-kure/launcher#785](https://github.com/go-kure/launcher/issues/785) | Release name default (rescopes [go-kure/launcher#776](https://github.com/go-kure/launcher/issues/776)) | §4.2 | Shipped | go-kure/launcher#793 |
 | [go-kure/launcher#786](https://github.com/go-kure/launcher/issues/786) | Secret values | §4.3 | Shipped | — |
-| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Shipped: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization of a chart's own layout (`layout`); the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`); the claim a `pvc` volume of a `webservice` or `worker` component generates (`workload-volume-claim`, `claimObjectName`); the Ingress and the HTTPRoute of the routing traits (`ingress`, `httproute`); the ReplicationSource of the `volsync` trait (`volsync-replicationsource`, with a new `name`); the claimed names of the `configmap`, `secret` and `pvc` traits' objects (no role, by design). Bundle, ordered-group and synthesized NetworkPolicy names are hook-only by design: the author names the bundle by `metadata.name`, a group is derived from the order, and a synthesized policy has no authored home. The `generated` role for an object a rule or a handler outside launcher's own generates that no other role names; two applications of one name in one bundle refused. The length of a non-chart layout's Kustomization name is the base library's (go-kure/kure#1030), no longer launcher's open point. A chart's layout names and hook-group order need per-layout placement (go-kure/kure#1032). Default Kustomization names, a chart's layout's and a hook-group child's alike, are left to the base library and its shortening (go-kure/launcher#941). The override length check is the 63 characters kure checks a set name against (`pkg/oam/README.md`, "Pipeline") | go-kure/launcher#783, go-kure/launcher#793 |
+| [go-kure/launcher#787](https://github.com/go-kure/launcher/issues/787) | Name overrides | §3.2 | Shipped: authored names used as written or refused; `scaler`, `rbac`, `networkpolicy` and `postgresql` overrides; `objectName` on kind components; the consumer `Naming` hook for the roles of §3.2; the hook-group names and their `hook-group` role; the Kustomization of a chart's own layout (`layout`); the HelmRelease of a `helm` component (`helm-release`) and the Kustomization and the kept source of an `oci` component (`oci-kustomization`, `oci-source`); the Deployment, the Service and the ServiceAccount of a `webservice` or `worker` component (`workload-deployment`, `workload-service`, `workload-serviceaccount`); the Cluster and the ObjectStore of a `postgresql` component (`postgresql-cluster`, `postgresql-objectstore`); the claim a `pvc` volume of a `webservice` or `worker` component generates (`workload-volume-claim`, `claimObjectName`); the Ingress and the HTTPRoute of the routing traits (`ingress`, `httproute`); the ReplicationSource of the `volsync` trait (`volsync-replicationsource`, with a new `name`); the claimed names of the `configmap`, `secret` and `pvc` traits' objects (no role, by design). Bundle, ordered-group and synthesized NetworkPolicy names are hook-only by design: the author names the bundle by `metadata.name`, a group is derived from the order, and a synthesized policy has no authored home. The `generated` role for an object a rule or a handler outside launcher's own generates that no other role names; two applications of one name in one bundle refused. The length of a non-chart layout's Kustomization name is the base library's (go-kure/kure#1030), no longer launcher's open point. A chart's layout names and hook-group order need per-layout placement (go-kure/kure#1032). Default Kustomization names, a chart's layout's and a hook-group child's alike, are left to the base library and its shortening (go-kure/launcher#941). The override length check is the 63 characters kure checks a set name against (`site/content/api-reference/oam/pipeline.md`, "Pipeline") | go-kure/launcher#783, go-kure/launcher#793 |
 | [go-kure/launcher#788](https://github.com/go-kure/launcher/issues/788) | Component label and provenance | §3.4 | Shipped | — |
 | [go-kure/launcher#789](https://github.com/go-kure/launcher/issues/789) | Contract metadata | §6.1 | Shipped | — |
 | [go-kure/launcher#790](https://github.com/go-kure/launcher/issues/790) | Full spec and full set of kind components | §6.2 | Closed: the kind inventory; the kinds §6.2 lists as shipped; `labels` and `annotations` on every kind component. The held cluster-wide kinds continue in go-kure/launcher#943 | [go-kure/kure#981](https://github.com/go-kure/kure/issues/981) (missing constructors), go-kure/launcher#787, go-kure/launcher#943 |

@@ -254,7 +254,7 @@ returns no `PolicyResult`, and the capabilities the rewritten document's traits 
 against are recorded when `TransformWithPolicy` runs on it.
 
 `ConsumedCapabilities` is populated only by `TransformWithPolicy`, never by the plain
-`Transform` entry point, which discards `PolicyResult` — see the `pkg/oam/README.md`
+`Transform` entry point, which discards `PolicyResult` — see the `site/content/api-reference/oam/transform-and-lowering.md`
 "Transform & extension" section for the field's shape. The per-value counterpart, which
 source supplied each property leaf, is populated only by `TransformWithProvenance`; the
 same README section describes it. A key in `ConsumedCapabilities` says a binding was read,

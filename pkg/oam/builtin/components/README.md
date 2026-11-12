@@ -515,7 +515,7 @@ component type**, in the order `sort.Strings` gives (`cilium-nodeconfig` before
 | `kindTraitPairs`, for a kind a trait also generates | the tests of `pkg/cmd/kurel` | `TestKindLists_InOrder`, in the order of the entries' `typ` |
 | `policyFreeTypes`, for a kind built on `policyFreeKind` whose type publishes its field comments | `kind_policy_free_internal_test.go` | no test: its rows name the kind's value, not its type, and a new row goes at the end. A kind with no row is not held by `TestPolicyFreeKinds_NoDefaultedZeros` |
 | "Component types" | this file | `TestKindLists_InOrder` |
-| "Component type allowlist" | `pkg/oam/README.md` | `TestKindLists_InOrder`; `TestKindLists_Complete` fails on a type of `validComponentTypes` with no row and on a row of no type of it |
+| "Component type allowlist" | `site/content/api-reference/oam/parsing-and-types.md` | `TestKindLists_InOrder`; `TestKindLists_Complete` fails on a type of `validComponentTypes` with no row and on a row of no type of it |
 | Table 4.2 | `docs/oam/design-kurel-package.md` | `TestKindLists_InOrder` |
 | The table of kind components under "`kurel build`" | `pkg/cmd/kurel/README.md` | `TestKindLists_InOrder` |
 | "Per-type highlights" | this file | no test, and not yet in order: a new entry goes before the first entry whose head names a type that sorts after its own |
@@ -533,7 +533,7 @@ in its own test file rather than beside the list.
 
 No sentence names every kind. A sentence that needs the set points at the "Kind inventory",
 which its tests hold complete. One table names every component type, one row each: the
-"Component type allowlist" of `pkg/oam/README.md`. A change that adds a type to
+"Component type allowlist" of `site/content/api-reference/oam/parsing-and-types.md`. A change that adds a type to
 `validComponentTypes` adds its row there, so it changes the README that CI's documentation
 check requires of a change to `pkg/oam`.
 
@@ -2002,7 +2002,7 @@ rule, because "additive" on its own would be false:
 | An unrecognised key inside a toleration entry is now an error | **New errors only, and here output really is byte-identical.** A key the parser never read contributed nothing to the emitted object, so every document that still builds emits exactly what it emitted before. | `docs/oam/design-gvk.md` already states that an unrecognised key is a build error; this moves `daemonset` toward the documented contract rather than away from it. Gating it to `deployment` would leave `daemonset` permanently accepting shapes that do no work. |
 | An empty `key` with a non-`Exists` operator is now an error | **New errors only, and only on documents the apiserver would have refused.** Upstream states it as a hard "must" (`k8s.io/api@v0.36.3` `core/v1/types.go:4093`). | Nothing appliable is lost. |
 | `tolerations` authored as a mapping rather than an array is now an error | **New errors only, and output is byte-identical.** The whole property was previously discarded without a word — the parser's `[]any` assertion failed and it returned "absent", so a mistyped block emitted no tolerations at all and the build succeeded. Its two sibling parsers on the adjacent lines (`affinity`, `topologySpreadConstraints`) already rejected the same mistake, so this removes an inconsistency rather than adding a rule. | A silently discarded property is the failure mode this whole projection exists to remove; leaving `daemonset` on the old behaviour would keep the one parser that swallows a typo. |
-| An explicit null on a toleration's `key`, `operator`, `value` or `effect` now reads as omission | **Fewer errors, and output is byte-identical for everything that already built.** Such an entry previously failed conversion with `must be a string, got <nil>`; it now behaves as if the key were absent, which is this package's null-as-omission convention. Only `null` is affected — an empty string is unchanged, so `operator: ""` is still an error rather than a silent default. | The null cannot be filtered before it arrives: `withoutExplicitNulls` strips only top-level properties, so an author writing a nested null reaches the parser with it intact. `ValidateAuthoredProperties` (`pkg/oam/property_validate_authored.go`) does shape-check authored documents, but its reach stops at any path that skips it entirely — a component a lowering rule constructs directly in Go, or a built-in parser's own field read, this file among them (`pkg/oam/README.md`'s "Scope" paragraph) — which is why the parser has to answer for itself and why these guards stay. A lowering rule's emitted null under an optional declared key is now normalised to absence before conversion (same file, `validateObjectProperties`), so the two paths agree on what a null means rather than one accepting what the other refuses. Leaving `daemonset` out would keep one kind refusing documents the schema declares valid. |
+| An explicit null on a toleration's `key`, `operator`, `value` or `effect` now reads as omission | **Fewer errors, and output is byte-identical for everything that already built.** Such an entry previously failed conversion with `must be a string, got <nil>`; it now behaves as if the key were absent, which is this package's null-as-omission convention. Only `null` is affected — an empty string is unchanged, so `operator: ""` is still an error rather than a silent default. | The null cannot be filtered before it arrives: `withoutExplicitNulls` strips only top-level properties, so an author writing a nested null reaches the parser with it intact. `ValidateAuthoredProperties` (`pkg/oam/property_validate_authored.go`) does shape-check authored documents, but its reach stops at any path that skips it entirely — a component a lowering rule constructs directly in Go, or a built-in parser's own field read, this file among them (the "Scope" paragraph of `site/content/api-reference/oam/schemas-and-contract.md`) — which is why the parser has to answer for itself and why these guards stay. A lowering rule's emitted null under an optional declared key is now normalised to absence before conversion (same file, `validateObjectProperties`), so the two paths agree on what a null means rather than one accepting what the other refuses. Leaving `daemonset` out would keep one kind refusing documents the schema declares valid. |
 | A `value` under `operator: Exists` is now an error | **New errors only, and only on documents the apiserver would have refused** — upstream's `ValidateTolerations` rejects the pair outright, notwithstanding the field doc's softer "should" (the citation, and its second-hand provenance, are at the check itself in `common.go`). | Same: nothing appliable is lost. |
 | A non-empty `key` that is not a qualified name is now an error | **New errors only, and only on documents the apiserver would have refused.** `ValidateTolerations` applies `ValidateLabelName` to every non-empty key, unconditionally and behind no feature gate. The empty key is untouched — it remains legal and keeps its own rule. | Nothing appliable is lost, and it is the same rule the affinity and topology-key paths already apply to their own label keys; `daemonset` accepting a malformed key there and not here was an inconsistency, not a policy. |
 | Under `operator: Equal`, a `value` that is not a valid label value is now an error | **New errors only, and only on documents the apiserver would have refused.** The value is matched against a taint's value, so upstream runs `IsValidLabelValue` on it for the `Equal` arm. `Exists` and `Lt`/`Gt` reach their own value rules first, so this fires on `Equal` alone. | Same: nothing appliable is lost. |
@@ -2443,7 +2443,7 @@ object would change what the next `Generate` emits.
 Every refusal by the environment policy this package raises is an `oam.PolicyRefusal` with
 a class, which a consumer reads from `oam.ViolationError.Class` instead of matching text
 (go-kure/launcher#849). The classes, what each covers and what stays unclassified are in
-`pkg/oam/README.md`, "Refusal classes". What is particular to this package:
+`site/content/api-reference/oam/policy-and-capability.md`, "Refusal classes". What is particular to this package:
 
 - **The class does not depend on the path.** A privileged container is
   `oam.RefusalPrivileged` on a workload kind's own `ApplyPolicy`, on an operator CR's pod
@@ -2565,7 +2565,7 @@ One shared schema and parser (`chartEndpoints`) serve the three types.
 `configmap`, `secret`, `postgresql`, `webservice` and `worker` implement `oam.OutputProvider`
 (go-kure/launcher#1259): the names of the objects a component generates, read through
 `Transformer.ComponentOutputs` before the document is built, and held by the build against
-the names it gives (see "Outputs" in `pkg/oam/README.md`). A name is the author's property,
+the names it gives (see "Outputs" in `site/content/api-reference/oam/names-and-overrides.md`). A name is the author's property,
 else the `Naming` hook's, else the default, resolved by the code that names the object in the
 lowering, so a query and a build cannot differ. A refused component answers no outputs and is
 refused in the lowering's own words. No other builtin declares any.
@@ -11083,7 +11083,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   every child a directory with its own Flux Kustomization, whatever the default. kure names
   that Kustomization `<bundle's Kustomization>-<child>` and shortens it past 63 characters by
   its own rule (go-kure/kure#1030, go-kure/kure#1036), while the child's name, its directory,
-  is held to 253 (`pkg/oam/README.md`, "Pipeline"). A single-group
+  is held to 253 (`site/content/api-reference/oam/pipeline.md`, "Pipeline"). A single-group
   chart's `AugmentLayout` is a no-op. Every `helmtemplate` component is a `LayoutAugmenter`, a
   hook-free chart included, since the group count is known only after the render — so even a
   hook-free chart gets its own sub-layout directory under a layout-walking consumer, for no
@@ -11127,7 +11127,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   component's default child, less its suffix; a prefix that ends as another chart's phase
   begins). kure refuses that name, used twice, when the
   walked tree is integrated; another `hookGroupNamePrefix` on one of the components is the
-  way out (`pkg/oam/README.md`, "Name roles and the `Naming` hook"). A `HelmTemplateConfig` built directly sets `HookGroupNamePrefix`.
+  way out (`site/content/api-reference/oam/names-and-overrides.md`, "Name roles and the `Naming` hook"). A `HelmTemplateConfig` built directly sets `HookGroupNamePrefix`.
   The component's own layout, the parent of the hook-group children, also gets a Flux
   Kustomization under `FluxIntegratedPerLayout`, which kure names `<bundle>-<component>` and
   shortens past 63 characters by its own rule; launcher leaves that default to kure.
@@ -12097,7 +12097,7 @@ go-kure/launcher#512 (see the `postgresql` entry below).
   (go-kure/launcher#1230; `docs/delivery-scope.md` §3.5).
   **The Pooler's and the Databases' names** (go-kure/launcher#787) are
   resolved in the order of every name role (see "Name roles and the `Naming`
-  hook" in `pkg/oam/README.md`): the author's property, else the consumer's
+  hook" in `site/content/api-reference/oam/names-and-overrides.md`): the author's property, else the consumer's
   `Naming` hook, else the default. `poolerName` names the Pooler (role
   `pooler`, default `<name>-pooler`) and must be a DNS-1123 label, since
   CloudNativePG names the pooler's Service after it (a leading digit is refused when

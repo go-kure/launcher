@@ -14,18 +14,20 @@ var (
 	roleKind = schema.GroupKind{Group: "rbac.authorization.k8s.io", Kind: "Role"}
 )
 
-// TestNameRoles_ReadmeTable holds the README's role table to NameRoles: one row
-// per role, in the same order, and none for anything else. A role added to the
-// code without its row, or documented without existing, fails here.
+// TestNameRoles_ReadmeTable holds the role table of the "Names and overrides" part
+// of the OAM page (site/content/api-reference/oam/names-and-overrides.md) to
+// NameRoles: one row per role, in the same order, and none for anything else. A
+// role added to the code without its row, or documented without existing, fails here.
 func TestNameRoles_ReadmeTable(t *testing.T) {
-	readme, err := os.ReadFile("README.md")
+	const file = "../../site/content/api-reference/oam/names-and-overrides.md"
+	readme, err := os.ReadFile(file)
 	if err != nil {
-		t.Fatalf("reading the README: %v", err)
+		t.Fatalf("reading %s: %v", file, err)
 	}
 	const heading = "### Name roles and the `Naming` hook\n"
 	_, section, found := strings.Cut(string(readme), heading)
 	if !found {
-		t.Fatalf("the README has no %q section", strings.TrimSpace(heading))
+		t.Fatalf("%s has no %q section", file, strings.TrimSpace(heading))
 	}
 	var rows []NameRole
 	inTable := false

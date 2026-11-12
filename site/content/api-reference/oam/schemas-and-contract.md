@@ -206,6 +206,35 @@ takes (`destinationPath`, `endpointURL`, `secretName`) and the reason `backup.ob
 (`serverName`, `azureCredentials`, `googleCredentials`; go-kure/launcher#1001). Before go-kure/launcher#790 a nested refusal carried no hint.
 The refusal text itself is unchanged at every depth.
 
+**Where a refusal is, as data.** Every refusal the property validators make is a
+`*PropertyError` (go-kure/launcher#1466): `errors.As` finds it in the error the call
+returns, a hinted refusal included, and `Error()` is the text above, byte for byte.
+The one exception is the platform-reservation check described below: its refusal
+wraps `ErrPlatformReserved`, which `errors.Is` finds, and it names its location in
+its text only. A caller that maps a refusal to a reply of its own reads these fields
+and parses no text:
+
+| Field | Holds |
+|---|---|
+| `Kind` | `unsupported-field`, `required`, `exclusive`, `type`, `enum`, `range`, `null-element`, or `schema` (the handler's own schema is malformed, so the document is not at fault) |
+| `Position` | `component`, `trait` or `policy`; empty where the refusal was made on no authored document (a schema, a property a rule emitted) |
+| `Component`, `Trait`, `Policy` | the component's name (for a trait, the one it sits on), the trait's type, the policy's name; empty where they do not apply |
+| `Field` | the location below `properties`: dotted keys, array elements as `[n]`, as in `probes.httpGet[0].port`. For `unsupported-field` and `required` it is the key itself; for `exclusive` the object holding the group, empty at the top level; for `schema` the node whose declaration is wrong |
+
+```go
+var pe *oam.PropertyError
+if errors.As(err, &pe) && pe.Kind == oam.PropertyErrorRequired {
+    // pe.Component, pe.Trait and pe.Field name the missing key
+}
+```
+
+`Field` is the path as the refusal builds it, so a key that itself holds a dot
+reads the same as a nested one (`a.b` is one key or two); the kind and the
+position are exact either way. A refusal that names a document position is made
+by the three boundaries of this check; the same refusal made by `Transform`'s
+emission checks carries a kind and no position. The exported helper
+`CheckSchemaNodeGroups` returns the `schema` kind too.
+
 Before any of that, it runs `Transform`'s own reservation check
 (`enforcePlatformReserved`) over the document, with the same schemas and the same
 error text `Transform` would report for it. It has to come first: validation drops an
@@ -247,13 +276,19 @@ component or trait type no handler and no lowering rule claims (rejected separat
 by the type allowlists and by `validateSettled`); a custom trait type from a
 `CapabilityDefinition`, which declares that the type *exists* but not what properties
 it accepts; and a policy type nothing is registered for, which the transform rejects
-with `no handler for policy type`. Top-level `Required` is also deliberately not enforced
-here — `ClusterProfile` capability rendering merges into a trait's top-level property
-map after this runs, so a required property the platform supplies is legitimately
-absent from what the author wrote.
+with `no handler for policy type`.
+
+`Required` is enforced at the top level too, as written, and a null counts as absent
+(go-kure/launcher#1463): `component "web" (type "webservice"): properties: "image" is
+required`. Two cases are left to the platform and are not refused here. A trait a
+capability binding matches is checked on the merged properties, as described below, because
+`ClusterProfile` capability rendering merges into its top-level property map after this
+runs. A component key that its handler lists in `ComponentCapabilityDefaults` is filled by
+the capability, so its absence is accepted.
 
 Nested `Required`, inside an object the author did write, is enforced
-(go-kure/launcher#765):
+(go-kure/launcher#765), and top-level `Required` on a matched trait follows the same
+rule:
 
 - `ValidateAuthoredProperties` knows no profile, so it checks nested `Required` as
   written, on every trait.
@@ -282,9 +317,10 @@ Nested `Required`, inside an object the author did write, is enforced
   handler and is now refused. `kurel build` already ran the validator, so its output
   is unchanged.
 
-Required is enforced only inside an object that is present after the merge; an
-object property left out entirely is not refused, whatever its own `Required` flag
-says, as at the top level.
+The Required keys inside an object are checked only when that object is present after
+the merge. An optional object property that is left out entirely is not checked, as at
+the top level. An object property that is itself Required and is left out is refused as
+a missing key, like any other.
 
 One property is legal on **every** trait regardless of what its handler declares:
 `scope`. It is read by the transform engine rather than by a handler —
