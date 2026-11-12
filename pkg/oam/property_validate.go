@@ -1618,8 +1618,9 @@ func (t *Transformer) validateEmittedComponentAs(comp *Component, member bool) e
 
 // emittedKey is the registered name an emitted type reference dispatches on: a plain name a
 // handler or rule is registered under as written, a declared identity as its registered name.
-// A reference that does not resolve is returned as it is, and resolveEmitted refuses it after
-// the round.
+// A reference that does not resolve is returned as it is: an unknown versioned identity is
+// refused by resolveEmitted after the round, and an unknown plain name by the validation that
+// follows it.
 func emittedKey(ix *typeIndex, registered func(string) bool, ref string) string {
 	if registered(ref) {
 		return ref

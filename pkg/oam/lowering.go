@@ -2091,9 +2091,10 @@ func (t *Transformer) enforceAuthoredReservations(doc *Application, docOrigin Or
 // emitted (enforcePlatformReserved).
 func (t *Transformer) enforceComponentReservations(comp *Component, path string, where PropertyError) error {
 	var provider any
-	if rule, ok := t.componentLoweringRules[comp.Type]; ok {
+	typ := emittedKey(t.componentTypes, t.isComponentKey, comp.Type)
+	if rule, ok := t.componentLoweringRules[typ]; ok {
 		provider = rule
-	} else if h := t.findComponentHandler(comp.Type); h != nil {
+	} else if h := t.findComponentHandler(typ); h != nil {
 		provider = h
 	}
 	p, ok := provider.(PropertySchemaProvider)
@@ -2131,9 +2132,10 @@ func (t *Transformer) enforceEmittedComponentReservations(comps []Component, rul
 // its TraitLoweringRule's when one is registered, else its dispatchable handler's.
 func (t *Transformer) enforceTraitReservations(trait *Trait, path string, where PropertyError) error {
 	var provider any
-	if rule, ok := t.traitLoweringRules[trait.Type]; ok {
+	typ := emittedKey(t.traitTypes, t.isTraitKey, trait.Type)
+	if rule, ok := t.traitLoweringRules[typ]; ok {
 		provider = rule
-	} else if h := t.findTraitHandler(trait.Type); h != nil {
+	} else if h := t.findTraitHandler(typ); h != nil {
 		provider = h
 	}
 	p, ok := provider.(PropertySchemaProvider)
