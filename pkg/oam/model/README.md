@@ -266,7 +266,8 @@ on a computed value. Three rows of the comparison test guard the name: `[1, 1.0]
 (25, 25 and 105, and 27, 27 and 107 without the skip). A cel-go version that renames the type fails them.
 
 **Result size.** The Go copy of a single-hole result holds at most 1,000,000 units, counted at every
-depth. A list element or a map entry is one unit, and so is each byte of a bytes value. The copy is
+depth. A list element or a map entry is one unit, and so is each byte of a bytes value. A map key
+costs a further unit for each 1,024 bytes, twice, because the copy hashes it to read the entry and to insert it. The copy is
 made after the evaluation. An expression can share one list or one bytes value in many places at a
 small cost, and the copy counts it once for each place. So the cost limit does not bound the copy. A result over the limit fails with `ErrCostLimit`, which names the
 site. A string or a map key in the result, at any depth, holds at most 1,000,000 bytes, as a string read by name
