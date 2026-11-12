@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/cel-go/cel"
-	celast "github.com/google/cel-go/common/ast"
+	"cel.dev/cel-go/cel"
+	celast "cel.dev/cel-go/common/ast"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"

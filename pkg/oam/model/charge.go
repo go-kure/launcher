@@ -8,12 +8,12 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/common"
-	"github.com/google/cel-go/common/types"
-	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/common/types/traits"
-	"github.com/google/cel-go/interpreter"
+	"cel.dev/cel-go/cel"
+	"cel.dev/cel-go/common"
+	"cel.dev/cel-go/common/types"
+	"cel.dev/cel-go/common/types/ref"
+	"cel.dev/cel-go/common/types/traits"
+	"cel.dev/cel-go/interpreter"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -424,7 +424,7 @@ func hasWideClause(str string) bool {
 // 1e308), a timestamp, a duration and a type at most 64, every other scalar at most scalar, and
 // each element of a list or entry of a map 4 more for its separators, 6 for a map entry, whose
 // value can be an empty list or map that prints its two brackets and holds nothing else.
-// cel-go v0.31.0 prints a value inside a list or map as it prints it alone (stringFormatterV2,
+// cel-go v0.31.0 and v0.32.0 print a value inside a list or map as they print it alone (stringFormatterV2,
 // strings version 5), so the walk adds no quotes.
 // A list or map is walked as a tree, and the walk spends one step of the budget of the evaluation
 // for each value it reads and stops the evaluation when the budget is gone, so a shared nest, which

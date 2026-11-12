@@ -37,10 +37,10 @@
       "allowedVersions": "!/^1\\.53\\.0$/"
     },
     {
-      "description": "github.com/google/cel-go is held at the 0.31 line. v0.32.0 declares its module path as cel.dev/cel-go in its own go.mod, so Go refuses it under the old path ('module declares its path as: cel.dev/cel-go but was required as: github.com/google/cel-go') and the old path has no tag after v0.32.0. An update there fails make deps in lint, test and validate-manifests. Remove this rule in the change that moves the imports and the require to cel.dev/cel-go: go-kure/launcher#1412.",
+      "description": "cel.dev/cel-go is held below v0.33.0. v0.33 removes interpreter.AsFrame, and with the charge wrappers of pkg/oam/model as they are, six test groups fail on cost. Remove this rule in the change that ports the wrappers: go-kure/launcher#1491.",
       "matchManagers": ["gomod"],
-      "matchPackageNames": ["github.com/google/cel-go"],
-      "allowedVersions": "<0.32.0"
+      "matchPackageNames": ["cel.dev/cel-go"],
+      "allowedVersions": "<0.33.0"
     },
     {
       "description": "k8s.io/kube-openapi gets no routine update proposals here: it moves by MVS when the modules that require it move, in practice the k8s.io/* modules, and those follow the imported kure (the shared-direct list below). A vulnerability alert still proposes it: the shared preset enables vulnerabilityAlerts, whose generated rule force-enables the advisory's update over this one. If such a PR moves only the require line, the go.mod replace still selects the build version and it fixes nothing: check the replace target, and move it, in step with kure's, to take the fix. The shared preset's kubernetes group cannot hold it back here, because every other direct k8s.io/* require is in that list, so the group would only ever carry kube-openapi alone. It has no releases, so every update is a digest that can run ahead of k8s.io/apimachinery: go-kure/launcher#877's digest returned structured-merge-diff v7 types while apimachinery v0.37.1 builds managed fields with v6, and nothing reaching managedfields compiled. It is not in the shared-direct list because it is not a direct require of kure; it is a direct require here for its pkg/validation packages, imported by production code and tests in pkg/oam/builtin/components. Its build version is held by a replace in go.mod mirrored from kure's, so a require bump changes nothing that builds.",

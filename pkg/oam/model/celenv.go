@@ -1,8 +1,8 @@
 package model
 
 import (
-	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/ext"
+	"cel.dev/cel-go/cel"
+	"cel.dev/cel-go/ext"
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
@@ -32,7 +32,7 @@ const (
 
 // The versions of the cel-go extension libraries that celEnv 1 means. Each library
 // defaults to its newest version, so without a pin a cel-go upgrade would change what
-// a model means. These are the highest versions of cel-go v0.31.0. The golden file
+// a model means. These are the highest versions of cel-go v0.31.0 and v0.32.0. The golden file
 // testdata/celenv1-functions.txt freezes the resulting function set.
 const (
 	stringsVersion  = 5
