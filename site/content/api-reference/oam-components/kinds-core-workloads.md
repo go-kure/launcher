@@ -11,7 +11,10 @@ weight: 3
   own opinions, which these two keep: `topologySpread` and the four-key
   `affinity` shorthand, and on `webservice` the `port` that drives the Service.
   Note the shorthand is what they keep — neither publishes the raw `corev1`
-  `affinity`/`topologySpreadConstraints` that `deployment` does.
+  `affinity` that `deployment` does. Both publish `tolerations` and
+  `topologySpreadConstraints` as `deployment` does (go-kure/launcher#1473, see
+  ["Raw scheduling properties"](common-config.md#raw-scheduling-properties)); authored constraints need
+  `topologySpread: false`.
   The `webservice` rule implements the optional `oam.EndpointProvider`: it declares its own
   pods (`app: <component-name>`) on the declared `port` (its single `port` property drives both
   the container port and the Service port), letting a downstream platform synthesize generic
