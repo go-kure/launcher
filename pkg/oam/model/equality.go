@@ -1,6 +1,8 @@
 package model
 
 import (
+	"strings"
+
 	"github.com/google/cel-go/common/operators"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -9,6 +11,12 @@ import (
 
 	"github.com/go-kure/launcher/pkg/errors"
 )
+
+// The class of this file: every cel-go path that walks or prints a value must be charged by
+// the size of the value, not by the node that holds it. cel-go charges a call by the length of
+// its operands, and a value that several places share is walked once for each place. The
+// comparisons, flatten, join and the length of a string or bytes value are charged here. A
+// reader who adds a cel-go version or a library looks for the next path of this class.
 
 // maxCompareSteps is the number of values the comparisons and flattens of one site
 // evaluation may visit. A list, a map, a list element and a map value each count one. It is
@@ -19,20 +27,25 @@ import (
 // only, in the same way.
 const maxCompareSteps = 1000000
 
+// compareBytesPerStep is the number of bytes of a string or bytes value that one step pays
+// for. cel-go compares such a value by its content and counts it as one value.
+const compareBytesPerStep = 1024
+
 // compareBudgetName names the budget in the activation. It is no CEL identifier, so no
 // expression can read or shadow it.
 const compareBudgetName = "@compare-budget"
 
-// budgetedCalls are the calls that the evaluation replaces, because cel-go compares or copies
-// nested values in them and charges the outer length only: `==`, `!=`, `in`, `distinct` and
-// `flatten`. The first four are every caller of Equal in cel-go v0.31.0, read in common/types
+// budgetedCalls are the calls that the evaluation replaces, because cel-go compares, copies or
+// prints nested values in them and charges the outer length only: `==`, `!=`, `in`, `distinct`,
+// `flatten` and `join`. The join of a list that holds a non-string builds its error from the
+// text of the whole tree. The first four are every caller of Equal in cel-go v0.31.0, read in common/types
 // (Contains, behind `in`), ext (distinct) and interpreter (the == and != nodes). flatten is
 // the one list function of the pinned extension that copies nested elements under the legacy
 // cost tracker (ext/lists.go, trackListFlattenLegacy). A new cel-go version, or a new version
 // of a pinned extension library, can add a call. TestComparisonCallSetIsReadFromCelGo fails
 // on any other version, so that someone reads the calls again (go-kure/launcher#1413 moves
 // cel-go).
-var budgetedCalls = []string{operators.Equals, operators.NotEquals, operators.In, "distinct", "flatten"}
+var budgetedCalls = []string{operators.Equals, operators.NotEquals, operators.In, "distinct", "flatten", "join"}
 
 // compareBudget is the steps left to the comparisons of one site evaluation.
 type compareBudget struct{ left int }
@@ -77,7 +90,23 @@ func (b *compareBudget) equal(l, r ref.Val) (v ref.Val, ok bool) {
 			return b.equalMaps(lm, rm)
 		}
 	}
+	if n := scalarSize(l); n >= compareBytesPerStep {
+		if b.left -= n / compareBytesPerStep; b.left < 0 {
+			return nil, false
+		}
+	}
 	return types.Equal(l, r), true
+}
+
+// scalarSize is the length in bytes of a string or bytes value, and 0 for any other.
+func scalarSize(v ref.Val) int {
+	switch x := v.(type) {
+	case types.String:
+		return len(x)
+	case types.Bytes:
+		return len(x)
+	}
+	return 0
 }
 
 func (b *compareBudget) equalLists(l, r traits.Lister) (ref.Val, bool) {
@@ -127,6 +156,12 @@ func compareDecorator(i interpreter.Interpretable) (interpreter.Interpretable, e
 		return &budgetedIn{InterpretableCall: call, elem: args[0], list: args[1]}, nil
 	case "distinct":
 		return &budgetedDistinct{InterpretableCall: call, list: args[0]}, nil
+	case "join":
+		j := &budgetedJoin{InterpretableCall: call, list: args[0]}
+		if len(args) == 2 {
+			j.sep = args[1]
+		}
+		return j, nil
 	case "flatten":
 		f := &budgetedFlatten{InterpretableCall: call, list: args[0]}
 		if len(args) == 2 {
@@ -247,6 +282,54 @@ func (e *budgetedDistinct) Eval(a interpreter.Activation) ref.Val {
 		}
 	}
 	return types.DefaultTypeAdapter.NativeToValue(unique)
+}
+
+// budgetedJoin is the join of the strings extension. cel-go builds the error for an element
+// that is no string from the text of the element, and the text of a list prints every shared
+// child, so this node names the type of the element and never prints it.
+type budgetedJoin struct {
+	interpreter.InterpretableCall
+	list interpreter.Interpretable
+	sep  interpreter.Interpretable // nil for join()
+}
+
+func (e *budgetedJoin) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
+
+func (e *budgetedJoin) Eval(a interpreter.Activation) ref.Val {
+	c := e.list.Eval(a)
+	if types.IsError(c) {
+		return c
+	}
+	sep := types.String("")
+	if e.sep != nil {
+		s := e.sep.Eval(a)
+		if types.IsError(s) {
+			return s
+		}
+		str, ok := s.(types.String)
+		if !ok {
+			return types.ValOrErr(s, "no such overload: %v.join(%v)", c.Type(), s.Type())
+		}
+		sep = str
+	}
+	list, ok := c.(traits.Lister)
+	if !ok {
+		return types.ValOrErr(c, "no such overload: %v.join()", c.Type())
+	}
+	var sb strings.Builder
+	n := list.Size().(types.Int)
+	for i := types.IntZero; i < n; i++ {
+		if i != 0 {
+			sb.WriteString(string(sep))
+		}
+		elem := list.Get(i)
+		str, ok := elem.(types.String)
+		if !ok {
+			return types.WrapErr(errors.Errorf("join: invalid input of type %s", elem.Type().TypeName()))
+		}
+		sb.WriteString(string(str))
+	}
+	return types.String(sb.String())
 }
 
 type budgetedFlatten struct {
