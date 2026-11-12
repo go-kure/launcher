@@ -52,6 +52,9 @@ func TestComparisonOfSharedNestedValuesIsBounded(t *testing.T) {
 		// flatten copies every element it reaches and cel-go charges the outer length only (lists extension version 3).
 		{"flatten of shared lists", "cel.bind(a, lists.range(1100), lists.range(1100).map(i, a).flatten().size())"},
 		{"flatten to a depth of shared lists", nested4(40, "[d].flatten(4).size()")},
+		// a bytes or string value is compared by its content, and cel-go counts it as one value.
+		{"equal bytes shared through nested lists", longBuffers("bytes(lists.range(10000).map(i, 'xxxxxxxxxx').join(''))", "a + b''")},
+		{"equal strings shared through nested lists", longBuffers("lists.range(10000).map(i, 'xxxxxxxxxx').join('')", "a.upperAscii().lowerAscii()")},
 		// the call is charged as in cel-go, and cel-go charges distinct by n^2.
 		{"distinct is charged by cel-go", "lists.range(1000).distinct().size()"},
 	}
@@ -75,6 +78,8 @@ func TestComparisonOfSharedNestedValuesIsBounded(t *testing.T) {
 		{"distinct of 837,930 values", nested4(30, "[d, d].distinct().size() == 1"), true},
 		{"one value just under the limit", "cel.bind(a, lists.range(999), cel.bind(b, lists.range(999).map(i, a), b == b))", true},
 		{"different values stop early", nested4(60, "d == [d[0]]"), false},
+		{"two long equal strings compared once", "cel.bind(a, lists.range(10000).map(i, 'xxxxxxxxxx').join(''), a == a.upperAscii().lowerAscii())", true},
+		{"two long equal byte values compared once", "cel.bind(a, bytes(lists.range(10000).map(i, 'xxxxxxxxxx').join('')), a == a + b'')", true},
 		{"flatten of a few lists", "[[1, 2], [3]].flatten().size()", int64(3)},
 		{"flatten of shared lists under the limit", nested4(30, "[d[0]].flatten(2).size()"), int64(900)},
 	}
@@ -126,6 +131,7 @@ func TestComparisonGivesWhatCelGoGives(t *testing.T) {
 		"[1, 2].distinct() == [1, 2]", "[[1, [2]]] in [[[1, [2]]]]", "{'a': {'b': [1]}} != {'a': {'b': [2]}}",
 		"[[1, 2], [3]].flatten()", "[[1, [2]], [3]].flatten(2)", "[[1], [2]].flatten(0)", "[[1, [2, [3]]]].flatten(1)", "[[1, [2, [3]]]].flatten(2)",
 		"[[1, 2], [3]].flatten().size()", "1 == 1", "[1, 2, 3].distinct().size()",
+		"['a', 'b'].join()", "['a', 'b'].join('-')", "[].join()", "['a'].join(',')", "['a', 'b', 'c'].join(', ').size()", "'abc' == 'abc'", "'abc' != 'abd'",
 	}
 	for _, expr := range corpus {
 		t.Run(expr, func(t *testing.T) {
@@ -147,12 +153,12 @@ func TestComparisonGivesWhatCelGoGives(t *testing.T) {
 	}
 }
 
-// The comparison replaces four calls. They were read from cel-go v0.31.0: the callers of
+// The evaluation replaces five calls that compare or copy values, and join. They were read from cel-go v0.31.0: the callers of
 // Equal in common/types (Contains, behind `in`), in ext (distinct) and in interpreter (the
 // == and != nodes). A new cel-go version, or a new version of a pinned extension library, can
 // add a caller, and a caller that is not replaced is the gap of go-kure/launcher#1451 again.
 func TestComparisonCallSetIsReadFromCelGo(t *testing.T) {
-	want := []string{"@in", "_!=_", "_==_", "distinct", "flatten"}
+	want := []string{"@in", "_!=_", "_==_", "distinct", "flatten", "join"}
 	got := slices.Clone(budgetedCalls)
 	slices.Sort(got)
 	if !reflect.DeepEqual(got, want) {
@@ -169,7 +175,7 @@ func TestComparisonCallSetIsReadFromCelGo(t *testing.T) {
 		}
 	}
 	if version != "v0.31.0" {
-		t.Fatalf("cel-go is %q. The four budgeted calls were read from v0.31.0. Search common/types, ext and interpreter for every caller of Equal in the new version, extend budgetedCalls, then change this version (go-kure/launcher#1413 moves cel-go)", version)
+		t.Fatalf("cel-go is %q. The budgeted calls were read from v0.31.0. Search common/types, ext and interpreter for every caller of Equal in the new version, extend budgetedCalls, then change this version (go-kure/launcher#1413 moves cel-go)", version)
 	}
 }
 
@@ -177,5 +183,26 @@ func TestFlattenKeepsItsError(t *testing.T) {
 	_, err := evalValue(t, "[[1]].flatten(-1)")
 	if err == nil || !strings.Contains(err.Error(), "level must be non-negative") {
 		t.Errorf("flatten(-1) gave %v, want cel-go's error", err)
+	}
+}
+
+// longBuffers builds two equal buffers of 100000 bytes that do not share memory, and the
+// comparison of 300 lists of 300 lists that share them: 90300 values, and 9 billion bytes
+// to scan when every one of them is compared by content.
+func longBuffers(a, b string) string {
+	return fmt.Sprintf("cel.bind(a, %s, cel.bind(b, %s, cel.bind(xs, lists.range(300).map(i, a), cel.bind(ys, lists.range(300).map(i, b), cel.bind(xx, lists.range(300).map(i, xs), cel.bind(yy, lists.range(300).map(i, ys), xx == yy))))))", a, b)
+}
+
+// cel-go builds the error of join from the text of the value it refuses, and the text of a
+// list prints every shared child, so the error of one expression grew to 7 GB at n = 200.
+func TestJoinErrorNamesNoValue(t *testing.T) {
+	for _, expr := range []string{"['', 1].join()", "['', 1].join(',')", nested4(60, "['', d].join()"), nested4(60, "['', d].join(',')")} {
+		_, err := evalValue(t, expr)
+		if err == nil || !strings.Contains(err.Error(), "join: invalid input") {
+			t.Fatalf("%s gave %v, want cel-go's error text join: invalid input", expr, err)
+		}
+		if len(err.Error()) > 300 {
+			t.Errorf("the error of %.40s is %d bytes long, want a text that names no value", expr, len(err.Error()))
+		}
 	}
 }
