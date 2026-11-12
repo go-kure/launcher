@@ -220,13 +220,14 @@ of `format`: a `format` that builds a result of 2,000,000 bytes runs to the end.
 cel-go compares them element by element at every depth and charges the outer length only, so `d == d`
 on four levels of shared lists of 200 elements reports a cost of 8,739 and runs for about a minute
 (go-kure/launcher#1451). The `flatten` of the lists extension (version 3) has the same flaw: it copies
-every element it reaches and charges the outer length times the depth. So the evaluation replaces six
-calls, `==`, `!=`, `in`, `distinct`, `flatten` and `join`, with versions that count the values they visit: a list,
+every element it reaches and charges the outer length times the depth. So the evaluation replaces five
+calls, `==`, `!=`, `in`, `distinct` and `flatten`, with versions that count the values they visit: a list,
 a map, a list element and a map value are one step each, and a string or bytes value costs one more step for
-each 1,024 bytes it holds, because cel-go compares it by its content. The `join` of a list that holds a
-non-string fails in cel-go with an error built from the text of the whole list, which prints every shared
-child and reached 7 GB, so the replacement names the type of the element and prints no value. All of them in one site evaluation share a budget
-of 1,000,000 steps. A site that needs more fails with `ErrCostLimit`, which names the site. The stop holds
+each 1,024 bytes it holds, because cel-go compares it by its content. All of them in one site evaluation
+share a budget of 1,000,000 steps. It also replaces `join`, only for its error: the `join` of a list that
+holds a non-string fails in cel-go with an error built from the text of the whole list, which prints every
+shared child and reached 7 GB, so the replacement names the type of the element and prints no value. That
+`join` does not spend the budget. A site that needs more fails with `ErrCostLimit`, which names the site. The stop holds
 even where CEL would drop the error, as in `(a == b) || true`: the evaluation checks the budget when the
 program ends. **A comparison or flatten of more than 1,000,000 values is refused even where stock cel-go
 finishes it**: `d == d` on four levels of shared lists of 50 elements holds 6.25 million values, and cel-go
@@ -235,6 +236,12 @@ compares 52 expressions with cel-go's own result and cost. The first four calls 
 in cel-go v0.31.0 and in the pinned extension versions, `flatten` is the one list function that copies
 nested elements under the legacy cost tracker, and `join` is the one call whose error prints a nested value. A test reads the cel-go version and fails on another one,
 so that the calls are read again when go-kure/launcher#1413 moves cel-go.
+
+**Known limit: cel-go charges some calls by node, not by size.** Other paths of the same class are not
+bounded by this evaluation: the buffer of a `join`, a `reverse` or `slice` of a list built by repeated `+`,
+the keys of a map, a scan by `size()`, `!=` or `int()` of a long string, and `sort` and `sortBy`. A
+model that uses them can allocate or scan far more than its cost shows. Only `pkg/oam/model` evaluates a
+model's expressions, and nothing registers one by default. go-kure/launcher#1461 lists the paths.
 
 **Result size.** The Go copy of a single-hole result holds at most 1,000,000 units, counted at every
 depth. A list element or a map entry is one unit, and so is each byte of a bytes value. The copy is
