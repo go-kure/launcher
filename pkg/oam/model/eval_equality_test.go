@@ -184,9 +184,30 @@ func TestComparisonGivesWhatCelGoGives(t *testing.T) {
 	}
 }
 
-// The evaluation replaces five calls that compare or copy values, and join. They were read from cel-go v0.32.0: the callers of
+// A comparison that stops on the budget ends with an error value, not a panic, so the call still
+// reports its cost: the cost is that of the call and does not depend on how it ended. 1,000 lists
+// of 1,000 are 100 steps of cost for the call, which an omitted report drops from the total.
+func TestComparisonStopReportsTheCostOfItsCall(t *testing.T) {
+	for _, op := range []string{"==", "!="} {
+		t.Run(op, func(t *testing.T) {
+			expr := "cel.bind(xs, lists.range(999), cel.bind(ys, lists.range(1000).map(i, xs), ys " + op + " ys))"
+			_, wantCost := stockResult(t, expr)
+			_, cost, err := evalValueCost(t, expr)
+			if !errors.Is(err, ErrCostLimit) {
+				t.Fatalf("Eval gave error %v, want one that wraps ErrCostLimit", err)
+			}
+			if cost != wantCost {
+				t.Errorf("reported cost %d at the stop, cel-go reports %d", cost, wantCost)
+			}
+		})
+	}
+}
+
+// The evaluation replaces five calls that compare or copy values, and join. They were read from cel-go v0.33.2: the callers of
 // Equal in common/types (Contains, behind `in`), in ext (distinct) and in interpreter (the
-// == and != nodes). A new cel-go version, or a new version of a pinned extension library, can
+// == and != nodes). Three callers are new since v0.31.0 and none is reachable from a model: the
+// optional library's hasValue (the environment does not enable it), the async call matcher (no async
+// function is registered) and the second Contains of a typed list (behind `in`). A new cel-go version, or a new version of a pinned extension library, can
 // add a caller, and a caller that is not replaced is the gap of go-kure/launcher#1451 again.
 func TestComparisonCallSetIsReadFromCelGo(t *testing.T) {
 	want := []string{"@in", "_!=_", "_==_", "distinct", "flatten", "join"}
@@ -205,8 +226,8 @@ func TestComparisonCallSetIsReadFromCelGo(t *testing.T) {
 			version = d.Version
 		}
 	}
-	if version != "v0.32.0" {
-		t.Fatalf("cel-go is %q. The budgeted calls were read from v0.32.0. Search common/types, ext and interpreter for every caller of Equal in the new version, extend budgetedCalls, then change this version (go-kure/launcher#1491 moves cel-go to v0.33)", version)
+	if version != "v0.33.2" {
+		t.Fatalf("cel-go is %q. The budgeted calls were read from v0.33.2. Search common/types, ext and interpreter for every caller of Equal in the new version, extend budgetedCalls, then change this version", version)
 	}
 }
 

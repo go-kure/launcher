@@ -38,13 +38,12 @@ const compareBudgetName = "@compare-budget"
 // budgetedCalls are the calls that the evaluation replaces, because cel-go compares, copies or
 // prints nested values in them and charges the outer length only: `==`, `!=`, `in`, `distinct`,
 // `flatten` and `join`. The join of a list that holds a non-string builds its error from the
-// text of the whole tree. The first four are every caller of Equal in cel-go v0.32.0, read in common/types
-// (Contains, behind `in`), ext (distinct) and interpreter (the == and != nodes). flatten is
-// the one list function of the pinned extension that copies nested elements under the legacy
-// cost tracker (ext/lists.go, trackListFlattenLegacy). A new cel-go version, or a new version
-// of a pinned extension library, can add a call. TestComparisonCallSetIsReadFromCelGo fails
-// on any other version, so that someone reads the calls again when cel-go moves (the move
-// to v0.33 is go-kure/launcher#1491).
+// text of the whole tree. The first four are every caller of Equal in cel-go v0.33.2 that a model reaches, read in
+// common/types (Contains, behind `in`), ext (distinct) and interpreter (the == and != nodes).
+// flatten is the one list function of the pinned extension that copies nested elements under the
+// legacy cost tracker (ext/lists.go, trackListFlattenLegacy). A new cel-go version, or a new
+// version of a pinned extension library, can add a call. TestComparisonCallSetIsReadFromCelGo
+// fails on any other version, so that someone reads the calls again when cel-go moves.
 var budgetedCalls = []string{operators.Equals, operators.NotEquals, operators.In, "distinct", "flatten", "join"}
 
 // compareBudget is the steps left to the comparisons of one site evaluation.
@@ -161,82 +160,114 @@ func compareDecorator(i interpreter.Interpretable) (interpreter.Interpretable, e
 	if !ok {
 		return i, nil
 	}
-	args := call.Args()
 	switch call.Function() {
 	case operators.Equals, operators.NotEquals:
-		return &budgetedEq{InterpretableCall: call, lhs: args[0], rhs: args[1], negate: call.Function() == operators.NotEquals}, nil
+		return &budgetedEq{InterpretableCall: call, negate: call.Function() == operators.NotEquals}, nil
 	case operators.In:
-		return &budgetedIn{InterpretableCall: call, elem: args[0], list: args[1]}, nil
+		return &budgetedIn{call}, nil
 	case "distinct":
-		return &budgetedDistinct{InterpretableCall: call, list: args[0]}, nil
+		return &budgetedDistinct{call}, nil
 	case "join":
-		j := &budgetedJoin{InterpretableCall: call, list: args[0]}
-		if len(args) == 2 {
-			j.sep = args[1]
-		}
-		return j, nil
+		return &budgetedJoin{call}, nil
 	case "flatten":
-		f := &budgetedFlatten{InterpretableCall: call, list: args[0]}
-		if len(args) == 2 {
-			f.depth = args[1]
-		}
-		return f, nil
+		return &budgetedFlatten{call}, nil
 	}
 	return i, nil
 }
 
-// operands evaluates two operands as cel-go does: the first error is the result.
-func operands(a interpreter.Activation, x, y interpreter.Interpretable) (l, r, failed ref.Val) {
-	l = x.Eval(a)
-	if types.IsError(l) {
-		return nil, nil, l
+// execCall is the Exec of a replacement node. It evaluates the operands of call in order, with
+// Exec on the frame so that each reports its own cost, and returns the first error as cel-go
+// does. It runs body on the values and reports the call to the cost tracker of the frame.
+//
+// cel-go v0.33 has no observer that reads a node's function and arguments after it ran: each
+// node reports its own cost from inside its own Exec (interpreter/interpretable.go, evalUnary,
+// evalBinary and evalVarArgs), so a node that does not run cel-go's Exec reports nothing, and
+// the evaluation reads a cost of 0. An operand that fails returns before the report, as in
+// cel-go. A refusal by panic does too, because the evaluation ends there.
+func execCall(f *interpreter.ExecutionFrame, call interpreter.InterpretableCall, body func(vals []ref.Val) ref.Val) ref.Val {
+	args := call.Args()
+	vals := make([]ref.Val, len(args))
+	for i, arg := range args {
+		if vals[i] = arg.Exec(f); types.IsError(vals[i]) {
+			return vals[i]
+		}
 	}
-	r = y.Eval(a)
-	if types.IsError(r) {
-		return nil, nil, r
+	res := body(vals)
+	reportCost(f, call, vals, res)
+	return res
+}
+
+// reportCost gives the cost tracker of the frame the call that the node replaced, with the method
+// of cel-go's node for that number of operands (a call of three or more is a vararg call).
+func reportCost(f *interpreter.ExecutionFrame, call interpreter.InterpretableCall, vals []ref.Val, res ref.Val) {
+	costs := f.CostTracker()
+	if costs == nil {
+		return
 	}
-	return l, r, nil
+	switch len(vals) {
+	case 0:
+		costs.EvalZeroArity(f, call.ID(), call, res)
+	case 1:
+		costs.EvalUnary(f, call.ID(), call, vals[0], res)
+	case 2:
+		costs.EvalBinary(f, call.ID(), call, vals[0], vals[1], res)
+	default:
+		costs.EvalVarArgs(f, call.ID(), call, vals, res)
+	}
 }
 
 // A replacement node embeds the call it replaces, so that it keeps ID, Function, OverloadID
-// and Args. cel-go's cost tracker reads those from an InterpretableCall and charges the call
-// by its function, which keeps the reported cost the cel-go estimate. A node that is not an
-// InterpretableV2 is wrapped by cel-go in an adapter that hides them, so each node has Exec.
+// and Args, which the cost tracker reads to charge the call by its function. Each node has Exec,
+// which runs the node and reports its cost, and an Eval that runs Exec on a frame.
 type budgetedEq struct {
 	interpreter.InterpretableCall
-	lhs, rhs interpreter.Interpretable
-	negate   bool
+	negate bool
 }
-
-func (e *budgetedEq) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
 
 func (e *budgetedEq) Eval(a interpreter.Activation) ref.Val {
-	l, r, failed := operands(a, e.lhs, e.rhs)
-	if failed != nil {
-		return failed
-	}
-	v, ok := budgetOf(a).equal(l, r)
-	if !ok {
-		return compareStop()
-	}
-	if e.negate {
-		return types.Bool(v != types.True)
-	}
-	return v
+	return interpreter.EvalActivation(a, e.Exec)
 }
 
-type budgetedIn struct {
-	interpreter.InterpretableCall
-	elem, list interpreter.Interpretable
+// Exec reports the cost of an operand that fails as cel-go's == and != nodes do (a legacy
+// behaviour of cel-go, evalEq and evalNe), which no other call does.
+func (e *budgetedEq) Exec(f *interpreter.ExecutionFrame) ref.Val {
+	args := e.Args()
+	l := args[0].Exec(f)
+	if types.IsError(l) {
+		reportCost(f, e, []ref.Val{l, types.UnknownType}, l)
+		return l
+	}
+	r := args[1].Exec(f)
+	if types.IsError(r) {
+		reportCost(f, e, []ref.Val{l, r}, r)
+		return r
+	}
+	var res ref.Val
+	v, ok := budgetOf(f).equal(l, r)
+	switch {
+	case !ok:
+		res = compareStop() // an error value, so the call still reports its cost
+	case e.negate:
+		res = types.Bool(v != types.True)
+	default:
+		res = v
+	}
+	reportCost(f, e, []ref.Val{l, r}, res)
+	return res
 }
 
-func (e *budgetedIn) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
+type budgetedIn struct{ interpreter.InterpretableCall }
 
 func (e *budgetedIn) Eval(a interpreter.Activation) ref.Val {
-	x, c, failed := operands(a, e.elem, e.list)
-	if failed != nil {
-		return failed
-	}
+	return interpreter.EvalActivation(a, e.Exec)
+}
+
+func (e *budgetedIn) Exec(f *interpreter.ExecutionFrame) ref.Val {
+	return execCall(f, e, func(vals []ref.Val) ref.Val { return e.run(f, vals) })
+}
+
+func (e *budgetedIn) run(f *interpreter.ExecutionFrame, vals []ref.Val) ref.Val {
+	x, c := vals[0], vals[1]
 	list, ok := c.(traits.Lister)
 	if !ok {
 		if c.Type().HasTrait(traits.ContainerType) {
@@ -244,7 +275,7 @@ func (e *budgetedIn) Eval(a interpreter.Activation) ref.Val {
 		}
 		return types.ValOrErr(c, "no such overload")
 	}
-	b := budgetOf(a)
+	b := budgetOf(f)
 	n := list.Size().(types.Int)
 	for i := types.IntZero; i < n; i++ {
 		v, ok := b.equal(x, list.Get(i))
@@ -258,23 +289,23 @@ func (e *budgetedIn) Eval(a interpreter.Activation) ref.Val {
 	return types.False
 }
 
-type budgetedDistinct struct {
-	interpreter.InterpretableCall
-	list interpreter.Interpretable
-}
-
-func (e *budgetedDistinct) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
+type budgetedDistinct struct{ interpreter.InterpretableCall }
 
 func (e *budgetedDistinct) Eval(a interpreter.Activation) ref.Val {
-	c := e.list.Eval(a)
-	if types.IsError(c) {
-		return c
-	}
+	return interpreter.EvalActivation(a, e.Exec)
+}
+
+func (e *budgetedDistinct) Exec(f *interpreter.ExecutionFrame) ref.Val {
+	return execCall(f, e, func(vals []ref.Val) ref.Val { return e.run(f, vals) })
+}
+
+func (e *budgetedDistinct) run(f *interpreter.ExecutionFrame, vals []ref.Val) ref.Val {
+	c := vals[0]
 	list, ok := c.(traits.Lister)
 	if !ok {
 		return types.ValOrErr(c, "no such overload")
 	}
-	b := budgetOf(a)
+	b := budgetOf(f)
 	n := list.Size().(types.Int)
 	var unique []ref.Val
 	for i := types.IntZero; i < n; i++ {
@@ -300,25 +331,22 @@ func (e *budgetedDistinct) Eval(a interpreter.Activation) ref.Val {
 // budgetedJoin is the join of the strings extension. cel-go builds the error for an element
 // that is no string from the text of the element, and the text of a list prints every shared
 // child, so this node names the type of the element and never prints it.
-type budgetedJoin struct {
-	interpreter.InterpretableCall
-	list interpreter.Interpretable
-	sep  interpreter.Interpretable // nil for join()
-}
-
-func (e *budgetedJoin) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
+type budgetedJoin struct{ interpreter.InterpretableCall }
 
 func (e *budgetedJoin) Eval(a interpreter.Activation) ref.Val {
-	c := e.list.Eval(a)
-	if types.IsError(c) {
-		return c
-	}
+	return interpreter.EvalActivation(a, e.Exec)
+}
+
+func (e *budgetedJoin) Exec(f *interpreter.ExecutionFrame) ref.Val {
+	return execCall(f, e, func(vals []ref.Val) ref.Val { return e.run(vals) })
+}
+
+// run joins vals[0] with the separator vals[1], which join() does not have.
+func (e *budgetedJoin) run(vals []ref.Val) ref.Val {
+	c := vals[0]
 	sep := types.String("")
-	if e.sep != nil {
-		s := e.sep.Eval(a)
-		if types.IsError(s) {
-			return s
-		}
+	if len(vals) == 2 {
+		s := vals[1]
 		str, ok := s.(types.String)
 		if !ok {
 			return types.ValOrErr(s, "no such overload: %v.join(%v)", c.Type(), s.Type())
@@ -358,25 +386,22 @@ func (e *budgetedJoin) Eval(a interpreter.Activation) ref.Val {
 	return types.String(sb.String())
 }
 
-type budgetedFlatten struct {
-	interpreter.InterpretableCall
-	list  interpreter.Interpretable
-	depth interpreter.Interpretable // nil for flatten()
-}
-
-func (e *budgetedFlatten) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
+type budgetedFlatten struct{ interpreter.InterpretableCall }
 
 func (e *budgetedFlatten) Eval(a interpreter.Activation) ref.Val {
-	c := e.list.Eval(a)
-	if types.IsError(c) {
-		return c
-	}
+	return interpreter.EvalActivation(a, e.Exec)
+}
+
+func (e *budgetedFlatten) Exec(f *interpreter.ExecutionFrame) ref.Val {
+	return execCall(f, e, func(vals []ref.Val) ref.Val { return e.run(f, vals) })
+}
+
+// run flattens vals[0] to the depth vals[1], which flatten() does not have.
+func (e *budgetedFlatten) run(f *interpreter.ExecutionFrame, vals []ref.Val) ref.Val {
+	c := vals[0]
 	depth := int64(1)
-	if e.depth != nil {
-		d := e.depth.Eval(a)
-		if types.IsError(d) {
-			return d
-		}
+	if len(vals) == 2 {
+		d := vals[1]
 		n, ok := d.(types.Int)
 		if !ok {
 			return types.ValOrErr(d, "no such overload: %v.flatten(%v)", c.Type(), d.Type())
@@ -390,7 +415,7 @@ func (e *budgetedFlatten) Eval(a interpreter.Activation) ref.Val {
 	if depth < 0 {
 		return types.WrapErr(errors.New("level must be non-negative"))
 	}
-	out, ok := budgetOf(a).flatten(list, depth, nil)
+	out, ok := budgetOf(f).flatten(list, depth, nil)
 	if !ok {
 		return compareStop()
 	}
