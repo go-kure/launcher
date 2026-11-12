@@ -56,8 +56,8 @@ under the key is the owner's, or generation fails. That holds whatever wrote the
 `manifests` or `passthrough` document, an authored pod label, a kind's property, a chart
 rendered at build time. The synthesized NetworkPolicies select by the label, so a pod that
 carried another component's value would be let in wherever that component's pods are. The
-kinds' `labels` property refuses the same value in the transform ("`labels` and
-`annotations`: the metadata of a kind component's object" below). The key must therefore be
+kinds' `labels` property refuses the same value in the transform ([`labels` and
+`annotations`: the metadata of a kind component's object](names-and-overrides.md#labels-and-annotations-the-metadata-of-a-kind-components-object)). The key must therefore be
 one nothing else writes.
 
 The value is read, on every object and on each member of an unstructured list envelope:
