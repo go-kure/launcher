@@ -43,7 +43,7 @@ func (r *Rule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 	if lctx.Namer == nil {
 		return oam.LoweringResult{}, errors.Errorf("model: %s: no name allocator in the lowering context", r.m.Key())
 	}
-	inputs := make(map[string]any, len(r.m.Spec.Inputs)+len(comp.Properties))
+	inputs := make(map[string]any, len(r.m.Spec.Inputs))
 	for name, s := range r.m.Spec.Inputs {
 		if s.Default != nil {
 			inputs[name] = s.Default
