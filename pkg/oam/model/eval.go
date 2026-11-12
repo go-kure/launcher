@@ -585,6 +585,9 @@ func (c *converter) toGo(v ref.Val) (any, error) {
 		}
 		return f, nil
 	case types.String:
+		if len(x) > maxValueSize {
+			return nil, errors.Errorf("%w: a string holds more than %d bytes", ErrCostLimit, maxValueSize)
+		}
 		return string(x), nil
 	case types.Bytes:
 		if err := c.takeN(len(x)); err != nil {
