@@ -77,7 +77,7 @@ func (h *HelmChartHandler) UnsupportedFieldHint(key string) string {
 	if !helmChartCompositeKeys[key] {
 		return ""
 	}
-	return `helmchart is now the Flux HelmChart source (go-kure/launcher#351); a document written for the removed helmchart composite uses "helm" (go-kure/launcher#350; migration table in pkg/oam/builtin/components/README.md)`
+	return `helmchart is now the Flux HelmChart source (go-kure/launcher#351); a document written for the removed helmchart composite uses "helm" (go-kure/launcher#350; migration table in site/content/api-reference/oam-components/kinds-helm.md)`
 }
 
 // ToApplicationConfig decodes the component's properties strictly into a

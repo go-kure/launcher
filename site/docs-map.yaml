@@ -46,7 +46,24 @@ packages:
     mount: {target: api-reference/oam-models.md, title: Component Models, weight: 21, group: OAM, desc: "Configuration-defined component models: document format and loader"}
   - path: pkg/oam/builtin/components
     readme: pkg/oam/builtin/components/README.md
-    mount: {target: api-reference/oam-components.md, title: Component Handlers, weight: 22, group: OAM, desc: "Built-in component types (webservice, worker, cronjob, helm, helmrelease, helmtemplate, …)"}
+    mount: {target: api-reference/oam-components/_index.md, title: Component Handlers, weight: 22, group: OAM, desc: "Built-in component types (webservice, worker, cronjob, helm, helmrelease, helmtemplate, …)"}
+    guides:
+      - api-reference/oam-components/common-config
+      - api-reference/oam-components/policy-and-endpoints
+      - api-reference/oam-components/kinds-core-workloads
+      - api-reference/oam-components/kinds-networking
+      - api-reference/oam-components/kinds-access-and-admission
+      - api-reference/oam-components/kinds-flux
+      - api-reference/oam-components/kinds-helm
+      - api-reference/oam-components/kinds-monitoring
+      - api-reference/oam-components/kinds-metallb
+      - api-reference/oam-components/kinds-postgres
+      - api-reference/oam-components/kinds-secrets-certs-backup
+      - api-reference/oam-components/adding-a-kind
+      - api-reference/oam-components/upstream-fields-not-read
+      - api-reference/oam-components/extending
+      - api-reference/oam-components/null-and-spellings
+      - api-reference/oam-components/conventions
   - path: pkg/oam/builtin/traits
     readme: pkg/oam/builtin/traits/README.md
     mount: {target: api-reference/oam-traits.md, title: Trait Handlers, weight: 24, group: OAM, desc: "Built-in traits (ingress, certificate, scaler, externalsecret, …)"}
