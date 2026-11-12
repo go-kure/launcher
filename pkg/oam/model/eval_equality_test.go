@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/cel-go/cel"
 
@@ -90,6 +91,36 @@ func TestComparisonOfSharedNestedValuesIsBounded(t *testing.T) {
 				t.Errorf("got %v, %v, want %v", got, err, tc.want)
 			}
 		})
+	}
+}
+
+// TestIssueExpressionAtN1000IsRefusedFast runs the expression of go-kure/launcher#1451 at
+// N=1000, which holds 10^12 values when read as a tree, and requires the refusal itself. The
+// evaluation runs in a goroutine only so that a comparison with no bound fails this test with
+// its own message after a generous guard, and does not hang the run until the test binary
+// times out. The guard is no time assertion: a refusal that comes late still passes.
+func TestIssueExpressionAtN1000IsRefusedFast(t *testing.T) {
+	const hangGuard = 30 * time.Second
+	c := mustCompile(t, oneValue(t, "${"+nested4(1000, "d == d")+"}"))
+	type result struct {
+		got any
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		got, _, err := c.Eval("spec.values[0].expr", stdScope())
+		done <- result{got, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err == nil {
+			t.Fatalf("the comparison gave %v, want a refusal", r.got)
+		}
+		if !errors.Is(r.err, ErrCostLimit) || !strings.Contains(r.err.Error(), "spec.values[0].expr") {
+			t.Errorf("error %q must wrap ErrCostLimit and name the site", r.err)
+		}
+	case <-time.After(hangGuard):
+		t.Fatalf("the comparison of 10^12 values hung for %v: it has no bound", hangGuard)
 	}
 }
 
