@@ -3,7 +3,7 @@
 go = "1.27.4"
 golangci-lint = "2.15.0"
 git-cliff = "2.14.2"
-goreleaser = "2.20.1"
+goreleaser = "2.20.2"
 # Required for GoReleaser SBOM generation and signing
 syft = "1.57.1"
 cosign = "3.1.4"
