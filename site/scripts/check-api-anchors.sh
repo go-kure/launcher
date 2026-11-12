@@ -240,13 +240,14 @@ done
 # and must be a `guides` entry (`api-reference/<package>/<part>`) of a package in the docs map.
 # The doc gate counts a guide as the package's docs and counts nothing else.
 guides="$(yq '.packages[]?.guides[]?' "$DOCSMAP")" || die "cannot read guides from $DOCSMAP"
+parts="$(find "$CONTENT/api-reference" -mindepth 2 -maxdepth 2 -name '*.md' ! -name '_index.md' -type f | sort)" || die "cannot read $CONTENT/api-reference"
 nparts=0
 while IFS= read -r part; do
     [[ -n "$part" ]] || continue
     nparts=$((nparts + 1))
     slug="${part#"$CONTENT"/}"; slug="${slug%.md}"
     grep -Fxq -- "$slug" <<<"$guides" || report "$slug: part is in no package guides in $(basename "$DOCSMAP")"
-done < <(find "$CONTENT/api-reference" -mindepth 2 -maxdepth 2 -name '*.md' ! -name '_index.md' -type f | sort)
+done <<<"$parts"
 
 if [[ $fail -ne 0 ]]; then
     exit 1

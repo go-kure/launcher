@@ -210,6 +210,12 @@ expect "missing docs map is refused" 2 "docs map not found" -- \
 printf 'packages: [\n' > "$d/bad.yaml"
 expect "unreadable docs map is refused" 2 "cannot read guides" -- \
     --site "$d/site" --pins "$d/pins.txt" --content "$d/content" --docs-map "$d/bad.yaml"
+# A find that fails only on the content tree must stop the run, not read as zero parts.
+mkdir -p "$d/bin"
+printf '#!/bin/sh\ncase "$*" in *"%s"*) exit 1;; esac\nexec %s "$@"\n' "$d/content" "$(command -v find)" > "$d/bin/find"
+chmod +x "$d/bin/find"
+PATH="$d/bin:$PATH" expect "a failing read of the parts is exit 2" 2 "cannot read $d/content/api-reference" -- \
+    --site "$d/site" --pins "$d/pins.txt" --content "$d/content" --docs-map "$d/map.yaml"
 expect "--content without a value is refused" 2 "--content needs a value" -- --content
 
 # 10: --print-pins lists the heading ids, in order, and nothing else. Its output is a
