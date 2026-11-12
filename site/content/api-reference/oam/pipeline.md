@@ -3,6 +3,9 @@ title: "Pipeline"
 weight: 1
 ---
 
+The implementation and history of the section below are on the
+[contributor page](../../contributing/oam-reference/pipeline.md).
+
 ## Pipeline
 
 ```
@@ -16,8 +19,8 @@ parse → resolve parameters → transform (component + trait handlers) → mani
    `ComponentHandler` and each trait to its `TraitHandler`, merging the
    `ClusterProfile`'s capability choices.
 
-The transform orders components only where the document declares an order
-(go-kure/launcher#783). No component type comes before another by itself. Three
+The transform orders components only where the document declares an order.
+No component type comes before another by itself. Three
 declarations order components:
 
 - **A tier.** A `placement` policy, or the `<domain>/tier` annotation it replaces, puts a
@@ -69,10 +72,10 @@ caller that walks the tree itself must visit the own applications of a bundle th
 children; `GenerateApplications` does.
 
 **Where a layout-walking consumer finds the application.** Launcher writes no directory;
-kure's layout walker does. Since go-kure/kure#979 the root node's directory renders no
+kure's layout walker does. The root node's directory renders no
 bundle: the application bundle has a directory of its own inside it, named after the bundle,
 which the root's `kustomization.yaml` does not list. `Bundle.DirName` on the bundle launcher
-returned gives that directory another name (go-kure/kure#972). **Breaking output change** for such a
+returned gives that directory another name. **Breaking output change** for such a
 consumer: with `layout.DefaultLayoutRules()`, everything launcher returns is written one
 directory down. Below, `<bundle>` is the application bundle's name: the Application's name,
 unless the `Naming` hook renames the bundle. The root node is unnamed whether or not the
@@ -84,8 +87,8 @@ components are ordered, so `<bundle>/` is in the same place for both:
 | Ordered: the generated sources | `<bundle>/` | `cluster/<bundle>/` |
 | Ordered: a group | `<bundle>/<group>/` | `cluster/<bundle>/<group>/` |
 
-**Breaking output change** for a layout-walking consumer of an ordered application
-(go-kure/launcher#783): its root node was named `<bundle>` until then, which put a directory
+**Breaking output change** for a layout-walking consumer of an ordered application:
+its root node was named `<bundle>` until then, which put a directory
 of the root node's own above the bundle's. The tree was `<bundle>/<bundle>/`
 (`<cluster>/<bundle>/<bundle>/` with a `ClusterName`; a `ClusterName` whose last segment is
 the bundle's name was the node's directory itself, with no directory added and no
@@ -106,8 +109,7 @@ directory of its own, a `helmtemplate` component or any component under
 (`cluster/<bundle>/<component>/`). The `spec.path` of the Flux Kustomization, or the
 `source.path` of the ArgoCD Application, that kure generates for the bundle moves with it.
 `layout.TopDirectory(rootNode, rules)` returns the directory at the top of that tree
-(`cluster` or the `ClusterName` directory above), the one kure's bootstrap points Flux at
-since go-kure/kure#979.
+(`cluster` or the `ClusterName` directory above), the one kure's bootstrap points Flux at.
 
 With the default `BundleGrouping: GroupFlat`, `ManifestLayout.OriginUnit()` on the root
 node's layout returns the bundle directory's layout; it is nil on every other layout, and on
@@ -123,8 +125,7 @@ for the `bundle` and `group` roles
 Under `FluxIntegratedPerLayout` placement kure also makes a Kustomization for each
 application layout and each hook-group layout. Its default name is
 `<unit name>-<layout name>`, the unit name being the bundle's Kustomization name, and kure
-shortens a default over 63 characters by its own rule (go-kure/kure#1030,
-go-kure/kure#1036), with the first 8 hexadecimal characters of the SHA-256 of the default. A
+shortens a default over 63 characters by its own rule, with the first 8 hexadecimal characters of the SHA-256 of the default. A
 layout name of at most 54 characters stays whole, after as much of the unit name as fits:
 `<unit prefix>-<hash>-<layout name>`, or `<hash>-<layout name>` where none fits. A longer one
 keeps its first 54 characters, `<layout prefix>-<hash>`, so the phase at the end of a long
@@ -140,7 +141,7 @@ refused in the transform, naming the component and the role, unless it is a DNS-
 subdomain of at most 63 characters. Launcher never overwrites a `KustomizationName` a caller
 set on the layout. A name set on the layout needs per-layout placement: under any other the
 layout has no Kustomization of its own, and kure's Flux integration refuses the name, naming
-the layout (go-kure/kure#1032). Charts of one document are held apart, but the name a chart's
+the layout. Charts of one document are held apart, but the name a chart's
 layout gets is not held against a bundle's or a hook-group child's; kure refuses a
 Kustomization name used twice when it integrates the walked tree.
 
@@ -156,25 +157,25 @@ the hook sets another, which names directory and Kustomization alike and is neve
 A consumer that walks the tree itself can still set the field on a walked child before the
 integration. Like the child's `DependsOn`, the field needs `FluxIntegratedPerLayout`: under
 any other placement a child gets no Kustomization of its own, and kure's Flux integration
-refuses both, naming the child (go-kure/kure#1032).
+refuses both, naming the child.
 
-**Breaking output change** (go-kure/launcher#941): under `FluxIntegratedPerLayout` placement
+**Breaking output change**: under `FluxIntegratedPerLayout` placement
 the Kustomization of a default hook-group child regains the leading `<unit name>-`
-(`shop-db-01-main` becomes `shop-shop-db-01-main`, as before go-kure/launcher#787), and a
+(`shop-db-01-main` becomes `shop-shop-db-01-main`), and a
 Kustomization name launcher shortened, for a chart's layout or a hook-group child, becomes
 the one kure shortens by its own rule. Directory names do not change.
 
 Launcher sets no Flux delivery field on any bundle it returns: `Interval`, `RetryInterval`,
 `Timeout`, `Prune`, `Wait`, `Force`, `Suspend`, `HealthChecks`, `Patches` and `PostBuild`
-stay unset (go-kure/launcher#781). How an application is delivered (which Flux
+stay unset. How an application is delivered (which Flux
 Kustomization applies it, how readiness is judged, how often it reconciles) belongs to the
 consumer that delivers it; see `docs/delivery-scope.md`.
 
 A consumer that sets one on a bundle launcher returned gets what kure's Flux workflow makes
 of it. Under `FluxIntegratedPerLayout` placement eleven settings of a bundle reach further
-than its own Kustomization: `Wait`, `Timeout`, `RetryInterval`, `Labels` and `Annotations`
-since go-kure/kure#1016, and `Interval`, `Prune`, `Force`, `Suspend`, `PostBuild` and
-`Patches` since go-kure/kure#1021. The ten besides `Patches` are also on the Kustomization
+than its own Kustomization: `Wait`, `Timeout`, `RetryInterval`, `Labels` and `Annotations`,
+and `Interval`, `Prune`, `Force`, `Suspend`, `PostBuild` and
+`Patches`. The ten besides `Patches` are also on the Kustomization
 of the layout of each component the bundle holds and of each `helmtemplate` hook-group child
 of such a component (`shop-db` and `shop-shop-db-NN-<phase>`, beside `shop`); a patch reaches
 those Kustomizations only as the placements below say, some of them or none. The bundle
@@ -235,16 +236,15 @@ settings", "Patches of a bundle with per-layout Kustomizations" and "Durations".
 
 Under any placement, a bundle with child bundles (in an ordered application, the
 application's bundle above its group bundles) that sets `Wait` no longer carries a
-`spec.healthChecks` entry per child on its Kustomization (go-kure/kure#1022): Flux ignores
+`spec.healthChecks` entry per child on its Kustomization: Flux ignores
 health checks under `wait`, so nothing changes on a cluster, but the generated object does.
 kure's layout writers (`WriteManifest`, `ManifestLayout.WriteToDisk` and `WriteToTar`) refuse
-a layout that holds an object written without a `kind`, or without an `apiVersion`
-(go-kure/kure#1020), where they wrote it before. Each item of a List is judged, not the List
+a layout that holds an object written without a `kind`, or without an `apiVersion`,
+where they wrote it before. Each item of a List is judged, not the List
 itself, and an object with kustomize's `config.kubernetes.io/local-config` annotation at any
 value but `"false"` needs a `kind` but no `apiVersion`.
 
-**Breaking output change** for a consumer (go-kure/kure#1016, go-kure/kure#1021,
-go-kure/kure#1022 and go-kure/kure#1020, with the kure commit `go.mod` pins). Under
+**Breaking output change** for a consumer (with the kure commit `go.mod` pins). Under
 `FluxIntegratedPerLayout` placement, a bundle that sets one of the ten besides `Patches` gives
 it to the Kustomizations of the components it holds and of their hook groups; its patches go
 there by the four placements above: a targeted one to every one of them, a plain untargeted
@@ -260,7 +260,7 @@ child bundles and no such duration, and holds no object the writers now refuse, 
 is written as before.
 
 kure reads the resources a layout holds as kustomize builds them, a List standing for its
-items, by one rule in its pre-write checks and in its Flux integration (go-kure/kure#1017).
+items, by one rule in its pre-write checks and in its Flux integration.
 Launcher's own decode paths put no List into a layout (kure's parser replaces a list document
 by its items, and `passthrough` refuses a list); a Go caller's own `ApplicationConfig` that
 returns one has it read by that rule. Launcher reads such a List by one rule of its own,
@@ -276,7 +276,7 @@ also leave out what Kustomize's build drops: an object whose
 `config.kubernetes.io/local-config` annotation is present with any value but `"false"` (an
 empty value, a boolean `true`, a number or a null drops it too, as authored in an unstructured
 object; a boolean `false` keeps it) is never applied, so it generates nothing and collides with nothing,
-and the claim it would make for a controller goes with it (go-kure/launcher#1338). That is
+and the claim it would make for a controller goes with it. That is
 judged on each item once a `List` is inlined, so a `List`'s own annotation is not read; an
 envelope whose kind does not end in `List` is one object for Kustomize and is dropped with all
 its items. The other readers of generated objects, such as the forced-volume warning, still
@@ -296,7 +296,7 @@ passed, and two unnamed Lists were refused as one object whatever they held.
 
 An application can carry a delivery intent, `stack.Application.Delivery`: what it asks of the
 engine that delivers its objects, stated without naming the engine. The `prune-protection` and
-`force-replace` traits set it (go-kure/launcher#782), on the component's application and on
+`force-replace` traits set it, on the component's application and on
 each of its trait sub-applications; a sibling group's one application takes each intent that
 any of its members has. Launcher writes no Flux annotation for either trait. kure's Flux
 workflow turns the intent into `kustomize.toolkit.fluxcd.io/prune: disabled` and
@@ -305,7 +305,7 @@ where it integrates a layout (`CreateLayoutWithResources`, `IntegrateWithLayout`
 [traits README](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits) says
 what that covers.
 
-**Breaking library changes** (go-kure/launcher#782):
+**Breaking library changes**:
 
 - Output: the objects of a component with `prune-protection` or `force-replace` no longer
   carry `kustomize.toolkit.fluxcd.io/prune` or `kustomize.toolkit.fluxcd.io/force`. A consumer
@@ -335,10 +335,9 @@ what that covers.
 
 Within a bundle, each component's application is followed by the sub-applications its traits
 created, in creation order, so a trait's objects are emitted with their own component's rather
-than after every component of the bundle (go-kure/launcher#712). A trait handler that moves
-an application or removes a sub-application keeps the order it left (go-kure/launcher#718); one
-that replaces, removes or renames a component's application fails the transform (go-kure/launcher#734,
-see `TraitHandler` in [Transform, extension and lowering](transform-and-lowering.md#transform--extension)). A trait whose handler
+than after every component of the bundle. A trait handler that moves
+an application or removes a sub-application keeps the order it left; one
+that replaces, removes or renames a component's application fails the transform (see `TraitHandler` in [Transform, extension and lowering](transform-and-lowering.md#transform--extension)). A trait whose handler
 implements `SubApplicationDecorator` (the built-in `prune-protection` and `force-replace`, which
 set a delivery intent) is also applied to those sub-applications, whatever order the traits were authored in: the last step of
 the transform, after the Phase-4 synthesis below, applies it to each of them. The NetworkPolicies
@@ -348,15 +347,15 @@ Under `TransformContext.FluxNamespace`, every config that takes it (`SetFluxName
 `helmrelease`, `fluxcd-kustomization`, Flux source, `fluxcd-alert`, `fluxcd-provider`, `fluxcd-receiver`, `imagepolicy`,
 `imagerepository`, `imageupdateautomation`, `artifactgenerator` and `resourcesetinputprovider` kinds) moves its Flux objects there, and a trait
 sub-application of that component follows only when the Flux object reads it by name from its own
-namespace (go-kure/launcher#740). In a sibling group the Flux object is any of the group's Flux
+namespace. In a sibling group the Flux object is any of the group's Flux
 members, the members whose config takes the Flux namespace before the component's first trait runs:
 they land in the Flux namespace together, so a Flux member's trait sub-application follows when any
 of them reads it, whichever member carries the trait (an `oci` component's source reads the Secret
-of a trait on its Kustomization, go-kure/launcher#1012). A member that is no Flux object keeps its
+of a trait on its Kustomization). A member that is no Flux object keeps its
 trait sub-applications with its workloads, whatever a Flux member reads. A Flux object a lowering
 rule orders after a generated source (`Component.OrderAfter`) reads through that source as well: a
 trait sub-application of the component follows when the source reads it (the `oci` rule's shared
-source reads the Secret one consumer's trait makes, go-kure/launcher#1016). A workload ordered after
+source reads the Secret one consumer's trait makes). A workload ordered after
 a source gains nothing from it. A trait that makes, in a later group, a Secret a generated source
 or a ConfigMap or Secret a Flux object requires is admitted under the default delivery, which
 converges, and refused under `TransformContext.GroupsWaitForFluxObjects` (below). The config reports what it reads (`FluxNamespaceReads`: a
@@ -368,7 +367,7 @@ sub-application config names the ConfigMap or Secret it produces (`FluxNamespace
 a ConfigMap or Secret the Flux object does not name, a Certificate whose Secret it does not name, a
 claim, a NetworkPolicy, a route — stays in the application namespace with the
 workloads, where a HelmRelease installs them (`targetNamespace`) and keeps its Helm release
-storage (`storageNamespace`, defaulted to the same namespace, go-kure/launcher#988). A ConfigMap or Secret the Flux
+storage (`storageNamespace`, defaulted to the same namespace). A ConfigMap or Secret the Flux
 object names moves even when the chart's pods read it as well: the Flux object cannot reconcile
 without it, and a reference through the chart's values is invisible here. Every built-in config
 that takes the Flux namespace reports its reads, possibly none; decorators and sibling
@@ -383,8 +382,7 @@ group for the Flux object's. Under the field the transform refuses it, naming th
 ConfigMap or Secret, the maker and the groups: put the trait on a component in the Flux object's
 group or an earlier one, or place the component there, or provide the object apart from the
 document. Unset, launcher assumes the default delivery, under which a group is Ready once applied
-and the document converges, and it refuses nothing (go-kure/launcher#1039,
-go-kure/launcher#1079, go-kure/launcher#1086). Two kinds of Flux object wait:
+and the document converges, and it refuses nothing. Two kinds of Flux object wait:
 - a Flux object of a group, a sibling group's Flux member included (named by the group), in its
   own group;
 - a generated source, in the group of its earliest Flux consumer, a Flux object its own lowering
@@ -442,8 +440,7 @@ source (`source.name`) lowers to such a HelmRelease and leaves the source's orde
 Kind, name and namespace must match: the reference's `namespace`, else the one the Flux object
 lands in, where a source component lands too. A `suspend: true` object requires none; otherwise
 the source counts whatever the object reports as `FluxRequiredReads`. The refusal names the
-reference's field; place the source's component in the Flux object's group or an earlier one
-(go-kure/launcher#1088).
+reference's field; place the source's component in the Flux object's group or an earlier one.
 
 A Phase-4 post-build stage then synthesizes per-component `NetworkPolicy` resources,
 each a **separate** additive resource (the authored `networkpolicy` /
@@ -515,7 +512,7 @@ from `TransformContext.Domain` (empty ⇒ the library default `gokure.dev`; the 
 uses `launcher.gokure.dev`). The full key is overridable per transform through
 `TransformContext.ComponentLabelKey` (precedence: `ComponentLabelKey` > `<Domain>/component`
 > `gokure.dev/component`). Launcher puts that label on every object a component owns and on
-its pod templates itself (go-kure/launcher#788, [Component label and
+its pod templates itself ([Component label and
 ownership](labels-and-ownership.md#component-label-and-ownership)), so the selector matches the component's pods
 with no caller labelling anything. The label is authoritative: a value an object already
 holds under the key is the component's own, or generation fails, so `ComponentLabelKey` must
@@ -529,7 +526,7 @@ most 52 characters (its first 52, with trailing `-`/`.` trimmed) plus `-` and th
 characters of its sha256. The projection is deterministic, so every component-identity label and
 selector that uses it gets the same value for one component. The `app` label and the `app`
 selectors the built-in components and traits generate to identify a component use the same
-function (go-kure/launcher#572); authored
+function; authored
 labels and selectors (a `service` component's `selector`, a `networkpolicy` peer) are emitted as
 written, and a type that emits authored objects (`passthrough`, for one) adds no `app` label.
 Selectors under an operator's own label and naming contract — the `postgresql` endpoints'
@@ -551,7 +548,7 @@ label, with each routed Service port translated to its `targetPort`. A routed po
 one of the Service's TCP ports is dropped (the rules are TCP, so a route to a UDP or SCTP port
 is dropped the same way), and a route left with no port synthesizes no policy. A `service` of type `ExternalName` selects no pods: it reports a routing
 target without labels and no port for any routed port, so a route to it synthesizes no policy
-either, alone or as a member of a sibling group (go-kure/launcher#790). That label-less
+either, alone or as a member of a sibling group. That label-less
 selector is a marker for "owns its Service name and selects no pods" and is never written into
 an object, where it would select every pod of the namespace; a config that reported it together
 with a port fails the build. A sibling group whose `service` member fronts its own sibling's pods on
@@ -562,39 +559,29 @@ A routing trait's ports for the Service of the component it runs on belong to wh
 component owns that Service name, not to the routing component. When another component owns it
 (a `service` with `objectName` set to the routing component's name, say), the allow lands on
 that owner's pods through the routing target above, and the routing component gets none; a
-Service no component owns keeps the allow on the routing component (go-kure/launcher#1157).
+Service no component owns keeps the allow on the routing component.
 
 A synthesized `NetworkPolicy` is constructed with **no labels and no annotations** —
 only `metadata.name` and `metadata.namespace`, plus the spec. The one label it then gets
 is the component label of the component it was synthesized for, like every object that
-component owns (go-kure/launcher#788); the external-backend policy
+component owns; the external-backend policy
 (`{service}-allow-ingress-traffic`) belongs to no component and stays unlabelled. A
 consumer attributes a policy through its application: `GeneratedApplication.Component`,
 or `ComponentName()` on the application's config, names the component, and is empty for
 the external-backend policy ([Component label and ownership](labels-and-ownership.md#component-label-and-ownership)).
-Since go-kure/launcher#361 the absence of other labels is a
-property of the object as constructed rather than a scrub: kure's release-1 builder
-contract (`go-kure/kure` ≥ `v0.2.0-beta.11`) makes `CreateNetworkPolicy` return TypeMeta
-and identity only, so `netpol_synthesis.go`'s `np.Labels = nil` / `np.Annotations = nil`
-lines no longer strip a constructor-stamped `app:` label and annotation — they are kept
-as a guard, not as a fix-up. Everything else on the policy (`spec.podSelector`,
-`spec.policyTypes`, the rules) is written by the synthesizer as a direct field
-assignment; nothing upstream of it supplies a default.
 
 No synthesized policy shares a selector with its inputs or with another policy. Every
 peer's `podSelector` and every policy's `spec.podSelector` is a `DeepCopy` of the traffic
 source, egress peer, backend or endpoint selector it came from. The inputs are retained
 trait configuration, reused by every rule and every policy built from them, so a label a
-consumer stamps onto one generated policy would otherwise reach all of them
-(go-kure/launcher#396).
+consumer stamps onto one generated policy would otherwise reach all of them.
 
 **Where a route lands: `Transformer.RoutedBackends`.** `RoutedBackends(app, ctx)` reports, for
 every route of every routing trait (`ingress`, `httproute`) of the document, the Service it
 names, the component that owns that Service, the pods the Service selects and, for each routed
 port, whether the Service has it. A downstream consumer calls it to check its own view of the
 document against what the routing traits resolve, whether or not any traffic source is
-configured. It is read-only and works on the whole document, not on one component
-(go-kure/launcher#1133).
+configured. It is read-only and works on the whole document, not on one component.
 
 - **One row per routing sub-application and Service** (`RoutedBackend`): `Component` carries the
   trait, `Application` is the sub-application's name, `Service` the Service the route names, and
@@ -624,9 +611,6 @@ configured. It is read-only and works on the whole document, not on one componen
   has no list of Service ports to ask: the `owner` and `unowned` kinds). `unchecked` is neither
   a match nor a mismatch, and is never guessed. `RoutedPort.Port` is a Service port, a number or a
   Service port name, and is never a container port.
-- **Same resolution as the synthesis, not a copy.** The Service owners come from the lookups the
-  NetworkPolicy synthesis builds, and a port is matched by asking the owner's
-  `ServiceRoutingTarget` once per port.
 
 Limits. The method runs the transform up to the point where the synthesis would start and
 stops there: an error raised before that point is returned, and what runs after it (the
