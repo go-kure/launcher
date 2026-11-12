@@ -312,7 +312,7 @@ identity names one definition: a changed model under the same identity must use 
 | Call | Does |
 |---|---|
 | `model.Compile(m)` | Compiles every expression site of `m` with a cache of its own. |
-| `(*Cache).Compile(m)` | The same, with a shared cache from `model.NewCache()`. `Len()` counts the cached sites. |
+| `(*Cache).Compile(m)` | The same, with a shared cache from `model.CreateCache()`. `Len()` counts the cached sites. |
 | `(*Compiled).Eval(path, scope)` | Runs one site. Returns the Go value, the actual cost and an error. |
 | `model.Load(data)` | Decodes one document and checks it. A failure of a decoded document wraps `model.ErrInvalid` and names the field, for example `spec.parts[1].id`. A YAML, `apiVersion` or `kind` failure does not wrap it. A YAML type error, such as a list where a string belongs, names the line of the field and not its path. An explicit tag that does not fit its value, such as `!!bool notabool`, names its line too, when one tagged value is at fault; with two or more, the error has no line. |
 | `(*Model).Identity()` | The model identity as written in `metadata`. |
