@@ -397,7 +397,7 @@ map and run `bash site/scripts/gen-docs-tables.sh`.
 | `pkg/cmd/kurel/` | `api-reference/kurel-cli` | — |
 | `pkg/errors/` | `api-reference/errors` | — |
 | `pkg/patch/` | `api-reference/patch` | — |
-| `pkg/oam/` | `api-reference/oam` | — |
+| `pkg/oam/` | `api-reference/oam` | `api-reference/oam/pipeline`, `api-reference/oam/labels-and-ownership`, `api-reference/oam/names-and-overrides`, `api-reference/oam/parsing-and-types`, `api-reference/oam/transform-and-lowering`, `api-reference/oam/schemas-and-contract`, `api-reference/oam/policy-and-capability` |
 | `pkg/oam/model/` | `api-reference/oam-models` | — |
 | `pkg/oam/builtin/components/` | `api-reference/oam-components` | — |
 | `pkg/oam/builtin/traits/` | `api-reference/oam-traits` | — |

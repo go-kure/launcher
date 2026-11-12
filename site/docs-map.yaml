@@ -32,7 +32,15 @@ packages:
   # ─── Published (OAM model + handler catalogs) ───
   - path: pkg/oam
     readme: pkg/oam/README.md
-    mount: {target: api-reference/oam.md, title: OAM Model, weight: 20, group: OAM, desc: "OAM data model, parser, and transform pipeline"}
+    mount: {target: api-reference/oam/_index.md, title: OAM Model, weight: 20, group: OAM, desc: "OAM data model, parser, and transform pipeline"}
+    guides:
+      - api-reference/oam/pipeline
+      - api-reference/oam/labels-and-ownership
+      - api-reference/oam/names-and-overrides
+      - api-reference/oam/parsing-and-types
+      - api-reference/oam/transform-and-lowering
+      - api-reference/oam/schemas-and-contract
+      - api-reference/oam/policy-and-capability
   - path: pkg/oam/model
     readme: pkg/oam/model/README.md
     mount: {target: api-reference/oam-models.md, title: Component Models, weight: 21, group: OAM, desc: "Configuration-defined component models: document format and loader"}

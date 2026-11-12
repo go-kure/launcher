@@ -37,7 +37,7 @@ build_reverse_map() {
   echo "|-----------------|---------------------|------------------|"
   yq '.packages[] | select(.mount) | [.path, .mount.target, (.guides // [] | join("||"))] | @tsv' "$DOCS_MAP" \
   | while IFS=$'\t' read -r path target guides; do
-      local ref="${BT}${target%.md}${BT}"
+      local ref="${target%.md}"; ref="${BT}${ref%/_index}${BT}"
       local g="—"
       if [[ -n "$guides" ]]; then
         g="${BT}${guides//||/${BT}, ${BT}}${BT}"
@@ -69,7 +69,8 @@ build_nav() {
     yq ".packages[] | select(.mount and .mount.group == \"${group}\") | [.path, .mount.target, .mount.title, .mount.weight, .mount.desc] | @tsv" "$DOCS_MAP" \
     | sort -t"$(printf '\t')" -k4 -n \
     | while IFS=$'\t' read -r path target title weight desc; do
-        local base="${target#api-reference/}"; base="${base%.md}"
+        # A page mounted as <dir>/_index.md is served at <dir>/.
+        local base="${target#api-reference/}"; base="${base%.md}"; base="${base%/_index}"
         echo "| [${title}](${base}) | ${desc} | [pkg.go.dev](https://pkg.go.dev/${MODULE}/${path}) |"
       done
   done <<< "$groups"
