@@ -246,8 +246,9 @@ identifier read by size, against the same budget of 1,000,000 steps as the compa
 value costs one step for each 1,024 bytes. No string or bytes value may hold more than 1,000,000 bytes,
 and no list or map more than 1,000,000 elements: a value at the cap is allowed, and a value over it stops
 the evaluation with `ErrCostLimit`. A list or a map costs nothing more, because cel-go charges a call by
-the element count of its operands. The result of `sort` and `sortBy` costs the bytes of the string and
-bytes elements it holds, because a sort compares them by content. `join` checks its buffer before it
+the element count of its operands. The keys of `sort` and `sortBy` cost the bytes of the string and
+bytes elements they hold, because a sort compares them by content. The charge comes before the sort runs,
+so a sort that fails after it compared, in `xs.sort() == [] || true`, is paid for too. `join` checks its buffer before it
 writes, against the bytes that the next write adds (the first element has no separator before it).
 `replace` is replaced by a version that computes the size of its result from the number of matches
 and stops before it builds a result over the cap. An identifier that is the key of an index, as in
