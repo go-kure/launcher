@@ -71,8 +71,8 @@ type Cache struct {
 	sites map[string]*site
 }
 
-// NewCache returns an empty cache.
-func NewCache() *Cache { return &Cache{sites: map[string]*site{}} }
+// CreateCache returns an empty cache.
+func CreateCache() *Cache { return &Cache{sites: map[string]*site{}} }
 
 // Len returns the number of cached sites. A site is one expression path of one model.
 func (c *Cache) Len() int {
@@ -99,7 +99,7 @@ func (c *Cache) put(k string, s *site) *site {
 }
 
 // Compile compiles m with a cache of its own.
-func Compile(m *Model) (*Compiled, error) { return NewCache().Compile(m) }
+func Compile(m *Model) (*Compiled, error) { return CreateCache().Compile(m) }
 
 // Compile compiles every expression site of m, reusing the sites already in the cache.
 // It reports the first failure, which wraps ErrInvalid and names the site. The order is

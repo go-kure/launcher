@@ -433,7 +433,7 @@ func TestProgramCacheKey(t *testing.T) {
 	a := mk(t, "alpha.acme.example", oam.PropertySchema{Type: oam.PropertyTypeString, Required: true})
 	b := mk(t, "beta.acme.example", oam.PropertySchema{Type: oam.PropertyTypeInteger, Required: true})
 
-	cache := NewCache()
+	cache := CreateCache()
 	ca, err := cache.Compile(a)
 	if err != nil {
 		t.Fatalf("Compile(a): %v", err)
@@ -465,7 +465,7 @@ func TestProgramCacheKey(t *testing.T) {
 // Two goroutines share one compiled model and one cache.
 func TestConcurrentEval(t *testing.T) {
 	m := propModel(t, "${inputs.image}:${inputs.replicas}")
-	cache := NewCache()
+	cache := CreateCache()
 	c, err := cache.Compile(m)
 	if err != nil {
 		t.Fatalf("Compile: %v", err)

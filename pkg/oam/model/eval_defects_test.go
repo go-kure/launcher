@@ -91,7 +91,7 @@ func TestResultSizeIsBounded(t *testing.T) {
 // result changes what the next evaluation of the site returns, for every Compiled that shares
 // the cache.
 func TestBytesResultIsACopy(t *testing.T) {
-	cache := NewCache()
+	cache := CreateCache()
 	first, err := cache.Compile(propModel(t, "${b'abc'}"))
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
