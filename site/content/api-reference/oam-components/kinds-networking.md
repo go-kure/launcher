@@ -993,6 +993,9 @@ wider.** Three rules of that schema, each one comparison of authored fields:
 - no rule at all, neither `spec` nor an entry in `specs` (the object's
   expression rule `has(self.spec) || has(self.specs)`). An empty `specs` is not
   emitted, so it holds none; beside a `spec` it is accepted.
+  `TestCiliumClusterwideNetworkPolicy_ObjectRule` holds the refusal to the API
+  server's own expression validator, which accepts an authored `specs: []` and
+  would refuse the object written without it;
 - a rule that authors both `endpointSelector` and `nodeSelector`, or neither:
   the schema takes exactly one. None is filled in. `endpointSelector: {}`
   selects every endpoint of the cluster and `nodeSelector: {}` every node, and
