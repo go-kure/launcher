@@ -394,8 +394,8 @@ func TestMapComparisonSpendsForAMissingKey(t *testing.T) {
 		b[fmt.Sprintf("b%d", i)] = int64(i)
 	}
 	s := stdScope()
-	s.Inputs["a"], s.Inputs["b"] = a, b
-	c := mustCompile(t, oneValue(t, "${lists.range(1000).all(i, {'x': inputs.a} != {'x': inputs.b})}"))
+	s.Inputs["labels"], s.Inputs["config"] = a, b
+	c := mustCompile(t, oneValue(t, "${lists.range(1000).all(i, {'x': inputs.labels} != {'x': inputs.config})}"))
 	got, _, err := c.Eval("spec.values[0].expr", s)
 	if !errors.Is(err, ErrCostLimit) {
 		t.Fatalf("gave %v, %v: the comparisons read 10,000,000 entries and must wrap ErrCostLimit", got, err)
