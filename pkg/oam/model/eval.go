@@ -604,6 +604,9 @@ func (c *converter) toGo(v ref.Val) (any, error) {
 			if !ok {
 				return nil, errors.New("map keys must be strings")
 			}
+			if len(k) > maxValueSize {
+				return nil, errors.Errorf("%w: a map key holds more than %d bytes", ErrCostLimit, maxValueSize)
+			}
 			e, err := c.toGo(x.Get(k))
 			if err != nil {
 				return nil, err

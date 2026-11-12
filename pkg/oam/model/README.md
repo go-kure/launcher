@@ -267,8 +267,9 @@ on a computed value. Three rows of the comparison test guard the name: `[1, 1.0]
 depth. A list element or a map entry is one unit, and so is each byte of a bytes value. The copy is
 made after the evaluation. An expression can share one list or one bytes value in many places at a
 small cost, and the copy counts it once for each place. So the cost limit does not bound the copy. A result over the limit fails with `ErrCostLimit`, which names the
-site. A string in the result, at any depth, holds at most 1,000,000 bytes, as a string read by name does: an
-input that nests a longer string fails when the result exports it.
+site. A string or a map key in the result, at any depth, holds at most 1,000,000 bytes, as a string read by name
+does: an input that nests a longer one fails when the result exports it. A comparison that only reads such an
+input is charged by its size against the budget and exports nothing.
 
 **Cache.** `Cache.Compile` keeps a compiled site under the model identity (`Model.Key()`), the
 site path and the template text. A second compile of a model reuses the sites. The same text at

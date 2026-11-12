@@ -139,6 +139,10 @@ func (b *compareBudget) equalMaps(l, r traits.Mapper) (ref.Val, bool) {
 		lv, _ := l.Find(k)
 		rv, found := r.Find(k)
 		if !found {
+			// the key is a visit like any other, and a missing key costs a step too
+			if b.left--; b.left < 0 {
+				return nil, false
+			}
 			same = false
 			continue
 		}
