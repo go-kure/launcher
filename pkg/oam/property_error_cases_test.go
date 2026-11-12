@@ -95,6 +95,19 @@ func perrFullSchema() perrSchema {
 	}
 }
 
+// perrReservedSchema declares platform-reserved keys at the top level, below an
+// object and inside an array element (go-kure/launcher#1469).
+func perrReservedSchema() perrSchema {
+	str := PropertySchema{Type: PropertyTypeString}
+	rsv := PropertySchema{Type: PropertyTypeString, PlatformReserved: true}
+	return perrSchema{props: map[string]PropertySchema{
+		"name":   str,
+		"locked": rsv,
+		"box":    {Type: PropertyTypeObject, Properties: map[string]PropertySchema{"free": str, "sealed": rsv}},
+		"items":  {Type: PropertyTypeArray, Items: &PropertySchema{Type: PropertyTypeObject, Properties: map[string]PropertySchema{"k": rsv}}},
+	}}
+}
+
 // perrHintComp is the full-schema component with a hint for a top-level key and one
 // for a key below "obj".
 type perrHintComp struct{ perrComp }
@@ -130,6 +143,7 @@ func newPerrTransformer() *Transformer {
 			"perr-union-one":       perrBadComp("perr-union-one", one(PropertySchema{Types: []PropertyType{PropertyTypeString}})),
 			"perr-union-array":     perrBadComp("perr-union-array", one(PropertySchema{Types: []PropertyType{PropertyTypeString, PropertyTypeArray}})),
 			"perr-union-duplicate": perrBadComp("perr-union-duplicate", one(PropertySchema{Types: []PropertyType{PropertyTypeString, PropertyTypeString}})),
+			"perr-rsv":             perrComp{typ: "perr-rsv", perrSchema: perrReservedSchema()},
 			"perr-empty-key": perrBadComp("perr-empty-key", map[string]PropertySchema{
 				"o": {Type: PropertyTypeObject, Properties: map[string]PropertySchema{"ok": str}},
 				"r": {Type: PropertyTypeObject, Properties: map[string]PropertySchema{"": {Type: PropertyTypeString, Required: true}}},
@@ -138,6 +152,7 @@ func newPerrTransformer() *Transformer {
 		map[string]TraitHandler{
 			"perr-trait":      perrTrait{typ: "perr-trait", perrSchema: perrFullSchema()},
 			"perr-trait-bare": perrBareTrait{typ: "perr-trait-bare"},
+			"perr-rsv-trait":  perrTrait{typ: "perr-rsv-trait", perrSchema: perrReservedSchema()},
 		},
 	)
 	tr.RegisterPolicy("perr-pol", perrPolicy{typ: "perr-pol", perrSchema: perrFullSchema()})
@@ -271,5 +286,20 @@ func perrCases() []perrCase {
 			kind: "unsupported-field", pos: "component", comp: "web", field: "o."},
 		{name: "required empty key below an object", app: perrNamedApp("web", "perr-empty-key", map[string]any{"r": map[string]any{}}),
 			kind: "required", pos: "component", comp: "web", field: "r."},
+
+		// platform-reserved (go-kure/launcher#1469): presence is the rule, so an explicit
+		// null is refused as a value is.
+		{name: "component reserved top", app: perrNamedApp("web", "perr-rsv", map[string]any{"locked": "x"}),
+			kind: "platform-reserved", pos: "component", comp: "web", field: "locked"},
+		{name: "component reserved top null", app: perrNamedApp("web", "perr-rsv", map[string]any{"locked": nil}),
+			kind: "platform-reserved", pos: "component", comp: "web", field: "locked"},
+		{name: "component reserved nested", app: perrNamedApp("web", "perr-rsv", map[string]any{"box": map[string]any{"sealed": "x"}}),
+			kind: "platform-reserved", pos: "component", comp: "web", field: "box.sealed"},
+		{name: "component reserved in array element", app: perrNamedApp("web", "perr-rsv", map[string]any{"items": []any{map[string]any{"k": "x"}}}),
+			kind: "platform-reserved", pos: "component", comp: "web", field: "items[0].k"},
+		{name: "trait reserved top", app: perrWithTrait("perr-rsv-trait", map[string]any{"locked": "x"}),
+			kind: "platform-reserved", pos: "trait", comp: "web", trait: "perr-rsv-trait", field: "locked"},
+		{name: "trait reserved nested", app: perrWithTrait("perr-rsv-trait", map[string]any{"box": map[string]any{"sealed": "x"}}),
+			kind: "platform-reserved", pos: "trait", comp: "web", trait: "perr-rsv-trait", field: "box.sealed"},
 	}
 }
