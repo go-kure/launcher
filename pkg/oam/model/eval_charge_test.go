@@ -263,6 +263,7 @@ func TestChargeStopsALongKeyOfAnIndex(t *testing.T) {
 	rows := []struct{ name, expr string }{
 		{"m[k] in a loop", fmt.Sprintf("cel.bind(k, %s, cel.bind(m, {k: 1}, lists.range(15000).all(i, m[k] == 1)))", key100k)},
 		{"a conditional key in a loop", fmt.Sprintf("cel.bind(k, %s, cel.bind(m, {k: 1}, lists.range(15000).all(i, m[i >= 0 ? k : k] == 1)))", key100k)},
+		{"a conditional key with a constant branch", fmt.Sprintf("cel.bind(k, %s, cel.bind(m, {k: 1}, lists.range(15000).all(i, m[i >= 0 ? k : ''] == 1)))", key100k)},
 	}
 	for _, tc := range rows {
 		t.Run("refused/"+tc.name, func(t *testing.T) {

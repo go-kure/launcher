@@ -2,6 +2,7 @@ package model
 
 import (
 	"reflect"
+	"strings"
 
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -89,7 +90,11 @@ func (b *compareBudget) charge(v ref.Val, scan bool) ref.Val {
 func chargeDecorator(i interpreter.Interpretable) (interpreter.Interpretable, error) {
 	switch x := i.(type) {
 	case interpreter.InterpretableCall:
-		return &chargedCall{InterpretableCall: x, scan: scanCalls[x.Function()]}, nil
+		var call interpreter.InterpretableCall = x
+		if x.Function() == "replace" {
+			call = &budgetedReplace{InterpretableCall: x}
+		}
+		return &chargedCall{InterpretableCall: call, scan: scanCalls[x.Function()]}, nil
 	case interpreter.InterpretableAttribute:
 		// The planner decorates a relative attribute twice, once when it makes the node and once
 		// when it returns it. cel-go's own observer skips a node that it already watches, and a
@@ -128,4 +133,78 @@ func (c *chargedAttr) Exec(f *interpreter.ExecutionFrame) ref.Val {
 	return budgetOf(f).charge(c.InterpretableAttribute.Exec(f), false)
 }
 
+// cel-go reads an identifier that is the key of an index, as in m[k], through the Qualify of the
+// attribute: the attribute resolves its own value and Exec never runs. The key is hashed at every
+// lookup, so it is charged here, as Exec charges a read. Two attributes are charged: one that an
+// identifier names, and a conditional of attributes, as in m[c ? k : k]. The planner builds the
+// conditional from the bare attributes of its branches, so no wrapper of a branch ever runs.
+// The condition runs once more under the charge, and its cost counts twice. A relative
+// attribute, such as the key of m[f(x)], holds a call as its operand, and the wrapper of that
+// call charges the result, so resolving it again here would run the call twice.
+func (c *chargedAttr) Qualify(vars interpreter.Activation, obj any) (any, error) {
+	c.chargeKey(vars)
+	return c.InterpretableAttribute.Qualify(vars, obj)
+}
+
+func (c *chargedAttr) QualifyIfPresent(vars interpreter.Activation, obj any, presenceOnly bool) (any, bool, error) {
+	c.chargeKey(vars)
+	return c.InterpretableAttribute.QualifyIfPresent(vars, obj, presenceOnly)
+}
+
+func (c *chargedAttr) chargeKey(vars interpreter.Activation) {
+	if _, ok := c.Attr().(interpreter.NamespacedAttribute); !ok && !isConditionalAttribute(c.Attr()) {
+		return
+	}
+	if key, err := c.InterpretableAttribute.Resolve(vars); err == nil {
+		budgetOf(vars).charge(c.Adapter().NativeToValue(key), false)
+	}
+}
+
+// isConditionalAttribute matches the type by name, as chargeDecorator does for evalWatchAttr,
+// because it is unexported. A test row of TestChargeStopsALongKeyOfAnIndex fails on a cel-go
+// version that renames it.
+func isConditionalAttribute(a interpreter.Attribute) bool {
+	return reflect.TypeOf(a).String() == "*interpreter.conditionalAttribute"
+}
+
 func (c *chargedAttr) Eval(a interpreter.Activation) ref.Val { return c.Exec(interpreter.AsFrame(a)) }
+
+// budgetedReplace is replace with the size of its result checked before it is built. cel-go calls
+// strings.Replace and charges the result after it exists, so two operands of 100,000 and 2,000
+// bytes built 200,000,000 bytes. The result has the length of the string plus, for each replaced
+// occurrence, the length of the new text less the length of the old. The node evaluates its own
+// operands, as budgetedJoin does, and gives the result that cel-go gives.
+type budgetedReplace struct {
+	interpreter.InterpretableCall
+}
+
+func (e *budgetedReplace) Exec(f *interpreter.ExecutionFrame) ref.Val { return e.Eval(f) }
+
+func (e *budgetedReplace) Eval(a interpreter.Activation) ref.Val {
+	args := e.Args()
+	vals := make([]ref.Val, len(args))
+	for i, arg := range args {
+		if vals[i] = arg.Eval(a); types.IsError(vals[i]) {
+			return vals[i]
+		}
+	}
+	str, ok1 := vals[0].(types.String)
+	old, ok2 := vals[1].(types.String)
+	repl, ok3 := vals[2].(types.String)
+	n := types.Int(-1)
+	ok4 := true
+	if len(vals) == 4 {
+		n, ok4 = vals[3].(types.Int)
+	}
+	if !ok1 || !ok2 || !ok3 || !ok4 {
+		return types.NewErr("no such overload: %v.replace", vals[0].Type())
+	}
+	count := strings.Count(string(str), string(old))
+	if n >= 0 && types.Int(count) > n {
+		count = int(n)
+	}
+	if len(str)+count*(len(repl)-len(old)) > maxValueSize {
+		return chargeStop()
+	}
+	return types.String(strings.Replace(string(str), string(old), string(repl), int(n)))
+}
