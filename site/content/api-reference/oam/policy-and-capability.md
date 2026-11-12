@@ -3,6 +3,9 @@ title: "Policy defaults and capability system"
 weight: 7
 ---
 
+The implementation, history and tests of the sections below are on the
+[contributor page](../../contributing/oam-reference/policy-and-capability.md).
+
 ## Policy defaults & enforcement
 
 `Policy` is a typed accessor interface (no type assertions in handlers) that carries
@@ -24,21 +27,20 @@ set (so `ApplyPolicy` is always called with a non-nil value at runtime). A trait
 sub-application runs its `ApplyPolicy` after the trait's `Apply` and is held to the same rule
 as the `TraitHandler`: it must not replace, remove or rename a component's application in the
 bundle, nor rename a sibling group member's. The transform fails, naming the trait, its
-component and the sub-application (go-kure/launcher#752).
+component and the sub-application.
 
 **Optional policy interfaces.** A check that not every consumer needs is asked through an
 interface a `Policy` may also implement, so adding one breaks no implementation.
-`ExplicitSecretPolicy` (`AllowExplicitSecrets() bool`, go-kure/launcher#786) says whether a
-document may carry secret values itself: the `secret` trait, the `secret` kind component
-(go-kure/launcher#790), the `helm` component's
+`ExplicitSecretPolicy` (`AllowExplicitSecrets() bool`) says whether a
+document may carry secret values itself: the `secret` trait, the `secret` kind component, the `helm` component's
 `secretValues` and the `helmtemplate` kind's, and a core Secret the `passthrough` or
-`manifests` component carries (go-kure/launcher#794). `ExplicitSecretsAllowed(policy)` is how
+`manifests` component carries. `ExplicitSecretsAllowed(policy)` is how
 a handler asks. **A policy that does not implement it allows them**, as does no policy at all: this is
 the permissive side, so a consumer that must keep secrets out of documents has to implement the
 interface and answer `false`. A refusal is a `ViolationError` naming the component, of class
 `RefusalExplicitSecret` (below).
 
-`ObjectKindPolicy` (go-kure/launcher#922) says which kinds of object a build may emit and
+`ObjectKindPolicy` says which kinds of object a build may emit and
 whether it may emit cluster-scoped ones: `AllowedObjectKinds()` (empty allows every kind),
 `ForbiddenObjectKinds()` (a kind on both lists is forbidden) and `AllowClusterScopedObjects()`.
 A kind is a `schema.GroupKind`, matched in any version; a `Kind` of `*` matches every kind of
@@ -83,7 +85,7 @@ Whatever an `ApplyPolicy` returns reaches the caller as a `*ViolationError` nami
 component, and so does a trait-type constraint of the policy (`ForbiddenCapabilities`,
 `AllowedCapabilities`, `RequiredCapabilities`). Its `Class` says what the refusal is about, so
 a consumer that reports a security refusal differently from a resource limit does not match
-error text (go-kure/launcher#849):
+error text:
 
 ```go
 var v *oam.ViolationError
@@ -166,8 +168,7 @@ validates a capability rendering of that type. It returns true when a registered
 trait handler or trait lowering rule implements `ValidateAndApplyDefaults`, or
 when a non-built-in type has a `CapabilityDefinition` whose schema is applied.
 With none of those validators, `EvaluateProfile` passes the binding through
-unchecked. `EvaluateProfile` and this method resolve the validators through the same
-unexported function, so they cannot disagree.
+unchecked.
 
 **Pre-GA behavior change**: `EvaluateProfile` now also checks a binding whose type has
 a `CapabilityDefinition` but no trait handler and no trait lowering rule. The schema
@@ -210,35 +211,35 @@ type** still accepts any default, unchanged.
 
 A trait's matched capability rendering is merged under its properties: an authored
 value replaces the rendered one at that key, and keys the trait does not author keep
-the platform value. Where both hold an object, the merge recurses
-(go-kure/launcher#750): authoring `resources: {limits: {cpu: 2}}` over a rendered
+the platform value. Where both hold an object, the merge recurses:
+authoring `resources: {limits: {cpu: 2}}` over a rendered
 `resources: {limits: {cpu: 1, memory: 1Gi}}` gives `{cpu: 2, memory: 1Gi}`, and an
 authored `{}` keeps the rendered object. A list, a value of another kind, and a
 rendered object built in Go with another type (`map[string]string`) are replaced
 whole. An authored `null` is absence here too, at any depth, so a `null` over a key
 the rendering supplies takes the platform value. A `null` under a key the rendering
 lacks is left as authored. **Pre-GA output changes**: the authored `null` used to
-replace the rendered value, so the handler saw the key unset (go-kure/launcher#742);
+replace the rendered value, so the handler saw the key unset;
 an authored object used to replace the rendered object whole, dropping its sibling
-keys (go-kure/launcher#750). This holds for every unsealed trait with a rendering, on both the
+keys. This holds for every unsealed trait with a rendering, on both the
 dispatch path and an unsealed trait lowering rule's input.
 
 Authored validation checks nested `Required` on the merged properties too
-(`ValidateAuthoredPropertiesWithCapabilities`, go-kure/launcher#765), so a partial
+(`ValidateAuthoredPropertiesWithCapabilities`), so a partial
 override that omits a required nested key the rendering supplies is accepted. The
 profile-less `ValidateAuthoredProperties` still refuses it.
 
 A component handler that implements `ComponentCapabilityDefaults` (see [Transform &
 extension](transform-and-lowering.md#transform--extension)) gets the same precedence for the properties it lists, and only those.
-Each value it fills is then validated against the component's own `PropertySchema`
-(go-kure/launcher#751): a value the trait handler's schema accepted can still be
+Each value it fills is then validated against the component's own `PropertySchema`:
+a value the trait handler's schema accepted can still be
 refused here, with an error naming the component, the capability and the property
 (`component "data": capability "pvc" defaults: properties.storageClassName: expected
 string, got int`). A component with no schema relies on the trait side, and its
 fill is refused when the component has no schema and no trait handler or trait
 lowering rule for the capability's type validates the rendering, meaning it
 implements `ValidateAndApplyDefaults`, or the type is not built in and has a
-`CapabilityDefinition` applied (go-kure/launcher#772). A type with no handler, no rule
+`CapabilityDefinition` applied. A type with no handler, no rule
 and no applicable `CapabilityDefinition`, whose binding `EvaluateProfile` never checks,
 is refused there too. The
 error names the component, the capability and the rendering keys. **Pre-GA input
@@ -249,7 +250,7 @@ No built-in component is affected: `persistentvolumeclaim`, the only built-in
 
 Both merges copy the rendering value they hand out, keeping its Go type: a `3` the
 profile decoded as `int` reaches the handler as `int`, and an `int64` above 2^53 keeps
-its exact value (go-kure/launcher#756). The copy used to be a JSON round trip, which
+its exact value. The copy used to be a JSON round trip, which
 turned every number into `float64`. A `ComponentCapabilityDefaults` fill is then
 normalized by the component's schema check like any validated property: a
 `map[string]string` under an object property reaches the handler as
