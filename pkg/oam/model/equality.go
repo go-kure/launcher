@@ -129,6 +129,10 @@ func (b *compareBudget) equalMaps(l, r traits.Mapper) (ref.Val, bool) {
 	}
 	for it := l.Iterator(); it.HasNext() == types.True; {
 		k := it.Next()
+		// both maps hash the key: a long key costs one step for each 1,024 bytes, twice
+		if b.left -= 2 * (scalarSize(k) / compareBytesPerStep); b.left < 0 {
+			return nil, false
+		}
 		lv, _ := l.Find(k)
 		rv, found := r.Find(k)
 		if !found {
@@ -326,6 +330,10 @@ func (e *budgetedJoin) Eval(a interpreter.Activation) ref.Val {
 		str, ok := elem.(types.String)
 		if !ok {
 			return types.WrapErr(errors.Errorf("join: invalid input of type %s", elem.Type().TypeName()))
+		}
+		// the buffer is checked before it grows: cel-go would build all of it and charge it after
+		if sb.Len()+len(sep)+len(str) > maxValueSize {
+			return chargeStop()
 		}
 		sb.WriteString(string(str))
 	}

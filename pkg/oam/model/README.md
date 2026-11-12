@@ -212,9 +212,9 @@ escape `$${`.
 The cost also stops a `replace` or a `join` that would build a result of several megabytes (a
 test pins both). `lists.range(1000000)` is stopped by the cost limit. A list of more than
 1,000,000 elements is refused by cel-go, which has its own cap for `lists.range`, and not by the
-cost limit. The cost does not bound the size of the result
-of `format`: a `format` that builds a result of 2,000,000 bytes runs to the end. A size limit for
-`format` is a separate change.
+cost limit. The charge by size (see "Charge by size") also bounds every value. The one call it does not
+bound is `format`: a `format` that builds a result of 2,000,000 bytes is refused only after it is built.
+go-kure/launcher#1462 tracks a size limit for `format`.
 
 **Comparisons and flatten.** The cost does not bound a comparison of nested lists that share their elements:
 cel-go compares them element by element at every depth and charges the outer length only, so `d == d`
@@ -224,7 +224,7 @@ every element it reaches and charges the outer length times the depth. So the ev
 calls, `==`, `!=`, `in`, `distinct` and `flatten`, with versions that count the values they visit: a list,
 a map, a list element and a map value are one step each, and a string or bytes value costs one more step for
 each 1,024 bytes it holds, because cel-go compares it by its content. All of them in one site evaluation
-share a budget of 1,000,000 steps. It also replaces `join`, only for its error: the `join` of a list that
+share a budget of 1,000,000 steps with the charge by size. It also replaces `join`, only for its error: the `join` of a list that
 holds a non-string fails in cel-go with an error built from the text of the whole list, which prints every
 shared child and reached 7 GB, so the replacement names the type of the element and prints no value. That
 `join` does not spend the budget. A site that needs more fails with `ErrCostLimit`, which names the site. The stop holds
@@ -237,11 +237,24 @@ in cel-go v0.31.0 and in the pinned extension versions, `flatten` is the one lis
 nested elements under the legacy cost tracker, and `join` is the one call whose error prints a nested value. A test reads the cel-go version and fails on another one,
 so that the calls are read again when go-kure/launcher#1413 moves cel-go.
 
-**Known limit: cel-go charges some calls by node, not by size.** Other paths of the same class are not
-bounded by this evaluation: the buffer of a `join`, a `reverse` or `slice` of a list built by repeated `+`,
-the keys of a map, a scan by `size()`, `!=` or `int()` of a long string, and `sort` and `sortBy`. A
-model that uses them can allocate or scan far more than its cost shows. Only `pkg/oam/model` evaluates a
-model's expressions, and nothing registers one by default. go-kure/launcher#1461 lists the paths.
+**Charge by size.** cel-go charges a call by the length of its operands and reads the cost after the call
+returns, so a value that many places share, or a call that builds a big output from small operands, ran
+below the cost limit (go-kure/launcher#1461). The evaluation now charges every call result and every
+identifier read by size, against the same budget of 1,000,000 steps as the comparisons. A string or bytes
+value costs one step for each 1,024 bytes. No string or bytes value may hold more than 1,000,000 bytes,
+and no list or map more than 1,000,000 elements: a value at the cap is allowed, and a value over it stops
+the evaluation with `ErrCostLimit`. A list or a map costs nothing more, because cel-go charges a call by
+the element count of its operands. The result of `sort` and `sortBy` costs the bytes of the string and
+bytes elements it holds, because a sort compares them by content. `join` checks its buffer before it
+writes, and a map comparison charges the length of each key. `&&`, `||`, the conditional and the
+comprehensions are not calls, so they stay lazy: a branch that does not run is not charged. **A value over
+the cap is refused even where stock cel-go finishes it.** A test names a class for every function of the
+pinned environment, so that a new cel-go version fails two lists and not one. The wrapper of an
+identifier read skips a node that cel-go already watches, and it finds that node by the name of an
+unexported cel-go type. Without the skip, cel-go reports one more step of cost for each index or select
+on a computed value. Three rows of the comparison test guard the name: `[1, 1.0][0] == [1, 1.0][1]`,
+`[1u, 1][0] == [1u, 1][1]` and `[[1], {'a': 1}][0] == [[1], {'a': 1}][1]` must report the cost of cel-go
+(25, 25 and 105, and 27, 27 and 107 without the skip). A cel-go version that renames the type fails them.
 
 **Result size.** The Go copy of a single-hole result holds at most 1,000,000 units, counted at every
 depth. A list element or a map entry is one unit, and so is each byte of a bytes value. The copy is
