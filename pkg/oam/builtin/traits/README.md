@@ -72,7 +72,7 @@ preflight reject every valid use of the trait.
 ### Storage
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
-| `pvc` | PersistentVolumeClaim | The `persistentvolumeclaim` kind's twin: every claim field below is parsed, defaulted and built by the kind's own code, so both build the same claim; the trait adds only the claim's `name`, the owner's `app` label, namespace and bundle (go-kure/launcher#741). `name` (a DNS-1123 subdomain), `size` (optional; policy default `storageSize`; the effective size must be a positive quantity — zero or negative fails the build, as `ValidatePersistentVolumeClaimSpec` would refuse the claim), `storageClassName` (a DNS-1123 subdomain; an authored `""` requests no class, i.e. no dynamic provisioning, and is emitted as `storageClassName: ""`; unset or `null` takes the ClusterProfile `pvc` capability's `storageClassName`, as the kind's does (go-kure/launcher#742), else the cluster default. **Pre-GA output change** (go-kure/launcher#702): `""` used to be treated as unset), `accessModes[]` (`ReadWriteOncePod` must be the only mode), `volumeMode` (optional `Filesystem`\|`Block`; omitted leaves the claim's mode unset, which the apiserver defaults to `Filesystem`; any other value or type fails the build), and the kind's `selector`, `dataSourceRef`, `volumeName` and `volumeAttributesClassName`, each with the kind's rules (go-kure/launcher#790; `pkg/oam/builtin/components/README.md`, the `persistentvolumeclaim` entry). **`volumeName` has no policy check and no capability gate**: a claim that names a PersistentVolume binds to that volume only, with no dynamic provisioning (the volume must still match the claim's class, size, access modes and volume mode), so whoever may author the trait may ask for any PersistentVolume of the cluster by name. `dataSource` and a whole `resources` are refused with the kind's reason for each: the trait answers the document check's `UnsupportedFieldHint` with the kind's, so the refusal of either key ends with `; <reason>` in a document as it does for the kind (go-kure/launcher#790; `pkg/oam/README.md`, "A reason on a refused key") (policy: `maxStorageSize`). **Pre-GA tightening** (go-kure/launcher#741): a `name` or `storageClassName` that is not a DNS-1123 subdomain, and `ReadWriteOncePod` combined with another mode, used to build and are now refused, as the kind refuses them; a zero or negative `size` is refused when the trait is applied instead of at generation |
+| `pvc` | PersistentVolumeClaim | The `persistentvolumeclaim` kind's twin: every claim field below is parsed, defaulted and built by the kind's own code, so both build the same claim; the trait adds only the claim's `name`, the owner's `app` label, namespace and bundle (go-kure/launcher#741). `name` (a DNS-1123 subdomain), `size` (optional; policy default `storageSize`; the effective size must be a positive quantity — zero or negative fails the build, as `ValidatePersistentVolumeClaimSpec` would refuse the claim), `storageClassName` (a DNS-1123 subdomain; an authored `""` requests no class, i.e. no dynamic provisioning, and is emitted as `storageClassName: ""`; unset or `null` takes the ClusterProfile `pvc` capability's `storageClassName`, as the kind's does (go-kure/launcher#742), else the cluster default. **Pre-GA output change** (go-kure/launcher#702): `""` used to be treated as unset), `accessModes[]` (`ReadWriteOncePod` must be the only mode), `volumeMode` (optional `Filesystem`\|`Block`; omitted leaves the claim's mode unset, which the apiserver defaults to `Filesystem`; any other value or type fails the build), and the kind's `selector`, `dataSourceRef`, `volumeName` and `volumeAttributesClassName`, each with the kind's rules (go-kure/launcher#790; `pkg/oam/builtin/components/README.md`, the `persistentvolumeclaim` entry). **`volumeName` has no policy check and no capability gate**: a claim that names a PersistentVolume binds to that volume only, with no dynamic provisioning (the volume must still match the claim's class, size, access modes and volume mode), so whoever may author the trait may ask for any PersistentVolume of the cluster by name. `dataSource` and a whole `resources` are refused with the kind's reason for each: the trait answers the document check's `UnsupportedFieldHint` with the kind's, so the refusal of either key ends with `; <reason>` in a document as it does for the kind (go-kure/launcher#790; `site/content/api-reference/oam/schemas-and-contract.md`, "A reason on a refused key") (policy: `maxStorageSize`). **Pre-GA tightening** (go-kure/launcher#741): a `name` or `storageClassName` that is not a DNS-1123 subdomain, and `ReadWriteOncePod` combined with another mode, used to build and are now refused, as the kind refuses them; a zero or negative `size` is refused when the trait is applied instead of at generation |
 | `volsync` | VolSync ReplicationSource | `name`, `sourcePVC`, `schedule`, `copyMethod`, `storageClassName`, `volumeSnapshotClassName`, `retain.{daily,weekly,monthly}` (class fields also supplied via capability rendering; injection is `copyMethod`-aware) |
 
 ### Configuration & scaling
@@ -157,7 +157,7 @@ not the app — chooses the implementation:
   into the emitted `ingress` trait's `tls[]`: it reaches that trait in the platform-reserved
   `managedTLS` property (`hosts`, and `secretName` when authored), which the trait adds after
   its own `tls[]` entries. Its Secret's name is resolved under the `Naming` hook role
-  `tls-secret` (`pkg/oam/README.md`): the expose `secretName` when authored, else the hook's
+  `tls-secret` (`site/content/api-reference/oam/names-and-overrides.md`): the expose `secretName` when authored, else the hook's
   answer, else `<component>-tls` as before. A rendering of the `ingress` capability may supply
   `managedTLS` as well: it is consumer-supplied, never author-supplied. Authored on an
   `ingress` trait it is refused (`ErrPlatformReserved`). An `ingress` trait's own
@@ -218,7 +218,7 @@ not the app — chooses the implementation:
   [External Secret Shorthand](/concepts/oam-external-secret-shorthand/).
 
   The produced Secret's name is resolved under the `Naming` hook role `external-secret`
-  (go-kure/launcher#787, `pkg/oam/README.md`): `targetSecretName` when authored, else the
+  (go-kure/launcher#787, `site/content/api-reference/oam/names-and-overrides.md`): `targetSecretName` when authored, else the
   hook's answer, else `secretName`. It is resolved before anything reads it, so the
   ExternalSecret's `target.name`, the `envFrom` secretRef and the secret volume below all
   carry it. A reference to the produced Secret the author wrote elsewhere does not follow a
@@ -619,7 +619,7 @@ is rejected (it could never take effect), and a `backendSelector` on a ref that 
 sibling component is ignored (component-label retargeting wins). Same-namespace only.
 
 Where each of these routes lands, resolved through the same lookups, is reported by
-`Transformer.RoutedBackends` (see `pkg/oam/README.md`): the Service a route names, the component
+`Transformer.RoutedBackends` (see `site/content/api-reference/oam/pipeline.md`): the Service a route names, the component
 that owns it, the pods it selects, and whether the Service has each routed port. The traits'
 route-to-own-Service name (`BackendServiceName()`, else the application's name) is the `Service`
 it reports for a route to the component's own Service.
@@ -921,7 +921,7 @@ decorating trait declared before `scaler` must not hide the claim that caps
 component's synthesized ingress allow on its `selector` pods rather than on the component
 label, which none of its pods carry. The `podTemplateLabeler` and `identityPortMapper` forwards
 keep a sibling group able to tell a `service` member routing to its own `deployment` member's pods
-(see the sibling group section of `pkg/oam/README.md`) when a trait wraps either member. The `servicePortNamer` forward keeps an `ingress` path's
+(see the sibling group section of `site/content/api-reference/oam/transform-and-lowering.md`) when a trait wraps either member. The `servicePortNamer` forward keeps an `ingress` path's
 `portName` on a decorated component held to its Service port's name (the first port, on a
 `service` component), the same rule a port number is held to. A config that implements none of them gets the zero
 answer (`nil`, `0`, `""`, `false`), which every reader treats as "not set".
@@ -1238,7 +1238,7 @@ that already exist upstream.
 
 A refusal by the environment policy that a trait's sub-application raises in `ApplyPolicy`
 is an `oam.PolicyRefusal` with a class, which a consumer reads from
-`oam.ViolationError.Class` (go-kure/launcher#849; `pkg/oam/README.md`, "Refusal classes"):
+`oam.ViolationError.Class` (go-kure/launcher#849; `site/content/api-reference/oam/policy-and-capability.md`, "Refusal classes"):
 `oam.RefusalExplicitSecret` for the `secret` trait, `oam.RefusalReplicaMaximum` for a
 `scaler` over the policy's `maxReplicas`, and `oam.RefusalStorageMaximum` for a `pvc` over
 its `maxStorageSize`. The violation names the component the trait is on. A trait type the
@@ -1304,7 +1304,7 @@ the written tree, and a colon has not been shown to be safe there. An author who
 a name cannot write it today.
 
 The names of the `scaler`, `rbac`, `networkpolicy`, `ingress` and `httproute` objects and
-the `volsync` ReplicationSource are resolved under a name role (`pkg/oam/README.md`, "Name roles and the `Naming` hook"): the
+the `volsync` ReplicationSource are resolved under a name role (`site/content/api-reference/oam/names-and-overrides.md`, "Name roles and the `Naming` hook"): the
 author's property, else the consumer's `TransformContext.Naming` hook, else the default. The
 `ingress` and `httproute` traits an `expose` trait lowers to are resolved the same way.
 `Transform` keeps those names apart and refuses two that name one object, naming both: an
@@ -1334,7 +1334,7 @@ authored trait's.
 Every other authored name in the
 table below is checked as a name, not against the other objects of the document:
 `oam.GenerateApplications` and `oam.CheckInDocumentCollisions` report those (`kurel build`
-runs both; see `pkg/oam/README.md`, "Nothing above compares the applications inside one
+runs both; see `site/content/api-reference/oam/transform-and-lowering.md`, "Nothing above compares the applications inside one
 document").
 
 Every trait's sub-application name is resolved under the `sub-application` role, so the hook
@@ -1342,7 +1342,7 @@ can rename it. That name is not the object's: the `configmap`, `secret`, `ingres
 `httproute` and `volsync` objects keep their own name when their sub-application is renamed.
 Two applications of one name in one bundle are refused, so a `configmap` and a `pvc` trait of
 one `name` on one component, or a trait sub-application named after another component, fail
-the transform (`pkg/oam/README.md`, "Name roles and the `Naming` hook"; go-kure/launcher#787).
+the transform (`site/content/api-reference/oam/names-and-overrides.md`, "Name roles and the `Naming` hook"; go-kure/launcher#787).
 
 | Trait | Property | What it names |
 |-------|----------|---------------|

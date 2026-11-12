@@ -138,7 +138,7 @@ the fact. The covenant below prevents that.
    downstream implementation must remain a compatible superset of launcher's — accepting
    everything launcher accepts, with the same meaning — or be renamed on the downstream side.
 4. **Family reservation.** A successor implementation is the same name at a new version
-   (`webservice@v2`, the type identity in `pkg/oam/README.md` "Type identity"); the older
+   (`webservice@v2`, the type identity in `site/content/api-reference/oam/parsing-and-types.md` "Type identity"); the older
    `<family>.v<N>` spelling (`webservice.v2`) is retired. A reservation under this covenant
    covers the **whole family**: reserving `backup` also reserves every version of it
    (`backup@v1`, `backup@v2`, …), and a dialect still spelling a successor `backup.v2` is
