@@ -67,18 +67,19 @@ func TestValidateAuthoredProperties(t *testing.T) {
 			}),
 		},
 
-		// Required: enforced nested, not at the top level. See the doc comment on
-		// validateAuthoredProperties — ClusterProfile capability rendering merges into
-		// a trait's TOP-LEVEL property map after this runs, so a required property the
-		// platform supplies is legitimately absent from what the author wrote.
+		// Required: enforced at the top level and nested. A trait a capability binding
+		// matches is the exception at the top level; top_level_required_test.go pins
+		// that (go-kure/launcher#1463).
 		{
-			name: "omitted top-level Required is accepted on a component",
-			app:  authoredApp("webservice", map[string]any{}),
+			name:    "omitted top-level Required is rejected on a component",
+			app:     authoredApp("webservice", map[string]any{}),
+			wantErr: `"image" is required`,
 		},
 		{
-			name: "omitted top-level Required is accepted on a trait",
+			name: "omitted top-level Required is rejected on a trait no binding matches",
 			app: authoredApp("webservice", map[string]any{"image": "nginx"},
 				Trait{Type: "pvc", Properties: map[string]any{"accessModes": []any{"ReadWriteOnce"}}}),
+			wantErr: `trait "pvc": properties: "size" is required`,
 		},
 		{
 			name: "omitted Required inside a declared object IS rejected",
@@ -190,10 +191,11 @@ func TestValidateAuthoredProperties_Policies(t *testing.T) {
 				Properties: map[string]any{"components": []any{"api", "web"}}}),
 		},
 		{
-			// Same top-level rule as components: the handler reports a missing
-			// property it needs with its own message, at transform time.
-			name: "omitted top-level Required is accepted on a policy",
-			app:  policyApp(ApplicationPolicy{Name: "order", Type: "dependency", Properties: map[string]any{}}),
+			// Same top-level rule as components, as written: a policy has no
+			// capability merge.
+			name:    "omitted top-level Required is rejected on a policy",
+			app:     policyApp(ApplicationPolicy{Name: "order", Type: "dependency", Properties: map[string]any{}}),
+			wantErr: `policy "order" (type "dependency"): properties: "components" is required`,
 		},
 		{
 			name: "a policy handler declaring no schema accepts anything",
