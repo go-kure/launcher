@@ -263,6 +263,8 @@ func TestChargeStopsALongKeyOfAnIndex(t *testing.T) {
 	rows := []struct{ name, expr string }{
 		{"m[k] in a loop", fmt.Sprintf("cel.bind(k, %s, cel.bind(m, {k: 1}, lists.range(15000).all(i, m[k] == 1)))", key100k)},
 		{"a conditional key in a loop", fmt.Sprintf("cel.bind(k, %s, cel.bind(m, {k: 1}, lists.range(15000).all(i, m[i >= 0 ? k : k] == 1)))", key100k)},
+		// the key is picked from the list that a call returns: the call wrapper charges the list and never the string (finding 2 of the second review)
+		{"a key picked from a list", fmt.Sprintf("cel.bind(k, %s, cel.bind(xs, [k], cel.bind(m, {k: 1}, lists.range(15000).all(i, m[(xs + [])[0]] == 1))))", key100k)},
 		{"a conditional key with a constant branch", fmt.Sprintf("cel.bind(k, %s, cel.bind(m, {k: 1}, lists.range(15000).all(i, m[i >= 0 ? k : ''] == 1)))", key100k)},
 	}
 	for _, tc := range rows {
@@ -308,6 +310,8 @@ func TestChargeWrappersGiveWhatCelGoGives(t *testing.T) {
 		"'a.b.c'.replace('.', '').size()",
 		"{'a': 1}['a']", "[1, 2, 3][1]", "{'a': 1}['a' + '']", "[10, 20][1 + 0]", "cel.bind(k, 'a', {'a': 1}[k])", "cel.bind(k, 'a', {'a': 1}[true ? k : 'b'])",
 		"[0, 1, 2].map(i, [10, 20, 30][i])", "cel.bind(m, {'a': {'b': 2}}, m['a']['b'])", "cel.bind(k, 'b', {'a': {'b': 2}}['a'][k])",
+		// a key that holds a call or an index is resolved once: a second resolution reports more cost than cel-go
+		"cel.bind(xs, ['a'], {'a': 1}[xs[0 + 0]])", "cel.bind(xs, ['a'], {'a': 1}[(xs + [])[0]])", "cel.bind(k, 'a', cel.bind(c, 1, {'a': 1}[c + 0 > 0 ? k : k]))",
 	}
 	for _, expr := range corpus {
 		t.Run(expr, func(t *testing.T) {
