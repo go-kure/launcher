@@ -695,18 +695,18 @@ func TestReplaceGrowth(t *testing.T) {
 	hostile := []struct {
 		name, expr string
 		stops      func(error) bool
+		mustStop   bool // the README states the stop, so a result without it fails the row
 	}{
-		{"hostile replace three times", base + grow + grow + grow, costStop},
+		{"hostile replace three times", base + grow + grow + grow, costStop, false},
 		// The bound string is built once, so the cost of this row is the join call and not the build of
 		// its operand.
-		{"hostile join", "cel.bind(b, " + base + ", lists.range(1000).map(i, b).join(''))", costStop},
+		{"hostile join", "cel.bind(b, " + base + ", lists.range(1000).map(i, b).join(''))", costStop, false},
 		// The smallest count that crosses a limit of 1,000,000 elements. If nothing bounds it, the row
 		// allocates one list of 1,000,001 values: about 24 bytes each, so about 24 MiB, and up to
 		// twice that while the list grows.
-		{"hostile lists.range", "lists.range(1000001).size()", rangeCap},
-		// The largest count below that cap. Either the cost limit stops it or it ends with a result
-		// within the limit. The row logs which, with the cost, so the outcome is read and not assumed.
-		{"hostile lists.range at the cap", "lists.range(1000000).size()", costStop},
+		{"hostile lists.range", "lists.range(1000001).size()", rangeCap, false},
+		// The largest count below that cap. The README states that the cost limit stops it.
+		{"hostile lists.range at the cap", "lists.range(1000000).size()", costStop, true},
 	}
 	for _, tc := range hostile {
 		t.Run(tc.name, func(t *testing.T) {
@@ -723,6 +723,9 @@ func TestReplaceGrowth(t *testing.T) {
 					t.Errorf("the row failed for a cause other than its stop: %v", err)
 				}
 				return
+			}
+			if tc.mustStop {
+				t.Fatalf("the row ran to the end with %#v at cost %d, and the README states that the cost limit stops it", got, cost)
 			}
 			switch v := got.(type) {
 			case string:
