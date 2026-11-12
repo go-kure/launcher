@@ -27,8 +27,9 @@ import (
 //
 // Each kind is served at admissionregistration.k8s.io/v1 from a Kubernetes
 // version of its own (admissionPolicyServedFrom): a cluster below it refuses
-// the object at apply. Launcher has no input for the target version, so the
-// build does not check it; the kind's schema and README entry state it.
+// the object at apply. The build does not check it, even for a ClusterProfile
+// that states spec.kubernetesVersion, which reaches only the feature-gated
+// properties; the kind's schema and README entry state it.
 //
 // Each kind's required list is derived from the markers of the linked
 // k8s.io/api source (TestBuiltinMarkerKinds_RequiredMatchMarkers). The API

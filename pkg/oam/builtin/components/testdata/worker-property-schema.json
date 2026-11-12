@@ -164,7 +164,7 @@
             },
             "fileKeyRef": {
               "type": "object",
-              "description": "Select a key of an env file mounted via a volume (corev1 EnvFiles feature; requires the cluster's EnvFiles feature gate, on by default from Kubernetes 1.35: a ClusterProfile with an earlier kubernetesVersion refuses it).",
+              "description": "Select a key of an env file mounted via a volume (corev1 EnvFiles feature; requires the cluster's EnvFiles feature gate, on by default from Kubernetes 1.35: a ClusterProfile with an earlier kubernetesVersion refuses it unless its spec.featureGates sets the gate on, and refuses it at any version when that map sets the gate off).",
               "properties": {
                 "key": {
                   "type": "string",
@@ -331,7 +331,7 @@
   },
   "hostnameOverride": {
     "type": "string",
-    "description": "Fully overrides the pod's hostname (a DNS-1123 subdomain of at most 64 characters). Mutually exclusive with hostNetwork and setHostnameAsFQDN; requires the cluster's HostnameOverride feature gate, on by default from Kubernetes 1.35: a ClusterProfile with an earlier kubernetesVersion refuses it.",
+    "description": "Fully overrides the pod's hostname (a DNS-1123 subdomain of at most 64 characters). Mutually exclusive with hostNetwork and setHostnameAsFQDN; requires the cluster's HostnameOverride feature gate, on by default from Kubernetes 1.35: a ClusterProfile with an earlier kubernetesVersion refuses it unless its spec.featureGates sets the gate on, and refuses it at any version when that map sets the gate off.",
     "gate": "HostnameOverride"
   },
   "image": {
@@ -443,7 +443,7 @@
                   },
                   "fileKeyRef": {
                     "type": "object",
-                    "description": "Select a key of an env file mounted via a volume (corev1 EnvFiles feature; requires the cluster's EnvFiles feature gate, on by default from Kubernetes 1.35: a ClusterProfile with an earlier kubernetesVersion refuses it).",
+                    "description": "Select a key of an env file mounted via a volume (corev1 EnvFiles feature; requires the cluster's EnvFiles feature gate, on by default from Kubernetes 1.35: a ClusterProfile with an earlier kubernetesVersion refuses it unless its spec.featureGates sets the gate on, and refuses it at any version when that map sets the gate off).",
                     "properties": {
                       "key": {
                         "type": "string",
@@ -1094,7 +1094,7 @@
   },
   "podResources": {
     "type": "object",
-    "description": "Pod-level compute resources shared by all containers (corev1.PodSpec.resources). Only cpu, memory and hugepages-\u003csize\u003e are valid here; requires the cluster's PodLevelResources feature gate, on by default from Kubernetes 1.34: a ClusterProfile with an earlier kubernetesVersion refuses it. Distinct from the container-level `resources` property.",
+    "description": "Pod-level compute resources shared by all containers (corev1.PodSpec.resources). Only cpu, memory and hugepages-\u003csize\u003e are valid here; requires the cluster's PodLevelResources feature gate, on by default from Kubernetes 1.34: a ClusterProfile with an earlier kubernetesVersion refuses it unless its spec.featureGates sets the gate on, and refuses it at any version when that map sets the gate off. Distinct from the container-level `resources` property.",
     "properties": {
       "limits": {
         "type": "object",
@@ -1746,7 +1746,7 @@
                   },
                   "fileKeyRef": {
                     "type": "object",
-                    "description": "Select a key of an env file mounted via a volume (corev1 EnvFiles feature; requires the cluster's EnvFiles feature gate, on by default from Kubernetes 1.35: a ClusterProfile with an earlier kubernetesVersion refuses it).",
+                    "description": "Select a key of an env file mounted via a volume (corev1 EnvFiles feature; requires the cluster's EnvFiles feature gate, on by default from Kubernetes 1.35: a ClusterProfile with an earlier kubernetesVersion refuses it unless its spec.featureGates sets the gate on, and refuses it at any version when that map sets the gate off).",
                     "properties": {
                       "key": {
                         "type": "string",
