@@ -12,8 +12,8 @@ This release step covers the format, the CEL environment and the evaluation of o
 `model.Compile` compiles every expression of a loaded model against the environment below, and
 `Compiled.Eval` runs one of them. `Compiled.Expand` builds the components of the parts and binds the
 outputs that a later part reads. `model.Registry` registers a model as a component type, and its rule
-lowers a component of that type into the parts. The emit hook, the capability check on the traits of a
-model, the limits of a whole build and the hostile corpus arrive in later steps of
+lowers a component of that type into the parts. The emit hook and the limits of a whole build are
+in. The capability check on the traits of a model and the hostile corpus arrive in later steps of
 go-kure/launcher#1261. A document that loads today keeps its meaning then.
 
 ## Document
@@ -232,9 +232,30 @@ A component of the model type lowers into the components of its parts.
   or a rule is registered under stays as written. A model that emits no component is refused with
   `model.ErrInvalid`.
 
-The rule enforces one limit and `Register` enforces the other. One render gives at most 50 components,
-and the models nest at most 4 deep. The limits of a whole build (500 parts, 1 MiB of YAML and one second of run time) belong to the
-hostile-corpus step of go-kure/launcher#1261.
+The rule enforces the limits of a render and of a build, and `Register` enforces the nesting depth. One
+render gives at most 50 components, and the models nest at most 4 deep.
+
+**Limits of a whole build.** A build is one `Transform`. Every model render in it spends from one budget
+that the run keeps, so two builds on one rule never share it. A limit that is broken fails the build with
+`model.ErrLimit` and names the limit.
+
+| Limit | Value | What counts | Where it is checked |
+|---|---|---|---|
+| `MaxBuildParts` | 500 | Components that all renders of the build give, after `when` and `forEach` | Before the parts of a `forEach` are built |
+| `MaxBuildCost` | 10,000,000 | Actual CEL cost units that all expressions of the build spent | After each expression |
+| `MaxBuildPropertyBytes` | 1 MiB | The size as JSON of the properties of the components and of their traits that the build emitted | After each render |
+| `BuildTimeout` | 1 s | Time from the first model render of the build | Before and after each expression, and inside a long comprehension |
+
+The byte limit is a proxy and is named for what it measures: the size of the emitted properties. The
+exact size of the rendered YAML of the whole build is not checked, because the rule emits components and
+the renderer makes the YAML later (go-kure/launcher#1509 tracks the exact check). The deadline stops a long
+comprehension through the context of the evaluation (`Scope.Ctx`; a nil context reads as
+`context.Background()`), and the program checks it every 100 steps of the comprehension. The stop is
+cooperative: one long call of a function and a compile are not interrupted, and memory is not bounded. The
+deadline starts at the first model render of the build and not at the start of the `Transform`. A direct
+`Expand` or `Eval` has no build and so no build limit. The deadline can bind long before the cost limit: on
+a loaded development host, one expression of 700,000 cost units (`lists.range(50000).map(i, i)`) ran for
+about 2.8 s.
 
 **Result.** A string that is exactly one hole gives the value with its type: `int64`, `uint64`,
 `float64`, `bool`, `string`, `[]byte`, `[]any` (in order), `map[string]any` or `nil`. A string

@@ -142,7 +142,9 @@ The model rule calls it through `LoweringContext.EmitModelComponent`, once for e
 emits, in part order and only after the whole render succeeded. The call carries a `ModelEmit`: the
 model key, the part id, the type as the model wrote it, the name the build gave and a copy of the
 properties. A hook error fails the transform and names the model and the part. A Go lowering rule
-and an authored component never reach the hook, and a nil hook asks nothing.
+and an authored component never reach the hook, and a nil hook asks nothing. The model rule keeps the
+limits of the whole build (parts, cost, emitted properties bytes and time) in `LoweringContext.RunState`,
+so that they belong to one transform.
 `Transformer.CheckComponentTypes` is a dry run of `DeclareComponentTypes`. It checks that
 the declaration is valid and declares nothing. It does not need the handler or rule to be
 registered yet, and `DeclareComponentTypes` does. A component model registers its rule

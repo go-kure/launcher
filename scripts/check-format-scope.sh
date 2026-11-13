@@ -177,6 +177,7 @@ LEFT_OUT_PATHS=(
   # error they received.
   pkg/oam/doc.go
   pkg/oam/emit_hook.go
+  pkg/oam/run_state.go
   pkg/oam/post_policy_step.go
   pkg/oam/provenance.go
   pkg/oam/routed_backend.go
