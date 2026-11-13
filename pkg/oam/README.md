@@ -145,6 +145,13 @@ properties. A hook error fails the transform and names the model and the part. A
 and an authored component never reach the hook, and a nil hook asks nothing. The model rule keeps the
 limits of the whole build (parts, cost, emitted properties bytes and time) in `LoweringContext.RunState`,
 so that they belong to one transform.
+A component lowering rule seals the traits it writes by hand: they skip the capability merge, the
+missing-binding refusal and the consumption record, and, when the rule's input counted as checked
+(it declares a property schema, or its input was synthesized), the platform-reserved refusal too.
+A rule that implements `AuthoredTraitEmitter` and returns `true` from `EmitsAuthoredTraits()` is the
+exception. The model rule does, because its traits are written in the model, as an author writes a
+trait in `app.yaml`, so its hand-written traits take every one of those steps like an authored trait
+(see [Component Models](/pkg/oam/model/README.md)).
 `Transformer.CheckComponentTypes` is a dry run of `DeclareComponentTypes`. It checks that
 the declaration is valid and declares nothing. It does not need the handler or rule to be
 registered yet, and `DeclareComponentTypes` does. A component model registers its rule
