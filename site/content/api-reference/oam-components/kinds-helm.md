@@ -270,7 +270,22 @@ message, since a HelmRelease installs the chart, no hook-group layout exists and
 the prefix would name nothing. An authored `layoutKustomizationName` is passed
 on and refused the same way: under `delivery: flux` the component has no layout
 of its own. No source is emitted, and an authored `valuesMode: inline` is
-dropped.
+dropped. The rule refuses everything a client-side render cannot honour, each
+with a `helm:` message:
+
+- a source reference, and `valuesMode: configMap`;
+- `source.name` beside an inline source, `valuesConfigMapName`,
+  `valuesSecretName` and `helmReleaseName`: the render generates no source, no
+  values ConfigMap, no values Secret and no HelmRelease, so each would name
+  nothing;
+- an inline GitRepository or Bucket source, since the render fetches only from a
+  Helm or OCI repository;
+- an OCI source without `version`;
+- `source.digest`: the render fetches the chart by `version` and does not pin it
+  to a digest, and only the `ocirepository` that `delivery: flux` generates
+  reads it;
+- every other HelmRelease key (`interval`, `targetNamespace`, `driftDetection`,
+  `install`, `upgrade`, `valuesFrom`), which `helmtemplate` does not accept.
 
 ### Validation
 
@@ -333,23 +348,6 @@ whoever reads either can test a guess of the whole tree against it. To keep a
 value out of the document and the output altogether, create the Secret out of
 band (an `external-secret` trait, a sealed or externally managed Secret) and
 name it in `valuesFrom`, or use the chart's own existing-secret values.
-
-The rule refuses everything a client-side render cannot honour, each with a
-`helm:` message:
-
-- a source reference, and `valuesMode: configMap`;
-- `source.name` beside an inline source, `valuesConfigMapName`,
-  `valuesSecretName` and `helmReleaseName`: the render generates no source, no
-  values ConfigMap, no values Secret and no HelmRelease, so each would name
-  nothing;
-- an inline GitRepository or Bucket source, since the render fetches only from a
-  Helm or OCI repository;
-- an OCI source without `version`;
-- `source.digest`: the render fetches the chart by `version` and does not pin it
-  to a digest, and only the `ocirepository` that `delivery: flux` generates
-  reads it;
-- every other HelmRelease key (`interval`, `targetNamespace`, `driftDetection`,
-  `install`, `upgrade`, `valuesFrom`), which `helmtemplate` does not accept.
 
 Strict, unlike the removed `helmchart` composite. An undeclared key at the top
 level or inside `source` is refused, and so are:
