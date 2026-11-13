@@ -376,6 +376,9 @@ type NameAllocator struct {
 	// other: LoweringContext.ResolveName asks it for a name a lowering rule
 	// generates.
 	hook func(NameRequest) (string, bool)
+	// emit is TransformContext.EmitHook on the allocator of a transform, nil on any
+	// other: LoweringContext.EmitModelComponent calls it for a model's component.
+	emit func(ModelEmit) error
 	// lowered holds the object names lowering rules resolved, in the order they
 	// were resolved, until the transform claims them into resolved with the
 	// namespace lowering settled on (claimLowered, naming_lowering.go).

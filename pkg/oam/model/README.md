@@ -222,6 +222,11 @@ A component of the model type lowers into the components of its parts.
   round. The lowering rule emits a kind part (a Secret or a ConfigMap), and the build names its object
   after the part and never asks the hook for it. So the rule's read does not ask the hook for the
   role `object` either. A direct `Expand` keeps the hook, because a later `Transform` asks it.
+- The rule tells the `TransformContext.EmitHook` of the run about each component it emits, with the
+  model, the part, the type as written, the name and a copy of the properties. It does so after the
+  whole render succeeded, so a render that fails reports nothing. A direct `Expand` calls no hook:
+  its components are not emitted by a build. A hook error fails the build and names the model and the
+  part.
 - A part type and a trait type stay as the model wrote them. The engine resolves an identity to the
   registered name after each round, as it does for an authored component. A plain name that a handler
   or a rule is registered under stays as written. A model that emits no component is refused with

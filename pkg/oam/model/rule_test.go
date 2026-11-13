@@ -36,12 +36,18 @@ func registered(t *testing.T, doc string) (*oam.Transformer, *model.Registry) {
 // objects is every object a Transform of comps generates, as JSON, by (kind, name).
 func objects(t *testing.T, tr *oam.Transformer, comps []oam.Component, naming func(oam.NameRequest) (string, bool)) (map[[2]string]map[string]any, error) {
 	t.Helper()
+	return objectsWith(t, tr, comps, naming, nil)
+}
+
+// objectsWith is objects under an EmitHook.
+func objectsWith(t *testing.T, tr *oam.Transformer, comps []oam.Component, naming func(oam.NameRequest) (string, bool), emit func(oam.ModelEmit) error) (map[[2]string]map[string]any, error) {
+	t.Helper()
 	app := &oam.Application{
 		APIVersion: oam.SupportedAPIVersion, Kind: "Application",
 		Metadata: oam.Metadata{Name: "shop", Namespace: "demo"},
 		Spec:     oam.ApplicationSpec{Components: comps},
 	}
-	cluster, err := tr.Transform(app, oam.TransformContext{Namespace: "demo", Naming: naming})
+	cluster, err := tr.Transform(app, oam.TransformContext{Namespace: "demo", Naming: naming, EmitHook: emit})
 	if err != nil {
 		return nil, err
 	}

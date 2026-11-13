@@ -136,6 +136,13 @@ properties of an emitted component, trait or policy are checked against that sch
 when the rule wrote the type as an identity. The same holds for the platform-reserved check
 and for the members of a same-name sibling group. A rule reads the Naming hook of the run
 through `LoweringContext.NamingHook`.
+
+A consumer sees what a configuration-defined model emits through `TransformContext.EmitHook`.
+The model rule calls it through `LoweringContext.EmitModelComponent`, once for each component it
+emits, in part order and only after the whole render succeeded. The call carries a `ModelEmit`: the
+model key, the part id, the type as the model wrote it, the name the build gave and a copy of the
+properties. A hook error fails the transform and names the model and the part. A Go lowering rule
+and an authored component never reach the hook, and a nil hook asks nothing.
 `Transformer.CheckComponentTypes` is a dry run of `DeclareComponentTypes`. It checks that
 the declaration is valid and declares nothing. It does not need the handler or rule to be
 registered yet, and `DeclareComponentTypes` does. A component model registers its rule

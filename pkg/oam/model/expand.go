@@ -102,29 +102,39 @@ func (s *site) checkPartReads(path string, parts map[string]map[string]string) e
 // It does not run the transform and does not check the traits against a capability: the
 // components are the input of a later step. A failure returns no component.
 func (c *Compiled) Expand(tr *oam.Transformer, sc Scope, naming func(oam.NameRequest) (string, bool), partName func(string) (string, error)) ([]oam.Component, error) {
+	comps, _, err := c.expand(tr, sc, naming, partName)
+	return comps, err
+}
+
+// expand is Expand that also returns, for each component, the id of the part that gave it.
+func (c *Compiled) expand(tr *oam.Transformer, sc Scope, naming func(oam.NameRequest) (string, bool), partName func(string) (string, error)) ([]oam.Component, []string, error) {
 	sc.Values = make(map[string]any, len(c.values))
 	sc.Parts = map[string]map[string]string{}
 	sc.Loop = nil
 	for i, v := range c.values {
 		val, _, err := c.Eval("spec.values["+strconv.Itoa(i)+"].expr", sc)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		sc.Values[v.Name] = val
 	}
 	var comps []oam.Component
+	var ids []string
 	for i, p := range c.parts {
 		base := "spec.parts[" + strconv.Itoa(i) + "]"
 		out, err := c.expandPart(tr, base, p, sc, naming, partName, len(comps))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		comps = append(comps, out...)
+		for range out {
+			ids = append(ids, p.ID)
+		}
 	}
 	if len(comps) == 0 {
-		return nil, errors.Errorf("%w: spec.parts: no part emitted a component", ErrInvalid)
+		return nil, nil, errors.Errorf("%w: spec.parts: no part emitted a component", ErrInvalid)
 	}
-	return comps, nil
+	return comps, ids, nil
 }
 
 // expandPart builds the components of one part and, for a part that is read, binds its outputs
