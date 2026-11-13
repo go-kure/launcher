@@ -33,6 +33,10 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - `TestKindComponents_OmittedRequiredAndWrittenDefaults` holds the four in its table as
     well, from the same markers: to that, and to no default marked on a field the type writes
     unauthored. [the four: `role`, `rolebinding`, `clusterrole` and `clusterrolebinding`;
-    that: the statement above that the API marks no field of the four required that the type
-    leaves out when unauthored]
+    that: the statement on the reference page that the API marks no field of the four required
+    that the type leaves out when unauthored]
+  - These checks are of presence [the reference sentence now reads "The checks on required
+    fields are of presence"; these checks: the required-field validation of the four kinds,
+    `refuseUnauthoredRequired`, called by `policyFreeKind.config`, which the two tests above
+    hold to the markers]
 
