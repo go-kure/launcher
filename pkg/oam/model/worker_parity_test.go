@@ -254,18 +254,29 @@ func TestWorkerParity_Default(t *testing.T) {
 	requireParity(t, map[string]any{"image": "nginx:1.27", "replicas": 3}, 10)
 }
 
+// The full property set goes through both parts of the model, the one with the trait and the one
+// without, because each part has its own expressions for every property.
 func TestWorkerParity_Properties(t *testing.T) {
-	requireParity(t, map[string]any{
-		"image":    "nginx:1.27",
-		"replicas": 3,
-		"env":      []any{map[string]any{"name": "MODE", "value": "fast"}},
-		"command":  []any{"/bin/sh"},
-		"args":     []any{"-c", "echo hello"},
-		"resources": map[string]any{
-			"requests": map[string]any{"cpu": "200m", "memory": "256Mi"},
-			"limits":   map[string]any{"memory": "512Mi"},
-		},
-	}, 10)
+	for _, tc := range []struct {
+		name   string
+		spread bool
+		mapped int
+	}{{"spread", true, 10}, {"plain", false, 8}} {
+		t.Run(tc.name, func(t *testing.T) {
+			requireParity(t, map[string]any{
+				"image":          "nginx:1.27",
+				"replicas":       3,
+				"topologySpread": tc.spread,
+				"env":            []any{map[string]any{"name": "MODE", "value": "fast"}},
+				"command":        []any{"/bin/sh"},
+				"args":           []any{"-c", "echo hello"},
+				"resources": map[string]any{
+					"requests": map[string]any{"cpu": "200m", "memory": "256Mi"},
+					"limits":   map[string]any{"memory": "512Mi"},
+				},
+			}, tc.mapped)
+		})
+	}
 }
 
 func TestWorkerParity_TopologySpreadOff(t *testing.T) {
