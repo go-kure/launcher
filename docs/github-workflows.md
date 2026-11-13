@@ -103,8 +103,9 @@ PR and merge-queue job (no needs):
 └─────────────┘
 ```
 
-On `merge_group` events (merge queue), `lint`/`test`/`build` run against the queue's
-temporary branch — the merged result — before the PR is allowed to land. `detect-changes` runs the
+On `merge_group` events (merge queue), `build` and, when the group changes a Go-relevant
+path, `lint` and `test` run against the queue's temporary branch — the merged result — before the
+PR is allowed to land. `detect-changes` runs the
 same path filter as on a PR, diffed from the merge base of the group head with the branch the
 group merges into, so it covers every entry of the group that is not on the branch yet. A group
 that changes no Go-relevant path skips `lint`, `test`, `Security`, `Build kurel` and
@@ -430,9 +431,9 @@ Runs on main and `release/*` branches only (not PRs):
 
   The refusal paths, plus the no-change, inert, affected and acknowledged outcomes and the
   merge-queue mode, are pinned by hermetic cases in `scripts/test/cases/` — the same cases, under the same file names, as
-  `go-kure/kure`'s — which the `lint` job runs on every push and merge-queue run, and on a PR
-  whenever its `go` path filter matches (a workflow change, this script or anything under
-  `scripts/test/` does) (`make test-pin-impact`, also part of `mise run verify` and
+  `go-kure/kure`'s — which the `lint` job runs on every push, and on a PR or a
+  merge-queue group whenever its `go` path filter matches (a workflow change, this script or
+  anything under `scripts/test/` does) (`make test-pin-impact`, also part of `mise run verify` and
   `make precommit`);
   `scripts/test/pin-impact-lib.sh` stubs `curl` and builds a throwaway git repository per case,
   so no case touches the network. A maintainer who has reviewed a real hit and judged it safe adds
@@ -454,7 +455,8 @@ Runs on main and `release/*` branches only (not PRs):
   PR's base, and the gate refuses an inconsistent base before it reads the label, so it would
   refuse the repair PR too (go-kure/kure#951). The queue now ejects the PR instead; rebase it onto
   `main` and align its pins. The impact itself is still checked only on the PR (go-kure/kure#730)
-- **Path filtering** — `dorny/paths-filter` skips jobs when unrelated files change
+- **Path filtering** — `dorny/paths-filter` skips jobs when unrelated files change, on a PR and
+  in the merge queue
 - **Diff-based lint** — on PRs, lint only checks new/changed lines (`--new-from-rev`)
 - **CGO enabled** — test job installs `build-essential` for cgo-dependent packages, guarded by
   `command -v gcc && command -v make` (both, see below). The guard is not an optimisation: the
