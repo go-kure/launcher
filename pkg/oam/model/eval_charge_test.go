@@ -357,14 +357,30 @@ func TestChargeWrappersGiveWhatCelGoGives(t *testing.T) {
 // depend on that order: a comparison that a cheap key decides gave false when it came first and
 // ErrCostLimit when a deep key came first. The walk now reads every key, so the spend and the
 // outcome do not depend on the order.
+//
+// cel-go gives the keys of a map literal by ranging over a Go map (refValMapAccessor.Iterator,
+// reflect MapRange), so the order is random from run to run. Each run spends the whole budget,
+// about a second under the race detector, so the maps hold seven cheap keys and one deep key:
+// a walk that stops at the first difference answers false in seven runs of eight, and eight runs
+// miss it with a chance of 8^-8.
 func TestMapComparisonDoesNotDependOnKeyOrder(t *testing.T) {
+	const cheap = 7
+	var left, same, other []string
+	for i := 0; i < cheap; i++ {
+		left = append(left, fmt.Sprintf("'c%d': 0", i))
+		same = append(same, fmt.Sprintf("'c%d': 1", i))
+		other = append(other, fmt.Sprintf("'o%d': 0", i))
+	}
+	mapOf := func(entries []string) string {
+		return "{" + strings.Join(append(slices.Clone(entries), "'deep': d"), ", ") + "}"
+	}
 	for name, expr := range map[string]string{
-		"a cheap key that differs":   nested4(60, "{'cheap': 0, 'deep': d} == {'cheap': 1, 'deep': d}"),
-		"a key that the other lacks": nested4(60, "{'cheap': 0, 'deep': d} == {'other': 0, 'deep': d}"),
+		"cheap keys that differ":    nested4(60, mapOf(left)+" == "+mapOf(same)),
+		"keys that the other lacks": nested4(60, mapOf(left)+" == "+mapOf(other)),
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := mustCompile(t, oneValue(t, "${"+expr+"}"))
-			for i := 0; i < 60; i++ {
+			for i := 0; i < 8; i++ {
 				got, _, err := c.Eval("spec.values[0].expr", stdScope())
 				if !errors.Is(err, ErrCostLimit) {
 					t.Fatalf("run %d gave %v, %v: every run must wrap ErrCostLimit", i, got, err)
@@ -571,11 +587,31 @@ func TestResultCopyChargesTheBytesOfMapKeys(t *testing.T) {
 // go-kure/launcher#1462: cel-go builds the whole result of format before it charges it, and the
 // operands of a format can be small next to the result. The evaluation checks the largest result
 // the operands can print before it runs format.
-const (
-	// long400k is a string of 400,000 bytes, built below the cost limit.
-	long400k = "lists.range(40000).map(i, 'xxxxxxxxxx').join('')"
-	// long300k is a string of 300,000 bytes.
-	long300k = "lists.range(30000).map(i, 'xxxxxxxxxx').join('')"
+
+// scaled is a CEL expression for a string of base*factors[0]*factors[1]*... bytes: a literal of base
+// bytes, repeated by each factor in turn as a sum of that many copies. The rows that use it test the
+// charge of format, not the charge of map or join, and a list of 40,000 elements costs minutes of the
+// package time under the race detector. It holds len(factors) binds, and the row that uses it adds one,
+// so the count stays within maxBindDepth. A literal of more than about 3,500 bytes breaks the
+// size limit of an expression.
+func scaled(base int, factors ...int) string {
+	body := ""
+	for i := len(factors) - 1; i >= 0; i-- {
+		sum := strings.TrimSuffix(strings.Repeat("a + ", factors[i]), " + ")
+		if body == "" {
+			body = sum
+		} else {
+			body = "cel.bind(a, " + sum + ", " + body + ")"
+		}
+	}
+	return "cel.bind(a, '" + strings.Repeat("x", base) + "', " + body + ")"
+}
+
+var (
+	// long400k is a string of 400,000 bytes, built below the cost limit: 3,125 doubled seven times.
+	long400k = scaled(3125, 2, 2, 2, 2, 2, 2, 2)
+	// long300k is a string of 300,000 bytes: 3,125 tripled, then doubled five times.
+	long300k = scaled(3125, 3, 2, 2, 2, 2, 2)
 )
 
 // A format of 150 clauses over one string of 400,000 bytes prints 60,000,000 bytes, and a shared
@@ -596,6 +632,20 @@ func TestChargeFormatStopsBeforeTheAllocation(t *testing.T) {
 				t.Errorf("the refusal came after %d MB of allocation, want less than 50", mb)
 			}
 		})
+	}
+}
+
+// The rows of the format tests sit at 300,000 and 400,000 bytes on purpose, so the strings that
+// scaled builds must have exactly those sizes.
+func TestLongFormatStringsHaveTheirSize(t *testing.T) {
+	for _, tc := range []struct {
+		expr string
+		want int64
+	}{{long400k, 400000}, {long300k, 300000}} {
+		got, err := evalValue(t, tc.expr+".size()")
+		if err != nil || got != tc.want {
+			t.Errorf("size of the string = %v, %v, want %d", got, err, tc.want)
+		}
 	}
 }
 
