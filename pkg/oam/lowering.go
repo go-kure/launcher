@@ -669,6 +669,24 @@ type ComponentLoweringRule interface {
 	LowerComponent(comp *Component, lctx LoweringContext) (LoweringResult, error)
 }
 
+// AuthoredTraitEmitter is an optional interface for a ComponentLoweringRule whose
+// hand-written traits are authored in kind: the rule states a trait the way an
+// author would, and the capability binding, the missing-binding refusal, the
+// platform-reserved refusal and the consumption record still have to happen for it.
+// A model's component rule is one. Without it the engine seals every trait a rule
+// whose input counted as checked writes, which skips all four. A trait a rule
+// forwards from its input is not affected either way.
+type AuthoredTraitEmitter interface {
+	EmitsAuthoredTraits() bool
+}
+
+// emitsAuthoredTraits reports whether rule asks for its hand-written traits to stay
+// unsealed (AuthoredTraitEmitter).
+func emitsAuthoredTraits(rule ComponentLoweringRule) bool {
+	e, ok := rule.(AuthoredTraitEmitter)
+	return ok && e.EmitsAuthoredTraits()
+}
+
 // TraitLoweringRule lowers a trait in spec.components[].traits[].
 type TraitLoweringRule interface {
 	TraitType() string
@@ -875,7 +893,8 @@ func (t *Transformer) RegisterComponentLowering(r ComponentLoweringRule) {
 // configmap, secret) are launcher's own opinions, which a policy author neither
 // wrote nor can predict, so the capability check does not judge them. A rule
 // registered through RegisterComponentLowering is an embedder's or a model's, and
-// the traits it writes are judged.
+// the traits it writes are judged by the capability check. A model's rule also
+// implements AuthoredTraitEmitter, so those traits take the capability steps too.
 func (t *Transformer) RegisterBuiltinComponentLowering(r ComponentLoweringRule) {
 	t.RegisterComponentLowering(r)
 	t.builtinComponentRuleTypes[r.ComponentType()] = true
@@ -1536,10 +1555,17 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			// itself still saw its INPUT's prior identity; only the OUTPUT stamped
 			// below carries this invocation's own.
 			compOrigin.Rule = loweringRuleIdentity(string(PositionComponent), comp.Type, rule)
+			authoredTraits := emitsAuthoredTraits(rule)
 			if !inputChecked {
 				if err := t.enforceEmittedComponentReservations(result.Components, compOrigin.Rule, nil); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
+			}
+			// A rule whose own traits travel as authored ones is held to the
+			// reservation check on them too, here and before emission validation
+			// strips an explicit null from them, as for a rule whose input was not
+			// checked.
+			if !inputChecked || authoredTraits {
 				// A trait the rule forwarded keeps what it was (sealEmittedNestedTraits),
 				// so one that arrived synthesized stays exempt.
 				forwardedSynthesized := func(trait *Trait) bool {
@@ -1558,7 +1584,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
-				if err := t.sealEmittedNestedTraits(&result.Components[j], compOrigin, originalTraits, inputChecked); err != nil {
+				if err := t.sealEmittedNestedTraits(&result.Components[j], compOrigin, originalTraits, inputChecked, authoredTraits, ctx.Capabilities); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 				// A trait a non-builtin rule wrote itself is part of the output the
@@ -1780,7 +1806,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				if err := t.validateEmittedComponent(&result.Components[j]); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
-				if err := t.sealEmittedNestedTraits(&result.Components[j], traitOrigin, nil, inputChecked); err != nil {
+				if err := t.sealEmittedNestedTraits(&result.Components[j], traitOrigin, nil, inputChecked, false, nil); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", traitOrigin)
 				}
 				// A trait-position rule may also emit Components (loweringPositionRules);
@@ -1901,8 +1927,13 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 //
 // synthesized is the emitting rule's inputChecked: each trait sealed here gets it
 // as Trait.synthesized, the same marker the component it sits in carries.
-func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Origin, forwarded []Trait, synthesized bool) error {
-	return t.sealNestedTraits(comp, parentOrigin, synthesized, func(trait *Trait) bool {
+//
+// authored (AuthoredTraitEmitter) keeps the traits the rule wrote unsealed and
+// unsynthesized: they get their origin and the emission check, then travel as authored
+// traits through the capability merge, the missing-binding refusal, D3 and the
+// consumption record.
+func (t *Transformer) sealEmittedNestedTraits(comp *Component, parentOrigin Origin, forwarded []Trait, synthesized, authored bool, caps map[string]CapabilityBinding) error {
+	return t.markNestedTraits(comp, parentOrigin, !authored, synthesized, caps, func(trait *Trait) bool {
 		i := forwardedIndex(trait, forwarded)
 		if i < 0 {
 			return false
@@ -1961,6 +1992,13 @@ func (t *Transformer) sealNestedTraitsInDocument(comp *Component, parentOrigin O
 // comment (above) describes. Each one's Trait.synthesized is set to synthesized,
 // which also resets a by-value copy of a synthesized trait that the rule changed.
 func (t *Transformer) sealNestedTraits(comp *Component, parentOrigin Origin, synthesized bool, isForwarded func(*Trait) bool) error {
+	return t.markNestedTraits(comp, parentOrigin, true, synthesized, nil, isForwarded)
+}
+
+// markNestedTraits is sealNestedTraits' body. With seal false the traits keep their
+// authored standing: sealed and synthesized are both cleared, so a by-value copy of
+// an earlier rule's sealed trait that this rule rewrote does not keep its seal.
+func (t *Transformer) markNestedTraits(comp *Component, parentOrigin Origin, seal, synthesized bool, caps map[string]CapabilityBinding, isForwarded func(*Trait) bool) error {
 	for k := range comp.Traits {
 		trait := &comp.Traits[k]
 		// The forwarding mark (forwardableTraits) stays until the caller has
@@ -1978,9 +2016,15 @@ func (t *Transformer) sealNestedTraits(comp *Component, parentOrigin Origin, syn
 		// earlier rule emitted carries that rule's input, which says nothing of what
 		// this rule did, so the provenance report renders every leaf of the trait.
 		trait.ruleInput = nil
-		trait.sealed = true
-		trait.synthesized = synthesized
-		if err := t.validateEmittedTrait(trait); err != nil {
+		trait.sealed = seal
+		trait.synthesized = seal && synthesized
+		validate := t.validateEmittedTrait
+		if !seal {
+			// A trait that goes on as an authored one is held to what an authored
+			// trait is held to, under the profile's bindings.
+			validate = func(trait *Trait) error { return t.validateEmittedAuthoredTrait(trait, caps) }
+		}
+		if err := validate(trait); err != nil {
 			return err
 		}
 	}

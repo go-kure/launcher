@@ -36,6 +36,12 @@ func (r *Rule) ComponentType() string { return r.m.Key() }
 // PropertySchema publishes the inputs of the model as the schema of its component.
 func (r *Rule) PropertySchema() map[string]oam.PropertySchema { return r.m.Spec.Inputs }
 
+// EmitsAuthoredTraits (oam.AuthoredTraitEmitter) reports that the traits a model writes on
+// its parts are authored in kind: the engine resolves their capability, refuses a missing
+// binding and a platform-reserved value, and records the consumed capability, as it does for
+// a trait written in a document.
+func (*Rule) EmitsAuthoredTraits() bool { return true }
+
 // LowerComponent expands one component of the model's type into the components of its parts.
 // An input the component does not set takes its default. A part is named
 // "<component>-<part>" by the allocator of the run, so a name that two parts want fails the

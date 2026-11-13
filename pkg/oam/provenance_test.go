@@ -838,6 +838,25 @@ func TestProvenance_LoweredElements(t *testing.T) {
 		want:      map[string]Source{"port": {Kind: SourceRendered, Ref: "component/traited"}},
 		owners:    map[string][]provOwner{"web/expose": {{}}},
 	}, {
+		// A rule that writes authored traits (AuthoredTraitEmitter): the trait is not
+		// sealed, so it is reported as an authored trait is: its own value as authored,
+		// the merged capability rendering as capability.
+		name: "trait an authored-trait rule hard-codes",
+		register: func(tr *Transformer) {
+			tr.RegisterComponentLowering(authoredFnRule{emitRule{"authored", func(c *Component) []Component {
+				return []Component{{Name: c.Name, Type: "web", Properties: map[string]any{"image": "a"},
+					Traits: []Trait{{Type: "expose", Properties: map[string]any{"port": 80}}}}}
+			}}})
+		},
+		app:       func() *Application { return provApp(Component{Name: "web", Type: "authored"}) },
+		component: "web",
+		trait:     "expose",
+		want: map[string]Source{
+			"port":  {Kind: SourceAuthored},
+			"proto": {Kind: SourceCapability, Ref: "expose"},
+		},
+		owners: map[string][]provOwner{"web/expose": {{}}},
+	}, {
 		name: "component rule passes an authored value through",
 		register: func(tr *Transformer) {
 			tr.RegisterComponentLowering(emitRule{"copier", func(c *Component) []Component {

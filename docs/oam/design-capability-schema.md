@@ -237,7 +237,9 @@ before it settles into its terminal type). A trait is resolved at most once per 
 regardless of `sealed` re-dispatch through the fixpoint: both call sites already guard their
 capability-processing step on `!trait.sealed`, since a sealed trait was emitted by an earlier
 lowering round that already merged its own rendering — the same guard that prevents a
-double-merge prevents a double-count for free.
+double-merge prevents a double-count for free. A trait a component rule writes by hand has
+merged nothing, so a rule that implements `AuthoredTraitEmitter` (a model's rule) leaves it
+unsealed and it goes through that step.
 
 A lowering rule's own read counts too (go-kure/launcher#686). A component, trait,
 document or policy rule reads a capability only through `LoweringContext.Capability(key)`,

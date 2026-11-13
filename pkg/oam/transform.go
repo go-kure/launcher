@@ -1721,7 +1721,9 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 				}
 			}
 			// A sealed trait was emitted by a lowering rule, which already merged
-			// capability rendering into it (D5) before the fixpoint settled — the
+			// capability rendering into it (D5) before the fixpoint settled (a trait
+			// a component rule wrote by hand is sealed likewise, unless that rule
+			// implements AuthoredTraitEmitter, which leaves it authored) — the
 			// information-closure rule does not allow a second, different-key merge
 			// here (a fifth input). So every capability-processing step below is
 			// skipped entirely for a sealed trait; the trait's Properties are final.
