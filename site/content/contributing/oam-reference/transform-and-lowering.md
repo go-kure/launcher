@@ -40,11 +40,11 @@ Implementation, history and tests of the sections on the reference page
   - go-kure/launcher#720 (a PersistentVolume or PersistentVolumeClaim that is force-applied, or covered by the `ForceReplace` delivery intent, is warned about, not refused).
   - go-kure/launcher#782 (the `force-replace` trait sets the `ForceReplace` delivery intent that forces an application).
   - go-kure/launcher#781 (a bundle whose `Force` the caller set before generating forces its applications; launcher never sets it).
-  - go-kure/launcher#702 (a `webservice`/`worker` `volumes` entry is a synthesized `pvc` trait, so the claim is named as a sub-application of its component, and the claims of the deployment member's synthesized `pvc` traits follow Deployment, Service, ServiceAccount).
+  - go-kure/launcher#702 (a `webservice`/`worker` `volumes` entry that generates a claim, which one with `claimName` does not, is a synthesized `pvc` trait, so the claim is named as a sub-application of its component, and the claims of the deployment member's synthesized `pvc` traits follow Deployment, Service, ServiceAccount).
   - go-kure/launcher#794 (`deployment` is the one built-in pod kind a lowering rule emits into a group, and the only one that has `PodTemplateLabels`).
   - go-kure/launcher#755 (sub-applications are compared after each one's `ApplyPolicy` has run, so a policy that renames a sub-application onto another member's is refused, and the name it moved away from is free).
   - go-kure/launcher#612 (an authored value that only compares equal to a rendered one, such as `-0.0` over `0.0`, which a handler tells apart with `math.Signbit`).
-  - go-kure/launcher#609 and go-kure/launcher#626 (a reserved key a rule emits as `null` is refused as when authored directly, before emission validation strips an explicit `null`).
+  - go-kure/launcher#609 and go-kure/launcher#626 (for the output of a rule whose input was not checked, which stays authored, the components and traits it emits at trait position and those nested in the components it emits are checked for reserved keys as they are emitted, before emission validation strips an explicit `null`, so a reserved key written as `null` is refused as when authored directly).
   - go-kure/launcher#849 (an error that holds a `PolicyRefusal` fails the transform as the component's `ViolationError` with the refusal's class, any other error as a `TransformError`).
   - go-kure/launcher#281 and go-kure/launcher#729 (the `postgresql` rule attaches a step to the `cnpg-cluster` it emits, `CnpgClusterConfig.ApplyPostgresqlDefaults`, to set the values postgresql derives after the policy).
   - go-kure/launcher#783 (`Component.OrderAfter(names...)`).
