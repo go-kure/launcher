@@ -109,6 +109,18 @@ func parityCompare(goObjs, modelObjs objMap) (problems []string, mapped int) {
 	if len(goObjs) != len(modelObjs) {
 		problems = append(problems, fmt.Sprintf("Go has %d objects, the model has %d", len(goObjs), len(modelObjs)))
 	}
+	// The mapping hides the part suffix, so a reference to the wrong part would count like a right
+	// one. Read each Deployment's ServiceAccount reference before any mapping: it must name an
+	// emitted ServiceAccount of the model.
+	for mk, o := range modelObjs {
+		if mk[0] != "Deployment" {
+			continue
+		}
+		ref, _ := lookupString(o, "spec", "template", "spec", "serviceAccountName")
+		if _, ok := modelObjs[[2]string{"ServiceAccount", ref}]; !ok {
+			problems = append(problems, fmt.Sprintf("%s %s: serviceAccountName %q names no ServiceAccount the model emits", mk[0], mk[1], ref))
+		}
+	}
 	used := map[[2]string]bool{}
 	var keys [][2]string
 	for k := range goObjs {
@@ -136,6 +148,20 @@ func parityCompare(goObjs, modelObjs objMap) (problems []string, mapped int) {
 		}
 	}
 	return problems, mapped
+}
+
+// lookupString reads a string at a path of object keys.
+func lookupString(o map[string]any, path ...string) (string, bool) {
+	var cur any = o
+	for _, k := range path {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return "", false
+		}
+		cur = m[k]
+	}
+	s, ok := cur.(string)
+	return s, ok
 }
 
 func parityWalk(path string, g, m any, problems *[]string, mapped *int) {
@@ -273,6 +299,13 @@ func TestWorkerParity_ComparerControls(t *testing.T) {
 	bad := parityRender(t, tr, "worker-cfg.acme.example@v1", map[string]any{"image": "nginx:1.28", "replicas": 3})
 	if problems, _ := parityCompare(goObjs, bad); len(problems) == 0 {
 		t.Error("the comparer passed a model with a different image")
+	}
+	// A reference to the wrong part must fail, though it maps to the same string as a right one.
+	wrongRef := parityRender(t, tr, "worker-cfg.acme.example@v1", props)
+	pod := wrongRef[[2]string{"Deployment", parityComponent + "-spread"}]["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	pod["serviceAccountName"] = parityComponent + "-plain"
+	if problems, _ := parityCompare(goObjs, wrongRef); len(problems) == 0 {
+		t.Error("the comparer passed a Deployment that references a ServiceAccount the model does not emit")
 	}
 	// A mapped leaf in a place where Go carries something else must fail.
 	skewed := parityRender(t, tr, "worker-cfg.acme.example@v1", props)
