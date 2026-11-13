@@ -1,6 +1,29 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.8] - 2026-11-13
+
+### Build
+
+- Update dependency hugo to v0.170.0
+
+### Document Format
+
+- Resolve the capability of a trait a model writes in app.yaml
+
+### Documentation
+
+- Name the model rule's authored-trait exception in the lowering section
+
+### Fixed
+
+- Keep API-reference links in the current version
+- Reject the published host on a preview build
+
+### Testing
+
+- Freeze the build clock for the whole model test binary
+
 ## [0.2.0-beta.7] - 2026-11-13
 
 ### Added
