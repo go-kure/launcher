@@ -632,406 +632,380 @@ The component in `pkg/cmd/kurel/testdata/alertmanager-component/app.yaml`, built
 against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The
 fixture test compares the two.
 
+## thanosruler
+
+**thanosruler** is the kind-named projection of a ThanosRuler of the same API.
+It is built as `alertmanager` is, on `policyHeldKind` with the same policy check
+(`monitoring_workload.go`), and emits that one object in the build namespace,
+named after the component unless `objectName` names it; the handler declares the
+object as namespaced and adds no label and no annotation.
+
+### Properties
+
+**One field is renamed: the spec's `labels` is the `externalLabels` property.**
+Every kind component's `labels` property is its object's own labels (see ["The
+object's labels and
+annotations"](conventions.md#the-objects-labels-and-annotations-labels-annotations)):
+the engine reads it before the handler sees it, so the spec's field cannot be
+authored under its own name. These are the ThanosRuler's Prometheus external
+labels, a map of label names to values (upstream: the operator always adds a
+`thanos_ruler_replica` label with the pod's name), not Kubernetes labels: the
+reserved-key and component-label checks of `labels` do not apply to them, and
+nothing is added to them. Authored together, `labels` lands on the object's
+metadata and `externalLabels` on its `spec.labels`. `externalLabels` is decoded
+as strictly as the spec, under the same null contract, and an error names
+`externalLabels`, not the spec field. A key that names the spec's field in
+another spelling (`Labels`) is refused (`Labels: not a thanosruler property: the
+ThanosRuler's external labels are the externalLabels property, …`): the strict
+decode matches field names case-insensitively and would otherwise carry it into
+the spec unpublished. The rename is the kind's alone; the engine's `labels`
+keeps its meaning.
+
+**Authored.** The properties are the top-level json fields of `ThanosRulerSpec`,
+decoded strictly at every depth, `labels` renamed as above: the image (`image`,
+`version`, `imagePullPolicy`, `imagePullSecrets`); the pods, as on
+`alertmanager` less `hostNetwork`, which this spec does not have; the
+StatefulSet (`serviceName`, `podManagementPolicy`, `updateStrategy`,
+`minReadySeconds`); and the ruler itself: what it queries and where it sends
+alerts (`queryEndpoints`, `queryConfig`, `alertmanagersUrl`,
+`alertmanagersConfig`, `alertQueryUrl`, `alertDropLabels`,
+`alertRelabelConfigs`, `alertRelabelConfigFile`), which rules it evaluates and
+how (`ruleSelector`, `ruleNamespaceSelector`, `enforcedNamespaceLabel`,
+`excludedFromEnforcement`, `prometheusRulesExcludedFromEnforce`,
+`evaluationInterval`, `resendDelay`, `ruleOutageTolerance`, `ruleQueryOffset`,
+`ruleConcurrentEval`, `ruleGracePeriod`), where its data goes (`retention`,
+`objectStorageConfig`, `objectStorageConfigFile`, `remoteWrite`), its server
+(`listenLocal`, `portName`, `routePrefix`, `externalPrefix`,
+`grpcServerTlsConfig`, `web`), `tracingConfig`, `tracingConfigFile`, `logLevel`,
+`logFormat`, `enableFeatures`, `additionalArgs` and `paused`. `additionalArgs`
+is passed to the thanos-ruler container as written and is not read; upstream
+documents that an argument the operator already sets, or an invalid one, fails
+the reconciliation. An entry of `containers` named `thanos-ruler` or
+`config-reloader` is a patch of the container the operator generates under that
+name (`makeStatefulSetSpec`, merged by `k8s.MergePatchContainers`), so such a
+patch may name no image; any other entry of `containers` that names none is
+refused (`containers[0] "proxy": names no image, and the Prometheus operator
+generates no container of that name to merge it into; name an image, or the
+container it patches (thanos-ruler, config-reloader)`). The operator generates
+no init container and adds each entry of `initContainers` as written, so every
+one must name an image (`initContainers[0] "prepare": names no image, and the
+Prometheus operator merges no entry of initContainers into a container of its
+own; name an image`). The thanos-ruler container runs with `resources` as the
+operator fills it, an unset memory request as 200Mi, and with the requests and
+limits of a listed `thanos-ruler` entry merged over that block key by key
+(`makeStatefulSet` and `makeStatefulSetSpec`, `pkg/thanos/statefulset.go:62-67`,
+`:481` and `:494`); the checks hold that merged block with the 200Mi filled
+where it names no memory request, and not the patch's block alone, as on
+`alertmanager`. A memory limit under 200Mi with no memory request in either is
+refused, as the API would refuse the pods (`resources: memory: the unset request
+the Prometheus operator fills as 200Mi must not exceed limit 100Mi; …`; with a
+patch, the path is `resources with containers[0] "thanos-ruler" merged over
+it`), while a request the patch names replaces the 200Mi and is held with the
+limit of `resources`. An image a `thanos-ruler` entry names replaces `image`, so
+`image` is then not held and the entry's is. Nothing is refused as not
+authorable.
+
+**Required: the kind's required list is generated**, as on **alertmanager**. No
+top-level field is one. Among the fields it refuses unauthored under an authored
+parent, as before: an additional argument's `name`, a DNS option's `name`, a
+host alias's `ip` and `hostnames`, the `type` of an `updateStrategy`; the
+`namespace` and `resource` of an `excludedFromEnforcement` entry, the
+`ruleNamespace` and `ruleName` of a `prometheusRulesExcludedFromEnforce` entry;
+and of a `remoteWrite` entry its `url`, the `clientId`, `clientSecret` and
+`tokenUrl` of its `oauth2`, and the `clientId`, `tenantId` (and, under
+`azureAd.oauth`, `clientSecret`) of its Azure AD settings; the `key` and
+`operator` of a match expression, in every label selector the spec holds,
+presence only. Refused since go-kure/launcher#883 (**breaking** for a document
+that leaves one out under an authored parent): the required fields of the
+Kubernetes types the spec embeds (a container's or a volume's `name`, the `key`
+of a Secret key reference, a node selector requirement's `key`, a sysctl's
+`name` and `value`), and the `username` and the `password` of a `remoteWrite`
+entry's `basicAuth`, which the operator refuses left out. The `keySecret` of
+`web.tlsConfig` is asked for only where it is authored, as on **prometheus**.
+**Not refused:** the owner reference fields of an ephemeral claim template's
+metadata, which the API server prunes, as on **alertmanager**, and the restart
+rule and pod certificate fields the type leaves out when empty, as on
+**alertmanager**.
+
+### Outputs
+
+Launcher emits no pod, no StatefulSet and no Service for it: the operator builds
+a StatefulSet from the object and runs the pods.
+
+**The group of an excluded object is written.** An `excludedFromEnforcement`
+entry that leaves `group` out (or writes it `null`) is written with
+`monitoring.coreos.com`. The Go type writes the field whether or not it was
+authored, and the API allows only that one value, which it defaults only where
+the field is absent: an empty group would be refused at apply. An authored empty
+group is refused by the entry's index (`excludedFromEnforcement[1].group: empty:
+the API admits only monitoring.coreos.com; …`), not repaired. An authored
+`monitoring.coreos.com` is kept; another group is written as authored and left
+to the API server.
+
+**What the type writes unauthored:** `resources: {}`, on every ThanosRuler; and,
+on an authored `storage`, a `volumeClaimTemplate` with `metadata: {}` and
+`status: {}`, as on `alertmanager`.
+
+### Validation
+
+What is said of `alertmanager` above holds here unless this entry says
+otherwise: no capability is required and nothing gates the kind; an authored `0`
+the type cannot carry is refused on a listed container, and so is an empty
+`portName`, `evaluationInterval`, `retention` or `action` of a `remoteWrite`
+entry's `writeRelabelConfigs` rule, which the CRD defaults to `web`, `15s`,
+`24h` and `replace` (`evaluationInterval: "" cannot be carried by the Prometheus
+operator API types (…)`), while a string default of the Kubernetes pod types is
+not refused; the tag rule and the request-over-limit check hold with or without
+a policy, and so does the refusal of a memory limit under the 200Mi the operator
+requests where `resources` names none; no policy default is filled; an image the
+operator chooses is refused under a registry allowlist, and the operator's own
+replica count and memory request are held, not written (both below);
+`podMetadata` is read for reserved keys and takes no label; a claim template's
+metadata is not read. The operator's behaviour is read from its source at
+prometheus-operator v0.94.1 (`pkg/thanos/statefulset.go`). The zero-duration
+rule of `alertmanager` has no counterpart: the operator passes a set duration
+through as written.
+
+**What the operator builds from the spec is checked where the API would break
+it**, as on `alertmanager`, under any policy and none, at
+`pkg/thanos/statefulset.go` of prometheus-operator v0.94.1:
+- a `portName` the API refuses where the operator writes it: not an IANA service
+  name; and `grpc`, the port the operator adds beside the web port on the
+  thanos-ruler container unless `listenLocal` is set, and on the governing
+  Service it creates unless `serviceName` names one of the author's (:216-232,
+  :545-583; `portName: "grpc" is the name of a port the Prometheus operator adds
+  to the thanos-ruler container, …`). The operator writes `portName` nowhere
+  else, as it gives the ruler no probe, so on the container it is judged as the
+  pods run the web port: a `thanos-ruler` patch that names port 10902 otherwise
+  leaves it out of the container, and one that renames `grpc` frees that name.
+  The Service's half is held whatever a patch says. A patch of `thanos-ruler` or
+  `config-reloader` is merged by port number into the ports the operator gives
+  them (`grpc` at 10901/TCP, the web port at 10902/TCP and `reloader-web` at
+  8080/TCP, the last two unless `listenLocal` is set), and a port name that
+  leaves two of one name is refused, as on `alertmanager`. A `serviceName` must
+  be a DNS-1123 label, the package's Service-name rule; a leading digit is
+  refused when `spec.kubernetesVersion` is below 1.36, unless
+  `spec.featureGates` sets RelaxedServiceNameValidation on
+  (`docs/delivery-scope.md` §3.5).
+- a negative `replicas`: the operator copies the count into the StatefulSet as
+  written (:507), which the API refuses.
+- the storage rules of `alertmanager` (:92-133, :441-450): a claim of the arm in
+  use the API refuses, a claim template name beside `emptyDir` or `ephemeral`
+  other than `thanos-ruler-<name>-data`, and on the claim template arm one that
+  is not a DNS-1123 label or that names a volume the operator adds.
+- an entry of `volumes` named as a volume the operator adds: `tls-assets`,
+  `web-config` (whatever `version` names, though the operator adds it only for
+  Thanos 0.21.0 on, so that raising `version` does not turn a volume of the
+  author's into a clash, as on `alertmanager`), `remote-write-config`, the
+  volume of each Secret key the spec sets (`query-config`,
+  `alertmanager-config`, and `objstorage-config`, `tracing-config` and
+  `alertrelabel-config` where the file field that takes precedence is unset),
+  `thanos-ruler-<name>-rulefiles-<n>` of the rule ConfigMaps, of which the
+  operator makes as many as the selected rules need
+  (`pkg/thanos/rules.go:86-104`, `pkg/operator/rules.go:363-365`), and the data
+  volume's (:135, :243-297, :377-398, :452-469; `volumes[0] "tls-assets": the
+  name is a volume the Prometheus operator adds to every ThanosRuler's pods;
+  …`). The web TLS credentials' volumes are left to the API.
+- an entry of `volumeMounts` at a path the operator mounts a volume at in the
+  thanos-ruler container: `/thanos/data`, `/etc/thanos/certs`,
+  `/etc/thanos/web_config/web-config.yaml`, `/etc/thanos/config/<volume>` of
+  each Secret key's volume above, and
+  `/etc/thanos/rules/thanos-ruler-<name>-rulefiles-<n>` (:297-302, :394,
+  :441-471, :601-626).
+- an entry of `volumeMounts` that breaks a rule of a mount: a `subPath` beside a
+  `subPathExpr`, either one absolute or holding a `..` element, a
+  `mountPropagation` that is not `None`, `HostToContainer` or `Bidirectional`, a
+  `recursiveReadOnly` that is not `Disabled`, `IfPossible` or `Enabled`,
+  `Enabled` or `IfPossible` without `readOnly: true` or beside a propagation
+  other than `None`, and `Bidirectional` where the thanos-ruler container is not
+  privileged. The operator copies the entry as written and merges into it the
+  mount of a listed `thanos-ruler` container at the same `mountPath`, so the
+  entry is judged as merged: that mount can supply `readOnly` or a propagation,
+  and only `securityContext.privileged: true` on that listed container makes the
+  container privileged. Checked before the path.
+- an entry of `containers` or `initContainers` with a `volumeMounts` entry that
+  breaks the same rules, naming the container and the mount. An entry named for
+  a container the operator generates is merged into it, and the merge can take
+  `readOnly: true` from the operator's own mount at the path, so such an entry
+  is not refused for `recursiveReadOnly` without `readOnly: true`; every other
+  rule holds, and `Bidirectional` needs that entry's own
+  `securityContext.privileged: true`.
+- an entry of `volumeMounts` at the path of an earlier one written alike: the
+  API refuses two mounts at one path. The message names both entries. As on
+  `alertmanager`, a path written otherwise than another entry's, or than a path
+  the operator mounts at, as `/thanos/data/`, is admitted: both mounts are made,
+  and one may hide the other, the operator's included; where the kubelet makes
+  the two paths equal (a relative path and its absolute form), CRI-O makes only
+  one of them.
+- `dnsPolicy: None` without `dnsConfig.nameservers`: the API refuses the pods
+  the operator copies them into (:539-540).
+- a name the operator's objects cannot be named after: the data volume
+  `thanos-ruler-<name>-data`, unless a claim template's name names it, and the
+  first rule ConfigMap's volume `thanos-ruler-<name>-rulefiles-0` must each be a
+  DNS-1123 label, so a name has no dot and at most 38 characters. Each pod's
+  hostname, `thanos-ruler-<name>-<ordinal>`, is no longer than that volume's
+  name at any replica count. The refusal names the component, or `objectName`
+  where that set the name.
+- a field the operator reads only from some Thanos version on, where `version`
+  is below that version. An unset `version` is judged against the operator
+  release launcher vendors (v0.95.1, default v0.42.5), at which no field below
+  is refused; one the operator cannot parse is left to it, as below. Below its
+  version the operator leaves the flag off the thanos-ruler container, serves
+  the web endpoint over plain HTTP without the web configuration, or refuses the
+  object at reconcile. Of a remote write entry it logs every such field as
+  ignored and drops it from the configuration: `tlsConfig.minVersion`,
+  `tlsConfig.maxVersion`, `queueConfig.sampleAgeLimit`, the entry's own fields
+  (`sendNativeHistograms`, `noProxy`, `proxyFromEnvironment`,
+  `proxyConnectHeader`, `messageVersion`, `roundRobinDNS`), `azureAd` as a
+  whole, and its methods `sdk` and `oauth`. (Up to v0.94.1 the operator reset a
+  copy of the entry, and wrote the entry's own fields all the same.) An
+  `azureAd` left with no method by a dropped `sdk` or `oauth` is refused at
+  reconcile, and the refusal names it (`ruleQueryOffset: read by the Prometheus
+  operator only for Thanos 0.38.0 and later; at version v0.37.0 it does not pass
+  it to Thanos Ruler, and the ruler runs without it; raise version to 0.38.0 or
+  later, or leave ruleQueryOffset unset`). Several such fields, refused at
+  reconcile or dropped, are refused together ahead of the checks below, each
+  named with its version and no consequence claimed for any, as on `prometheus`.
+  Flags (`makeStatefulSetSpec`): `web.tlsConfig` and `web.httpConfig` (0.21.0),
+  `ruleOutageTolerance` and `ruleGracePeriod` (0.30.0), `ruleConcurrentEval`
+  above 0 and `grpcServerTlsConfig.minVersion` (0.37.0), `ruleQueryOffset`
+  (0.38.0), `enableFeatures` (0.39.0), `grpcServerTlsConfig.cipherSuites` and
+  `curves` (0.42.0). Remote write (`createOrUpdateRulerConfigSecret`):
+  `remoteWrite` itself (0.24.0, refused at reconcile); of an entry,
+  `tlsConfig.minVersion` (0.28.0), `tlsConfig.maxVersion` and
+  `sendNativeHistograms` (0.30.0), `azureAd` and `azureAd.oauth` (0.31.0),
+  `queueConfig.sampleAgeLimit`, `noProxy`, `proxyFromEnvironment` and
+  `proxyConnectHeader` (0.32.0), `azureAd.sdk` (0.36.0), `messageVersion`
+  (0.37.0), `roundRobinDNS` (0.38.0), and an `azureAd.managedIdentity` without
+  `clientId` (0.40.0, refused at reconcile).
+- a remote write entry's `azureAd` authored with no authentication method (none
+  of `managedIdentity`, `oauth`, `sdk` and `workloadIdentity`), as on
+  `prometheus`: the operator refuses it at reconcile whatever it drops
+  (`validateRemoteWriteSpec`, which it applies to the ruler's entries too). The
+  gates above of `remoteWrite` and of `azureAd`, which refuse any `azureAd`
+  below 0.31.0, are refused ahead of it, as are several gated fields together;
+  it is refused ahead of a single other gate and of the fields below, naming the
+  methods the operator passes to Thanos at the version: from 0.40.0 on
+  `remoteWrite[0].azureAd: no authentication method: … at every version,
+  wherever it generates the remote write configuration; set managedIdentity,
+  oauth or sdk (the operator does not pass workloadIdentity to Thanos), or leave
+  azureAd unset`, below it a `managedIdentity with a clientId`, and below 0.36.0
+  no `sdk`.
+- a remote write entry's `azureAd.workloadIdentity`, `azureAd.scope`, or
+  `sigv4.externalId` with a `roleArn`, at every `version` the operator can
+  parse, after the gates above of `remoteWrite` and of `azureAd`, whose miss
+  leads the operator to refuse the object or may (`remoteWrite` below 0.24.0, a
+  managed identity without a `clientId` below 0.40.0, a method it drops), and
+  ahead of the other gates, so that a `workloadIdentity` whose drop leaves no
+  method, and the object refused, is not refused as a flag the ruler runs
+  without. An `externalId` without a `roleArn` is left to the API server, which
+  refuses it (below). The operator passes them to Thanos at no version: it logs
+  each as ignored, with minimum version `none`, and drops it from the remote
+  write configuration, so the ruler writes without it. An `azureAd` whose only
+  method was `workloadIdentity` is left with none, and the operator refuses the
+  object at reconcile (`remoteWrite[].azureAd.scope: the Prometheus operator
+  does not pass it to Thanos at any version: it drops it from the remote write
+  configuration, and the ruler writes without it; leave
+  remoteWrite[].azureAd.scope unset`).
+
+**Not checked of what the operator refuses:** a ThanosRuler with neither
+`queryConfig` nor `queryEndpoints` (:141-143), a `version` it cannot parse
+(:145-149), an entry of `additionalArgs` naming a flag it generates
+(`BuildArgs`, :352), and a `web.tlsConfig` its validation refuses
+(`webconfig.New`, :383-386). Each fails the reconcile, and is left to the
+operator. So is a remote write entry that `validateRemoteWriteSpec`
+(`pkg/prometheus/operator.go`) refuses for more than its authentication method
+being absent: two of `basicAuth`, `oauth2`, `authorization`, `sigv4` and
+`azureAd`, two `azureAd` methods, or an `oauth` `clientId` that is not a UUID.
+Where one applies, a refusal above that says the ruler runs or writes without a
+field is given all the same.
+
+**The API's expression rules are not checked.** Two are listed
+(`thanosRulerRulesLeft`) and left to the API server: an `updateStrategy` with a
+`rollingUpdate` must have the type `RollingUpdate`, and the `externalId` of a
+remote write entry's `sigv4` needs a `roleArn`. The kind refuses an `externalId`
+only with a `roleArn`, as one the operator passes to Thanos at no version, so
+the second rule still decides one without.
+
+**Policy.** Refused, with a workload kind's classes: `image`, where no patch of
+`thanos-ruler` names one in its place, the image of a listed container or init
+container (a patch of `thanos-ruler` or `config-reloader` included) and an image
+volume's reference outside the allowed registries; under a policy that lists
+allowed registries, the image of the `thanos-ruler` container where neither
+`image` nor a patch of it names one, and that of `config-reloader` where no
+patch names one; `replicas` over the replica maximum, an unset one counted as
+the 1 the StatefulSet runs; the cpu or memory of `resources` and of a listed
+container over the maxima, `resources` with a `thanos-ruler` entry's requests
+and limits merged over it, and the 200Mi the operator requests held where
+neither names a memory request (`resources, whose unset memory request the
+Prometheus operator fills as 200Mi: memory request "200Mi" exceeds enforced
+maximum "128Mi"`); the storage a claim requests over the storage maximum, of the
+`storage` arm the operator uses (`emptyDir`, then `ephemeral`, then
+`volumeClaimTemplate`, as on `alertmanager`) and of a generic ephemeral volume;
+a hostPath volume; a privileged listed container, a pod-level
+`securityContext.windowsOptions.hostProcess` and a capability the policy does
+not allow. The spec has no field for the host's network, process or IPC
+namespace.
+
+**An image the operator chooses is refused under a registry allowlist.** Where
+the spec names no image for a container the operator generates, the operator
+chooses the one it runs, and no registry allowlist reaches that choice, so a
+policy with a non-empty `AllowedRegistries` refuses it (`image: unset, so the
+Prometheus operator chooses the image the pods run, …`; `the image of the
+config-reloader container (containers): unset, …`) and the author names an image
+from one of the listed registries: `image` or a patch of `thanos-ruler` for the
+first, a patch of `config-reloader` for the second. The operator generates
+`config-reloader` on every ThanosRuler, as it always writes at least one rule
+ConfigMap (`makeConfigMapsFromRules`, `pkg/operator/rules.go`). Without such a
+list, it builds.
+
+**The operator's own values are held, not written.** Where the spec leaves the
+thanos-ruler container's memory request unset, the operator fills 200Mi before
+it builds the StatefulSet (`makeStatefulSet`); it copies an unset `replicas`
+into the StatefulSet as unset, which the API server defaults to 1. The policy
+holds those values as if authored, and the emitted object still leaves both
+unset.
+
+**Credentials: one is held, the rest are stated.** The deprecated
+`remoteWrite[].bearerToken` holds a credential in the object; under a policy
+that forbids explicit secrets it is refused (`remoteWrite[1].bearerToken: holds
+a credential in the object, and the environment policy forbids explicit
+secrets…`, `oam.RefusalExplicitSecret`), and without one it is written as
+authored. Every other credential of the spec is the key of a Secret (a remote
+write entry's basic auth, authorization, OAuth2, SigV4 and Azure AD secrets) or
+the path of a file in the container (`bearerTokenFile`, a `keyFile`). **Not
+held:** a credential under a name that does not say so. A value of
+`remoteWrite[].headers`, the userinfo of a URL (`remoteWrite[].url`,
+`queryEndpoints`, `alertmanagersUrl`), and free text (`additionalArgs`, the
+`env` of a listed container) are written as authored, under a policy that
+forbids explicit secrets too.
+
+**`podMetadata`.** As on `alertmanager`: the pods carry the component label only
+if the author writes the component's own value into `podMetadata.labels`;
+otherwise the NetworkPolicies generated for the component do not select them.
+The operator reserves four labels of its own on the pods
+(`app.kubernetes.io/name`, `app.kubernetes.io/managed-by`,
+`app.kubernetes.io/instance`, `thanos-ruler`) and the annotation
+`kubectl.kubernetes.io/default-container`; upstream documents that an authored
+value does not override them. Launcher does not refuse such a key.
+
+**Not covered.** Whether what the object refers to exists (a Secret key, the
+ServiceAccount, a governing Service named by `serviceName`, the PrometheusRule
+objects the selectors match, the query and Alertmanager endpoints). What the
+operator adds on its own, beyond the images, the replica count and the memory
+request above (the resources of a config-reloader no entry patches, the
+arguments it derives, the `thanos-ruler-operated` Service), is not in the
+object. The object's status is the operator's and is not written.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/thanosruler-component/app.yaml`, built
+against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The
+fixture test compares the two.
+
 ## Kinds not yet in sections
 
 The kinds below are not yet in these sections.
-
-- **thanosruler** (go-kure/launcher#790) is the kind-named projection of a
-  ThanosRuler of the same API. It is built as `alertmanager` is, on
-  `policyHeldKind` with the same policy check (`monitoring_workload.go`), and
-  emits that one object in the build namespace, named after the component
-  unless `objectName` names it; the handler declares the object as
-  namespaced and adds no label and no annotation. Launcher emits no pod, no
-  StatefulSet and no Service for it: the operator builds a StatefulSet from
-  the object and runs the pods. What is said of `alertmanager` above holds
-  here unless this entry says otherwise: no capability is required and
-  nothing gates the kind; an authored `0` the type cannot carry is refused on
-  a listed container, and so is an empty `portName`, `evaluationInterval`,
-  `retention` or `action` of a `remoteWrite` entry's `writeRelabelConfigs`
-  rule, which the CRD defaults to `web`, `15s`, `24h` and `replace`
-  (`evaluationInterval: "" cannot be carried by the Prometheus operator API
-  types (…)`), while a string default of the Kubernetes pod types is not
-  refused; the tag rule and the request-over-limit check hold with
-  or without a policy, and so does the refusal of a memory limit under the
-  200Mi the operator requests where `resources` names none; no policy
-  default is filled; an image the operator chooses is refused under a
-  registry allowlist, and the operator's own replica count and memory
-  request are held, not written (both below); `podMetadata` is read for
-  reserved keys and takes no label; a claim template's metadata is not read.
-  The operator's behaviour is read from its source at prometheus-operator
-  v0.94.1 (`pkg/thanos/statefulset.go`). The zero-duration rule of
-  `alertmanager` has no counterpart: the operator passes a set duration
-  through as written.
-
-  **One field is renamed: the spec's `labels` is the `externalLabels`
-  property.** Every kind component's `labels` property is its object's own
-  labels (see ["The object's labels and annotations"](conventions.md#the-objects-labels-and-annotations-labels-annotations)): the engine reads
-  it before the handler sees it, so the spec's field cannot be authored
-  under its own name. These are the ThanosRuler's Prometheus external
-  labels, a map of label names to values (upstream: the operator always adds
-  a `thanos_ruler_replica` label with the pod's name), not Kubernetes
-  labels: the reserved-key and component-label checks of `labels` do not
-  apply to them, and nothing is added to them. Authored together, `labels`
-  lands on the object's metadata and `externalLabels` on its `spec.labels`.
-  `externalLabels` is decoded as strictly as the spec, under the same null
-  contract, and an error names `externalLabels`, not the spec field. A key that names the spec's field in another
-  spelling (`Labels`) is refused (`Labels: not a thanosruler property: the
-  ThanosRuler's external labels are the externalLabels property, …`): the
-  strict decode matches field names case-insensitively and would otherwise
-  carry it into the spec unpublished. The rename is the kind's alone; the
-  engine's `labels` keeps its meaning. `TestCoreKindSchemas_CoverSpec`
-  records it as a mapping (`externalLabels` for `labels`), so a second
-  renamed field fails there until it is listed.
-
-  **Authored.** The properties are the top-level json fields of
-  `ThanosRulerSpec`, decoded strictly at every depth, `labels` renamed as
-  above: the image (`image`, `version`, `imagePullPolicy`,
-  `imagePullSecrets`); the pods, as on `alertmanager` less `hostNetwork`,
-  which this spec does not have; the StatefulSet (`serviceName`,
-  `podManagementPolicy`, `updateStrategy`, `minReadySeconds`); and the ruler
-  itself: what it queries and where it sends alerts (`queryEndpoints`,
-  `queryConfig`, `alertmanagersUrl`, `alertmanagersConfig`,
-  `alertQueryUrl`, `alertDropLabels`, `alertRelabelConfigs`,
-  `alertRelabelConfigFile`), which rules it evaluates and how
-  (`ruleSelector`, `ruleNamespaceSelector`, `enforcedNamespaceLabel`,
-  `excludedFromEnforcement`, `prometheusRulesExcludedFromEnforce`,
-  `evaluationInterval`, `resendDelay`, `ruleOutageTolerance`,
-  `ruleQueryOffset`, `ruleConcurrentEval`, `ruleGracePeriod`), where its
-  data goes (`retention`, `objectStorageConfig`, `objectStorageConfigFile`,
-  `remoteWrite`), its server (`listenLocal`, `portName`, `routePrefix`,
-  `externalPrefix`, `grpcServerTlsConfig`, `web`), `tracingConfig`,
-  `tracingConfigFile`, `logLevel`, `logFormat`, `enableFeatures`,
-  `additionalArgs` and `paused`. `additionalArgs` is passed to the
-  thanos-ruler container as written and is not read; upstream documents that
-  an argument the operator already sets, or an invalid one, fails the
-  reconciliation. An entry of `containers` named
-  `thanos-ruler` or `config-reloader` is a patch of the container the
-  operator generates under that name (`makeStatefulSetSpec`, merged by
-  `k8s.MergePatchContainers`), so such a patch may name no image; any other
-  entry of `containers` that names none is refused (`containers[0] "proxy":
-  names no image, and the Prometheus operator generates no container of
-  that name to merge it into; name an image, or the container it patches
-  (thanos-ruler, config-reloader)`). The operator generates no init
-  container and adds each entry of `initContainers` as written, so every
-  one must name an image (`initContainers[0] "prepare": names no image, and
-  the Prometheus operator merges no entry of initContainers into a container
-  of its own; name an image`). The thanos-ruler container runs with
-  `resources` as the operator fills it, an unset memory request as 200Mi,
-  and with the requests and limits of a listed `thanos-ruler` entry merged
-  over that block key by key (`makeStatefulSet` and `makeStatefulSetSpec`,
-  `pkg/thanos/statefulset.go:62-67`, `:481` and `:494`); the checks hold that
-  merged block with the 200Mi filled where it names no memory request, and
-  not the patch's block alone, as on `alertmanager`. A memory limit under
-  200Mi with no memory request in either is refused, as the API would refuse
-  the pods (`resources: memory: the unset request the Prometheus operator
-  fills as 200Mi must not exceed limit 100Mi; …`; with a patch, the path is
-  `resources with containers[0] "thanos-ruler" merged over it`), while a
-  request the patch names replaces the 200Mi and is held with the limit of
-  `resources`. An image a `thanos-ruler` entry names replaces `image`, so
-  `image` is then not held and the entry's is.
-  Nothing is refused as not authorable.
-
-  **Required: the kind's required list is generated** (go-kure/launcher#883),
-  as on **alertmanager**. No top-level field is one. Among the fields it
-  refuses unauthored under an authored parent, as before: an additional
-  argument's `name`, a DNS option's `name`, a host alias's `ip` and
-  `hostnames`, the `type` of an `updateStrategy`; the `namespace` and
-  `resource` of an `excludedFromEnforcement` entry, the `ruleNamespace` and
-  `ruleName` of a `prometheusRulesExcludedFromEnforce` entry; and of a
-  `remoteWrite` entry its `url`, the `clientId`, `clientSecret` and
-  `tokenUrl` of its `oauth2`, and the `clientId`, `tenantId` (and, under
-  `azureAd.oauth`, `clientSecret`) of its Azure AD settings; the `key` and
-  `operator` of a match expression, in every label selector the spec holds,
-  presence only. Refused since go-kure/launcher#883 (**breaking** for a
-  document that leaves one out under an authored parent): the required
-  fields of the Kubernetes types the spec embeds (a container's or a
-  volume's `name`, the `key` of a Secret key reference, a node selector
-  requirement's `key`, a sysctl's `name` and `value`), and the `username`
-  and the `password` of a `remoteWrite` entry's `basicAuth`, which the
-  operator refuses left out. The `keySecret` of `web.tlsConfig` is asked for
-  only where it is authored, as on **prometheus**. **Not refused:** the owner
-  reference fields of an ephemeral claim template's metadata, which the API
-  server prunes, as on **alertmanager**, and the restart rule and pod
-  certificate fields the type leaves out when empty, as on **alertmanager**.
-
-  **What the operator builds from the spec is checked where the API would
-  break it**, as on `alertmanager`, under any policy and none, at
-  `pkg/thanos/statefulset.go` of prometheus-operator v0.94.1:
-  - a `portName` the API refuses where the operator writes it: not an IANA
-    service name; and `grpc`, the port the operator adds beside the web port
-    on the thanos-ruler container unless `listenLocal` is set, and on the
-    governing Service it creates unless `serviceName` names one of the
-    author's (:216-232, :545-583; `portName: "grpc" is the name of a port the
-    Prometheus operator adds to the thanos-ruler container, …`). The
-    operator writes `portName` nowhere else, as it gives the ruler no probe,
-    so on the container it is judged as the pods run the web port: a
-    `thanos-ruler` patch that names port 10902 otherwise leaves it out of the
-    container, and one that renames `grpc` frees that name. The Service's
-    half is held whatever a patch says. A patch of
-    `thanos-ruler` or `config-reloader` is merged by port number into the
-    ports the operator gives them (`grpc` at 10901/TCP, the web port at
-    10902/TCP and `reloader-web` at 8080/TCP, the last two unless
-    `listenLocal` is set), and a port name that leaves two of one name is
-    refused, as on `alertmanager`. A `serviceName` must be a DNS-1123 label,
-    the package's Service-name rule; a leading digit is refused when
-    `spec.kubernetesVersion` is below 1.36, unless `spec.featureGates` sets
-    RelaxedServiceNameValidation on (go-kure/launcher#959, go-kure/launcher#1230,
-    `docs/delivery-scope.md` §3.5).
-  - a negative `replicas`: the operator copies the count into the
-    StatefulSet as written (:507), which the API refuses.
-  - the storage rules of `alertmanager` (:92-133, :441-450): a claim of the
-    arm in use the API refuses, a claim template name beside `emptyDir` or
-    `ephemeral` other than `thanos-ruler-<name>-data`, and on the claim
-    template arm one that is not a DNS-1123 label or that names a volume the
-    operator adds.
-  - an entry of `volumes` named as a volume the operator adds: `tls-assets`,
-    `web-config` (whatever `version` names, though the operator adds it only
-    for Thanos 0.21.0 on, so that raising `version` does not turn a volume
-    of the author's into a clash, as on `alertmanager`),
-    `remote-write-config`, the volume of each Secret key the spec sets
-    (`query-config`, `alertmanager-config`, and `objstorage-config`,
-    `tracing-config` and `alertrelabel-config` where the file field that
-    takes precedence is unset), `thanos-ruler-<name>-rulefiles-<n>` of the
-    rule ConfigMaps, of which the operator makes as many as the selected
-    rules need (`pkg/thanos/rules.go:86-104`,
-    `pkg/operator/rules.go:363-365`), and the data volume's (:135, :243-297,
-    :377-398, :452-469; `volumes[0] "tls-assets": the name is a volume the
-    Prometheus operator adds to every ThanosRuler's pods; …`). The web TLS
-    credentials' volumes are left to the API.
-  - an entry of `volumeMounts` at a path the operator mounts a volume at in
-    the thanos-ruler container: `/thanos/data`, `/etc/thanos/certs`,
-    `/etc/thanos/web_config/web-config.yaml`, `/etc/thanos/config/<volume>`
-    of each Secret key's volume above, and
-    `/etc/thanos/rules/thanos-ruler-<name>-rulefiles-<n>` (:297-302, :394,
-    :441-471, :601-626).
-  - an entry of `volumeMounts` that breaks a rule of a mount
-    (go-kure/launcher#1211, go-kure/launcher#1227): a `subPath` beside a
-    `subPathExpr`, either one absolute or holding a `..` element, a
-    `mountPropagation` that is not `None`, `HostToContainer` or
-    `Bidirectional`, a `recursiveReadOnly` that is not `Disabled`,
-    `IfPossible` or `Enabled`, `Enabled` or `IfPossible` without
-    `readOnly: true` or beside a propagation other than `None`, and
-    `Bidirectional` where the thanos-ruler container is not privileged. The
-    operator copies the entry as written and merges into it the mount of a
-    listed `thanos-ruler` container at the same `mountPath`, so the entry is
-    judged as merged: that mount can supply `readOnly` or a propagation, and
-    only `securityContext.privileged: true` on that listed container makes the
-    container privileged. Checked before the path.
-  - an entry of `containers` or `initContainers` with a `volumeMounts` entry
-    that breaks the same rules, naming the container and the mount. An entry
-    named for a container the operator generates is merged into it, and the
-    merge can take `readOnly: true` from the operator's own mount at the path,
-    so such an entry is not refused for `recursiveReadOnly` without
-    `readOnly: true`; every other rule holds, and `Bidirectional` needs that
-    entry's own `securityContext.privileged: true`.
-  - an entry of `volumeMounts` at the path of an earlier one written alike:
-    the API refuses two mounts at one path. The message names both entries.
-    As on `alertmanager`, a path written otherwise than another entry's, or
-    than a path the operator mounts at, as `/thanos/data/`, is admitted: both
-    mounts are made, and one may hide the other, the operator's included;
-    where the kubelet makes the two paths equal (a relative path and its
-    absolute form), CRI-O makes only one of them (go-kure/launcher#1050).
-  - `dnsPolicy: None` without `dnsConfig.nameservers`: the API refuses the
-    pods the operator copies them into (:539-540).
-  - a name the operator's objects cannot be named after: the data volume
-    `thanos-ruler-<name>-data`, unless a claim template's name names it, and
-    the first rule ConfigMap's volume `thanos-ruler-<name>-rulefiles-0` must
-    each be a DNS-1123 label, so a name has no dot and at most 38
-    characters. Each pod's hostname, `thanos-ruler-<name>-<ordinal>`, is no
-    longer than that volume's name at any replica count. The refusal names
-    the component, or `objectName` where that set the name.
-  - a field the operator reads only from some Thanos version on, where
-    `version` is below that version (go-kure/launcher#976). An unset
-    `version` is judged against the operator release launcher vendors
-    (v0.95.1, default v0.42.5), at which no field below is refused; one the
-    operator cannot parse is left to it, as below. Below its version the
-    operator leaves the flag off the thanos-ruler container, serves the web
-    endpoint over plain HTTP without the web configuration, or refuses the
-    object at reconcile. Of a remote write entry it logs every such field as
-    ignored and drops it from the configuration: `tlsConfig.minVersion`,
-    `tlsConfig.maxVersion`, `queueConfig.sampleAgeLimit`, the entry's own
-    fields (`sendNativeHistograms`, `noProxy`, `proxyFromEnvironment`,
-    `proxyConnectHeader`, `messageVersion`, `roundRobinDNS`), `azureAd` as a
-    whole, and its methods `sdk` and `oauth`. (Up to v0.94.1 the operator
-    reset a copy of the entry, and wrote the entry's own fields all the
-    same.) An `azureAd` left with no method by a dropped `sdk` or `oauth` is
-    refused at reconcile, and the refusal names it
-    (`ruleQueryOffset: read by the Prometheus operator only for
-    Thanos 0.38.0 and later; at version v0.37.0 it does not pass it to
-    Thanos Ruler, and the ruler runs without it; raise version to 0.38.0 or
-    later, or leave ruleQueryOffset unset`). Several such fields, refused
-    at reconcile or dropped, are refused together ahead of the checks
-    below, each named with its version and no consequence claimed for any,
-    as on `prometheus` (go-kure/launcher#1022). Flags (`makeStatefulSetSpec`):
-    `web.tlsConfig` and `web.httpConfig` (0.21.0), `ruleOutageTolerance` and
-    `ruleGracePeriod` (0.30.0), `ruleConcurrentEval` above 0 and
-    `grpcServerTlsConfig.minVersion` (0.37.0), `ruleQueryOffset` (0.38.0),
-    `enableFeatures` (0.39.0), `grpcServerTlsConfig.cipherSuites` and
-    `curves` (0.42.0). Remote write (`createOrUpdateRulerConfigSecret`):
-    `remoteWrite` itself (0.24.0, refused at reconcile); of an entry,
-    `tlsConfig.minVersion` (0.28.0), `tlsConfig.maxVersion` and
-    `sendNativeHistograms` (0.30.0), `azureAd` and `azureAd.oauth` (0.31.0),
-    `queueConfig.sampleAgeLimit`, `noProxy`, `proxyFromEnvironment` and
-    `proxyConnectHeader` (0.32.0), `azureAd.sdk` (0.36.0), `messageVersion`
-    (0.37.0), `roundRobinDNS` (0.38.0), and an `azureAd.managedIdentity`
-    without `clientId` (0.40.0, refused at reconcile).
-    `TestThanosRulerVersionGates_MatchVendoredSource` parses every version
-    comparison of the operator's package `pkg/thanos` (every Go file of it,
-    its tests aside), vendored as for `alertmanager`, and holds each to this
-    list.
-  - a remote write entry's `azureAd` authored with no authentication
-    method (none of `managedIdentity`, `oauth`, `sdk` and
-    `workloadIdentity`), as on `prometheus` (go-kure/launcher#1023): the
-    operator refuses it at reconcile whatever it drops
-    (`validateRemoteWriteSpec`, which it applies to the ruler's entries
-    too). The gates above of `remoteWrite` and of `azureAd`, which refuse
-    any `azureAd` below 0.31.0, are refused ahead of it, as are several
-    gated fields together; it is refused ahead of a single other gate and
-    of the fields below, naming the methods
-    the operator passes to Thanos at the version: from 0.40.0 on
-    `remoteWrite[0].azureAd: no authentication method: … at every version,
-    wherever it generates the remote write configuration; set
-    managedIdentity, oauth or sdk (the operator does not pass
-    workloadIdentity to Thanos), or leave azureAd unset`, below it a
-    `managedIdentity with a clientId`, and below 0.36.0 no `sdk`.
-  - a remote write entry's `azureAd.workloadIdentity`, `azureAd.scope`, or
-    `sigv4.externalId` with a `roleArn` (go-kure/launcher#1020), at every
-    `version` the operator can parse, after the gates above of `remoteWrite`
-    and of `azureAd`, whose miss leads the operator to refuse the object or
-    may (`remoteWrite` below 0.24.0, a managed identity without a `clientId`
-    below 0.40.0, a method it drops), and ahead of the other gates, so that
-    a `workloadIdentity` whose drop leaves no method, and the object
-    refused, is not refused as a flag the ruler runs without. An
-    `externalId` without a `roleArn` is left to the API server, which
-    refuses it (below).
-    The operator passes them to Thanos at no version: it logs each as ignored,
-    with minimum version `none`, and drops it from the remote write
-    configuration, so the ruler writes without it. An `azureAd` whose only
-    method was `workloadIdentity` is left with none, and the operator
-    refuses the object at reconcile (`remoteWrite[].azureAd.scope: the
-    Prometheus operator does not pass it to Thanos at any version: it drops
-    it from the remote write configuration, and the ruler writes without it;
-    leave remoteWrite[].azureAd.scope unset`).
-    `TestThanosRulerRemoteWriteTexts_MatchVendoredSource` holds the list to
-    every field `createOrUpdateRulerConfigSecret` ignores with minimum
-    version `none`.
-
-  **Not checked of what the operator refuses:** a ThanosRuler with neither
-  `queryConfig` nor `queryEndpoints` (:141-143), a `version` it cannot parse
-  (:145-149), an entry of `additionalArgs` naming a flag it generates
-  (`BuildArgs`, :352), and a `web.tlsConfig` its validation refuses
-  (`webconfig.New`, :383-386). Each fails the reconcile, and is left to the
-  operator. So is a remote write entry that `validateRemoteWriteSpec`
-  (`pkg/prometheus/operator.go`) refuses for more than its authentication
-  method being absent: two of `basicAuth`, `oauth2`, `authorization`,
-  `sigv4` and `azureAd`, two `azureAd` methods, or an `oauth` `clientId`
-  that is not a UUID. Where one applies, a refusal above that says the ruler
-  runs or writes without a field is given all the same.
-
-  **The group of an excluded object is written.** An `excludedFromEnforcement`
-  entry that leaves `group` out (or writes it `null`) is written with
-  `monitoring.coreos.com`. The Go type writes the field whether or not it was
-  authored, and the API allows only that one value, which it defaults only
-  where the field is absent: an empty group would be refused at apply. An
-  authored empty group is refused by the entry's index
-  (`excludedFromEnforcement[1].group: empty: the API admits only
-  monitoring.coreos.com; …`), not repaired. An authored
-  `monitoring.coreos.com` is kept; another group is written as authored and
-  left to the API server. `TestMonitoringExcludedGroup_MatchesMarkers` holds
-  the written value to the default and the enum of the linked module's
-  source.
-
-  **The API's expression rules are not checked.** Two are listed
-  (`thanosRulerRulesLeft`) and left to the API server: an `updateStrategy`
-  with a `rollingUpdate` must have the type `RollingUpdate`, and the
-  `externalId` of a remote write entry's `sigv4` needs a `roleArn`. The kind
-  refuses an `externalId` only with a `roleArn`, as one the operator passes
-  to Thanos at no version (go-kure/launcher#1020), so the second rule still
-  decides one without.
-
-  **What the type writes unauthored:** `resources: {}`, on every
-  ThanosRuler; and, on an authored `storage`, a `volumeClaimTemplate` with
-  `metadata: {}` and `status: {}`, as on `alertmanager`.
-
-  **Policy.** Refused, with a workload kind's classes: `image`, where no
-  patch of `thanos-ruler` names one in its place, the image of
-  a listed container or init container (a patch of `thanos-ruler` or
-  `config-reloader` included) and an image volume's reference outside the
-  allowed registries; under a policy that lists allowed registries, the
-  image of the `thanos-ruler` container where neither `image` nor a patch of
-  it names one, and that of `config-reloader` where no patch names one;
-  `replicas` over the replica maximum, an unset one counted as the 1 the
-  StatefulSet runs; the cpu or memory of `resources` and of a listed
-  container over the maxima, `resources` with a `thanos-ruler` entry's
-  requests and limits merged over it, and the 200Mi the operator requests
-  held where neither names a memory request (`resources, whose unset memory
-  request the Prometheus operator fills as 200Mi: memory request "200Mi"
-  exceeds enforced maximum "128Mi"`); the storage a claim requests over the
-  storage maximum, of the `storage` arm the operator uses (`emptyDir`, then
-  `ephemeral`, then `volumeClaimTemplate`, as on `alertmanager`) and of a
-  generic ephemeral volume; a hostPath volume; a privileged listed
-  container, a pod-level `securityContext.windowsOptions.hostProcess` and a
-  capability the policy does not allow. The spec has no field for the
-  host's network, process or IPC namespace.
-  `TestMonitoringWorkloadKinds_PodFieldsHeldOrListed` holds every field of
-  the spec that shapes the pods to a refusal shown on a document or a stated
-  reason, as for `alertmanager`.
-
-  **An image the operator chooses is refused under a registry allowlist.**
-  Where the spec names no image for a container the operator generates, the
-  operator chooses the one it runs, and no registry allowlist reaches that
-  choice, so a policy with a non-empty `AllowedRegistries` refuses it
-  (`image: unset, so the Prometheus operator chooses the image the pods run,
-  …`; `the image of the config-reloader container (containers): unset, …`)
-  and the author names an image from one of the listed registries: `image`
-  or a patch of `thanos-ruler` for the first, a patch of `config-reloader`
-  for the second. The operator generates `config-reloader` on every
-  ThanosRuler, as it always writes at least one rule ConfigMap
-  (`makeConfigMapsFromRules`, `pkg/operator/rules.go`). Without such a list,
-  it builds.
-
-  **The operator's own values are held, not written.** Where the spec leaves
-  the thanos-ruler container's memory request unset, the operator fills
-  200Mi before it builds the StatefulSet (`makeStatefulSet`); it copies an
-  unset `replicas` into the StatefulSet as unset, which the API server
-  defaults to 1. The policy holds those values as if authored, and the
-  emitted object still leaves both unset.
-
-  **Credentials: one is held, the rest are stated.** The deprecated
-  `remoteWrite[].bearerToken` holds a credential in the object; under a
-  policy that forbids explicit secrets it is refused
-  (`remoteWrite[1].bearerToken: holds a credential in the object, and the
-  environment policy forbids explicit secrets…`,
-  `oam.RefusalExplicitSecret`), and without one it is written as authored.
-  Every other credential of the spec is the key of a Secret (a remote write
-  entry's basic auth, authorization, OAuth2, SigV4 and Azure AD secrets) or
-  the path of a file in the container (`bearerTokenFile`, a `keyFile`).
-  **Not held:** a credential under a name that does not say so. A value of
-  `remoteWrite[].headers`, the userinfo of a URL (`remoteWrite[].url`,
-  `queryEndpoints`, `alertmanagersUrl`), and free text (`additionalArgs`,
-  the `env` of a listed container) are written as authored, under a policy
-  that forbids explicit secrets too.
-  `TestMonitoringWorkloadKinds_CredentialsHeldOrListed` derives the fields
-  whose name suggests a credential and holds each to the policy or a stated
-  reason.
-
-  **`podMetadata`.** As on `alertmanager`: the pods carry the component label
-  only if the author writes the component's own value into
-  `podMetadata.labels`; otherwise the NetworkPolicies generated for the
-  component do not select them. The operator reserves four labels of its own
-  on the pods (`app.kubernetes.io/name`, `app.kubernetes.io/managed-by`,
-  `app.kubernetes.io/instance`, `thanos-ruler`) and the annotation
-  `kubectl.kubernetes.io/default-container`; upstream documents that an
-  authored value does not override them. Launcher does not refuse such a key.
-
-  **Not covered.** Whether what the object refers to exists (a Secret key, the
-  ServiceAccount, a governing Service named by `serviceName`, the
-  PrometheusRule objects the selectors match, the query and Alertmanager
-  endpoints). What the operator adds on its own, beyond the images, the
-  replica count and the memory request above (the resources of a
-  config-reloader no entry patches, the arguments it derives, the
-  `thanos-ruler-operated` Service), is not in the object. The object's
-  status is the operator's and is not written.
 
 - **prometheus** (go-kure/launcher#790) is the kind-named projection of a
   Prometheus of the same API. It is built as `alertmanager` is, on
