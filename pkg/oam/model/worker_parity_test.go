@@ -272,21 +272,30 @@ func TestWorkerParity_TopologySpreadOff(t *testing.T) {
 	requireParity(t, map[string]any{"image": "nginx:1.27", "replicas": 3, "topologySpread": false}, 8)
 }
 
-// A property the model does not declare is refused by the authored-property check, where the Go worker
-// accepts `affinity`. This is a recorded gap and not a parity: the model refuses where Go builds.
+// The affinity shorthand (`enablePodAntiAffinity`) is valid on the Go worker and undeclared in the
+// model, so the authored-property check refuses it on the model and names the property. This is a
+// recorded gap and not a parity: the model refuses where Go builds.
 func TestWorkerParity_UnmodelledPropertyRefused(t *testing.T) {
-	tr, _ := registered(t, workerModel)
-	app := &oam.Application{
-		APIVersion: oam.SupportedAPIVersion, Kind: "Application",
-		Metadata: oam.Metadata{Name: "shop", Namespace: "demo"},
-		Spec: oam.ApplicationSpec{Components: []oam.Component{{
-			Name: parityComponent, Type: "worker-cfg.acme.example@v1",
-			Properties: map[string]any{"image": "nginx:1.27", "affinity": map[string]any{"podAntiAffinity": "soft"}},
-		}}},
+	props := map[string]any{"image": "nginx:1.27", "affinity": map[string]any{"enablePodAntiAffinity": true}}
+	check := func(typ string, tr *oam.Transformer) error {
+		app := &oam.Application{
+			APIVersion: oam.SupportedAPIVersion, Kind: "Application",
+			Metadata: oam.Metadata{Name: "shop", Namespace: "demo"},
+			Spec:     oam.ApplicationSpec{Components: []oam.Component{{Name: parityComponent, Type: typ, Properties: props}}},
+		}
+		_, err := tr.ValidateAuthoredPropertiesForTarget(app, nil, nil)
+		return err
 	}
-	_, err := tr.ValidateAuthoredPropertiesForTarget(app, nil, nil)
+	if err := check("worker", expandTransformer(t)); err != nil {
+		t.Fatalf("test bug: the Go worker refused the affinity shorthand: %v", err)
+	}
+	tr, _ := registered(t, workerModel)
+	err := check("worker-cfg.acme.example@v1", tr)
 	if err == nil || !strings.Contains(err.Error(), "affinity") {
 		t.Fatalf("the model accepted a property it does not declare, or named the wrong one: %v", err)
+	}
+	if strings.Contains(err.Error(), "enablePodAntiAffinity") {
+		t.Errorf("the model refused a nested key and not the top-level property: %v", err)
 	}
 }
 
