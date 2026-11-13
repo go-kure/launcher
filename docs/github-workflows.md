@@ -151,7 +151,7 @@ self-test (`make test-verify-merge`).
 | Job | Check Name | Timeout | Dependencies | Purpose |
 |-----|------------|---------|--------------|---------|
 | `changes` | `detect-changes` | 2 min | — | Path filter: the `go:` output controls downstream jobs on a PR and in the merge queue, the `docs:` output controls `docs-build` on a PR only (push, schedule and manual runs run them all) |
-| `validate` | `lint` | 20 min | changes | go-version, fmt, tidy, vet, lint, tool-version parity (golangci-lint pin across Makefile/ci.yml/docs), govulncheck doc parity, verify-merge self-test, `check-pin-impact.sh` cases (`make test-pin-impact`); diff-based lint on PRs |
+| `validate` | `lint` | 35 min | changes | go-version, fmt, tidy, vet, lint, tool-version parity (golangci-lint pin across Makefile/ci.yml/docs), govulncheck doc parity, verify-merge self-test, `check-pin-impact.sh` cases (`make test-pin-impact`); diff-based lint on PRs |
 | `test` | `test` | 35 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
 | `security` | `Security` | 15 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
 | `action-pins` | `action-pins` | 2 min | — | Fails if any third-party `uses:` ref is not pinned to a 40-char commit SHA (`go-kure/.github` composite action) |
