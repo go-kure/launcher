@@ -3,664 +3,737 @@ title: "Kinds: Helm"
 weight: 7
 ---
 
-- **helm** (go-kure/launcher#349, `helm.go`) — the role-named Helm component: a
-  component-position lowering rule (`HelmRule`), not a handler, that lowers to the
-  kind-named terminals. Properties: `chart`, `version`, `delivery`
-  (`flux` default | `template`), `source` (inline `url` with optional `kind` and,
-  for a GitRepository, `ref`, for an OCI chart, `digest`; an inline Bucket's `kind`, `endpoint`, `bucketName`,
-  `provider`, `region`, `prefix`; beside any of these a `name` for the generated
-  source; or a reference `{name, kind, namespace}` to an
-  existing HelmRepository, GitRepository, Bucket, OCIRepository or HelmChart),
-  `values`, `valuesMode` (`inline` |
-  `configMap`), `valuesConfigMapName`, `secretValues` (the sensitive part of the
-  values tree, see below), `valuesSecretName`, `helmReleaseName` (the name of
-  the HelmRelease object, see below),
-  `scopeOverrides`, `hookGroupNamePrefix` and `layoutKustomizationName` (each under
-  `delivery: template` only, see below),
-  and the HelmRelease keys `interval`, `releaseName`,
-  `targetNamespace`, `driftDetection`, `install`, `upgrade`, `valuesFrom`.
-  - `delivery: flux` emits a `helmrelease` under the authored name, with the
-    authored traits and annotations. A HelmRepository, GitRepository or Bucket
-    source (go-kure/launcher#336) becomes `chart.spec.sourceRef` with `chart`
-    required: the chart name, or for a GitRepository or Bucket the chart's path in
-    the fetched artifact. For a GitRepository or Bucket the rule also sets
-    `chart.spec.reconcileStrategy: Revision`, so a new source revision deploys even
-    when the chart's version is unchanged (Flux's `ChartVersion` default would skip
-    it); a HelmRepository keeps that default. An OCIRepository or HelmChart source
-    becomes `chartRef`. `values` and the HelmRelease keys are forwarded verbatim, so their shape is
-    the `helmrelease` terminal's to check. `valuesMode` is never forwarded, and the
-    rule has no registration-time default for it: `inline` (or no `valuesMode`)
-    keeps `values` on the `helmrelease`.
-  - **`valuesMode: configMap`** (go-kure/launcher#702) with non-empty `values`
-    moves them into a `configmap` trait the rule appends to the `helmrelease`, after
-    its authored traits, and drops `values` from it. The trait's ConfigMap carries
-    the values under the key `values.json`, and a `valuesFrom` entry
-    `{kind: ConfigMap, name: <it>, valuesKey: values.json}` is placed before the
-    authored entries, so an authored entry wins on a shared key (Flux merges
-    `spec.valuesFrom` in list order). The values are serialized once, as indented JSON
-    with sorted keys and numbers kept exact (JSON is YAML, which is how Flux reads a
-    values reference); those exact bytes are both stored and hashed into the name:
-    `<component>-values-<first 10 hex digits of their sha256>`. A name that would
-    exceed 253 bytes is shortened by the one shortening rule
-    (`oam.ShortenNameWithSuffix`, go-kure/launcher#793): the component name is cut to a
-    prefix plus the first 10 hex digits of the sha256 of the full component name (8
-    before go-kure/launcher#793, so such a name changes once), and the suffix is kept, so
-    it is always a legal DNS-1123 subdomain and always carries the values hash. Identical values hash alike whatever their key order, and any change
-    to them renames the ConfigMap and so changes the HelmRelease's spec, which is what
-    makes Flux upgrade the release at once on a values-only edit (under this default
-    name; see `valuesConfigMapName` below). Empty or absent `values`
-    add no trait and no entry; `values` that are not a JSON object, a non-finite
-    number in them, or a `valuesFrom` that is not a list are `helm:` build errors.
-    Being an ordinary `configmap` trait, it is checked by that trait (a key it refuses,
-    or data over the ConfigMap size limit, fails the build), labelled
-    `app: <label value>` like the trait's other ConfigMaps, emitted after the
-    HelmRelease, and moved with the release into the Flux namespace, since its
-    `valuesFrom` names it. The trait builds its ConfigMap through the `configmap`
-    kind's own code (go-kure/launcher#741); the values travel as one string, so the
-    kind's string-only typing never refuses them. Known gap, shared with authored traits
-    (go-kure/launcher#757): an authored `configmap` trait on the same component that
-    takes the same name is not refused, and both ConfigMaps are emitted.
-  - **`valuesConfigMapName` and `valuesSecretName`** (go-kure/launcher#787) name
-    the values ConfigMap and the values Secret (`secretValues`, below). Each name
-    is resolved in the one order of every generated name: the author's property,
-    else the consumer's `Naming` hook (roles `values-configmap` and
-    `values-secret`, asked with the component and the hashed default), else the
-    default `<component>-values-<hash>` or `<component>-secret-values-<hash>`.
-    A name from the author or the hook is used as written and gets no hash. It
-    must be a DNS-1123 subdomain of at most 253 characters, and is refused
-    otherwise, never shortened. Both objects follow the HelmRelease to the Flux
-    namespace, so the name is held there against any other ConfigMap or Secret
-    launcher names: one of the same name in the application namespace is another
-    object.
+Each kind below with a heading has the same sections: Properties, Outputs,
+Validation and Example. Its implementation, history and tests are on the
+[contributor page](../../contributing/oam-reference/kinds-helm.md).
 
-    **The cost of a fixed name.** The default name moves with the content, so a
-    values-only edit changes the HelmRelease's `spec.valuesFrom`, and Flux
-    upgrades the release as soon as it sees the new HelmRelease. Under a name
-    that does not move, the edit changes only the ConfigMap's or Secret's
-    content, and the HelmRelease is unchanged. helm-controller still merges the
-    referenced values on every reconciliation and upgrades the release when the
-    result differs from the last one applied, so the edit is picked up at the
-    release's next reconciliation: within its `interval`, not at once. Flux
-    reconciles at once only where the ConfigMap or Secret carries the label
-    `reconcile.fluxcd.io/watch: Enabled`, or helm-controller runs with a
-    `--watch-configs-label-selector` that selects it. The rule sets no such
-    label.
+## helm
 
-    A property that names nothing is refused: `valuesConfigMapName` without
-    `valuesMode: configMap` or with empty `values`, `valuesSecretName` with
-    empty or absent `secretValues`, and either under `delivery: template`, which
-    generates neither object. Two components of one document cannot write the
-    same name for the same kind: each generates its own object, and the second
-    is refused (`helm: naming the values ConfigMap: name collision: ConfigMap
-    "shared" is named by component "a" (role "values-configmap", set by
-    valuesConfigMapName) and by component "b" (…); give one of them another
-    name`).
-  - **`helmReleaseName`** (go-kure/launcher#787) names the HelmRelease object,
-    in the same order: the author's property, else the consumer's `Naming` hook
-    (role `helm-release`, asked with the component), else the component name,
-    so a document that does not set it and a hook that declines give the same
-    output as before. A name that is not the default is used as written: a
-    DNS-1123 subdomain of at most 253 characters, refused otherwise and never
-    shortened. With a HelmRepository, GitRepository or Bucket source the
-    HelmRelease carries a chart template, so its name, the default included, is
-    also held to 63 characters, the owner label helm-controller gives the
-    HelmChart it generates (go-kure/launcher#1080, see `helmrelease`); a longer
-    component name needs a shorter `helmReleaseName`. An OCI source is reached
-    through a `chartRef` and is not held. **`helmReleaseName` is the name of the HelmRelease object in the
-    cluster (`metadata.name`); `releaseName` is the name Helm gives the release
-    (`spec.releaseName`, the chart's `.Release.Name`).** Renaming the object
-    moves nothing else: `spec.releaseName` stays the authored `releaseName` or
-    the component name, so the installed release is not reinstalled under
-    another name, the values ConfigMap and Secret keep their names, and the
-    `helmrelease` member keeps the component's name, with its group, its
-    placement and its traits. Nothing launcher writes names the HelmRelease, so
-    no reference moves. The name is claimed where the HelmRelease lands, the
-    default included: an authored `helmrelease` component whose `objectName` is
-    the same name is refused in the transform with both named (`name collision:
-    HelmRelease.helm.toolkit.fluxcd.io "default/chart" is named by component
-    "chart" (role "helm-release", its default) and by component "rel" (role
-    "object", set by properties.objectName); give one of them another name`).
-    Under `delivery: template` the property is refused, since no HelmRelease is
-    generated, and the hook is not asked.
-  - **`secretValues`** (go-kure/launcher#786) is a second values tree, for the
-    values that must not sit in the HelmRelease or in a ConfigMap. It is an object
-    like `values`; absent, `null` or empty it changes nothing. The `helmrelease`
-    kind has no such property: there, name a Secret in `valuesFrom`.
-    - *Under `delivery: flux`* the rule appends a `secret` trait to the
-      `helmrelease`, after its authored traits and after the values ConfigMap's
-      trait. The trait's Secret holds the tree under the key `values.json`,
-      serialized as the values ConfigMap's is, and is named
-      `<component>-secret-values-<first 10 hex digits of the sha256 of those
-      bytes>`, shortened past 253 bytes by the same rule
-      (`oam.ShortenNameWithSuffix`). A `valuesFrom` entry
-      `{kind: Secret, name: <it>, valuesKey: values.json}` is placed after the
-      values ConfigMap's entry and before the authored entries, so the order is:
-      values ConfigMap, values Secret, authored. No value of `secretValues` is
-      written to the HelmRelease or to the values ConfigMap. Being an ordinary
-      `secret` trait, it is checked by that trait (the 1 MiB limit), labelled
-      `app: <label value>`, emitted after the HelmRelease, and moved with the
-      release into the Flux namespace. A change in `secretValues` renames the
-      Secret and so changes the HelmRelease, which is what makes Flux upgrade the
-      release at once (under this default name; see `valuesSecretName` above).
-    - *Under `delivery: template`* the tree is passed to the `helmtemplate`, which
-      merges it over `values` for the render (see **helmtemplate**). Nothing is
-      emitted for it: a value is in the output only where the chart renders it.
-    - *A path set in both `values` and `secretValues` is refused*, under either
-      delivery and either values mode:
-      `helm: auth.password is set in both values and secretValues; a path may be
-      set in only one of them`. Two objects at the same key are compared key by
-      key; anything else at a key both trees set (a scalar, a list, a null, and
-      a nil map a Go caller passes, which is a null) is a shared path. Under
-      `delivery: template` the two trees are compared as they are, without a
-      JSON round trip, since the render takes the values with their Go types:
-      an object is a `map[string]any`, which is all a parsed document holds, and
-      a map of another type a Go caller passes (`map[string]string`) at a key
-      both trees set is a shared path too. An empty
-      key is a key like any other and is written `""` in
-      the message. Without the refusal the winner would depend on the values mode,
-      since Flux applies inline `spec.values` after every `valuesFrom` entry.
-    - *A key named `global` below the top level of `secretValues` is refused*,
-      under either delivery and either values mode, before anything is rendered or
-      emitted (go-kure/launcher#794, item 9):
-      `helm: secretValues: redis.global: a key named global is allowed only at the
-      top level, …`. Helm reads `<dependency>.global` as that dependency's globals.
-      Where their shape conflicts with the chart's own `global` at a key, a table
-      on one side and a plain value on the other, it drops the dependency's entry
-      and prints it in a warning that cannot be intercepted: in the build's log
-      under `delivery: template`, in the Flux controller's under `delivery: flux`.
-      Launcher does not read the chart, so it cannot tell a dependency from any
-      other key: a key named `global` below the top level that is not a
-      dependency's globals cannot be given through `secretValues` either, only
-      through `values`. Put a sensitive global under the top-level `global`, which
-      every dependency receives and Helm does not print. The tree is searched as
-      JSON, through objects only: a key in a list element is not refused. The
-      message names the path by its keys and no value.
-    - *Policy.* A policy that forbids explicit secrets
-      (`oam.ExplicitSecretPolicy`, see the `pkg/oam` README) refuses a component
-      with `secretValues`, under either delivery, with a violation naming the
-      component. A policy that does not implement that optional interface allows
-      it.
-    - *No refusal of the property repeats a value.* It names `secretValues`, a
-      path by its keys, or the type of a wrong value, and never wraps an encoding
-      or decoding error, which could quote one. Under `delivery: template` an
-      error about an object the chart rendered is another matter (see
-      **helmtemplate**, "not covered").
+`helm` is the role-named Helm component: a component-position lowering rule
+(`HelmRule`), not a handler, that lowers to the kind-named terminals.
 
-    **Security note.** `secretValues` keeps sensitive values out of the
-    HelmRelease and the values ConfigMap. It does not encrypt them. The generated
-    Secret is in the build output in clear form (`data` is base64, an encoding):
-    the output is exactly as sensitive as the input document, and so is every
-    place it is written to, a Git repository or an OCI artifact included.
-    Encrypting it is the consumer's business (SOPS or the like, on the written
-    manifests). The Secret's name, and the HelmRelease naming it, carry 40 bits of
-    a digest of the tree, so whoever reads either can test a guess of the whole
-    tree against it. To keep a value out of the document and the output altogether,
-    create the Secret out of band (an `external-secret` trait, a sealed or
-    externally managed Secret) and name it in `valuesFrom`, or use the chart's own
-    existing-secret values.
-  - An inline source also emits the source: a `helmrepository` with only the URL
-    for `http(s)://`, or an `ocirepository` with `ref.tag: <version>` for `oci://`.
-    **`source.digest`** (go-kure/launcher#1064) pins an inline `oci://` chart to a
-    manifest digest, `sha256:` followed by 64 lowercase hex digits: the
-    `ocirepository` gets it as `ref.digest`, beside `ref.tag` when `version` is
-    set and alone without it, and Flux then pulls by digest, so a tag pushed again
-    upstream does not change what the cluster installs. It is valid only with an
-    inline OCI source (an `oci://` `url`, `kind` unset or `OCIRepository`).
-    A Git repository needs `kind: GitRepository` set (an `http(s)://` URL alone
-    means a Helm repository) and emits a `gitrepository` with the URL (`http://`
-    or `https://`) and `source.ref`, which must set exactly one of
-    `branch`, `tag`, `semver`, `name`, `commit`: Flux would otherwise check out
-    branch `master`, or pick one of several fields by precedence. The schema
-    publishes the rule as an `exclusive` group on `source.ref`, and a field
-    authored as an empty string beside a set one counts as a second field.
-    `kind: Bucket`
-    with `endpoint` and `bucketName` (and optionally `provider`, `region`,
-    `prefix`), and no `url`, emits a `bucket` with exactly those keys.
-    Credentials (`secretRef` and the like) have no inline form: author the
-    `gitrepository` or `bucket` component and reference it. That includes every
-    `ssh://` repository, which Flux reads only with a key from `secretRef`.
-    The `ocirepository` also selects the Helm chart content layer
-    (`application/vnd.cncf.helm.chart.content.v1.tar+gzip`) with
-    `operation: copy`. Flux therefore passes the chart archive through unchanged.
-    By default it would extract and re-archive the chart, dropping files that its
-    ignore rules exclude (`*.zip`, `*.png`, ...) even when the chart reads them
-    with `.Files.Get`.
-    It is named `<document>-source-<digest>`, where the 10-hex digest is taken
-    over the content identity: `helm:<url>`, `oci:<url>:<version>`, with a
-    digest `oci-digest:<JSON of url, version and digest>`,
-    `git:<JSON of url and ref>`, or `bucket:<JSON of provider, endpoint,
-    bucketName, region, prefix>` (JSON, so a `:` inside a URL or endpoint cannot
-    make two identities collide). Two components with one OCI URL and version
-    therefore share a source only when their digests are equal.
-    Components of one document with the same identity share one source; the
-    first emits it and the rest only reference it
-    (`LoweringContext.ResolveSharedName`).
-    Different documents never share or collide, because the document name is part
-    of the source name. The source carries no traits and keeps its terminal's
-    interval default rather than the release `interval`. The source terminal's
-    registry allowlist (`ApplyPolicy`) applies to it.
-  - **Naming the generated source** (go-kure/launcher#787). The name is
-    resolved in the one order of every generated name: the author's
-    `source.name`, else the consumer's `Naming` hook, else the default above.
-    - *The hook* is asked under role `helm-source`, once for each source
-      identity of a document, with the default `<document>-source-<digest>` and
-      no component, since the source belongs to the document: every component of
-      that identity that names no source adopts the answer.
-    - *`source.name` beside an inline source* names the source that component
-      generates. The name is the component's own choice. Components that write
-      the same name for the same identity share one source; a component that
-      writes none does not share it, and gets the document's source beside it
-      (two sources of one identity), unless the name written is that source's
-      own (its default, or the hook's answer): one name for one identity is one
-      source. One name for two identities, or for two
-      kinds, is refused as a collision naming both components, and so is a hook
-      answer that gives two identities one name.
-    - A name from the author or the hook is used as written: it must be a
-      DNS-1123 subdomain of at most 253 characters and is refused otherwise,
-      never shortened.
-    - *The source cannot take the name of a component.* It is a component of the
-      lowered document itself, so `source.name` equal to the component's own
-      name, or to the name of another component the document holds, is refused
-      (`helm: source.name "web" is the component's own name; the generated
-      source is a component of the document too, so give it another name`). The
-      default and a hook answer are held to the same rule (`helm: the generated
-      source would be named "shop-source-…", the name of a helmrepository
-      component of the document; … so rename that component, name the source
-      with source.name, or have the Naming hook return another name for role
-      "helm-source"`). To give a HelmRepository and its HelmRelease one name,
-      author the `helmrepository` component with `objectName` and reference it.
-    - The source lands beside the HelmRelease, in the Flux namespace when one is
-      set. Its name is held there against every other object of its kind
-      launcher names; an object of the same name and kind in the application
-      namespace is another object.
-    - `source.name` alone, with no inline source, references an existing source
-      as before, and `source.namespace` belongs to that form only.
+### Properties
 
-    **Breaking** (go-kure/launcher#787). A `helm` component with both
-    `source.url` and `source.name` was refused and builds now, under
-    `delivery: flux`. The refusal of `source.namespace` beside an inline source
-    reads `helm: source.namespace is only valid with a reference to an existing
-    source (source.name and no inline source); a generated source is created
-    beside the HelmRelease`. An authored component that already has the name a
-    generated source would take by default was refused by `pkg/oam` as a
-    duplicate component name, and is now refused by the rule with the message
-    above.
-  - **The generated source is applied with the application bundle, ahead of
-    every group** (go-kure/launcher#783). The rule orders the release after the
-    source it generates or adopts (`Component.OrderAfter`), and `pkg/oam` puts
-    such a source among the application bundle's own applications, beside the
-    ordered groups. A source several releases share therefore exists once and
-    precedes all of them, whatever tier a release is placed in. A `placement`
-    policy or tier annotation naming the generated source, and a `dependency`
-    rule making it wait on a component, fail the build. A source the component
-    references by `source.name` is the author's own component and the rule
-    orders nothing after it.
-  - `delivery: template` emits a `helmtemplate` with the URL, its resolved kind,
-    `chart`, `version`, `values`, `secretValues`, `scopeOverrides` and an authored `releaseName`,
-    which the `helmtemplate` checks and, when unset, defaults to the component
-    name, the release name the `delivery: flux` HelmRelease carries too
-    (go-kure/launcher#785; see **helmrelease**). An authored `hookGroupNamePrefix`
-    (go-kure/launcher#787) is passed on as written and is the `helmtemplate`'s; under
-    `delivery: flux` it is refused with a `helm:` message, since a HelmRelease installs the
-    chart, no hook-group layout exists and the prefix would name nothing. An authored
-    `layoutKustomizationName` (go-kure/launcher#787) is passed on and refused the same way:
-    under `delivery: flux` the component has no layout of its own. No source is emitted, and an authored
-    `valuesMode: inline` is dropped. The rule refuses everything a client-side
-    render cannot honour, each with a `helm:` message:
-    - a source reference, and `valuesMode: configMap`;
-    - `source.name` beside an inline source, `valuesConfigMapName`,
-      `valuesSecretName` and `helmReleaseName` (go-kure/launcher#787): the render
-      generates no source, no values ConfigMap, no values Secret and no
-      HelmRelease, so each would name nothing;
-    - an inline GitRepository or Bucket source, since the render fetches only
-      from a Helm or OCI repository;
-    - an OCI source without `version`;
-    - `source.digest` (go-kure/launcher#1064): the render fetches the chart by
-      `version` and does not pin it to a digest, and only the `ocirepository`
-      that `delivery: flux` generates reads it;
-    - every other HelmRelease key (`interval`, `targetNamespace`,
-      `driftDetection`, `install`, `upgrade`, `valuesFrom`), which `helmtemplate`
-      does not accept.
-  - **`scopeOverrides`** (go-kure/launcher#794, item 11) states the scope of a kind
-    the chart renders, for `delivery: template`: the list of `{apiVersion, kind,
-    scope}` the `helmtemplate` and `manifests` components take, with the meaning it
-    has there (see **Scope overrides** under **helmtemplate**). The rule forwards
-    the authored list to the `helmtemplate` as written, under the declared spelling
-    of the key, so a chart delivered through `helm` and one authored as a
-    `helmtemplate` with the same list render the same objects. `null` reads as
-    omission under either delivery.
-    - *A malformed entry is refused by the rule*, with the shared parser's message
-      under its own prefix (`helm: scopeOverrides[0]: scope "cluster" is invalid;
-      must be "Cluster" or "Namespaced"`), so the message names the component type
-      the author wrote. An entry that contradicts a `CustomResourceDefinition` the
-      chart renders is refused when the chart is rendered, by the `helmtemplate`.
-    - *`delivery: flux` refuses the property*, set or defaulted and whatever its
-      shape: `helm: delivery: flux does not support scopeOverrides (only a
-      client-side render reads it)`. Helm creates a HelmRelease's objects in the
-      cluster, so nothing in the build could apply a stated scope, and dropping the
-      property would let an author believe it took effect.
-  - Strict, unlike the removed `helmchart` composite. An undeclared key at the top level or inside
-    `source` is refused, and so are:
-    - `delivery: native`;
-    - `source.namespace` with an inline source;
-    - an inline HelmRepository or OCIRepository URL carrying a user or password
-      (`https://user:token@host`, `oci://user@registry/chart`), under either
-      delivery: the URL is copied verbatim into the generated source or the
-      render, so the credential would sit in plain text in the output.
-      Credentials go in the `secretRef` of an authored `helmrepository` or
-      `ocirepository`, referenced with `source.name`; a client-side render takes
-      none. No message repeats the URL, not even the refusal of one that does
-      not parse;
-    - an inline GitRepository without exactly one `source.ref` field, or with a
-      URL that is not `http://` or `https://` (an `ssh://` one needs credentials),
-      or one that is more or less than a host, an optional port and a
-      repository path (user info, a query or a fragment is refused), or whose
-      port is outside 1–65535;
-    - `url` with an inline Bucket, or one without `endpoint` or `bucketName`, or
-      an `endpoint` that is more than a `host[:port]` or an `https://` URL of a
-      host and port (user info, a path, a query, a fragment or `http://` is
-      refused: a non-TLS endpoint needs `insecure: true`, which only an authored
-      `bucket` takes) or whose port is outside 1–65535, or a `provider` other
-      than `generic`, `aws`, `gcp` or `azure` (checked at the helm rule; the
-      `bucket` terminal leaves it to the CRD);
-    - `source.ref` other than on an inline GitRepository, and `endpoint`,
-      `bucketName`, `provider`, `region`, `prefix` other than on an inline
-      Bucket;
-    - `source.digest` other than on an inline OCI source (a HelmRepository,
-      GitRepository or Bucket source has no manifest digest, and a referenced
-      source pins its own), or other than `sha256:` followed by 64 lowercase hex
-      digits;
-    - `chart` with an OCIRepository or HelmChart source;
-    - `version` with a referenced OCIRepository or HelmChart source, which pins
-      its own;
-    - `version` with a GitRepository or Bucket source: Flux reads that chart at
-      the source's fetched revision and ignores `version`;
-    - two keys equal ignoring case, at the top level or inside `source`
-      (`chart` and `Chart`): the decode would match both to one field and keep
-      either.
+Properties: `chart`, `version`, `delivery` (`flux` default | `template`),
+`source` (inline `url` with optional `kind` and, for a GitRepository, `ref`, for
+an OCI chart, `digest`; an inline Bucket's `kind`, `endpoint`, `bucketName`,
+`provider`, `region`, `prefix`; beside any of these a `name` for the generated
+source; or a reference `{name, kind, namespace}` to an existing HelmRepository,
+GitRepository, Bucket, OCIRepository or HelmChart), `values`, `valuesMode`
+(`inline` | `configMap`), `valuesConfigMapName`, `secretValues` (the sensitive
+part of the values tree, see below), `valuesSecretName`, `helmReleaseName` (the
+name of the HelmRelease object, see below), `scopeOverrides`,
+`hookGroupNamePrefix` and `layoutKustomizationName` (each under `delivery:
+template` only, see below), and the HelmRelease keys `interval`, `releaseName`,
+`targetNamespace`, `driftDetection`, `install`, `upgrade`, `valuesFrom`.
 
-  An authored component already named like a generated source fails the build:
-  the rule refuses it when the document holds that component as the rule runs
-  (see **Naming the generated source**), and `pkg/oam` refuses it as a duplicate
-  component name when another rule emits it in the same lowering round.
-- **helmchart** — since go-kure/launcher#351, the kind-named terminal for Flux's `HelmChart`:
-  see **helmrepository / ocirepository / gitrepository / bucket / helmchart**. Until
-  go-kure/launcher#350 the name belonged to a role-level composite (a HelmRelease plus its source,
-  or a client-side render), which is gone; use `helm`. A document written for the composite
-  fails validation on a key `HelmChartSpec` does not declare. When that key is one of the
-  composite's own that `HelmChartSpec` lacks (`delivery`, `releaseName`, `targetNamespace`,
-  `source`, `values`, `valuesMode`, `driftDetection`, `install`, `upgrade`, `valuesFrom`), the
-  error adds a pointer to `helm`; any other unknown key gets the plain error. To
-  migrate, change `type: helmchart` to `type: helm` and rename `delivery: native` to
-  `delivery: flux`; the other properties keep their names. The output then changes only as
-  this table says. `TestHelmParity` (`pkg/cmd/kurel`) pins it on three fixture pairs: the
-  last `helmchart` output of each input, frozen before the removal, is diffed against the
-  `helm` build, and the diffs are in `pkg/cmd/kurel/testdata/helm-parity/`:
+**`scopeOverrides`** states the scope of a kind the chart renders, for
+`delivery: template`: the list of `{apiVersion, kind, scope}` the `helmtemplate`
+and `manifests` components take, with the meaning it has there (see **Scope
+overrides** under **helmtemplate**). The rule forwards the authored list to the
+`helmtemplate` as written, under the declared spelling of the key, so a chart
+delivered through `helm` and one authored as a `helmtemplate` with the same list
+render the same objects. `null` reads as omission under either delivery.
 
-  | # | What changes with `helm` |
-  |---|---|
-  | 1 | The values ConfigMap name carries a values hash. |
-  | 2 | A generated source is named `<app>-source-<digest>`, not after the component. |
-  | 3 | *(void)* `oci` and Helm-over-OCI components: neither shares an OCIRepository with the other (go-kure/launcher#665). |
-  | 4 | The delivery value `native` is `flux`. |
-  | 5 | *(void)* `targetNamespace` under a Flux namespace: both default it to the application namespace (go-kure/launcher#625). |
-  | 6 | A generated source keeps its terminal's default interval, not the release interval. |
-  | 7 | No registration-time `valuesMode` default; `valuesMode` is never forwarded (under `configMap` the values become a `configmap` trait). |
-  | 8 | *(void)* Generated sources: neither gets an automatic health check; launcher sets none (go-kure/launcher#781). |
-  | 9 | The registry allowlist applies to inline sources. |
-  | 10 | Generated sources are applied with the application bundle, ahead of every group. A tier annotation on the component places only its release. |
-  | 11 | Template delivery refuses `targetNamespace`, and an unset `releaseName` renders under the component name, shortened as Flux shortens a release name, instead of `release` (go-kure/launcher#776, go-kure/launcher#785). |
-  | 12 | `chart` is refused with an OCIRepository or HelmChart source. |
-  | 13 | `version` is refused with a referenced OCIRepository or HelmChart source. |
-  | 14 | `source.namespace` is refused together with `url`. |
-  | 15 | Unknown keys are refused at any depth of `source`, and so are two keys that differ only in case. |
-  | 16 | *(void)* A generated OCIRepository: both set `layerSelector` (the chart content layer, `copy`) (go-kure/launcher#665). |
-  | 17 | `placement` may not place a generated source in any tier, and a `dependency` rule may not make it wait. |
-  | 18 | Any other `helmchart` default or build-time check a terminal does not reproduce (strict decoding). |
-  | 19 | The HelmRelease carries the component label and a post-renderer that sets it on the chart's pod templates, as every component's output does (go-kure/launcher#788). |
-  | 20 | Every HelmRelease carries `spec.releaseName`: the authored value, else the component name, where `helmchart` left an unset one to Flux (go-kure/launcher#785). |
+*A malformed entry is refused by the rule*, with the shared parser's message
+under its own prefix (`helm: scopeOverrides[0]: scope "cluster" is invalid; must
+be "Cluster" or "Namespaced"`), so the message names the component type the
+author wrote. An entry that contradicts a `CustomResourceDefinition` the chart
+renders is refused when the chart is rendered, by the `helmtemplate`.
 
-  Two `helmchart` behaviours have no `helm` counterpart beyond row 18: `valuesMode: configMap`
-  no longer makes the component a `LayoutAugmenter` (the values ConfigMap comes from a
-  `configmap` trait on the `helmrelease`, ordinary build output, so `kurel build` accepts it and a layout-walking consumer
-  no longer moves the component into a sub-layout), and under `delivery: template` the render's
-  `.Release.Namespace` can no longer be authored (row 11; see **helmtemplate**).
-- **helmrelease** — the kind-named terminal for Flux's `HelmRelease`
-  (go-kure/launcher#327, part of the Helm-family redesign go-kure/launcher#336). Its
-  properties are exactly the top-level JSON keys of `HelmReleaseSpec` in the
-  helm-controller API version `go.mod` links; a test ties the published schema to that struct, so a helm-controller bump that adds or
-  drops a spec field fails the suite until the schema follows. It emits no source object:
-  `chart.spec.sourceRef` or `chartRef` names one that already exists, and with
-  `chart.kind: OCIRepository` helm-controller generates one (see **Chart template of kind
-  OCIRepository**).
+*`delivery: flux` refuses the property*, set or defaulted and whatever its
+shape: `helm: delivery: flux does not support scopeOverrides (only a client-side
+render reads it)`. Helm creates a HelmRelease's objects in the cluster, so
+nothing in the build could apply a stated scope, and dropping the property would
+let an author believe it took effect.
 
-  **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON` into
-  `HelmReleaseSpec`. A key the struct does not declare,
-  at any depth (`chart.spec.chartVersion`, a stray key inside a `valuesFrom` entry), is refused
-  by name, and so is a wrongly typed value (`suspend: "yes"`, `maxHistory: "3"`, an
-  unparsable duration). The schema keeps the nested Flux blocks as open objects; the strict
-  decode is what checks them. `valuesMode` is refused like any other unknown key; the
-  error adds a pointer to the `helm` component's `valuesMode: configMap`, or a
-  `configmap` trait plus a `valuesFrom` entry, which replace it (go-kure/launcher#702).
-  Known gap, inherited from the decoder:
-  inside a type with its own `UnmarshalJSON` unknown keys are not refused — `values` is the
-  case that matters, and it is open by design. Keys match case-insensitively, as in
-  `encoding/json`; schema validation, which a `kurel build` runs first, is exact.
+### Outputs
 
-  **Defaults and checks.** `interval` defaults to `60m` when unset (a zero duration counts
-  as unset); Flux requires the field. A set `interval` must be a duration Flux accepts
-  (go-kure/launcher#590, go-kure/launcher#601; `oci` applies the same check). The CRDs
-  require `^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`: unsigned, in `ms`, `s`, `m` or `h` (`10m`,
-  `1h30m`, `1.5h`). `time.ParseDuration` alone would also accept `-5m` or `500us`, which
-  would fail at apply time; both are build errors. The value is emitted as a
-  `metav1.Duration`, which serializes `Duration.String()` rather than the authored text, so
-  that form is checked too: `0.5ms` matches the pattern but is written as `500µs`, and is
-  refused as below Flux's millisecond resolution. A positive value too small for the
-  duration type (`0.0000000001ms`) is refused the same way rather than emitted as `0s`. In
-  practice any value of `0s` or at least `1ms` is accepted. The check runs on the authored
-  text, which also refuses a positive value that would decode to zero and be replaced by the
-  default, and again in `Generate` on the decoded duration's emitted form, for a config built
-  directly. It lives in the internal `pkg/oam/internal/fluxduration`. Its other
-  duration fields are checked
-  the same way, in the same form (go-kure/launcher#606): `timeout`, `chart.spec.interval`,
-  `install.timeout`, `upgrade.timeout`, `test.timeout`, `rollback.timeout`,
-  `uninstall.timeout`, and `install.strategy.retryInterval` and
-  `upgrade.strategy.retryInterval`. `chart.spec.timeout`, read only under
-  `chart.kind: OCIRepository`, takes no `h`, as an `ocirepository`'s timeout does not, and must
-  be under an hour (see **Chart template of kind OCIRepository**). A nested key matches
-  case-insensitively at every level, as the decode does. Exactly one of
-  `chart` and `chartRef` is required. The published schema lists both as optional and says
-  so in the handler's `exclusive` group (go-kure/launcher#790): a validator built from it
-  refuses both and neither, as the build does. The template's `kind` is HelmChart, its
-  default, or OCIRepository (see **Chart template of kind OCIRepository**); any other is
-  refused. Under an authored `chart` of kind HelmChart, `chart.spec.sourceRef.kind`
-  is required (go-kure/launcher#790): the API requires it and takes `HelmRepository`,
-  `GitRepository` or `Bucket`, the Go type leaves an empty one out of the object, and the
-  kind does not choose a source's kind for the author, so a reference without one is
-  refused with `chart.spec.sourceRef.kind: required (…)`. Which of the three it is stays the
-  CRD's to check. A template of kind HelmChart without `chart.spec.sourceRef`, or without
-  `chart.spec.chart`, is refused the same way: the API's rules require both for that kind.
-  So, under kind HelmChart, are the OCIRepository fields the template inlines, which that
-  kind does not read, whatever their value (`false` and `null` included): `url`, `ref`,
-  `layerSelector`, `provider`, `secretRef`, `serviceAccountName`, `certSecretRef`,
-  `proxySecretRef`, `timeout`, `ignore`, `insecure`, `suspend`, and
-  `verify.matchOIDCIdentity` and `verify.trustedRootSecretRef`; a source's own settings go
-  on the source `sourceRef` names. An authored `chart.spec.verify` that names no `provider` is written with
-  `provider: cosign`, the API's default: the Go type writes the field whether or not it was
-  authored, so the API's default never applies, and the object is then what the API would
-  have made of the omitted field. An authored `provider: ""` is refused, since the type
-  cannot tell it from an unauthored one and the API's enum (`cosign`, `notation`) refuses it
-  as written. Two spellings of one key on the way (`Provider` and `provider`) are refused,
-  since the decode keeps one value and drops the other. `TestKindComponents_OmittedRequiredAndWrittenDefaults` holds both to the
-  markers in the source of the linked Flux modules, which ship no CRD: the required field
-  to a refusal shown on a document, and the written value to the default the marker states,
-  so an upstream change of that default fails the test. "Required" there is what the
-  markers say; no API server was asked. `values` must be a JSON object; a non-finite number
-  (`.nan`, `.inf`) is a build error, never a panic. Each `valuesFrom` entry is held to the
-  `ValuesReference` CRD's own constraints, and a violation is a build error naming the
-  entry's index: `kind` is `Secret` or `ConfigMap`, exactly as Flux's enum spells them
-  (go-kure/launcher#748); `name` is required and at most 253 characters; a set `valuesKey`
-  is at most 253 characters and matches `^[\-._a-zA-Z0-9]+$`; a set `targetPath` is at
-  most 250 characters and matches the CRD's pattern (dot-path characters, `\`, `/`, and
-  `[n]` indexes of up to five digits) (go-kure/launcher#762). Lengths count characters, as
-  the CRD's `maxLength` does, not bytes. Like the other checks these run again in
-  `Generate`, and they cover the `valuesFrom` a `helm` component passes through.
-  **Every other required field the type writes unauthored is refused too**
-  (go-kure/launcher#883), where it is left out under a parent that is authored: the `name`
-  of a `dependsOn` entry, of `chartRef` (with its `kind`), of a Secret or ConfigMap reference
-  (`kubeConfig`, the chart template's `secretRef`, `certSecretRef`, `proxySecretRef` and its
-  `verify` references), of an install, upgrade or wait `strategy` and of a test filter; a
-  `verify.matchOIDCIdentity` entry's `issuer` and `subject`; a drift ignore rule's `paths`; a
-  post-renderer's patch and image `name`; a health check expression's `apiVersion` and
-  `current` (`dependsOn[0].name: required (the Flux API requires the name of what this refers
-  to)`). The list is generated from the markers of the linked helm-controller module (see
-  ["Required fields a kind writes unauthored and does not refuse"](conventions.md#required-fields-a-kind-writes-unauthored-and-does-not-refuse)) and runs after the checks
-  above, so `chart.spec` and a `valuesFrom` entry's `kind` and `name` keep their words. Nothing
-  else is checked here: the enum checks on `driftDetection.mode`, `install.crds` and
-  `upgrade.crds` are left to the HelmRelease CRD's own admission, and so are the limits of
-  an authored `releaseName`.
+`delivery: flux` emits a `helmrelease` under the authored name, with the
+authored traits and annotations. A HelmRepository, GitRepository or Bucket
+source becomes `chart.spec.sourceRef` with `chart` required: the chart name, or
+for a GitRepository or Bucket the chart's path in the fetched artifact. For a
+GitRepository or Bucket the rule also sets `chart.spec.reconcileStrategy:
+Revision`, so a new source revision deploys even when the chart's version is
+unchanged (Flux's `ChartVersion` default would skip it); a HelmRepository keeps
+that default. An OCIRepository or HelmChart source becomes `chartRef`. `values`
+and the HelmRelease keys are forwarded verbatim, so their shape is the
+`helmrelease` terminal's to check. `valuesMode` is never forwarded, and the rule
+has no registration-time default for it: `inline` (or no `valuesMode`) keeps
+`values` on the `helmrelease`.
 
-  **Chart template of kind OCIRepository** (go-kure/launcher#1072). With
-  `chart.kind: OCIRepository`, helm-controller generates an OCIRepository for the chart
-  artifact `chart.spec.url` names. The component holds the template to the Flux API's rules
-  for that kind (helm-controller API v1.7.1): `chart.spec.url` is required and starts with
-  `oci://`, and carries no user or password, which it would write in plain text into the
-  HelmRelease (put the registry credential in a Secret named by `chart.spec.secretRef`);
-  `chart`, `sourceRef`, `valuesFiles` and `ignoreMissingValuesFiles` are refused;
-  `version` takes only `*` and `reconcileStrategy` only `ChartVersion`, since the chart's
-  version is the tag or digest `chart.spec.ref` names. The OCIRepository fields the template
-  inlines, refused under kind HelmChart (above), are taken and written as authored. Under a
-  non-empty allowlist `chart.spec.url` is held to the allowed registries as an
-  `ocirepository`'s `url` is: its registry named explicitly, with a repository path after it.
-  `chart.spec.timeout` takes no `h` and must be under an hour: helm-controller writes the
-  OCIRepository it generates through the unstructured converter, which writes a duration of
-  an hour or more with an `h`, and the OCIRepository's timeout refuses that whatever form it
-  was authored in. For a longer timeout, use an `ocirepository` component and a `chartRef`
-  to it. helm-controller names the OCIRepository `<namespace>-<name>` after the HelmRelease,
-  in the HelmRelease's namespace, gives it the template's interval (else the HelmRelease's)
-  and, when the template sets no `chart.spec.layerSelector`, the chart layer as its layer
-  selector (an authored one is kept), takes over an object of that name and deletes
-  it with the HelmRelease, when the kind, name or namespace of the chart source it generates changes, or
-  when the release switches to `chartRef`. So an object of that identity the build
-  generates is refused as a collision (see the collision contract in `pkg/oam`'s README).
-  Prefer an `ocirepository` component and a `chartRef` when several releases share the
-  source or it is authored on its own.
+**`valuesMode: configMap`** with non-empty `values` moves them into a
+`configmap` trait the rule appends to the `helmrelease`, after its authored
+traits, and drops `values` from it. The trait's ConfigMap carries the values
+under the key `values.json`, and a `valuesFrom` entry `{kind: ConfigMap, name:
+<it>, valuesKey: values.json}` is placed before the authored entries, so an
+authored entry wins on a shared key (Flux merges `spec.valuesFrom` in list
+order). The values are serialized once, as indented JSON with sorted keys and
+numbers kept exact (JSON is YAML, which is how Flux reads a values reference);
+those exact bytes are both stored and hashed into the name:
+`<component>-values-<first 10 hex digits of their sha256>`. A name that would
+exceed 253 bytes is shortened by the one shortening rule
+(`oam.ShortenNameWithSuffix`): the component name is cut to a prefix plus the
+first 10 hex digits of the sha256 of the full component name (8 before
+go-kure/launcher#793, so such a name changes once), and the suffix is kept, so
+it is always a legal DNS-1123 subdomain and always carries the values hash.
+Identical values hash alike whatever their key order, and any change to them
+renames the ConfigMap and so changes the HelmRelease's spec, which is what makes
+Flux upgrade the release at once on a values-only edit (under this default name;
+see `valuesConfigMapName` below). Empty or absent `values` add no trait and no
+entry; `values` that are not a JSON object, a non-finite number in them, or a
+`valuesFrom` that is not a list are `helm:` build errors. Being an ordinary
+`configmap` trait, it is checked by that trait (a key it refuses, or data over
+the ConfigMap size limit, fails the build), labelled `app: <label value>` like
+the trait's other ConfigMaps, emitted after the HelmRelease, and moved with the
+release into the Flux namespace, since its `valuesFrom` names it. The trait
+builds its ConfigMap through the `configmap` kind's own code; the values travel
+as one string, so the kind's string-only typing never refuses them. Known gap,
+shared with authored traits: an authored `configmap` trait on the same component
+that takes the same name is not refused, and both ConfigMaps are emitted.
 
-  **Generated HelmChart** (go-kure/launcher#1074). With a chart template of kind HelmChart,
-  helm-controller generates the HelmChart `<namespace>-<name>`, named after the HelmRelease,
-  in the namespace `chart.spec.sourceRef` names, else in the HelmRelease's, takes over an
-  object of that name and deletes it with the HelmRelease, when the kind, name or namespace
-  of the chart source it generates changes, or when the release switches to `chartRef`. So a
-  `helmchart` component, or any other HelmChart the build generates, of that identity is
-  refused as a collision naming helm-controller's claim, as for kind OCIRepository. A
-  `chartRef` claims nothing.
+**`valuesConfigMapName` and `valuesSecretName`** name the values ConfigMap and
+the values Secret (`secretValues`, below). Each name is resolved in the one
+order of every generated name: the author's property, else the consumer's
+`Naming` hook (roles `values-configmap` and `values-secret`, asked with the
+component and the hashed default), else the default `<component>-values-<hash>`
+or `<component>-secret-values-<hash>`. A name from the author or the hook is
+used as written and gets no hash. It must be a DNS-1123 subdomain of at most 253
+characters, and is refused otherwise, never shortened. Both objects follow the
+HelmRelease to the Flux namespace, so the name is held there against any other
+ConfigMap or Secret launcher names: one of the same name in the application
+namespace is another object.
 
-  **Name of the generated chart source** (go-kure/launcher#1080). With a chart template of
-  either kind, helm-controller labels the source it generates with the HelmRelease's name as
-  the `helm.toolkit.fluxcd.io/name` owner label (helm-controller v1.7.1
-  `internal/reconcile/helmchart_template.go:147`), and names it `<namespace>-<name>` after the
-  HelmRelease's own namespace and name: a `chart.spec.sourceRef.namespace` moves the
-  HelmChart, never its name (`oam.GeneratedChartSource`). A label value is at most 63
-  characters and a name at most 253, and a source helm-controller cannot apply leaves the
-  HelmRelease never reconciled. So `Generate` refuses a HelmRelease name over 63 characters,
-  whether from the component name or from `objectName`, and a `<namespace>-<name>` over 253,
-  the namespace being the HelmRelease's after the move to the Flux namespace. The remedy is a
-  shorter name, or a `chartRef` to an authored source, which is not held. A component's
-  namespace is a DNS label, so with the name held to 63 only a `HelmReleaseConfig` built
-  directly with a longer `Namespace` reaches the 253 limit. This is a new build refusal for a
-  document of kind HelmChart, the default, whose component or object name is over 63
-  characters, and for a `helm` component with a HelmRepository, GitRepository or Bucket
-  source whose HelmRelease name is: such a HelmRelease never reconciled.
+**The cost of a fixed name.** The default name moves with the content, so a
+values-only edit changes the HelmRelease's `spec.valuesFrom`, and Flux upgrades
+the release as soon as it sees the new HelmRelease. Under a name that does not
+move, the edit changes only the ConfigMap's or Secret's content, and the
+HelmRelease is unchanged. helm-controller still merges the referenced values on
+every reconciliation and upgrades the release when the result differs from the
+last one applied, so the edit is picked up at the release's next reconciliation:
+within its `interval`, not at once. Flux reconciles at once only where the
+ConfigMap or Secret carries the label `reconcile.fluxcd.io/watch: Enabled`, or
+helm-controller runs with a `--watch-configs-label-selector` that selects it.
+The rule sets no such label.
 
-  **Release name** (go-kure/launcher#785). A component that authors no `releaseName` gets
-  `spec.releaseName` set to the component name, so every HelmRelease in the output names its
-  release. A name over 53 characters, Helm's limit, is shortened as Flux helm-controller
-  shortens a release name — its first 40 characters, `-`, and the first 12 hex digits of the
-  SHA-256 of the whole name (`oam.ShortenName` at `oam.ShortenLimitHelmRelease`,
-  go-kure/launcher#793) — so the written name is the one Flux would shorten the component
-  name to itself. An authored `releaseName` is written as it is, never shortened.
-  `helmtemplate` renders under the same default, so a `helm` component releases its chart
-  under one name with `delivery: flux`, with or without a Flux namespace, and with
-  `delivery: template`. A default Helm would not install under is a build error with the
-  remedy to set `releaseName`: the shortening can cut a dotted name just after a `.`, leaving
-  a label that starts with `-`. The check runs again in `Generate`, where a
-  `HelmReleaseConfig` built directly with neither a `Name` nor a `releaseName` is refused as
-  well: it has nothing to derive a default from.
+**`helmReleaseName`** names the HelmRelease object, in the same order: the
+author's property, else the consumer's `Naming` hook (role `helm-release`, asked
+with the component), else the component name, so a document that does not set it
+and a hook that declines give the same output as before. A name that is not the
+default is used as written: a DNS-1123 subdomain of at most 253 characters,
+refused otherwise and never shortened. With a HelmRepository, GitRepository or
+Bucket source the HelmRelease carries a chart template, so its name, the default
+included, is also held to 63 characters, the owner label helm-controller gives
+the HelmChart it generates (see `helmrelease`); a longer component name needs a
+shorter `helmReleaseName`. An OCI source is reached through a `chartRef` and is
+not held. **`helmReleaseName` is the name of the HelmRelease object in the
+cluster (`metadata.name`); `releaseName` is the name Helm gives the release
+(`spec.releaseName`, the chart's `.Release.Name`).** Renaming the object moves
+nothing else: `spec.releaseName` stays the authored `releaseName` or the
+component name, so the installed release is not reinstalled under another name,
+the values ConfigMap and Secret keep their names, and the `helmrelease` member
+keeps the component's name, with its group, its placement and its traits.
+Nothing launcher writes names the HelmRelease, so no reference moves. The name
+is claimed where the HelmRelease lands, the default included: an authored
+`helmrelease` component whose `objectName` is the same name is refused in the
+transform with both named (`name collision: HelmRelease.helm.toolkit.fluxcd.io
+"default/chart" is named by component "chart" (role "helm-release", its default)
+and by component "rel" (role "object", set by properties.objectName); give one
+of them another name`). Under `delivery: template` the property is refused,
+since no HelmRelease is generated, and the hook is not asked.
 
-  **Breaking output change** (go-kure/launcher#785): every HelmRelease gains
-  `spec.releaseName`. Left unset, Flux names a release `<targetNamespace>-<name>` when
-  `spec.targetNamespace` is set and `<name>` otherwise, so the release name itself changes
-  wherever a target namespace is set and no `releaseName` is authored: under a Flux
-  namespace, which defaults one (below), and with an authored `targetNamespace` alone. There
-  the release `shop-web` of a component `web` with target namespace `shop` becomes `web`. Flux
-  does not rename a release that is already installed: it uninstalls the existing release and
-  installs a new one under the new name (the warning on `.spec.releaseName` in Flux's
-  HelmRelease reference). To keep the installed release, author its name as `releaseName` on
-  such a component: `<targetNamespace>-<name>`, or, where that is over 53 characters, the
-  shortened name Flux installed it under (its first 40 characters, `-`, 12 hex digits of its
-  SHA-256; the `name` of an entry in the HelmRelease's `status.history`). The long form is
-  not accepted there: the HelmRelease CRD limits `releaseName` to 53 characters. Without a
-  target namespace the name stays `<name>` and only the field is new.
+**`secretValues`** is a second values tree, for the values that must not sit in
+the HelmRelease or in a ConfigMap. It is an object like `values`; absent, `null`
+or empty it changes nothing. The `helmrelease` kind has no such property: there,
+name a Secret in `valuesFrom`.
 
-  **Identity and namespaces.** The HelmRelease is named after the component and lands in
-  the Flux namespace when one is configured, else in the application namespace
-  (`SetFluxNamespace`). Under a Flux namespace, a component that does not author
-  `targetNamespace` gets `spec.targetNamespace` set to the application namespace, so the
-  release still installs there rather than into the Flux namespace; an authored value wins.
-  The release's Helm storage follows the release (go-kure/launcher#988): a component that
-  does not author `storageNamespace` gets `spec.storageNamespace` set to the effective
-  target namespace, authored or defaulted, so the `sh.helm.release.v1.*` Secrets, which hold
-  the rendered manifests and the merged values, stay with the release rather than collect in
-  the Flux namespace; an authored value wins. Without a Flux namespace neither is set, and
-  helm-controller keeps the storage in the HelmRelease's own namespace, the application
-  namespace. A `helm` component takes no `storageNamespace`, so its release always gets the
-  default.
-  The Kustomization `oci` emits has no such default, deliberately (go-kure/launcher#794,
-  item 1): a HelmRelease's `targetNamespace` only says where the release installs, while a
-  Kustomization's overrides the namespace of every namespaced object in the artifact (see
-  `oci`).
-  The ConfigMaps and Secrets the HelmRelease reads from its own namespace — `valuesFrom`,
-  `kubeConfig.secretRef` / `configMapRef`, and `chart.spec.verify.secretRef` when
-  helm-controller creates the HelmChart beside the release (`chart.spec.sourceRef` names no
-  namespace, or names the Flux namespace), and under `chart.kind: OCIRepository` the
-  `chart.spec.secretRef`, `certSecretRef`, `proxySecretRef`, `verify.secretRef` and
-  `verify.trustedRootSecretRef` of the OCIRepository it generates beside the release — must
-  live in the Flux namespace too. A `configmap`, `external-secret` or `certificate` trait on the
-  component whose object one of them names moves there with the release; one none of them names
-  stays in the application namespace with the release's workloads (go-kure/launcher#740). A
-  trait ConfigMap named in `valuesFrom` therefore leaves the application namespace even when the
-  chart's pods read it too; give the pods their own copy, under another name, if they need it.
-  *Required reads*: the HelmRelease cannot become Ready without each of those but a
-  `valuesFrom` entry marked `optional: true`, and of an OCIRepository chart template the
-  `verify.trustedRootSecretRef` only under the `cosign` provider; a suspended release
-  (`suspend: true`) requires none. Under a delivery whose groups wait for their Flux objects, a
-  trait on a component of a later group that makes one is refused (go-kure/launcher#1079), and
-  so is a component of a later group that makes one where the release lands
-  (go-kure/launcher#1086). So is a component of a later group making the source the `chartRef`
-  or a chart template of kind `HelmChart` names, in the reference's namespace or else the
-  release's (go-kure/launcher#1088).
-  The target namespace does not reach the release name: `spec.releaseName` is always set
-  (see **Release name**), so Flux does not derive `<targetNamespace>-<name>`. Author
-  `releaseName` when a specific release name matters — for instance when taking over a
-  release installed under another name.
+*Under `delivery: flux`* the rule appends a `secret` trait to the `helmrelease`,
+after its authored traits and after the values ConfigMap's trait. The trait's
+Secret holds the tree under the key `values.json`, serialized as the values
+ConfigMap's is, and is named `<component>-secret-values-<first 10 hex digits of
+the sha256 of those bytes>`, shortened past 253 bytes by the same rule
+(`oam.ShortenNameWithSuffix`). A `valuesFrom` entry `{kind: Secret, name: <it>,
+valuesKey: values.json}` is placed after the values ConfigMap's entry and before
+the authored entries, so the order is: values ConfigMap, values Secret,
+authored. No value of `secretValues` is written to the HelmRelease or to the
+values ConfigMap. Being an ordinary `secret` trait, it is checked by that trait
+(the 1 MiB limit), labelled `app: <label value>`, emitted after the HelmRelease,
+and moved with the release into the Flux namespace. A change in `secretValues`
+renames the Secret and so changes the HelmRelease, which is what makes Flux
+upgrade the release at once (under this default name; see `valuesSecretName`
+above).
 
-  **Breaking output change** (go-kure/launcher#988): under a Flux namespace every
-  HelmRelease that authors no `storageNamespace` gains `spec.storageNamespace`. Left unset,
-  helm-controller kept the release's Helm storage in the Flux namespace, where the
-  HelmRelease sits. Where such a release is already installed, helm-controller reads the
-  changed storage namespace as a changed release target: it uninstalls the existing release
-  from the old storage namespace and installs it again in the new one (its
-  `ReleaseTargetChanged` check), so the release's objects are deleted and recreated and its
-  history starts over. To keep an installed release in place, author `storageNamespace` as
-  the Flux namespace on a `helmrelease` component. Output without a Flux namespace is
-  unchanged.
+*Under `delivery: template`* the tree is passed to the `helmtemplate`, which
+merges it over `values` for the render (see **helmtemplate**). Nothing is
+emitted for it: a value is in the output only where the chart renders it.
 
-  **Values in a ConfigMap.** The HelmRelease is the only object `helmrelease` emits.
-  Until go-kure/launcher#702 it took a launcher-owned `valuesMode: configMap` and emitted
-  the values ConfigMap itself; that key is gone (see **Decoding**). The `helm`
-  component's `valuesMode: configMap` produces the same ConfigMap through a `configmap`
-  trait (see **helm**), and on a `helmrelease` authored directly the same result is a
-  `configmap` trait plus a `valuesFrom` entry naming it.
+An inline source also emits the source: a `helmrepository` with only the URL for
+`http(s)://`, or an `ocirepository` with `ref.tag: <version>` for `oci://`.
+**`source.digest`** pins an inline `oci://` chart to a manifest digest,
+`sha256:` followed by 64 lowercase hex digits: the `ocirepository` gets it as
+`ref.digest`, beside `ref.tag` when `version` is set and alone without it, and
+Flux then pulls by digest, so a tag pushed again upstream does not change what
+the cluster installs. It is valid only with an inline OCI source (an `oci://`
+`url`, `kind` unset or `OCIRepository`). A Git repository needs `kind:
+GitRepository` set (an `http(s)://` URL alone means a Helm repository) and emits
+a `gitrepository` with the URL (`http://` or `https://`) and `source.ref`, which
+must set exactly one of `branch`, `tag`, `semver`, `name`, `commit`: Flux would
+otherwise check out branch `master`, or pick one of several fields by
+precedence. The schema publishes the rule as an `exclusive` group on
+`source.ref`, and a field authored as an empty string beside a set one counts as
+a second field. `kind: Bucket` with `endpoint` and `bucketName` (and optionally
+`provider`, `region`, `prefix`), and no `url`, emits a `bucket` with exactly
+those keys. Credentials (`secretRef` and the like) have no inline form: author
+the `gitrepository` or `bucket` component and reference it. That includes every
+`ssh://` repository, which Flux reads only with a key from `secretRef`. The
+`ocirepository` also selects the Helm chart content layer
+(`application/vnd.cncf.helm.chart.content.v1.tar+gzip`) with `operation: copy`.
+Flux therefore passes the chart archive through unchanged. By default it would
+extract and re-archive the chart, dropping files that its ignore rules exclude
+(`*.zip`, `*.png`, ...) even when the chart reads them with `.Files.Get`. It is
+named `<document>-source-<digest>`, where the 10-hex digest is taken over the
+content identity: `helm:<url>`, `oci:<url>:<version>`, with a digest
+`oci-digest:<JSON of url, version and digest>`, `git:<JSON of url and ref>`, or
+`bucket:<JSON of provider, endpoint, bucketName, region, prefix>` (JSON, so a
+`:` inside a URL or endpoint cannot make two identities collide). Two components
+with one OCI URL and version therefore share a source only when their digests
+are equal. Components of one document with the same identity share one source;
+the first emits it and the rest only reference it
+(`LoweringContext.ResolveSharedName`). Different documents never share or
+collide, because the document name is part of the source name. The source
+carries no traits and keeps its terminal's interval default rather than the
+release `interval`. The source terminal's registry allowlist (`ApplyPolicy`)
+applies to it.
+
+**Naming the generated source**. The name is resolved in the one order of every
+generated name: the author's `source.name`, else the consumer's `Naming` hook,
+else the default above.
+
+- *The hook* is asked under role `helm-source`, once for each source identity of
+  a document, with the default `<document>-source-<digest>` and no component,
+  since the source belongs to the document: every component of that identity
+  that names no source adopts the answer.
+- *`source.name` beside an inline source* names the source that component
+  generates. The name is the component's own choice. Components that write the
+  same name for the same identity share one source; a component that writes none
+  does not share it, and gets the document's source beside it (two sources of
+  one identity), unless the name written is that source's own (its default, or
+  the hook's answer): one name for one identity is one source. One name for two
+  identities, or for two kinds, is refused as a collision naming both
+  components, and so is a hook answer that gives two identities one name.
+- A name from the author or the hook is used as written: it must be a DNS-1123
+  subdomain of at most 253 characters and is refused otherwise, never shortened.
+- *The source cannot take the name of a component.* It is a component of the
+  lowered document itself, so `source.name` equal to the component's own name,
+  or to the name of another component the document holds, is refused (`helm:
+  source.name "web" is the component's own name; the generated source is a
+  component of the document too, so give it another name`). The default and a
+  hook answer are held to the same rule (`helm: the generated source would be
+  named "shop-source-…", the name of a helmrepository component of the document;
+  … so rename that component, name the source with source.name, or have the
+  Naming hook return another name for role "helm-source"`). To give a
+  HelmRepository and its HelmRelease one name, author the `helmrepository`
+  component with `objectName` and reference it.
+- The source lands beside the HelmRelease, in the Flux namespace when one is
+  set. Its name is held there against every other object of its kind launcher
+  names; an object of the same name and kind in the application namespace is
+  another object.
+- `source.name` alone, with no inline source, references an existing source as
+  before, and `source.namespace` belongs to that form only.
+
+**Breaking**. A `helm` component with both `source.url` and `source.name` was
+refused and builds now, under `delivery: flux`. The refusal of
+`source.namespace` beside an inline source reads `helm: source.namespace is only
+valid with a reference to an existing source (source.name and no inline source);
+a generated source is created beside the HelmRelease`. An authored component
+that already has the name a generated source would take by default was refused
+by `pkg/oam` as a duplicate component name, and is now refused by the rule with
+the message above.
+
+**The generated source is applied with the application bundle, ahead of every
+group**. The rule orders the release after the source it generates or adopts
+(`Component.OrderAfter`), and `pkg/oam` puts such a source among the application
+bundle's own applications, beside the ordered groups. A source several releases
+share therefore exists once and precedes all of them, whatever tier a release is
+placed in. A `placement` policy or tier annotation naming the generated source,
+and a `dependency` rule making it wait on a component, fail the build. A source
+the component references by `source.name` is the author's own component and the
+rule orders nothing after it.
+
+`delivery: template` emits a `helmtemplate` with the URL, its resolved kind,
+`chart`, `version`, `values`, `secretValues`, `scopeOverrides` and an authored
+`releaseName`, which the `helmtemplate` checks and, when unset, defaults to the
+component name, the release name the `delivery: flux` HelmRelease carries too
+(see **helmrelease**). An authored `hookGroupNamePrefix` is passed on as written
+and is the `helmtemplate`'s; under `delivery: flux` it is refused with a `helm:`
+message, since a HelmRelease installs the chart, no hook-group layout exists and
+the prefix would name nothing. An authored `layoutKustomizationName` is passed
+on and refused the same way: under `delivery: flux` the component has no layout
+of its own. No source is emitted, and an authored `valuesMode: inline` is
+dropped. The rule refuses everything a client-side render cannot honour, each
+with a `helm:` message:
+
+- a source reference, and `valuesMode: configMap`;
+- `source.name` beside an inline source, `valuesConfigMapName`,
+  `valuesSecretName` and `helmReleaseName`: the render generates no source, no
+  values ConfigMap, no values Secret and no HelmRelease, so each would name
+  nothing;
+- an inline GitRepository or Bucket source, since the render fetches only from a
+  Helm or OCI repository;
+- an OCI source without `version`;
+- `source.digest`: the render fetches the chart by `version` and does not pin it
+  to a digest, and only the `ocirepository` that `delivery: flux` generates
+  reads it;
+- every other HelmRelease key (`interval`, `targetNamespace`, `driftDetection`,
+  `install`, `upgrade`, `valuesFrom`), which `helmtemplate` does not accept.
+
+### Validation
+
+A property that names nothing is refused: `valuesConfigMapName` without
+`valuesMode: configMap` or with empty `values`, `valuesSecretName` with empty or
+absent `secretValues`, and either under `delivery: template`, which generates
+neither object. Two components of one document cannot write the same name for
+the same kind: each generates its own object, and the second is refused (`helm:
+naming the values ConfigMap: name collision: ConfigMap "shared" is named by
+component "a" (role "values-configmap", set by valuesConfigMapName) and by
+component "b" (…); give one of them another name`).
+
+*A path set in both `values` and `secretValues` is refused*, under either
+delivery and either values mode: `helm: auth.password is set in both values and
+secretValues; a path may be set in only one of them`. Two objects at the same
+key are compared key by key; anything else at a key both trees set (a scalar, a
+list, a null, and a nil map a Go caller passes, which is a null) is a shared
+path. Under `delivery: template` the two trees are compared as they are, without
+a JSON round trip, since the render takes the values with their Go types: an
+object is a `map[string]any`, which is all a parsed document holds, and a map of
+another type a Go caller passes (`map[string]string`) at a key both trees set is
+a shared path too. An empty key is a key like any other and is written `""` in
+the message. Without the refusal the winner would depend on the values mode,
+since Flux applies inline `spec.values` after every `valuesFrom` entry.
+
+*A key named `global` below the top level of `secretValues` is refused*, under
+either delivery and either values mode, before anything is rendered or emitted:
+`helm: secretValues: redis.global: a key named global is allowed only at the top
+level, …`. Helm reads `<dependency>.global` as that dependency's globals. Where
+their shape conflicts with the chart's own `global` at a key, a table on one
+side and a plain value on the other, it drops the dependency's entry and prints
+it in a warning that cannot be intercepted: in the build's log under `delivery:
+template`, in the Flux controller's under `delivery: flux`. Launcher does not
+read the chart, so it cannot tell a dependency from any other key: a key named
+`global` below the top level that is not a dependency's globals cannot be given
+through `secretValues` either, only through `values`. Put a sensitive global
+under the top-level `global`, which every dependency receives and Helm does not
+print. The tree is searched as JSON, through objects only: a key in a list
+element is not refused. The message names the path by its keys and no value.
+
+*Policy.* A policy that forbids explicit secrets (`oam.ExplicitSecretPolicy`,
+see the `pkg/oam` README) refuses a component with `secretValues`, under either
+delivery, with a violation naming the component. A policy that does not
+implement that optional interface allows it.
+
+*No refusal of the property repeats a value.* It names `secretValues`, a path by
+its keys, or the type of a wrong value, and never wraps an encoding or decoding
+error, which could quote one. Under `delivery: template` an error about an
+object the chart rendered is another matter (see **helmtemplate**, "not
+covered").
+
+**Security note.** `secretValues` keeps sensitive values out of the HelmRelease
+and the values ConfigMap. It does not encrypt them. The generated Secret is in
+the build output in clear form (`data` is base64, an encoding): the output is
+exactly as sensitive as the input document, and so is every place it is written
+to, a Git repository or an OCI artifact included. Encrypting it is the
+consumer's business (SOPS or the like, on the written manifests). The Secret's
+name, and the HelmRelease naming it, carry 40 bits of a digest of the tree, so
+whoever reads either can test a guess of the whole tree against it. To keep a
+value out of the document and the output altogether, create the Secret out of
+band (an `external-secret` trait, a sealed or externally managed Secret) and
+name it in `valuesFrom`, or use the chart's own existing-secret values.
+
+Strict, unlike the removed `helmchart` composite. An undeclared key at the top
+level or inside `source` is refused, and so are:
+
+- `delivery: native`;
+- `source.namespace` with an inline source;
+- an inline HelmRepository or OCIRepository URL carrying a user or password
+  (`https://user:token@host`, `oci://user@registry/chart`), under either
+  delivery: the URL is copied verbatim into the generated source or the render,
+  so the credential would sit in plain text in the output. Credentials go in the
+  `secretRef` of an authored `helmrepository` or `ocirepository`, referenced
+  with `source.name`; a client-side render takes none. No message repeats the
+  URL, not even the refusal of one that does not parse;
+- an inline GitRepository without exactly one `source.ref` field, or with a URL
+  that is not `http://` or `https://` (an `ssh://` one needs credentials), or
+  one that is more or less than a host, an optional port and a repository path
+  (user info, a query or a fragment is refused), or whose port is outside
+  1–65535;
+- `url` with an inline Bucket, or one without `endpoint` or `bucketName`, or an
+  `endpoint` that is more than a `host[:port]` or an `https://` URL of a host
+  and port (user info, a path, a query, a fragment or `http://` is refused: a
+  non-TLS endpoint needs `insecure: true`, which only an authored `bucket`
+  takes) or whose port is outside 1–65535, or a `provider` other than `generic`,
+  `aws`, `gcp` or `azure` (checked at the helm rule; the `bucket` terminal
+  leaves it to the CRD);
+- `source.ref` other than on an inline GitRepository, and `endpoint`,
+  `bucketName`, `provider`, `region`, `prefix` other than on an inline Bucket;
+- `source.digest` other than on an inline OCI source (a HelmRepository,
+  GitRepository or Bucket source has no manifest digest, and a referenced source
+  pins its own), or other than `sha256:` followed by 64 lowercase hex digits;
+- `chart` with an OCIRepository or HelmChart source;
+- `version` with a referenced OCIRepository or HelmChart source, which pins its
+  own;
+- `version` with a GitRepository or Bucket source: Flux reads that chart at the
+  source's fetched revision and ignores `version`;
+- two keys equal ignoring case, at the top level or inside `source` (`chart` and
+  `Chart`): the decode would match both to one field and keep either.
+
+An authored component already named like a generated source fails the build: the
+rule refuses it when the document holds that component as the rule runs (see
+**Naming the generated source**), and `pkg/oam` refuses it as a duplicate
+component name when another rule emits it in the same lowering round.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/helm-repository/app.yaml`, built
+against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The
+fixture test compares the two.
+
+## helmchart
+
+`helmchart` is the kind-named terminal for Flux's `HelmChart`: see
+**helmrepository / ocirepository / gitrepository / bucket / helmchart**.
+
+### Properties
+
+Until go-kure/launcher#350 the name belonged to a role-level composite (a
+HelmRelease plus its source, or a client-side render), which is gone; use
+`helm`.
+
+### Outputs
+
+To migrate, change `type: helmchart` to `type: helm` and rename `delivery:
+native` to `delivery: flux`; the other properties keep their names. The output
+then changes only as this table says.
+
+| # | What changes with `helm` |
+|---|---|
+| 1 | The values ConfigMap name carries a values hash. |
+| 2 | A generated source is named `<app>-source-<digest>`, not after the component. |
+| 3 | *(void)* `oci` and Helm-over-OCI components: neither shares an OCIRepository with the other. |
+| 4 | The delivery value `native` is `flux`. |
+| 5 | *(void)* `targetNamespace` under a Flux namespace: both default it to the application namespace. |
+| 6 | A generated source keeps its terminal's default interval, not the release interval. |
+| 7 | No registration-time `valuesMode` default; `valuesMode` is never forwarded (under `configMap` the values become a `configmap` trait). |
+| 8 | *(void)* Generated sources: neither gets an automatic health check; launcher sets none. |
+| 9 | The registry allowlist applies to inline sources. |
+| 10 | Generated sources are applied with the application bundle, ahead of every group. A tier annotation on the component places only its release. |
+| 11 | Template delivery refuses `targetNamespace`, and an unset `releaseName` renders under the component name, shortened as Flux shortens a release name, instead of `release`. |
+| 12 | `chart` is refused with an OCIRepository or HelmChart source. |
+| 13 | `version` is refused with a referenced OCIRepository or HelmChart source. |
+| 14 | `source.namespace` is refused together with `url`. |
+| 15 | Unknown keys are refused at any depth of `source`, and so are two keys that differ only in case. |
+| 16 | *(void)* A generated OCIRepository: both set `layerSelector` (the chart content layer, `copy`). |
+| 17 | `placement` may not place a generated source in any tier, and a `dependency` rule may not make it wait. |
+| 18 | Any other `helmchart` default or build-time check a terminal does not reproduce (strict decoding). |
+| 19 | The HelmRelease carries the component label and a post-renderer that sets it on the chart's pod templates, as every component's output does. |
+| 20 | Every HelmRelease carries `spec.releaseName`: the authored value, else the component name, where `helmchart` left an unset one to Flux. |
+
+Two `helmchart` behaviours have no `helm` counterpart beyond row 18:
+`valuesMode: configMap` no longer makes the component a `LayoutAugmenter` (the
+values ConfigMap comes from a `configmap` trait on the `helmrelease`, ordinary
+build output, so `kurel build` accepts it and a layout-walking consumer no
+longer moves the component into a sub-layout), and under `delivery: template`
+the render's `.Release.Namespace` can no longer be authored (row 11; see
+**helmtemplate**).
+
+### Validation
+
+A document written for the composite fails validation on a key `HelmChartSpec`
+does not declare. When that key is one of the composite's own that
+`HelmChartSpec` lacks (`delivery`, `releaseName`, `targetNamespace`, `source`,
+`values`, `valuesMode`, `driftDetection`, `install`, `upgrade`, `valuesFrom`),
+the error adds a pointer to `helm`; any other unknown key gets the plain error.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/flux-sources/app.yaml`, built against
+the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+test compares the two.
+
+## helmrelease
+
+`helmrelease` is the kind-named terminal for Flux's `HelmRelease`.
+
+### Properties
+
+Its properties are exactly the top-level JSON keys of `HelmReleaseSpec` in the
+helm-controller API version `go.mod` links; a test ties the published schema to
+that struct, so a helm-controller bump that adds or drops a spec field fails the
+suite until the schema follows.
+
+**Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON`
+into `HelmReleaseSpec`. A key the struct does not declare, at any depth
+(`chart.spec.chartVersion`, a stray key inside a `valuesFrom` entry), is refused
+by name, and so is a wrongly typed value (`suspend: "yes"`, `maxHistory: "3"`,
+an unparsable duration). The schema keeps the nested Flux blocks as open
+objects; the strict decode is what checks them. `valuesMode` is refused like any
+other unknown key; the error adds a pointer to the `helm` component's
+`valuesMode: configMap`, or a `configmap` trait plus a `valuesFrom` entry, which
+replace it. Known gap, inherited from the decoder: inside a type with its own
+`UnmarshalJSON` unknown keys are not refused — `values` is the case that
+matters, and it is open by design. Keys match case-insensitively, as in
+`encoding/json`; schema validation, which a `kurel build` runs first, is exact.
+
+### Outputs
+
+It emits no source object: `chart.spec.sourceRef` or `chartRef` names one that
+already exists, and with `chart.kind: OCIRepository` helm-controller generates
+one (see **Chart template of kind OCIRepository**).
+
+**Generated HelmChart**. With a chart template of kind HelmChart,
+helm-controller generates the HelmChart `<namespace>-<name>`, named after the
+HelmRelease, in the namespace `chart.spec.sourceRef` names, else in the
+HelmRelease's, takes over an object of that name and deletes it with the
+HelmRelease, when the kind, name or namespace of the chart source it generates
+changes, or when the release switches to `chartRef`. So a `helmchart` component,
+or any other HelmChart the build generates, of that identity is refused as a
+collision naming helm-controller's claim, as for kind OCIRepository. A
+`chartRef` claims nothing.
+
+**Release name**. A component that authors no `releaseName` gets
+`spec.releaseName` set to the component name, so every HelmRelease in the output
+names its release. A name over 53 characters, Helm's limit, is shortened as Flux
+helm-controller shortens a release name — its first 40 characters, `-`, and the
+first 12 hex digits of the SHA-256 of the whole name (`oam.ShortenName` at
+`oam.ShortenLimitHelmRelease`) — so the written name is the one Flux would
+shorten the component name to itself. An authored `releaseName` is written as it
+is, never shortened. `helmtemplate` renders under the same default, so a `helm`
+component releases its chart under one name with `delivery: flux`, with or
+without a Flux namespace, and with `delivery: template`. A default Helm would
+not install under is a build error with the remedy to set `releaseName`: the
+shortening can cut a dotted name just after a `.`, leaving a label that starts
+with `-`. The check runs again in `Generate`, where a `HelmReleaseConfig` built
+directly with neither a `Name` nor a `releaseName` is refused as well: it has
+nothing to derive a default from.
+
+**Breaking output change**: every HelmRelease gains `spec.releaseName`. Left
+unset, Flux names a release `<targetNamespace>-<name>` when
+`spec.targetNamespace` is set and `<name>` otherwise, so the release name itself
+changes wherever a target namespace is set and no `releaseName` is authored:
+under a Flux namespace, which defaults one (below), and with an authored
+`targetNamespace` alone. There the release `shop-web` of a component `web` with
+target namespace `shop` becomes `web`. Flux does not rename a release that is
+already installed: it uninstalls the existing release and installs a new one
+under the new name (the warning on `.spec.releaseName` in Flux's HelmRelease
+reference). To keep the installed release, author its name as `releaseName` on
+such a component: `<targetNamespace>-<name>`, or, where that is over 53
+characters, the shortened name Flux installed it under (its first 40 characters,
+`-`, 12 hex digits of its SHA-256; the `name` of an entry in the HelmRelease's
+`status.history`). The long form is not accepted there: the HelmRelease CRD
+limits `releaseName` to 53 characters. Without a target namespace the name stays
+`<name>` and only the field is new.
+
+**Identity and namespaces.** The HelmRelease is named after the component and
+lands in the Flux namespace when one is configured, else in the application
+namespace (`SetFluxNamespace`). Under a Flux namespace, a component that does
+not author `targetNamespace` gets `spec.targetNamespace` set to the application
+namespace, so the release still installs there rather than into the Flux
+namespace; an authored value wins. The release's Helm storage follows the
+release: a component that does not author `storageNamespace` gets
+`spec.storageNamespace` set to the effective target namespace, authored or
+defaulted, so the `sh.helm.release.v1.*` Secrets, which hold the rendered
+manifests and the merged values, stay with the release rather than collect in
+the Flux namespace; an authored value wins. Without a Flux namespace neither is
+set, and helm-controller keeps the storage in the HelmRelease's own namespace,
+the application namespace. A `helm` component takes no `storageNamespace`, so
+its release always gets the default. The Kustomization `oci` emits has no such
+default, deliberately: a HelmRelease's `targetNamespace` only says where the
+release installs, while a Kustomization's overrides the namespace of every
+namespaced object in the artifact (see `oci`). The ConfigMaps and Secrets the
+HelmRelease reads from its own namespace — `valuesFrom`, `kubeConfig.secretRef`
+/ `configMapRef`, and `chart.spec.verify.secretRef` when helm-controller creates
+the HelmChart beside the release (`chart.spec.sourceRef` names no namespace, or
+names the Flux namespace), and under `chart.kind: OCIRepository` the
+`chart.spec.secretRef`, `certSecretRef`, `proxySecretRef`, `verify.secretRef`
+and `verify.trustedRootSecretRef` of the OCIRepository it generates beside the
+release — must live in the Flux namespace too. A `configmap`, `external-secret`
+or `certificate` trait on the component whose object one of them names moves
+there with the release; one none of them names stays in the application
+namespace with the release's workloads. A trait ConfigMap named in `valuesFrom`
+therefore leaves the application namespace even when the chart's pods read it
+too; give the pods their own copy, under another name, if they need it.
+*Required reads*: the HelmRelease cannot become Ready without each of those but
+a `valuesFrom` entry marked `optional: true`, and of an OCIRepository chart
+template the `verify.trustedRootSecretRef` only under the `cosign` provider; a
+suspended release (`suspend: true`) requires none. Under a delivery whose groups
+wait for their Flux objects, a trait on a component of a later group that makes
+one is refused, and so is a component of a later group that makes one where the
+release lands. So is a component of a later group making the source the
+`chartRef` or a chart template of kind `HelmChart` names, in the reference's
+namespace or else the release's. The target namespace does not reach the release
+name: `spec.releaseName` is always set (see **Release name**), so Flux does not
+derive `<targetNamespace>-<name>`. Author `releaseName` when a specific release
+name matters — for instance when taking over a release installed under another
+name.
+
+**Breaking output change**: under a Flux namespace every HelmRelease that
+authors no `storageNamespace` gains `spec.storageNamespace`. Left unset,
+helm-controller kept the release's Helm storage in the Flux namespace, where the
+HelmRelease sits. Where such a release is already installed, helm-controller
+reads the changed storage namespace as a changed release target: it uninstalls
+the existing release from the old storage namespace and installs it again in the
+new one (its `ReleaseTargetChanged` check), so the release's objects are deleted
+and recreated and its history starts over. To keep an installed release in
+place, author `storageNamespace` as the Flux namespace on a `helmrelease`
+component. Output without a Flux namespace is unchanged.
+
+**Values in a ConfigMap.** The HelmRelease is the only object `helmrelease`
+emits. Until go-kure/launcher#702 it took a launcher-owned `valuesMode:
+configMap` and emitted the values ConfigMap itself; that key is gone (see
+**Decoding**). The `helm` component's `valuesMode: configMap` produces the same
+ConfigMap through a `configmap` trait (see **helm**), and on a `helmrelease`
+authored directly the same result is a `configmap` trait plus a `valuesFrom`
+entry naming it.
+
+### Validation
+
+**Defaults and checks.** `interval` defaults to `60m` when unset (a zero
+duration counts as unset); Flux requires the field. A set `interval` must be a
+duration Flux accepts (`oci` applies the same check). The CRDs require
+`^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$`: unsigned, in `ms`, `s`, `m` or `h` (`10m`,
+`1h30m`, `1.5h`). `time.ParseDuration` alone would also accept `-5m` or `500us`,
+which would fail at apply time; both are build errors. The value is emitted as a
+`metav1.Duration`, which serializes `Duration.String()` rather than the authored
+text, so that form is checked too: `0.5ms` matches the pattern but is written as
+`500µs`, and is refused as below Flux's millisecond resolution. A positive value
+too small for the duration type (`0.0000000001ms`) is refused the same way
+rather than emitted as `0s`. In practice any value of `0s` or at least `1ms` is
+accepted. The check runs on the authored text, which also refuses a positive
+value that would decode to zero and be replaced by the default, and again in
+`Generate` on the decoded duration's emitted form, for a config built directly.
+Its other duration fields are checked the same way, in the same form: `timeout`,
+`chart.spec.interval`, `install.timeout`, `upgrade.timeout`, `test.timeout`,
+`rollback.timeout`, `uninstall.timeout`, and `install.strategy.retryInterval`
+and `upgrade.strategy.retryInterval`. `chart.spec.timeout`, read only under
+`chart.kind: OCIRepository`, takes no `h`, as an `ocirepository`'s timeout does
+not, and must be under an hour (see **Chart template of kind OCIRepository**). A
+nested key matches case-insensitively at every level, as the decode does.
+Exactly one of `chart` and `chartRef` is required. The published schema lists
+both as optional and says so in the handler's `exclusive` group: a validator
+built from it refuses both and neither, as the build does. The template's `kind`
+is HelmChart, its default, or OCIRepository (see **Chart template of kind
+OCIRepository**); any other is refused. Under an authored `chart` of kind
+HelmChart, `chart.spec.sourceRef.kind` is required: the API requires it and
+takes `HelmRepository`, `GitRepository` or `Bucket`, the Go type leaves an empty
+one out of the object, and the kind does not choose a source's kind for the
+author, so a reference without one is refused with `chart.spec.sourceRef.kind:
+required (…)`. Which of the three it is stays the CRD's to check. A template of
+kind HelmChart without `chart.spec.sourceRef`, or without `chart.spec.chart`, is
+refused the same way: the API's rules require both for that kind. So, under kind
+HelmChart, are the OCIRepository fields the template inlines, which that kind
+does not read, whatever their value (`false` and `null` included): `url`, `ref`,
+`layerSelector`, `provider`, `secretRef`, `serviceAccountName`, `certSecretRef`,
+`proxySecretRef`, `timeout`, `ignore`, `insecure`, `suspend`, and
+`verify.matchOIDCIdentity` and `verify.trustedRootSecretRef`; a source's own
+settings go on the source `sourceRef` names. An authored `chart.spec.verify`
+that names no `provider` is written with `provider: cosign`, the API's default:
+the Go type writes the field whether or not it was authored, so the API's
+default never applies, and the object is then what the API would have made of
+the omitted field. An authored `provider: ""` is refused, since the type cannot
+tell it from an unauthored one and the API's enum (`cosign`, `notation`) refuses
+it as written. Two spellings of one key on the way (`Provider` and `provider`)
+are refused, since the decode keeps one value and drops the other.
+`TestKindComponents_OmittedRequiredAndWrittenDefaults` holds both to the markers
+in the source of the linked Flux modules, which ship no CRD: the required field
+to a refusal shown on a document, and the written value to the default the
+marker states, so an upstream change of that default fails the test. "Required"
+there is what the markers say; no API server was asked. `values` must be a JSON
+object; a non-finite number (`.nan`, `.inf`) is a build error, never a panic.
+Each `valuesFrom` entry is held to the `ValuesReference` CRD's own constraints,
+and a violation is a build error naming the entry's index: `kind` is `Secret` or
+`ConfigMap`, exactly as Flux's enum spells them; `name` is required and at most
+253 characters; a set `valuesKey` is at most 253 characters and matches
+`^[\-._a-zA-Z0-9]+$`; a set `targetPath` is at most 250 characters and matches
+the CRD's pattern (dot-path characters, `\`, `/`, and `[n]` indexes of up to
+five digits). Lengths count characters, as the CRD's `maxLength` does, not
+bytes. Like the other checks these run again in `Generate`, and they cover the
+`valuesFrom` a `helm` component passes through. **Every other required field the
+type writes unauthored is refused too**, where it is left out under a parent
+that is authored: the `name` of a `dependsOn` entry, of `chartRef` (with its
+`kind`), of a Secret or ConfigMap reference (`kubeConfig`, the chart template's
+`secretRef`, `certSecretRef`, `proxySecretRef` and its `verify` references), of
+an install, upgrade or wait `strategy` and of a test filter; a
+`verify.matchOIDCIdentity` entry's `issuer` and `subject`; a drift ignore rule's
+`paths`; a post-renderer's patch and image `name`; a health check expression's
+`apiVersion` and `current` (`dependsOn[0].name: required (the Flux API requires
+the name of what this refers to)`). The list is generated from the markers of
+the linked helm-controller module (see ["Required fields a kind writes
+unauthored and does not
+refuse"](conventions.md#required-fields-a-kind-writes-unauthored-and-does-not-refuse))
+and runs after the checks above, so `chart.spec` and a `valuesFrom` entry's
+`kind` and `name` keep their words. Nothing else is checked here: the enum
+checks on `driftDetection.mode`, `install.crds` and `upgrade.crds` are left to
+the HelmRelease CRD's own admission, and so are the limits of an authored
+`releaseName`.
+
+**Chart template of kind OCIRepository**. With `chart.kind: OCIRepository`,
+helm-controller generates an OCIRepository for the chart artifact
+`chart.spec.url` names. The component holds the template to the Flux API's rules
+for that kind (helm-controller API v1.7.1): `chart.spec.url` is required and
+starts with `oci://`, and carries no user or password, which it would write in
+plain text into the HelmRelease (put the registry credential in a Secret named
+by `chart.spec.secretRef`); `chart`, `sourceRef`, `valuesFiles` and
+`ignoreMissingValuesFiles` are refused; `version` takes only `*` and
+`reconcileStrategy` only `ChartVersion`, since the chart's version is the tag or
+digest `chart.spec.ref` names. The OCIRepository fields the template inlines,
+refused under kind HelmChart (above), are taken and written as authored. Under a
+non-empty allowlist `chart.spec.url` is held to the allowed registries as an
+`ocirepository`'s `url` is: its registry named explicitly, with a repository
+path after it. `chart.spec.timeout` takes no `h` and must be under an hour:
+helm-controller writes the OCIRepository it generates through the unstructured
+converter, which writes a duration of an hour or more with an `h`, and the
+OCIRepository's timeout refuses that whatever form it was authored in. For a
+longer timeout, use an `ocirepository` component and a `chartRef` to it.
+helm-controller names the OCIRepository `<namespace>-<name>` after the
+HelmRelease, in the HelmRelease's namespace, gives it the template's interval
+(else the HelmRelease's) and, when the template sets no
+`chart.spec.layerSelector`, the chart layer as its layer selector (an authored
+one is kept), takes over an object of that name and deletes it with the
+HelmRelease, when the kind, name or namespace of the chart source it generates
+changes, or when the release switches to `chartRef`. So an object of that
+identity the build generates is refused as a collision (see the collision
+contract in `pkg/oam`'s README). Prefer an `ocirepository` component and a
+`chartRef` when several releases share the source or it is authored on its own.
+
+**Name of the generated chart source**. With a chart template of either kind,
+helm-controller labels the source it generates with the HelmRelease's name as
+the `helm.toolkit.fluxcd.io/name` owner label (helm-controller v1.7.1
+`internal/reconcile/helmchart_template.go:147`), and names it
+`<namespace>-<name>` after the HelmRelease's own namespace and name: a
+`chart.spec.sourceRef.namespace` moves the HelmChart, never its name
+(`oam.GeneratedChartSource`). A label value is at most 63 characters and a name
+at most 253, and a source helm-controller cannot apply leaves the HelmRelease
+never reconciled. So `Generate` refuses a HelmRelease name over 63 characters,
+whether from the component name or from `objectName`, and a `<namespace>-<name>`
+over 253, the namespace being the HelmRelease's after the move to the Flux
+namespace. The remedy is a shorter name, or a `chartRef` to an authored source,
+which is not held. A component's namespace is a DNS label, so with the name held
+to 63 only a `HelmReleaseConfig` built directly with a longer `Namespace`
+reaches the 253 limit. This is a new build refusal for a document of kind
+HelmChart, the default, whose component or object name is over 63 characters,
+and for a `helm` component with a HelmRepository, GitRepository or Bucket source
+whose HelmRelease name is: such a HelmRelease never reconciled.
+
+### Example
+
+The component in
+`pkg/cmd/kurel/testdata/helmrelease-oci-chart-component/app.yaml`, built against
+the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+test compares the two.
+
+## Kinds not yet in sections
+
+The kinds below are not yet in these sections.
+
 - **helmtemplate** — the kind-named terminal for a client-side Helm render
   (go-kure/launcher#348, part of the Helm-family redesign go-kure/launcher#336), and what the
   role-named `helm` rule lowers to under `delivery: template`.
