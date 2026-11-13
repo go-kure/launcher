@@ -13,8 +13,10 @@ This release step covers the format, the CEL environment and the evaluation of o
 `Compiled.Eval` runs one of them. `Compiled.Expand` builds the components of the parts and binds the
 outputs that a later part reads. `model.Registry` registers a model as a component type, and its rule
 lowers a component of that type into the parts. The emit hook and the limits of a whole build are
-in. The capability check on the traits of a model and the hostile corpus arrive in later steps of
-go-kure/launcher#1261. A document that loads today keeps its meaning then.
+in. A trait a model writes on a part is resolved like an authored one: `Rule` implements
+`oam.AuthoredTraitEmitter`, so the engine merges the capability rendering into it, refuses a
+missing binding and a platform-reserved value, and records the consumed capability. The hostile
+corpus arrives in a later step of go-kure/launcher#1261. A document that loads today keeps its meaning then.
 
 ## Document
 

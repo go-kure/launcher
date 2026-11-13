@@ -1645,6 +1645,29 @@ func (t *Transformer) validateEmittedTrait(trait *Trait) error {
 	return nil
 }
 
+// validateEmittedAuthoredTrait is validateEmittedTrait for a trait that goes on as an
+// authored one (markNestedTraits with seal false): it is the authored check itself,
+// validateAuthoredTraitAt, under the profile's bindings. Its Required keys, its
+// required exclusive groups and its engine-owned keys are judged as an authored
+// trait's are, and Required is checked on the properties as a matching binding would
+// merge them (go-kure/launcher#765, go-kure/launcher#1463), here at emission as well
+// as in applyTraits and the lowering fixpoint: a later rule that consumes the trait
+// leaves those two with nothing to check.
+func (t *Transformer) validateEmittedAuthoredTrait(trait *Trait, capabilities map[string]CapabilityBinding) error {
+	path := fmt.Sprintf("emitted trait %q: properties", trait.Type)
+	// The registered name, as validateEmittedTrait looks the handler up. A copy of the
+	// properties, as validateEmittedAgainst takes: validation normalizes in place, and
+	// the map the rule emitted may be held by other elements too.
+	probe := *trait
+	probe.Type = emittedKey(t.traitTypes, t.isTraitKey, trait.Type)
+	probe.Properties = copyPropertyMap(trait.Properties)
+	if err := t.validateAuthoredTraitAt(&probe, capabilities, path); err != nil {
+		return err
+	}
+	trait.Properties = probe.Properties
+	return nil
+}
+
 // validateEmittedPolicy is validateEmittedComponent for the policy position: falls
 // back to policyLoweringRules when no terminal handler claims pol.Type, exactly as
 // validateEmittedComponent/validateEmittedTrait already fall back to their own

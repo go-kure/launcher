@@ -133,8 +133,11 @@ type Trait struct {
 	// rule's own deterministic output, so applyTraits must not merge a second
 	// ClusterProfile capability rendering into it — that would make the trait's
 	// output depend on a fifth input the information-closure rule does not allow.
-	// An authored trait is never sealed. Sealing says nothing about whether the
-	// trait's content was checked; Trait.synthesized does.
+	// An authored trait is never sealed, and neither is a trait a component rule
+	// that implements AuthoredTraitEmitter writes by hand: it has merged no
+	// capability rendering, so it goes through the capability steps as authored.
+	// Sealing says nothing about whether the trait's content was checked;
+	// Trait.synthesized does.
 	sealed bool
 	// synthesized marks a sealed trait whose emitting rule's input was checked, the
 	// trait counterpart of Component.synthesized and set under the same rule at each

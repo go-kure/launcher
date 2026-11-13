@@ -95,7 +95,8 @@ needs a new slice, so no element keeps its address. The engine therefore hands e
 unexported forwarding mark (`forwardableTraits`, `Trait.forwardedFrom`), and
 `isForwardedTrait` also accepts a copy that still carries its mark, its type and the
 very same properties map. A copy whose type or properties the rule replaced is the
-rule's own output and is sealed; the mark is cleared once the emission is classified.
+rule's own output and is sealed (unless the rule is an `AuthoredTraitEmitter`, below); the
+mark is cleared once the emission is classified.
 A forwarded trait also keeps the index it had in the slice the rule was handed
 (`Trait.authoredIndex`), because a rule that places its own trait first shifts the
 forwarded ones in its output: the origin it is given afterwards still names its
@@ -176,7 +177,18 @@ currently a no-op in practice. A sealed trait skips the capability merge but not
 unless a lowering rule synthesized it (`Trait.synthesized`), it is checked as it
 stands before a schema-declaring trait rule runs over it and in `applyTraits`
 (go-kure/launcher#611), so a schema-less rule cannot copy an authored reserved value
-into a trait it emits. A component a lowering rule synthesized (`Component.synthesized`,
+into a trait it emits. A component rule that implements `AuthoredTraitEmitter` (a model's
+rule, `pkg/oam/model`) is the exception to sealing: the traits it writes by hand have had no
+capability rendering merged into them, so they get their origin and the emission check but
+stay unsealed and unsynthesized, and the capability merge, the missing-binding refusal, D3 and
+the consumption record apply to them as to an authored trait (go-kure/launcher#1562). D3 runs
+on them at emission, before emission validation strips an explicit null. Their properties are
+then validated as an authored trait's are (`validateAuthoredTraitAt`): the engine-owned `scope`
+key is accepted, a required key that a matching binding supplies is not refused, and one
+nobody supplies is refused at emission, so a later rule that consumes the trait cannot skip the
+check. A top-level exclusive group is held to at most one member, as for an authored trait; its
+"at least one" is not checked here. A
+component a lowering rule synthesized (`Component.synthesized`,
 the counterpart of `Trait.synthesized`) is exempt likewise — only a rule whose input was
 checked synthesizes: a component rule that declares a schema or whose input component is
 synthesized, or a trait rule whose input trait is synthesized or that declares a schema
@@ -257,7 +269,9 @@ because that would introduce a fifth input (a *different* key's capability rende
 chosen by the emitted type rather than the authored one). The fix is the `sealed` field
 (`types.go`): every trait a `TraitLoweringRule` emits is marked `sealed = true`
 (`lowerDocumentBody`, `lowering.go`), and `applyTraits` skips its entire
-capability-processing block for a sealed trait (`transform.go`, `if !trait.sealed`).
+capability-processing block for a sealed trait (`transform.go`, `if !trait.sealed`). A trait a
+component rule writes by hand is sealed likewise, because it is launcher's own output, except
+for an `AuthoredTraitEmitter` rule, whose hand-written traits stay authored.
 `TestExposeRule_SealedGuard_ExtraIngressCapabilityIgnored`
 (`pkg/cmd/kurel/expose_sealed_test.go`) proves the guard does something: it fails when
 the guard is removed (verified by hand) and passes with it in place, confirming a
