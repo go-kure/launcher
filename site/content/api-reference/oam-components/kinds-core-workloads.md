@@ -1339,7 +1339,7 @@ Service name, which must be a DNS-1123 label`);
 digit is accepted at every Kubernetes release: the API validates a StatefulSet's
 `serviceName` as a DNS-1123 label, not as a Service name, and the `statefulset` emits no
 Service, so `spec.kubernetesVersion` does not change it. The governing Service is a
-`service` component's, and that name is checked (`docs/delivery-scope.md` §3.5). `serviceName` defaulted to the
+`service` component's, and that name is checked (`docs/delivery-scope.md` §3.5). Previously `serviceName` defaulted to the
 component name and the component emitted that headless Service itself;
 ["Main container ports"](common-config.md#main-container-ports) has the migration, including why an existing
 StatefulSet must be recreated.
@@ -1379,7 +1379,7 @@ builder-managed, which leaves these three.
 
 ### Properties
 
-`port > 0` added a ClusterIP Service named after
+Previously `port > 0` added a ClusterIP Service named after
 the component, which held the component name to the Service-name rule and an
 ingress `portName` to `http`.
 With no Service, only the container-name rule applies (see
@@ -1753,7 +1753,7 @@ a value of the wrong type". That matches `pkg/oam`'s own
 optional-field helper in `common.go` routes its presence check through
 `authoredValue`, so each JobSpec field shared with `cronjob` that is read
 through one of them reads a null the same way on both kinds, and so does a
-field any other kind reads through one. The change was
+field any other kind reads through one. The change to read an explicit `null` as an omission was
 one-directional — a null that used to be refused is now absence, and nothing
 that parsed before parses differently — so no document that built before
 stopped building.
@@ -1956,7 +1956,7 @@ decodes the object, since the transform applies `NoopPolicy` when no policy is p
 only a config no policy was applied to, one a Go caller builds
 outside the transform, emits the object undecoded, as authored.
 
-**Behaviour change:** a `passthrough` object reached the
+**Behaviour change:** previously a `passthrough` object reached the
 output unchecked. A document that relied on that no longer builds when its object is a
 workload with a privileged container, a host namespace, a hostPath volume, an image
 outside the registry allowlist, an untagged or `:latest` image, or a value over a
@@ -2087,7 +2087,7 @@ array, which is refused with a policy or with none and is no policy violation.
 **Breaking**: the table under `helmtemplate` lists what built
 before and is refused now.
 
-**Behaviour change:** the objects of a `manifests` source reached the output unchecked. A document that relied on that no longer builds when its
+**Behaviour change:** previously the objects of a `manifests` source reached the output unchecked. A document that relied on that no longer builds when its
 source holds a workload with a privileged container, a host namespace, a hostPath
 volume, an image outside the registry allowlist, an untagged or `:latest` image, or a
 value over a maximum, or an object the check cannot read (above) — and with no policy
