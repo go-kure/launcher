@@ -75,3 +75,88 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - before go-kure/launcher#466 it was refused as `must be a string, got <nil>` [it: a
     `nodeSelector` value that is null, such as `rack: null`]
 
+### Container fields
+
+- **History:**
+  - go-kure/launcher#790 (the seven container fields read on every container of a hand-parsed
+    workload kind, and an `initContainers` entry's own `restartPolicy` and
+    `restartPolicyRules`).
+  - go-kure/launcher#1180 (`restartPolicy: Always` makes an init container entry a native
+    sidecar).
+  - go-kure/launcher#1225 (an init container's `ports` read as a `sidecars` entry's are).
+  - go-kure/launcher#1183 (`restartPolicyRules` refused below Kubernetes 1.35, naming the gate
+    and the version).
+  - go-kure/launcher#1230 (the schema names the gate per value (`valueGates`), so `Always` is
+    accepted at every version).
+- **Tests:**
+  - One parser (`parseContainerFields`, `container_fields.go`) and one schema fragment
+    (`schemaContainerFields`) serve the three positions, pinned to each other by
+    `TestContainerFieldsSchemaMatchesParser`. [the three positions: the main container, each
+    `initContainers` entry and each `sidecars` entry]
+
+### Referencing an existing claim (`pvc.claimName`)
+
+- **History:**
+  - go-kure/launcher#702 (a `pvc` volume with `claimName` mounts an existing claim).
+  - go-kure/launcher#787 (the `claimObjectName` of a volume that synthesizes a claim, role
+    `workload-volume-claim`).
+  - go-kure/launcher#746 (an unauthored `storageClass` takes the `storageClassName` of the
+    ClusterProfile `pvc` capability).
+  - go-kure/launcher#761 (a `statefulset` `volumeClaimTemplates` entry takes the same
+    default).
+
+### Raw block volumes (`volumeMode: Block`)
+
+- **History:**
+  - go-kure/launcher#385 (a container consumes a Block claim through `volumeDevices` at a
+    `devicePath`).
+  - go-kure/launcher#790 (the published schema publishes `mountPath` and `devicePath` as two
+    optional keys plus a required `exclusive` group).
+
+### Pod-level properties
+
+- **History:**
+  - go-kure/launcher#342 (the seven kind components share one pod-level property surface,
+    `parsePodSpec`).
+  - go-kure/launcher#1183 (a property whose feature gate is off at the profile's
+    `kubernetesVersion` refused).
+  - go-kure/launcher#1231 (a profile's `spec.featureGates` replaces the release default for a
+    gate it names).
+  - go-kure/launcher#1230 (the gate named per value in the schema (`valueGates`)).
+  - go-kure/launcher#1321 (the `template` of `cnpg-pooler` left open like the raw-PodSpec
+    kinds, its gated paths named in `gatedPaths`).
+  - go-kure/launcher#1245 (a gated path in an open node refused, naming the authored path).
+  - go-kure/launcher#1330 (a gated value refused, naming the authored path and the value).
+  - go-kure/launcher#702 (an unset pod kind names no account and sets
+    `automountServiceAccountToken: false` unless that is authored).
+  - go-kure/launcher#790 (the schema publishes the `resourceClaims` pair `resourceClaimName`
+    and `resourceClaimTemplateName` as an `exclusive` group).
+  - go-kure/launcher#312 (the shared `enforceExtraContainer` helper covers every
+    `initContainers` and `sidecars` entry).
+  - go-kure/launcher#1171 (the `security-context` trait merges into what is authored).
+  - go-kure/launcher#790 made the container `windowsOptions` authorable [the container
+    `windowsOptions`: `securityContext.windowsOptions`]
+
+### Deployment-level properties (`deployment`, `webservice`, `worker`)
+
+- **History:**
+  - go-kure/launcher#343 (the kind-named `deployment` component).
+  - go-kure/launcher#341 (`DeploymentSpec` parsed by `parseDeploymentSpec` into real `appsv1`
+    types, from one fragment all three handlers compose).
+  - go-kure/launcher#1216 (the pod template's `podMetadata` is the same on all three).
+
+#### Main container ports
+
+- **History:**
+  - go-kure/launcher#280 (`deployment` publishes `ports`, the main container's
+    `corev1.ContainerPort` list).
+  - go-kure/launcher#1132 (`deployment`, `statefulset` and `daemonset` implement
+    `oam.EndpointProvider` from the main container's `ports`).
+  - go-kure/launcher#225 (`job`, `cronjob` and `worker` report no endpoint).
+  - go-kure/launcher#334 (`daemonset`, `statefulset`, `job` and `cronjob` publish the same
+    `ports`, with the same entry rules).
+  - go-kure/launcher#343 (`deployment` dropped `port` and the Service it drove).
+  - go-kure/launcher#690 (`daemonset` and `statefulset` drop `port` and the Service it drove
+    (breaking), and replace it with `ports`).
+  - go-kure/launcher#660 (a sidecar port of the same name as a main container port refused).
+
