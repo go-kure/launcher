@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -36,12 +37,21 @@ type Self struct {
 // the loop variable of a forEach part and the outputs of the parts built so far. An input
 // that is absent from Inputs is null. Parts maps a part id to its output keys and the
 // object name of each (`parts.<id>.<key>`); Expand fills it.
+//
+// Ctx stops a long comprehension: an evaluation under a context that is done fails with
+// ErrLimit between two steps of the comprehension. A nil Ctx reads as context.Background().
+// The stop is cooperative: one long call of a function, and a compile, are not interrupted.
 type Scope struct {
 	Inputs map[string]any
 	Self   Self
 	Values map[string]any
 	Loop   any
 	Parts  map[string]map[string]string
+	Ctx    context.Context
+
+	// budget is the limits of the build this evaluation belongs to. A rule sets it, and a
+	// direct Eval or Expand has none.
+	budget *buildBudget
 }
 
 // segment is one piece of a template: literal text, or a compiled hole when prog is set.
@@ -265,7 +275,7 @@ func (w *walker) build(path, text string, spec siteSpec) (*site, error) {
 			s.out = out
 		}
 		s.reads = appendPartReads(s.reads, ast)
-		prog, err := env.Program(ast, cel.CostLimit(maxExpressionCost), cel.CustomDecorator(compareDecorator), cel.CustomDecorator(chargeDecorator))
+		prog, err := env.Program(ast, cel.CostLimit(maxExpressionCost), cel.CustomDecorator(compareDecorator), cel.CustomDecorator(chargeDecorator), cel.InterruptCheckFrequency(interruptCheckFrequency))
 		if err != nil {
 			return nil, invalid(path, "%s", err)
 		}
@@ -488,6 +498,10 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 	if s.loop != "" {
 		act[s.loop] = sc.Loop
 	}
+	ctx := sc.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	budget := newCompareBudget()
 	act[compareBudgetName] = budget
 	var cost int64
@@ -500,15 +514,25 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 			text.WriteString(seg.text)
 			continue
 		}
-		val, det, err := seg.prog.Eval(act)
+		if err := sc.budget.checkDeadline(); err != nil {
+			return nil, cost, errors.Wrapf(err, "model: evaluate %s", path)
+		}
+		val, det, err := seg.prog.ContextEval(ctx, act)
 		if n := det.ActualCost(); n != nil {
-			cost += int64(min(*n, math.MaxInt64))
+			spent := int64(min(*n, math.MaxInt64))
+			cost += spent
+			if err := sc.budget.chargeCost(spent); err != nil {
+				return nil, cost, errors.Wrapf(err, "model: evaluate %s", path)
+			}
 		}
 		if budget.exhausted() {
 			return nil, cost, siteError(path, compareStopError())
 		}
 		if err != nil {
 			return nil, cost, siteError(path, err)
+		}
+		if err := sc.budget.checkDeadline(); err != nil {
+			return nil, cost, errors.Wrapf(err, "model: evaluate %s", path)
 		}
 		if s.single {
 			out, err := toGo(val)
@@ -540,6 +564,9 @@ func textSizeError(path string) error {
 
 // siteError names the site in an evaluation failure and marks a cost-limit stop.
 func siteError(path string, err error) error {
+	if errors.Is(err, interpreter.InterruptError{}) {
+		return errors.Errorf("%w: %s: %s", ErrLimit, path, deadlineMessage)
+	}
 	var stop interpreter.EvalCancelledError
 	if errors.As(err, &stop) && stop.Cause == interpreter.CostLimitExceeded {
 		if stop.Message == chargeStopMessage {

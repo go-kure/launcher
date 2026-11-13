@@ -379,6 +379,8 @@ type NameAllocator struct {
 	// emit is TransformContext.EmitHook on the allocator of a transform, nil on any
 	// other: LoweringContext.EmitModelComponent calls it for a model's component.
 	emit func(ModelEmit) error
+	// runState is what a rule keeps for the whole run: LoweringContext.RunState.
+	runState map[any]any
 	// lowered holds the object names lowering rules resolved, in the order they
 	// were resolved, until the transform claims them into resolved with the
 	// namespace lowering settled on (claimLowered, naming_lowering.go).

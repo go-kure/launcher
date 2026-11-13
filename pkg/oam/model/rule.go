@@ -1,6 +1,9 @@
 package model
 
 import (
+	"context"
+	"time"
+
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 )
@@ -63,9 +66,24 @@ func (r *Rule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 	if lctx.Document != nil {
 		application = lctx.Document.Metadata.Name
 	}
-	sc := Scope{Inputs: inputs, Self: Self{Name: comp.Name, Application: application}}
+	// The limits of the build are kept by the run, so every model of one Transform spends from
+	// the same budget. The context stops a long comprehension at the deadline of the build.
+	budget := lctx.RunState(budgetKey{}, func() any { return newBuildBudget() }).(*buildBudget)
+	ctx, cancel := context.WithTimeout(context.Background(), max(budget.remaining(), time.Nanosecond))
+	defer cancel()
+	sc := Scope{Inputs: inputs, Self: Self{Name: comp.Name, Application: application}, Ctx: ctx, budget: budget}
 	name := func(part string) (string, error) { return lctx.Namer.Name(comp.Name, part, lctx.Origin) }
 	comps, parts, err := r.c.expand(r.t, sc, objectNameUnhooked(lctx.NamingHook()), name)
+	if err != nil {
+		return oam.LoweringResult{}, errors.Wrapf(err, "model: %s", r.m.Key())
+	}
+	size, err := propertyBytes(comps)
+	if err == nil {
+		err = budget.chargeBytes(size)
+	}
+	if err == nil {
+		err = budget.checkDeadline()
+	}
 	if err != nil {
 		return oam.LoweringResult{}, errors.Wrapf(err, "model: %s", r.m.Key())
 	}

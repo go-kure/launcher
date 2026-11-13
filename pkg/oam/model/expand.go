@@ -161,6 +161,9 @@ func (c *Compiled) expandPart(tr *oam.Transformer, base string, p Part, sc Scope
 	if have+len(instances) > MaxParts {
 		return nil, errors.Errorf("%w: %s gives more than %d parts in one render", ErrLimit, base, MaxParts)
 	}
+	if err := sc.budget.chargeParts(len(instances)); err != nil {
+		return nil, errors.Wrapf(err, "model: %s", base)
+	}
 	var comps []oam.Component
 	for _, el := range instances {
 		is := sc
