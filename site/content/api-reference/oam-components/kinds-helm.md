@@ -3,8 +3,8 @@ title: "Kinds: Helm"
 weight: 7
 ---
 
-Each kind below with a heading has the same sections: Properties, Outputs,
-Validation and Example. Its implementation, history and tests are on the
+Each kind below has the same sections: Properties, Outputs, Validation and
+Example. Its implementation, history and tests are on the
 [contributor page](../../contributing/oam-reference/kinds-helm.md).
 
 ## helm
@@ -730,761 +730,843 @@ The component in
 the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
 test compares the two.
 
-## Kinds not yet in sections
+## helmtemplate
 
-The kinds below are not yet in these sections.
+`helmtemplate` is the kind-named terminal for a client-side Helm render, and
+what the role-named `helm` rule lowers to under `delivery: template`. It fetches
+and renders the chart at build time and emits the rendered manifests, each
+checked against the environment policy (see **Policy** below). It creates no
+source CR and no `HelmRelease`.
 
-- **helmtemplate** — the kind-named terminal for a client-side Helm render
-  (go-kure/launcher#348, part of the Helm-family redesign go-kure/launcher#336), and what the
-  role-named `helm` rule lowers to under `delivery: template`.
-  It fetches and renders the chart at build time and emits the rendered manifests, each checked
-  against the environment policy (see **Policy** below). It creates no source CR and no
-  `HelmRelease`.
+### Properties
 
-  **Properties.** `source` is
-  required: `url` (required) is an `http://` or `https://` Helm repository URL, or an `oci://`
-  URL naming the chart; `kind` (optional, `HelmRepository` or `OCIRepository`) is inferred from
-  the scheme when unset — `oci://` is `OCIRepository`, anything else `HelmRepository` — and
-  must agree with it when set. A `url` carrying a user or password is refused, since the render
-  takes no credentials, and the message never repeats it. `chart` is required for a
-  `HelmRepository`; an `OCIRepository`'s URL already names the chart, so there `chart` is not
-  used. `version`
-  is required for an `OCIRepository`. `values` is an open object, the Helm values tree, and must
-  be representable as JSON: a non-finite number (`.nan`, `.inf`) is a build error. The source
-  checks are shared with the `helm` rule's inline source rather than copied. `scopeOverrides`
-  states the scope of a kind the chart renders (see **Scope overrides** below).
-  `hookGroupNamePrefix` (go-kure/launcher#787) is the prefix of the names of the hook-group
-  layouts, in place of `<application>-<component>`, and so of their Flux Kustomizations under
-  `FluxIntegratedPerLayout`; so does a prefix the `Naming` hook returns for the `hook-group`
-  role. With neither, the default prefix names only the layouts: kure names each Kustomization
-  `<unit>-<layout name>` (go-kure/launcher#941). See the hook-group paragraph below.
-  `layoutKustomizationName` (go-kure/launcher#787) is the name of the Flux Kustomization of
-  the component's own layout, in place of `<bundle>-<component>`; see the same paragraph.
+**Properties.** `source` is required: `url` (required) is an `http://` or
+`https://` Helm repository URL, or an `oci://` URL naming the chart; `kind`
+(optional, `HelmRepository` or `OCIRepository`) is inferred from the scheme when
+unset — `oci://` is `OCIRepository`, anything else `HelmRepository` — and must
+agree with it when set. A `url` carrying a user or password is refused, since
+the render takes no credentials, and the message never repeats it. `chart` is
+required for a `HelmRepository`; an `OCIRepository`'s URL already names the
+chart, so there `chart` is not used. `version` is required for an
+`OCIRepository`. `values` is an open object, the Helm values tree, and must be
+representable as JSON: a non-finite number (`.nan`, `.inf`) is a build error.
+The source checks are shared with the `helm` rule's inline source rather than
+copied. `scopeOverrides` states the scope of a kind the chart renders (see
+**Scope overrides** below). `hookGroupNamePrefix` is the prefix of the names of
+the hook-group layouts, in place of `<application>-<component>`, and so of their
+Flux Kustomizations under `FluxIntegratedPerLayout`; so does a prefix the
+`Naming` hook returns for the `hook-group` role. With neither, the default
+prefix names only the layouts: kure names each Kustomization `<unit>-<layout
+name>`. See the hook-group paragraph below. `layoutKustomizationName` is the
+name of the Flux Kustomization of the component's own layout, in place of
+`<bundle>-<component>`; see the same paragraph.
 
-  `secretValues` (go-kure/launcher#786) is a second open object, for the sensitive part of the
-  values tree; it is what the `helm` rule forwards its own `secretValues` as. The chart is
-  rendered with `secretValues` merged over `values`, object by object, with the authored value
-  types. The terminal emits nothing for it, so a value is in the output only where the chart
-  renders it: a chart that puts it in a Secret emits that Secret in clear form, and one that
-  puts it in a ConfigMap or an environment variable emits it there. The output is as sensitive
-  as the input; see the security note under **helm**. Further:
-  - a path set in both trees is refused, naming the path
-    (`helmtemplate: auth.password is set in both values and secretValues; …`), by the rule the
-    `helm` component states;
-  - a key named `global` below the top level is refused, naming the path, before any fetch
-    (`helmtemplate: secretValues: redis.global: a key named global is allowed only at the top
-    level, …`), by the rule the `helm` component states and with its trade-off: such a key that
-    is not a dependency's globals can be given through `values` only, and a sensitive global
-    goes under the top-level `global`;
-  - a policy that forbids explicit secrets (`oam.ExplicitSecretPolicy`) refuses the component
-    in `ApplyPolicy`, before any fetch
-    (`helmtemplate: secretValues is set and the environment policy forbids explicit secrets; …`).
-    **Not covered:** a Secret the chart itself renders. It is emitted under such a policy, where
-    the `passthrough` and `manifests` components refuse a Secret they carry: its content comes
-    from the chart and its values, and most charts render one;
-  - a render or decode failure is not reported as Helm reports it, since a template error can
-    quote a value (`fail`, `required`, a YAML parse error showing the line). The chart is
-    rendered a second time with `values` alone. If that fails too, its error is the one
-    reported, after `rendering chart with secretValues failed; the cause is withheld because it
-    can repeat a sensitive value. Without them it fails with: …`. If it succeeds, the message is
-    only `rendering chart with secretValues failed, and without them it renders; the cause is
-    withheld because it can repeat a sensitive value`. To debug such a chart, render it
-    with placeholder values in `values`. The second render repeats the fetch;
-  - *not covered:* an error about a rendered object. No check that runs on what the chart
-    rendered, once it has decoded, scrubs its error. It names the object it refuses by kind
-    and name, and can quote any part of the object it refuses or locates the refusal by. The
-    policy checks (see **Policy**) quote a container's or a volume's name, an image reference,
-    a resource quantity, a capability; the transform's component label quotes the key of a
-    label that is not a string. So any part of a rendered object can reach an error: a chart
-    that builds one from a sensitive value has it quoted there. The refusal of a field the kind's type does not
-    declare is not among them: it is a decode failure, withheld as above. The refusal of a
-    `scopeOverrides` entry that contradicts a CustomResourceDefinition the chart renders (see
-    **Scope overrides** below) is such an error and is not withheld: it names the kind, the
-    object's name and the two scopes, never a value;
-  - Helm's own warnings about a values conflict quote the value Helm drops. With the refusal
-    above that is never a value of `secretValues`: for a top-level `global` it is the
-    dependency's `global` entry from `values`, and for a dependency's ordinary key it is the
-    dependency's default. A test pins both, each way round, on the process's standard log and
-    its default `slog` logger.
+`secretValues` is a second open object, for the sensitive part of the values
+tree; it is what the `helm` rule forwards its own `secretValues` as. The chart
+is rendered with `secretValues` merged over `values`, object by object, with the
+authored value types. The terminal emits nothing for it, so a value is in the
+output only where the chart renders it: a chart that puts it in a Secret emits
+that Secret in clear form, and one that puts it in a ConfigMap or an environment
+variable emits it there. The output is as sensitive as the input; see the
+security note under **helm**. Further:
 
-  **Release name.** `releaseName` is the render's `.Release.Name`. Unset, it is the default the
-  `helmrelease` terminal writes to `spec.releaseName` (go-kure/launcher#785): the component
-  name, and for a name over 53 characters, Flux helm-controller's shortened form of it — its
-  first 40 characters, `-`, and the first 12 hex digits of the SHA-256 of the whole name. A
-  `helm` component therefore renders under `delivery: template` with the same release name its
-  HelmRelease is installed under with `delivery: flux`, whatever its target namespace. The chart
-  and its source play no part. The name, authored or defaulted, must be a valid Helm release name
-  by Helm's own rule — a DNS-1123 subdomain of at most 53 characters — since kure's render checks
-  nothing. An authored name is never shortened: one over 53 characters is refused. A default that
-  is not valid — the shortening can cut a dotted name just after a `.`, leaving a label that starts
-  with `-` — is refused with the remedy to set `releaseName`, as Flux would fail to install it. A
-  `HelmTemplateConfig` built directly defaults it from `Name` the same way, and is refused when
-  both are empty. Since component names are unique in a document, two renders of one chart no
-  longer share a release name by default. Two given the same `releaseName` in one namespace
-  generate the same objects when the chart names its objects after the release, as most do, and
-  `kurel build` refuses them as a generated-object collision rather than merging them. Before
-  go-kure/launcher#776 every render used kure's default `release`; the project is pre-GA, so the
-  changed object names of an existing template-rendered chart carry no compatibility shim.
+- a path set in both trees is refused, naming the path (`helmtemplate:
+  auth.password is set in both values and secretValues; …`), by the rule the
+  `helm` component states;
+- a key named `global` below the top level is refused, naming the path, before
+  any fetch (`helmtemplate: secretValues: redis.global: a key named global is
+  allowed only at the top level, …`), by the rule the `helm` component states
+  and with its trade-off: such a key that is not a dependency's globals can be
+  given through `values` only, and a sensitive global goes under the top-level
+  `global`;
+- a policy that forbids explicit secrets (`oam.ExplicitSecretPolicy`) refuses
+  the component in `ApplyPolicy`, before any fetch (`helmtemplate: secretValues
+  is set and the environment policy forbids explicit secrets; …`). **Not
+  covered:** a Secret the chart itself renders. It is emitted under such a
+  policy, where the `passthrough` and `manifests` components refuse a Secret
+  they carry: its content comes from the chart and its values, and most charts
+  render one;
+- a render or decode failure is not reported as Helm reports it, since a
+  template error can quote a value (`fail`, `required`, a YAML parse error
+  showing the line). The chart is rendered a second time with `values` alone. If
+  that fails too, its error is the one reported, after `rendering chart with
+  secretValues failed; the cause is withheld because it can repeat a sensitive
+  value. Without them it fails with: …`. If it succeeds, the message is only
+  `rendering chart with secretValues failed, and without them it renders; the
+  cause is withheld because it can repeat a sensitive value`. To debug such a
+  chart, render it with placeholder values in `values`. The second render
+  repeats the fetch;
+- *not covered:* an error about a rendered object. No check that runs on what
+  the chart rendered, once it has decoded, scrubs its error. It names the object
+  it refuses by kind and name, and can quote any part of the object it refuses
+  or locates the refusal by. The policy checks (see **Policy**) quote a
+  container's or a volume's name, an image reference, a resource quantity, a
+  capability; the transform's component label quotes the key of a label that is
+  not a string. So any part of a rendered object can reach an error: a chart
+  that builds one from a sensitive value has it quoted there. The refusal of a
+  field the kind's type does not declare is not among them: it is a decode
+  failure, withheld as above. The refusal of a `scopeOverrides` entry that
+  contradicts a CustomResourceDefinition the chart renders (see **Scope
+  overrides** below) is such an error and is not withheld: it names the kind,
+  the object's name and the two scopes, never a value;
+- Helm's own warnings about a values conflict quote the value Helm drops. With
+  the refusal above that is never a value of `secretValues`: for a top-level
+  `global` it is the dependency's `global` entry from `values`, and for a
+  dependency's ordinary key it is the dependency's default.
 
-  **Decoding.** `values`, `secretValues` and `scopeOverrides` are split off, and the rest of the property map is decoded with
-  `builtin.DecodeStrictJSON` into a closed struct, so any other key, at any depth, is refused by
-  name, as is a wrongly typed value. `values` itself reaches the render exactly as authored, with
-  its YAML-decoded value types, rather than the strict decoder's `json.Number` re-reading, which
-  a chart template comparing a value with a number would treat differently; `secretValues` likewise.
-  A `secretValues` that is not an object is refused by its type, never by its content. The schema declares
-  the same keys, with `source` closed to `url` and `kind`, and a test ties it to the struct. Keys
-  match case-insensitively in the handler, as in `encoding/json`; schema validation, which a
-  `kurel build` runs first, is exact.
+**Release name.** `releaseName` is the render's `.Release.Name`. Unset, it is
+the default the `helmrelease` terminal writes to `spec.releaseName`: the
+component name, and for a name over 53 characters, Flux helm-controller's
+shortened form of it — its first 40 characters, `-`, and the first 12 hex digits
+of the SHA-256 of the whole name. A `helm` component therefore renders under
+`delivery: template` with the same release name its HelmRelease is installed
+under with `delivery: flux`, whatever its target namespace. The chart and its
+source play no part. The name, authored or defaulted, must be a valid Helm
+release name by Helm's own rule — a DNS-1123 subdomain of at most 53 characters
+— since kure's render checks nothing. An authored name is never shortened: one
+over 53 characters is refused. A default that is not valid — the shortening can
+cut a dotted name just after a `.`, leaving a label that starts with `-` — is
+refused with the remedy to set `releaseName`, as Flux would fail to install it.
+A `HelmTemplateConfig` built directly defaults it from `Name` the same way, and
+is refused when both are empty. Since component names are unique in a document,
+two renders of one chart no longer share a release name by default. Two given
+the same `releaseName` in one namespace generate the same objects when the chart
+names its objects after the release, as most do, and `kurel build` refuses them
+as a generated-object collision rather than merging them. Before
+go-kure/launcher#776 every render used kure's default `release`; the project is
+pre-GA, so the changed object names of an existing template-rendered chart carry
+no compatibility shim.
 
-  **Refused outright.** `targetNamespace`, every property only a Flux-reconciled release reads
-  (`interval`, `driftDetection`, `install`, `upgrade`, `valuesFrom`, `valuesMode`), the `helm`
-  rule's `delivery` switch, and a source reference (`source.name`, `source.namespace`) are
-  undeclared keys: schema validation refuses each, and so does the strict decode. An
-  `OCIRepository` source without `version` is refused by the handler. The key itself is what is
-  refused, whatever it holds. The render's `.Release.Namespace` is the application namespace;
-  the terminal declares no `targetNamespace`, so it cannot be set.
+**Decoding.** `values`, `secretValues` and `scopeOverrides` are split off, and
+the rest of the property map is decoded with `builtin.DecodeStrictJSON` into a
+closed struct, so any other key, at any depth, is refused by name, as is a
+wrongly typed value. `values` itself reaches the render exactly as authored,
+with its YAML-decoded value types, rather than the strict decoder's
+`json.Number` re-reading, which a chart template comparing a value with a number
+would treat differently; `secretValues` likewise. A `secretValues` that is not
+an object is refused by its type, never by its content. The schema declares the
+same keys, with `source` closed to `url` and `kind`, and a test ties it to the
+struct. Keys match case-insensitively in the handler, as in `encoding/json`;
+schema validation, which a `kurel build` runs first, is exact.
 
-  **Namespace.** A namespaced rendered object that carries no `metadata.namespace` is given the
-  application namespace, where a Helm install into that namespace would create it
-  (go-kure/launcher#794, item 4). Each object's scope is resolved as the `manifests` component
-  resolves it, by the one function both call (`resolveObjectScope`, `manifests.go`): a
-  `scopeOverrides` entry for the object's kind, else kure's scope table (`manifest.Scope`) — the
-  kinds kure registers, in any API version — plus the scope a `CustomResourceDefinition` among
-  the emitted objects declares for the kind it defines. Unlike `manifests`, the render refuses
-  nothing about what the chart wrote, since the application does not author a chart:
-  - a namespace the chart wrote is kept, on a cluster-scoped object too, as Helm keeps it;
-  - a cluster-scoped object without one stays without;
-  - an object of unknown scope without one is left as rendered, with no namespace and no error:
-    a kind kure does not register — a custom resource, or a built-in of an API group kure's
-    scheme does not hold — with no CRD for it among the emitted objects and no `scopeOverrides`
-    entry. `Lease`, `EndpointSlice` and the image-reflector kinds (`ImageRepository`,
-    `ImagePolicy`) are registered, so one without a namespace is given the application
-    namespace. Whoever applies the output decides where it lands (Flux's `targetNamespace`, a
-    client's default namespace). A chart's `crds/` directory is not rendered, and a CRD under a
-    dropped hook is not emitted, so neither gives a kind a scope.
+### Outputs
 
-  The policy check runs on the stamped objects, so a violation names an object with the
-  namespace it is emitted in. A `HelmTemplateConfig` built directly with an empty `Namespace`
-  has none to give and stamps nothing.
+**Namespace.** A namespaced rendered object that carries no `metadata.namespace`
+is given the application namespace, where a Helm install into that namespace
+would create it. Each object's scope is resolved as the `manifests` component
+resolves it, by the one function both call (`resolveObjectScope`,
+`manifests.go`): a `scopeOverrides` entry for the object's kind, else kure's
+scope table (`manifest.Scope`) — the kinds kure registers, in any API version —
+plus the scope a `CustomResourceDefinition` among the emitted objects declares
+for the kind it defines. Unlike `manifests`, the render refuses nothing about
+what the chart wrote, since the application does not author a chart:
 
-  **Scope overrides** (go-kure/launcher#794, item 11). `scopeOverrides` states the scope of a
-  kind the chart renders, for a kind of unknown scope above: a list of `{apiVersion, kind,
-  scope}`, `scope` being `Cluster` or `Namespaced`, matched on the exact `apiVersion` and
-  `kind`. It is the property `manifests` has, read by the same parser (`parseScopeOverrides`)
-  and resolved by the same function, so an entry means the same on both: it outranks kure's
-  own table, is ignored for a kind the Kubernetes API itself scopes, and must agree with a
-  `CustomResourceDefinition` among the emitted objects (see **crd / manifests**). A test holds
-  the two components to the same answer for the same objects and overrides.
-  - `Namespaced`: an object of the kind without `metadata.namespace` is given the application
-    namespace, as a kind kure knows to be namespaced is.
-  - `Cluster`: an object of the kind is left as rendered. That includes one the chart wrote a
-    namespace on, which `manifests` refuses: template delivery refuses nothing about what a
-    chart wrote.
-  - An entry for a kind the chart does not render does nothing. `null` reads as omission.
+- a namespace the chart wrote is kept, on a cluster-scoped object too, as Helm
+  keeps it;
+- a cluster-scoped object without one stays without;
+- an object of unknown scope without one is left as rendered, with no namespace
+  and no error: a kind kure does not register — a custom resource, or a built-in
+  of an API group kure's scheme does not hold — with no CRD for it among the
+  emitted objects and no `scopeOverrides` entry. `Lease`, `EndpointSlice` and
+  the image-reflector kinds (`ImageRepository`, `ImagePolicy`) are registered,
+  so one without a namespace is given the application namespace. Whoever applies
+  the output decides where it lands (Flux's `targetNamespace`, a client's
+  default namespace). A chart's `crds/` directory is not rendered, and a CRD
+  under a dropped hook is not emitted, so neither gives a kind a scope.
 
-  *Refused*, two cases only. A malformed entry, at decode and before any render, with the
-  `manifests` messages under this component's prefix (`helmtemplate: scopeOverrides[0]: scope
-  "cluster" is invalid; must be "Cluster" or "Namespaced"`). And an entry that contradicts a
-  `CustomResourceDefinition` the chart renders for the kind, when the chart is rendered
-  (`helmtemplate "<component>": object Widget "w": scopeOverrides says Cluster but the
-  CustomResourceDefinition for Widget.fixtures.example.com the chart renders declares
-  Namespaced; …`): that CRD defines the scope the cluster will serve, so no cluster can honour
-  the entry. The message names the object's kind and name and the two scopes, nothing else of
-  the object. A `HelmTemplateConfig` built directly holds the overrides in `ScopeOverrides`,
-  where a value other than the two scopes is refused before the render.
+The policy check runs on the stamped objects, so a violation names an object
+with the namespace it is emitted in. A `HelmTemplateConfig` built directly with
+an empty `Namespace` has none to give and stamps nothing.
 
-  The `helm` rule takes the same property under `delivery: template` and forwards it here as
-  written, after refusing a malformed entry under its own prefix; under `delivery: flux` it
-  refuses the property (see **helm**).
+**Scope overrides**. `scopeOverrides` states the scope of a kind the chart
+renders, for a kind of unknown scope above: a list of `{apiVersion, kind,
+scope}`, `scope` being `Cluster` or `Namespaced`, matched on the exact
+`apiVersion` and `kind`. It is the property `manifests` has, read by the same
+parser (`parseScopeOverrides`) and resolved by the same function, so an entry
+means the same on both: it outranks kure's own table, is ignored for a kind the
+Kubernetes API itself scopes, and must agree with a `CustomResourceDefinition`
+among the emitted objects (see **crd / manifests**).
 
-  *Not covered:* no policy or placement check on template output reads an object's scope, so
-  the overrides change the namespace stamp and nothing else.
-  Not breaking: a document that does not use the property renders as before.
+- `Namespaced`: an object of the kind without `metadata.namespace` is given the
+  application namespace, as a kind kure knows to be namespaced is.
+- `Cluster`: an object of the kind is left as rendered. That includes one the
+  chart wrote a namespace on, which `manifests` refuses: template delivery
+  refuses nothing about what a chart wrote.
+- An entry for a kind the chart does not render does nothing. `null` reads as
+  omission.
 
-  **Breaking output change** (go-kure/launcher#794): such objects gain `metadata.namespace` in
-  the output. Before, a chart that left it unset rendered namespace-less objects, which landed
-  wherever the applying client defaulted them.
+*Refused*, two cases only. A malformed entry, at decode and before any render,
+with the `manifests` messages under this component's prefix (`helmtemplate:
+scopeOverrides[0]: scope "cluster" is invalid; must be "Cluster" or
+"Namespaced"`). And an entry that contradicts a `CustomResourceDefinition` the
+chart renders for the kind, when the chart is rendered (`helmtemplate
+"<component>": object Widget "w": scopeOverrides says Cluster but the
+CustomResourceDefinition for Widget.fixtures.example.com the chart renders
+declares Namespaced; …`): that CRD defines the scope the cluster will serve, so
+no cluster can honour the entry. The message names the object's kind and name
+and the two scopes, nothing else of the object. A `HelmTemplateConfig` built
+directly holds the overrides in `ScopeOverrides`, where a value other than the
+two scopes is refused before the render.
 
-  **Breaking output change** (go-kure/launcher#790, with the kure version that registers
-  them): `Lease`, `EndpointSlice`, `PriorityClass`, `RuntimeClass`, `APIService`, the
-  `admissionregistration.k8s.io/v1` kinds and the image-reflector kinds are read as their
-  Go types, no longer as kinds the build does not know. One that sets only fields its type
-  declares is emitted from that type; one that sets a field the type does not declare is
-  emitted as rendered, the field kept (*Undeclared fields*, below); a field of the wrong type
-  is now a build error. The namespaced ones (`Lease`, `EndpointSlice`, `ImageRepository`,
-  `ImagePolicy`) gain `metadata.namespace` when the chart left it unset. A chart that renders
-  a `v1` `List` or a typed list now builds, and each of its items is held to the policy and
-  to *Undeclared fields* as a document of its own is. A list of a kind the scheme does not
-  register no longer builds when a `helm.sh/hook` annotation is involved, on the list or on
-  an item (see "Rendered objects"): it built before, with a wrong output, the list's hook
-  lost and its items emitted as ordinary resources.
+The `helm` rule takes the same property under `delivery: template` and forwards
+it here as written, after refusing a malformed entry under its own prefix; under
+`delivery: flux` it refuses the property (see **helm**).
 
-  **Breaking** (go-kure/launcher#790, with the kure version that reads a list in one place,
-  go-kure/kure#1014), for template delivery, `manifests` and `crd` alike. Built before,
-  refused now:
+*Not covered:* no policy or placement check on template output reads an object's
+scope, so the overrides change the namespace stamp and nothing else. Not
+breaking: a document that does not use the property renders as before.
 
-  | Document | Before | Now |
-  |---|---|---|
-  | A list (a `v1` `List`, a typed list, a list of an unregistered kind) with a label or an annotation on its own metadata | Built: the items emitted, the list's metadata dropped. Template delivery refused only `helm.sh/hook` there, and still does, with its own text | `List has metadata of its own that its items cannot keep: annotations …; labels …` |
-  | `Kind` or `apiversion` beside the exact key, on a document or on an item of a list | Built, with two exceptions: emitted as written, the extra key kept. A workload or a claim was refused already, by *Undeclared fields* (`undeclared field Kind`), and so was an item of a typed list whose `Kind` or `apiversion` states another value than the list holds, by the parser (`the item states …, the list holds …`). Both are refused now with the other text | `the key "Kind" equals "kind" only after case folding; write it "kind" or remove it` |
-  | `Items` on a `v1` `List` | Decoded, to no object at all: a chart or a source with other objects built. A `manifests` or `crd` source that held nothing else was refused already (`source resolved to no manifests`) | The same text, for `"Items"` |
-  | `Items` on a list of an unregistered kind | Built: the list emitted as one object | The same text |
-  | A `null` item in a list of an unregistered kind | Built: an otherwise empty object emitted, with the list's `apiVersion` and its kind without `List` | `item 0 of WidgetList: the item is null, not an object` |
-  | An item of a registered kind, in a list of an unregistered kind, that does not decode as its type (`data: 1` on a ConfigMap) | Built: the item emitted as written. A workload, a claim or a PersistentVolume there did not build: the policy check refused it as unreadable, and it is refused now for the decode | The item's decode error, naming its position |
-  | In a JSON document, an item of a registered kind, in a list of an unregistered kind, that states `apiVersion` or `kind` and then `null` for it, where the stated value is not the one its list gives it | Built: the item emitted as written. A workload, a claim or a PersistentVolume there did not build: the policy check refused it as unreadable | `item 0 of FooList: Deployment "web": the object was read as apps/v1 Deployment, and the decode that checks its fields reads the document as example.com/v1 Deployment, so its fields cannot be checked; …` (*Undeclared fields*, below) |
-  | An object of an unregistered kind that does not end in `List`, with a top-level `items` array | Built: the entries emitted in its place, each unstructured | `… an `items` array on an object of a kind that is no list (example.com/v1 Widget) is read as a list by what applies the output …` |
+**Breaking output change**: such objects gain `metadata.namespace` in the
+output. Before, a chart that left it unset rendered namespace-less objects,
+which landed wherever the applying client defaulted them.
 
-  Not refusals, and a change of output all the same: an item of a registered kind in a list of
-  an unregistered kind is read as its Go type, as in a `v1` `List`, where it was emitted as
-  written. It is emitted from that type, *Undeclared fields* applies to it, and the policy
-  check reads it: a workload, a claim or a PersistentVolume there was refused as unreadable
-  and is now checked, and builds when the policy allows it. A list inside such a list was
-  left whole, and refused by the policy check; it is opened in turn.
+**Breaking output change** (with the kure version that registers them): `Lease`,
+`EndpointSlice`, `PriorityClass`, `RuntimeClass`, `APIService`, the
+`admissionregistration.k8s.io/v1` kinds and the image-reflector kinds are read
+as their Go types, no longer as kinds the build does not know. One that sets
+only fields its type declares is emitted from that type; one that sets a field
+the type does not declare is emitted as rendered, the field kept (*Undeclared
+fields*, below); a field of the wrong type is now a build error. The namespaced
+ones (`Lease`, `EndpointSlice`, `ImageRepository`, `ImagePolicy`) gain
+`metadata.namespace` when the chart left it unset. A chart that renders a `v1`
+`List` or a typed list now builds, and each of its items is held to the policy
+and to *Undeclared fields* as a document of its own is. A list of a kind the
+scheme does not register no longer builds when a `helm.sh/hook` annotation is
+involved, on the list or on an item (see "Rendered objects"): it built before,
+with a wrong output, the list's hook lost and its items emitted as ordinary
+resources.
 
-  Texts that changed: a `null` item of a `v1` `List` was `nil runtime object provided` and is
-  `the item is null, not an object`; `… is nested more than 8 lists deep` now holds for a
-  list of an unregistered kind too; the policy check's refusal of an object with a top-level
-  `items` array no longer says the object `sits inside a list of an unregistered kind`, and
-  no decode returns such an object any more (*Limits*, below).
+**Output order.** Every rendered manifest carrying a `helm.sh/hook` annotation
+(or a standalone `helm.sh/hook-weight`) is grouped by `(phase, weight)` via
+kure's `helm.SplitByHookWeight`. `Generate` returns every rendered object flat,
+in hook-execution order — `pre-install, pre-upgrade, main, post-install,
+post-upgrade, <unknown, alphabetical>` — with a multi-event annotation such as
+`pre-install,pre-upgrade` placed by its earliest phase; a chart with no hook
+annotations at all yields one group, in chart-render order.
+`pre-delete`/`post-delete`/`pre-rollback`/`post-rollback`/`test` objects are
+dropped outright (kure does not surface them as static manifests) — mostly a bug
+fix, since a `test` Pod rendered as a static GitOps object would otherwise be
+reconciled on every apply, but it is silent data loss for a chart that relies on
+one of those hooks; `pkg/oam` has no logging channel to flag it.
 
-  **Output order.** Every rendered manifest carrying a `helm.sh/hook` annotation (or a standalone
-  `helm.sh/hook-weight`) is grouped by `(phase, weight)` via kure's `helm.SplitByHookWeight`.
-  `Generate` returns every rendered object flat, in hook-execution order —
-  `pre-install, pre-upgrade, main, post-install, post-upgrade, <unknown, alphabetical>` — with a
-  multi-event annotation such as `pre-install,pre-upgrade` placed by its earliest phase; a chart
-  with no hook annotations at all yields one group, in chart-render order.
-  `pre-delete`/`post-delete`/`pre-rollback`/`post-rollback`/`test` objects are dropped outright
-  (kure does not surface them as static manifests) — mostly a bug fix, since a `test` Pod rendered
-  as a static GitOps object would otherwise be reconciled on every apply, but it is silent data
-  loss for a chart that relies on one of those hooks; `pkg/oam` has no logging channel to flag it.
+**Rendered objects.** The render is decoded with kure's manifest parser
+(`io.ParseYAMLWithOptions`, unstructured allowed), the decode the `manifests`
+component uses. An object of a kind kure's scheme registers is emitted as its Go
+type — a Deployment as `*appsv1.Deployment`, a hook Job as `*batchv1.Job` — and
+any other as unstructured. What follows from reading a document as the API
+server does:
 
-  **Rendered objects.** The render is decoded with kure's manifest parser
-  (`io.ParseYAMLWithOptions`, unstructured allowed), the decode the `manifests` component uses
-  (go-kure/launcher#791). An object of a kind kure's scheme registers is emitted as its Go type —
-  a Deployment as `*appsv1.Deployment`, a hook Job as `*batchv1.Job` — and any other as
-  unstructured. What follows from reading a document as the API server does:
-  - a field the registered type does not declare is not dropped, as the parser alone would drop
-    it: the object is refused or emitted as rendered (*Undeclared fields*, below). A value of
-    the wrong type (an unquoted `true` as an annotation value) is a build error;
-  - YAML is read as YAML 1.1, so an unquoted `yes` or `y` is a boolean; a mapping key that is not
-    a string (`1:`) becomes its string form, and an unquoted timestamp stays the string the chart
-    wrote; in an unstructured object an integer an int64 cannot hold becomes a float;
-  - a large integer survives the write where the object holds it as an integer. Since
-    go-kure/kure#1006 kure's manifest writer writes an integer field of a typed object, and an
-    integer in an unstructured one, with its own digits: `9007199254740993` and
-    `9223372036854775807` are written as rendered (they were written `9007199254740992` and
-    `9223372036854776000`). That holds for every object launcher writes, whichever component
-    emitted it. A number the object holds as a float is written as that float, with the
-    shortest digits that read back as it, and an integer an int64 cannot hold is such a float
-    in an unstructured object (the item above): `9223372036854775808` is written
-    `9223372036854776000`, and `18446744073709551615` as `1.8446744073709552e+19`. A value
-    that large has to be a string in a field that takes one;
-  - an empty, null or comment-only document is skipped, while a scalar, a sequence, `{}` and a
-    mapping without `apiVersion` and `kind` are build errors — in a document
-    of a dropped hook as well, since the render is decoded before hooks are grouped;
-  - a list document is replaced by its items, in the list's order. What a list is, is kure's
-    parser's to say, in one place since go-kure/kure#1014: a list kind the scheme registers
-    (a `v1` `List`, a typed list such as `DeploymentList`), and a kind the scheme does not
-    register whose name ends in `List` and that states `items`. Each item of a typed list is
-    decoded as the kind the list holds. Each item of a `v1` `List` and of a list of an
-    unregistered kind is decoded as a document of its own: typed when its kind is registered,
-    unstructured otherwise, and a list among them is replaced by its items in turn, to the
-    eight levels the parser bounds. An item of a list of an unregistered kind that leaves
-    `apiVersion` or `kind` out is read with the list's `apiVersion` and the list's kind
-    without `List`. An item that does not decode, or is `null`, is a build error naming its
-    position (`item 0 of WidgetList: the item is null, not an object`). A list is never
-    emitted, so what it states on its own metadata would be lost: a label or an annotation
-    there is the parser's error (`List has metadata of its own that its items cannot keep:
-    annotations helm.sh/resource-policy`). A kind the scheme does not register that ends in
-    `List` and states no `items` is one object; a registered list kind that states none is a
-    list without items, and yields no object;
-  - `apiVersion`, `kind` and, on a list, `items` are read under those exact keys, and a key
-    that equals one of them only after case folding (`Kind`, `apiversion`, `Items`) is the
-    parser's error, on a document and on an item of a list (`the key "Kind" equals "kind" only
-    after case folding; write it "kind" or remove it`): the readers of a document downstream
-    do not agree on which of two such keys stands;
-  - an object of a kind the scheme does not register and that does not end in `List`, with a
-    top-level `items` array (`{kind: Widget, items: [...]}`), is a build error, with a policy
-    or with none, at the top of the render and as an item of a list (`Widget "w": an `items`
-    array on an object of a kind that is no list (example.com/v1 Widget) is read as a list by
-    what applies the output, which would apply its entries in the object's place; write the
-    entries as documents of their own, or give the object a kind ending in List`). The parser
-    reads such a document as one object. What applies the output tells a list by that array
-    and not by the kind, so the entries would reach the cluster without any check here having
-    read them. It is the envelope `passthrough` refuses (**Lists**, under `passthrough`), and
-    the one refused on a registered kind that declares no `items` (*Undeclared fields*,
-    below). An `items` that is no array, or one below the top level, is the object's own
-    content. The refusal is no refusal by the policy and carries no class. Under template
-    delivery it is still the component's `oam.ViolationError`, as every render that does not
-    decode is, since the chart is rendered at the transform's policy step; a `manifests`
-    source reports it as its parse error, without one;
-  - a document the decoder of its kind panics on is a build error, not a crash. The API type
-    of a registered kind may decode itself and not handle what was written: Cilium's ICMP
-    field dereferences the `type` an `icmps` field of a `CiliumNetworkPolicy` or a
-    `CiliumClusterwideNetworkPolicy` left out. Since go-kure/kure#1009 kure's parser reports
-    the panic itself, as that document's parse error. The error names the object by its kind
-    and its name and holds the panic (`decoding rendered manifests: parse error in Kubernetes
-    object: failed to decode object: the decoder panicked on CiliumNetworkPolicy "demo/p":
-    runtime error: invalid memory address or nil pointer dereference`); it names neither the
-    field nor the document's position, and an item of a list by its position in the list
-    (`item 0 of List`). Such a document is one bad document among the others: the error holds
-    every document's own, and the YAML error of input that stops being YAML further down.
-    Before that change launcher caught the panic itself, named the document by its position
-    (`document 2 (CiliumNetworkPolicy "demo/p")`) and reported that document alone;
-  - malformed JSON the decoder cannot read past is a build error: `{]`, alone or after JSON
-    documents. What follows it in the input is not read. Before go-kure/kure#1012 kure's
-    parser did not return on such input, and neither did the build;
-  - which kinds are registered is kure's to say. Since go-kure/kure#1007 a MetalLB `BGPPeer`
-    at `metallb.io/v1beta2`, the version MetalLB stores, is one, beside `v1beta1`.
-    **Breaking** for a chart or a manifest source that holds such a document, which was
-    emitted as rendered: it is now emitted as its Go type, so `spec.passwordSecret: {}` is
-    written where the document left the field out, and a field of the wrong type
-    (`holdTime: [1]`) is a build error. One that sets an undeclared field is still emitted as
-    rendered (*Undeclared fields*, below);
-  - a list document where a `helm.sh/hook` annotation is involved is a build error naming the
-    list: the annotation on the list's own metadata, or on one of its items (for a `v1` `List`
-    and a list of an unregistered kind, whose items are documents of their own, at every
-    depth the parser opens). Helm reads a hook on the rendered document's own
-    metadata and nowhere else, and the parser reads only a list's items. So the items of a hook
-    list would be emitted as ordinary resources, and an item's own annotation, which Helm does
-    not read, would group it as a hook or drop it. The check reads a list as the parser does,
-    with one addition: Helm reads `metadata` under any case of the key and the parser reads
-    the exact key, so a hook on a list under `Metadata` is refused here. A list without the
-    annotation, and without any other label or annotation of its own, builds; an object that
-    is not a list keeps its hook.
+- a field the registered type does not declare is not dropped, as the parser
+  alone would drop it: the object is refused or emitted as rendered (*Undeclared
+  fields*, below). A value of the wrong type (an unquoted `true` as an
+  annotation value) is a build error;
+- YAML is read as YAML 1.1, so an unquoted `yes` or `y` is a boolean; a mapping
+  key that is not a string (`1:`) becomes its string form, and an unquoted
+  timestamp stays the string the chart wrote; in an unstructured object an
+  integer an int64 cannot hold becomes a float;
+- a large integer survives the write where the object holds it as an integer.
+  Since go-kure/kure#1006 kure's manifest writer writes an integer field of a
+  typed object, and an integer in an unstructured one, with its own digits:
+  `9007199254740993` and `9223372036854775807` are written as rendered (they
+  were written `9007199254740992` and `9223372036854776000`). That holds for
+  every object launcher writes, whichever component emitted it. A number the
+  object holds as a float is written as that float, with the shortest digits
+  that read back as it, and an integer an int64 cannot hold is such a float in
+  an unstructured object (the item above): `9223372036854775808` is written
+  `9223372036854776000`, and `18446744073709551615` as `1.8446744073709552e+19`.
+  A value that large has to be a string in a field that takes one;
+- an empty, null or comment-only document is skipped, while a scalar, a
+  sequence, `{}` and a mapping without `apiVersion` and `kind` are build errors
+  — in a document of a dropped hook as well, since the render is decoded before
+  hooks are grouped;
+- a list document is replaced by its items, in the list's order. What a list is,
+  is kure's parser's to say, in one place since go-kure/kure#1014: a list kind
+  the scheme registers (a `v1` `List`, a typed list such as `DeploymentList`),
+  and a kind the scheme does not register whose name ends in `List` and that
+  states `items`. Each item of a typed list is decoded as the kind the list
+  holds. Each item of a `v1` `List` and of a list of an unregistered kind is
+  decoded as a document of its own: typed when its kind is registered,
+  unstructured otherwise, and a list among them is replaced by its items in
+  turn, to the eight levels the parser bounds. An item of a list of an
+  unregistered kind that leaves `apiVersion` or `kind` out is read with the
+  list's `apiVersion` and the list's kind without `List`. An item that does not
+  decode, or is `null`, is a build error naming its position (`item 0 of
+  WidgetList: the item is null, not an object`). A list is never emitted, so
+  what it states on its own metadata would be lost: a label or an annotation
+  there is the parser's error (`List has metadata of its own that its items
+  cannot keep: annotations helm.sh/resource-policy`). A kind the scheme does not
+  register that ends in `List` and states no `items` is one object; a registered
+  list kind that states none is a list without items, and yields no object;
+- `apiVersion`, `kind` and, on a list, `items` are read under those exact keys,
+  and a key that equals one of them only after case folding (`Kind`,
+  `apiversion`, `Items`) is the parser's error, on a document and on an item of
+  a list (`the key "Kind" equals "kind" only after case folding; write it "kind"
+  or remove it`): the readers of a document downstream do not agree on which of
+  two such keys stands;
+- an object of a kind the scheme does not register and that does not end in
+  `List`, with a top-level `items` array (`{kind: Widget, items: [...]}`), is a
+  build error, with a policy or with none, at the top of the render and as an
+  item of a list (`Widget "w": an `items` array on an object of a kind that is
+  no list (example.com/v1 Widget) is read as a list by what applies the output,
+  which would apply its entries in the object's place; write the entries as
+  documents of their own, or give the object a kind ending in List`). The parser
+  reads such a document as one object. What applies the output tells a list by
+  that array and not by the kind, so the entries would reach the cluster without
+  any check here having read them. It is the envelope `passthrough` refuses
+  (**Lists**, under `passthrough`), and the one refused on a registered kind
+  that declares no `items` (*Undeclared fields*, below). An `items` that is no
+  array, or one below the top level, is the object's own content. The refusal is
+  no refusal by the policy and carries no class. Under template delivery it is
+  still the component's `oam.ViolationError`, as every render that does not
+  decode is, since the chart is rendered at the transform's policy step; a
+  `manifests` source reports it as its parse error, without one;
+- a document the decoder of its kind panics on is a build error, not a crash.
+  The API type of a registered kind may decode itself and not handle what was
+  written: Cilium's ICMP field dereferences the `type` an `icmps` field of a
+  `CiliumNetworkPolicy` or a `CiliumClusterwideNetworkPolicy` left out. Since
+  go-kure/kure#1009 kure's parser reports the panic itself, as that document's
+  parse error. The error names the object by its kind and its name and holds the
+  panic (`decoding rendered manifests: parse error in Kubernetes object: failed
+  to decode object: the decoder panicked on CiliumNetworkPolicy "demo/p":
+  runtime error: invalid memory address or nil pointer dereference`); it names
+  neither the field nor the document's position, and an item of a list by its
+  position in the list (`item 0 of List`). Such a document is one bad document
+  among the others: the error holds every document's own, and the YAML error of
+  input that stops being YAML further down. Before that change launcher caught
+  the panic itself, named the document by its position (`document 2
+  (CiliumNetworkPolicy "demo/p")`) and reported that document alone;
+- malformed JSON the decoder cannot read past is a build error: `{]`, alone or
+  after JSON documents. What follows it in the input is not read. Before
+  go-kure/kure#1012 kure's parser did not return on such input, and neither did
+  the build;
+- which kinds are registered is kure's to say. Since go-kure/kure#1007 a MetalLB
+  `BGPPeer` at `metallb.io/v1beta2`, the version MetalLB stores, is one, beside
+  `v1beta1`. **Breaking** for a chart or a manifest source that holds such a
+  document, which was emitted as rendered: it is now emitted as its Go type, so
+  `spec.passwordSecret: {}` is written where the document left the field out,
+  and a field of the wrong type (`holdTime: [1]`) is a build error. One that
+  sets an undeclared field is still emitted as rendered (*Undeclared fields*,
+  below);
+- a list document where a `helm.sh/hook` annotation is involved is a build error
+  naming the list: the annotation on the list's own metadata, or on one of its
+  items (for a `v1` `List` and a list of an unregistered kind, whose items are
+  documents of their own, at every depth the parser opens). Helm reads a hook on
+  the rendered document's own metadata and nowhere else, and the parser reads
+  only a list's items. So the items of a hook list would be emitted as ordinary
+  resources, and an item's own annotation, which Helm does not read, would group
+  it as a hook or drop it. The check reads a list as the parser does, with one
+  addition: Helm reads `metadata` under any case of the key and the parser reads
+  the exact key, so a hook on a list under `Metadata` is refused here. A list
+  without the annotation, and without any other label or annotation of its own,
+  builds; an object that is not a list keeps its hook.
 
-  A decode failure is reported as `decoding rendered manifests: …`. `Generate` returns a fresh
-  copy of the decoded objects on every call, as `manifests` does, so a trait that decorates a
-  typed workload (`topology-spread`, `security-context`, a mounted `configmap`,
-  `external-secret`) acts on a chart's Deployment as on an authored one, and generating the
-  same result twice gives the same output.
+A decode failure is reported as `decoding rendered manifests: …`. `Generate`
+returns a fresh copy of the decoded objects on every call, as `manifests` does,
+so a trait that decorates a typed workload (`topology-spread`,
+`security-context`, a mounted `configmap`, `external-secret`) acts on a chart's
+Deployment as on an authored one, and generating the same result twice gives the
+same output.
 
-  **Policy.** `ApplyPolicy` holds the chart to the environment policy in two steps
-  (go-kure/launcher#791); the transform calls it with `NoopPolicy` when no policy is passed.
-  - *The source, before any fetch.* The host of `source.url` must match an entry of the policy's
-    allowed registries (`AllowedRegistries`) exactly, as for `oci`, `crd` and `manifests`; for an
-    `oci://` URL that is its first segment, which is what the Helm registry client pulls from. A
-    refused source fails before any request is made: only an allowed source is rendered. No
-    allowlist, or an empty one, permits every host.
-  - *Every emitted workload.* The chart is then rendered — in the transform, so a fetch or render
-    failure is reported there, as that component's policy error — and each Pod, PodTemplate,
-    ReplicationController, Deployment, StatefulSet, DaemonSet, ReplicaSet, Job and CronJob in it,
-    a kept hook's included, is checked as an authored workload is: host namespaces, hostPath
-    volumes, the cpu/memory maxima, the storage maximum on a generic ephemeral volume's claim,
-    the registry allowlist on an image volume's reference (**breaking**, go-kure/launcher#790:
-    a chart that renders one from a registry outside the list built before; see *Image volumes*
-    under **pod**),
-    and for every init and regular container the registry allowlist, the privileged, HostProcess
-    and capability gates, and `ValidateImageRef` (no untagged image, no `:latest`), which holds
-    the reference of an image volume too (**breaking**, go-kure/launcher#790: a chart that
-    renders an untagged or `:latest` one built before). Ephemeral
-    containers are refused. The storage a PersistentVolumeClaim, or a StatefulSet's claim
-    template, requests is held to the storage maximum (`MaxStorageSize`), as the
-    `persistentvolumeclaim` and `statefulset` kinds hold theirs. The replica count of a
-    Deployment, StatefulSet, ReplicaSet or ReplicationController (one when the chart sets none)
-    and the `maxReplicas` of a HorizontalPodAutoscaler, in any API version, are held to the
-    replica maximum (`MaxReplicas`), as the `deployment` and `statefulset` kinds and the
-    `scaler` trait hold theirs. A PersistentVolume is held to what the `persistentvolume`
-    kind holds its own to: a `hostPath` or `local` source needs `AllowHostPathVolumes()`,
-    and `spec.capacity.storage` is held to the storage maximum (breaking for a chart that
-    renders one; see **persistentvolume**). The error names the rendered
-    object and the field (`helmtemplate: rendered Deployment "demo/web":
-    spec.template.spec.containers[0] "app": …`).
+**Hook-group layout.** For a layout-walking consumer (the
+`layout.LayoutAugmenter` path), more than one hook group makes `AugmentLayout`
+clear the component's flat `Resources` and replace them with one child
+`ManifestLayout` per group, named `<application>-<component>-NN-<phase-slug>`,
+written to its own directory `<component dir>/<child>` (its `Namespace` is the
+component layout's own path, which kure joins with the child's name, so a
+hook-group directory is never nested twice) and chained via `DependsOn`, listing
+each child's preceding sibling in the order kure's `helm.SplitByHookWeight`
+synthesizes from Helm's hook phases — a combined install/upgrade ordering for
+GitOps reconciliation, not Helm's own per-operation execution order (kure
+`pkg/stack/helm/hooks.go:28-36`). `DependsOn` is set on every child, and only
+kure's `FluxIntegratedPerLayout` placement carries it: there kure's layout
+integrator gives each child a Flux Kustomization CR of its own and writes each
+entry into its `spec.dependsOn` as the name of the Kustomization of the sibling
+the entry names (kure `pkg/stack/layout/manifest.go`'s `DependsOn` field doc).
+Under `FluxSeparate` and `FluxIntegratedPerBundle` a child gets no Kustomization
+of its own, and kure's Flux integration refuses the child's `DependsOn` and
+`KustomizationName`, naming the child; before, it dropped them without an error,
+and the order between hook groups was lost. A chart with more than one hook
+group therefore needs `FluxIntegratedPerLayout` under kure's Flux integration.
+When it partitions, `AugmentLayout` also sets the component layout's
+`ApplicationFileMode` to `AppFilePerResource` unless the caller already set one,
+so the component stays a directory whose `kustomization.yaml` lists the
+children. Without that, a writer-wide `AppFileSingle` default (kure
+`layout.Config.ApplicationFileMode`) would make kure's `WriteManifest` refuse
+the tree under any placement but `FluxIntegratedPerLayout`: an `AppFileSingle`
+layout writes no `kustomization.yaml`, so nothing would list its child layouts.
+The children carry no mode of their own, so under such a default each hook group
+is written as one file, `<component dir>/<child>.yaml`, instead of a
+sub-directory, and the component's `kustomization.yaml` lists it; under
+`FluxIntegratedPerLayout` kure's layout integrator keeps every child a directory
+with its own Flux Kustomization, whatever the default. kure names that
+Kustomization `<bundle's Kustomization>-<child>` and shortens it past 63
+characters by its own rule, while the child's name, its directory, is held to
+253 (`site/content/api-reference/oam/pipeline.md`, "Pipeline"). A single-group
+chart's `AugmentLayout` is a no-op. Every `helmtemplate` component is a
+`LayoutAugmenter`, a hook-free chart included, since the group count is known
+only after the render — so even a hook-free chart gets its own sub-layout
+directory under a layout-walking consumer, for no behavioural benefit. The child
+name begins with the application name: component names are unique only within
+one Application, while the Kustomization CRs a consumer generates for the
+hook-group children of every application can share one namespace, so two
+differently named Applications that each have a component `db` get
+`<application>-db-NN-<phase-slug>` children that differ. The transform hands the
+config its application (`oam.ApplicationNameSetter`, the `Application` field); a
+`HelmTemplateConfig` built directly, outside a transform, has none unless the
+caller sets the field, and its children are then named `<layout
+name>-NN-<phase-slug>`. **Breaking output change**: every hook-group child name,
+and so its directory and the Flux Kustomization a consumer derives from it,
+gains the leading `<application>-`. The Kustomization kure generates for the
+child under `FluxIntegratedPerLayout` is `<bundle's Kustomization>-<child>`
+(`shop-shop-db-01-main`), and the next group's `spec.dependsOn` follows it.
+**Breaking output change**: from go-kure/launcher#787 launcher named it by the
+child alone (`shop-db-01-main`) and shortened it to 63 characters itself; it now
+leaves the name to kure, whose `<unit>-` keeps two applications of one name in
+different bundles apart, and which refuses the name under the coarser
+placements. A layout name over 253 characters is shortened by the one shortening
+rule (`oam.ShortenNameWithSuffix`, which `helm` uses for its values ConfigMap
+name): the `-NN-<phase-slug>` suffix is kept whole and
+`<application>-<component>` becomes its own beginning plus 10 hex digits of its
+sha256 (8 before go-kure/launcher#793), so two long names that differ anywhere
+almost never shorten to the same one. Known limitation: the two names are joined
+by a plain `-`, which either may contain, so application `a-b` with component
+`c` and application `a` with component `b-c` still get the same child names. The
+default carries no namespace either: like the bundle name, a child name is built
+from the application's name alone, so two Applications with one name in
+different namespaces get the same child names. Keeping those apart is the
+author's or the consumer's: the `hookGroupNamePrefix` property, or the `Naming`
+hook's answer for the `hook-group` role, replaces `<application>-<component>` in
+the name of every child, directory and Kustomization alike. Such a prefix is a
+DNS-1123 subdomain and is never shortened: a child name over 63 characters built
+from it fails the transform, in an error with the component, the role and the
+full name (`*oam.HookGroupNameError`, which answers to
+`oam.ErrHookGroupNameTooLong`), and two components of one document that resolve
+to one prefix fail the transform. The transform has the chart rendered by its
+policy step, with or without a policy of the caller's, and asks the config then
+(`CheckHookGroupNames`); `AugmentLayout` returns the same error for a config
+built directly or a prefix set after the transform. Known limit: the transform
+holds the prefixes apart, not the names built from them after the render, so two
+different prefixes can still give one Kustomization name (a written prefix that
+equals kure's name for another component's default child, less its suffix; a
+prefix that ends as another chart's phase begins). kure refuses that name, used
+twice, when the walked tree is integrated; another `hookGroupNamePrefix` on one
+of the components is the way out
+(`site/content/api-reference/oam/names-and-overrides.md`, "Name roles and the
+`Naming` hook"). A `HelmTemplateConfig` built directly sets
+`HookGroupNamePrefix`. The component's own layout, the parent of the hook-group
+children, also gets a Flux Kustomization under `FluxIntegratedPerLayout`, which
+kure names `<bundle>-<component>` and shortens past 63 characters by its own
+rule; launcher leaves that default to kure. **Breaking output change**: before,
+the transform shortened a default over 63 characters by launcher's rule and
+`AugmentLayout` set it on the layout, so such a layout's Kustomization name
+changes. The `layoutKustomizationName` property, or the `Naming` hook's answer
+for the `layout` role, sets another name, a DNS-1123 subdomain of at most 63
+characters used as written and never shortened; any other fails the transform,
+naming the component and the role. A name set on the layout needs per-layout
+placement: under any other the layout gets no Kustomization of its own, and
+kure's Flux integration refuses the name, naming the layout. A
+`HelmTemplateConfig` built directly sets `LayoutKustomizationName`;
+`AugmentLayout` never overwrites a `KustomizationName` the layout already
+carries. `GenerateCoversAugmentLayout` is always true — `Generate`'s output is
+already the flat union `AugmentLayout` repartitions — so `kurel build`, which
+never walks a layout, accepts the component and emits `Generate`'s flat output.
 
-  **Behaviour change:** a chart that renders a privileged container, a host namespace or a
-  hostPath volume no longer builds unless the policy allows it — and with no policy passed
-  nothing allows it, since `NoopPolicy` denies all five. The policy accessors that allow such a
-  chart are `AllowPrivileged()`, `AllowHostNetwork()`, `AllowHostPID()`, `AllowHostIPC()` and
-  `AllowHostPathVolumes()`; there is no per-chart exemption. A chart image without a tag, or
-  tagged `:latest`, has to be pinned through the chart's values.
+### Validation
 
-  **Undeclared fields** (go-kure/launcher#794, item 7). Kure's parser decodes a registered kind
-  leniently: a field the vendored API type does not declare — one a newer Kubernetes version
-  added, say — is dropped, with no error. The policy check reads that type, so it would pass a
-  workload whose undeclared pod spec field it never saw, and the object would be written
-  without the field. Template delivery, `manifests`, `crd` and `passthrough` therefore decode
-  each document of a registered kind once more, strictly, over the same scheme, and act on
-  what that reports:
-  - *A workload or a claim* — the kinds the policy check reads as Go types: Pod, PodTemplate,
-    ReplicationController, Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob,
-    PersistentVolumeClaim and PersistentVolume, which "a workload or a claim" stands for
-    wherever this rule is cited — that sets an undeclared field is refused, under any policy
-    and with none. A kind the check comes to read as its Go type joins them. The error names the object and the path of every such field (`decoding rendered
-    manifests: Deployment "demo/web": undeclared field
-    spec.template.spec.fieldOfALaterVersion: the apps/v1 Deployment type this build reads the
-    object with does not declare it, so the object cannot be checked against environment
-    policy`).
-  - *Any other registered kind* is emitted as the document was rendered, unstructured, the
-    field kept. A HorizontalPodAutoscaler is one of these: the check reads its `maxReplicas`
-    from the unstructured object as it does from the Go type. One shape is refused: a
-    top-level `items` array on a kind that declares none, since written out the object is a
-    list to whatever applies it, and its items would be applied in its place.
+**Refused outright.** `targetNamespace`, every property only a Flux-reconciled
+release reads (`interval`, `driftDetection`, `install`, `upgrade`, `valuesFrom`,
+`valuesMode`), the `helm` rule's `delivery` switch, and a source reference
+(`source.name`, `source.namespace`) are undeclared keys: schema validation
+refuses each, and so does the strict decode. An `OCIRepository` source without
+`version` is refused by the handler. The key itself is what is refused, whatever
+it holds. The render's `.Release.Namespace` is the application namespace; the
+terminal declares no `targetNamespace`, so it cannot be set.
 
-  A list (a `v1` `List`, a typed list, a list of an unregistered kind) is replaced by its
-  items, so the rule is each item's: an item is refused or kept as a document of its own is,
-  the error naming its position (`decoding rendered manifests: item 1 of List: Deployment
-  "demo/web": undeclared field …`; `item 0 of WidgetList: item 0 of List: …` for a list in a
-  list). A kept item that left `apiVersion` and `kind` out is written with the ones its list
-  gives it: the kind a typed list holds, and for a list of an unregistered kind the list's
-  `apiVersion` and its kind without `List`. The list's other fields are not read: the list
-  is never emitted. A document whose items cannot be matched to the objects the parser made
-  of them is refused, not passed with an item unread.
+**Breaking** (with the kure version that reads a list in one place), for
+template delivery, `manifests` and `crd` alike. Built before, refused now:
 
-  A key written twice is not an undeclared field and is read as before (the last value
-  stands). One case of it is refused, whatever the kind: a JSON document that writes so
-  many keys twice that the strict decode's record of errors, which holds a hundred, is
-  full without naming an undeclared field. Whether such a document also sets one cannot
-  be told. (A document whose undeclared field is recorded before the record fills is
-  treated as any other: refused as a workload or a claim, kept as another kind.)
+| Document | Before | Now |
+|---|---|---|
+| A list (a `v1` `List`, a typed list, a list of an unregistered kind) with a label or an annotation on its own metadata | Built: the items emitted, the list's metadata dropped. Template delivery refused only `helm.sh/hook` there, and still does, with its own text | `List has metadata of its own that its items cannot keep: annotations …; labels …` |
+| `Kind` or `apiversion` beside the exact key, on a document or on an item of a list | Built, with two exceptions: emitted as written, the extra key kept. A workload or a claim was refused already, by *Undeclared fields* (`undeclared field Kind`), and so was an item of a typed list whose `Kind` or `apiversion` states another value than the list holds, by the parser (`the item states …, the list holds …`). Both are refused now with the other text | `the key "Kind" equals "kind" only after case folding; write it "kind" or remove it` |
+| `Items` on a `v1` `List` | Decoded, to no object at all: a chart or a source with other objects built. A `manifests` or `crd` source that held nothing else was refused already (`source resolved to no manifests`) | The same text, for `"Items"` |
+| `Items` on a list of an unregistered kind | Built: the list emitted as one object | The same text |
+| A `null` item in a list of an unregistered kind | Built: an otherwise empty object emitted, with the list's `apiVersion` and its kind without `List` | `item 0 of WidgetList: the item is null, not an object` |
+| An item of a registered kind, in a list of an unregistered kind, that does not decode as its type (`data: 1` on a ConfigMap) | Built: the item emitted as written. A workload, a claim or a PersistentVolume there did not build: the policy check refused it as unreadable, and it is refused now for the decode | The item's decode error, naming its position |
+| In a JSON document, an item of a registered kind, in a list of an unregistered kind, that states `apiVersion` or `kind` and then `null` for it, where the stated value is not the one its list gives it | Built: the item emitted as written. A workload, a claim or a PersistentVolume there did not build: the policy check refused it as unreadable | `item 0 of FooList: Deployment "web": the object was read as apps/v1 Deployment, and the decode that checks its fields reads the document as example.com/v1 Deployment, so its fields cannot be checked; …` (*Undeclared fields*, below) |
+| An object of an unregistered kind that does not end in `List`, with a top-level `items` array | Built: the entries emitted in its place, each unstructured | `… an `items` array on an object of a kind that is no list (example.com/v1 Widget) is read as a list by what applies the output …` |
 
-  Another is an item of a list of an unregistered kind, in a JSON document, that states
-  `apiVersion` or `kind` and then `null` for it. The parser reads the last statement, takes
-  the `null` for the key left out and gives the item its list's; the strict decode keeps the
-  string the `null` follows. Where that string is what the list gives too, the two agree
-  and nothing changes. Where it is not, the strict decode checks the fields of another kind
-  than the one emitted, and an item the parser made a Go type of is refused, with or without
-  an undeclared field
-  (`item 0 of FooList: Deployment "web": the object was read as apps/v1 Deployment, and the
-  decode that checks its fields reads the document as example.com/v1 Deployment, so its
-  fields cannot be checked; a second apiVersion or kind that is null is the known cause,
-  state each once`). The parser refuses the same in an item of a typed list itself. An item
-  the parser leaves untyped, its kind not registered at the list's `apiVersion`, is emitted
-  as the parser read it and is not checked as the kind the strict decode would read: nothing
-  of an unstructured object is dropped.
+Not refusals, and a change of output all the same: an item of a registered kind
+in a list of an unregistered kind is read as its Go type, as in a `v1` `List`,
+where it was emitted as written. It is emitted from that type, *Undeclared
+fields* applies to it, and the policy check reads it: a workload, a claim or a
+PersistentVolume there was refused as unreadable and is now checked, and builds
+when the policy allows it. A list inside such a list was left whole, and refused
+by the policy check; it is opened in turn.
 
-  Whether a cluster accepts a kept field its own version does not know is not verified
-  here; the object reaches it as the chart wrote it.
+Texts that changed: a `null` item of a `v1` `List` was `nil runtime object
+provided` and is `the item is null, not an object`; `… is nested more than 8
+lists deep` now holds for a list of an unregistered kind too; the policy check's
+refusal of an object with a top-level `items` array no longer says the object
+`sits inside a list of an unregistered kind`, and no decode returns such an
+object any more (*Limits*, below).
 
-  **Breaking**, in two ways. A chart that renders a workload or a claim with an undeclared
-  field built before, the field dropped from the output, and no longer builds: the field has
-  to go, or wait for a launcher whose pinned API types declare it. And the output of every
-  other registered kind gains the fields the typed decode had dropped since
-  go-kure/launcher#791; such an object is written from the document and not from its Go type,
-  so the rest of it is as the chart wrote it too.
+**Policy.** `ApplyPolicy` holds the chart to the environment policy in two
+steps; the transform calls it with `NoopPolicy` when no policy is passed.
 
-  Known limit: a type that unmarshals itself decodes its own keys, so an undeclared key inside
-  one is not reported and is still dropped. A CustomResourceDefinition's `items` schema is
-  such a type: the same kind of type as a `CiliumNetworkPolicy`'s endpoint selector, which
-  the kind inventory records and an authored Cilium policy checks on its own. A key next to
-  `properties` in the same schema is reported and kept. No type under a workload or a claim does this beyond scalar
-  leaves (`Quantity`, `IntOrString`, `Time`) and the raw field set of `managedFields`; a test
-  walks those types and fails when one starts to.
+- *The source, before any fetch.* The host of `source.url` must match an entry
+  of the policy's allowed registries (`AllowedRegistries`) exactly, as for
+  `oci`, `crd` and `manifests`; for an `oci://` URL that is its first segment,
+  which is what the Helm registry client pulls from. A refused source fails
+  before any request is made: only an allowed source is rendered. No allowlist,
+  or an empty one, permits every host.
+- *Every emitted workload.* The chart is then rendered — in the transform, so a
+  fetch or render failure is reported there, as that component's policy error —
+  and each Pod, PodTemplate, ReplicationController, Deployment, StatefulSet,
+  DaemonSet, ReplicaSet, Job and CronJob in it, a kept hook's included, is
+  checked as an authored workload is: host namespaces, hostPath volumes, the
+  cpu/memory maxima, the storage maximum on a generic ephemeral volume's claim,
+  the registry allowlist on an image volume's reference (**breaking**,
+  go-kure/launcher#790: a chart that renders one from a registry outside the
+  list built before; see *Image volumes* under **pod**), and for every init and
+  regular container the registry allowlist, the privileged, HostProcess and
+  capability gates, and `ValidateImageRef` (no untagged image, no `:latest`),
+  which holds the reference of an image volume too (**breaking**,
+  go-kure/launcher#790: a chart that renders an untagged or `:latest` one built
+  before). Ephemeral containers are refused. The storage a
+  PersistentVolumeClaim, or a StatefulSet's claim template, requests is held to
+  the storage maximum (`MaxStorageSize`), as the `persistentvolumeclaim` and
+  `statefulset` kinds hold theirs. The replica count of a Deployment,
+  StatefulSet, ReplicaSet or ReplicationController (one when the chart sets
+  none) and the `maxReplicas` of a HorizontalPodAutoscaler, in any API version,
+  are held to the replica maximum (`MaxReplicas`), as the `deployment` and
+  `statefulset` kinds and the `scaler` trait hold theirs. A PersistentVolume is
+  held to what the `persistentvolume` kind holds its own to: a `hostPath` or
+  `local` source needs `AllowHostPathVolumes()`, and `spec.capacity.storage` is
+  held to the storage maximum (breaking for a chart that renders one; see
+  **persistentvolume**). The error names the rendered object and the field
+  (`helmtemplate: rendered Deployment "demo/web":
+  spec.template.spec.containers[0] "app": …`).
 
-  Limits. The items of a list, whatever its kind, are checked as documents of their own are,
-  a list among them opened in turn.
-  A workload, claim or PersistentVolume in an API version kure's scheme
-  does not register
-  (`batch/v1beta1`, `apps/v1beta2`) cannot be read and
-  is refused rather than passed unchecked, inside a list as outside one. The decode returns no object with a
-  top-level `items` array (*Rendered objects*, above), so the check meets none; one that reaches it
-  another way is refused as unreadable. Not checked: an object of a dropped hook (never emitted); the pods a
-  custom resource's controller creates, and the replica count a custom resource sets; the host of the chart archive a Helm repository's index
-  points at, and any redirect, which kure's renderer follows. That one is a decided limit
-  (go-kure/launcher#794, item 6): the allowlist is checked on the chart's source URL before
-  anything is fetched, and holding every later request to it needs a hook in kure's chart
-  renderer, which takes a release name and a namespace and nothing about its requests
-  (`helm.RenderChart`). A nil policy (a direct
-  `ApplyPolicy(nil)`, or `Generate` on a config no policy was applied to) checks nothing, and
-  `ApplyPolicy(nil)` withdraws no policy applied before. A chart
-  delivered as a Flux `HelmRelease` (`helmrelease`, `helm` under `delivery: flux`) is rendered
-  on the cluster, so nothing it renders can be checked at build time; only the host of a source
-  component in the document is.
+**Behaviour change:** a chart that renders a privileged container, a host
+namespace or a hostPath volume no longer builds unless the policy allows it —
+and with no policy passed nothing allows it, since `NoopPolicy` denies all five.
+The policy accessors that allow such a chart are `AllowPrivileged()`,
+`AllowHostNetwork()`, `AllowHostPID()`, `AllowHostIPC()` and
+`AllowHostPathVolumes()`; there is no per-chart exemption. A chart image without
+a tag, or tagged `:latest`, has to be pinned through the chart's values.
 
-  **Hook-group layout.** For a layout-walking consumer (the `layout.LayoutAugmenter` path), more
-  than one hook group makes `AugmentLayout` clear the component's flat `Resources` and replace
-  them with one child `ManifestLayout` per group, named
-  `<application>-<component>-NN-<phase-slug>`, written to
-  its own directory `<component dir>/<child>` (its `Namespace` is the component layout's own path,
-  which kure joins with the child's name, so a hook-group directory is never nested twice) and
-  chained via `DependsOn`, listing each child's preceding sibling in the order kure's
-  `helm.SplitByHookWeight` synthesizes from Helm's hook phases — a combined install/upgrade
-  ordering for GitOps reconciliation, not Helm's own per-operation execution order (kure
-  `pkg/stack/helm/hooks.go:28-36`). `DependsOn` is set on every child, and only kure's
-  `FluxIntegratedPerLayout` placement carries it: there kure's layout integrator gives each child
-  a Flux Kustomization CR of its own and writes each entry into its `spec.dependsOn` as the name
-  of the Kustomization of the sibling the entry names (kure `pkg/stack/layout/manifest.go`'s
-  `DependsOn` field doc). Under `FluxSeparate` and `FluxIntegratedPerBundle` a child gets no
-  Kustomization of its own, and kure's Flux integration refuses the child's `DependsOn` and
-  `KustomizationName`, naming the child (go-kure/kure#1032); before, it dropped them without an
-  error, and the order between hook groups was lost. A chart with more than one hook group
-  therefore needs `FluxIntegratedPerLayout` under kure's Flux integration. When it
-  partitions, `AugmentLayout` also sets the component layout's `ApplicationFileMode` to
-  `AppFilePerResource` unless the caller already set one, so the component stays a directory
-  whose `kustomization.yaml` lists the children. Without that, a writer-wide `AppFileSingle`
-  default (kure `layout.Config.ApplicationFileMode`) would make kure's `WriteManifest` refuse the
-  tree under any placement but `FluxIntegratedPerLayout`: an `AppFileSingle` layout writes no
-  `kustomization.yaml`, so nothing would list its child layouts (`go-kure/launcher#563`). The
-  children carry no mode of their own, so under such a default each hook group is written as one
-  file, `<component dir>/<child>.yaml`, instead of a sub-directory, and the component's
-  `kustomization.yaml` lists it; under `FluxIntegratedPerLayout` kure's layout integrator keeps
-  every child a directory with its own Flux Kustomization, whatever the default. kure names
-  that Kustomization `<bundle's Kustomization>-<child>` and shortens it past 63 characters by
-  its own rule (go-kure/kure#1030, go-kure/kure#1036), while the child's name, its directory,
-  is held to 253 (`site/content/api-reference/oam/pipeline.md`, "Pipeline"). A single-group
-  chart's `AugmentLayout` is a no-op. Every `helmtemplate` component is a `LayoutAugmenter`, a
-  hook-free chart included, since the group count is known only after the render — so even a
-  hook-free chart gets its own sub-layout directory under a layout-walking consumer, for no
-  behavioural benefit. The child name begins with the application name
-  (go-kure/launcher#792): component names are unique only within one Application, while the
-  Kustomization CRs a consumer generates for the hook-group children of every application can
-  share one namespace, so two differently named Applications that each have a component `db`
-  get `<application>-db-NN-<phase-slug>` children that differ. The transform hands the config its
-  application (`oam.ApplicationNameSetter`, the `Application` field); a `HelmTemplateConfig`
-  built directly, outside a transform, has none unless the caller sets the field, and its
-  children are then named `<layout name>-NN-<phase-slug>`. **Breaking output change**: every
-  hook-group child name, and so its directory and the Flux Kustomization a consumer derives
-  from it, gains the leading `<application>-`. The Kustomization kure generates for the child
-  under `FluxIntegratedPerLayout` is `<bundle's Kustomization>-<child>`
-  (`shop-shop-db-01-main`), and the next group's `spec.dependsOn` follows it. **Breaking output
-  change** (go-kure/launcher#941): from go-kure/launcher#787 launcher named it by the child
-  alone (`shop-db-01-main`) and shortened it to 63 characters itself; it now leaves the name to
-  kure, whose `<unit>-` keeps two applications of one name in different bundles apart, and
-  which refuses the name under the coarser placements (go-kure/kure#1032). A layout name over
-  253 characters is shortened by the one shortening rule (`oam.ShortenNameWithSuffix`, which
-  `helm` uses for its values ConfigMap name): the `-NN-<phase-slug>` suffix is kept whole and `<application>-<component>` becomes
-  its own beginning plus 10 hex digits of its sha256 (8 before go-kure/launcher#793), so two
-  long names that differ anywhere almost never shorten to the same one. Known limitation: the
-  two names are joined by a plain `-`, which either may contain, so application `a-b` with
-  component `c` and application `a` with component `b-c` still get the same child names. The
-  default carries no namespace either: like the bundle name, a child name is built from the
-  application's name alone, so two Applications with one name in different namespaces get the
-  same child names. Keeping those apart is the author's or the consumer's: the
-  `hookGroupNamePrefix` property, or the `Naming` hook's answer for the `hook-group` role
-  (go-kure/launcher#787), replaces `<application>-<component>` in the name of every child,
-  directory and Kustomization alike. Such a prefix is a DNS-1123 subdomain and is never
-  shortened: a child name over 63 characters built from it fails the transform, in an error
-  with the component, the role and the full name (`*oam.HookGroupNameError`, which answers
-  to `oam.ErrHookGroupNameTooLong`), and two components of one document that
-  resolve to one prefix fail the transform. The transform has the chart rendered by its
-  policy step, with or without a policy of the caller's, and asks the config then
-  (`CheckHookGroupNames`); `AugmentLayout` returns the same error for a config built
-  directly or a prefix set after the transform. Known limit: the transform holds the prefixes
-  apart, not the names built from them after the render, so two different prefixes can still
-  give one Kustomization name (a written prefix that equals kure's name for another
-  component's default child, less its suffix; a prefix that ends as another chart's phase
-  begins). kure refuses that name, used twice, when the
-  walked tree is integrated; another `hookGroupNamePrefix` on one of the components is the
-  way out (`site/content/api-reference/oam/names-and-overrides.md`, "Name roles and the `Naming` hook"). A `HelmTemplateConfig` built directly sets `HookGroupNamePrefix`.
-  The component's own layout, the parent of the hook-group children, also gets a Flux
-  Kustomization under `FluxIntegratedPerLayout`, which kure names `<bundle>-<component>` and
-  shortens past 63 characters by its own rule; launcher leaves that default to kure.
-  **Breaking output change** (go-kure/launcher#941): before, the transform shortened a default
-  over 63 characters by launcher's rule and `AugmentLayout` set it on the layout, so such a
-  layout's Kustomization name changes. The `layoutKustomizationName` property, or the
-  `Naming` hook's answer for the `layout` role, sets another name, a DNS-1123 subdomain of at
-  most 63 characters used as written and never shortened; any other fails the transform,
-  naming the component and the role. A name set on the layout needs per-layout placement:
-  under any other the layout gets no Kustomization of its own, and kure's Flux integration
-  refuses the name, naming the layout (go-kure/kure#1032). A
-  `HelmTemplateConfig` built directly sets `LayoutKustomizationName`; `AugmentLayout` never
-  overwrites a `KustomizationName` the layout already carries. `GenerateCoversAugmentLayout` is always true —
-  `Generate`'s output is already the flat union `AugmentLayout` repartitions — so `kurel build`,
-  which never walks a layout, accepts the component and emits `Generate`'s flat output.
-- **oci** — `source.url` (`oci://…`), `source.name` (a name for the generated
-  OCIRepository, see below), `source.objectName` (a name for the OCIRepository
-  the component keeps to itself, see below), `kustomizationName` (a name for
-  the Kustomization, see below), the source's registry access
-  `source.secretRef`, `source.provider`, `source.insecure`,
-  `source.certSecretRef`, `source.proxySecretRef` (go-kure/launcher#999) and
-  `source.serviceAccountName` (go-kure/launcher#1009),
-  `version` (tag or `sha256:…`), `path`, `prune`, `interval`,
-  `targetNamespace`, `wait`, `healthChecks`.
+**Undeclared fields**. Kure's parser decodes a registered kind leniently: a
+field the vendored API type does not declare — one a newer Kubernetes version
+added, say — is dropped, with no error. The policy check reads that type, so it
+would pass a workload whose undeclared pod spec field it never saw, and the
+object would be written without the field. Template delivery, `manifests`, `crd`
+and `passthrough` therefore decode each document of a registered kind once more,
+strictly, over the same scheme, and act on what that reports:
 
-  **Lowering (go-kure/launcher#784).** `oci` is a role-named component: `OCIRule`
-  lowers it to the two kind-named terminals it stands for, an `ocirepository`
-  (`url`, `ref.tag` from `version`, or `ref.digest` for a `sha256:` value, the
-  authored `interval`, and each registry access key that is set, as written)
-  and a `fluxcd-kustomization` (`path`, `prune`,
-  `sourceRef`, and `interval`, `targetNamespace`, `wait` and `healthChecks`
-  when set). No handler is registered for `oci`. The rule runs the checks
-  below first, with their `oci:` messages; everything past them is the
-  terminals' own.
-  Each Secret reference of the registry access names a Secret in the
-  namespace the OCIRepository lands in, the Flux namespace when one is set,
-  as on `ocirepository`; `source.serviceAccountName` names a ServiceAccount
-  in that namespace. A Secret-making trait (`secret`,
-  `external-secret`, `certificate`) goes to the Kustomization, not the source.
-  The Secret it makes moves to the Flux namespace when the source reads it,
-  whichever form the source takes: the source the component keeps to itself,
-  as the two land there together (go-kure/launcher#1012), or one generated on
-  its own, which several components share or `source.name` names, and which
-  every consumer is ordered after (go-kure/launcher#1016). A workload that
-  needs the Secret in the application namespace gets a second Secret of its
-  own; or provide the Secret in the Flux namespace. One consumer making it is
-  enough; two consumers making the same Secret collide. A consumer that
-  makes it in a later group than another consumer of the same source (a
-  `dependency` policy orders it after that one) is admitted under the
-  default delivery, which converges. Under
-  `TransformContext.GroupsWaitForFluxObjects`, a delivery that makes a group
-  Ready only once its Flux objects are, it never would: the earlier
-  consumer waits for the source, the source for the Secret, and the
-  Secret's group for the earlier one. The transform then refuses it
-  (go-kure/launcher#1039): put the trait on a consumer in the earliest
-  group, or provide the Secret apart from the document. The same holds for
-  any Flux object that requires a ConfigMap or Secret a trait makes in a
-  later group, whichever component carries the trait (go-kure/launcher#1079;
-  see each kind's *Required reads*), and for one a component of a later
-  group makes: a `secret` or `configmap` component, a `certificate`'s
-  `secretName`, an `externalsecret`'s target, where it lands with the
-  source (go-kure/launcher#1086): place the component in the group of the
-  earliest consumer or an earlier one. An
-  `external-secret` under `target.creationPolicy: Merge` or `None` makes no
-  Secret and is admitted; so is a `verify.trustedRootSecretRef` under a
-  provider other than `cosign`, which source-controller does not read.
-  - *A component alone on its artifact* lowers to a same-name group: both
-    objects are named after the component (unless `kustomizationName` or
-    `source.objectName` names them, below) and deploy as one unit, the
-    OCIRepository first. This is the pair of objects `oci` has always emitted,
-    byte for byte. Annotations go to both members, so a tier annotation, a
-    `placement` policy or a `dependency` rule naming the component acts on the
-    pair. `prune-protection` and `force-replace` cover both objects (the
-    pair's application takes the delivery intent); every other trait goes to
-    the Kustomization.
-  - *Two or more `oci` components of one document on the same source* share
-    it. The source then belongs to the document, not to the component that
-    comes first: it is emitted once, named `<document>-source-<digest>` (the
-    10-hex digest of the source identity, through
-    `LoweringContext.ResolveSharedName`, which shortens a default over 253
-    characters by the one rule), and each component lowers to its Kustomization alone,
-    referencing it and ordered after it (`Component.OrderAfter`). Like a
-    source `helm` generates, it is then a generated source: `pkg/oam` applies
-    it with the application bundle, ahead of every group, wherever its
-    consumers are placed. It carries no trait and no annotation of any
-    consumer, and may not be placed in a tier or made to wait on a component.
-    The consumer's `Naming` hook may rename it: it is asked under role
-    `helm-source`, once for each source identity of a document, with that
-    default and no component (go-kure/launcher#787).
-  - *`source.name` names the source* (go-kure/launcher#787), and makes it the
-    shared form whatever the number of consumers: the OCIRepository is emitted
-    once under that name, applied with the application bundle ahead of every
-    group, and the component lowers to its Kustomization alone. **A source
-    named this way carries no annotations and no traits of the component**, not
-    even for a component alone on its artifact: `prune-protection` and
-    `force-replace` then cover the Kustomization only, and a tier annotation
-    places only the Kustomization. The name is the component's own choice.
-    Components that write the same name for the same identity share the source;
-    a component that writes none does not share it and is not counted among
-    its consumers, so it keeps its own source, or shares the document's with
-    the other components that name none. A name equal to that shared source's
-    own names that source: one name for one identity is one source. The name
-    is used as written: it must
-    be a DNS-1123 subdomain of at most 253 characters, and cannot be the
-    component's own name or that of another component of the document (`oci:
-    source.name "base" is the component's own name; the generated source is a
-    component of the document too, so give it another name`). One name for two
-    identities is refused as a collision. `source.name: ""` reads as absent.
-  - *`kustomizationName` and `source.objectName` name the two objects that
-    carry the component's name* (go-kure/launcher#787): the Kustomization, in
-    both forms, and the source a component keeps to itself. Each is the
-    author's property, else the consumer's `Naming` hook's answer (roles
-    `oci-kustomization` and `oci-source`, asked with the component), else the
-    component name, so a document that sets neither and a hook that declines
-    give the same output as before. A name that is not the default is used as
-    written: a DNS-1123 subdomain of at most 253 characters, refused otherwise
-    and never shortened. It names the object alone. Both members keep the
-    component's name, so the pair stays one unit: a tier annotation, a
-    `placement` policy or a `dependency` rule naming the component still acts
-    on both, and the traits go where they went. The Kustomization's `sourceRef`
-    names the kept source by the name that object takes. Every one of these
-    names is claimed, the default included, so an authored `ocirepository` or
-    `fluxcd-kustomization` component whose `objectName` is the same name is
-    refused in the transform with both named:
+- *A workload or a claim* — the kinds the policy check reads as Go types: Pod,
+  PodTemplate, ReplicationController, Deployment, StatefulSet, DaemonSet,
+  ReplicaSet, Job, CronJob, PersistentVolumeClaim and PersistentVolume, which "a
+  workload or a claim" stands for wherever this rule is cited — that sets an
+  undeclared field is refused, under any policy and with none. A kind the check
+  comes to read as its Go type joins them. The error names the object and the
+  path of every such field (`decoding rendered manifests: Deployment "demo/web":
+  undeclared field spec.template.spec.fieldOfALaterVersion: the apps/v1
+  Deployment type this build reads the object with does not declare it, so the
+  object cannot be checked against environment policy`).
+- *Any other registered kind* is emitted as the document was rendered,
+  unstructured, the field kept. A HorizontalPodAutoscaler is one of these: the
+  check reads its `maxReplicas` from the unstructured object as it does from the
+  Go type. One shape is refused: a top-level `items` array on a kind that
+  declares none, since written out the object is a list to whatever applies it,
+  and its items would be applied in its place.
 
-    ```
-    name collision: OCIRepository.source.toolkit.fluxcd.io "default/manifests" is named by component "manifests" (role "oci-source", its default) and by component "repo" (role "object", set by properties.objectName); give one of them another name
-    ```
+A list (a `v1` `List`, a typed list, a list of an unregistered kind) is replaced
+by its items, so the rule is each item's: an item is refused or kept as a
+document of its own is, the error naming its position (`decoding rendered
+manifests: item 1 of List: Deployment "demo/web": undeclared field …`; `item 0
+of WidgetList: item 0 of List: …` for a list in a list). A kept item that left
+`apiVersion` and `kind` out is written with the ones its list gives it: the kind
+a typed list holds, and for a list of an unregistered kind the list's
+`apiVersion` and its kind without `List`. The list's other fields are not read:
+the list is never emitted. A document whose items cannot be matched to the
+objects the parser made of them is refused, not passed with an item unread.
 
-    `source.objectName` and `source.name` both name the OCIRepository, in two
-    ways, and are refused together. Write `source.objectName` to rename the
-    source the component keeps to itself: it stays with the Kustomization and
-    carries the component's annotations and its `prune-protection` and
-    `force-replace` traits. Write `source.name` for a source generated on its
-    own, which components that write the same name share. A component that
-    writes `source.objectName` keeps its own source whatever other component
-    has the same identity, and is not counted among the consumers of a shared
-    one.
-  - *The source identity* is the `url`, the `version`, the effective
-    `interval` and the registry access. Unset, `0s`, `60m` and `1h` are one
-    interval. Components whose intervals differ do not share: each keeps a
-    source of its own, polling at its own interval, as a component alone on
-    its artifact does. Nor do components whose access differs in any key, so
-    no component pulls with another's credentials, provider, ServiceAccount
-    or TLS settings; one `source.name` written with two accesses is refused
-    as one name for two identities. An unset key (a `null` reference, an
-    empty `provider` or `serviceAccountName`, `insecure: false`) is no access and leaves the identity, and a shared
-    source's name, as they were before these keys; an authored `{}`
-    reference is access of its own, and `provider: generic` differs from no
-    provider.
-    An `oci` and a `helm` component on one artifact never share either: the
-    identities differ, and a Helm source copies the chart layer instead of
-    extracting it.
+A key written twice is not an undeclared field and is read as before (the last
+value stands). One case of it is refused, whatever the kind: a JSON document
+that writes so many keys twice that the strict decode's record of errors, which
+holds a hundred, is full without naming an undeclared field. Whether such a
+document also sets one cannot be told. (A document whose undeclared field is
+recorded before the record fills is treated as any other: refused as a workload
+or a claim, kept as another kind.)
 
-  **Output changes.** For a document in which several `oci` components
-  reconcile one artifact, the OCIRepository is renamed from the name of the
-  component deployed first to `<document>-source-<digest>`. It is applied
-  with the application bundle, ahead of every group, instead of with that
-  component, so the application has an ordered group even when the document
-  declares no order. That component's `prune-protection` or `force-replace`
-  no longer covers it. The rename also happens when a second consumer
-  is added to a document that had one, and is undone when it is removed.
-  Components that shared one source while their intervals differed now emit
-  one source each. `interval: 0s` now emits the 60m default on both objects,
-  since both terminals read a zero interval as unset; it used to be emitted
-  as `0s`. Nothing else changes.
+Another is an item of a list of an unregistered kind, in a JSON document, that
+states `apiVersion` or `kind` and then `null` for it. The parser reads the last
+statement, takes the `null` for the key left out and gives the item its list's;
+the strict decode keeps the string the `null` follows. Where that string is what
+the list gives too, the two agree and nothing changes. Where it is not, the
+strict decode checks the fields of another kind than the one emitted, and an
+item the parser made a Go type of is refused, with or without an undeclared
+field (`item 0 of FooList: Deployment "web": the object was read as apps/v1
+Deployment, and the decode that checks its fields reads the document as
+example.com/v1 Deployment, so its fields cannot be checked; a second apiVersion
+or kind that is null is the known cause, state each once`). The parser refuses
+the same in an item of a typed list itself. An item the parser leaves untyped,
+its kind not registered at the list's `apiVersion`, is emitted as the parser
+read it and is not checked as the kind the strict decode would read: nothing of
+an unstructured object is dropped.
 
-  Sharing is decided among the `oci` components the document holds when the
-  rule runs: an `oci` component a third-party rule emits in a later lowering
-  round is not counted as a consumer of a source lowered before it.
+Whether a cluster accepts a kept field its own version does not know is not
+verified here; the object reaches it as the chart wrote it.
 
-  **Messages.** The checks the rule runs keep their `oci:` text. A lowering
-  refusal is reported with the component and its document
-  (`component "x" (type "oci") in document …: oci: version is required …`).
-  The registry allowlist is the `ocirepository` terminal's check, so its
-  refusals name that kind and its field (`ocirepository: url: …`) rather
-  than `oci: source.url`.
+**Breaking**, in two ways. A chart that renders a workload or a claim with an
+undeclared field built before, the field dropped from the output, and no longer
+builds: the field has to go, or wait for a launcher whose pinned API types
+declare it. And the output of every other registered kind gains the fields the
+typed decode had dropped since go-kure/launcher#791; such an object is written
+from the document and not from its Go type, so the rest of it is as the chart
+wrote it too.
 
-  `targetNamespace` has no default (go-kure/launcher#622). Unset, the
-  Kustomization emits no `spec.targetNamespace` and each object keeps the
-  namespace the artifact's own kustomize build gives it: the one it carries,
-  or a `namespace` set in the artifact's `kustomization.yaml`.
-  kustomize-controller does not fill in its own namespace for an object that
-  still has none. Author `targetNamespace` when namespaced objects are left
-  without a namespace after that build: they otherwise fail at apply with
-  `namespace not specified`, with or without a Flux namespace. This deliberately differs from `helmrelease`, which under a Flux namespace defaults
-  `targetNamespace` to the application namespace. A Kustomization's
-  `targetNamespace` sets or overrides the namespace of every namespaced object
-  it applies, Flux custom resources included, so a default would move the
-  objects of a deliberately multi-namespace artifact.
-  `wait` and `healthChecks` are opt-in readiness settings for the delivery
-  Kustomization (go-kure/launcher#432). A document in which neither requests
-  anything — `wait` absent or `false`, and `healthChecks` absent, null or
-  empty — builds the same Kustomization byte for byte, and the default stays
-  unset.
-  `wait: true` sets `spec.wait`, so Flux reports the Kustomization ready only
-  once everything it applied is ready; `false`, like an omitted key, emits
-  nothing. `healthChecks` is a list of `{apiVersion, kind, name, namespace}`
-  entries copied, in authored order, into `spec.healthChecks`. The component
-  delivers an opaque artifact, so the list is authored, never derived.
-  `apiVersion` (`apps/v1`, or `v1` for a core kind), `kind` and `name` are
-  required non-empty strings, and `namespace` is optional, left out for a
-  cluster-scoped kind. Any other key in an entry is refused by name, a
-  wrongly typed field is a type error (`healthChecks[0].name: must be a
-  string, got int`), and an empty or null list emits nothing. `wait: true`
-  together with a non-empty `healthChecks` is refused: kustomize-controller
-  ignores `healthChecks` when `wait` is true, so the list would never be
-  checked. There is no `timeout` property; Flux's own default applies.
-  Under a policy with a non-empty registry allowlist (`AllowedRegistries`),
-  `source.url` must name its registry explicitly — `oci://<registry>/<repository>`
-  with a non-empty repository and a registry that is `localhost` or contains
-  `.` or `:` — and that registry must match an allowlist entry exactly
-  (go-kure/launcher#580). Flux's source-controller parses the url with
-  go-containerregistry's `name.NewRepository`, which reads any other first
-  segment as part of a Docker Hub repository: `oci://ghcr.io` and
-  `oci://registry/my-artifact` are pulled from Docker Hub, so they are refused
-  even when `ghcr.io` or `registry` is listed. No policy, or an empty
-  allowlist, accepts every `oci://` url this rule would refuse; a user or
-  password in `source.url` is refused whatever the policy, by its
-  `ocirepository` terminal (see **helmrepository / ocirepository /
-  gitrepository / bucket / helmchart**).
-  `interval` (default `60m`) must be a duration Flux accepts, checked exactly as
-  for `helmrelease` (go-kure/launcher#590): see its Defaults paragraph.
+Known limit: a type that unmarshals itself decodes its own keys, so an
+undeclared key inside one is not reported and is still dropped. A
+CustomResourceDefinition's `items` schema is such a type: the same kind of type
+as a `CiliumNetworkPolicy`'s endpoint selector, which the kind inventory records
+and an authored Cilium policy checks on its own. A key next to `properties` in
+the same schema is reported and kept. No type under a workload or a claim does
+this beyond scalar leaves (`Quantity`, `IntOrString`, `Time`) and the raw field
+set of `managedFields`; a test walks those types and fails when one starts to.
+
+Limits. The items of a list, whatever its kind, are checked as documents of
+their own are, a list among them opened in turn. A workload, claim or
+PersistentVolume in an API version kure's scheme does not register
+(`batch/v1beta1`, `apps/v1beta2`) cannot be read and is refused rather than
+passed unchecked, inside a list as outside one. The decode returns no object
+with a top-level `items` array (*Rendered objects*, above), so the check meets
+none; one that reaches it another way is refused as unreadable. Not checked: an
+object of a dropped hook (never emitted); the pods a custom resource's
+controller creates, and the replica count a custom resource sets; the host of
+the chart archive a Helm repository's index points at, and any redirect, which
+kure's renderer follows. That one is a decided limit: the allowlist is checked
+on the chart's source URL before anything is fetched, and holding every later
+request to it needs a hook in kure's chart renderer, which takes a release name
+and a namespace and nothing about its requests (`helm.RenderChart`). A nil
+policy (a direct `ApplyPolicy(nil)`, or `Generate` on a config no policy was
+applied to) checks nothing, and `ApplyPolicy(nil)` withdraws no policy applied
+before. A chart delivered as a Flux `HelmRelease` (`helmrelease`, `helm` under
+`delivery: flux`) is rendered on the cluster, so nothing it renders can be
+checked at build time; only the host of a source component in the document is.
+
+### Example
+
+No example yet.
+
+## oci
+
+`oci` is a role-named component: `OCIRule` lowers it to the two kind-named
+terminals it stands for, an `ocirepository` (`url`, `ref.tag` from `version`, or
+`ref.digest` for a `sha256:` value, the authored `interval`, and each registry
+access key that is set, as written) and a `fluxcd-kustomization` (`path`,
+`prune`, `sourceRef`, and `interval`, `targetNamespace`, `wait` and
+`healthChecks` when set). No handler is registered for `oci`. The rule runs the
+checks below first, with their `oci:` messages; everything past them is the
+terminals' own.
+
+### Properties
+
+`source.url` (`oci://…`), `source.name` (a name for the generated OCIRepository,
+see below), `source.objectName` (a name for the OCIRepository the component
+keeps to itself, see below), `kustomizationName` (a name for the Kustomization,
+see below), the source's registry access `source.secretRef`, `source.provider`,
+`source.insecure`, `source.certSecretRef`, `source.proxySecretRef` and
+`source.serviceAccountName`, `version` (tag or `sha256:…`), `path`, `prune`,
+`interval`, `targetNamespace`, `wait`, `healthChecks`.
+
+`wait` and `healthChecks` are opt-in readiness settings for the delivery
+Kustomization. A document in which neither requests anything — `wait` absent or
+`false`, and `healthChecks` absent, null or empty — builds the same
+Kustomization byte for byte, and the default stays unset. `wait: true` sets
+`spec.wait`, so Flux reports the Kustomization ready only once everything it
+applied is ready; `false`, like an omitted key, emits nothing. `healthChecks` is
+a list of `{apiVersion, kind, name, namespace}` entries copied, in authored
+order, into `spec.healthChecks`. The component delivers an opaque artifact, so
+the list is authored, never derived. `apiVersion` (`apps/v1`, or `v1` for a core
+kind), `kind` and `name` are required non-empty strings, and `namespace` is
+optional, left out for a cluster-scoped kind. Any other key in an entry is
+refused by name, a wrongly typed field is a type error (`healthChecks[0].name:
+must be a string, got int`), and an empty or null list emits nothing. `wait:
+true` together with a non-empty `healthChecks` is refused: kustomize-controller
+ignores `healthChecks` when `wait` is true, so the list would never be checked.
+There is no `timeout` property; Flux's own default applies.
+
+### Outputs
+
+Each Secret reference of the registry access names a Secret in the namespace the
+OCIRepository lands in, the Flux namespace when one is set, as on
+`ocirepository`; `source.serviceAccountName` names a ServiceAccount in that
+namespace. A Secret-making trait (`secret`, `external-secret`, `certificate`)
+goes to the Kustomization, not the source. The Secret it makes moves to the Flux
+namespace when the source reads it, whichever form the source takes: the source
+the component keeps to itself, as the two land there together, or one generated
+on its own, which several components share or `source.name` names, and which
+every consumer is ordered after. A workload that needs the Secret in the
+application namespace gets a second Secret of its own; or provide the Secret in
+the Flux namespace. One consumer making it is enough; two consumers making the
+same Secret collide. A consumer that makes it in a later group than another
+consumer of the same source (a `dependency` policy orders it after that one) is
+admitted under the default delivery, which converges. Under
+`TransformContext.GroupsWaitForFluxObjects`, a delivery that makes a group Ready
+only once its Flux objects are, it never would: the earlier consumer waits for
+the source, the source for the Secret, and the Secret's group for the earlier
+one. The transform then refuses it: put the trait on a consumer in the earliest
+group, or provide the Secret apart from the document. The same holds for any
+Flux object that requires a ConfigMap or Secret a trait makes in a later group,
+whichever component carries the trait (see each kind's *Required reads*), and
+for one a component of a later group makes: a `secret` or `configmap` component,
+a `certificate`'s `secretName`, an `externalsecret`'s target, where it lands
+with the source: place the component in the group of the earliest consumer or an
+earlier one. An `external-secret` under `target.creationPolicy: Merge` or `None`
+makes no Secret and is admitted; so is a `verify.trustedRootSecretRef` under a
+provider other than `cosign`, which source-controller does not read.
+
+- *A component alone on its artifact* lowers to a same-name group: both objects
+  are named after the component (unless `kustomizationName` or
+  `source.objectName` names them, below) and deploy as one unit, the
+  OCIRepository first. This is the pair of objects `oci` has always emitted,
+  byte for byte. Annotations go to both members, so a tier annotation, a
+  `placement` policy or a `dependency` rule naming the component acts on the
+  pair. `prune-protection` and `force-replace` cover both objects (the pair's
+  application takes the delivery intent); every other trait goes to the
+  Kustomization.
+- *Two or more `oci` components of one document on the same source* share it.
+  The source then belongs to the document, not to the component that comes
+  first: it is emitted once, named `<document>-source-<digest>` (the 10-hex
+  digest of the source identity, through `LoweringContext.ResolveSharedName`,
+  which shortens a default over 253 characters by the one rule), and each
+  component lowers to its Kustomization alone, referencing it and ordered after
+  it (`Component.OrderAfter`). Like a source `helm` generates, it is then a
+  generated source: `pkg/oam` applies it with the application bundle, ahead of
+  every group, wherever its consumers are placed. It carries no trait and no
+  annotation of any consumer, and may not be placed in a tier or made to wait on
+  a component. The consumer's `Naming` hook may rename it: it is asked under
+  role `helm-source`, once for each source identity of a document, with that
+  default and no component.
+- *`source.name` names the source*, and makes it the shared form whatever the
+  number of consumers: the OCIRepository is emitted once under that name,
+  applied with the application bundle ahead of every group, and the component
+  lowers to its Kustomization alone. **A source named this way carries no
+  annotations and no traits of the component**, not even for a component alone
+  on its artifact: `prune-protection` and `force-replace` then cover the
+  Kustomization only, and a tier annotation places only the Kustomization. The
+  name is the component's own choice. Components that write the same name for
+  the same identity share the source; a component that writes none does not
+  share it and is not counted among its consumers, so it keeps its own source,
+  or shares the document's with the other components that name none. A name
+  equal to that shared source's own names that source: one name for one identity
+  is one source. The name is used as written: it must be a DNS-1123 subdomain of
+  at most 253 characters, and cannot be the component's own name or that of
+  another component of the document (`oci: source.name "base" is the component's
+  own name; the generated source is a component of the document too, so give it
+  another name`). One name for two identities is refused as a collision.
+  `source.name: ""` reads as absent.
+- *`kustomizationName` and `source.objectName` name the two objects that carry
+  the component's name*: the Kustomization, in both forms, and the source a
+  component keeps to itself. Each is the author's property, else the consumer's
+  `Naming` hook's answer (roles `oci-kustomization` and `oci-source`, asked with
+  the component), else the component name, so a document that sets neither and a
+  hook that declines give the same output as before. A name that is not the
+  default is used as written: a DNS-1123 subdomain of at most 253 characters,
+  refused otherwise and never shortened. It names the object alone. Both members
+  keep the component's name, so the pair stays one unit: a tier annotation, a
+  `placement` policy or a `dependency` rule naming the component still acts on
+  both, and the traits go where they went. The Kustomization's `sourceRef` names
+  the kept source by the name that object takes. Every one of these names is
+  claimed, the default included, so an authored `ocirepository` or
+  `fluxcd-kustomization` component whose `objectName` is the same name is
+  refused in the transform with both named:
+
+```
+name collision: OCIRepository.source.toolkit.fluxcd.io "default/manifests" is named by component "manifests" (role "oci-source", its default) and by component "repo" (role "object", set by properties.objectName); give one of them another name
+```
+
+`source.objectName` and `source.name` both name the OCIRepository, in two ways,
+and are refused together. Write `source.objectName` to rename the source the
+component keeps to itself: it stays with the Kustomization and carries the
+component's annotations and its `prune-protection` and `force-replace` traits.
+Write `source.name` for a source generated on its own, which components that
+write the same name share. A component that writes `source.objectName` keeps its
+own source whatever other component has the same identity, and is not counted
+among the consumers of a shared one.
+
+- *The source identity* is the `url`, the `version`, the effective `interval`
+  and the registry access. Unset, `0s`, `60m` and `1h` are one interval.
+  Components whose intervals differ do not share: each keeps a source of its
+  own, polling at its own interval, as a component alone on its artifact does.
+  Nor do components whose access differs in any key, so no component pulls with
+  another's credentials, provider, ServiceAccount or TLS settings; one
+  `source.name` written with two accesses is refused as one name for two
+  identities. An unset key (a `null` reference, an empty `provider` or
+  `serviceAccountName`, `insecure: false`) is no access and leaves the identity,
+  and a shared source's name, as they were before these keys; an authored `{}`
+  reference is access of its own, and `provider: generic` differs from no
+  provider. An `oci` and a `helm` component on one artifact never share either:
+  the identities differ, and a Helm source copies the chart layer instead of
+  extracting it.
+
+**Output changes.** For a document in which several `oci` components reconcile
+one artifact, the OCIRepository is renamed from the name of the component
+deployed first to `<document>-source-<digest>`. It is applied with the
+application bundle, ahead of every group, instead of with that component, so the
+application has an ordered group even when the document declares no order. That
+component's `prune-protection` or `force-replace` no longer covers it. The
+rename also happens when a second consumer is added to a document that had one,
+and is undone when it is removed. Components that shared one source while their
+intervals differed now emit one source each. `interval: 0s` now emits the 60m
+default on both objects, since both terminals read a zero interval as unset; it
+used to be emitted as `0s`. Nothing else changes.
+
+Sharing is decided among the `oci` components the document holds when the rule
+runs: an `oci` component a third-party rule emits in a later lowering round is
+not counted as a consumer of a source lowered before it.
+
+`targetNamespace` has no default. Unset, the Kustomization emits no
+`spec.targetNamespace` and each object keeps the namespace the artifact's own
+kustomize build gives it: the one it carries, or a `namespace` set in the
+artifact's `kustomization.yaml`. kustomize-controller does not fill in its own
+namespace for an object that still has none. Author `targetNamespace` when
+namespaced objects are left without a namespace after that build: they otherwise
+fail at apply with `namespace not specified`, with or without a Flux namespace.
+This deliberately differs from `helmrelease`, which under a Flux namespace
+defaults `targetNamespace` to the application namespace. A Kustomization's
+`targetNamespace` sets or overrides the namespace of every namespaced object it
+applies, Flux custom resources included, so a default would move the objects of
+a deliberately multi-namespace artifact.
+
+### Validation
+
+**Messages.** The checks the rule runs keep their `oci:` text. A lowering
+refusal is reported with the component and its document (`component "x" (type
+"oci") in document …: oci: version is required …`). The registry allowlist is
+the `ocirepository` terminal's check, so its refusals name that kind and its
+field (`ocirepository: url: …`) rather than `oci: source.url`.
+
+Under a policy with a non-empty registry allowlist (`AllowedRegistries`),
+`source.url` must name its registry explicitly — `oci://<registry>/<repository>`
+with a non-empty repository and a registry that is `localhost` or contains `.`
+or `:` — and that registry must match an allowlist entry exactly. Flux's
+source-controller parses the url with go-containerregistry's
+`name.NewRepository`, which reads any other first segment as part of a Docker
+Hub repository: `oci://ghcr.io` and `oci://registry/my-artifact` are pulled from
+Docker Hub, so they are refused even when `ghcr.io` or `registry` is listed. No
+policy, or an empty allowlist, accepts every `oci://` url this rule would
+refuse; a user or password in `source.url` is refused whatever the policy, by
+its `ocirepository` terminal (see **helmrepository / ocirepository /
+gitrepository / bucket / helmchart**).
+
+`interval` (default `60m`) must be a duration Flux accepts, checked exactly as
+for `helmrelease`: see its Defaults paragraph.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/oci/app.yaml`, built against the
+`cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test
+compares the two.
