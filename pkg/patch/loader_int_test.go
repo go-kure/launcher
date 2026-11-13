@@ -838,19 +838,25 @@ func TestWriteBack_ScalarItemDoesNotTakeAMapping(t *testing.T) {
 	}
 }
 
-// The write-back of a scalar list is timed at two sizes, n and 2n, and the test compares the
-// two times. Linear pairing makes the second about twice the first, and the old quadratic scan
-// made it about four times. An absolute bound failed on a slow runner (5.6 s against 5 s) and
-// would have passed a quadratic scan on a fast one, because the ratio of both runs does not
-// depend on the speed of the runner. Each size takes the best of scalarListRuns fresh runs, so
+// The write-back of a scalar list is timed at two sizes, n and scalarListGrowth*n, and the test
+// compares the two times. Linear pairing makes the second about 4 times the first, and the old
+// quadratic scan made it about 16 times. An absolute bound failed on a slow runner (5.6 s against
+// 5 s) and would have passed a quadratic scan on a fast one, because the ratio of both runs does
+// not depend on the speed of the runner. Each size takes the best of scalarListRuns fresh runs, so
 // one stall does not count. A size whose time is under scalarListFloor is noise, and n doubles
 // until it is not or reaches scalarListMaxItems.
+//
+// The limit sits at the geometric middle of the two ratios, 4 and 16, so it is 2 times above the
+// linear ratio and 2 times below the quadratic one. A first version compared n with 2n against
+// 3.0: its two ratios were 2 and 4, a margin of 1.5 times on one side, and a ratio of two timings
+// of about 100 ms each crossed it twice in five cluster runs (3.11 and 3.17).
 const (
 	scalarListStartItems = 12500
 	scalarListMaxItems   = 100000
+	scalarListGrowth     = 4
 	scalarListRuns       = 3
 	scalarListFloor      = 20 * time.Millisecond
-	scalarListRatioLimit = 3.0
+	scalarListRatioLimit = 8.0
 )
 
 // bestScalarListWriteBack returns the shortest of scalarListRuns write-backs of a list of items
@@ -891,15 +897,15 @@ func TestWriteBack_LargeScalarListIsLinear(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			items := scalarListStartItems
 			small := bestScalarListWriteBack(t, items, c.text)
-			for small < scalarListFloor && 2*items*2 <= scalarListMaxItems {
+			for small < scalarListFloor && scalarListGrowth*items*2 <= scalarListMaxItems {
 				items *= 2
 				small = bestScalarListWriteBack(t, items, c.text)
 			}
-			large := bestScalarListWriteBack(t, 2*items, c.text)
+			large := bestScalarListWriteBack(t, scalarListGrowth*items, c.text)
 			ratio := float64(large) / float64(small)
-			t.Logf("scalar list write-back: %d items %v, %d items %v, ratio %.2f (limit %.1f)", items, small, 2*items, large, ratio, scalarListRatioLimit)
+			t.Logf("scalar list write-back: %d items %v, %d items %v, ratio %.2f (limit %.1f)", items, small, scalarListGrowth*items, large, ratio, scalarListRatioLimit)
 			if ratio >= scalarListRatioLimit {
-				t.Errorf("write-back of a scalar list took %v at %d items and %v at %d items, ratio %.2f, limit %.1f: the pairing is no longer linear", small, items, large, 2*items, ratio, scalarListRatioLimit)
+				t.Errorf("write-back of a scalar list took %v at %d items and %v at %d items, ratio %.2f, limit %.1f: the pairing is no longer linear", small, items, large, scalarListGrowth*items, ratio, scalarListRatioLimit)
 			}
 		})
 	}
