@@ -13,18 +13,30 @@ Outputs, Validation and Example. Its implementation, history and tests are on th
 `mutatingwebhookconfiguration` are the kind-named
 projections of three cluster-scoped objects: an `apiregistration.k8s.io/v1`
 APIService and an `admissionregistration.k8s.io/v1`
-ValidatingWebhookConfiguration and MutatingWebhookConfiguration. Each emits
-that one object, named after the component unless `objectName` names it,
-with no namespace, holding exactly what was authored, on `policyFreeKind`.
+ValidatingWebhookConfiguration and MutatingWebhookConfiguration.
 No dimension of the environment policy reads them; its object kind rules
 (`oam.ObjectKindPolicy`) gate them as every emitted object, so a policy
 that forbids their group, their kind or cluster-scoped objects refuses
 them. What they do once applied is out of the build's reach (see ["Kind
 inventory"](https://www.gokure.dev/launcher/api-reference/oam-components/#kind-inventory), "Cluster-wide admission and API registration").
 
+### Properties
+
+**apiservice** decodes `APIServiceSpec` strictly.
+
+**validatingwebhookconfiguration** and **mutatingwebhookconfiguration**
+have no spec: their one property is the object's `webhooks`, strictly
+decoded, and `kind`, `apiVersion` and `metadata` are refused.
+
+### Outputs
+
+Each emits that one object, named after the component unless `objectName`
+names it, with no namespace, holding exactly what was authored, on
+`policyFreeKind`.
+
 ### Validation
 
-**apiservice** decodes `APIServiceSpec` strictly. From the markers,
+**apiservice**: from the markers,
 `groupPriorityMinimum` and `versionPriority` are required, which the type
 writes unauthored. By hand, from the API server's validation: `version`
 must be written, `group` too (the API exempts `v1`, the core API, whose
@@ -40,10 +52,8 @@ ranges (1 to 20000, 1 to 1000), the port, and how `caBundle` and
 `insecureSkipTLSVerify` combine are left to the API server. `caBundle` is
 base64, as the API's JSON writes bytes.
 
-**validatingwebhookconfiguration** and **mutatingwebhookconfiguration**
-have no spec: their one property is the object's `webhooks`, strictly
-decoded, and `kind`, `apiVersion` and `metadata` are refused. From the
-markers, a webhook's `name`, `clientConfig`, `sideEffects` and
+**validatingwebhookconfiguration** and **mutatingwebhookconfiguration**:
+from the markers, a webhook's `name`, `clientConfig`, `sideEffects` and
 `admissionReviewVersions`, a Service's `namespace` and `name`, and a match
 condition's `name` and `expression` must be written. By hand, from the API
 server's validation at Kubernetes v1.37.1: `clientConfig` holds exactly one
@@ -82,8 +92,15 @@ configuration with no webhook.
 
 `validatingadmissionpolicy`, `validatingadmissionpolicybinding`,
 `mutatingadmissionpolicy`, `mutatingadmissionpolicybinding` are the kind-named projections of four
-cluster-scoped `admissionregistration.k8s.io/v1` objects. Each decodes its
-spec strictly and emits that one object, named after the component unless
+cluster-scoped `admissionregistration.k8s.io/v1` objects.
+
+### Properties
+
+Each decodes its spec strictly.
+
+### Outputs
+
+Each emits that one object, named after the component unless
 `objectName` names it, with no namespace, holding exactly what was
 authored, on `policyFreeKind`, gated as the webhook configurations above.
 
@@ -256,7 +273,7 @@ is its own.
   `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares the
   two.
 
-## role
+### role
 
 `role` emits its Role in the build namespace; the handler declares its
 object as namespaced, so the object name is claimed in the object's
@@ -269,7 +286,7 @@ requires no rule, and the type always writes the list: a role that authors
 none carries `rules: null` and grants nothing, and an authored empty list
 is written as `[]`.
 
-## rolebinding
+### rolebinding
 
 `rolebinding` emits its RoleBinding in the build namespace; the handler
 declares its object as namespaced, so the object name is claimed in the
@@ -282,7 +299,7 @@ its `namespace` out: the API server's validation takes it, the key is not
 written, and the authorizer of that version reads the subject as one of
 the binding's own namespace.
 
-## clusterrole
+### clusterrole
 
 `clusterrole` emits its ClusterRole with no namespace; the handler
 declares its object as cluster-scoped, so the object name is claimed
@@ -302,7 +319,7 @@ expressions"](conventions.md#a-label-selectors-match-expressions)). An aggregate
 emitted with `rules: null` when `rules` is not authored and with
 `rules: []` when authored so, and the control plane fills the rules.
 
-## clusterrolebinding
+### clusterrolebinding
 
 `clusterrolebinding` emits its ClusterRoleBinding with no namespace; the
 handler declares its object as cluster-scoped, so the object name is
