@@ -3,9 +3,9 @@ title: "Kinds: PostgreSQL and CloudNativePG"
 weight: 10
 ---
 
-Each kind below with a heading has the same sections: Properties, Outputs,
-Validation and Example. Its implementation, history and tests are on the
-[contributor page](../../contributing/oam-reference/kinds-postgres.md).
+Each kind below has the same sections: Properties, Outputs, Validation and
+Example. Its implementation, history and tests are on the [contributor
+page](../../contributing/oam-reference/kinds-postgres.md).
 
 ## cnpg-imagecatalog, cnpg-clusterimagecatalog, cnpg-backup, cnpg-scheduledbackup, cnpg-databaserole, cnpg-publication, cnpg-subscription
 
@@ -905,453 +905,455 @@ The component in `pkg/cmd/kurel/testdata/postgresql-full/app.yaml`, built
 against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The
 fixture test compares the two.
 
-## Kinds not yet in sections
+## cnpg-cluster
 
-The kinds below are not yet in these sections.
+**cnpg-cluster** — the operator-CR kind component for a CloudNativePG `Cluster`
+(design: `docs/oam/design-operator-cr-components.md`).
 
-- **cnpg-cluster** — the operator-CR kind component for a CloudNativePG
-  `Cluster` (design: `docs/oam/design-operator-cr-components.md`). The
-  component name becomes the Cluster's name and its `cnpg.io/cluster`
-  endpoint selector, so it must be what CloudNativePG's admission webhook
-  admits: a DNS-1035 label (no leading digit, no dot) of at most 50
-  characters. Any other name is refused at parse time, when endpoints are
-  collected and by `Generate` (`cnpg-cluster name "db.main": must be a
-  DNS-1035 label of at most 50 characters …`), although other kinds accept
-  DNS-1123 subdomains of up to 253. Its
-  properties are the `spec` of a `postgresql.cnpg.io/v1` `Cluster`, one schema
-  key per `ClusterSpec` json field: scalars are typed, and every structured
-  field is an open `object` or an `array` of open objects whose description
-  points at the upstream type. `ToApplicationConfig` decodes the whole property
-  map into `cnpgv1.ClusterSpec` with `builtin.DecodeStrictJSON`, so a key the
-  linked CNPG version does not declare, at any depth (`storage.sise`,
-  `bootstrap.initdb.databse`), and a value of the wrong type
-  (`storage.size: 5`) are refused rather than dropped. Two limits come from
-  `encoding/json` itself: the unknown-field error names the key but not its
-  path, and a key differing from a declared one only in letter case is
-  accepted as that field (two spellings of one field in the same object are
-  refused, since the decoder would keep only one: `storage.size: sets the
-  same field as storage.Size …`). The policy defaults below read what was authored
-  from the decoded spec as well as from the property map, where every
-  spelling the decoder accepts is consulted, so such a key still counts as
-  authored and is not overwritten by a default — including an empty
-  `storage.size`, which the decoded spec cannot tell from absence.
-  It carries **no launcher opinions**: `Generate` emits the Cluster named after
-  the component in the build namespace with exactly the authored spec, so an
-  unauthored field is left for the operator's own default. `postgresql`'s
-  choices — an image from `version`, `primaryUpdateStrategy: unsupervised`,
-  `enablePDB` from the replica count, a `1Gi` storage fallback, pod
-  anti-affinity — are not made here: its lowering rule writes them as this
-  kind's properties, and the trait it attaches sets the two that depend on
-  the policy (see `postgresql`). The one value it writes unasked is
-  `instances: 1`, the CRD default, because `ClusterSpec.Instances` has no
-  `omitempty` and would otherwise serialize as `0`. The non-pointer blocks
-  appear even when unauthored, as they do for `postgresql`: `affinity` and
-  `resources` as empty objects, and `postgresql` as
-  `syncReplicaElectionConstraint: {enabled: false}`, because that nested
-  field's `enabled` has no `omitempty`.
-  Nulls follow ["The null contract"](null-and-spellings.md#the-null-contract), and a null is whatever serializes
-  to JSON null: the properties are marshalled with `encoding/json` and read
-  back before anything else looks at them, so a null map value is left out
-  rather than decoded to an empty string, and a null array element is
-  refused by path (`env[0]: null is not a valid array element`). The
-  contract covers declared keys only: a key the CNPG type does not declare
-  is refused as an unknown field even when its value is null
-  (`storage: {sise: null}`), not dropped with the null. A lowering
-  rule emits JSON-shaped values (string-keyed maps, slices, scalars) as for
-  every component; that is the supported contract, and the engine's schema
-  check refuses a typed API struct where it checks an object or array item
-  (for example an `env` entry), though not inside an open object's
-  undeclared keys. Because the reading is the serialization itself, a
-  direct caller of the handler additionally has a value built in Go read
-  exactly as `encoding/json` writes it — a concrete collection type, a nil
-  behind a pointer, a `json.RawMessage` and a custom encoder included. A
-  value that does not serialize is refused. An `instances` below 1, in
-  any spelling, is refused before policy runs (`instances: must be >= 1,
-  got 0`): the CRD's minimum is 1, so the API server would refuse the
-  Cluster. A policy instance-count default below 1 is refused the same way.
-  `Generate` repeats the name and instance-count refusals on what it emits,
-  the count's upper bound (`instances: must be <= 2147483647, got …`)
-  included, so a `CnpgClusterConfig` built in Go without
-  `ToApplicationConfig` cannot produce a Cluster the operator or the API
-  server rejects for either. It also refuses any storage request the
-  Cluster carries that does not parse or is not positive, authored or from
-  a policy default, on every claim the storage maximum below covers
-  (`storage.size: quantity must be positive, got "0"`;
-  `walStorage.pvcTemplate.resources.requests.storage: …`): CloudNativePG's
-  webhook parses only `storage.size`, so such a Cluster was admitted and its
-  claims then failed the API server's positive storage-request check
-  (go-kure/launcher#623). An unset size is still left to the operator.
-  An authored `0` or `false` that the typed spec cannot carry, on a field
-  whose CRD default is not zero, is refused by path
-  (`managed.roles[0].connectionLimit: 0 cannot be carried by the
-  CloudNativePG API types (the field is omitted when zero, so the operator
-  would apply its default -1)`). These fields are non-pointer and
-  `omitempty`, so the value is omitted when the Cluster is encoded and the
-  operator applies its CRD default instead. For the linked CNPG version they
-  are `managed.roles[].connectionLimit` (default `-1`, unlimited),
-  `postgresUID` and `postgresGID` (`26`), `startDelay` (`3600`),
-  `stopDelay` (`1800`), `switchoverDelay` (`3600`),
-  `probes.liveness.isolationCheck.requestTimeout` and `.connectionTimeout`
-  (`1000`) and `replicationSlots.updateInterval` (`30`); a test derives the
-  set from the CNPG module's CRD and Go types, so a CNPG bump that changes it
-  fails CI. An explicit zero default on any other such field, such as
-  `managed.roles[].login: false`, `superuser: false`, `minSyncReplicas: 0`
-  or `monitoring.enablePodMonitor: false`, is accepted: it is omitted too,
-  and the field's absence means the same value.
-  Two fields the Cluster CRD requires, which the Go type leaves out when they
-  are empty, are refused when unauthored or empty: the `signerName` and the
-  `keyType` of a pod certificate source of the projected volume template
-  (`projectedVolumeTemplate.sources[0].podCertificate.signerName: required
-  (…)`). The object would show the omission and the API server refuse it.
-  Two more that the CRD requires, which the Go type writes as `null` when
-  they are unauthored, are refused when unauthored: the `nodeSelectorTerms`
-  of a required node affinity
-  (`affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms:
-  required (…)`) and the `databases` of an import
-  (`bootstrap.initdb.import.databases: required (…)`). The API server drops a
-  null of a field that is not nullable before it validates, so the required
-  field is then missing. An authored empty list is written as one and is not
-  refused here. A third such field is not refused:
-  `replicationSlots.synchronizeReplicas.enabled`, which the CRD defaults, so
-  the API server puts the default (`true`) in the place of the null.
-  `TestKindComponents_NullRequired` derives the three from the CRD and shows
-  each answer by running the CRD's schema validator on the object.
-  **Four fields the linked Go type holds and the Cluster CRD does not are
-  refused when authored**, under `backup.barmanObjectStore` and under each
-  `externalClusters[].barmanObjectStore`: `s3Credentials.sseCustomerKey`
-  (with its `name` and `key`) and `s3AddressingStyle` (for example
-  `backup.barmanObjectStore.s3AddressingStyle: no field of the
-  postgresql.cnpg.io/v1 Cluster API: its CRD has no such property`). The
-  barman-cloud type the strict decode reads is newer than the Cluster CRD of
-  cloudnative-pg v1.30.1 (its `clusters.yaml`), which has no property for
-  either, so the API server would name each as unknown and prune it. A `null`
-  or an empty `s3AddressingStyle` is not authored and builds. The kind's row
-  in `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the eight
-  paths from the CRD in both directions, and
-  `TestCnpgClusterHandler_AbsentFromCRD` shows each refusal. Remove the
-  refusals when cloudnative-pg ships a CRD that carries the fields.
-  **The kind's required list is generated** (go-kure/launcher#883; see
-  ["Required fields a kind writes unauthored and does not refuse"](conventions.md#required-fields-a-kind-writes-unauthored-and-does-not-refuse)): every
-  field the Cluster CRD requires that the Go type writes whether or not it
-  was authored (`""`, `0`, `{}` or `null`) is refused when unauthored, each
-  where its parent is authored (`replica.source: required (…)`), the fields
-  of the Kubernetes types the spec embeds included. Among them are the eleven
-  strings the kind refused by hand before, which the CRD bounds with a
-  minimum length or an enumeration:
-  `backup.barmanObjectStore.destinationPath`,
-  `bootstrap.initdb.import.type` (`microservice` or `monolith`),
-  `bootstrap.pg_basebackup.source`,
-  `externalClusters[].barmanObjectStore.destinationPath`,
-  `managed.services.additional[].selectorType` (`rw`, `r` or `ro`),
-  `podSelectorRefs[].name`, the `name` of a `postgresql.extensions[]` entry
-  and the `name` and the `value` of its `env[]` entries,
-  `postgresql.synchronous.method` (`any` or `first`) and `replica.source`;
-  and, refused since go-kure/launcher#883 (**breaking** for a document that
-  leaves one out under an authored parent), the `name` and `key` of a Secret
-  or ConfigMap reference, an `imageCatalogRef`'s `kind`, `name` and `major`,
-  `postgresql.synchronous.number`, an external cluster's `name`, a plugin's
-  `name`, a tablespace's `name` and `storage`, a `podSelectorRefs` entry's
-  `selector`, the `topologyKey` of a pod affinity term and the `weight` of a
-  weighted one, the
-  `maxSkew`, `topologyKey` and `whenUnsatisfiable` of a topology spread
-  constraint and the `type` of a seccomp or AppArmor profile. A field the
-  kind refused by hand keeps its text byte for byte; any other reads `the
-  CloudNativePG API requires this field` (or `requires the name of what this
-  refers to`, for a reference's `name`). Most such objects the API server
-  refused; an `imageCatalogRef` written with `name: ""` or `major: 0` it
-  accepted, and it reached the operator. An authored empty one is a value: it is
-  written, and refusing it is left to the API server. The refusal reads the authored
-  properties, so `Generate` does not repeat it: a `CnpgClusterConfig` built
-  in Go is not held to it. Nor is the component a `postgresql` component is
-  lowered to, whose properties are written from a typed spec, so that a
-  string left out there reaches the kind as an authored `""`: `postgresql`
-  refuses the two it could leave out itself, under the property its author
-  wrote (above). The same test
-  derives every field
-  the type writes unauthored as a zero value the CRD's own rule refuses, and
-  shows each answer with the validator; the twelfth of a Cluster is
-  `instances`, which is not refused (below).
-  `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the two from
-  the CRD and shows the refusals. It also holds the two fields the CRD
-  defaults and the type writes unauthored to a reason they are harmless:
-  `instances`, of which the kind always writes a count (the authored one, the
-  policy's default, or the CRD's own `1`), and
-  `backup.volumeSnapshot.onlineConfiguration`, written `{}` under an authored
-  `volumeSnapshot`. The CRD's default for the object is `waitForArchive: true`
-  and `immediateCheckpoint: false`; in a `{}` it fills `waitForArchive` with
-  the field's own default `true`, and an absent `immediateCheckpoint` is
-  `false`.
-  A `false` or `0` the type keeps (a pointer such as `enablePDB: false`,
-  a quantity `cpu: 0`) is emitted as authored. An authored
-  empty string the type omits on a field the CRD defaults (`primaryUpdateStrategy:
-  ""`, `logLevel: ""`) is refused as a defaulted `0` is
-  (`cnpgClusterDefaultedZeroFields`); elsewhere it is not refused —
-  `storage.size: ""`, which the CRD does not default, keeps its meaning
-  above. The two pod-certificate fields above are refused too: an empty
-  `signerName` or `keyType` is refused as an unauthored one is.
-  A match expression authored in one of the spec's label selectors without
-  its `key` or its `operator` is refused by path
-  (`podSelectorRefs[0].selector.matchExpressions[0].operator: required (…)`):
-  the CRD requires both, and the type would write them empty; the generated
-  list holds them with the sentences of every kind's selectors. Presence only;
-  ["A label selector's match expressions"](conventions.md#a-label-selectors-match-expressions) lists the selectors and says what is
-  left to the API server and to the operator's webhook.
-  `ApplyPolicy` enforces the policy `postgresql` enforces (postgresql lowers
-  onto this kind, so it is the same code), in this order:
-  the instance-count default when `instances` is not authored (an authored
-  value wins even when it equals the fallback) and its maximum; the cpu and
-  memory request and limit defaults on `resources`, filling only unset
-  entries, and their maxima; and the storage-size default on `storage.size`
-  when neither `storage.size` nor `storage.pvcTemplate`'s storage request is
-  authored. With no policy default the size is left to the operator; the
-  `1Gi` fallback is postgresql's, applied after the policy by the post-policy
-  step its rule attaches
-  (`ApplyPostgresqlDefaults`: the fallback is held to the policy maximum, and
-  `enablePDB` is set from the instance count; a fallback over the maximum is the
-  component's `oam.ViolationError` of class `oam.RefusalStorageMaximum`, as a
-  refusal of `ApplyPolicy` is). That method is for that step,
-  not an authoring surface. A storage-size default that is
-  not a quantity is refused (`policy default for storage.size: invalid
-  quantity "lots"`), as an invalid cpu or memory default is, since with no
-  maximum set nothing else would parse it. So is a zero or negative one
-  (`quantity must be positive, got "0"`): CloudNativePG's webhook only
-  parses the size, and the claims it creates would then fail the API
-  server's positive storage-request check. The storage maximum applies to
-  every claim the Cluster creates — `storage`, `walStorage`, each
-  `tablespaces[i].storage` (either `size` or the `pvcTemplate` request) and
-  `ephemeralVolumeSource.volumeClaimTemplate` — and the error names the one
-  that exceeds it. Because this kind exposes the two security contexts, it
-  also refuses `securityContext.privileged` and a `securityContext` or
-  `podSecurityContext` `windowsOptions.hostProcess` unless the policy allows
-  privileged workloads, and an added capability the policy forbids or leaves
-  off a non-empty allowlist. The registry allowlist the workload kinds apply
-  to their image applies to an authored `imageName`
-  (`imageName: image "…" is not from an allowed registry [...]`). When
-  `imageName` is unset, the operator takes the image from the catalog
-  `imageCatalogRef` names, which this kind does not check, or, without one,
-  chooses an image of its own, which no allowlist can hold: under a non-empty
-  allowlist a Cluster with neither `imageName` nor `imageCatalogRef` is
-  refused, with the registry class (**breaking**, go-kure/launcher#790: it
-  built before): `imageName: unset, so the CloudNativePG operator chooses the
-  image the pods run, which the allowed registries [...] cannot hold; name an
-  image from one of them`. Set `imageName`, or `imageCatalogRef` to take the
-  image from a catalog. With no allowlist nothing changes. The operator's own
-  image, which it runs in the instance pods' bootstrap init container, is not
-  covered: no field of the Cluster names it. A `postgresql` component always
-  writes `imageName` (its derived `ghcr.io/cloudnative-pg/postgresql:<version>` or the authored one),
-  so the allowlist applies to its image too. The allowlist applies as well to
-  the image of each `postgresql.extensions[]` entry, which the operator mounts
-  into the instance pods as an image volume (**breaking**,
-  go-kure/launcher#790: an extension image from a registry outside the list
-  built before): `postgresql.extensions[0].image.reference: image "…" is not
-  from an allowed registry [...]`, with the registry class, the reference read
-  as `imageName` is (see *Image volumes* under **pod**). An entry
-  without a reference is not checked: the operator takes that image from the
-  catalog `imageCatalogRef` names (and refuses the Cluster without one), and
-  a catalog's images are not checked by this kind, as for an unset
-  `imageName`. A build reads the objects a document brings, not an object a
-  reference points at: a catalog's images are held where the catalog is
-  authored, by the kind that builds it. `cnpg-imagecatalog` and
-  `cnpg-clusterimagecatalog` hold every image of a catalog they build to the
-  same list (see their entry above). Nothing in this library holds the images
-  of any other catalog: not of a raw catalog on `manifests`, `passthrough` or
-  a chart, and not of one that already exists in the cluster. A `postgresql`
-  component writes no extension entry. `imageName` and the extension images are every image a
-  Cluster names today; the test that walks the pod spec for image fields
-  walks the Cluster and the Pooler spec the same way.
-  Both are also held to the tag rule (`ValidateImageRef`) when the component
-  is read and again at generation, with or without a policy (**breaking**,
-  go-kure/launcher#790: an untagged or `:latest` `imageName` or extension
-  reference built before): `imageName: image "…" rejected: no tag or digest
-  specified; use an explicit version tag or digest`,
-  `postgresql.extensions[0].image.reference: image "…" rejected: …`. An unset
-  `imageName` and an entry without a reference name no image and are not
-  checked, as for the allowlist. A digest without a tag passes, here as
-  everywhere the rule runs; on `imageName` CloudNativePG's webhook refuses
-  one, and a tag that is no PostgreSQL version, and those are the operator's
-  value rules, left to the operator.
-  Generation refuses `hugepages-<size>`
-  in `resources` without `cpu` or `memory` after policy defaults. It also
-  applies the shared parser's request/limit cross-check there
-  (`resources: cpu: request 2 must not exceed limit 1`; hugepages and
-  extended resources need a limit equal to the request), so a policy default
-  limit below an authored request is refused as well. The other
-  resource-name rules of the shared parser are left to the API server.
-  `Endpoints` declares the same primary endpoint as `postgresql`
-  (`cnpg.io/cluster: <Cluster name>` on port `5432`), and only for a
-  component the parse accepts: what `ToApplicationConfig` refuses of the
-  name or of the properties is refused where endpoints are collected, in the
-  same words (`instances: must be >= 1, got 0`). What `Generate` refuses
-  once the policy is applied is not repeated there.
-  `TestCnpgClusterSchema_CoversClusterSpec` pins the schema to
-  `ClusterSpec` by reflection: each json field is published with its type or
-  listed with a reason in `cnpgClusterExcludedFields` (empty today), and a
-  schema key with no field or a stale exclusion also fails, so a CNPG bump
-  that adds, removes or retypes a field names it.
+### Properties
 
-- **cnpg-pooler**, **cnpg-database**, **cnpg-objectstore** — the operator-CR
-  kind components for a CloudNativePG `Pooler` and `Database` and a Barman
-  Cloud plugin `ObjectStore` (`barmancloud.cnpg.io/v1`), built on the
-  `cnpg-cluster` recipe: one schema key per json field of `PoolerSpec`,
-  `DatabaseSpec` or `ObjectStoreSpec`, the whole property map decoded strictly
-  into that type under the same null contract, the same refusal of an
-  authored `0` or `false` the type cannot carry (for the linked versions only
-  `instanceSidecarConfiguration.retentionPolicyIntervalSeconds`, default
-  `1800`, on the ObjectStore) and of two spellings of one field, and the same
-  reflection tests pinning the schema and both derived lists to the linked
-  modules. `Generate` emits one object named after the component in the build
-  namespace with the authored spec, and repeats the parse-time refusals made
-  on the decoded spec. The
-  fields each CRD requires are refused when
-  unauthored or empty, by path: `cluster.name` and `pgbouncer` on the Pooler
-  (`pgbouncer: {}` selects PgBouncer's defaults); `cluster.name`, `name` and
-  `owner` on the Database; `configuration.destinationPath` on the ObjectStore.
-  The published schema marks the top-level property of each as required
-  (go-kure/launcher#790): `cluster` and `pgbouncer` of a `cnpg-pooler`;
-  `cluster`, `name` and `owner` of a `cnpg-database`; `configuration` of a
-  `cnpg-objectstore`. That refuses no component that built before, since the
-  kind refused each without it already. The `template` of a `cnpg-pooler` is an
-  open object, so its schema names the gated pod fields in `gatedPaths`, as the
-  pod template kinds do: a gated field under `template.spec` is refused when the
-  ClusterProfile's `kubernetesVersion` is below the release where its feature
-  gate is on by default, unless the profile's `spec.featureGates` sets that gate
-  on, and refused at any version when it sets the gate off (go-kure/launcher#1321).
-  A document with no `kubernetesVersion` is unchanged.
-  **The required lists of the three kinds are generated**
-  (go-kure/launcher#883), as `cnpg-cluster`'s is: every field each CRD
-  requires that the Go type writes whether or not it was authored is refused
-  when unauthored under an authored parent, with the text the kind gave it by
-  hand where it had one. **Breaking** for a document that leaves one out
-  under an authored parent: on the Pooler, among others, the `name` of a
-  `pgbouncer` Secret reference, `pgbouncer.imageCatalogRef`'s `kind` and
-  `name`, a service port's `port`, and under `template.spec` a container's
-  `name`, the `topologyKey` of a pod affinity term, a topology spread
-  constraint's `maxSkew`, `topologyKey` and `whenUnsatisfiable` and a seccomp
-  profile's `type`; on the Database, the `name` of a `schemas`, `extensions`,
-  `fdws` or `servers` entry, the `name` and `value` of an option, the `name`
-  of a usage and a server's `fdw`; on the ObjectStore, the `name` and `key`
-  of a credential's or `endpointCA`'s Secret reference and the fields of the
-  sidecar's `env` the pod kinds require. The texts the kinds refused with
-  before (`cluster.name: required (…)`, `pgbouncer: required (…)`) are kept
-  byte for byte. `template.spec.containers` is not refused: the kind writes
-  `containers: []` itself, which the CRD accepts (below).
-  A `cluster.name` must be a name CloudNativePG admits for a Cluster (a DNS-1035
-  label of at most 50 characters).
-  On the Pooler, a match expression authored in a label selector of
-  `template.spec` without its `key` or its `operator` is refused too, by
-  path, by the generated list; an authored empty one is not (presence only;
-  see ["A label selector's match expressions"](conventions.md#a-label-selectors-match-expressions)).
-  `cnpg-pooler` writes no type or instance count of its own, so the operator's
-  defaults (`rw`, `1`) apply. Its component name is the Pooler's name and its
-  Service's, so it must be a DNS-1123 label of at most 63 characters (a
-  leading digit is refused when `spec.kubernetesVersion` is below 1.36, RelaxedServiceNameValidation, unless `spec.featureGates` sets that gate on; CloudNativePG's Pooler
-  webhook checks no name syntax, go-kure/launcher#959,
-  `docs/delivery-scope.md` §3.5), and a pooler named like its cluster is refused, as CloudNativePG's webhook does:
-  by the build, and where its endpoint is collected in the same words
-  (`cluster.name "main": a pooler cannot have the same name as its cluster`).
-  `ApplyPolicy` applies the workload kinds' pod gates to `template.spec` (host
-  namespaces, hostPath volumes, privilege, host-process, capabilities, the
-  registry allowlist on each authored container image, cpu and memory maxima;
-  errors name the container, as in `template.spec.containers[0] "pgbouncer": cpu
-  limit "2" exceeds enforced maximum "1"`), caps a generic ephemeral volume's
-  claim at the policy storage maximum, holds an image volume's reference to the
-  registry allowlist (`template.spec: volume "ext" image.reference: image "…" is
-  not from an allowed registry [...]`; **breaking**, go-kure/launcher#790, see
-  *Image volumes* under **pod**), and applies the registry allowlist to an
-  authored `pgbouncer.image`. With or without a policy, when the component is
-  read and again at generation, an authored `pgbouncer.image`, the image of
-  each init and regular container of the template and the reference of each
-  of its image volumes are held to the tag rule (`ValidateImageRef`;
-  **breaking**, go-kure/launcher#790: an untagged or `:latest` one built
-  before): `pgbouncer.image: image "…" rejected: …`,
-  `template.spec.containers[0] "pgbouncer": image "…" rejected: …`. A template
-  container that names no image is not checked: the operator supplies the
-  PgBouncer image, so that is the ordinary form here, where the pod kinds
-  refuse it. The operator takes the PgBouncer image, in order, from the
-  template's regular container named `pgbouncer`, from `pgbouncer.image`, from
-  the catalog `pgbouncer.imageCatalogRef` names (not checked by this kind, as
-  for `cnpg-cluster`), and otherwise chooses one of its own, which no allowlist
-  can hold. Under a non-empty allowlist a Pooler that names its image none of
-  these three ways is refused, with the registry class (**breaking**,
-  go-kure/launcher#790: it built before): `pgbouncer.image (pooler.image on a
-  postgresql component): unset, so the CloudNativePG operator chooses the
-  image the pods run, which the allowed registries [...] cannot hold; name an
-  image from one of them`. An image on an init container or on a container of
-  another name does not count. With no allowlist nothing changes. The
-  operator's own image, which it runs in the pod's bootstrap init container,
-  is not covered: no field of the Pooler names it. Generation runs the shared
-  parser's request/limit and hugepages checks on the template's pod and container
-  resources (`template.spec.containers[0] "pgbouncer": resources: cpu: request
-  2 must not exceed limit 1`), as `cnpg-cluster` does on its `resources`; the
-  other resource-name rules of the shared parser are left to the API server. A
-  template declaring `ephemeralContainers`, `activeDeadlineSeconds`, `priority`
-  or `overhead` is refused, as the workload kinds refuse them: the operator
-  copies the template into a Deployment, whose pod template cannot carry the
-  first two and whose pods get the last two from the default Priority and
-  RuntimeClass admission controllers, which refuse an authored value that
-  differs from theirs. Four fields the Pooler CRD requires under
-  `template.spec`, which the pod spec's type leaves out when they are empty,
-  are refused when unauthored or empty: the `action` of a restart rule of a
-  container or an init container and the `operator` of its exit codes
-  (`template.spec.containers[0].restartPolicyRules[0].action: required (…)`),
-  and the `signerName` and `keyType` of a pod certificate source of a
-  projected volume
-  (`template.spec.volumes[0].projected.sources[0].podCertificate.signerName:
-  required (…)`). The object would show the omission and the API server
-  refuse it; the CRD of the linked module settles that, which is what the
-  built-in pod kinds lack.
-  `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the fields
-  from the CRD and shows the refusals. Five more that the CRD requires under
-  `template.spec`, which the pod spec's type writes as `null` when they are
-  unauthored, are refused when unauthored: the `nodeSelectorTerms` of a
-  required node affinity, the `priority` of an eviction responder, the
-  `monitors` of a `cephfs` or an `rbd` volume, and the `secretRef` of a
-  `scaleIO` volume (`template.spec.volumes[0].cephfs.monitors: required (…)`).
-  The API server drops a null of a field that is not nullable before it
-  validates, so the required field is then missing. An authored empty list is
-  written as one and is not refused here. `template.spec.containers` is such
-  a field too and is not refused: the kind writes `containers: []` itself
-  (below). `TestKindComponents_NullRequired` derives these fields and
-  `pgbouncer` from the CRD and shows each answer by running the CRD's schema
-  validator on the object. One string the CRD requires and bounds with a
-  pattern, which the type writes as `""` when it is unauthored, is refused
-  when unauthored under an authored `pgbouncer.imageCatalogRef`: its `key`
-  (`pgbouncer.imageCatalogRef.key: required (…)`). An authored empty one is
-  written, and refusing it is left to the API server. The refusal reads the
-  authored properties, so `Generate` does not repeat it: a `CnpgPoolerConfig`
-  built in Go is not held to it. The same test derives
-  it, as the one field of a Pooler the type writes unauthored as a zero value
-  the CRD's own rule refuses. The instance count is deliberately not policed:
-  `postgresql`, which lowers its pooler onto this kind, never applied a
-  policy to the pooler's count, so a maximum here would refuse a document
-  that built before.
-  Pod-level errors name the template's own fields, as in `template.spec:
-  resources cpu limit "2" exceeds enforced maximum "1"`. A `template` that lists
-  no containers (labels only, say) is written with `containers: []`: the Go type
-  cannot omit the template's `spec`, the CRD requires `containers` once it is
-  present, and the operator adds its `pgbouncer` container either way.
-  `Endpoints` declares the PgBouncer pods (`cnpg.io/poolerName:
-  <Pooler object name>` on port `5432`: the component name unless
-  `objectName` or the naming hook names the Pooler), byte-identical to `postgresql`'s pooler
-  endpoint for a pooler of that name (`<component-name>-pooler` by default,
-  of the `postgresql` component), and
-  only for a component the parse accepts: what `ToApplicationConfig` refuses
-  is refused where endpoints are collected, in the same words (`pgbouncer:
-  required (an empty object selects PgBouncer's defaults)`).
-  `cnpg-database` also refuses the names the CRD reserves (`postgres`,
-  `template0`, `template1`). The `ensure` of each schema, extension, fdw and
-  server has no `omitempty` but a CRD default of `present`, so `Generate` writes
-  `present` where it is unauthored, as the API server would have; a
-  test derives that list from the CRD too. An authored `ensure: ""` there is
-  refused by its path (`schemas[0].ensure: "" is refused by the Database CRD,
-  …`) rather than written as `present`, since the CRD's enum refuses it as
-  written; an explicit null is absence and takes the default. A Database runs nothing, so it has
-  no policy and no endpoint.
-  `cnpg-objectstore` caps the cpu and memory requests and limits of the plugin
-  sidecar it adds to every instance pod (`instanceSidecarConfiguration.resources`)
-  at the policy maxima, filling no default, and declares no endpoint;
-  generation runs the same request/limit and hugepages checks on them, leaving
-  the other resource-name rules to the API server. It refuses
-  `configuration.serverName`, which the shared Barman type carries but the
-  plugin's CRD forbids on an ObjectStore: the server name is a plugin parameter
-  of the Cluster that uses the store.
+The component name becomes the Cluster's name and its `cnpg.io/cluster` endpoint
+selector, so it must be what CloudNativePG's admission webhook admits: a
+DNS-1035 label (no leading digit, no dot) of at most 50 characters. Any other
+name is refused at parse time, when endpoints are collected and by `Generate`
+(`cnpg-cluster name "db.main": must be a DNS-1035 label of at most 50 characters
+…`), although other kinds accept DNS-1123 subdomains of up to 253. Its
+properties are the `spec` of a `postgresql.cnpg.io/v1` `Cluster`, one schema key
+per `ClusterSpec` json field: scalars are typed, and every structured field is
+an open `object` or an `array` of open objects whose description points at the
+upstream type. `ToApplicationConfig` decodes the whole property map into
+`cnpgv1.ClusterSpec` with `builtin.DecodeStrictJSON`, so a key the linked CNPG
+version does not declare, at any depth (`storage.sise`,
+`bootstrap.initdb.databse`), and a value of the wrong type (`storage.size: 5`)
+are refused rather than dropped. Two limits come from `encoding/json` itself:
+the unknown-field error names the key but not its path, and a key differing from
+a declared one only in letter case is accepted as that field (two spellings of
+one field in the same object are refused, since the decoder would keep only one:
+`storage.size: sets the same field as storage.Size …`). The policy defaults
+below read what was authored from the decoded spec as well as from the property
+map, where every spelling the decoder accepts is consulted, so such a key still
+counts as authored and is not overwritten by a default — including an empty
+`storage.size`, which the decoded spec cannot tell from absence.
+
+### Outputs
+
+It carries **no launcher opinions**: `Generate` emits the Cluster named after
+the component in the build namespace with exactly the authored spec, so an
+unauthored field is left for the operator's own default. `postgresql`'s choices
+— an image from `version`, `primaryUpdateStrategy: unsupervised`, `enablePDB`
+from the replica count, a `1Gi` storage fallback, pod anti-affinity — are not
+made here: its lowering rule writes them as this kind's properties, and the
+trait it attaches sets the two that depend on the policy (see `postgresql`). The
+one value it writes unasked is `instances: 1`, the CRD default, because
+`ClusterSpec.Instances` has no `omitempty` and would otherwise serialize as `0`.
+The non-pointer blocks appear even when unauthored, as they do for `postgresql`:
+`affinity` and `resources` as empty objects, and `postgresql` as
+`syncReplicaElectionConstraint: {enabled: false}`, because that nested field's
+`enabled` has no `omitempty`.
+
+### Validation
+
+Nulls follow ["The null contract"](null-and-spellings.md#the-null-contract), and
+a null is whatever serializes to JSON null: the properties are marshalled with
+`encoding/json` and read back before anything else looks at them, so a null map
+value is left out rather than decoded to an empty string, and a null array
+element is refused by path (`env[0]: null is not a valid array element`). The
+contract covers declared keys only: a key the CNPG type does not declare is
+refused as an unknown field even when its value is null (`storage: {sise:
+null}`), not dropped with the null. A lowering rule emits JSON-shaped values
+(string-keyed maps, slices, scalars) as for every component; that is the
+supported contract, and the engine's schema check refuses a typed API struct
+where it checks an object or array item (for example an `env` entry), though not
+inside an open object's undeclared keys. Because the reading is the
+serialization itself, a direct caller of the handler additionally has a value
+built in Go read exactly as `encoding/json` writes it — a concrete collection
+type, a nil behind a pointer, a `json.RawMessage` and a custom encoder included.
+A value that does not serialize is refused. An `instances` below 1, in any
+spelling, is refused before policy runs (`instances: must be >= 1, got 0`): the
+CRD's minimum is 1, so the API server would refuse the Cluster. A policy
+instance-count default below 1 is refused the same way. `Generate` repeats the
+name and instance-count refusals on what it emits, the count's upper bound
+(`instances: must be <= 2147483647, got …`) included, so a `CnpgClusterConfig`
+built in Go without `ToApplicationConfig` cannot produce a Cluster the operator
+or the API server rejects for either. It also refuses any storage request the
+Cluster carries that does not parse or is not positive, authored or from a
+policy default, on every claim the storage maximum below covers (`storage.size:
+quantity must be positive, got "0"`;
+`walStorage.pvcTemplate.resources.requests.storage: …`): CloudNativePG's webhook
+parses only `storage.size`, so such a Cluster was admitted and its claims then
+failed the API server's positive storage-request check. An unset size is still
+left to the operator. An authored `0` or `false` that the typed spec cannot
+carry, on a field whose CRD default is not zero, is refused by path
+(`managed.roles[0].connectionLimit: 0 cannot be carried by the CloudNativePG API
+types (the field is omitted when zero, so the operator would apply its default
+-1)`). These fields are non-pointer and `omitempty`, so the value is omitted
+when the Cluster is encoded and the operator applies its CRD default instead.
+For the linked CNPG version they are `managed.roles[].connectionLimit` (default
+`-1`, unlimited), `postgresUID` and `postgresGID` (`26`), `startDelay` (`3600`),
+`stopDelay` (`1800`), `switchoverDelay` (`3600`),
+`probes.liveness.isolationCheck.requestTimeout` and `.connectionTimeout`
+(`1000`) and `replicationSlots.updateInterval` (`30`); a test derives the set
+from the CNPG module's CRD and Go types, so a CNPG bump that changes it fails
+CI. An explicit zero default on any other such field, such as
+`managed.roles[].login: false`, `superuser: false`, `minSyncReplicas: 0` or
+`monitoring.enablePodMonitor: false`, is accepted: it is omitted too, and the
+field's absence means the same value. Two fields the Cluster CRD requires, which
+the Go type leaves out when they are empty, are refused when unauthored or
+empty: the `signerName` and the `keyType` of a pod certificate source of the
+projected volume template
+(`projectedVolumeTemplate.sources[0].podCertificate.signerName: required (…)`).
+The object would show the omission and the API server refuse it. Two more that
+the CRD requires, which the Go type writes as `null` when they are unauthored,
+are refused when unauthored: the `nodeSelectorTerms` of a required node affinity
+(`affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms:
+required (…)`) and the `databases` of an import
+(`bootstrap.initdb.import.databases: required (…)`). The API server drops a null
+of a field that is not nullable before it validates, so the required field is
+then missing. An authored empty list is written as one and is not refused here.
+A third such field is not refused:
+`replicationSlots.synchronizeReplicas.enabled`, which the CRD defaults, so the
+API server puts the default (`true`) in the place of the null.
+`TestKindComponents_NullRequired` derives the three from the CRD and shows each
+answer by running the CRD's schema validator on the object. **Four fields the
+linked Go type holds and the Cluster CRD does not are refused when authored**,
+under `backup.barmanObjectStore` and under each
+`externalClusters[].barmanObjectStore`: `s3Credentials.sseCustomerKey` (with its
+`name` and `key`) and `s3AddressingStyle` (for example
+`backup.barmanObjectStore.s3AddressingStyle: no field of the
+postgresql.cnpg.io/v1 Cluster API: its CRD has no such property`). The
+barman-cloud type the strict decode reads is newer than the Cluster CRD of
+cloudnative-pg v1.30.1 (its `clusters.yaml`), which has no property for either,
+so the API server would name each as unknown and prune it. A `null` or an empty
+`s3AddressingStyle` is not authored and builds. The kind's row in
+`TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the eight paths
+from the CRD in both directions, and `TestCnpgClusterHandler_AbsentFromCRD`
+shows each refusal. Remove the refusals when cloudnative-pg ships a CRD that
+carries the fields. **The kind's required list is generated** (see ["Required
+fields a kind writes unauthored and does not
+refuse"](conventions.md#required-fields-a-kind-writes-unauthored-and-does-not-refuse)):
+every field the Cluster CRD requires that the Go type writes whether or not it
+was authored (`""`, `0`, `{}` or `null`) is refused when unauthored, each where
+its parent is authored (`replica.source: required (…)`), the fields of the
+Kubernetes types the spec embeds included. Among them are the eleven strings the
+kind refused by hand before, which the CRD bounds with a minimum length or an
+enumeration: `backup.barmanObjectStore.destinationPath`,
+`bootstrap.initdb.import.type` (`microservice` or `monolith`),
+`bootstrap.pg_basebackup.source`,
+`externalClusters[].barmanObjectStore.destinationPath`,
+`managed.services.additional[].selectorType` (`rw`, `r` or `ro`),
+`podSelectorRefs[].name`, the `name` of a `postgresql.extensions[]` entry and
+the `name` and the `value` of its `env[]` entries,
+`postgresql.synchronous.method` (`any` or `first`) and `replica.source`; and,
+refused since go-kure/launcher#883 (**breaking** for a document that leaves one
+out under an authored parent), the `name` and `key` of a Secret or ConfigMap
+reference, an `imageCatalogRef`'s `kind`, `name` and `major`,
+`postgresql.synchronous.number`, an external cluster's `name`, a plugin's
+`name`, a tablespace's `name` and `storage`, a `podSelectorRefs` entry's
+`selector`, the `topologyKey` of a pod affinity term and the `weight` of a
+weighted one, the `maxSkew`, `topologyKey` and `whenUnsatisfiable` of a topology
+spread constraint and the `type` of a seccomp or AppArmor profile. A field the
+kind refused by hand keeps its text byte for byte; any other reads `the
+CloudNativePG API requires this field` (or `requires the name of what this
+refers to`, for a reference's `name`). Most such objects the API server refused;
+an `imageCatalogRef` written with `name: ""` or `major: 0` it accepted, and it
+reached the operator. An authored empty one is a value: it is written, and
+refusing it is left to the API server. The refusal reads the authored
+properties, so `Generate` does not repeat it: a `CnpgClusterConfig` built in Go
+is not held to it. Nor is the component a `postgresql` component is lowered to,
+whose properties are written from a typed spec, so that a string left out there
+reaches the kind as an authored `""`: `postgresql` refuses the two it could
+leave out itself, under the property its author wrote (above). The same test
+derives every field the type writes unauthored as a zero value the CRD's own
+rule refuses, and shows each answer with the validator; the twelfth of a Cluster
+is `instances`, which is not refused (below).
+`TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the two from the
+CRD and shows the refusals. It also holds the two fields the CRD defaults and
+the type writes unauthored to a reason they are harmless: `instances`, of which
+the kind always writes a count (the authored one, the policy's default, or the
+CRD's own `1`), and `backup.volumeSnapshot.onlineConfiguration`, written `{}`
+under an authored `volumeSnapshot`. The CRD's default for the object is
+`waitForArchive: true` and `immediateCheckpoint: false`; in a `{}` it fills
+`waitForArchive` with the field's own default `true`, and an absent
+`immediateCheckpoint` is `false`. A `false` or `0` the type keeps (a pointer
+such as `enablePDB: false`, a quantity `cpu: 0`) is emitted as authored. An
+authored empty string the type omits on a field the CRD defaults
+(`primaryUpdateStrategy: ""`, `logLevel: ""`) is refused as a defaulted `0` is
+(`cnpgClusterDefaultedZeroFields`); elsewhere it is not refused — `storage.size:
+""`, which the CRD does not default, keeps its meaning above. The two
+pod-certificate fields above are refused too: an empty `signerName` or `keyType`
+is refused as an unauthored one is. A match expression authored in one of the
+spec's label selectors without its `key` or its `operator` is refused by path
+(`podSelectorRefs[0].selector.matchExpressions[0].operator: required (…)`): the
+CRD requires both, and the type would write them empty; the generated list holds
+them with the sentences of every kind's selectors. Presence only; ["A label
+selector's match
+expressions"](conventions.md#a-label-selectors-match-expressions) lists the
+selectors and says what is left to the API server and to the operator's webhook.
+`ApplyPolicy` enforces the policy `postgresql` enforces (postgresql lowers onto
+this kind, so it is the same code), in this order: the instance-count default
+when `instances` is not authored (an authored value wins even when it equals the
+fallback) and its maximum; the cpu and memory request and limit defaults on
+`resources`, filling only unset entries, and their maxima; and the storage-size
+default on `storage.size` when neither `storage.size` nor
+`storage.pvcTemplate`'s storage request is authored. With no policy default the
+size is left to the operator; the `1Gi` fallback is postgresql's, applied after
+the policy by the post-policy step its rule attaches (`ApplyPostgresqlDefaults`:
+the fallback is held to the policy maximum, and `enablePDB` is set from the
+instance count; a fallback over the maximum is the component's
+`oam.ViolationError` of class `oam.RefusalStorageMaximum`, as a refusal of
+`ApplyPolicy` is). That method is for that step, not an authoring surface. A
+storage-size default that is not a quantity is refused (`policy default for
+storage.size: invalid quantity "lots"`), as an invalid cpu or memory default is,
+since with no maximum set nothing else would parse it. So is a zero or negative
+one (`quantity must be positive, got "0"`): CloudNativePG's webhook only parses
+the size, and the claims it creates would then fail the API server's positive
+storage-request check. The storage maximum applies to every claim the Cluster
+creates — `storage`, `walStorage`, each `tablespaces[i].storage` (either `size`
+or the `pvcTemplate` request) and `ephemeralVolumeSource.volumeClaimTemplate` —
+and the error names the one that exceeds it. Because this kind exposes the two
+security contexts, it also refuses `securityContext.privileged` and a
+`securityContext` or `podSecurityContext` `windowsOptions.hostProcess` unless
+the policy allows privileged workloads, and an added capability the policy
+forbids or leaves off a non-empty allowlist. The registry allowlist the workload
+kinds apply to their image applies to an authored `imageName` (`imageName: image
+"…" is not from an allowed registry [...]`). When `imageName` is unset, the
+operator takes the image from the catalog `imageCatalogRef` names, which this
+kind does not check, or, without one, chooses an image of its own, which no
+allowlist can hold: under a non-empty allowlist a Cluster with neither
+`imageName` nor `imageCatalogRef` is refused, with the registry class
+(**breaking**: it built before): `imageName: unset, so the CloudNativePG
+operator chooses the image the pods run, which the allowed registries [...]
+cannot hold; name an image from one of them`. Set `imageName`, or
+`imageCatalogRef` to take the image from a catalog. With no allowlist nothing
+changes. The operator's own image, which it runs in the instance pods' bootstrap
+init container, is not covered: no field of the Cluster names it. A `postgresql`
+component always writes `imageName` (its derived
+`ghcr.io/cloudnative-pg/postgresql:<version>` or the authored one), so the
+allowlist applies to its image too. The allowlist applies as well to the image
+of each `postgresql.extensions[]` entry, which the operator mounts into the
+instance pods as an image volume (**breaking**: an extension image from a
+registry outside the list built before):
+`postgresql.extensions[0].image.reference: image "…" is not from an allowed
+registry [...]`, with the registry class, the reference read as `imageName` is
+(see *Image volumes* under **pod**). An entry without a reference is not
+checked: the operator takes that image from the catalog `imageCatalogRef` names
+(and refuses the Cluster without one), and a catalog's images are not checked by
+this kind, as for an unset `imageName`. A build reads the objects a document
+brings, not an object a reference points at: a catalog's images are held where
+the catalog is authored, by the kind that builds it. `cnpg-imagecatalog` and
+`cnpg-clusterimagecatalog` hold every image of a catalog they build to the same
+list (see their entry above). Nothing in this library holds the images of any
+other catalog: not of a raw catalog on `manifests`, `passthrough` or a chart,
+and not of one that already exists in the cluster. A `postgresql` component
+writes no extension entry. `imageName` and the extension images are every image
+a Cluster names today; the test that walks the pod spec for image fields walks
+the Cluster and the Pooler spec the same way. Both are also held to the tag rule
+(`ValidateImageRef`) when the component is read and again at generation, with or
+without a policy (**breaking**: an untagged or `:latest` `imageName` or
+extension reference built before): `imageName: image "…" rejected: no tag or
+digest specified; use an explicit version tag or digest`,
+`postgresql.extensions[0].image.reference: image "…" rejected: …`. An unset
+`imageName` and an entry without a reference name no image and are not checked,
+as for the allowlist. A digest without a tag passes, here as everywhere the rule
+runs; on `imageName` CloudNativePG's webhook refuses one, and a tag that is no
+PostgreSQL version, and those are the operator's value rules, left to the
+operator. Generation refuses `hugepages-<size>` in `resources` without `cpu` or
+`memory` after policy defaults. It also applies the shared parser's
+request/limit cross-check there (`resources: cpu: request 2 must not exceed
+limit 1`; hugepages and extended resources need a limit equal to the request),
+so a policy default limit below an authored request is refused as well. The
+other resource-name rules of the shared parser are left to the API server.
+`Endpoints` declares the same primary endpoint as `postgresql`
+(`cnpg.io/cluster: <Cluster name>` on port `5432`), and only for a component the
+parse accepts: what `ToApplicationConfig` refuses of the name or of the
+properties is refused where endpoints are collected, in the same words
+(`instances: must be >= 1, got 0`). What `Generate` refuses once the policy is
+applied is not repeated there.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/cnpg-cluster-full/app.yaml`, built
+against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The
+fixture test compares the two.
+
+## cnpg-pooler, cnpg-database, cnpg-objectstore
+
+### Properties
+
+**cnpg-pooler**, **cnpg-database**, **cnpg-objectstore** — the operator-CR kind
+components for a CloudNativePG `Pooler` and `Database` and a Barman Cloud plugin
+`ObjectStore` (`barmancloud.cnpg.io/v1`), built on the `cnpg-cluster` recipe:
+one schema key per json field of `PoolerSpec`, `DatabaseSpec` or
+`ObjectStoreSpec`, the whole property map decoded strictly into that type under
+the same null contract, the same refusal of an authored `0` or `false` the type
+cannot carry (for the linked versions only
+`instanceSidecarConfiguration.retentionPolicyIntervalSeconds`, default `1800`,
+on the ObjectStore) and of two spellings of one field, and the same reflection
+tests pinning the schema and both derived lists to the linked modules.
+
+### Outputs
+
+`Generate` emits one object named after the component in the build namespace
+with the authored spec, and repeats the parse-time refusals made on the decoded
+spec.
+
+### Validation
+
+The fields each CRD requires are refused when unauthored or empty, by path:
+`cluster.name` and `pgbouncer` on the Pooler (`pgbouncer: {}` selects
+PgBouncer's defaults); `cluster.name`, `name` and `owner` on the Database;
+`configuration.destinationPath` on the ObjectStore. The published schema marks
+the top-level property of each as required: `cluster` and `pgbouncer` of a
+`cnpg-pooler`; `cluster`, `name` and `owner` of a `cnpg-database`;
+`configuration` of a `cnpg-objectstore`. That refuses no component that built
+before, since the kind refused each without it already. The `template` of a
+`cnpg-pooler` is an open object, so its schema names the gated pod fields in
+`gatedPaths`, as the pod template kinds do: a gated field under `template.spec`
+is refused when the ClusterProfile's `kubernetesVersion` is below the release
+where its feature gate is on by default, unless the profile's
+`spec.featureGates` sets that gate on, and refused at any version when it sets
+the gate off. A document with no `kubernetesVersion` is unchanged. **The
+required lists of the three kinds are generated**, as `cnpg-cluster`'s is: every
+field each CRD requires that the Go type writes whether or not it was authored
+is refused when unauthored under an authored parent, with the text the kind gave
+it by hand where it had one. **Breaking** for a document that leaves one out
+under an authored parent: on the Pooler, among others, the `name` of a
+`pgbouncer` Secret reference, `pgbouncer.imageCatalogRef`'s `kind` and `name`, a
+service port's `port`, and under `template.spec` a container's `name`, the
+`topologyKey` of a pod affinity term, a topology spread constraint's `maxSkew`,
+`topologyKey` and `whenUnsatisfiable` and a seccomp profile's `type`; on the
+Database, the `name` of a `schemas`, `extensions`, `fdws` or `servers` entry,
+the `name` and `value` of an option, the `name` of a usage and a server's `fdw`;
+on the ObjectStore, the `name` and `key` of a credential's or `endpointCA`'s
+Secret reference and the fields of the sidecar's `env` the pod kinds require.
+The texts the kinds refused with before (`cluster.name: required (…)`,
+`pgbouncer: required (…)`) are kept byte for byte. `template.spec.containers` is
+not refused: the kind writes `containers: []` itself, which the CRD accepts
+(below). A `cluster.name` must be a name CloudNativePG admits for a Cluster (a
+DNS-1035 label of at most 50 characters). On the Pooler, a match expression
+authored in a label selector of `template.spec` without its `key` or its
+`operator` is refused too, by path, by the generated list; an authored empty one
+is not (presence only; see ["A label selector's match
+expressions"](conventions.md#a-label-selectors-match-expressions)).
+`cnpg-pooler` writes no type or instance count of its own, so the operator's
+defaults (`rw`, `1`) apply. Its component name is the Pooler's name and its
+Service's, so it must be a DNS-1123 label of at most 63 characters (a leading
+digit is refused when `spec.kubernetesVersion` is below 1.36,
+RelaxedServiceNameValidation, unless `spec.featureGates` sets that gate on;
+CloudNativePG's Pooler webhook checks no name syntax, go-kure/launcher#959,
+`docs/delivery-scope.md` §3.5), and a pooler named like its cluster is refused,
+as CloudNativePG's webhook does: by the build, and where its endpoint is
+collected in the same words (`cluster.name "main": a pooler cannot have the same
+name as its cluster`). `ApplyPolicy` applies the workload kinds' pod gates to
+`template.spec` (host namespaces, hostPath volumes, privilege, host-process,
+capabilities, the registry allowlist on each authored container image, cpu and
+memory maxima; errors name the container, as in `template.spec.containers[0]
+"pgbouncer": cpu limit "2" exceeds enforced maximum "1"`), caps a generic
+ephemeral volume's claim at the policy storage maximum, holds an image volume's
+reference to the registry allowlist (`template.spec: volume "ext"
+image.reference: image "…" is not from an allowed registry [...]`; **breaking**,
+go-kure/launcher#790, see *Image volumes* under **pod**), and applies the
+registry allowlist to an authored `pgbouncer.image`. With or without a policy,
+when the component is read and again at generation, an authored
+`pgbouncer.image`, the image of each init and regular container of the template
+and the reference of each of its image volumes are held to the tag rule
+(`ValidateImageRef`; **breaking**, go-kure/launcher#790: an untagged or
+`:latest` one built before): `pgbouncer.image: image "…" rejected: …`,
+`template.spec.containers[0] "pgbouncer": image "…" rejected: …`. A template
+container that names no image is not checked: the operator supplies the
+PgBouncer image, so that is the ordinary form here, where the pod kinds refuse
+it. The operator takes the PgBouncer image, in order, from the template's
+regular container named `pgbouncer`, from `pgbouncer.image`, from the catalog
+`pgbouncer.imageCatalogRef` names (not checked by this kind, as for
+`cnpg-cluster`), and otherwise chooses one of its own, which no allowlist can
+hold. Under a non-empty allowlist a Pooler that names its image none of these
+three ways is refused, with the registry class (**breaking**: it built before):
+`pgbouncer.image (pooler.image on a postgresql component): unset, so the
+CloudNativePG operator chooses the image the pods run, which the allowed
+registries [...] cannot hold; name an image from one of them`. An image on an
+init container or on a container of another name does not count. With no
+allowlist nothing changes. The operator's own image, which it runs in the pod's
+bootstrap init container, is not covered: no field of the Pooler names it.
+Generation runs the shared parser's request/limit and hugepages checks on the
+template's pod and container resources (`template.spec.containers[0]
+"pgbouncer": resources: cpu: request 2 must not exceed limit 1`), as
+`cnpg-cluster` does on its `resources`; the other resource-name rules of the
+shared parser are left to the API server. A template declaring
+`ephemeralContainers`, `activeDeadlineSeconds`, `priority` or `overhead` is
+refused, as the workload kinds refuse them: the operator copies the template
+into a Deployment, whose pod template cannot carry the first two and whose pods
+get the last two from the default Priority and RuntimeClass admission
+controllers, which refuse an authored value that differs from theirs. Four
+fields the Pooler CRD requires under `template.spec`, which the pod spec's type
+leaves out when they are empty, are refused when unauthored or empty: the
+`action` of a restart rule of a container or an init container and the
+`operator` of its exit codes
+(`template.spec.containers[0].restartPolicyRules[0].action: required (…)`), and
+the `signerName` and `keyType` of a pod certificate source of a projected volume
+(`template.spec.volumes[0].projected.sources[0].podCertificate.signerName:
+required (…)`). The object would show the omission and the API server refuse it;
+the CRD of the linked module settles that, which is what the built-in pod kinds
+lack.
+
+Five more that the CRD requires under `template.spec`, which the pod spec's type
+writes as `null` when they are unauthored, are refused when unauthored: the
+`nodeSelectorTerms` of a required node affinity, the `priority` of an eviction
+responder, the `monitors` of a `cephfs` or an `rbd` volume, and the `secretRef`
+of a `scaleIO` volume (`template.spec.volumes[0].cephfs.monitors: required
+(…)`). The API server drops a null of a field that is not nullable before it
+validates, so the required field is then missing. An authored empty list is
+written as one and is not refused here. `template.spec.containers` is such a
+field too and is not refused: the kind writes `containers: []` itself (below).
+
+One string the CRD requires and bounds with a pattern, which the type writes as
+`""` when it is unauthored, is refused when unauthored under an authored
+`pgbouncer.imageCatalogRef`: its `key` (`pgbouncer.imageCatalogRef.key: required
+(…)`). An authored empty one is written, and refusing it is left to the API
+server. The refusal reads the authored properties, so `Generate` does not repeat
+it: a `CnpgPoolerConfig` built in Go is not held to it.
+
+The instance count is deliberately not policed: `postgresql`, which lowers its
+pooler onto this kind, never applied a policy to the pooler's count, so a
+maximum here would refuse a document that built before. Pod-level errors name
+the template's own fields, as in `template.spec: resources cpu limit "2" exceeds
+enforced maximum "1"`. A `template` that lists no containers (labels only, say)
+is written with `containers: []`: the Go type cannot omit the template's `spec`,
+the CRD requires `containers` once it is present, and the operator adds its
+`pgbouncer` container either way. `Endpoints` declares the PgBouncer pods
+(`cnpg.io/poolerName: <Pooler object name>` on port `5432`: the component name
+unless `objectName` or the naming hook names the Pooler), byte-identical to
+`postgresql`'s pooler endpoint for a pooler of that name
+(`<component-name>-pooler` by default, of the `postgresql` component), and only
+for a component the parse accepts: what `ToApplicationConfig` refuses is refused
+where endpoints are collected, in the same words (`pgbouncer: required (an empty
+object selects PgBouncer's defaults)`). `cnpg-database` also refuses the names
+the CRD reserves (`postgres`, `template0`, `template1`). The `ensure` of each
+schema, extension, fdw and server has no `omitempty` but a CRD default of
+`present`, so `Generate` writes `present` where it is unauthored, as the API
+server would have; a test derives that list from the CRD too. An authored
+`ensure: ""` there is refused by its path (`schemas[0].ensure: "" is refused by
+the Database CRD, …`) rather than written as `present`, since the CRD's enum
+refuses it as written; an explicit null is absence and takes the default. A
+Database runs nothing, so it has no policy and no endpoint. `cnpg-objectstore`
+caps the cpu and memory requests and limits of the plugin sidecar it adds to
+every instance pod (`instanceSidecarConfiguration.resources`) at the policy
+maxima, filling no default, and declares no endpoint; generation runs the same
+request/limit and hugepages checks on them, leaving the other resource-name
+rules to the API server. It refuses `configuration.serverName`, which the shared
+Barman type carries but the plugin's CRD forbids on an ObjectStore: the server
+name is a plugin parameter of the Cluster that uses the store.
+
+### Example
+
+- `cnpg-pooler`: The component in
+  `pkg/cmd/kurel/testdata/cnpg-pooler-full/app.yaml`, built against the
+  `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.
+- `cnpg-database`: The component in
+  `pkg/cmd/kurel/testdata/cnpg-database-full/app.yaml`, built against the
+  `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.
+- `cnpg-objectstore`: The component in
+  `pkg/cmd/kurel/testdata/cnpg-objectstore-full/app.yaml`, built against the
+  `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.

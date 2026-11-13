@@ -143,3 +143,56 @@ names.
     the cases the reference page gives above it: an authored `enabled: false`, a
     block with nothing in it and `backup: {}`, and the test is in
     `postgresql_dropped_values_internal_test.go`.]
+
+## cnpg-cluster
+
+- **History:**
+  - go-kure/launcher#623 (storage size and instance count not fully validated)
+    [The reference cited it after "the API server's positive storage-request
+    check" in its Validation section.]
+  - go-kure/launcher#790 (the kind-named projections) [The reference cited it
+    after "is refused, with the registry class" in its Validation section; and
+    after "instance pods as an image volume" in its Validation section; and
+    after "generation, with or without a policy" in its Validation section.]
+  - go-kure/launcher#883 (refusing an omitted CRD-required field the Go type
+    writes empty) [The reference cited it after "**The kind's required list is
+    generated**" in its Validation section.]
+- **Tests:**
+  - `TestCnpgClusterSchema_CoversClusterSpec` pins the schema to `ClusterSpec`
+    by reflection: each json field is published with its type or listed with a
+    reason in `cnpgClusterExcludedFields` (empty today), and a schema key with
+    no field or a stale exclusion also fails, so a CNPG bump that adds, removes
+    or retypes a field names it. ["The schema" is the `cnpg-cluster` property
+    schema, which the reference page describes, "a CNPG bump" is a new version
+    of the CloudNativePG module the kind links, and the test is in
+    `cnpg_cluster_schema_test.go`.]
+
+## cnpg-pooler, cnpg-database, cnpg-objectstore
+
+- **History:**
+  - go-kure/launcher#790 (the kind-named projections) [The reference cited it
+    after "top-level property of each as required" in its Validation section;
+    and after "is refused, with the registry class" in its Validation section.]
+  - go-kure/launcher#1321 (the gate check not reaching fields under the
+    cnpg-pooler template open schema) [The reference cited it after "when it
+    sets the gate off" in its Validation section.]
+  - go-kure/launcher#883 (refusing an omitted CRD-required field the Go type
+    writes empty) [The reference cited it in its Validation section.]
+- **Tests:**
+  - `TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the fields
+    from the CRD and shows the refusals. ["The fields" are the fields of a
+    Pooler template that the CRD requires and the pod spec's type leaves out
+    when they are empty, which the reference page gives, "the refusals" are the
+    refusals of those fields, and the test is in
+    `kind_api_sets_internal_test.go`.]
+  - `TestKindComponents_NullRequired` derives these fields and `pgbouncer` from
+    the CRD and shows each answer by running the CRD's schema validator on the
+    object. ["These fields" are the fields the CRD requires under
+    `template.spec` that the pod spec's type writes as `null` when they are
+    unauthored, which the reference page gives, and the test is in
+    `kind_null_required_internal_test.go`.]
+  - The same test derives it, as the one field of a Pooler the type writes
+    unauthored as a zero value the CRD's own rule refuses. ["The same test" is
+    `TestKindComponents_NullRequired`, which the previous entry names, "it" is
+    the `key` of an authored `pgbouncer.imageCatalogRef`, which the reference
+    page gives, and the test is in `kind_null_required_internal_test.go`.]
