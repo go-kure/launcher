@@ -41,7 +41,7 @@ done
 # Each bad link must fail for its own reason, even when it has no fragment.
 expect_error() {
     printf '%s\n' '---' 'title: Broken' '---' "[Broken]($1)" > content/api-reference/broken.md
-    if hugo --baseURL "$origin/launcher/dev/" > build.log 2>&1; then
+    if hugo --baseURL "${3:-$origin/launcher/dev/}" > build.log 2>&1; then
         echo "Build accepted $1" >&2; exit 1
     fi
     grep -Fq "$2" build.log || { cat build.log >&2; exit 1; }
@@ -51,4 +51,6 @@ expect_error '/launcher/api-reference/part/#details' 'hard-codes a published API
 expect_error '/launcher/v0.1/api-reference/part/' 'hard-codes a published API reference'
 expect_error '/site/content/api-reference/missing.md' 'has no published page'
 expect_error '/pkg/unmounted/README.md' 'has no published page'
-echo 'API-reference links passed for dev, versioned release and latest, including five rejected targets.'
+# A preview build under another hostname still rejects the published host.
+expect_error "$origin/launcher/api-reference/part/" 'hard-codes a published API reference' http://localhost:1313/launcher/dev/
+echo 'API-reference links passed for dev, versioned release and latest, including six rejected targets.'

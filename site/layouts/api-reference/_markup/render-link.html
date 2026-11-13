@@ -5,7 +5,8 @@
   {{- $url = replace $url $from $to -}}
 {{- end -}}
 {{- $u := urls.Parse $url -}}
-{{- $local := or (not $u.Host) (eq (lower $u.Hostname) (lower (urls.Parse site.BaseURL).Hostname)) -}}
+{{- /* The published host counts as this site even on a preview build under another hostname. */ -}}
+{{- $local := or (not $u.Host) (eq (lower $u.Hostname) (lower (urls.Parse site.BaseURL).Hostname)) (eq (lower $u.Hostname) "www.gokure.dev") -}}
 {{- if and $local (findRE `^/launcher/((dev|v[^/]+)/)?api-reference(/|$)` $u.Path) -}}
   {{- errorf "%s: %q hard-codes a published API reference. Link to the Markdown file instead" .Page.Path .Destination -}}
 {{- end -}}
