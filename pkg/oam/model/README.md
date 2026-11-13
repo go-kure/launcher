@@ -259,7 +259,14 @@ cooperative: one long call of a function and a compile are not interrupted, and 
 deadline starts at the first model render of the build and not at the start of the `Transform`. A direct
 `Expand` or `Eval` has no build and so no build limit. The deadline can bind long before the cost limit: on
 a loaded development host, one expression of 700,000 cost units (`lists.range(50000).map(i, i)`) ran for
-about 2.8 s.
+about 2.8 s. The tests of the hostile builds (`rule_hostile_build_test.go`) set each limit against a control
+under it: 510 parts against 459 across nested models, 100,000 parts against 50 in one render, one input byte
+more than fits in 1 MiB against the longest input that fits, and a build of about 3,000 units against one of
+about 4,500 for the cost sum, which runs at a lowered limit of 3,500. At the real limit they show only that a
+build of slow expressions fails with a limit error, at the deadline or at the cost, whichever comes first.
+One long comprehension is stopped while it runs, by a clock that leaves the evaluation 2 ms, and a short
+build of the same model on a later clock then builds. A build of eight such comprehensions on the real clock
+is skipped on a host that is fast enough to pass it, because a pass shows nothing about the deadline.
 
 **Result.** A string that is exactly one hole gives the value with its type: `int64`, `uint64`,
 `float64`, `bool`, `string`, `[]byte`, `[]any` (in order), `map[string]any` or `nil`. A string
