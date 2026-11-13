@@ -227,6 +227,11 @@ A component of the model type lowers into the components of its parts.
   whole render succeeded, so a render that fails reports nothing. A direct `Expand` calls no hook:
   its components are not emitted by a build. A hook error fails the build and names the model and the
   part.
+- A trait that the author writes on a component of a model type is refused with `model.ErrTraitsUnsupported`,
+  and the error names the component, the model and the trait type. A model has many parts, so no part is the one
+  such a trait belongs to, and the rule would otherwise drop it without a word. Traits are not supported on a model
+  component yet. The `traits:` that an outer model writes on a part that is itself a model are the outer author's own
+  and are not refused.
 - A part type and a trait type stay as the model wrote them. The engine resolves an identity to the
   registered name after each round, as it does for an authored component. A plain name that a handler
   or a rule is registered under stays as written. A model that emits no component is refused with
