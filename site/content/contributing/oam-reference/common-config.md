@@ -160,3 +160,77 @@ Text in square brackets is added here to say what a moved sentence refers to.
     (breaking), and replace it with `ports`).
   - go-kure/launcher#660 (a sidecar port of the same name as a main container port refused).
 
+#### Raw scheduling properties
+
+- **History:**
+  - go-kure/launcher#412 (`deployment` publishes `affinity`, `tolerations` and
+    `topologySpreadConstraints` as their plain `corev1` shapes, parsed by `scheduling.go`).
+  - go-kure/launcher#790 (the other kind-named workloads (`statefulset`, `daemonset`, `job`,
+    `cronjob`) publish the same shapes through the same parsers and schemas, and `statefulset`
+    dropped the four-key `affinity` shorthand (breaking)).
+  - go-kure/launcher#1473 (`webservice` and `worker` publish `tolerations` and
+    `topologySpreadConstraints` as the same shapes, from the same schemas and parsers).
+
+##### What `tolerations` changed for `daemonset`
+
+- **History:**
+  - go-kure/launcher#790 (`statefulset`, `job` and `cronjob` gained `tolerations`).
+  - go-kure/launcher#690 (`daemonset` and `statefulset` emit no Service and dropped `port`,
+    which they read as no port at `0`).
+  - go-kure/launcher#1268 (`scaler` is available on `statefulset`, with the HPA's
+    `scaleTargetRef` naming a `StatefulSet`).
+  - go-kure/launcher#1178 (`deployment` reports its pod template labels, its own and the ones
+    `podMetadata.labels` adds).
+  - go-kure/launcher#1216 (the `deployment` member of a `webservice` or `worker` reports the
+    same, authored `podMetadata.labels` included).
+  - go-kure/launcher#794 (`statefulset`, `daemonset`, `job` and `cronjob` have no
+    `PodTemplateLabels` method, deliberately (item 3 of that issue)).
+  - go-kure/launcher#394 (a property read through one of the shared field helpers in
+    `common.go`, which test presence with `authoredValue`, reads a null as omission on every
+    kind, and six parsers that read their own property with a bare lookup (`envFrom`,
+    `probes`, `lifecycle`, `securityContext`, `volumes`, `accessModes`) were converted to the
+    same primitive).
+  - go-kure/launcher#570 (the top-level keys still answered with a bare lookup and then
+    type-checked read a null as omission: `timeZone`, `successfulJobsHistoryLimit` and
+    `failedJobsHistoryLimit` of `cronjob`, `completionMode` of `job` and `cronjob`,
+    `clusterScoped` of `passthrough`, `inline` and `url` of `crd` and `manifests`, and
+    `scopeOverrides` of `manifests`).
+  - go-kure/launcher#341 (`webservice` and `worker` publish `strategy`: an authored `strategy`
+    on a `webservice` was accepted and silently discarded before, and under a non-RWX claim
+    those two substituted `Recreate` silently).
+  - go-kure/launcher#408 (`kurel build` calls `ValidateAuthoredProperties`, so an unrecognised
+    key in a component's `properties` map is a build error).
+  - go-kure/launcher#393 (`replicas` is validated the same way on every kind that reads it,
+    where only the `deployment` handler did before).
+  - go-kure/launcher#525 (an integer read from a lowering rule or a Go caller is checked
+    against its own target and refused with an error rather than truncated or wrapped).
+  - go-kure/launcher#1179 (under a `scaler` the Deployment or StatefulSet is built without
+    `spec.replicas`).
+  - go-kure/launcher#1196 (under a `scaler` the `topology-spread` trait counts the scaler's
+    `minReplicas` on a Deployment).
+
+## StatefulSet-level and claim-template properties
+
+- **History:**
+  - go-kure/launcher#361 (kure's `CreateStatefulSet` no longer writes `podManagementPolicy:
+    OrderedReady` into the object, the release-1 builder contract making that constructor
+    identity-only).
+  - go-kure/launcher#385 (`devicePath` joined the claim entry's key set, and `volumeMode:
+    Block` is accepted and rendered as a main-container `volumeDevices` entry).
+  - go-kure/launcher#383 (`maxUnavailable` takes a positive integer or a 1-100% string, the
+    schema leaf being the `Types: [integer, string]` union).
+  - go-kure/launcher#761 (an authored `storageClass: ""` requests no class, and an unauthored
+    entry takes the `storageClassName` of the ClusterProfile `pvc` capability (a pre-GA output
+    change)).
+  - go-kure/launcher#384 (the `volumes[].pvc.size` surface on every kind applies the
+    positivity rule).
+  - go-kure/launcher#570 (a container's resource quantities under any name and the top-level
+    keys once read with a bare lookup read a null as omission).
+  - go-kure/launcher#790 (an authored StatefulSet-level `spec.template` is rejected with an
+    error, where the parser dropped it silently before; the pod template is projected from the
+    component's own container and pod-level properties, as on `deployment`).
+  - go-kure/launcher#394 extended the same treatment to the shared field helpers and to the
+    parsers it converted, so it reaches well beyond these fields — but not the whole package.
+    [the same treatment: reading an explicit null as omission; these fields: the optional
+    StatefulSet-level and claim-level fields above]
+
