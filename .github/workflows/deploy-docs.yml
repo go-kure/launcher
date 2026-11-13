@@ -165,7 +165,7 @@ jobs:
       run: echo "$HOME/bin" >> $GITHUB_PATH
 
     - name: Validate docs map (code↔docs sync)
-      uses: go-kure/.github/.github/actions/check-doc-sync@ac530aac6108cec06f27dc29808e2d352cd97870 # main
+      uses: go-kure/.github/.github/actions/check-doc-sync@bdcae12ac503322ed1c1ce38dab1fe6b79be8981 # main
 
     - name: Inject front matter
       run: bash site/scripts/inject-frontmatter.sh
@@ -212,7 +212,7 @@ jobs:
     # because another slot's deploy moved the pages tip is redone on the new tip
     # and retried.
     - name: Deploy to go-kure.github.io
-      uses: go-kure/.github/.github/actions/deploy-docs-push@ac530aac6108cec06f27dc29808e2d352cd97870 # main
+      uses: go-kure/.github/.github/actions/deploy-docs-push@bdcae12ac503322ed1c1ce38dab1fe6b79be8981 # main
       with:
         source-path: .
         target-path: deploy-target
