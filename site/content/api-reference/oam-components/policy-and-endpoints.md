@@ -68,12 +68,12 @@ helper. All seven kind components enforce their
 `initContainers`; only `webservice`, `worker`, `deployment`, `statefulset`
 and, since go-kure/launcher#790, `daemonset` have a
 `sidecars` schema key at all (`cronjob`/`job` have no sidecars support,
-per ["Per-type highlights"](https://www.gokure.dev/launcher/api-reference/oam-components/#per-type-highlights)) so only those five enforce a sidecars
+per ["Per-type highlights"](/pkg/oam/builtin/components/README.md#per-type-highlights)) so only those five enforce a sidecars
 loop. Errors name the authored list position and container, e.g.
 `initContainers[0] "init": image "docker.io/x/y:v1" is not from an allowed
 registry [...]`.
 
-The twelve JobSpec-level properties (see ["Per-type highlights"](https://www.gokure.dev/launcher/api-reference/oam-components/#per-type-highlights)) are parsed
+The twelve JobSpec-level properties (see ["Per-type highlights"](/pkg/oam/builtin/components/README.md#per-type-highlights)) are parsed
 and applied by a dedicated `JobSpecConfig`/`parseJobSpec`/`applyJobSpec`,
 factored out separately from the fields above because
 `batchv1.CronJob.Spec.JobTemplate.Spec` and a bare `batchv1.Job.Spec` are the

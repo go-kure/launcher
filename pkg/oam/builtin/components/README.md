@@ -499,28 +499,28 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 
 The rest of this page is split into parts. Each part holds the full text of its sections and entries.
 
-- [Common config](https://www.gokure.dev/launcher/api-reference/oam-components/common-config/): The properties every workload kind shares: containers, volumes, pod-level and deployment-level properties, and the StatefulSet-level properties.
-- [Policy defaults, endpoints and outputs](https://www.gokure.dev/launcher/api-reference/oam-components/policy-and-endpoints/): Policy defaults and their order, refusal classes, the pod view of a monitoring object, declared endpoints and declared outputs.
-- [Kinds: core workloads](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-core-workloads/): webservice, worker, deployment, service, the core objects, statefulset, daemonset, cronjob, job, autoscaling and passthrough.
-- [Kinds: networking](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-networking/): Ingress, Gateway API, network policies and the Cilium kinds.
-- [Kinds: access and admission](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-access-and-admission/): API services, admission webhooks and policies, and the RBAC kinds.
-- [Kinds: Flux](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-flux/): The Flux notification and image kinds, the Flux Kustomization and the Flux source kinds.
-- [Kinds: Helm](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-helm/): helm, helmchart, helmrelease, helmtemplate and oci.
-- [Kinds: monitoring](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-monitoring/): Alertmanager, Thanos ruler, Prometheus and the monitoring objects.
-- [Kinds: MetalLB](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-metallb/): The MetalLB kinds.
-- [Kinds: PostgreSQL and CloudNativePG](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-postgres/): postgresql and the CloudNativePG kinds.
-- [Kinds: secrets, certificates and backup](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-secrets-certs-backup/): Issuers and certificates, the External Secrets kinds and the VolSync kinds.
-- [Adding a kind component: where its lines go](https://www.gokure.dev/launcher/api-reference/oam-components/adding-a-kind/): Where the lines of a new kind component go.
-- [Upstream fields a hand-parsed kind does not read](https://www.gokure.dev/launcher/api-reference/oam-components/upstream-fields-not-read/): The upstream fields a hand-parsed kind refuses or reads in another shape.
-- [Extending](https://www.gokure.dev/launcher/api-reference/oam-components/extending/): How to extend the handler set.
-- [The null contract and two spellings of one field](https://www.gokure.dev/launcher/api-reference/oam-components/null-and-spellings/): What an explicit null means and the fields that have two spellings.
-- [Conventions](https://www.gokure.dev/launcher/api-reference/oam-components/conventions/): The conventions every kind follows: the app label, object names, metadata, selectors and unauthored required fields.
+- [Common config](/site/content/api-reference/oam-components/common-config.md): The properties every workload kind shares: containers, volumes, pod-level and deployment-level properties, and the StatefulSet-level properties.
+- [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md): Policy defaults and their order, refusal classes, the pod view of a monitoring object, declared endpoints and declared outputs.
+- [Kinds: core workloads](/site/content/api-reference/oam-components/kinds-core-workloads.md): webservice, worker, deployment, service, the core objects, statefulset, daemonset, cronjob, job, autoscaling and passthrough.
+- [Kinds: networking](/site/content/api-reference/oam-components/kinds-networking.md): Ingress, Gateway API, network policies and the Cilium kinds.
+- [Kinds: access and admission](/site/content/api-reference/oam-components/kinds-access-and-admission.md): API services, admission webhooks and policies, and the RBAC kinds.
+- [Kinds: Flux](/site/content/api-reference/oam-components/kinds-flux.md): The Flux notification and image kinds, the Flux Kustomization and the Flux source kinds.
+- [Kinds: Helm](/site/content/api-reference/oam-components/kinds-helm.md): helm, helmchart, helmrelease, helmtemplate and oci.
+- [Kinds: monitoring](/site/content/api-reference/oam-components/kinds-monitoring.md): Alertmanager, Thanos ruler, Prometheus and the monitoring objects.
+- [Kinds: MetalLB](/site/content/api-reference/oam-components/kinds-metallb.md): The MetalLB kinds.
+- [Kinds: PostgreSQL and CloudNativePG](/site/content/api-reference/oam-components/kinds-postgres.md): postgresql and the CloudNativePG kinds.
+- [Kinds: secrets, certificates and backup](/site/content/api-reference/oam-components/kinds-secrets-certs-backup.md): Issuers and certificates, the External Secrets kinds and the VolSync kinds.
+- [Adding a kind component: where its lines go](/site/content/api-reference/oam-components/adding-a-kind.md): Where the lines of a new kind component go.
+- [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md): The upstream fields a hand-parsed kind refuses or reads in another shape.
+- [Extending](/site/content/api-reference/oam-components/extending.md): How to extend the handler set.
+- [The null contract and two spellings of one field](/site/content/api-reference/oam-components/null-and-spellings.md): What an explicit null means and the fields that have two spellings.
+- [Conventions](/site/content/api-reference/oam-components/conventions.md): The conventions every kind follows: the app label, object names, metadata, selectors and unauthored required fields.
 
 The headings below stay so that a link to an old section still lands here. Each one links to the part that holds the text. Some also keep the opening lines of the section or of an entry.
 
 ## Adding a kind component: where its lines go
 
-See [Adding a kind component: where its lines go](https://www.gokure.dev/launcher/api-reference/oam-components/adding-a-kind/#adding-a-kind-component-where-its-lines-go).
+See [Adding a kind component: where its lines go](/site/content/api-reference/oam-components/adding-a-kind.md#adding-a-kind-component-where-its-lines-go).
 
 ## Common config
 
@@ -545,19 +545,19 @@ author writes beside them in the same document. This covers those six parsers;
 it is not a claim that every property in this package is read through the
 helpers.
 
-Full text: [Common config](https://www.gokure.dev/launcher/api-reference/oam-components/common-config/#common-config).
+Full text: [Common config](/site/content/api-reference/oam-components/common-config.md#common-config).
 
 ### Container fields
 
-See [Common config](https://www.gokure.dev/launcher/api-reference/oam-components/common-config/#container-fields).
+See [Common config](/site/content/api-reference/oam-components/common-config.md#container-fields).
 
 ### Referencing an existing claim (`pvc.claimName`)
 
-See [Common config](https://www.gokure.dev/launcher/api-reference/oam-components/common-config/#referencing-an-existing-claim-pvcclaimname).
+See [Common config](/site/content/api-reference/oam-components/common-config.md#referencing-an-existing-claim-pvcclaimname).
 
 ### Raw block volumes (`volumeMode: Block`)
 
-See [Common config](https://www.gokure.dev/launcher/api-reference/oam-components/common-config/#raw-block-volumes-volumemode-block).
+See [Common config](/site/content/api-reference/oam-components/common-config.md#raw-block-volumes-volumemode-block).
 
 ### Pod-level properties
 
@@ -609,23 +609,23 @@ kinds share one table, so the two cannot differ. The refusal names the authored 
 the value (go-kure/launcher#1330). This check does not read whether a value such as
 `never` reaches a cluster. It only refuses the values the table names.
 
-Full text: [Common config](https://www.gokure.dev/launcher/api-reference/oam-components/common-config/#pod-level-properties).
+Full text: [Common config](/site/content/api-reference/oam-components/common-config.md#pod-level-properties).
 
 ### Deployment-level properties (`deployment`, `webservice`, `worker`)
 
-See [Common config](https://www.gokure.dev/launcher/api-reference/oam-components/common-config/#deployment-level-properties-deployment-webservice-worker).
+See [Common config](/site/content/api-reference/oam-components/common-config.md#deployment-level-properties-deployment-webservice-worker).
 
 #### Main container ports
 
-See [Common config](https://www.gokure.dev/launcher/api-reference/oam-components/common-config/#main-container-ports).
+See [Common config](/site/content/api-reference/oam-components/common-config.md#main-container-ports).
 
 #### Raw scheduling properties
 
-See [Common config](https://www.gokure.dev/launcher/api-reference/oam-components/common-config/#raw-scheduling-properties).
+See [Common config](/site/content/api-reference/oam-components/common-config.md#raw-scheduling-properties).
 
 ##### What `tolerations` changed for `daemonset`
 
-See [Common config](https://www.gokure.dev/launcher/api-reference/oam-components/common-config/#what-tolerations-changed-for-daemonset).
+See [Common config](/site/content/api-reference/oam-components/common-config.md#what-tolerations-changed-for-daemonset).
 
 ## Policy defaults & enforcement ordering
 
@@ -647,23 +647,23 @@ tiers, in precedence order:
    absence, not an opt-out. A policy sub-option to accept `unlimited` as a
    policy default is not provided.
 
-Full text: [Policy defaults, endpoints and outputs](https://www.gokure.dev/launcher/api-reference/oam-components/policy-and-endpoints/#policy-defaults--enforcement-ordering).
+Full text: [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
 
 ## Policy refusal classes
 
-See [Policy defaults, endpoints and outputs](https://www.gokure.dev/launcher/api-reference/oam-components/policy-and-endpoints/#policy-refusal-classes).
+See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-refusal-classes).
 
 ## Pod view of a monitoring workload object (`MonitoringPodSpec`)
 
-See [Policy defaults, endpoints and outputs](https://www.gokure.dev/launcher/api-reference/oam-components/policy-and-endpoints/#pod-view-of-a-monitoring-workload-object-monitoringpodspec).
+See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#pod-view-of-a-monitoring-workload-object-monitoringpodspec).
 
 ## Declared endpoints of a chart
 
-See [Policy defaults, endpoints and outputs](https://www.gokure.dev/launcher/api-reference/oam-components/policy-and-endpoints/#declared-endpoints-of-a-chart).
+See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#declared-endpoints-of-a-chart).
 
 ## Declared outputs
 
-See [Policy defaults, endpoints and outputs](https://www.gokure.dev/launcher/api-reference/oam-components/policy-and-endpoints/#declared-outputs).
+See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#declared-outputs).
 
 ## Per-type highlights
 
@@ -713,7 +713,7 @@ Opening lines of an entry:
   `backup.schedules` entry (go-kure/launcher#1001, below); it emits none of
   the other six.
 
-Full entry: [Kinds: PostgreSQL and CloudNativePG](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-postgres/).
+Full entry: [Kinds: PostgreSQL and CloudNativePG](/site/content/api-reference/oam-components/kinds-postgres.md).
 
 Opening lines of an entry:
 
@@ -728,7 +728,7 @@ Opening lines of an entry:
   of those pods is held to the environment policy as a workload kind's own
   fields are.
 
-Full entry: [Kinds: monitoring](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-monitoring/).
+Full entry: [Kinds: monitoring](/site/content/api-reference/oam-components/kinds-monitoring.md).
 
 Opening lines of an entry:
 
@@ -750,7 +750,7 @@ Opening lines of an entry:
   app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
   Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
 
-Full entry: [Kinds: core workloads](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-core-workloads/).
+Full entry: [Kinds: core workloads](/site/content/api-reference/oam-components/kinds-core-workloads.md).
 
 Opening lines of an entry:
 
@@ -767,7 +767,7 @@ Opening lines of an entry:
   server. A null list element (`rules: [null]`, a null path or TLS entry) is
   refused by its path.
 
-Full entry: [Kinds: networking](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-networking/).
+Full entry: [Kinds: networking](/site/content/api-reference/oam-components/kinds-networking.md).
 
 Opening lines of an entry:
 
@@ -783,7 +783,7 @@ Opening lines of an entry:
   in no namespace. An Issuer and a ClusterIssuer share one spec type
   (`IssuerSpec`), and what is said of an issuer below holds for both kinds.
 
-Full entry: [Kinds: secrets, certificates and backup](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-secrets-certs-backup/).
+Full entry: [Kinds: secrets, certificates and backup](/site/content/api-reference/oam-components/kinds-secrets-certs-backup.md).
 
 Opening lines of an entry:
 
@@ -804,7 +804,7 @@ Opening lines of an entry:
   and the HelmRelease keys `interval`, `releaseName`,
   `targetNamespace`, `driftDetection`, `install`, `upgrade`, `valuesFrom`.
 
-Full entry: [Kinds: Helm](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-helm/).
+Full entry: [Kinds: Helm](/site/content/api-reference/oam-components/kinds-helm.md).
 
 Opening lines of an entry:
 
@@ -820,7 +820,7 @@ Opening lines of an entry:
   Cluster creates a new one: the old one is pruned with its data unless it is
   protected** (see "The Cluster's and the ObjectStore's names" below).
 
-Full entry: [Kinds: PostgreSQL and CloudNativePG](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-postgres/).
+Full entry: [Kinds: PostgreSQL and CloudNativePG](/site/content/api-reference/oam-components/kinds-postgres.md).
 
 Opening lines of an entry:
 
@@ -853,7 +853,7 @@ Opening lines of an entry:
   beyond `float64` range in that object is read as text and is not refused
   (go-kure/launcher#1176).
 
-Full entry: [Kinds: core workloads](https://www.gokure.dev/launcher/api-reference/oam-components/kinds-core-workloads/).
+Full entry: [Kinds: core workloads](/site/content/api-reference/oam-components/kinds-core-workloads.md).
 
 ## StatefulSet-level and claim-template properties
 
@@ -873,51 +873,51 @@ pre-existing keys (`name`, `mountPath`, `size`, `storageClass`, `accessModes`)
 now sit inside a closed key set, so a typo in an entry is reported instead of
 being silently dropped. `devicePath` joined that set with go-kure/launcher#385.
 
-Full text: [Common config](https://www.gokure.dev/launcher/api-reference/oam-components/common-config/#statefulset-level-and-claim-template-properties).
+Full text: [Common config](/site/content/api-reference/oam-components/common-config.md#statefulset-level-and-claim-template-properties).
 
 ## Upstream fields a hand-parsed kind does not read
 
-See [Upstream fields a hand-parsed kind does not read](https://www.gokure.dev/launcher/api-reference/oam-components/upstream-fields-not-read/#upstream-fields-a-hand-parsed-kind-does-not-read).
+See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#upstream-fields-a-hand-parsed-kind-does-not-read).
 
 ### The two paths
 
-See [Upstream fields a hand-parsed kind does not read](https://www.gokure.dev/launcher/api-reference/oam-components/upstream-fields-not-read/#the-two-paths).
+See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#the-two-paths).
 
 ### Below the top level
 
-See [Upstream fields a hand-parsed kind does not read](https://www.gokure.dev/launcher/api-reference/oam-components/upstream-fields-not-read/#below-the-top-level).
+See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#below-the-top-level).
 
 ### Refused, with the reason
 
-See [Upstream fields a hand-parsed kind does not read](https://www.gokure.dev/launcher/api-reference/oam-components/upstream-fields-not-read/#refused-with-the-reason).
+See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#refused-with-the-reason).
 
 ### Read in another shape
 
-See [Upstream fields a hand-parsed kind does not read](https://www.gokure.dev/launcher/api-reference/oam-components/upstream-fields-not-read/#read-in-another-shape).
+See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#read-in-another-shape).
 
 ### One level down
 
-See [Upstream fields a hand-parsed kind does not read](https://www.gokure.dev/launcher/api-reference/oam-components/upstream-fields-not-read/#one-level-down).
+See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#one-level-down).
 
 ### Not authorable, and not refusable by name
 
-See [Upstream fields a hand-parsed kind does not read](https://www.gokure.dev/launcher/api-reference/oam-components/upstream-fields-not-read/#not-authorable-and-not-refusable-by-name).
+See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#not-authorable-and-not-refusable-by-name).
 
 ### Outside the properties
 
-See [Upstream fields a hand-parsed kind does not read](https://www.gokure.dev/launcher/api-reference/oam-components/upstream-fields-not-read/#outside-the-properties).
+See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#outside-the-properties).
 
 ### An explicit null on a refused key
 
-See [Upstream fields a hand-parsed kind does not read](https://www.gokure.dev/launcher/api-reference/oam-components/upstream-fields-not-read/#an-explicit-null-on-a-refused-key).
+See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#an-explicit-null-on-a-refused-key).
 
 ### What holds this
 
-See [Upstream fields a hand-parsed kind does not read](https://www.gokure.dev/launcher/api-reference/oam-components/upstream-fields-not-read/#what-holds-this).
+See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#what-holds-this).
 
 ## Extending
 
-See [Extending](https://www.gokure.dev/launcher/api-reference/oam-components/extending/#extending).
+See [Extending](/site/content/api-reference/oam-components/extending.md#extending).
 
 ## The null contract
 
@@ -934,40 +934,40 @@ requiredness check and its optional-key strip, its array-element guard,
 and each was aligned separately, so each round of review found the reader the last
 round had not touched.
 
-Full text: [The null contract and two spellings of one field](https://www.gokure.dev/launcher/api-reference/oam-components/null-and-spellings/#the-null-contract).
+Full text: [The null contract and two spellings of one field](/site/content/api-reference/oam-components/null-and-spellings.md#the-null-contract).
 
 ## Two spellings of one field
 
-See [The null contract and two spellings of one field](https://www.gokure.dev/launcher/api-reference/oam-components/null-and-spellings/#two-spellings-of-one-field).
+See [The null contract and two spellings of one field](/site/content/api-reference/oam-components/null-and-spellings.md#two-spellings-of-one-field).
 
 ## Conventions
 
-See [Conventions](https://www.gokure.dev/launcher/api-reference/oam-components/conventions/#conventions).
+See [Conventions](/site/content/api-reference/oam-components/conventions.md#conventions).
 
 ### The `app` label
 
-See [Conventions](https://www.gokure.dev/launcher/api-reference/oam-components/conventions/#the-app-label).
+See [Conventions](/site/content/api-reference/oam-components/conventions.md#the-app-label).
 
 ### The object name (`objectName`)
 
-See [Conventions](https://www.gokure.dev/launcher/api-reference/oam-components/conventions/#the-object-name-objectname).
+See [Conventions](/site/content/api-reference/oam-components/conventions.md#the-object-name-objectname).
 
 ### The object's labels and annotations (`labels`, `annotations`)
 
-See [Conventions](https://www.gokure.dev/launcher/api-reference/oam-components/conventions/#the-objects-labels-and-annotations-labels-annotations).
+See [Conventions](/site/content/api-reference/oam-components/conventions.md#the-objects-labels-and-annotations-labels-annotations).
 
 ### The pod template's labels and annotations (`podMetadata`)
 
-See [Conventions](https://www.gokure.dev/launcher/api-reference/oam-components/conventions/#the-pod-templates-labels-and-annotations-podmetadata).
+See [Conventions](/site/content/api-reference/oam-components/conventions.md#the-pod-templates-labels-and-annotations-podmetadata).
 
 ### A label selector's match expressions
 
-See [Conventions](https://www.gokure.dev/launcher/api-reference/oam-components/conventions/#a-label-selectors-match-expressions).
+See [Conventions](/site/content/api-reference/oam-components/conventions.md#a-label-selectors-match-expressions).
 
 ### Required fields a kind writes unauthored and does not refuse
 
-See [Conventions](https://www.gokure.dev/launcher/api-reference/oam-components/conventions/#required-fields-a-kind-writes-unauthored-and-does-not-refuse).
+See [Conventions](/site/content/api-reference/oam-components/conventions.md#required-fields-a-kind-writes-unauthored-and-does-not-refuse).
 
 ### Every spec field is this package's to write
 
-See [Conventions](https://www.gokure.dev/launcher/api-reference/oam-components/conventions/#every-spec-field-is-this-packages-to-write).
+See [Conventions](/site/content/api-reference/oam-components/conventions.md#every-spec-field-is-this-packages-to-write).

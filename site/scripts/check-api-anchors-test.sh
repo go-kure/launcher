@@ -150,9 +150,7 @@ pins "$d/pins.txt" 'api-reference/a/ a-one'
 expect "--base-path" 0 "1 fragment links resolved" -- \
     --site "$d/site" --pins "$d/pins.txt" --base-path /x/
 
-# 9b: an absolute link to the published site is read against the local build. A README links
-# its parts that way, because Hugo does not rewrite a repository path and a relative form
-# breaks on one of the two surfaces (go-kure/launcher#1335).
+# 9b: an absolute link to the published site is read against the local build.
 d="$WORK/siteurl"
 page "$d/site" api-reference/a '<h2 id=a-one>One</h2>
   <a href="https://www.gokure.dev/launcher/api-reference/b/#b-one" rel=external>ok</a>'

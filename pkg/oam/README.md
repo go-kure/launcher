@@ -7,7 +7,7 @@ validator, and the transform pipeline that turns an `Application` + `ClusterProf
 into Kubernetes manifests. Every document this package parses uses
 `apiVersion: launcher.gokure.dev/v1alpha1` (`SupportedAPIVersion`); the one exception is
 the raw-document lowering seam, where a `RawDocumentLoweringRule` may claim a kind under a
-consumer-owned group via `RawDocumentAPIVersioner` (see [Lowering](https://www.gokure.dev/launcher/api-reference/oam/transform-and-lowering/#lowering)).
+consumer-owned group via `RawDocumentAPIVersioner` (see [Lowering](/site/content/api-reference/oam/transform-and-lowering.md#lowering)).
 
 ## Document kinds
 
@@ -15,26 +15,26 @@ consumer-owned group via `RawDocumentAPIVersioner` (see [Lowering](https://www.g
 |------|------|---------|
 | `Application` | `Application` | The app: `components[]` (each with `type` + `properties`) and `traits[]`. |
 | `Package` | `Package` | A package's `kurel.yaml` descriptor: the declarations of its build-time parameters (`ParameterDecl`). The application is the separate `app.yaml`. |
-| `ClusterProfile` | `ClusterProfile` | Platform choices (trait implementations, capabilities) supplied at build time, and the cluster's Kubernetes release and per-gate feature-gate overrides (`spec.kubernetesVersion`, `spec.featureGates`; a library caller passes the overrides to `ValidateAuthoredPropertiesForTargetWithGates` and `TransformContext.FeatureGates`, see [Property schemas and contract metadata](https://www.gokure.dev/launcher/api-reference/oam/schemas-and-contract/)). |
+| `ClusterProfile` | `ClusterProfile` | Platform choices (trait implementations, capabilities) supplied at build time, and the cluster's Kubernetes release and per-gate feature-gate overrides (`spec.kubernetesVersion`, `spec.featureGates`; a library caller passes the overrides to `ValidateAuthoredPropertiesForTargetWithGates` and `TransformContext.FeatureGates`, see [Property schemas and contract metadata](/site/content/api-reference/oam/schemas-and-contract.md)). |
 | `CapabilityDefinition` | `CapabilityDefinition` | Declares the schema of a capability's rendering: the keys a `ClusterProfile` binding for it may hold. |
 
 ## Parts
 
 The rest of this page is split into parts. Each part holds the full text of its sections.
 
-- [Pipeline](https://www.gokure.dev/launcher/api-reference/oam/pipeline/): How a document goes from YAML to manifests.
-- [Component label and ownership](https://www.gokure.dev/launcher/api-reference/oam/labels-and-ownership/): The label that marks what a component owns, and the metadata keys launcher reserves.
-- [Names and overrides](https://www.gokure.dev/launcher/api-reference/oam/names-and-overrides/): How object names, labels and annotations are chosen and overridden.
-- [Parsing and type identity](https://www.gokure.dev/launcher/api-reference/oam/parsing-and-types/): The parser, the component type allowlist and how a type name resolves.
-- [Transform, extension and lowering](https://www.gokure.dev/launcher/api-reference/oam/transform-and-lowering/): The transform step, how to register builtins and the lowering rules.
-- [Property schemas and contract metadata](https://www.gokure.dev/launcher/api-reference/oam/schemas-and-contract/): Property schemas, what an explicit null means and the contract metadata.
-- [Policy defaults and capability system](https://www.gokure.dev/launcher/api-reference/oam/policy-and-capability/): Policy defaults, refusal classes and how a capability renders.
+- [Pipeline](/site/content/api-reference/oam/pipeline.md): How a document goes from YAML to manifests.
+- [Component label and ownership](/site/content/api-reference/oam/labels-and-ownership.md): The label that marks what a component owns, and the metadata keys launcher reserves.
+- [Names and overrides](/site/content/api-reference/oam/names-and-overrides.md): How object names, labels and annotations are chosen and overridden.
+- [Parsing and type identity](/site/content/api-reference/oam/parsing-and-types.md): The parser, the component type allowlist and how a type name resolves.
+- [Transform, extension and lowering](/site/content/api-reference/oam/transform-and-lowering.md): The transform step, how to register builtins and the lowering rules.
+- [Property schemas and contract metadata](/site/content/api-reference/oam/schemas-and-contract.md): Property schemas, what an explicit null means and the contract metadata.
+- [Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md): Policy defaults, refusal classes and how a capability renders.
 
 The headings below stay so that a link to an old section still lands here. Each one links to the part that holds the text. Some also keep the opening lines of the section.
 
 ## Pipeline
 
-See [Pipeline](https://www.gokure.dev/launcher/api-reference/oam/pipeline/#pipeline).
+See [Pipeline](/site/content/api-reference/oam/pipeline.md#pipeline).
 
 ## Component label and ownership
 
@@ -43,7 +43,7 @@ document as a whole (go-kure/launcher#788). The transform records that as its la
 two things follow from it: each application reports its owner, and each object it generates
 carries the owner's component label.
 
-Full text: [Component label and ownership](https://www.gokure.dev/launcher/api-reference/oam/labels-and-ownership/#component-label-and-ownership).
+Full text: [Component label and ownership](/site/content/api-reference/oam/labels-and-ownership.md#component-label-and-ownership).
 
 ## Reserved metadata keys
 
@@ -53,15 +53,15 @@ application the transform returns to the list, whatever wrote the key: a kind co
 `passthrough` or `manifests` object, a chart rendered at build time, a trait's `annotations`,
 a `postgresql` or `cnpg-cluster` component's `inheritedMetadata`.
 
-Full text: [Component label and ownership](https://www.gokure.dev/launcher/api-reference/oam/labels-and-ownership/#reserved-metadata-keys).
+Full text: [Component label and ownership](/site/content/api-reference/oam/labels-and-ownership.md#reserved-metadata-keys).
 
 ## Names and overrides
 
-See [Names and overrides](https://www.gokure.dev/launcher/api-reference/oam/names-and-overrides/#names-and-overrides).
+See [Names and overrides](/site/content/api-reference/oam/names-and-overrides.md#names-and-overrides).
 
 ### Name roles and the `Naming` hook
 
-See [Names and overrides](https://www.gokure.dev/launcher/api-reference/oam/names-and-overrides/#name-roles-and-the-naming-hook).
+See [Names and overrides](/site/content/api-reference/oam/names-and-overrides.md#name-roles-and-the-naming-hook).
 
 ### Outputs: the names a component's objects get
 
@@ -75,47 +75,47 @@ its `Name`. A key is one identifier (a letter or underscore, then letters, digit
 underscores), so a document can address it as `parts.<part>.<key>`. A type that provides no
 outputs answers `(nil, nil)`.
 
-Full text: [Names and overrides](https://www.gokure.dev/launcher/api-reference/oam/names-and-overrides/#outputs-the-names-a-components-objects-get).
+Full text: [Names and overrides](/site/content/api-reference/oam/names-and-overrides.md#outputs-the-names-a-components-objects-get).
 
 ### `objectName`: the object of a kind component
 
-See [Names and overrides](https://www.gokure.dev/launcher/api-reference/oam/names-and-overrides/#objectname-the-object-of-a-kind-component).
+See [Names and overrides](/site/content/api-reference/oam/names-and-overrides.md#objectname-the-object-of-a-kind-component).
 
 ### `labels` and `annotations`: the metadata of a kind component's object
 
-See [Names and overrides](https://www.gokure.dev/launcher/api-reference/oam/names-and-overrides/#labels-and-annotations-the-metadata-of-a-kind-components-object).
+See [Names and overrides](/site/content/api-reference/oam/names-and-overrides.md#labels-and-annotations-the-metadata-of-a-kind-components-object).
 
 ## Parsing
 
-See [Parsing and type identity](https://www.gokure.dev/launcher/api-reference/oam/parsing-and-types/#parsing).
+See [Parsing and type identity](/site/content/api-reference/oam/parsing-and-types.md#parsing).
 
 ### Component type allowlist
 
-See [Parsing and type identity](https://www.gokure.dev/launcher/api-reference/oam/parsing-and-types/#component-type-allowlist).
+See [Parsing and type identity](/site/content/api-reference/oam/parsing-and-types.md#component-type-allowlist).
 
 ## Type identity
 
-See [Parsing and type identity](https://www.gokure.dev/launcher/api-reference/oam/parsing-and-types/#type-identity).
+See [Parsing and type identity](/site/content/api-reference/oam/parsing-and-types.md#type-identity).
 
 ### Grammar
 
-See [Parsing and type identity](https://www.gokure.dev/launcher/api-reference/oam/parsing-and-types/#grammar).
+See [Parsing and type identity](/site/content/api-reference/oam/parsing-and-types.md#grammar).
 
 ### Resolution
 
-See [Parsing and type identity](https://www.gokure.dev/launcher/api-reference/oam/parsing-and-types/#resolution).
+See [Parsing and type identity](/site/content/api-reference/oam/parsing-and-types.md#resolution).
 
 ### Declaring and resolving
 
-See [Parsing and type identity](https://www.gokure.dev/launcher/api-reference/oam/parsing-and-types/#declaring-and-resolving).
+See [Parsing and type identity](/site/content/api-reference/oam/parsing-and-types.md#declaring-and-resolving).
 
 ## Transform & extension
 
-See [Transform, extension and lowering](https://www.gokure.dev/launcher/api-reference/oam/transform-and-lowering/#transform--extension).
+See [Transform, extension and lowering](/site/content/api-reference/oam/transform-and-lowering.md#transform--extension).
 
 ### Registering the builtins
 
-See [Transform, extension and lowering](https://www.gokure.dev/launcher/api-reference/oam/transform-and-lowering/#registering-the-builtins).
+See [Transform, extension and lowering](/site/content/api-reference/oam/transform-and-lowering.md#registering-the-builtins).
 
 ## Lowering
 
@@ -148,9 +148,9 @@ so that they belong to one transform.
 `Transformer.CheckComponentTypes` is a dry run of `DeclareComponentTypes`. It checks that
 the declaration is valid and declares nothing. It does not need the handler or rule to be
 registered yet, and `DeclareComponentTypes` does. A component model registers its rule
-only after this check passes (see [Component Models](https://www.gokure.dev/launcher/api-reference/oam-models/)).
+only after this check passes (see [Component Models](/pkg/oam/model/README.md)).
 
-Full text: [Transform, extension and lowering](https://www.gokure.dev/launcher/api-reference/oam/transform-and-lowering/#lowering).
+Full text: [Transform, extension and lowering](/site/content/api-reference/oam/transform-and-lowering.md#lowering).
 
 ## Property schemas
 
@@ -164,35 +164,35 @@ single schema vocabulary — the same type also backs `kurel.yaml` parameters (`
 parameters, capability rendering) reject them at decode time, so unifying the type does not widen
 their accepted behavior.
 
-Full text: [Property schemas and contract metadata](https://www.gokure.dev/launcher/api-reference/oam/schemas-and-contract/#property-schemas).
+Full text: [Property schemas and contract metadata](/site/content/api-reference/oam/schemas-and-contract.md#property-schemas).
 
 ### What an explicit `null` means on the emitted path
 
-See [Property schemas and contract metadata](https://www.gokure.dev/launcher/api-reference/oam/schemas-and-contract/#what-an-explicit-null-means-on-the-emitted-path).
+See [Property schemas and contract metadata](/site/content/api-reference/oam/schemas-and-contract.md#what-an-explicit-null-means-on-the-emitted-path).
 
 ## Contract metadata
 
-See [Property schemas and contract metadata](https://www.gokure.dev/launcher/api-reference/oam/schemas-and-contract/#contract-metadata).
+See [Property schemas and contract metadata](/site/content/api-reference/oam/schemas-and-contract.md#contract-metadata).
 
 ### Lowering targets and `Seal`
 
-See [Property schemas and contract metadata](https://www.gokure.dev/launcher/api-reference/oam/schemas-and-contract/#lowering-targets-and-seal).
+See [Property schemas and contract metadata](/site/content/api-reference/oam/schemas-and-contract.md#lowering-targets-and-seal).
 
 ### The "no handler" error
 
-See [Property schemas and contract metadata](https://www.gokure.dev/launcher/api-reference/oam/schemas-and-contract/#the-no-handler-error).
+See [Property schemas and contract metadata](/site/content/api-reference/oam/schemas-and-contract.md#the-no-handler-error).
 
 ## Policy defaults & enforcement
 
-See [Policy defaults and capability system](https://www.gokure.dev/launcher/api-reference/oam/policy-and-capability/#policy-defaults--enforcement).
+See [Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md#policy-defaults--enforcement).
 
 ### Refusal classes
 
-See [Policy defaults and capability system](https://www.gokure.dev/launcher/api-reference/oam/policy-and-capability/#refusal-classes).
+See [Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md#refusal-classes).
 
 ## Capability system
 
-See [Policy defaults and capability system](https://www.gokure.dev/launcher/api-reference/oam/policy-and-capability/#capability-system).
+See [Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md#capability-system).
 
 The `AllowedCapabilities`, `ForbiddenCapabilities` and `RequiredCapabilities` lists of a `Policy`
 judge the trait types an author wrote. They also judge the traits that a component rule writes onto
@@ -202,8 +202,8 @@ rule goes through `RegisterComponentLowering`, and its emitted traits count.
 
 ### Capability rendering: types and nulls
 
-See [Policy defaults and capability system](https://www.gokure.dev/launcher/api-reference/oam/policy-and-capability/#capability-rendering-types-and-nulls).
+See [Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md#capability-rendering-types-and-nulls).
 
 ### Rendering merge: authored values and nulls
 
-See [Policy defaults and capability system](https://www.gokure.dev/launcher/api-reference/oam/policy-and-capability/#rendering-merge-authored-values-and-nulls).
+See [Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md#rendering-merge-authored-values-and-nulls).

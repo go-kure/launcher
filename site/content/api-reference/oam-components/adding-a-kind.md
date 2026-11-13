@@ -23,11 +23,11 @@ component type**, in the order `sort.Strings` gives (`cilium-nodeconfig` before
 | `imageFieldTypes`, for a spec type a kind decodes that names an image | `image_fields_internal_test.go` | `TestKindLists_InOrder`, in the order of the entries' `name` |
 | `kindTraitPairs`, for a kind a trait also generates | the tests of `pkg/cmd/kurel` | `TestKindLists_InOrder`, in the order of the entries' `typ` |
 | `policyFreeTypes`, for a kind built on `policyFreeKind` whose type publishes its field comments | `kind_policy_free_internal_test.go` | no test: its rows name the kind's value, not its type, and a new row goes at the end. A kind with no row is not held by `TestPolicyFreeKinds_NoDefaultedZeros` |
-| ["Component types"](https://www.gokure.dev/launcher/api-reference/oam-components/#component-types) | this file | `TestKindLists_InOrder` |
+| ["Component types"](/pkg/oam/builtin/components/README.md#component-types) | this file | `TestKindLists_InOrder` |
 | "Component type allowlist" | `site/content/api-reference/oam/parsing-and-types.md` | `TestKindLists_InOrder`; `TestKindLists_Complete` fails on a type of `validComponentTypes` with no row and on a row of no type of it |
 | Table 4.2 | `docs/oam/design-kurel-package.md` | `TestKindLists_InOrder` |
 | The table of kind components under "`kurel build`" | `pkg/cmd/kurel/README.md` | `TestKindLists_InOrder` |
-| ["Per-type highlights"](https://www.gokure.dev/launcher/api-reference/oam-components/#per-type-highlights) | this file | no test, and not yet in order: a new entry goes before the first entry whose head names a type that sorts after its own |
+| ["Per-type highlights"](/pkg/oam/builtin/components/README.md#per-type-highlights) | this file | no test, and not yet in order: a new entry goes before the first entry whose head names a type that sorts after its own |
 | The "Shipped" entries of §6.2 that ship kinds | `docs/delivery-scope.md` | no test: the same position, before the entries that are not "Shipped" |
 
 In the Go lists an entry names its component type by a string literal, not by a constant (a
@@ -40,7 +40,7 @@ handler, its `ContractMetadata` and `ComponentObject` methods (not `contract.go`
 `object_name.go`), its tests, and the helpers only its entries in a shared list use, which go
 in its own test file rather than beside the list.
 
-No sentence names every kind. A sentence that needs the set points at the ["Kind inventory"](https://www.gokure.dev/launcher/api-reference/oam-components/#kind-inventory),
+No sentence names every kind. A sentence that needs the set points at the ["Kind inventory"](/pkg/oam/builtin/components/README.md#kind-inventory),
 which its tests hold complete. One table names every component type, one row each: the
 "Component type allowlist" of `site/content/api-reference/oam/parsing-and-types.md`. A change that adds a type to
 `validComponentTypes` adds its row there, so it changes the README that CI's documentation
@@ -55,7 +55,7 @@ before it is published:
 - a map whose values `gofmt` aligns (`ComponentHandlers`, `validComponentTypes`,
   `kindListExceptions`), when a new type is longer than every type the map holds: every
   entry is realigned, which conflicts with any other change to that map;
-- the ["Kind inventory"](https://www.gokure.dev/launcher/api-reference/oam-components/#kind-inventory), where a new kind edits its row in place (`missing` to `kind`): two
+- the ["Kind inventory"](/pkg/oam/builtin/components/README.md#kind-inventory), where a new kind edits its row in place (`missing` to `kind`): two
   changes that edit neighbouring rows;
 - the entries of §6.2 of `docs/delivery-scope.md` that are not "Shipped" (a "Held" entry,
   "Missing kinds"), which have no order: two changes that each add one at the same place,

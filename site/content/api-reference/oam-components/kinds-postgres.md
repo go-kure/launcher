@@ -439,7 +439,7 @@ Database's or a ScheduledBackup's generated name): the member could leave the
 group the trait reaches, so the rule refuses it and asks for the postgresql
 component's name instead (the rule for every lowering rule, and the message, are
 under ["Traits a lowering rule
-forwards"](https://www.gokure.dev/launcher/api-reference/oam-components/#traits-a-lowering-rule-forwards)).
+forwards"](/pkg/oam/builtin/components/README.md#traits-a-lowering-rule-forwards)).
 Policies that name the postgresql component are extended to the members the same
 way. A `placement` of it is repeated for each member, so they stay in the
 Cluster's tier and, without a dependency policy, in its bundle. When the
