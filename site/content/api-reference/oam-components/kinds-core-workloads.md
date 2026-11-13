@@ -709,609 +709,611 @@ The component in `pkg/cmd/kurel/testdata/persistentvolume-component/app.yaml`, b
 the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares
 the two.
 
+## pod
+
+**pod** is the kind-named projection of a v1 Pod, on
+the same recipe: one schema key per json field of `corev1.PodSpec`, the
+property map decoded strictly into that type, two spellings of one field
+refused, and one Pod named after the component in the build namespace, with
+the authored spec. The handler adds the `app` label and nothing else: no
+annotation, no ServiceAccount, no `automountServiceAccountToken`, no
+resources, no probe. The `app` label (`app: <component>`, see ["The `app`
+label"](conventions.md#the-app-label)) is the one every workload kind gives its pods and the one launcher's
+traits and Services select on: a `networkpolicy` trait's policy matches the
+Pod by it, and a `service` component reaches it with `selector: {app:
+<component>}`. The transform
+then sets the component label, as on every object a component owns. It is a bare Pod: no controller recreates it, and it
+is not the workload shape of `webservice`, `worker` or `deployment` — a
+property of those (`image`, `ports`, `env` at the top level) is refused as
+not a PodSpec field.
+
+### Outputs
+
+**Traits.** The pod is a trait target: `security-context`, a `configmap`
+trait's `mountPath` and an `external-secret` trait's `envFrom`/`mountPath`
+change its spec as they change a workload kind's pod template.
+`topology-spread` is Deployment-only and refuses a `pod` component.
+
+The config implements `oam.ServiceAccountNamer`: the account is the authored
+`serviceAccountName`, or the deprecated `serviceAccount` where that one is
+unset, as the API server reads the two; with neither, the namespace's
+`default` account. The Pod carries the `app` label and the component label,
+and what `labels` and `annotations` author beside them.
+
+### Validation
+
+**Refused when the component is read**, with or without a policy:
+- `ephemeralContainers`, `priority` and `overhead`, with the texts the
+  workload kinds give. A pod cannot be created with ephemeral containers,
+  and the Priority and RuntimeClass admission controllers set the other two
+  and reject a differing value; an author sets `priorityClassName` or
+  `runtimeClassName`. The three are not in the schema, so a caller that
+  validates the properties against it first, as `kurel build` does, refuses
+  each as an unsupported field whatever its value, an empty one included. A
+  caller that converts the component without that validation gets the texts
+  above, and there an empty `ephemeralContainers` or `overhead` is read as
+  unset. Cost: on a cluster that runs without those admission controllers
+  the two fields cannot be authored through this kind.
+- An unauthored `containers`. The API's other value rules (an empty list, a
+  container without a name, …) are left to the API server.
+- An image without a tag or digest, or tagged `:latest`, on every init and
+  regular container (`ValidateImageRef`), so a container without an image
+  too.
+- The same on the `reference` of an image volume (`volumes[0] "ext"
+  image.reference: image "…" rejected: …`); a volume that names no
+  reference is not checked. See *Image volumes* below.
+- A value the API server would replace with its default: the Go type omits
+  a zero there, so the authored value cannot be carried
+  (`containers[0].ports[0].protocol: "" cannot be carried by the Kubernetes
+  API types (the field is omitted when zero, so the API server would apply
+  its default "TCP")`). These are:
+  - written as `0`: a probe's `timeoutSeconds`, `periodSeconds`,
+    `successThreshold` or `failureThreshold` (defaults 1, 10, 1, 3), on the
+    liveness, readiness and startup probes of every init and regular
+    container;
+  - written as `""`: `dnsPolicy` (`ClusterFirst`), `restartPolicy`
+    (`Always`) and `schedulerName` (`default-scheduler`); on every init and
+    regular container `imagePullPolicy`, `terminationMessagePath`
+    (`/dev/termination-log`), `terminationMessagePolicy` (`File`), a port's
+    `protocol` (`TCP`), an `env` entry's `valueFrom.fieldRef.apiVersion`
+    (`v1`), and the `httpGet` `path` (`/`) and `scheme` (`HTTP`) of its
+    probes and of its `postStart` and `preStop` hooks; on a volume, the
+    `fieldRef.apiVersion` of a `downwardAPI` item, also inside a `projected`
+    source (`v1`), an image volume's `pullPolicy`, `iscsi.iscsiInterface`
+    (`default`), `rbd.pool`, `rbd.user` and `rbd.keyring` (`rbd`, `admin`,
+    `/etc/ceph/keyring`) and `scaleIO.storageMode` and `scaleIO.fsType`
+    (`ThinProvisioned`, `xfs`). An `imagePullPolicy` or image volume
+    `pullPolicy` defaults to `Always` for an image tagged `latest` or naming
+    neither a tag nor a digest, else to `IfNotPresent`; the image rule
+    refuses the first two, so an accepted image gets `IfNotPresent`. The
+    code defaults an image volume's `pullPolicy` only under the
+    `ImageVolume` feature gate, which is on and locked since Kubernetes
+    1.36;
+  - written as `0` when `hostNetwork` is `true`: a container port's
+    `hostPort`, which the API server sets to the port's `containerPort`. It
+    does so on the Pod, so on a template it applies to each pod created
+    from it.
+
+  Two strings the API server sets are not refused. `serviceAccountName`
+  and its deprecated spelling `serviceAccount` are kept equal, so an
+  authored `""` with neither set stays `""`; the `default` service account
+  is set by an admission plugin, not by defaulting. A string field that is
+  a pointer in the Go type (a gRPC probe's `service`, an `httpGet`
+  `protocol`, a container's `restartPolicy`, a `hostPath` `type`,
+  `azureDisk`'s fields) carries an authored `""`, so nothing is lost there.
+
+- A match expression without its `key` or `operator`, with an operator that
+  is none of the four, or with `values` that do not go with the operator, in
+  every label selector of the spec: a pod affinity or anti-affinity term's
+  `labelSelector` and `namespaceSelector`, a topology spread constraint's
+  `labelSelector`, a projected `clusterTrustBundle` source's `labelSelector`
+  and a generic ephemeral volume's claim `selector` (see ["A label selector's
+  match expressions"](conventions.md#a-label-selectors-match-expressions)). A node selector term is not a label selector and is
+  left to the API server.
+
+**Marked required upstream and not checked:** the `action` of a container
+restart rule and the `operator` of its exit codes (`restartPolicyRules[]`),
+and the `signerName` and `keyType` of a pod certificate source of a
+projected volume. The Go type leaves each out when it is empty, so the Pod
+would show the omission, and launcher does not refuse it: the built-in types
+ship markers and no schema, so no linked module shows that the API server
+refuses a Pod without one, and both fields are behind a feature gate of the
+cluster.
+
+**Policy.** `ApplyPolicy` runs the check the rendered-object check runs on a
+Pod (`enforcePodTemplatePolicy`): host namespaces, hostPath volumes, the
+storage maximum on a generic ephemeral volume's claim, the registry
+allowlist on an image volume's reference, the pod-level cpu and
+memory maxima, and for every init and regular container the registry
+allowlist, the cpu and memory maxima and the privileged, HostProcess and
+capability gates. It fills no policy default: a container without resources
+stays without. The kind names a field as the property it is (`hostNetwork is
+not allowed by environment policy`, `containers[0] "app": …`); the three
+rendered paths name it under the object (`passthrough: object Pod "runner":
+spec.containers[0] "app": …`).
+
+**Image volumes**. An image volume (`volumes[].image`)
+mounts an OCI image the kubelet pulls as it pulls a container's, so its
+`reference` is held to the allowed registries (`AllowedRegistries`), refused
+with the registry class: `volume "ext" image.reference: image
+"other.example/team/ext:1.0.0" is not from an allowed registry
+[registry.example]`. The reference is read as a container image is: one
+that names no registry host is Docker Hub's (`docker.io`), a tag or a digest
+is not part of the host, and the host must equal a list entry exactly, a
+trailing `/` on the entry aside (`registry.example:5000` is not
+`registry.example`). A volume that names no
+reference is not checked, and no list, or an empty one, allows every
+registry. The one check holds it on every path by which a document brings
+a pod spec: this kind, the pod template of `replicaset`, `replicationcontroller`,
+`podtemplate` and `cnpg-pooler`, and the pod spec of a workload that
+template delivery (`helmtemplate`), `passthrough` or a `manifests` source
+carries. The components with a volume schema of their own (`webservice`,
+`worker`, `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) take
+an image volume only in the nested form of a `volumes` entry (`type: image`,
+`image: {reference: ...}`), where the registry allowlist
+holds it (`enforceVolumeSourcePolicy`) and `ValidateImageRef` holds its
+reference when the component is read. With the container images these
+are every field of a pod spec that names an image the kubelet pulls today.
+**Not covered:** a custom
+resource that `passthrough`, a `manifests` source or a chart carries passes
+whatever it holds, the pod template of a CloudNativePG Pooler and the
+extension images of a Cluster included; only the kind that builds the
+object (`cnpg-pooler`, `cnpg-cluster`) holds its fields. **Breaking:** an
+image volume naming a registry outside the list built before, on each of
+those paths, and is refused now.
+
+**The tag rule on an image the document names.** The reference of an image
+volume is also held to `ValidateImageRef`, as a container's image is: one
+without a tag or digest, or tagged `:latest` (with a digest too), or one
+that is no image reference, is refused, on each of the paths above
+(`volumes[0] "ext" image.reference: image "registry.example/team/ext"
+rejected: no tag or digest specified; use an explicit version tag or
+digest`; a rendered path names it under the object,
+`spec.template.spec.volumes[0] "ext" …`). The rule is the library's, not the
+environment's: the kinds apply it when the component is read and again at
+generation, with or without a policy, and the refusal carries no policy
+class. A reference by digest alone passes, and a volume that names no
+reference is not checked. The kinds that name an image outside a pod spec
+hold it to the same rule: `cnpg-pooler` its `pgbouncer.image` and the images
+of its template, `cnpg-cluster` its `imageName` and the reference of each
+extension, `postgresql` the image it composes from `version` (each in its entry).
+**Breaking**: a document, a
+chart or a source naming an untagged or `:latest` image in one of those
+fields built before, and is refused now. The two catalog kinds
+(`cnpg-imagecatalog`, `cnpg-clusterimagecatalog`) hold each image, component
+image and extension reference of a catalog to the rule from the release
+that adds them, so nothing that built is refused there.
+
+**Known difference:** template delivery (`helmtemplate`), `passthrough` and
+`manifests` do not refuse `priority` or `overhead` on a Pod they emit; the
+admission controllers decide there. They do refuse ephemeral containers and
+an untagged or `:latest` image, an image volume's included.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/pod-component/app.yaml`, built against the
+`cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares the
+two.
+
+## replicaset
+
+**replicaset** is the kind-named projection of an
+apps/v1 ReplicaSet, on the same recipe: one schema key per json field of
+`appsv1.ReplicaSetSpec` (`replicas`, `minReadySeconds`, `selector`,
+`template`), the property map decoded strictly into that type, and one
+ReplicaSet named after the component in the build namespace, with the
+authored spec. It is the bare controller: no rollout, which a `deployment`
+component gives, and none of that kind's shorthand — a property of the
+workload kinds (`image`, `ports`, `strategy`) is refused as not a
+ReplicaSetSpec field.
+
+### Outputs
+
+**The `app` label.** The handler adds one thing: `app: <component>` on the
+pod template's labels, beside the authored ones (see ["The `app` label"](conventions.md#the-app-label)). It
+is the label every workload kind gives its pods and the one launcher's
+traits and Services select on, so a `networkpolicy` trait's policy and a
+`service` component with `selector: {app: <component>}` reach the pods. The
+selector is emitted as authored, and the ReplicaSet itself gets no label of
+the handler's; the transform then sets the component label on the object and
+its template, as on every object a component owns.
+- An authored `template.metadata.labels.app` with the component's own label
+  value is kept. Any other value is refused, naming the component
+  (``template.metadata.labels.app: "frontend" is not the `app` label of
+  component "web" ("web")``): the label cannot say something else than what
+  the traits select.
+- A selector that matches the authored template labels and would stop
+  matching once the label is added (`app` under `DoesNotExist`, or `NotIn`
+  the label value) is refused (``selector: rules out the label `app: web`
+  …``). A selector on `app: <component>` is satisfied by the added label, so
+  the template needs no label of its own for it. A selector that cannot be
+  read as one (an expression without its `key` or `operator`, an unknown
+  operator, `values` that do not go with the operator, a key or value that
+  is no label) cannot be compared and is refused with apimachinery's reason
+  (`selector: …`). That covers what ["A label selector's match expressions"](conventions.md#a-label-selectors-match-expressions)
+  lists, so this selector is not read a second time.
+
+**Traits.** A trait target as the `pod` kind is: `security-context`, a
+`configmap` trait's `mountPath` and an `external-secret` trait's
+`envFrom`/`mountPath` change its pod template. `topology-spread` and
+`scaler` are not available on it.
+
+The config implements `oam.ServiceAccountNamer`, reading the template's
+`serviceAccountName` as the `pod` kind reads its own. The ReplicaSet's own
+labels and annotations are the `labels` and `annotations` properties; the
+template's metadata is carried as authored and takes neither.
+
+### Validation
+
+**Refused when the component is read**, with or without a policy:
+- An unauthored `selector`. The Go type cannot omit it, so it would be
+  written as `null`, and launcher derives none. Whether it matches the
+  template's labels, like the API's other value rules (an empty selector,
+  `restartPolicy` other than `Always`, a negative `replicas`), is left to
+  the API server.
+- Under `template.spec`, what the `pod` kind refuses of its own spec, by the
+  same checks and named by path (`template.spec.containers: required`,
+  `template.spec.priority: not authorable …`, the image rule, a probe timing
+  written as `0`, a defaulted string written as `""`, a `hostPort` of `0`
+  under `hostNetwork`, a defective match expression in a label selector of
+  the pod spec).
+- `template.spec.activeDeadlineSeconds`. The API server forbids it on a
+  ReplicaSet's pod template, whose pods are replaced for as long as the
+  controller exists; a `pod` or a Job may set it.
+
+The two restart-rule fields and the two pod-certificate fields that are
+marked required upstream are not checked under `template.spec` either, for
+the reason the `pod` kind gives: no linked module shows that the API server
+refuses the omission.
+
+**Policy.** `ApplyPolicy` holds `replicas` to the replica maximum, an unset
+one as the 1 the API server defaults it to (`replicas 4 exceeds enforced
+maximum 3`), and the pod template to the check the `pod` kind runs
+(`enforcePodTemplatePolicy`), naming a field by its path in the properties
+(`template.spec: hostNetwork is not allowed by environment policy`,
+`template.spec.containers[0] "app": …`). It fills no policy default: an
+unset `replicas` stays unset and a container without resources stays
+without. The three rendered paths run the same checks on a ReplicaSet they
+emit and name the field under the object (`spec.replicas`,
+`spec.template.spec…`).
+
+**Known difference:** template delivery (`helmtemplate`), `passthrough` and
+`manifests` do not refuse `priority`, `overhead` or `activeDeadlineSeconds`
+on a ReplicaSet they emit, do not require a selector and add no `app` label;
+the API server decides there. They do refuse ephemeral containers and an
+untagged or `:latest` image, an image volume's included.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/replicaset-component/app.yaml`, built against the
+`cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares the
+two.
+
+## replicationcontroller
+
+**replicationcontroller** is the kind-named
+projection of a v1 ReplicationController, on the `replicaset` kind's recipe:
+one schema key per json field of `corev1.ReplicationControllerSpec`
+(`replicas`, `minReadySeconds`, `selector`, `template`), the property map
+decoded strictly into that type, and one ReplicationController named after
+the component in the build namespace, with the authored spec. What the
+`replicaset` kind states holds here — the `app` label on the pod template
+and the refusal of an authored one with another value, the three traits, the
+refusals under `template.spec` (`activeDeadlineSeconds` included), the two
+restart-rule fields and the two pod-certificate fields that are marked
+required upstream and are not checked, because no linked module shows that
+the API server refuses the omission, the
+replica maximum and the pod-template policy check, no policy default, the
+known difference of the three rendered paths, `oam.ServiceAccountNamer`, and
+`labels` and `annotations` for the object's own metadata — with these
+differences:
+- `selector` is a plain map of label to value, not a label selector: a
+  `matchLabels` or `matchExpressions` key is refused as not a
+  ReplicationControllerSpec field.
+- `selector` is optional. An unset one stays unset, and the API server
+  defaults it to the pod template's labels, the `app` label included.
+- `template` is required (`template: required`). The API type holds it by
+  pointer, so an unauthored one would be emitted without pods to create.
+- No selector is refused against the `app` label: a map selector asks only
+  for labels to be present, which a further label on the pods cannot break.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/replicationcontroller-component/app.yaml`, built
+against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test
+compares the two.
+
+## podtemplate
+
+**podtemplate** is the kind-named projection of a v1
+PodTemplate. The object has no spec: beside its identity it holds one field,
+`template`, and that is the component's one property, decoded strictly into
+`corev1.PodTemplateSpec`. It emits one PodTemplate named after the component
+in the build namespace, with the authored template. Any other property is
+refused, the object's own `kind`, `apiVersion` and `metadata` included
+(`properties do not decode into a v1 PodTemplate …`).
+
+### Outputs
+
+**It is stored, not run.** No controller creates pods from a PodTemplate, so
+the handler adds no `app` label to the template (an authored `app` label is
+carried as written), the config reports no ServiceAccount
+(`oam.ServiceAccountNamer` is not implemented, so an `rbac` trait binds the
+component name), and it is not a trait target: a `configmap` trait's
+`mountPath`, an `external-secret` trait's `envFrom`/`mountPath` and a
+`security-context` trait's pod-spec properties (`runAsUser` and the five
+others) are refused on it, naming the component and the kinds they apply
+to. `security-context` with `psaLevel` alone is accepted, as a declaration
+of the level, and writes nothing to the template
+(`pkg/oam/builtin/traits/README.md`,
+"Pod-spec traits on a component without a workload"). The transform still sets the
+component label on the object and its template, as on every object a
+component owns.
+
+### Validation
+
+**Refused when the component is read**, with or without a policy: under
+`template.spec`, what the `pod` kind refuses of its own spec, by the same
+checks and named by path (`template.spec.containers: required`, which an
+unauthored `template` also gives; `template.spec.priority: not authorable
+…`; the image rule; a probe timing written as `0`; a defaulted string
+written as `""`; a `hostPort` of `0` under `hostNetwork`, which the API
+server would replace in each pod created from the template; a defective
+match expression in a label selector of the pod spec).
+`template.spec.activeDeadlineSeconds` is allowed, unlike on a
+`replicaset` or `replicationcontroller`: the API server accepts it on a
+PodTemplate. The two restart-rule fields and the two pod-certificate fields
+that are marked required upstream are not checked, for the reason the `pod`
+kind gives: no linked module shows that the API server refuses the
+omission. The API's other value rules are left to the API server.
+
+**Policy.** `ApplyPolicy` holds the template to the check the `pod` kind
+runs (`enforcePodTemplatePolicy`), naming a field by its path in the
+properties (`template.spec: hostNetwork is not allowed by environment
+policy`), since whatever reads the template creates pods from it. It fills
+no policy default. The three rendered paths run the same check on a
+PodTemplate they emit and name the field the same way (`template.spec…`).
+
+**Known difference:** template delivery (`helmtemplate`), `passthrough` and
+`manifests` do not refuse `priority` or `overhead` on a PodTemplate they
+emit; the API server decides there. They do refuse ephemeral containers and
+an untagged or `:latest` image, an image volume's included. The PodTemplate's
+own labels and annotations
+are the `labels` and `annotations` properties; the template's metadata is
+carried as authored and takes neither.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/podtemplate-component/app.yaml`, built against the
+`cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares the
+two.
+
+## storageclass, volumeattributesclass, priorityclass, runtimeclass, ingressclass, csidriver
+
+**storageclass**, **volumeattributesclass**, **priorityclass**,
+**runtimeclass**, **ingressclass**, **csidriver** are
+the kind-named projections of six cluster-scoped objects: a
+`storage.k8s.io/v1` StorageClass, VolumeAttributesClass and CSIDriver, a
+`scheduling.k8s.io/v1` PriorityClass, a `node.k8s.io/v1` RuntimeClass and a
+`networking.k8s.io/v1` IngressClass. Each emits that one object, named after
+the component unless `objectName` names it, with no namespace, holding
+exactly what was authored: the handler adds no label, no annotation and no
+default of its own, and the transform sets the component label, as on every
+object a component owns.
+
+### Properties
+
+**What is authored.**
+- `ingressclass` and `csidriver` have a spec type, and the properties are
+  its json fields: `controller` and `parameters` (`IngressClassSpec`), and
+  the eleven fields of `CSIDriverSpec` (`attachRequired`, `podInfoOnMount`,
+  `volumeLifecycleModes`, `storageCapacity`, `fsGroupPolicy`,
+  `tokenRequests`, `requiresRepublish`, `seLinuxMount`,
+  `nodeAllocatableUpdatePeriodSeconds`, `serviceAccountTokenInSecrets`,
+  `preventPodSchedulingIfMissing`). A `csidriver` requires no property; an
+  `ingressclass` requires `controller` (see **Required** below).
+- The four classes have none: their fields sit on the object, beside its
+  identity. The properties are those fields, decoded strictly into the
+  object type, and the object's own `kind`, `apiVersion` and `metadata` are
+  refused by name under any spelling the decoder would match (`metadata:
+  not authorable: launcher sets the object's kind, apiVersion and metadata
+  (its name is the component's, or the one objectName gives it; its labels
+  and annotations are the labels and annotations properties)`).
+  `storageclass`: `provisioner`,
+  `parameters`, `reclaimPolicy`, `mountOptions`, `allowVolumeExpansion`,
+  `volumeBindingMode`, `allowedTopologies`. `volumeattributesclass`:
+  `driverName`, `parameters`. `priorityclass`: `value`, `globalDefault`,
+  `description`, `preemptionPolicy`. `runtimeclass`: `handler`, `overhead`,
+  `scheduling`.
+- **Required** is a top-level field the API server refuses an object
+  without: `provisioner` (`storageclass`), `handler` (`runtimeclass`),
+  `driverName` (`volumeattributesclass`) and `controller` (`ingressclass`)
+  must be a non-empty string (`provisioner: required …`), and a
+  `volumeattributesclass` must carry at least one of `parameters`
+  (`parameters: required …`). The upstream type marks `controller`
+  optional; the API server's validation requires it all the same. The API
+  does not require a PriorityClass `value`: the type always encodes one, so
+  a `priorityclass` that authors none is emitted with `value: 0`. Every
+  other value rule (which reclaim policies exist, a required field of a
+  nested object, the names a cluster-scoped object may carry) is left to
+  the API server.
+- A quantity written as a number is emitted in its canonical string form.
+  An authored `false` or `0` is kept where the API tells it from an unset
+  field (`allowVolumeExpansion: false`, `attachRequired: false`,
+  `value: 0`). Where the API type omits a zero, the field is left out of
+  the object, which the API reads as the same value: `globalDefault: false`
+  and an empty `description`.
+
+### Outputs
+
+**The object's name** is the component's unless `objectName`, or the
+`Naming` hook under role `object`, names it otherwise (see ["The object name"](conventions.md#the-object-name-objectname)
+below). Each handler declares its object as cluster-scoped, so the name is
+claimed in no namespace: two `storageclass` components given one object
+name are refused, whatever namespace the application is built for. What
+refers to the object names it by its object name: a claim's
+`storageClassName`, a pod's `runtimeClassName` or `priorityClassName`. The
+API identifies a CSI driver by the CSIDriver's name, so a `csidriver`
+component's object name must be the driver's (`csi.example.com`), written as
+the component name or as `objectName`. The build namespace does not apply to
+these objects. The handlers check no name rule of their own on either name:
+one the API server refuses for the kind builds here and is refused at
+apply. **A CSIDriver's name is not held to the limit the API documents for
+it.** The type's documentation gives a driver name at most 63 characters;
+the API server does not hold the CSIDriver object to that, and accepts any
+DNS subdomain name. It does refuse a PersistentVolume that names a driver
+longer than 63 characters, so such a CSIDriver is created and no volume can
+use it. The `csidriver` kind refuses what the API server refuses of the
+object and no more, so it builds that name too.
+
+**Labels and annotations** are the `labels` and `annotations` properties,
+on all six. That includes the annotations that mark a default class
+(`storageclass.kubernetes.io/is-default-class`,
+`ingressclass.kubernetes.io/is-default-class`): a default StorageClass or
+IngressClass writes its annotation there. Whether a second default exists
+is the cluster's to decide.
+
+### Validation
+
+A kind may list its defaulted zeros (`defaultedZeros`), and an authored
+`0`, `false` or `""` on a listed field is refused, as the secret-store kinds do
+(see the **secretstore** entry) and `alertmanager` does for the probes of the
+containers it lists and three strings of its own.
+
+**Authored empty lists the API defaults.** A defaulted-zero list may also
+hold a list the type omits when empty, and an authored `[]` there is
+refused the same way (`metrics: [] cannot be carried by the Kubernetes API
+types (the field is omitted when empty, so the API server would apply its
+default …)`). Three lists are refused: a `horizontalpodautoscaler`'s
+`metrics` and its scaling rules' `policies`, and a `networkpolicy`'s
+`policyTypes`. Two lists the API defaults are not refused, because an
+empty list already means their default: `csidriver`'s
+`volumeLifecycleModes` (an empty list means `Persistent`) and
+`imagerepository`'s `exclusionList` (the image-reflector controller
+filters tags through `GetExclusionList`, which returns the default list
+when the list is empty, so an API client's `[]` means the default too).
+
+**Policy.** None of the six has a field an `oam.Policy` method speaks to,
+so `ApplyPolicy` enforces nothing and fills nothing, and each builds the
+same under every policy and under none. A consumer that does not want an
+author to create one of these objects does not register its handler; the
+transform then refuses the component (`no handler for component type …`).
+
+**Not covered.**
+- An `ingressclass` whose `parameters` leaves `scope` out is emitted with
+  `scope: null`: the API type always encodes the field, and documents
+  `Cluster` as its default. Author `scope` to emit a value.
+- Whether a referenced object exists: the `runtimeclass` a pod names, the
+  `storageclass` a claim names, the parameters object of an `ingressclass`.
+
+### Example
+
+- `storageclass`: The component in `pkg/cmd/kurel/testdata/storageclass-component/app.yaml`,
+  built against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.
+- `volumeattributesclass`: The component in
+  `pkg/cmd/kurel/testdata/volumeattributesclass-component/app.yaml`, built against the
+  `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares the
+  two.
+- `priorityclass`: The component in `pkg/cmd/kurel/testdata/priorityclass-component/app.yaml`,
+  built against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.
+- `runtimeclass`: The component in `pkg/cmd/kurel/testdata/runtimeclass-component/app.yaml`,
+  built against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.
+- `ingressclass`: The component in `pkg/cmd/kurel/testdata/ingressclass-component/app.yaml`,
+  built against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.
+- `csidriver`: The component in `pkg/cmd/kurel/testdata/csidriver-component/app.yaml`, built
+  against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test
+  compares the two.
+
+## horizontalpodautoscaler
+
+**horizontalpodautoscaler** is the kind-named
+projection of an `autoscaling/v2` HorizontalPodAutoscaler. It emits that
+one object in the build namespace, named after the component unless
+`objectName` names it, holding exactly what was authored: the handler adds
+no label, no annotation and no default of its own. The handler declares its
+object as namespaced, so the object name is claimed in the object's namespace.
+
+### Properties
+
+**Authored:** the five fields of `HorizontalPodAutoscalerSpec`, decoded
+strictly at every depth: `scaleTargetRef`, `minReplicas`, `maxReplicas`,
+`metrics` and `behavior`. An unknown key is refused wherever it sits (a
+metric source, a scaling rule), a quantity written as a number is
+emitted in its canonical string form, and an authored `0` is kept
+(`stabilizationWindowSeconds: 0`).
+
+### Outputs
+
+**Beside the `scaler` trait.** The trait derives an autoscaler for the
+workload it is attached to, from a target CPU or memory utilization.
+This kind is the authored object, for what the trait does not express:
+other metric sources, scaling behavior, a target launcher does not own.
+The two name their objects apart (`<component>-hpa` for the trait), and
+two that are given one name in one namespace are refused as a name
+collision.
+
+**Labels and annotations** are the `labels` and `annotations` properties.
+
+### Validation
+
+**An empty `metrics` or `policies` list is refused.** The type omits
+`metrics` and a scaling rule's `policies` when empty, and the API server
+then applies its default: 80% average CPU utilization for `metrics`, and
+its default policies for `behavior.scaleUp` and `behavior.scaleDown`. So
+an authored `[]` cannot be carried (`metrics: [] cannot be carried by the
+Kubernetes API types (the field is omitted when empty, so the API server
+would apply its default …)`). See *Authored empty lists the API defaults*
+below.
+
+**Required** are the two top-level fields the API server refuses an
+autoscaler without: `scaleTargetRef` (`scaleTargetRef: required …`) and
+`maxReplicas` (`maxReplicas: required …`; an authored `0` is refused
+the same way, since the type cannot tell it from an unset one). The
+config is exported, so `Generate` repeats both. Every other value rule
+is left to the API server: a negative `maxReplicas`, the `kind` and
+`name` inside `scaleTargetRef`, `minReplicas` against `maxReplicas`,
+which metric source goes with which `type`. The label selector of a
+metric (`metrics[].object.metric.selector`, and under `pods` and
+`external`) is not held as other kinds hold theirs: the API server
+validates nothing of it, and a kind does not refuse what the API admits.
+
+**Policy.** `maxReplicas` is held to the environment policy's replica
+maximum (`MaxReplicas()`), as the `scaler` trait holds its own and as a
+HorizontalPodAutoscaler a chart renders, a `passthrough` component holds
+or a `manifests` source yields is held: `component "web": maxReplicas:
+replicas 4 exceeds enforced maximum 3`. Nothing else is held, and no
+default is filled: the policy's `scalerMinReplicas` and
+`scalerMaxReplicas` defaults belong to the `scaler` trait. A nil policy
+checks nothing.
+
+**The target is the author's, and is not checked.** `scaleTargetRef`
+names an object by `kind`, `name` and `apiVersion`; launcher points it
+at no component and does not look for the object in the document. To
+scale a workload component, name its object: the component name, or its
+`objectName`. **The guards the `scaler` trait applies to its own
+workload do not see this kind:** a `deployment`, `webservice` or
+`worker` with a claim that is not ReadWriteMany refuses a `scaler` trait
+whose `maxReplicas` is above 1, and builds beside a
+`horizontalpodautoscaler` component that scales it further. That is the
+state of an autoscaler emitted through `passthrough`, `manifests` or
+template delivery.
+
+**Not covered.** Whether the target exists or can be scaled. The
+object's status is the controller's and is not written.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/horizontalpodautoscaler-component/app.yaml`, built
+against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test
+compares the two.
+
 ## Kinds not yet in sections
 
 The kinds below are not yet in these sections.
-
-- **pod** (go-kure/launcher#790) is the kind-named projection of a v1 Pod, on
-  the same recipe: one schema key per json field of `corev1.PodSpec`, the
-  property map decoded strictly into that type, two spellings of one field
-  refused, and one Pod named after the component in the build namespace, with
-  the authored spec. The handler adds the `app` label and nothing else: no
-  annotation, no ServiceAccount, no `automountServiceAccountToken`, no
-  resources, no probe. The `app` label (`app: <component>`, see ["The `app`
-  label"](conventions.md#the-app-label)) is the one every workload kind gives its pods and the one launcher's
-  traits and Services select on: a `networkpolicy` trait's policy matches the
-  Pod by it, and a `service` component reaches it with `selector: {app:
-  <component>}`. The transform
-  then sets the component label, as on every object a component owns
-  (go-kure/launcher#788). It is a bare Pod: no controller recreates it, and it
-  is not the workload shape of `webservice`, `worker` or `deployment` — a
-  property of those (`image`, `ports`, `env` at the top level) is refused as
-  not a PodSpec field.
-
-  **Traits.** The pod is a trait target: `security-context`, a `configmap`
-  trait's `mountPath` and an `external-secret` trait's `envFrom`/`mountPath`
-  change its spec as they change a workload kind's pod template.
-  `topology-spread` is Deployment-only and refuses a `pod` component.
-
-  **Refused when the component is read**, with or without a policy:
-  - `ephemeralContainers`, `priority` and `overhead`, with the texts the
-    workload kinds give. A pod cannot be created with ephemeral containers,
-    and the Priority and RuntimeClass admission controllers set the other two
-    and reject a differing value; an author sets `priorityClassName` or
-    `runtimeClassName`. The three are not in the schema, so a caller that
-    validates the properties against it first, as `kurel build` does, refuses
-    each as an unsupported field whatever its value, an empty one included. A
-    caller that converts the component without that validation gets the texts
-    above, and there an empty `ephemeralContainers` or `overhead` is read as
-    unset. Cost: on a cluster that runs without those admission controllers
-    the two fields cannot be authored through this kind.
-  - An unauthored `containers`. The API's other value rules (an empty list, a
-    container without a name, …) are left to the API server.
-  - An image without a tag or digest, or tagged `:latest`, on every init and
-    regular container (`ValidateImageRef`), so a container without an image
-    too.
-  - The same on the `reference` of an image volume (`volumes[0] "ext"
-    image.reference: image "…" rejected: …`); a volume that names no
-    reference is not checked. See *Image volumes* below.
-  - A value the API server would replace with its default: the Go type omits
-    a zero there, so the authored value cannot be carried
-    (`containers[0].ports[0].protocol: "" cannot be carried by the Kubernetes
-    API types (the field is omitted when zero, so the API server would apply
-    its default "TCP")`). These are:
-    - written as `0`: a probe's `timeoutSeconds`, `periodSeconds`,
-      `successThreshold` or `failureThreshold` (defaults 1, 10, 1, 3), on the
-      liveness, readiness and startup probes of every init and regular
-      container;
-    - written as `""`: `dnsPolicy` (`ClusterFirst`), `restartPolicy`
-      (`Always`) and `schedulerName` (`default-scheduler`); on every init and
-      regular container `imagePullPolicy`, `terminationMessagePath`
-      (`/dev/termination-log`), `terminationMessagePolicy` (`File`), a port's
-      `protocol` (`TCP`), an `env` entry's `valueFrom.fieldRef.apiVersion`
-      (`v1`), and the `httpGet` `path` (`/`) and `scheme` (`HTTP`) of its
-      probes and of its `postStart` and `preStop` hooks; on a volume, the
-      `fieldRef.apiVersion` of a `downwardAPI` item, also inside a `projected`
-      source (`v1`), an image volume's `pullPolicy`, `iscsi.iscsiInterface`
-      (`default`), `rbd.pool`, `rbd.user` and `rbd.keyring` (`rbd`, `admin`,
-      `/etc/ceph/keyring`) and `scaleIO.storageMode` and `scaleIO.fsType`
-      (`ThinProvisioned`, `xfs`). An `imagePullPolicy` or image volume
-      `pullPolicy` defaults to `Always` for an image tagged `latest` or naming
-      neither a tag nor a digest, else to `IfNotPresent`; the image rule
-      refuses the first two, so an accepted image gets `IfNotPresent`. The
-      code defaults an image volume's `pullPolicy` only under the
-      `ImageVolume` feature gate, which is on and locked since Kubernetes
-      1.36;
-    - written as `0` when `hostNetwork` is `true`: a container port's
-      `hostPort`, which the API server sets to the port's `containerPort`. It
-      does so on the Pod, so on a template it applies to each pod created
-      from it.
-
-    Two strings the API server sets are not refused. `serviceAccountName`
-    and its deprecated spelling `serviceAccount` are kept equal, so an
-    authored `""` with neither set stays `""`; the `default` service account
-    is set by an admission plugin, not by defaulting. A string field that is
-    a pointer in the Go type (a gRPC probe's `service`, an `httpGet`
-    `protocol`, a container's `restartPolicy`, a `hostPath` `type`,
-    `azureDisk`'s fields) carries an authored `""`, so nothing is lost there.
-
-    The list is held to the API server's own defaulting code by
-    `TestKubernetesDefaulters_MatchVendoredSource`. It reads an excerpt of
-    that code, copied unmodified from kubernetes/kubernetes at the release
-    of the linked `k8s.io/api` under its Apache-2.0 licence, in
-    `testdata/upstream/kubernetes/` (see the next paragraph). The test walks
-    the generated `SetObjectDefaults_` function of the Pod, PodTemplate,
-    ReplicationController and ReplicaSet objects and every defaulting
-    function they call. It fails on a field the code defaults and the list
-    does not hold, on a default the list states otherwise, and on a row the
-    code does not set. The walk is closed: it accepts only the kinds of
-    statement, expression and type, the unary operators and the calls the
-    excerpt at the vendored tag uses, each listed in the test (a method by
-    its receiver's identity, a builtin only while no name of the excerpt
-    shadows it), and fails on anything else, naming it and its position,
-    rather than guess. It also fails on
-    listed shapes it cannot follow: among others, a write through a copy of a
-    field (read by name or through a dereference), a list element reached by
-    anything but a range over that list, a `break` out of a loop, a method
-    called on the object, a variable shadowing one of an enclosing block, or
-    a write it cannot place in the object. The
-    trade-off is that a re-vendoring whose code uses a new shape or call
-    fails the test until that shape is understood and listed, even when it
-    changes no default. Most defaults are set by a `SetDefaults_` function.
-    The exceptions are a port's `protocol` and the `iscsi`, `rbd` and
-    `scaleIO` strings, which `k8s.io/api` declares with a `+default` marker
-    and the generated functions apply, and `hostPort`, which
-    `defaultHostNetworkPorts` sets. A second test holds the numbers to the
-    field comments of the linked types.
-
-    The excerpt in `testdata/upstream/kubernetes/` holds eight files of
-    kubernetes/kubernetes under its Apache-2.0 licence, each with its header,
-    and kubernetes/kubernetes's `LICENSE`, the licence's full text, at the
-    same tag. Its `SOURCE` file names the tag and the git blob id of each
-    file and of `LICENSE`; the tests check each against its file, the tag
-    against the linked `k8s.io/api`, and fail when `LICENSE` is missing. `mise run
-    vendor-k8s-defaulters vX.Y.Z` re-fetches it when that module moves; it
-    takes the Kubernetes tag, not the module version: `k8s.io/api` v0.X.Y
-    pairs with Kubernetes v1.X.Y. CI never runs it, and the tests need no
-    network.
-  - A match expression without its `key` or `operator`, with an operator that
-    is none of the four, or with `values` that do not go with the operator, in
-    every label selector of the spec: a pod affinity or anti-affinity term's
-    `labelSelector` and `namespaceSelector`, a topology spread constraint's
-    `labelSelector`, a projected `clusterTrustBundle` source's `labelSelector`
-    and a generic ephemeral volume's claim `selector` (see ["A label selector's
-    match expressions"](conventions.md#a-label-selectors-match-expressions)). A node selector term is not a label selector and is
-    left to the API server.
-
-  **Marked required upstream and not checked:** the `action` of a container
-  restart rule and the `operator` of its exit codes (`restartPolicyRules[]`),
-  and the `signerName` and `keyType` of a pod certificate source of a
-  projected volume. The Go type leaves each out when it is empty, so the Pod
-  would show the omission, and launcher does not refuse it: the built-in types
-  ship markers and no schema, so no linked module shows that the API server
-  refuses a Pod without one, and both fields are behind a feature gate of the
-  cluster. `TestKindComponents_OmittedRequiredAndWrittenDefaults` lists the
-  four with that reason.
-
-  **Policy.** `ApplyPolicy` runs the check the rendered-object check runs on a
-  Pod (`enforcePodTemplatePolicy`): host namespaces, hostPath volumes, the
-  storage maximum on a generic ephemeral volume's claim, the registry
-  allowlist on an image volume's reference, the pod-level cpu and
-  memory maxima, and for every init and regular container the registry
-  allowlist, the cpu and memory maxima and the privileged, HostProcess and
-  capability gates. It fills no policy default: a container without resources
-  stays without. The kind names a field as the property it is (`hostNetwork is
-  not allowed by environment policy`, `containers[0] "app": …`); the three
-  rendered paths name it under the object (`passthrough: object Pod "runner":
-  spec.containers[0] "app": …`).
-
-  **Image volumes** (go-kure/launcher#790). An image volume (`volumes[].image`)
-  mounts an OCI image the kubelet pulls as it pulls a container's, so its
-  `reference` is held to the allowed registries (`AllowedRegistries`), refused
-  with the registry class: `volume "ext" image.reference: image
-  "other.example/team/ext:1.0.0" is not from an allowed registry
-  [registry.example]`. The reference is read as a container image is: one
-  that names no registry host is Docker Hub's (`docker.io`), a tag or a digest
-  is not part of the host, and the host must equal a list entry exactly, a
-  trailing `/` on the entry aside (`registry.example:5000` is not
-  `registry.example`). A volume that names no
-  reference is not checked, and no list, or an empty one, allows every
-  registry. The one check holds it on every path by which a document brings
-  a pod spec: this kind, the pod template of `replicaset`, `replicationcontroller`,
-  `podtemplate` and `cnpg-pooler`, and the pod spec of a workload that
-  template delivery (`helmtemplate`), `passthrough` or a `manifests` source
-  carries. The components with a volume schema of their own (`webservice`,
-  `worker`, `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) take
-  an image volume only in the nested form of a `volumes` entry (`type: image`,
-  `image: {reference: ...}`, go-kure/launcher#1177), where the registry allowlist
-  holds it (`enforceVolumeSourcePolicy`) and `ValidateImageRef` holds its
-  reference when the component is read. With the container images these
-  are every field of a pod spec that names an image the kubelet pulls today.
-  A test walks the linked `k8s.io/api` type and fails on a field whose name
-  holds `image`, or whose type is the image volume source, that is neither
-  held nor listed with a reason; an image field under another name and
-  another type is not found by it. **Not covered:** a custom
-  resource that `passthrough`, a `manifests` source or a chart carries passes
-  whatever it holds, the pod template of a CloudNativePG Pooler and the
-  extension images of a Cluster included; only the kind that builds the
-  object (`cnpg-pooler`, `cnpg-cluster`) holds its fields. **Breaking:** an
-  image volume naming a registry outside the list built before, on each of
-  those paths, and is refused now.
-
-  **The tag rule on an image the document names.** The reference of an image
-  volume is also held to `ValidateImageRef`, as a container's image is: one
-  without a tag or digest, or tagged `:latest` (with a digest too), or one
-  that is no image reference, is refused, on each of the paths above
-  (`volumes[0] "ext" image.reference: image "registry.example/team/ext"
-  rejected: no tag or digest specified; use an explicit version tag or
-  digest`; a rendered path names it under the object,
-  `spec.template.spec.volumes[0] "ext" …`). The rule is the library's, not the
-  environment's: the kinds apply it when the component is read and again at
-  generation, with or without a policy, and the refusal carries no policy
-  class. A reference by digest alone passes, and a volume that names no
-  reference is not checked. The kinds that name an image outside a pod spec
-  hold it to the same rule: `cnpg-pooler` its `pgbouncer.image` and the images
-  of its template, `cnpg-cluster` its `imageName` and the reference of each
-  extension, `postgresql` the image it composes from `version` (each in its entry).
-  The test that walks the types fails on a field held to the registry rule
-  and not to this one. **Breaking** (go-kure/launcher#790): a document, a
-  chart or a source naming an untagged or `:latest` image in one of those
-  fields built before, and is refused now. The two catalog kinds
-  (`cnpg-imagecatalog`, `cnpg-clusterimagecatalog`) hold each image, component
-  image and extension reference of a catalog to the rule from the release
-  that adds them, so nothing that built is refused there.
-
-  **Known difference:** template delivery (`helmtemplate`), `passthrough` and
-  `manifests` do not refuse `priority` or `overhead` on a Pod they emit; the
-  admission controllers decide there. They do refuse ephemeral containers and
-  an untagged or `:latest` image, an image volume's included.
-
-  The config implements `oam.ServiceAccountNamer`: the account is the authored
-  `serviceAccountName`, or the deprecated `serviceAccount` where that one is
-  unset, as the API server reads the two; with neither, the namespace's
-  `default` account. The Pod carries the `app` label and the component label,
-  and what `labels` and `annotations` author beside them.
-- **replicaset** (go-kure/launcher#790) is the kind-named projection of an
-  apps/v1 ReplicaSet, on the same recipe: one schema key per json field of
-  `appsv1.ReplicaSetSpec` (`replicas`, `minReadySeconds`, `selector`,
-  `template`), the property map decoded strictly into that type, and one
-  ReplicaSet named after the component in the build namespace, with the
-  authored spec. It is the bare controller: no rollout, which a `deployment`
-  component gives, and none of that kind's shorthand — a property of the
-  workload kinds (`image`, `ports`, `strategy`) is refused as not a
-  ReplicaSetSpec field.
-
-  **The `app` label.** The handler adds one thing: `app: <component>` on the
-  pod template's labels, beside the authored ones (see ["The `app` label"](conventions.md#the-app-label)). It
-  is the label every workload kind gives its pods and the one launcher's
-  traits and Services select on, so a `networkpolicy` trait's policy and a
-  `service` component with `selector: {app: <component>}` reach the pods. The
-  selector is emitted as authored, and the ReplicaSet itself gets no label of
-  the handler's; the transform then sets the component label on the object and
-  its template, as on every object a component owns (go-kure/launcher#788).
-  - An authored `template.metadata.labels.app` with the component's own label
-    value is kept. Any other value is refused, naming the component
-    (``template.metadata.labels.app: "frontend" is not the `app` label of
-    component "web" ("web")``): the label cannot say something else than what
-    the traits select.
-  - A selector that matches the authored template labels and would stop
-    matching once the label is added (`app` under `DoesNotExist`, or `NotIn`
-    the label value) is refused (``selector: rules out the label `app: web`
-    …``). A selector on `app: <component>` is satisfied by the added label, so
-    the template needs no label of its own for it. A selector that cannot be
-    read as one (an expression without its `key` or `operator`, an unknown
-    operator, `values` that do not go with the operator, a key or value that
-    is no label) cannot be compared and is refused with apimachinery's reason
-    (`selector: …`). That covers what ["A label selector's match expressions"](conventions.md#a-label-selectors-match-expressions)
-    lists, so this selector is not read a second time.
-
-  **Traits.** A trait target as the `pod` kind is: `security-context`, a
-  `configmap` trait's `mountPath` and an `external-secret` trait's
-  `envFrom`/`mountPath` change its pod template. `topology-spread` and
-  `scaler` are not available on it.
-
-  **Refused when the component is read**, with or without a policy:
-  - An unauthored `selector`. The Go type cannot omit it, so it would be
-    written as `null`, and launcher derives none. Whether it matches the
-    template's labels, like the API's other value rules (an empty selector,
-    `restartPolicy` other than `Always`, a negative `replicas`), is left to
-    the API server.
-  - Under `template.spec`, what the `pod` kind refuses of its own spec, by the
-    same checks and named by path (`template.spec.containers: required`,
-    `template.spec.priority: not authorable …`, the image rule, a probe timing
-    written as `0`, a defaulted string written as `""`, a `hostPort` of `0`
-    under `hostNetwork`, a defective match expression in a label selector of
-    the pod spec). A test holds the probe list to every non-pointer
-    `omitempty` number or boolean under `ReplicaSetSpec` whose field comment
-    states a non-zero default, the template's metadata included, and
-    `TestKubernetesDefaulters_MatchVendoredSource` holds the whole list to
-    the API server's defaulting code for a ReplicaSet.
-  - `template.spec.activeDeadlineSeconds`. The API server forbids it on a
-    ReplicaSet's pod template, whose pods are replaced for as long as the
-    controller exists; a `pod` or a Job may set it.
-
-  The two restart-rule fields and the two pod-certificate fields that are
-  marked required upstream are not checked under `template.spec` either, for
-  the reason the `pod` kind gives: no linked module shows that the API server
-  refuses the omission.
-
-  **Policy.** `ApplyPolicy` holds `replicas` to the replica maximum, an unset
-  one as the 1 the API server defaults it to (`replicas 4 exceeds enforced
-  maximum 3`), and the pod template to the check the `pod` kind runs
-  (`enforcePodTemplatePolicy`), naming a field by its path in the properties
-  (`template.spec: hostNetwork is not allowed by environment policy`,
-  `template.spec.containers[0] "app": …`). It fills no policy default: an
-  unset `replicas` stays unset and a container without resources stays
-  without. The three rendered paths run the same checks on a ReplicaSet they
-  emit and name the field under the object (`spec.replicas`,
-  `spec.template.spec…`).
-
-  **Known difference:** template delivery (`helmtemplate`), `passthrough` and
-  `manifests` do not refuse `priority`, `overhead` or `activeDeadlineSeconds`
-  on a ReplicaSet they emit, do not require a selector and add no `app` label;
-  the API server decides there. They do refuse ephemeral containers and an
-  untagged or `:latest` image, an image volume's included.
-
-  The config implements `oam.ServiceAccountNamer`, reading the template's
-  `serviceAccountName` as the `pod` kind reads its own. The ReplicaSet's own
-  labels and annotations are the `labels` and `annotations` properties; the
-  template's metadata is carried as authored and takes neither.
-- **replicationcontroller** (go-kure/launcher#790) is the kind-named
-  projection of a v1 ReplicationController, on the `replicaset` kind's recipe:
-  one schema key per json field of `corev1.ReplicationControllerSpec`
-  (`replicas`, `minReadySeconds`, `selector`, `template`), the property map
-  decoded strictly into that type, and one ReplicationController named after
-  the component in the build namespace, with the authored spec. What the
-  `replicaset` kind states holds here — the `app` label on the pod template
-  and the refusal of an authored one with another value, the three traits, the
-  refusals under `template.spec` (`activeDeadlineSeconds` included), the two
-  restart-rule fields and the two pod-certificate fields that are marked
-  required upstream and are not checked, because no linked module shows that
-  the API server refuses the omission, the
-  replica maximum and the pod-template policy check, no policy default, the
-  known difference of the three rendered paths, `oam.ServiceAccountNamer`, and
-  `labels` and `annotations` for the object's own metadata — with these
-  differences:
-  - `selector` is a plain map of label to value, not a label selector: a
-    `matchLabels` or `matchExpressions` key is refused as not a
-    ReplicationControllerSpec field.
-  - `selector` is optional. An unset one stays unset, and the API server
-    defaults it to the pod template's labels, the `app` label included.
-  - `template` is required (`template: required`). The API type holds it by
-    pointer, so an unauthored one would be emitted without pods to create.
-  - No selector is refused against the `app` label: a map selector asks only
-    for labels to be present, which a further label on the pods cannot break.
-- **podtemplate** (go-kure/launcher#790) is the kind-named projection of a v1
-  PodTemplate. The object has no spec: beside its identity it holds one field,
-  `template`, and that is the component's one property, decoded strictly into
-  `corev1.PodTemplateSpec`. It emits one PodTemplate named after the component
-  in the build namespace, with the authored template. Any other property is
-  refused, the object's own `kind`, `apiVersion` and `metadata` included
-  (`properties do not decode into a v1 PodTemplate …`).
-
-  **It is stored, not run.** No controller creates pods from a PodTemplate, so
-  the handler adds no `app` label to the template (an authored `app` label is
-  carried as written), the config reports no ServiceAccount
-  (`oam.ServiceAccountNamer` is not implemented, so an `rbac` trait binds the
-  component name), and it is not a trait target: a `configmap` trait's
-  `mountPath`, an `external-secret` trait's `envFrom`/`mountPath` and a
-  `security-context` trait's pod-spec properties (`runAsUser` and the five
-  others) are refused on it, naming the component and the kinds they apply
-  to. `security-context` with `psaLevel` alone is accepted, as a declaration
-  of the level, and writes nothing to the template
-  (go-kure/launcher#794, item 14; `pkg/oam/builtin/traits/README.md`,
-  "Pod-spec traits on a component without a workload"). The transform still sets the
-  component label on the object and its template, as on every object a
-  component owns (go-kure/launcher#788).
-
-  **Refused when the component is read**, with or without a policy: under
-  `template.spec`, what the `pod` kind refuses of its own spec, by the same
-  checks and named by path (`template.spec.containers: required`, which an
-  unauthored `template` also gives; `template.spec.priority: not authorable
-  …`; the image rule; a probe timing written as `0`; a defaulted string
-  written as `""`; a `hostPort` of `0` under `hostNetwork`, which the API
-  server would replace in each pod created from the template; a defective
-  match expression in a label selector of the pod spec).
-  `template.spec.activeDeadlineSeconds` is allowed, unlike on a
-  `replicaset` or `replicationcontroller`: the API server accepts it on a
-  PodTemplate. The two restart-rule fields and the two pod-certificate fields
-  that are marked required upstream are not checked, for the reason the `pod`
-  kind gives: no linked module shows that the API server refuses the
-  omission. The API's other value rules are left to the API server.
-
-  **Policy.** `ApplyPolicy` holds the template to the check the `pod` kind
-  runs (`enforcePodTemplatePolicy`), naming a field by its path in the
-  properties (`template.spec: hostNetwork is not allowed by environment
-  policy`), since whatever reads the template creates pods from it. It fills
-  no policy default. The three rendered paths run the same check on a
-  PodTemplate they emit and name the field the same way (`template.spec…`).
-
-  **Known difference:** template delivery (`helmtemplate`), `passthrough` and
-  `manifests` do not refuse `priority` or `overhead` on a PodTemplate they
-  emit; the API server decides there. They do refuse ephemeral containers and
-  an untagged or `:latest` image, an image volume's included. The PodTemplate's
-  own labels and annotations
-  are the `labels` and `annotations` properties; the template's metadata is
-  carried as authored and takes neither.
-- **storageclass**, **volumeattributesclass**, **priorityclass**,
-  **runtimeclass**, **ingressclass**, **csidriver** (go-kure/launcher#790) are
-  the kind-named projections of six cluster-scoped objects: a
-  `storage.k8s.io/v1` StorageClass, VolumeAttributesClass and CSIDriver, a
-  `scheduling.k8s.io/v1` PriorityClass, a `node.k8s.io/v1` RuntimeClass and a
-  `networking.k8s.io/v1` IngressClass. Each emits that one object, named after
-  the component unless `objectName` names it, with no namespace, holding
-  exactly what was authored: the handler adds no label, no annotation and no
-  default of its own, and the transform sets the component label, as on every
-  object a component owns (go-kure/launcher#788).
-
-  **One shared helper builds all six** (`policyFreeKind`, in
-  `kind_policy_free.go`), for a kind to which no dimension of the environment
-  policy applies; `servicecidr`, `poddisruptionbudget`, `endpointslice`, the four kinds of
-  the RBAC API, the four of the Prometheus operator's API, the four of Cilium's
-  BGP control plane and the five kinds of the Gateway API's infrastructure
-  objects are built on it too. The three kinds
-  of cert-manager's API, the two of VolSync's, `alertmanager`, `thanosruler` and `prometheus` are built on `policyHeldKind`
-  (`kind_policy_held.go`): this helper, unchanged, with an `ApplyPolicy` that
-  asks one function of the kind whether the policy refuses the decoded value.
-  It refuses or passes; it fills no default. A kind is a value
-  of it naming the upstream type, an optional check of required fields, an
-  optional list of required fields the type writes whether or not they were
-  authored, and the base-library constructor; the
-  helper is the rest: the strict decode of the property map into the upstream
-  type under the package's null contract, which refuses a `null` list element
-  by its path (`decodeKindSpec`), the refusal of a key written in two
-  spellings (`refuseUncarriedSpecValues`), the refusal of a listed required
-  field that was not authored (`refuseUnauthoredRequired`, which reads the
-  authored properties, since the decoded value does not show the omission, and
-  follows a list to each of its items), a config whose `ApplyPolicy` does
-  nothing, and a `Generate` that returns the constructor's object, under the
-  object name the config carries, with a deep copy of what was decoded, so two
-  builds of one config share nothing. The config type is unexported: a
-  component is only built from properties that went through the decode. A
-  kind may list its defaulted zeros (`defaultedZeros`), and an authored `0`,
-  `false` or `""` on a listed field is refused, as the secret-store kinds do
-  (see the **secretstore** entry) and `alertmanager` does for the probes of the
-  containers it lists and three strings of its own. A kind that lists none suits a type only
-  when none of its omit-when-zero numbers or booleans has a non-zero API
-  default; `TestPolicyFreeKinds_NoDefaultedZeros` reads the field comments of
-  every Kubernetes type built on it and fails on one whose comment states such
-  a default in a form it recognises (`Defaults to 1`, `Default is true`). A
-  default the comment words otherwise, or does not state, is not found, and
-  a string's default is not read from a comment. The types of the Prometheus
-  operator's API publish no field comment; `TestMonitoringKinds_DefaultedZeros`
-  reads the default markers of their source instead, strings included. Cilium's publish none either, and its module ships the CRDs:
-  `TestCiliumBGPKinds_DefaultsSitOnPointers` holds every default of the four
-  BGP CRDs to a field that is a pointer in the Go type.
-
-  **Authored empty lists the API defaults.** A defaulted-zero list may also
-  hold a list the type omits when empty, and an authored `[]` there is
-  refused the same way (`metrics: [] cannot be carried by the Kubernetes API
-  types (the field is omitted when empty, so the API server would apply its
-  default …)`). Three lists are refused: a `horizontalpodautoscaler`'s
-  `metrics` and its scaling rules' `policies`, and a `networkpolicy`'s
-  `policyTypes`. Two lists the API defaults are not refused, because an
-  empty list already means their default: `csidriver`'s
-  `volumeLifecycleModes` (an empty list means `Persistent`) and
-  `imagerepository`'s `exclusionList` (the image-reflector controller
-  filters tags through `GetExclusionList`, which returns the default list
-  when the list is empty, so an API client's `[]` means the default too). `TestKindComponents_DefaultedEmptyLists` walks every
-  kind in its table of API sources, finds each list omitted when empty that
-  its source gives a default (a CRD schema or a default marker) or whose
-  field comment mentions a default, and holds each to an answer: refused,
-  or not refused with the reason. A newly defaulted list fails it until it
-  is answered. The three refused defaults are held to the API server's
-  defaulting code by `TestKubernetesDefaulters_ListDefaultsMatchVendoredSource`,
-  from the excerpt the `pod` kind's list is held to: the functions that
-  reach those defaults are held to their exact statements, and each default
-  to being the only write to its field or to anything beneath it. Two limits: the lists
-  of the Kubernetes types are found from their field comments, so a list
-  the API server defaults without its comment saying so is not found; and
-  the table of kinds it walks is not itself proven to hold every kind
-  component.
-
-  **What is authored.**
-  - `ingressclass` and `csidriver` have a spec type, and the properties are
-    its json fields: `controller` and `parameters` (`IngressClassSpec`), and
-    the eleven fields of `CSIDriverSpec` (`attachRequired`, `podInfoOnMount`,
-    `volumeLifecycleModes`, `storageCapacity`, `fsGroupPolicy`,
-    `tokenRequests`, `requiresRepublish`, `seLinuxMount`,
-    `nodeAllocatableUpdatePeriodSeconds`, `serviceAccountTokenInSecrets`,
-    `preventPodSchedulingIfMissing`). A `csidriver` requires no property; an
-    `ingressclass` requires `controller` (see **Required** below).
-  - The four classes have none: their fields sit on the object, beside its
-    identity. The properties are those fields, decoded strictly into the
-    object type, and the object's own `kind`, `apiVersion` and `metadata` are
-    refused by name under any spelling the decoder would match (`metadata:
-    not authorable: launcher sets the object's kind, apiVersion and metadata
-    (its name is the component's, or the one objectName gives it; its labels
-    and annotations are the labels and annotations properties)`).
-    `storageclass`: `provisioner`,
-    `parameters`, `reclaimPolicy`, `mountOptions`, `allowVolumeExpansion`,
-    `volumeBindingMode`, `allowedTopologies`. `volumeattributesclass`:
-    `driverName`, `parameters`. `priorityclass`: `value`, `globalDefault`,
-    `description`, `preemptionPolicy`. `runtimeclass`: `handler`, `overhead`,
-    `scheduling`.
-  - **Required** is a top-level field the API server refuses an object
-    without: `provisioner` (`storageclass`), `handler` (`runtimeclass`),
-    `driverName` (`volumeattributesclass`) and `controller` (`ingressclass`)
-    must be a non-empty string (`provisioner: required …`), and a
-    `volumeattributesclass` must carry at least one of `parameters`
-    (`parameters: required …`). The upstream type marks `controller`
-    optional; the API server's validation requires it all the same. The API
-    does not require a PriorityClass `value`: the type always encodes one, so
-    a `priorityclass` that authors none is emitted with `value: 0`. Every
-    other value rule (which reclaim policies exist, a required field of a
-    nested object, the names a cluster-scoped object may carry) is left to
-    the API server.
-  - A quantity written as a number is emitted in its canonical string form.
-    An authored `false` or `0` is kept where the API tells it from an unset
-    field (`allowVolumeExpansion: false`, `attachRequired: false`,
-    `value: 0`). Where the API type omits a zero, the field is left out of
-    the object, which the API reads as the same value: `globalDefault: false`
-    and an empty `description`.
-
-  **The object's name** is the component's unless `objectName`, or the
-  `Naming` hook under role `object`, names it otherwise (see ["The object name"](conventions.md#the-object-name-objectname)
-  below). Each handler declares its object as cluster-scoped, so the name is
-  claimed in no namespace: two `storageclass` components given one object
-  name are refused, whatever namespace the application is built for. What
-  refers to the object names it by its object name: a claim's
-  `storageClassName`, a pod's `runtimeClassName` or `priorityClassName`. The
-  API identifies a CSI driver by the CSIDriver's name, so a `csidriver`
-  component's object name must be the driver's (`csi.example.com`), written as
-  the component name or as `objectName`. The build namespace does not apply to
-  these objects. The handlers check no name rule of their own on either name:
-  one the API server refuses for the kind builds here and is refused at
-  apply. **A CSIDriver's name is not held to the limit the API documents for
-  it.** The type's documentation gives a driver name at most 63 characters;
-  the API server does not hold the CSIDriver object to that, and accepts any
-  DNS subdomain name. It does refuse a PersistentVolume that names a driver
-  longer than 63 characters, so such a CSIDriver is created and no volume can
-  use it. The `csidriver` kind refuses what the API server refuses of the
-  object and no more, so it builds that name too.
-
-  **Policy.** None of the six has a field an `oam.Policy` method speaks to,
-  so `ApplyPolicy` enforces nothing and fills nothing, and each builds the
-  same under every policy and under none. A consumer that does not want an
-  author to create one of these objects does not register its handler; the
-  transform then refuses the component (`no handler for component type …`).
-
-  **Labels and annotations** are the `labels` and `annotations` properties,
-  on all six. That includes the annotations that mark a default class
-  (`storageclass.kubernetes.io/is-default-class`,
-  `ingressclass.kubernetes.io/is-default-class`): a default StorageClass or
-  IngressClass writes its annotation there. Whether a second default exists
-  is the cluster's to decide.
-
-  **Not covered.**
-  - An `ingressclass` whose `parameters` leaves `scope` out is emitted with
-    `scope: null`: the API type always encodes the field, and documents
-    `Cluster` as its default. Author `scope` to emit a value.
-  - Whether a referenced object exists: the `runtimeclass` a pod names, the
-    `storageclass` a claim names, the parameters object of an `ingressclass`.
-
-- **horizontalpodautoscaler** (go-kure/launcher#790) is the kind-named
-  projection of an `autoscaling/v2` HorizontalPodAutoscaler. It emits that
-  one object in the build namespace, named after the component unless
-  `objectName` names it, holding exactly what was authored: the handler adds
-  no label, no annotation and no default of its own. The handler declares its
-  object as namespaced, so the object name is claimed in the object's namespace.
-  - **Authored:** the five fields of `HorizontalPodAutoscalerSpec`, decoded
-    strictly at every depth: `scaleTargetRef`, `minReplicas`, `maxReplicas`,
-    `metrics` and `behavior`. An unknown key is refused wherever it sits (a
-    metric source, a scaling rule), a quantity written as a number is
-    emitted in its canonical string form, and an authored `0` is kept
-    (`stabilizationWindowSeconds: 0`). The type has no number or boolean
-    that is omitted when zero, which
-    `TestHorizontalPodAutoscalerSpec_NoOmittedZeros` holds it to.
-  - **An empty `metrics` or `policies` list is refused.** The type omits
-    `metrics` and a scaling rule's `policies` when empty, and the API server
-    then applies its default: 80% average CPU utilization for `metrics`, and
-    its default policies for `behavior.scaleUp` and `behavior.scaleDown`. So
-    an authored `[]` cannot be carried (`metrics: [] cannot be carried by the
-    Kubernetes API types (the field is omitted when empty, so the API server
-    would apply its default …)`). See *Authored empty lists the API defaults*
-    below.
-  - **Required** are the two top-level fields the API server refuses an
-    autoscaler without: `scaleTargetRef` (`scaleTargetRef: required …`) and
-    `maxReplicas` (`maxReplicas: required …`; an authored `0` is refused
-    the same way, since the type cannot tell it from an unset one). The
-    config is exported, so `Generate` repeats both. Every other value rule
-    is left to the API server: a negative `maxReplicas`, the `kind` and
-    `name` inside `scaleTargetRef`, `minReplicas` against `maxReplicas`,
-    which metric source goes with which `type`. The label selector of a
-    metric (`metrics[].object.metric.selector`, and under `pods` and
-    `external`) is not held as other kinds hold theirs: the API server
-    validates nothing of it, and a kind does not refuse what the API admits.
-  - **Policy.** `maxReplicas` is held to the environment policy's replica
-    maximum (`MaxReplicas()`), as the `scaler` trait holds its own and as a
-    HorizontalPodAutoscaler a chart renders, a `passthrough` component holds
-    or a `manifests` source yields is held: `component "web": maxReplicas:
-    replicas 4 exceeds enforced maximum 3`. Nothing else is held, and no
-    default is filled: the policy's `scalerMinReplicas` and
-    `scalerMaxReplicas` defaults belong to the `scaler` trait. A nil policy
-    checks nothing.
-  - **The target is the author's, and is not checked.** `scaleTargetRef`
-    names an object by `kind`, `name` and `apiVersion`; launcher points it
-    at no component and does not look for the object in the document. To
-    scale a workload component, name its object: the component name, or its
-    `objectName`. **The guards the `scaler` trait applies to its own
-    workload do not see this kind:** a `deployment`, `webservice` or
-    `worker` with a claim that is not ReadWriteMany refuses a `scaler` trait
-    whose `maxReplicas` is above 1, and builds beside a
-    `horizontalpodautoscaler` component that scales it further. That is the
-    state of an autoscaler emitted through `passthrough`, `manifests` or
-    template delivery.
-  - **Beside the `scaler` trait.** The trait derives an autoscaler for the
-    workload it is attached to, from a target CPU or memory utilization.
-    This kind is the authored object, for what the trait does not express:
-    other metric sources, scaling behavior, a target launcher does not own.
-    The two name their objects apart (`<component>-hpa` for the trait), and
-    two that are given one name in one namespace are refused as a name
-    collision.
-  - **Labels and annotations** are the `labels` and `annotations` properties.
-  - **Not covered.** Whether the target exists or can be scaled. The
-    object's status is the controller's and is not written.
 
 - **statefulset** — `serviceName` and `volumeClaimTemplates`
   (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
