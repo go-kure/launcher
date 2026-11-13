@@ -18,7 +18,7 @@ No dimension of the environment policy reads them; its object kind rules
 (`oam.ObjectKindPolicy`) gate them as every emitted object, so a policy
 that forbids their group, their kind or cluster-scoped objects refuses
 them. What they do once applied is out of the build's reach (see ["Kind
-inventory"](https://www.gokure.dev/launcher/api-reference/oam-components/#kind-inventory), "Cluster-wide admission and API registration").
+inventory"](/pkg/oam/builtin/components/README.md#kind-inventory), "Cluster-wide admission and API registration").
 
 ### Properties
 

@@ -224,11 +224,14 @@ Runs on main and `release/*` branches only (not PRs):
   two API-reference pages before they were split, so a link from outside that names an old section
   still lands on a page that has it. Second, every link with a `#fragment` on every built page must
   point at an id that exists on the target page. The shared link check does not read fragments.
-  A link to the published site (`https://www.gokure.dev/launcher/...`) is read against the local
-  build. A README links its parts that way, so the link goes to the live site and not to the
-  version the reader has checked out. The check counts links to other sites and links outside the
-  base path, and does not read them. Third, every hand-written part of an API-reference page
-  (`site/content/api-reference/<package>/<part>.md`) must be a `guides` entry of a package in
+  In the API reference, use repository-root Markdown links for package READMEs and hand-written
+  pages, for example `/pkg/oam/model/README.md` or `/site/content/api-reference/oam/pipeline.md`.
+  GitHub opens the file on the current ref. Hugo uses `site/docs-map.yaml` for mounted READMEs
+  and renders the link under the current build's base URL, retaining its fragment. The API
+  reference render hook rejects hard-coded launcher API URLs during the build, including those
+  without a fragment. CI exercises that hook with development and release base URLs.
+  The anchor checker counts links outside the build without fetching them. Third, every hand-written
+  part of an API-reference page (`site/content/api-reference/<package>/<part>.md`) must be a `guides` entry of a package in
   `site/docs-map.yaml`. The doc gate counts a guide as the package docs and counts nothing else.
   The target runs the self-test (`site/scripts/check-api-anchors-test.sh`) first, so a check
   that can no longer fail goes red as well.

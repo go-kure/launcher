@@ -12,7 +12,7 @@
 #      a missing anchor passes it.
 #
 # An absolute link to the published site (--site-url plus the base path) is read against the
-# local build, as if it were root-relative. A README links its parts that way. Links to another
+# local build, as if it were root-relative. Links to another
 # site, root-relative links outside the base path and relative links that leave the site are not
 # read. They are counted in the last line.
 #

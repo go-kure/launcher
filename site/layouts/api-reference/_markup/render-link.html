@@ -1,0 +1,28 @@
+{{- /* Keep links in the API reference usable both on GitHub and in a versioned build. */ -}}
+{{- $url := .Destination -}}
+{{- /* Match Relearn's render-link unescaping for links passed through Markdown twice. */ -}}
+{{- range $from, $to := dict "&#34;" `"` "&#39;" `'` "&#43;" `+` "&amp;" `&` -}}
+  {{- $url = replace $url $from $to -}}
+{{- end -}}
+{{- $u := urls.Parse $url -}}
+{{- $local := or (not $u.Host) (eq (lower $u.Hostname) (lower (urls.Parse site.BaseURL).Hostname)) -}}
+{{- if and $local (findRE `^/launcher/((dev|v[^/]+)/)?api-reference(/|$)` $u.Path) -}}
+  {{- errorf "%s: %q hard-codes a published API reference. Link to the Markdown file instead" .Page.Path .Destination -}}
+{{- end -}}
+{{- if or (hasPrefix $url "/site/content/") (and (hasPrefix $url "/pkg/") (hasSuffix $u.Path "/README.md")) -}}
+  {{- $path := strings.TrimPrefix "/site/content" $u.Path -}}
+  {{- if hasPrefix $path "/pkg/" -}}
+    {{- $map := transform.Unmarshal (os.ReadFile "docs-map.yaml") -}}
+    {{- with where $map.packages "readme" (strings.TrimPrefix "/" $u.Path) -}}
+      {{- with (index . 0).mount -}}{{- $path = printf "/%s" .target -}}{{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- with site.GetPage $path -}}
+    {{- $url = .Path -}}
+    {{- with $u.RawQuery -}}{{- $url = printf "%s?%s" $url . -}}{{- end -}}
+    {{- with $u.EscapedFragment -}}{{- $url = printf "%s#%s" $url . -}}{{- end -}}
+  {{- else -}}
+    {{- errorf "%s: repository link %q has no published page" $.Page.Path .Destination -}}
+  {{- end -}}
+{{- end -}}
+{{- partial "shortcodes/link.html" (dict "page" .Page "url" $url "title" .Title "content" .Text) -}}

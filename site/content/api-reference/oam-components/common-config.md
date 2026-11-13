@@ -85,11 +85,11 @@ a dotted or longer name, so the component-name rule itself is unchanged. Nothing
 affected — such a document never did. A kind that also names a Service after
 the component (`webservice`) refuses a dotted or longer name earlier, at
 conversion, by the stricter Service-name rule described under each kind in
-["Per-type highlights"](https://www.gokure.dev/launcher/api-reference/oam-components/#per-type-highlights). `daemonset` and `statefulset`
+["Per-type highlights"](/pkg/oam/builtin/components/README.md#per-type-highlights). `daemonset` and `statefulset`
 named one too until they stopped emitting a Service.
 `cronjob` and `job` refuse a name past the length of their own object earlier
 too, at conversion: a CronJob's name is at most 52 characters, a Job's at most
-63 (see each kind in ["Per-type highlights"](https://www.gokure.dev/launcher/api-reference/oam-components/#per-type-highlights)).
+63 (see each kind in ["Per-type highlights"](/pkg/oam/builtin/components/README.md#per-type-highlights)).
 
 Most workload types (`webservice`, `worker`, `deployment`, `statefulset`,
 `daemonset`, `cronjob`, `job`)
