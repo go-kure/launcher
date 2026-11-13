@@ -3,566 +3,716 @@ title: "Kinds: core workloads"
 weight: 3
 ---
 
-- **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
-  plus the full `DeploymentSpec`-level surface they share with `deployment` —
-  `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
-  `progressDeadlineSeconds` (go-kure/launcher#341, see ["Deployment-level
-  properties"](common-config.md#deployment-level-properties-deployment-webservice-worker)). What still separates them from `deployment` is launcher's
-  own opinions, which these two keep: `topologySpread` and the four-key
-  `affinity` shorthand, and on `webservice` the `port` that drives the Service.
-  Note the shorthand is what they keep — neither publishes the raw `corev1`
-  `affinity` that `deployment` does. Both publish `tolerations` and
-  `topologySpreadConstraints` as `deployment` does (go-kure/launcher#1473, see
-  ["Raw scheduling properties"](common-config.md#raw-scheduling-properties)); authored constraints need
-  `topologySpread: false`.
-  The `webservice` rule implements the optional `oam.EndpointProvider`: it declares its own
-  pods (`app: <component-name>`) on the declared `port` (its single `port` property drives both
-  the container port and the Service port), letting a downstream platform synthesize generic
-  app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
-  Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
-  - **`worker` is a component lowering rule, not a handler** (`WorkerRule`,
-    go-kure/launcher#280). It runs worker's own parse, then re-expresses the
-    component as a `deployment` of the same name: the authored properties are
-    forwarded, the four-key `affinity` shorthand is evaluated exactly as before
-    and forwarded as the raw `corev1` `affinity` (omitted when it evaluates to
-    nothing), and `topologySpread` becomes a synthesized `topology-spread`
-    trait placed before the authored traits (none when `topologySpread: false`).
-    Authored traits and annotations are forwarded unchanged. Worker's published
-    schema, its generated output and the `app: <component-name>` selector are
-    unchanged — every example and golden fixture builds byte-identically — and
-    the emitted component carries `Origin.Rule` `component/worker@v1alpha1`. Two
-    differences are deliberate. A worker refused by its own parse now reads
-    `component "w" (type "worker") in document …: <cause>` (the lowering
-    engine's prefix) where it read `component "w": <cause>`; the cause is
-    unchanged. A trait-lowering error on a worker's trait gains one chain line
-    naming the `component/worker@v1alpha1` step; a trait handler's error reads as before.
-    The former handler's affinity label-syntax check (see [Common config](common-config.md#common-config)) runs
-    in the rule, before the raw `affinity` is forwarded, with the same
-    `affinity: the shorthand evaluates to an affinity the API server would
-    refuse: …` text. A key worker's parse refuses with a reason is refused
-    there: an upstream field of its refusal maps, or `podActiveDeadlineSeconds`,
-    which only Job pods may set. Any other key worker does not declare is dropped
-    rather than forwarded to `deployment`; `kurel build` refuses both before
-    lowering anyway.
-  - **Both rules emit the component's ServiceAccount as a `serviceaccount`
-    member** (go-kure/launcher#702) unless `serviceAccountName` is authored. A
-    `worker` therefore lowers to a same-name sibling group of a `deployment` and
-    a `serviceaccount`; a `webservice` to a `deployment`, a `service` and a
-    `serviceaccount`. The member carries `automountServiceAccountToken: false`,
-    the component's annotations, and the authored `prune-protection` and
-    `force-replace` traits. The `deployment` member is handed the account's
-    object name as `serviceAccountName` (the component name, unless
-    `serviceAccountObjectName` or the `Naming` hook names the account, below),
-    so it runs as that account and generates none of its own. The output is unchanged: the same ServiceAccount,
-    in the same place, so every golden builds byte-identically. One consequence
-    for a library caller: a registry that lowers `webservice` or `worker` must
-    register a `serviceaccount` component handler too, or the build fails with
-    `member type "serviceaccount" has no component handler`.
-  - **Both rules turn each claim a `pvc` volume describes into a synthesized
-    `pvc` trait** on the `deployment` member (go-kure/launcher#702), named
-    `<component>-<volume>` as before unless the volume's `claimObjectName` or
-    the `Naming` hook names it (below), and rewrite the volume to reference it
-    by `claimName`, keeping `accessModes` so the non-RWX constraints still see it.
-    The claims are generated as before, after the component's own objects. A
-    registry that lowers `webservice` or `worker` must register the `pvc` trait
-    handler too.
-  - **`webservice` is a component lowering rule, not a handler**
-    (`WebserviceRule`, go-kure/launcher#280). It runs webservice's own parse,
-    then re-expresses the component as a same-name sibling group (see `pkg/oam`
-    "Same-name sibling groups"): a `deployment` and then a `service`, both named
-    after the component, deployed as one component — one tier, one
-    bundle. The `deployment` member gets the authored properties
-    webservice declares except `port`, `topologySpread` and `affinity`, plus
-    the main container's one port `{name: http, containerPort: <port>}`; the
-    `affinity` shorthand and `topologySpread` are handled as on `worker`. The
-    `service` member gets one port `{name: http, port: <port>}` and the default
-    selector `app: <component-name>`. Annotations go to both members. Each
-    authored trait is forwarded unchanged, in authored order, to the member it
-    acts on: `expose`, `ingress` and `httproute` go to the `service`;
-    `prune-protection` and `force-replace` go to both; every other trait goes
-    to the `deployment`. That includes `fluxcd-patches` and `fluxcd-postbuild`
-    (not built in; a consumer that delivers through Flux registers them) and any
-    trait type an extension registered, since the `deployment` member holds the
-    pods. Webservice's published schema and its generated objects are
-    unchanged, in the handler's order (Deployment, Service, ServiceAccount,
-    claims). Each emitted component carries `Origin.Rule`
-    `component/webservice@v1alpha1`. Four differences are deliberate. A refusal from
-    webservice's own parse gains the lowering engine's prefix, as on `worker`;
-    the cause is unchanged. The synthesized inbound NetworkPolicy opens an
-    ingress `portName: http` as the port's number, where the handler opened the
-    name `http`, which the container port also carried; the pods admitted are
-    the same. Likewise, an ingress path on another component whose `backend`
-    names a webservice's Service by `portName` opens that port's number on the
-    webservice's pods, translated as on a `service` component. A route on
-    another component whose `backend` names a webservice's Service on a port
-    that Service does not expose (`port: 9090` on a webservice whose `port` is
-    8080) no longer opens that port on the webservice's pods: the `service`
-    member opens only its own declared ports, as a `service` component does.
-    The route was already broken, since the Service has no such port to
-    forward. Webservice is no longer a handler a library caller converts with
-    directly, so the nameless-config fallback the handlers keep does not apply
-    to it: the engine only lowers a named component.
-  - **A `webservice` component name must be a valid Service name.** It always
-    emits a Service named after the component, and the API server validates
-    a Service's `metadata.name` as a DNS-1123 label: at most 63 characters,
-    lowercase letters, digits and `-`, starting and ending with a letter or
-    digit. That is stricter than the DNS-1123 subdomain every component name
-    already passes, so `api.v1` and a 64-character name are refused at
-    conversion (`name: "api.v1" is not a valid Service name, which must be a
-    DNS-1123 label`) instead of building a manifest the cluster rejects on
-    apply (go-kure/launcher#546). A leading digit (`1api`) is accepted: that
-    is the rule under RelaxedServiceNameValidation, on by default from Kubernetes 1.36, and a
-    build whose `spec.kubernetesVersion` is below 1.36 refuses such a Service at generation,
-    unless its `spec.featureGates` sets the gate on (go-kure/launcher#959, go-kure/launcher#1230, `docs/delivery-scope.md` §3.5). `Generate` applies the
-    same rule to the Application name it is handed. `worker` emits no Service
-    and keeps accepting such a name, within the container-name rule above.
-    The rule holds for the component name whatever the Service is named:
-    `serviceObjectName` (below) does not lift it.
-  - **`deploymentObjectName`, `serviceObjectName` and
-    `serviceAccountObjectName` name the objects the component generates**
-    (go-kure/launcher#787), each in place of the component name and each on its
-    own: the Deployment, the Service (`webservice` only; `worker` generates
-    none and does not declare the property) and the ServiceAccount. A name is
-    used as written, never shortened. The Deployment's and the ServiceAccount's
-    are DNS-1123 subdomains, the Service's a DNS-1123 label; anything else is
-    refused (`naming the Service: serviceObjectName "web.v1" cannot be the name
-    for role "workload-service": not a valid DNS-1123 label: …`). Without the
-    property the `Naming` hook is asked (roles `workload-deployment`,
-    `workload-service`, `workload-serviceaccount`), and without an answer the
-    object keeps the component name, so a document that sets none builds
-    byte-identically. Each name is held against every other resolved name of
-    its kind and namespace: two components given one `serviceObjectName`, or a
-    `service` component whose object carries a `webservice`'s Service name, are
-    refused as a name collision with both named.
-    - *They name the objects alone.* The members keep the component's name, so
-      the `app` label, the pod template's labels, the Deployment's and the
-      Service's selectors, the main container, the claims' default names
-      (`<component>-<volume>`) and every name a trait derives (`<component>-hpa`,
-      `<component>-httproute`) stay as they were.
-    - *A `pvc` volume's `claimObjectName` names the claim that volume
-      generates* (role `workload-volume-claim`), in place of
-      `<component>-<volume>`, used as written: a DNS-1123 subdomain, never
-      shortened. The volume mounts the claim by that name. Without it the
-      `Naming` hook is asked for each such volume. A volume with `claimName`
-      references an existing claim and generates none, so `claimObjectName`
-      beside it is refused and the hook is not asked for it. Two volumes, or
-      a volume and another component, that give one claim name are refused as
-      a name collision.
-    - *What launcher writes to a renamed object follows it.* The `scaler`
-      trait's `scaleTargetRef` names the Deployment, whatever the Service and
-      the ServiceAccount are named. A routing trait's own backend (`expose`,
-      `ingress`, `httproute`) is the Service, and a route naming that Service
-      still resolves to the component for the synthesized NetworkPolicy. The
-      pods' `serviceAccountName` and the `rbac` trait's subject name the
-      ServiceAccount.
-    - **A renamed Service changes its DNS name: the Service's name is the name
-      it is reached at in the cluster. Launcher builds no such address, so every
-      address written with the component name (an `env` value, a URL in another
-      component's properties, a backend another component's route names) is the
-      author's to change.**
-    - *`serviceAccountObjectName` names the account the component generates,
-      `serviceAccountName` an account that exists.* With `serviceAccountName`
-      the component generates none, so the two together are refused
-      (`serviceAccountObjectName and serviceAccountName are both set: …`), and
-      the hook is not asked for an account.
-  - **An ingress `portName` on a `webservice` must be `http`.** The Service's
-    one port is named `http`, so an `ingress` path whose implicit backend is
-    this component's Service (no `backend`, or `backend` naming that Service)
-    and that addresses it by any other `portName` is refused at build time
-    (`cannot route implicit backend to port "name"`), just as a numbered
-    `port` other than the component's `port` is (go-kure/launcher#545).
-- **deployment** — the kind-named Deployment (see ["Deployment-level
-  properties"](common-config.md#deployment-level-properties-deployment-webservice-worker)): the shared container-level, pod-level and
-  `DeploymentSpec`-level surface, the last of which it now shares with
-  `webservice` and `worker` rather than owning. What distinguishes it is mostly
-  what it leaves out: no `topologySpread`, no four-key `affinity` shorthand, no
-  `port`; it emits no Service, and declares one endpoint per main-container
-  `ports` entry (see ["Main container ports"](common-config.md#main-container-ports)). It is not `worker` minus
-  a few things either — it reads nulls as omissions across its whole surface,
-  which the role kinds do not. The one thing it
-  adds is the raw `corev1` scheduling surface the role kinds lack: `affinity`,
-  `tolerations` and `topologySpreadConstraints` as the API shapes
-  (go-kure/launcher#412, see ["Raw scheduling properties"](common-config.md#raw-scheduling-properties)). That is the
-  same distinction in the other direction — the role kinds carry the opinion,
-  this kind carries the API.
-- **service** — the kind-named Service (go-kure/launcher#411), an independent
-  component rather than half of a workload: it emits the Service and nothing
-  else, and the workload component whose pods it selects owns their
-  ServiceAccount. `selector` defaults to `app: <component name>`, the label
-  every workload kind puts on its pods; set it when the Service fronts a
-  workload named differently (a `deployment` named `api-server` behind a
-  `service` named `api`). `ports` is the full `corev1.ServicePort` list, at
-  least one entry unless the Service is headless or of type `ExternalName`: `port` (required), `targetPort` (a number or a container
-  port name, published as the `Types: [integer, string]` union
-  (go-kure/launcher#383), so a value of any other type is rejected by property
-  validation before the parser sees it; defaults to `port`), `protocol` (`TCP`, `UDP` or `SCTP`; defaults
-  to `TCP`), `name` (required once there is more than one port; names and
-  port/protocol pairs must be unique), `nodePort` (1-65535, only with `type`
-  `NodePort` or `LoadBalancer`, unique per protocol, as the API requires; two
-  refusals are launcher's own: `0`, which the API reads as "allocate one" —
-  leave the key out instead — and a node port on an `ExternalName` Service,
-  which the API accepts; the
-  cluster's own node port range is narrower and is checked on apply) and
-  `appProtocol` (a qualified name such as `http` or `kubernetes.io/h2c`).
-  `type` is `ClusterIP` (default), `NodePort`, `LoadBalancer` or
-  `ExternalName`. An empty `selector` is refused.
-  - **ExternalName.** `type: ExternalName` (go-kure/launcher#790) emits a DNS
-    alias for `externalName`, which is then required: a DNS-1123 subdomain,
-    with one trailing dot allowed. The Service selects no pods, so `selector`
-    is refused with it (launcher's own rule; the API accepts and ignores one),
-    and so are `clusterIP: None`, `ipFamilies` and `ipFamilyPolicy`; `ports`
-    is optional. On any other type `externalName` is refused (launcher's own
-    rule; the API ignores it there). Whatever ports it lists, an ExternalName
-    Service has no first port for a routing trait and no NetworkPolicy
-    endpoint: an `ingress` or `httproute` trait refuses it as an implicit
-    backend (`component "db" has no service port`), a trait-level
-    `servicePort` is refused, and it declares no endpoint. As on a port-less
-    headless Service, the refusal is of the component as a backend, not of
-    the trait: a trait on it that names another Service explicitly is carried
-    as on any component, and that route's policy is the routed Service's. It
-    still owns its name
-    (`BackendServiceName`): a route from another component naming it is a
-    route to a Service of this application, so that route's `backendSelector`
-    is not trusted, and **no inbound NetworkPolicy is synthesized for that
-    route**, in a same-name sibling group either: the Service leads to no pods
-    of the cluster, and the group's component label is on its workload's
-    pods, which the Service does not lead to. Named apart from its component
-    (`objectName`), it owns that name instead: a route naming the Service's
-    name gets no policy, and one naming the component's name is a route to a
-    Service from elsewhere.
-  - **Further `ServiceSpec` fields** (go-kure/launcher#790). Each is written
-    only when authored; unauthored, the API server's own default applies. The
-    rules are the API server's (`validateService`), except where marked as
-    launcher's own.
+Each kind below with a heading has the sections it needs from this list: Properties, Outputs,
+Validation and Example. Its implementation, history and tests are on the
+[contributor page](../../contributing/oam-reference/kinds-core-workloads.md).
 
-    | Property | Rules |
-    |----------|-------|
-    | `externalTrafficPolicy` | `Cluster` or `Local`. Only with `type` `NodePort` or `LoadBalancer`. |
-    | `internalTrafficPolicy` | `Cluster` or `Local`. |
-    | `trafficDistribution` | `PreferSameZone`, `PreferSameNode`, or `PreferClose` (the deprecated name of `PreferSameZone`). `PreferSameZone` and `PreferSameNode` need the `PreferSameTrafficDistribution` feature gate, on by default from Kubernetes 1.34: a build for a `ClusterProfile` whose `spec.kubernetesVersion` is below 1.34 refuses them (go-kure/launcher#1230). |
-    | `sessionAffinity` | `None` or `ClientIP`. |
-    | `sessionAffinityConfig` | Only with `sessionAffinity: ClientIP`. `clientIP.timeoutSeconds` is required once the key is authored (launcher's own: the API server would default it), 1-86400. |
-    | `publishNotReadyAddresses` | A boolean; written only when `true`. |
-    | `ipFamilies` | `IPv4` and/or `IPv6`, each once, at most two. |
-    | `ipFamilyPolicy` | `SingleStack`, `PreferDualStack` or `RequireDualStack`; `SingleStack` is refused with two `ipFamilies` (the API server's allocator refuses it). |
-    | `loadBalancerClass` | A qualified name. Only with `type: LoadBalancer`. |
-    | `loadBalancerSourceRanges` | CIDRs in canonical form (launcher's own: the API tolerates surrounding spaces and some non-canonical forms). Only with `type: LoadBalancer`. |
-    | `loadBalancerIP` | Only with `type: LoadBalancer` (launcher's own: the API ignores it elsewhere). The value is not validated, as in the API. |
-    | `allocateLoadBalancerNodePorts` | A boolean. Only with `type: LoadBalancer`. |
-    | `healthCheckNodePort` | 1-65535. Only with `type: LoadBalancer` and `externalTrafficPolicy: Local`. `0` is refused (launcher's own: the API reads it as "allocate one"; leave the key out instead). |
+## webservice, worker
 
-    `externalIPs` and `clusterIPs` are refused, and so is a literal
-    `clusterIP` address. `externalIPs` routes traffic for addresses the
-    cluster does not manage and is deprecated by the API; a Service's cluster
-    IPs are the cluster's to allocate. In a document all three are refused by
-    property validation before the parser runs: `externalIPs` and `clusterIPs`
-    as unsupported fields, each with the kind's reason after the list of
-    allowed keys (go-kure/launcher#790), and a literal `clusterIP` address as
-    a value outside the property's enum, which has `None` alone.
-  - **Headless.** `clusterIP: None` (go-kure/launcher#690) emits
-    `spec.clusterIP: None`: no virtual IP, and cluster DNS resolves the name to
-    the selected pods, as a StatefulSet's governing Service needs. It requires
-    `type: ClusterIP` (the default), since the API server refuses a headless
-    `NodePort` or `LoadBalancer` Service. `None` is the only value: a literal
-    address is refused, and so is an empty string, rather than read as
-    absence. A headless Service may have no `ports` at all; without
-    `clusterIP`, at least one port is still required (`ports: at least one
-    port is required`), except on an `ExternalName` Service (above). A
-    port-less Service has no first port, so routing
-    traits refuse it as an implicit backend, refuse a trait-level
-    `servicePort` on it, and it declares no NetworkPolicy endpoint. It still
-    owns its name (`BackendServiceName`): a route from another component
-    naming it is a route to a Service of this application, not an external
-    backend, so that route's `backendSelector` is not trusted and, with no
-    TCP port to translate, no allow is synthesized. Without `clusterIP` the
-    Service carries no `clusterIP`, as before.
-  - **The component name must be a valid Service name.** It becomes the
-    Service's `metadata.name`, which the API server validates as a DNS-1123
-    label: at most 63 characters, lowercase letters, digits and `-`, starting
-    and ending with a letter or digit. That is stricter than the DNS-1123
-    subdomain every component name already passes, so `api.v1` and a
-    64-character name are refused here (`name: "api.v1" is not a valid Service
-    name, which must be a DNS-1123 label`) instead of building a manifest the
-    cluster rejects on apply. `Generate` applies the same rule to the
-    Application name it is handed. A leading digit (`1api`) is accepted: that
-    is the rule under RelaxedServiceNameValidation, on by default from Kubernetes 1.36, and a
-    build whose `spec.kubernetesVersion` is below 1.36 refuses such a Service at generation,
-    unless its `spec.featureGates` sets the gate on (go-kure/launcher#959, go-kure/launcher#1230, `docs/delivery-scope.md` §3.5).
-  - **Routing traits use the first port.** `ingress`, `httproute` and `expose`
-    (which lowers to one of the two) on a `service` component resolve their
-    implicit backend to `ports[0].port` and refuse any other port on it,
-    whether it is named by number (`cannot route implicit backend to port N`)
-    or by an ingress path's `portName` (`cannot route implicit backend to port
-    "name"`); a `portName` must be the first port's own name, so an unknown
-    name is refused too. Naming the component's own Service as the backend
-    (`backend: api` on an ingress path, `backendRefs: [{name: api, port:
-    9000}]` on an httproute) is still the implicit backend and is refused the
-    same way. To reach a later port, put the routing trait on another
-    component and name this Service there as an explicit backend, with that
-    port.
-  - **Synthesized NetworkPolicy.** The `{component}-allow-ingress-traffic`
-    policy for traffic routed to a `service` selects its `selector` pods — not
-    the component label, which no pod carries — and opens the `targetPort` of
-    each routed TCP port. A route that reaches only a UDP or SCTP port
-    synthesizes no policy, and neither does a route to an `ExternalName`
-    Service, which has no pods to open a port on (above). In a same-name
-    sibling group whose `selector`
-    picks a sibling's own pods, the policy selects the component label
-    instead, but only when `IdentityTargetPorts` is true: the Service has at
-    least one port and every port, whatever its protocol, has a numeric
-    `targetPort` equal to its own `port`. Otherwise it keeps the `selector`.
-    Either way the routed ports are translated to their `targetPort` and
-    only TCP ones are opened (see `pkg/oam` "Same-name sibling groups").
-  - It implements `oam.EndpointProvider`: one endpoint, the `selector` pods on
-    every TCP `targetPort` (deduplicated). A Service with no TCP port declares
-    none, and neither does an `ExternalName` Service.
-  - **No policy check.** `service` has no `ApplyPolicy`, deliberately
-    (go-kure/launcher#794, item 2): none of its properties maps to an
-    environment-policy method, so there is nothing to enforce. The policy
-    makes no statement about a Service's `type`, so `NodePort` and
-    `LoadBalancer` build under every policy. **`type: ExternalName` has no
-    capability gate either: whoever may author a `service` component may give
-    an in-cluster name to any DNS name outside the cluster**, and workloads
-    that resolve the Service name are sent there. `nodePort`,
-    `loadBalancerSourceRanges`, `loadBalancerIP` and `externalTrafficPolicy`
-    are accepted the same way. The object kind policy
-    (`oam.ObjectKindPolicy`, go-kure/launcher#922) holds kinds, not these
-    fields: it can keep Services out of a build, not one `type`.
-- **serviceaccount**, **persistentvolumeclaim**, **configmap**
-  (go-kure/launcher#702) are kind-named projections of one object each. Each
-  emits that object, named after the component, and nothing else, so another
-  component refers to it by the component name. They are the authorable forms
-  of the objects the workload kinds generate for themselves today, and they
-  carry no launcher opinions. Like every component, they are in no tier
-  unless a tier annotation or placement policy places them. `serviceaccount`
-  and `configmap` have no `ApplyPolicy`, deliberately (go-kure/launcher#794,
-  item 2): none of their properties maps to an environment-policy method
-  (`imagePullSecrets` names Secrets, not a registry), so there is nothing to
-  enforce. `persistentvolumeclaim` has one, for the storage default and
-  maximum.
-  - `serviceaccount` publishes `automountServiceAccountToken` and
-    `imagePullSecrets` (`[{name}]`). An unauthored
-    `automountServiceAccountToken` stays unset, which Kubernetes reads as
-    true. The account a role kind generates sets it to false, so a
-    `serviceaccount` replacing that account authors `false` to keep the same
-    posture. A workload runs as it through `serviceAccountName`, which also
-    stops a role kind from generating its own account.
-  - `persistentvolumeclaim` publishes `size`, `storageClassName`,
-    `accessModes` (default `[ReadWriteOnce]`) and `volumeMode`. The claim is
-    built by the same `BuildPVC` as a `pvc` volume, so the two agree on every
-    field they share, including the explicit-empty `storageClassName: ""`,
-    which requests no class. The `pvc` trait is this kind's twin
-    (go-kure/launcher#741): it runs the kind's own `ParseClaimProperties`,
-    `ApplyClaimPolicy` and `GenerateClaim`, so the same properties build the
-    same claim. Only the ownership fields differ: the claim's name, its `app`
-    label, namespace and bundle. An unauthored `storageClassName` (absent or
-    `null`) comes from the ClusterProfile `pvc` capability's
-    `storageClassName`, as the trait's does (go-kure/launcher#742); with no
-    binding it stays unset, which is the cluster's default class. **Pre-GA
-    output change**: the kind used to ignore that binding, so an existing
-    claim built from it got the cluster's default class when it was created,
-    if the cluster had one. A claim's assigned `storageClassName` cannot
-    change: if the binding's class differs from it, the claim fails to apply
-    until it is recreated or the assigned class is authored. A claim created
-    with no class may take one later, so it applies. An unauthored `size`
-    comes from the EnvironmentPolicy storage default; with neither, the build
-    fails with `size: required …`. The policy's maximum storage size applies
-    either way. A workload mounts the claim through a `pvc` volume's
-    `claimName` (see ["Referencing an existing claim"](common-config.md#referencing-an-existing-claim-pvcclaimname)). A claim name
-    another component also generates (for example a `pvc` trait of the same
-    name) is refused as a generated-object collision.
+### Properties
 
-    Four more claim-spec fields are read (go-kure/launcher#790), by the kind
-    and by the `pvc` trait alike (`claim_spec.go`). Each is written only when
-    authored, so a document that authors none builds the claim it built
-    before. A workload's `pvc` volume does not take them.
+**webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
+plus the full `DeploymentSpec`-level surface they share with `deployment` —
+`strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
+`progressDeadlineSeconds` (see ["Deployment-level
+properties"](common-config.md#deployment-level-properties-deployment-webservice-worker)). What still separates them from `deployment` is launcher's
+own opinions, which these two keep: `topologySpread` and the four-key
+`affinity` shorthand, and on `webservice` the `port` that drives the Service.
+Note the shorthand is what they keep — neither publishes the raw `corev1`
+`affinity` that `deployment` does. Both publish `tolerations` and
+`topologySpreadConstraints` as `deployment` does (see
+["Raw scheduling properties"](common-config.md#raw-scheduling-properties)); authored constraints need
+`topologySpread: false`.
 
-    | Property | Rule |
-    |----------|------|
-    | `selector{matchLabels, matchExpressions[]}` | A label query over the PersistentVolumes that may back the claim, parsed as a `statefulset` claim template's is. A claim with a selector is never dynamically provisioned. An empty selector is refused: this is launcher's own rule, the API server reads it as "every volume". |
-    | `dataSourceRef{apiGroup, kind, name, namespace}` | The object to populate the volume from, with the rules of upstream `validateDataSourceRef` (the `dataSourceRef` row under ["StatefulSet-level and claim-template properties"](common-config.md#statefulset-level-and-claim-template-properties)). |
-    | `volumeName` | The name of the PersistentVolume to bind to. Must be a DNS-1123 subdomain: launcher's own rule, since `ValidatePersistentVolumeClaimSpec` does not read the field and a value that cannot name a PersistentVolume would leave the claim Pending for good. |
-    | `volumeAttributesClassName` | A DNS-1123 subdomain (`ValidateClassName`). |
+### Outputs
 
-    **No policy check on `volumeName`.** It is accepted with no capability
-    gate and no EnvironmentPolicy method; the object kind policy
-    (`oam.ObjectKindPolicy`, go-kure/launcher#922) holds kinds, not this
-    field. A claim that names a volume binds to
-    that PersistentVolume and to no other, with no dynamic provisioning, so
-    **whoever may author a claim may ask for any PersistentVolume of the
-    cluster by name**. The cluster still decides: the volume must be unbound
-    or reserved for this claim, and must satisfy the claim's size, access
-    modes, class, attributes class and volume mode (the PersistentVolume
-    controller's `checkVolumeSatisfyClaim`). The storage default and maximum
-    still apply to the claim's `size`.
+The `webservice` rule implements the optional `oam.EndpointProvider`: it declares its own
+pods (`app: <component-name>`) on the declared `port` (its single `port` property drives both
+the container port and the Service port), letting a downstream platform synthesize generic
+app→app connections targeting a webservice. `worker` declares no in-cluster port and emits no
+Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
 
-    `dataSource` is refused: it is the superseded spelling of `dataSourceRef`,
-    which the API server mirrors into it. The long `resources` spelling of
-    `size` is not read on a standalone claim.
-  - `configmap` publishes `data` (string values only: a number or a boolean
-    is refused rather than stringified), `binaryData` (base64; a key may not
-    also appear in `data`) and `immutable`. The `data` values and the decoded
-    `binaryData` values together may hold at most 1,048,576 bytes, the limit
-    the API server enforces; a larger ConfigMap is refused at build time. That
-    check is the exported `CheckConfigMapSize(data, binaryData)`. A key the API
-    server refuses in a ConfigMap is refused by the exported
-    `ValidateConfigMapKey(field, key)`. Keys are checked in sorted order, so
-    with several bad entries the one reported is the same on every build. It is
-    a different type from the `configmap` trait, which attaches a ConfigMap to
-    another component. The trait is this kind's twin (go-kure/launcher#741): it
-    reads `data`, `binaryData` and `immutable` through the exported
-    `ParseConfigMapProperties(props)` and builds the ConfigMap through
-    `GenerateConfigMap(config, name, namespace, labels)`, so the same properties
-    give the same ConfigMap and the same refusals on both paths.
-- **secret** (go-kure/launcher#790) is the kind-named projection of a v1
-  Secret, on the recipe of `configmap`: it emits the Secret, named after
-  the component (or its `objectName`) and carrying the component's `app`
-  label, and nothing else, so a workload's `secret` volume, `envFrom` or
-  `secretKeyRef` names it by that name.
-  - It publishes `stringData` (plain string values: a number, a boolean or a
-    nested object is refused, not stringified), `data` (base64; a key may not
-    also appear in `stringData`, where the API server would let `stringData`
-    win silently), `type` and `immutable`. An unauthored `type` and
-    `immutable` stay unset (the API server stores `Opaque` for an unset
-    type), and the keys a type requires are left to the API server.
-  - Every entry is emitted under `data`, base64-encoded as the API serializes
-    it, and never under `stringData`: the object written is the object the
-    API server stores. **base64 is an encoding, not encryption**, so the
-    build output is as sensitive as the document, and so is every place that
-    output is committed or pushed to. Prefer a Secret created out of band (an
-    `external-secret` trait, a sealed or externally managed Secret) for
-    anything that must not be in the output.
-  - The decoded values together may hold at most 1,048,576 bytes, the limit
-    the API server enforces (the exported `CheckSecretSize(data)`); a key the
-    API server refuses is refused by the exported `ValidateSecretKey(field,
-    key)`. Keys are checked in sorted order. **No refusal carries a value**:
-    an entry is named by its key, a wrong value by its type, and a base64
-    error by its key alone.
-  - *Policy.* Unlike `configmap`, the kind has an `ApplyPolicy`: a policy
-    that forbids explicit secrets (`oam.ExplicitSecretPolicy`, see the
-    `pkg/oam` README) refuses the component with a violation naming it,
-    `secret: the environment policy forbids explicit secrets; reference a
-    Secret created out of band instead`, as it refuses the `secret` trait, a
-    `helm` component's `secretValues` and a Secret a `passthrough` or
-    `manifests` component carries. A policy that does not implement that
-    interface, and no policy, allow it.
-  - It is a different type from the `secret` trait, which attaches a Secret
-    to another component. The trait is this kind's twin: it reads the same
-    four properties through the exported `ParseSecretProperties(props)` and
-    builds the Secret through `GenerateSecret(config, name, namespace,
-    labels)`, and its schema is the kind's plus `name`, so the same
-    properties give the same Secret and the same refusals on both paths. Only
-    the ownership fields differ: the Secret's name, its labels, its namespace
-    and the bundle it is placed in.
-  - *Names.* The kind's Secret is claimed under role `object`. A `secret`
-    component and a `secret` trait naming one Secret are refused; the trait
-    itself claims no name. It names its own Secret under no role, so the two
-    meet among the generated objects (`generated-object collision: Secret
-    "shop/shared" is generated by both component "shared" and sub-application
-    "shared" of component "web"; …`), as a `configmap` component and trait
-    do. The Secret a `helm` component generates for
-    `secretValues` is claimed under role `values-secret`, as the same kind,
-    so a `secret` component under that name is refused as a name collision
-    with both named.
-- **namespace**, **limitrange**, **resourcequota** (go-kure/launcher#790) are
-  kind-named projections of one Kubernetes core object each, built on the
-  recipe of the `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore` kinds:
-  one schema key per json field of the object's spec type, the whole property
-  map decoded strictly into that type under the null contract, and two
-  spellings of one field refused. `TestCoreKindSchemas_CoverSpec` holds each
-  schema to the linked type by reflection. Each emits its object, named after
-  the component,
-  with the authored spec and nothing else: the handler adds no annotation and
-  no label of its own, not an `app` label either. The transform then sets the component
-  label on the object, as on every object a component owns
-  (go-kure/launcher#788). None
-  runs a pod or requests storage, so `ApplyPolicy` is a no-op. Like every
-  component, they are in no tier unless a tier annotation or placement policy
-  places them.
-  The properties are the spec fields, and `labels` and `annotations` for the
-  object's metadata (["The object's labels and annotations"](conventions.md#the-objects-labels-and-annotations-labels-annotations)).
-  - `namespace` publishes `finalizers`, the one field of
-    `corev1.NamespaceSpec`. A Namespace is cluster-scoped: the object carries
-    no namespace, whatever namespace the application is built for. The
-    component name is the Namespace's name, which the API holds to a DNS-1123
-    label (at most 63 characters, no dot), narrower than a component name;
-    any other name is refused, naming it. A Namespace that needs the Pod
-    Security Admission labels (`pod-security.kubernetes.io/enforce` and its
-    siblings) writes them under `labels`.
-  - `limitrange` publishes `limits`, the one field of `corev1.LimitRangeSpec`,
-    and emits the LimitRange in the build namespace. `limits` is required: the
-    Go type cannot omit it, so an unauthored one (absent or `null`) would be
-    written as `limits: null` and is refused with `limits: required …`. An
-    authored `limits: []` is kept: a LimitRange that enforces nothing. Each
-    limit's `type` is required for the same reason (`limits[1].type: required
-    …`), and two limits of one type are refused by path, as the API refuses
-    them. The other value rules (which type names exist, `min` at most `max`,
-    what a `Pod` limit may not set) are left to the API server. A quantity
-    written as a number is emitted in its canonical string form (`cpu: 2`
-    becomes `cpu: "2"`). The limits constrain the pods and claims of the
-    namespace at admission; the environment policy is not applied to them.
-  - `resourcequota` publishes `hard`, `scopes` and `scopeSelector`, the
-    fields of `corev1.ResourceQuotaSpec`, and emits the ResourceQuota in the
-    build namespace. The API requires none of them, so a component with no
-    properties is a quota that limits nothing. Which resource names, scopes
-    and selector operators exist is left to the API server. A quantity written
-    as a number is emitted in its canonical string form
-    (`persistentvolumeclaims: 10` becomes `"10"`). The quota bounds what the
-    namespace may hold in total; the environment policy is not applied to it.
-- **persistentvolume** (go-kure/launcher#790) is the kind-named projection of
-  a v1 PersistentVolume, on the recipe of `namespace`, `limitrange` and
-  `resourcequota`: one schema key per json field of
-  `corev1.PersistentVolumeSpec`, the property map decoded strictly into that
-  type, two spellings of one field refused, and one object named after the
-  component, with the authored spec; the handler adds no label and no
-  annotation of its own, and the transform sets the component label. The spec
-  embeds `corev1.PersistentVolumeSource`, so each volume source (`nfs`, `csi`,
-  `hostPath`, …) is a top-level property, as it is a top-level field of the
-  object's spec. A PersistentVolume is cluster-scoped: the object carries no
-  namespace, whatever namespace the application is built for. The API requires
-  `capacity`, `accessModes` and exactly one source; those and the other value
-  rules are left to the API server, so a component with no properties builds a
-  volume the server refuses. A quantity written as a number is emitted in its
-  canonical string form. The object's labels and annotations are the `labels`
-  and `annotations` properties.
+**`worker` is a component lowering rule, not a handler** (`WorkerRule`). It runs worker's own parse, then re-expresses the
+component as a `deployment` of the same name: the authored properties are
+forwarded, the four-key `affinity` shorthand is evaluated exactly as before
+and forwarded as the raw `corev1` `affinity` (omitted when it evaluates to
+nothing), and `topologySpread` becomes a synthesized `topology-spread`
+trait placed before the authored traits (none when `topologySpread: false`).
+Authored traits and annotations are forwarded unchanged. Worker's published
+schema, its generated output and the `app: <component-name>` selector are
+unchanged — every example and golden fixture builds byte-identically — and
+the emitted component carries `Origin.Rule` `component/worker@v1alpha1`. Two
+differences are deliberate. A worker refused by its own parse now reads
+`component "w" (type "worker") in document …: <cause>` (the lowering
+engine's prefix) where it read `component "w": <cause>`; the cause is
+unchanged. A trait-lowering error on a worker's trait gains one chain line
+naming the `component/worker@v1alpha1` step; a trait handler's error reads as before.
+The former handler's affinity label-syntax check (see [Common config](common-config.md#common-config)) runs
+in the rule, before the raw `affinity` is forwarded, with the same
+`affinity: the shorthand evaluates to an affinity the API server would
+refuse: …` text. A key worker's parse refuses with a reason is refused
+there: an upstream field of its refusal maps, or `podActiveDeadlineSeconds`,
+which only Job pods may set. Any other key worker does not declare is dropped
+rather than forwarded to `deployment`; `kurel build` refuses both before
+lowering anyway.
 
-  **Policy.** Unlike `namespace`, `limitrange` and `resourcequota`, a
-  PersistentVolume is held to the
-  environment policy (`enforcePersistentVolumePolicy`):
-  - A `hostPath` or `local` source is refused unless `AllowHostPathVolumes()`
-    allows it. Both name a path on the node (`local` a disk, partition or
-    directory there), and a pod that binds the volume through a claim reads
-    and writes that path, as it does through a `hostPath` volume of its own.
-  - `capacity.storage` is held to the storage maximum (`MaxStorageSize()`), as
-    the storage a claim requests is.
+**Both rules emit the component's ServiceAccount as a `serviceaccount`
+member** unless `serviceAccountName` is authored. A
+`worker` therefore lowers to a same-name sibling group of a `deployment` and
+a `serviceaccount`; a `webservice` to a `deployment`, a `service` and a
+`serviceaccount`. The member carries `automountServiceAccountToken: false`,
+the component's annotations, and the authored `prune-protection` and
+`force-replace` traits. The `deployment` member is handed the account's
+object name as `serviceAccountName` (the component name, unless
+`serviceAccountObjectName` or the `Naming` hook names the account, below),
+so it runs as that account and generates none of its own. The output is unchanged: the same ServiceAccount,
+in the same place, so every golden builds byte-identically. One consequence
+for a library caller: a registry that lowers `webservice` or `worker` must
+register a `serviceaccount` component handler too, or the build fails with
+`member type "serviceaccount" has no component handler`.
 
-  One check covers every path that can produce the object: this kind, and the
-  rendered-object check that template delivery (`helmtemplate`), `passthrough`
-  and `manifests` run, where the refusal names the object (`passthrough: object
-  PersistentVolume "data": spec.hostPath: …`). On those three paths a
-  PersistentVolume in an API version the build cannot read is refused, since
-  its source and capacity cannot be checked.
+**Both rules turn each claim a `pvc` volume describes into a synthesized
+`pvc` trait** on the `deployment` member, named
+`<component>-<volume>` as before unless the volume's `claimObjectName` or
+the `Naming` hook names it (below), and rewrite the volume to reference it
+by `claimName`, keeping `accessModes` so the non-RWX constraints still see it.
+The claims are generated as before, after the component's own objects. A
+registry that lowers `webservice` or `worker` must register the `pvc` trait
+handler too.
 
-  Of the other source types of `corev1.PersistentVolumeSource` (k8s.io/api
-  v0.37.1, `core/v1/types.go`), all but `csi` and `flexVolume` name a remote
-  endpoint or disk, not a path on the node, and are not gated. **Not covered:** a `csi` or
-  `flexVolume` source. Each names a driver and options only the driver
-  interprets, and no field says whether a node path is exposed; a pod's `csi`
-  and `flexVolume` volumes are unchecked for the same reason. A driver that
-  exposes a node path therefore passes the gate. This is a decided limit
-  (go-kure/launcher#794, item 12): the environment policy makes no statement
-  about driver-defined volumes, on pods or on PersistentVolumes. One (an
-  allowlist of driver names, for instance) would be a new part of the policy
-  every consumer implements, and no use case asked for it.
+**`webservice` is a component lowering rule, not a handler**
+(`WebserviceRule`). It runs webservice's own parse,
+then re-expresses the component as a same-name sibling group (see `pkg/oam`
+"Same-name sibling groups"): a `deployment` and then a `service`, both named
+after the component, deployed as one component — one tier, one
+bundle. The `deployment` member gets the authored properties
+webservice declares except `port`, `topologySpread` and `affinity`, plus
+the main container's one port `{name: http, containerPort: <port>}`; the
+`affinity` shorthand and `topologySpread` are handled as on `worker`. The
+`service` member gets one port `{name: http, port: <port>}` and the default
+selector `app: <component-name>`. Annotations go to both members. Each
+authored trait is forwarded unchanged, in authored order, to the member it
+acts on: `expose`, `ingress` and `httproute` go to the `service`;
+`prune-protection` and `force-replace` go to both; every other trait goes
+to the `deployment`. That includes `fluxcd-patches` and `fluxcd-postbuild`
+(not built in; a consumer that delivers through Flux registers them) and any
+trait type an extension registered, since the `deployment` member holds the
+pods. Webservice's published schema and its generated objects are
+unchanged, in the handler's order (Deployment, Service, ServiceAccount,
+claims). Each emitted component carries `Origin.Rule`
+`component/webservice@v1alpha1`. Four differences are deliberate. A refusal from
+webservice's own parse gains the lowering engine's prefix, as on `worker`;
+the cause is unchanged. The synthesized inbound NetworkPolicy opens an
+ingress `portName: http` as the port's number, where the handler opened the
+name `http`, which the container port also carried; the pods admitted are
+the same. Likewise, an ingress path on another component whose `backend`
+names a webservice's Service by `portName` opens that port's number on the
+webservice's pods, translated as on a `service` component. A route on
+another component whose `backend` names a webservice's Service on a port
+that Service does not expose (`port: 9090` on a webservice whose `port` is
+8080) no longer opens that port on the webservice's pods: the `service`
+member opens only its own declared ports, as a `service` component does.
+The route was already broken, since the Service has no such port to
+forward. Webservice is no longer a handler a library caller converts with
+directly, so the nameless-config fallback the handlers keep does not apply
+to it: the engine only lowers a named component.
 
-  **Breaking:** before this kind, a PersistentVolume that a chart rendered, a
-  `passthrough` component held or a `manifests` source yielded reached the
-  output unchecked. One with a `hostPath` or `local` source, or with
-  `capacity.storage` over the storage maximum, is now refused where it built
-  before — and with no policy passed a `hostPath` or `local` one is always
-  refused, since `NoopPolicy` allows no hostPath volume. A consumer allows it
-  through its policy (`AllowHostPathVolumes()`, `MaxStorageSize()`), not per
-  component.
+**A `webservice` component name must be a valid Service name.** It always
+emits a Service named after the component, and the API server validates
+a Service's `metadata.name` as a DNS-1123 label: at most 63 characters,
+lowercase letters, digits and `-`, starting and ending with a letter or
+digit. That is stricter than the DNS-1123 subdomain every component name
+already passes, so `api.v1` and a 64-character name are refused at
+conversion (`name: "api.v1" is not a valid Service name, which must be a
+DNS-1123 label`) instead of building a manifest the cluster rejects on
+apply. A leading digit (`1api`) is accepted: that
+is the rule under RelaxedServiceNameValidation, on by default from Kubernetes 1.36, and a
+build whose `spec.kubernetesVersion` is below 1.36 refuses such a Service at generation,
+unless its `spec.featureGates` sets the gate on (`docs/delivery-scope.md` §3.5). `Generate` applies the
+same rule to the Application name it is handed. `worker` emits no Service
+and keeps accepting such a name, within the container-name rule above.
+The rule holds for the component name whatever the Service is named:
+`serviceObjectName` (below) does not lift it.
+
+**`deploymentObjectName`, `serviceObjectName` and
+`serviceAccountObjectName` name the objects the component generates**, each in place of the component name and each on its
+own: the Deployment, the Service (`webservice` only; `worker` generates
+none and does not declare the property) and the ServiceAccount. A name is
+used as written, never shortened. The Deployment's and the ServiceAccount's
+are DNS-1123 subdomains, the Service's a DNS-1123 label; anything else is
+refused (`naming the Service: serviceObjectName "web.v1" cannot be the name
+for role "workload-service": not a valid DNS-1123 label: …`). Without the
+property the `Naming` hook is asked (roles `workload-deployment`,
+`workload-service`, `workload-serviceaccount`), and without an answer the
+object keeps the component name, so a document that sets none builds
+byte-identically. Each name is held against every other resolved name of
+its kind and namespace: two components given one `serviceObjectName`, or a
+`service` component whose object carries a `webservice`'s Service name, are
+refused as a name collision with both named.
+- *They name the objects alone.* The members keep the component's name, so
+  the `app` label, the pod template's labels, the Deployment's and the
+  Service's selectors, the main container, the claims' default names
+  (`<component>-<volume>`) and every name a trait derives (`<component>-hpa`,
+  `<component>-httproute`) stay as they were.
+- *A `pvc` volume's `claimObjectName` names the claim that volume
+  generates* (role `workload-volume-claim`), in place of
+  `<component>-<volume>`, used as written: a DNS-1123 subdomain, never
+  shortened. The volume mounts the claim by that name. Without it the
+  `Naming` hook is asked for each such volume. A volume with `claimName`
+  references an existing claim and generates none, so `claimObjectName`
+  beside it is refused and the hook is not asked for it. Two volumes, or
+  a volume and another component, that give one claim name are refused as
+  a name collision.
+- *What launcher writes to a renamed object follows it.* The `scaler`
+  trait's `scaleTargetRef` names the Deployment, whatever the Service and
+  the ServiceAccount are named. A routing trait's own backend (`expose`,
+  `ingress`, `httproute`) is the Service, and a route naming that Service
+  still resolves to the component for the synthesized NetworkPolicy. The
+  pods' `serviceAccountName` and the `rbac` trait's subject name the
+  ServiceAccount.
+- **A renamed Service changes its DNS name: the Service's name is the name
+  it is reached at in the cluster. Launcher builds no such address, so every
+  address written with the component name (an `env` value, a URL in another
+  component's properties, a backend another component's route names) is the
+  author's to change.**
+- *`serviceAccountObjectName` names the account the component generates,
+  `serviceAccountName` an account that exists.* With `serviceAccountName`
+  the component generates none, so the two together are refused
+  (`serviceAccountObjectName and serviceAccountName are both set: …`), and
+  the hook is not asked for an account.
+
+### Validation
+
+**An ingress `portName` on a `webservice` must be `http`.** The Service's
+one port is named `http`, so an `ingress` path whose implicit backend is
+this component's Service (no `backend`, or `backend` naming that Service)
+and that addresses it by any other `portName` is refused at build time
+(`cannot route implicit backend to port "name"`), just as a numbered
+`port` other than the component's `port` is.
+
+### Example
+
+- `worker`: The component in `pkg/cmd/kurel/testdata/worker-minimal/app.yaml`, built against
+  the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares
+  the two.
+- `webservice`: No example yet.
+
+## deployment
+
+### Properties
+
+**deployment** — the kind-named Deployment (see ["Deployment-level
+properties"](common-config.md#deployment-level-properties-deployment-webservice-worker)): the shared container-level, pod-level and
+`DeploymentSpec`-level surface, the last of which it now shares with
+`webservice` and `worker` rather than owning. What distinguishes it is mostly
+what it leaves out: no `topologySpread`, no four-key `affinity` shorthand, no
+`port`; it emits no Service, and declares one endpoint per main-container
+`ports` entry (see ["Main container ports"](common-config.md#main-container-ports)). It is not `worker` minus
+a few things either — it reads nulls as omissions across its whole surface,
+which the role kinds do not. The one thing it
+adds is the raw `corev1` scheduling surface the role kinds lack: `affinity`,
+`tolerations` and `topologySpreadConstraints` as the API shapes
+(see ["Raw scheduling properties"](common-config.md#raw-scheduling-properties)). That is the
+same distinction in the other direction — the role kinds carry the opinion,
+this kind carries the API.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/deployment-ports/app.yaml`, built against the
+`cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares the
+two.
+
+## service
+
+### Properties
+
+**service** — the kind-named Service, an independent
+component rather than half of a workload: it emits the Service and nothing
+else, and the workload component whose pods it selects owns their
+ServiceAccount. `selector` defaults to `app: <component name>`, the label
+every workload kind puts on its pods; set it when the Service fronts a
+workload named differently (a `deployment` named `api-server` behind a
+`service` named `api`). `ports` is the full `corev1.ServicePort` list, at
+least one entry unless the Service is headless or of type `ExternalName`: `port` (required), `targetPort` (a number or a container
+port name, published as the `Types: [integer, string]` union, so a value of any other type is rejected by property
+validation before the parser sees it; defaults to `port`), `protocol` (`TCP`, `UDP` or `SCTP`; defaults
+to `TCP`), `name` (required once there is more than one port; names and
+port/protocol pairs must be unique), `nodePort` (1-65535, only with `type`
+`NodePort` or `LoadBalancer`, unique per protocol, as the API requires; two
+refusals are launcher's own: `0`, which the API reads as "allocate one" —
+leave the key out instead — and a node port on an `ExternalName` Service,
+which the API accepts; the
+cluster's own node port range is narrower and is checked on apply) and
+`appProtocol` (a qualified name such as `http` or `kubernetes.io/h2c`).
+`type` is `ClusterIP` (default), `NodePort`, `LoadBalancer` or
+`ExternalName`. An empty `selector` is refused.
+
+**ExternalName.** `type: ExternalName` emits a DNS
+alias for `externalName`, which is then required: a DNS-1123 subdomain,
+with one trailing dot allowed. The Service selects no pods, so `selector`
+is refused with it (launcher's own rule; the API accepts and ignores one),
+and so are `clusterIP: None`, `ipFamilies` and `ipFamilyPolicy`; `ports`
+is optional. On any other type `externalName` is refused (launcher's own
+rule; the API ignores it there). Whatever ports it lists, an ExternalName
+Service has no first port for a routing trait and no NetworkPolicy
+endpoint: an `ingress` or `httproute` trait refuses it as an implicit
+backend (`component "db" has no service port`), a trait-level
+`servicePort` is refused, and it declares no endpoint. As on a port-less
+headless Service, the refusal is of the component as a backend, not of
+the trait: a trait on it that names another Service explicitly is carried
+as on any component, and that route's policy is the routed Service's. It
+still owns its name
+(`BackendServiceName`): a route from another component naming it is a
+route to a Service of this application, so that route's `backendSelector`
+is not trusted, and **no inbound NetworkPolicy is synthesized for that
+route**, in a same-name sibling group either: the Service leads to no pods
+of the cluster, and the group's component label is on its workload's
+pods, which the Service does not lead to. Named apart from its component
+(`objectName`), it owns that name instead: a route naming the Service's
+name gets no policy, and one naming the component's name is a route to a
+Service from elsewhere.
+
+**Further `ServiceSpec` fields**. Each is written
+only when authored; unauthored, the API server's own default applies. The
+rules are the API server's (`validateService`), except where marked as
+launcher's own.
+
+| Property | Rules |
+|----------|-------|
+| `externalTrafficPolicy` | `Cluster` or `Local`. Only with `type` `NodePort` or `LoadBalancer`. |
+| `internalTrafficPolicy` | `Cluster` or `Local`. |
+| `trafficDistribution` | `PreferSameZone`, `PreferSameNode`, or `PreferClose` (the deprecated name of `PreferSameZone`). `PreferSameZone` and `PreferSameNode` need the `PreferSameTrafficDistribution` feature gate, on by default from Kubernetes 1.34: a build for a `ClusterProfile` whose `spec.kubernetesVersion` is below 1.34 refuses them. |
+| `sessionAffinity` | `None` or `ClientIP`. |
+| `sessionAffinityConfig` | Only with `sessionAffinity: ClientIP`. `clientIP.timeoutSeconds` is required once the key is authored (launcher's own: the API server would default it), 1-86400. |
+| `publishNotReadyAddresses` | A boolean; written only when `true`. |
+| `ipFamilies` | `IPv4` and/or `IPv6`, each once, at most two. |
+| `ipFamilyPolicy` | `SingleStack`, `PreferDualStack` or `RequireDualStack`; `SingleStack` is refused with two `ipFamilies` (the API server's allocator refuses it). |
+| `loadBalancerClass` | A qualified name. Only with `type: LoadBalancer`. |
+| `loadBalancerSourceRanges` | CIDRs in canonical form (launcher's own: the API tolerates surrounding spaces and some non-canonical forms). Only with `type: LoadBalancer`. |
+| `loadBalancerIP` | Only with `type: LoadBalancer` (launcher's own: the API ignores it elsewhere). The value is not validated, as in the API. |
+| `allocateLoadBalancerNodePorts` | A boolean. Only with `type: LoadBalancer`. |
+| `healthCheckNodePort` | 1-65535. Only with `type: LoadBalancer` and `externalTrafficPolicy: Local`. `0` is refused (launcher's own: the API reads it as "allocate one"; leave the key out instead). |
+
+`externalIPs` and `clusterIPs` are refused, and so is a literal
+`clusterIP` address. `externalIPs` routes traffic for addresses the
+cluster does not manage and is deprecated by the API; a Service's cluster
+IPs are the cluster's to allocate. In a document all three are refused by
+property validation before the parser runs: `externalIPs` and `clusterIPs`
+as unsupported fields, each with the kind's reason after the list of
+allowed keys, and a literal `clusterIP` address as
+a value outside the property's enum, which has `None` alone.
+
+**Headless.** `clusterIP: None` emits
+`spec.clusterIP: None`: no virtual IP, and cluster DNS resolves the name to
+the selected pods, as a StatefulSet's governing Service needs. It requires
+`type: ClusterIP` (the default), since the API server refuses a headless
+`NodePort` or `LoadBalancer` Service. `None` is the only value: a literal
+address is refused, and so is an empty string, rather than read as
+absence. A headless Service may have no `ports` at all; without
+`clusterIP`, at least one port is still required (`ports: at least one
+port is required`), except on an `ExternalName` Service (above). A
+port-less Service has no first port, so routing
+traits refuse it as an implicit backend, refuse a trait-level
+`servicePort` on it, and it declares no NetworkPolicy endpoint. It still
+owns its name (`BackendServiceName`): a route from another component
+naming it is a route to a Service of this application, not an external
+backend, so that route's `backendSelector` is not trusted and, with no
+TCP port to translate, no allow is synthesized. Without `clusterIP` the
+Service carries no `clusterIP`, as before.
+
+### Outputs
+
+**Synthesized NetworkPolicy.** The `{component}-allow-ingress-traffic`
+policy for traffic routed to a `service` selects its `selector` pods — not
+the component label, which no pod carries — and opens the `targetPort` of
+each routed TCP port. A route that reaches only a UDP or SCTP port
+synthesizes no policy, and neither does a route to an `ExternalName`
+Service, which has no pods to open a port on (above). In a same-name
+sibling group whose `selector`
+picks a sibling's own pods, the policy selects the component label
+instead, but only when `IdentityTargetPorts` is true: the Service has at
+least one port and every port, whatever its protocol, has a numeric
+`targetPort` equal to its own `port`. Otherwise it keeps the `selector`.
+Either way the routed ports are translated to their `targetPort` and
+only TCP ones are opened (see `pkg/oam` "Same-name sibling groups").
+
+It implements `oam.EndpointProvider`: one endpoint, the `selector` pods on
+every TCP `targetPort` (deduplicated). A Service with no TCP port declares
+none, and neither does an `ExternalName` Service.
+
+### Validation
+
+**The component name must be a valid Service name.** It becomes the
+Service's `metadata.name`, which the API server validates as a DNS-1123
+label: at most 63 characters, lowercase letters, digits and `-`, starting
+and ending with a letter or digit. That is stricter than the DNS-1123
+subdomain every component name already passes, so `api.v1` and a
+64-character name are refused here (`name: "api.v1" is not a valid Service
+name, which must be a DNS-1123 label`) instead of building a manifest the
+cluster rejects on apply. `Generate` applies the same rule to the
+Application name it is handed. A leading digit (`1api`) is accepted: that
+is the rule under RelaxedServiceNameValidation, on by default from Kubernetes 1.36, and a
+build whose `spec.kubernetesVersion` is below 1.36 refuses such a Service at generation,
+unless its `spec.featureGates` sets the gate on (`docs/delivery-scope.md` §3.5).
+
+**Routing traits use the first port.** `ingress`, `httproute` and `expose`
+(which lowers to one of the two) on a `service` component resolve their
+implicit backend to `ports[0].port` and refuse any other port on it,
+whether it is named by number (`cannot route implicit backend to port N`)
+or by an ingress path's `portName` (`cannot route implicit backend to port
+"name"`); a `portName` must be the first port's own name, so an unknown
+name is refused too. Naming the component's own Service as the backend
+(`backend: api` on an ingress path, `backendRefs: [{name: api, port:
+9000}]` on an httproute) is still the implicit backend and is refused the
+same way. To reach a later port, put the routing trait on another
+component and name this Service there as an explicit backend, with that
+port.
+
+**No policy check.** `service` has no `ApplyPolicy`, deliberately: none of its properties maps to an
+environment-policy method, so there is nothing to enforce. The policy
+makes no statement about a Service's `type`, so `NodePort` and
+`LoadBalancer` build under every policy. **`type: ExternalName` has no
+capability gate either: whoever may author a `service` component may give
+an in-cluster name to any DNS name outside the cluster**, and workloads
+that resolve the Service name are sent there. `nodePort`,
+`loadBalancerSourceRanges`, `loadBalancerIP` and `externalTrafficPolicy`
+are accepted the same way. The object kind policy
+(`oam.ObjectKindPolicy`) holds kinds, not these
+fields: it can keep Services out of a build, not one `type`.
+
+### Example
+
+No example yet.
+
+## serviceaccount, persistentvolumeclaim, configmap
+
+**serviceaccount**, **persistentvolumeclaim**, **configmap** are kind-named projections of one object each.
+
+### Properties
+
+`serviceaccount` publishes `automountServiceAccountToken` and
+`imagePullSecrets` (`[{name}]`). An unauthored
+`automountServiceAccountToken` stays unset, which Kubernetes reads as
+true. The account a role kind generates sets it to false, so a
+`serviceaccount` replacing that account authors `false` to keep the same
+posture. A workload runs as it through `serviceAccountName`, which also
+stops a role kind from generating its own account.
+
+`persistentvolumeclaim` publishes `size`, `storageClassName`,
+`accessModes` (default `[ReadWriteOnce]`) and `volumeMode`. The claim is
+built by the same `BuildPVC` as a `pvc` volume, so the two agree on every
+field they share, including the explicit-empty `storageClassName: ""`,
+which requests no class. The `pvc` trait is this kind's twin: it runs the kind's own `ParseClaimProperties`,
+`ApplyClaimPolicy` and `GenerateClaim`, so the same properties build the
+same claim. Only the ownership fields differ: the claim's name, its `app`
+label, namespace and bundle. An unauthored `storageClassName` (absent or
+`null`) comes from the ClusterProfile `pvc` capability's
+`storageClassName`, as the trait's does; with no
+binding it stays unset, which is the cluster's default class. **Pre-GA
+output change**: the kind used to ignore that binding, so an existing
+claim built from it got the cluster's default class when it was created,
+if the cluster had one. A claim's assigned `storageClassName` cannot
+change: if the binding's class differs from it, the claim fails to apply
+until it is recreated or the assigned class is authored. A claim created
+with no class may take one later, so it applies. An unauthored `size`
+comes from the EnvironmentPolicy storage default; with neither, the build
+fails with `size: required …`. The policy's maximum storage size applies
+either way. A workload mounts the claim through a `pvc` volume's
+`claimName` (see ["Referencing an existing claim"](common-config.md#referencing-an-existing-claim-pvcclaimname)). A claim name
+another component also generates (for example a `pvc` trait of the same
+name) is refused as a generated-object collision.
+
+Four more claim-spec fields are read, by the kind
+and by the `pvc` trait alike (`claim_spec.go`). Each is written only when
+authored, so a document that authors none builds the claim it built
+before. A workload's `pvc` volume does not take them.
+
+| Property | Rule |
+|----------|------|
+| `selector{matchLabels, matchExpressions[]}` | A label query over the PersistentVolumes that may back the claim, parsed as a `statefulset` claim template's is. A claim with a selector is never dynamically provisioned. An empty selector is refused: this is launcher's own rule, the API server reads it as "every volume". |
+| `dataSourceRef{apiGroup, kind, name, namespace}` | The object to populate the volume from, with the rules of upstream `validateDataSourceRef` (the `dataSourceRef` row under ["StatefulSet-level and claim-template properties"](common-config.md#statefulset-level-and-claim-template-properties)). |
+| `volumeName` | The name of the PersistentVolume to bind to. Must be a DNS-1123 subdomain: launcher's own rule, since `ValidatePersistentVolumeClaimSpec` does not read the field and a value that cannot name a PersistentVolume would leave the claim Pending for good. |
+| `volumeAttributesClassName` | A DNS-1123 subdomain (`ValidateClassName`). |
+
+`configmap` publishes `data` (string values only: a number or a boolean
+is refused rather than stringified), `binaryData` (base64; a key may not
+also appear in `data`) and `immutable`. The `data` values and the decoded
+`binaryData` values together may hold at most 1,048,576 bytes, the limit
+the API server enforces; a larger ConfigMap is refused at build time. That
+check is the exported `CheckConfigMapSize(data, binaryData)`. A key the API
+server refuses in a ConfigMap is refused by the exported
+`ValidateConfigMapKey(field, key)`. Keys are checked in sorted order, so
+with several bad entries the one reported is the same on every build. It is
+a different type from the `configmap` trait, which attaches a ConfigMap to
+another component. The trait is this kind's twin: it
+reads `data`, `binaryData` and `immutable` through the exported
+`ParseConfigMapProperties(props)` and builds the ConfigMap through
+`GenerateConfigMap(config, name, namespace, labels)`, so the same properties
+give the same ConfigMap and the same refusals on both paths.
+
+### Outputs
+
+Each
+emits that object, named after the component, and nothing else, so another
+component refers to it by the component name. They are the authorable forms
+of the objects the workload kinds generate for themselves today, and they
+carry no launcher opinions. Like every component, they are in no tier
+unless a tier annotation or placement policy places them.
+
+### Validation
+
+`serviceaccount`
+and `configmap` have no `ApplyPolicy`, deliberately: none of their properties maps to an environment-policy method
+(`imagePullSecrets` names Secrets, not a registry), so there is nothing to
+enforce. `persistentvolumeclaim` has one, for the storage default and
+maximum.
+
+**No policy check on `volumeName`.** It is accepted with no capability
+gate and no EnvironmentPolicy method; the object kind policy
+(`oam.ObjectKindPolicy`) holds kinds, not this
+field. A claim that names a volume binds to
+that PersistentVolume and to no other, with no dynamic provisioning, so
+**whoever may author a claim may ask for any PersistentVolume of the
+cluster by name**. The cluster still decides: the volume must be unbound
+or reserved for this claim, and must satisfy the claim's size, access
+modes, class, attributes class and volume mode (the PersistentVolume
+controller's `checkVolumeSatisfyClaim`). The storage default and maximum
+still apply to the claim's `size`.
+
+`dataSource` is refused: it is the superseded spelling of `dataSourceRef`,
+which the API server mirrors into it. The long `resources` spelling of
+`size` is not read on a standalone claim.
+
+### Example
+
+- `serviceaccount`: The component in
+  `pkg/cmd/kurel/testdata/serviceaccount-component/app.yaml`, built against the `cluster.yaml`
+  beside it, gives the `expected.yaml` beside it. The fixture test compares the two.
+- `persistentvolumeclaim`: The component in
+  `pkg/cmd/kurel/testdata/persistentvolumeclaim-component/app.yaml`, built against the
+  `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares the
+  two.
+- `configmap`: The component in `pkg/cmd/kurel/testdata/configmap-component/app.yaml`, built
+  against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test
+  compares the two.
+
+## secret
+
+**secret** is the kind-named projection of a v1
+Secret, on the recipe of `configmap`: it emits the Secret, named after
+the component (or its `objectName`) and carrying the component's `app`
+label, and nothing else, so a workload's `secret` volume, `envFrom` or
+`secretKeyRef` names it by that name.
+
+### Properties
+
+It publishes `stringData` (plain string values: a number, a boolean or a
+nested object is refused, not stringified), `data` (base64; a key may not
+also appear in `stringData`, where the API server would let `stringData`
+win silently), `type` and `immutable`. An unauthored `type` and
+`immutable` stay unset (the API server stores `Opaque` for an unset
+type), and the keys a type requires are left to the API server.
+
+It is a different type from the `secret` trait, which attaches a Secret
+to another component. The trait is this kind's twin: it reads the same
+four properties through the exported `ParseSecretProperties(props)` and
+builds the Secret through `GenerateSecret(config, name, namespace,
+labels)`, and its schema is the kind's plus `name`, so the same
+properties give the same Secret and the same refusals on both paths. Only
+the ownership fields differ: the Secret's name, its labels, its namespace
+and the bundle it is placed in.
+
+### Outputs
+
+Every entry is emitted under `data`, base64-encoded as the API serializes
+it, and never under `stringData`: the object written is the object the
+API server stores. **base64 is an encoding, not encryption**, so the
+build output is as sensitive as the document, and so is every place that
+output is committed or pushed to. Prefer a Secret created out of band (an
+`external-secret` trait, a sealed or externally managed Secret) for
+anything that must not be in the output.
+
+*Names.* The kind's Secret is claimed under role `object`. A `secret`
+component and a `secret` trait naming one Secret are refused; the trait
+itself claims no name. It names its own Secret under no role, so the two
+meet among the generated objects (`generated-object collision: Secret
+"shop/shared" is generated by both component "shared" and sub-application
+"shared" of component "web"; …`), as a `configmap` component and trait
+do. The Secret a `helm` component generates for
+`secretValues` is claimed under role `values-secret`, as the same kind,
+so a `secret` component under that name is refused as a name collision
+with both named.
+
+### Validation
+
+The decoded values together may hold at most 1,048,576 bytes, the limit
+the API server enforces (the exported `CheckSecretSize(data)`); a key the
+API server refuses is refused by the exported `ValidateSecretKey(field,
+key)`. Keys are checked in sorted order. **No refusal carries a value**:
+an entry is named by its key, a wrong value by its type, and a base64
+error by its key alone.
+
+*Policy.* Unlike `configmap`, the kind has an `ApplyPolicy`: a policy
+that forbids explicit secrets (`oam.ExplicitSecretPolicy`, see the
+`pkg/oam` README) refuses the component with a violation naming it,
+`secret: the environment policy forbids explicit secrets; reference a
+Secret created out of band instead`, as it refuses the `secret` trait, a
+`helm` component's `secretValues` and a Secret a `passthrough` or
+`manifests` component carries. A policy that does not implement that
+interface, and no policy, allow it.
+
+### Example
+
+No example yet.
+
+## namespace, limitrange, resourcequota
+
+**namespace**, **limitrange**, **resourcequota** are
+kind-named projections of one Kubernetes core object each, built on the
+recipe of the `cnpg-pooler`, `cnpg-database` and `cnpg-objectstore` kinds:
+one schema key per json field of the object's spec type, the whole property
+map decoded strictly into that type under the null contract, and two
+spellings of one field refused.
+
+### Properties
+
+The properties are the spec fields, and `labels` and `annotations` for the
+object's metadata (["The object's labels and annotations"](conventions.md#the-objects-labels-and-annotations-labels-annotations)).
+
+`namespace` publishes `finalizers`, the one field of
+`corev1.NamespaceSpec`. A Namespace is cluster-scoped: the object carries
+no namespace, whatever namespace the application is built for. The
+component name is the Namespace's name, which the API holds to a DNS-1123
+label (at most 63 characters, no dot), narrower than a component name;
+any other name is refused, naming it. A Namespace that needs the Pod
+Security Admission labels (`pod-security.kubernetes.io/enforce` and its
+siblings) writes them under `labels`.
+
+`limitrange` publishes `limits`, the one field of `corev1.LimitRangeSpec`,
+and emits the LimitRange in the build namespace. `limits` is required: the
+Go type cannot omit it, so an unauthored one (absent or `null`) would be
+written as `limits: null` and is refused with `limits: required …`. An
+authored `limits: []` is kept: a LimitRange that enforces nothing. Each
+limit's `type` is required for the same reason (`limits[1].type: required
+…`), and two limits of one type are refused by path, as the API refuses
+them. The other value rules (which type names exist, `min` at most `max`,
+what a `Pod` limit may not set) are left to the API server. A quantity
+written as a number is emitted in its canonical string form (`cpu: 2`
+becomes `cpu: "2"`). The limits constrain the pods and claims of the
+namespace at admission; the environment policy is not applied to them.
+
+`resourcequota` publishes `hard`, `scopes` and `scopeSelector`, the
+fields of `corev1.ResourceQuotaSpec`, and emits the ResourceQuota in the
+build namespace. The API requires none of them, so a component with no
+properties is a quota that limits nothing. Which resource names, scopes
+and selector operators exist is left to the API server. A quantity written
+as a number is emitted in its canonical string form
+(`persistentvolumeclaims: 10` becomes `"10"`). The quota bounds what the
+namespace may hold in total; the environment policy is not applied to it.
+
+### Outputs
+
+Each emits its object, named after
+the component,
+with the authored spec and nothing else: the handler adds no annotation and
+no label of its own, not an `app` label either. The transform then sets the component
+label on the object, as on every object a component owns.
+
+Like every
+component, they are in no tier unless a tier annotation or placement policy
+places them.
+
+### Validation
+
+None
+runs a pod or requests storage, so `ApplyPolicy` is a no-op.
+
+### Example
+
+- `namespace`: The component in `pkg/cmd/kurel/testdata/namespace-component/app.yaml`, built
+  against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test
+  compares the two.
+- `limitrange`: The component in `pkg/cmd/kurel/testdata/limitrange-component/app.yaml`, built
+  against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test
+  compares the two.
+- `resourcequota`: The component in `pkg/cmd/kurel/testdata/resourcequota-component/app.yaml`,
+  built against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.
+
+## persistentvolume
+
+### Properties
+
+**persistentvolume** is the kind-named projection of
+a v1 PersistentVolume, on the recipe of `namespace`, `limitrange` and
+`resourcequota`: one schema key per json field of
+`corev1.PersistentVolumeSpec`, the property map decoded strictly into that
+type, two spellings of one field refused, and one object named after the
+component, with the authored spec; the handler adds no label and no
+annotation of its own, and the transform sets the component label. The spec
+embeds `corev1.PersistentVolumeSource`, so each volume source (`nfs`, `csi`,
+`hostPath`, …) is a top-level property, as it is a top-level field of the
+object's spec.
+
+### Outputs
+
+A PersistentVolume is cluster-scoped: the object carries no
+namespace, whatever namespace the application is built for. The API requires
+`capacity`, `accessModes` and exactly one source; those and the other value
+rules are left to the API server, so a component with no properties builds a
+volume the server refuses. A quantity written as a number is emitted in its
+canonical string form. The object's labels and annotations are the `labels`
+and `annotations` properties.
+
+### Validation
+
+**Policy.** Unlike `namespace`, `limitrange` and `resourcequota`, a
+PersistentVolume is held to the
+environment policy (`enforcePersistentVolumePolicy`):
+- A `hostPath` or `local` source is refused unless `AllowHostPathVolumes()`
+  allows it. Both name a path on the node (`local` a disk, partition or
+  directory there), and a pod that binds the volume through a claim reads
+  and writes that path, as it does through a `hostPath` volume of its own.
+- `capacity.storage` is held to the storage maximum (`MaxStorageSize()`), as
+  the storage a claim requests is.
+
+One check covers every path that can produce the object: this kind, and the
+rendered-object check that template delivery (`helmtemplate`), `passthrough`
+and `manifests` run, where the refusal names the object (`passthrough: object
+PersistentVolume "data": spec.hostPath: …`). On those three paths a
+PersistentVolume in an API version the build cannot read is refused, since
+its source and capacity cannot be checked.
+
+Of the other source types of `corev1.PersistentVolumeSource` (k8s.io/api
+v0.37.1, `core/v1/types.go`), all but `csi` and `flexVolume` name a remote
+endpoint or disk, not a path on the node, and are not gated. **Not covered:** a `csi` or
+`flexVolume` source. Each names a driver and options only the driver
+interprets, and no field says whether a node path is exposed; a pod's `csi`
+and `flexVolume` volumes are unchecked for the same reason. A driver that
+exposes a node path therefore passes the gate. This is a decided limit: the environment policy makes no statement
+about driver-defined volumes, on pods or on PersistentVolumes. One (an
+allowlist of driver names, for instance) would be a new part of the policy
+every consumer implements, and no use case asked for it.
+
+**Breaking:** before this kind, a PersistentVolume that a chart rendered, a
+`passthrough` component held or a `manifests` source yielded reached the
+output unchecked. One with a `hostPath` or `local` source, or with
+`capacity.storage` over the storage maximum, is now refused where it built
+before — and with no policy passed a `hostPath` or `local` one is always
+refused, since `NoopPolicy` allows no hostPath volume. A consumer allows it
+through its policy (`AllowHostPathVolumes()`, `MaxStorageSize()`), not per
+component.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/persistentvolume-component/app.yaml`, built against
+the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares
+the two.
+
+## Kinds not yet in sections
+
+The kinds below are not yet in these sections.
+
 - **pod** (go-kure/launcher#790) is the kind-named projection of a v1 Pod, on
   the same recipe: one schema key per json field of `corev1.PodSpec`, the
   property map decoded strictly into that type, two spellings of one field
