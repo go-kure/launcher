@@ -88,8 +88,9 @@ components are ordered, so `<bundle>/` is in the same place for both:
 | Ordered: a group | `<bundle>/<group>/` | `cluster/<bundle>/<group>/` |
 
 **Breaking output change** for a layout-walking consumer of an ordered application:
-its root node was named `<bundle>` until then, which put a directory
-of the root node's own above the bundle's. The tree was `<bundle>/<bundle>/`
+its root node was named `<bundle>`, which put a directory
+of the root node's own above the bundle's, until the transform ordered components only
+where the document declares an order. The tree was `<bundle>/<bundle>/`
 (`<cluster>/<bundle>/<bundle>/` with a `ClusterName`; a `ClusterName` whose last segment is
 the bundle's name was the node's directory itself, with no directory added and no
 Kustomization of the node's own). Under `FluxIntegratedPerLayout` with any other cluster
