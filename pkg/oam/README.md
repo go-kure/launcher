@@ -136,7 +136,6 @@ properties of an emitted component, trait or policy are checked against that sch
 when the rule wrote the type as an identity. The same holds for the platform-reserved check
 and for the members of a same-name sibling group. A rule reads the Naming hook of the run
 through `LoweringContext.NamingHook`.
-`Trait.Synthesized` reports whether a lowering rule wrote a trait, as opposed to the author of the document, so a rule can tell the two apart.
 
 A consumer sees what a configuration-defined model emits through `TransformContext.EmitHook`.
 The model rule calls it through `LoweringContext.EmitModelComponent`, once for each component it

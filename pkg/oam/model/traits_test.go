@@ -9,10 +9,9 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/model"
 )
 
-// A trait the author writes on a component of a model type is refused, because the rule of a model
-// has no part to give it to and would drop it without a word (go-kure/launcher#1528). A trait that
-// an outer model writes in its own `traits:` on a part that is itself a model is not authored, and
-// still builds.
+// A trait on a component of a model type is refused, because the rule of a model has no part to
+// give it to and would drop it without a word (go-kure/launcher#1528). That holds for a trait the
+// document wrote and for one an outer model wrote in the `traits:` of a part that is itself a model.
 
 const innerModel = `apiVersion: launcher.gokure.dev/v1alpha1
 kind: Model
@@ -55,7 +54,7 @@ func requireTraitRefusal(t *testing.T, err error, trait string) {
 	if !errors.Is(err, model.ErrTraitsUnsupported) {
 		t.Errorf("the refusal does not wrap ErrTraitsUnsupported: %v", err)
 	}
-	for _, want := range []string{`"orders"`, "inner.acme.example@v1", `"` + trait + `"`} {
+	for _, want := range []string{`"orders"`, "inner.acme.example@v1", `"` + trait + `"`, "written in the document"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal does not name %s: %v", want, err)
 		}
@@ -85,9 +84,9 @@ func TestModelComponent_WithNoTraitBuilds(t *testing.T) {
 	}
 }
 
-// The traits of an outer model's part are the outer author's own, on a component that the outer
-// rule emitted. The inner model's rule sees them and must not refuse them.
-func TestModelComponent_OuterModelTraitsOnAModelPartStillBuild(t *testing.T) {
+// The traits of an outer model's part land on a component of the inner model type, where the
+// inner rule would drop them. They are refused too, and the error says an outer model wrote them.
+func TestModelComponent_RefusesATraitAnOuterModelWrote(t *testing.T) {
 	tr, reg := registered(t, innerModel)
 	m, err := model.Load([]byte(outerModel))
 	if err != nil {
@@ -96,8 +95,16 @@ func TestModelComponent_OuterModelTraitsOnAModelPartStillBuild(t *testing.T) {
 	if err := reg.Register(m); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	objs := objectsOK(t, tr, modelComponent("outer.acme.example@v1"), nil)
-	if len(objs) == 0 {
-		t.Error("the outer model built no object")
+	_, err = objects(t, tr, modelComponent("outer.acme.example@v1"), nil)
+	if err == nil {
+		t.Fatal("Transform accepted a trait that an outer model wrote on a model part")
+	}
+	if !errors.Is(err, model.ErrTraitsUnsupported) {
+		t.Errorf("the refusal does not wrap ErrTraitsUnsupported: %v", err)
+	}
+	for _, want := range []string{"inner.acme.example@v1", "topology-spread", "written by an outer model"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q: %v", want, err)
+		}
 	}
 }
