@@ -104,7 +104,13 @@ PR and merge-queue job (no needs):
 ```
 
 On `merge_group` events (merge queue), `lint`/`test`/`build` run against the queue's
-temporary branch — the merged result — before the PR is allowed to land. `pin-impact` is skipped
+temporary branch — the merged result — before the PR is allowed to land. `detect-changes` runs the
+same path filter as on a PR, diffed from the merge base of the group head with the branch the
+group merges into, so it covers every entry of the group that is not on the branch yet. A group
+that changes no Go-relevant path skips `lint`, `test`, `Security`, `Build kurel` and
+`validate-manifests` (and `docs-build` when it changes no docs path). A job skipped by its own
+`if:` reports success, so the required checks still report. `build` fails when `detect-changes`
+fails, so a failed filter cannot pass as a skip. `pin-impact` is skipped
 on a push; on a merge-queue run it checks only that the merged tree's `go-kure/.github` pins agree
 (see the pin-impact gate below).
 
@@ -143,7 +149,7 @@ self-test (`make test-verify-merge`).
 
 | Job | Check Name | Timeout | Dependencies | Purpose |
 |-----|------------|---------|--------------|---------|
-| `changes` | `detect-changes` | 2 min | — | Path filter: `go:` and `docs:` outputs control downstream jobs |
+| `changes` | `detect-changes` | 2 min | — | Path filter: `go:` and `docs:` outputs control downstream jobs on a PR and in the merge queue (push, schedule and manual runs run them all) |
 | `validate` | `lint` | 20 min | changes | go-version, fmt, tidy, vet, lint, tool-version parity (golangci-lint pin across Makefile/ci.yml/docs), govulncheck doc parity, verify-merge self-test, `check-pin-impact.sh` cases (`make test-pin-impact`); diff-based lint on PRs |
 | `test` | `test` | 35 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
 | `security` | `Security` | 15 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
@@ -153,7 +159,7 @@ self-test (`make test-verify-merge`).
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
 | `docs-build` | `docs-build` | 15 min | changes | Hugo site build for docs; go + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the forbidden-terms self-test of the CRD vendor scripts' matcher and `cliff.toml`'s scrub, run with git-cliff installed at `mise.toml`'s pin by the release installer from the same go-kure/.github checkout (`make test-forbidden-terms`) + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) + the source-revision check on the built site (`make check-revision-shown`) + the API-reference anchor and fragment-link check on the built site (`make check-api-anchors`) |
 | `pin-impact` | `pin-impact` | 3 min | — | On a merge-queue run, only checks that every `go-kure/.github` reference in the merged tree pins the same commit. On a PR, renders and gates on the real impact of a `go-kure/.github` pin bump: resolves each referenced action's `$GITHUB_ACTION_PATH` script (and the siblings those `source` or run), intersects against the compare diff, fails if a consumed path changed and refuses any shape it cannot resolve (go-kure/launcher#358) |
-| `build` | `build` | 1 min | validate, test, build-binaries, docs-build, coverage-check, action-pins, security, pin-impact, issue-refs | Aggregation gate |
+| `build` | `build` | 1 min | changes, validate, test, build-binaries, docs-build, coverage-check, action-pins, security, pin-impact, issue-refs | Aggregation gate |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
 | `validate-manifests` | `validate-manifests` | 10 min | changes | `kurel build` + `flux schema validate` against the `default` (embedded) and `ecosystem` (schemas.fluxoperator.dev) catalogs for a representative `examples/*.yaml` subset; `continue-on-error: true`, not in `build`'s gate (go-kure/launcher#292) |
 | `analyze-changes` | `Analyze Changes` | 5 min | — | Changed files summary, breaking change warning for pkg/ (PR only) |
