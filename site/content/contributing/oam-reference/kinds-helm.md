@@ -119,3 +119,93 @@ file.
     `chart.spec.sourceRef.kind`, and the written default of
     `chart.spec.verify.provider`. The test is in
     `kind_api_sets_internal_test.go`.)
+
+## helmtemplate
+
+- **History:**
+  - go-kure/launcher#348 (the kind-named terminal for a client-side Helm render,
+    part of the Helm-family redesign go-kure/launcher#336).
+  - go-kure/launcher#787 (`hookGroupNamePrefix` and `layoutKustomizationName`,
+    and the `Naming` hook's answers for the `hook-group` and `layout` roles).
+  - go-kure/launcher#941 (the default hook-group prefix names only the layouts
+    and kure names each Kustomization; the layout's Kustomization name is left
+    to kure).
+  - go-kure/launcher#786 (`secretValues`).
+  - go-kure/launcher#794, item 4 (a namespaced rendered object with no
+    `metadata.namespace` is given the application namespace).
+  - go-kure/launcher#794, item 11 (`scopeOverrides`).
+  - go-kure/launcher#794, item 7 (undeclared fields of a registered kind).
+  - go-kure/launcher#794, item 6 (the host of the chart archive a Helm
+    repository's index points at is not checked, a decided limit).
+  - go-kure/launcher#790 (`Lease`, `EndpointSlice`, `PriorityClass`,
+    `RuntimeClass`, `APIService`, the `admissionregistration.k8s.io/v1` kinds
+    and the image-reflector kinds are read as their Go types, and a list of a
+    kind the scheme does not register is refused when a `helm.sh/hook`
+    annotation is involved).
+  - go-kure/kure#1014 (a list is read in one place, kure's parser).
+  - go-kure/launcher#791 (the render is decoded with kure's manifest parser, and
+    `ApplyPolicy` holds the chart to the environment policy).
+  - go-kure/launcher#792 (the hook-group child name begins with the application
+    name).
+  - go-kure/kure#1030 and go-kure/kure#1036 (kure shortens the Kustomization
+    name past 63 characters by its own rule).
+  - go-kure/kure#1032 (kure's Flux integration refuses a hook-group child's
+    `DependsOn` and `KustomizationName` under `FluxSeparate` and
+    `FluxIntegratedPerBundle`, and a layout's name under any placement but
+    per-layout).
+  - go-kure/launcher#563 (an `AppFileSingle` layout writes no
+    `kustomization.yaml`, so nothing would list its child layouts).
+- **Tests:**
+  - A test pins both, each way round, on the process's standard log and its
+    default `slog` logger. ("both" are the two cases of the sentence before it:
+    a top-level `global`, where the dropped value is the dependency's `global`
+    entry from `values`, and a dependency's ordinary key, where it is the
+    dependency's default; the test is
+    `TestHelmSecretValues_AllowedShapesPrintNoValue` in
+    `pkg/cmd/kurel/helm_secret_values_test.go`.)
+  - A test holds the two components to the same answer for the same objects and
+    overrides. ("the two components" are `helmtemplate` and `manifests`; the
+    test is `TestScopeOverrides_ManifestsAndTemplateDeliveryResolveAlike` in
+    `helmtemplate_scope_overrides_internal_test.go`.)
+  - No type under a workload or a claim does this beyond scalar leaves
+    (`Quantity`, `IntOrString`, `Time`) and the raw field set of `managedFields`;
+    a test walks those types and fails when one starts to. (The reference keeps
+    this sentence. "this" is decoding its own keys, as the known limit above
+    states it, "those types" are the types under a workload or a claim, and "one"
+    is a type that unmarshals itself beyond the scalar leaves and the field set
+    of `managedFields`; the test is
+    `TestUndeclaredFields_NoSelfUnmarshallingStructUnderAWorkload` in
+    `undeclared_fields_internal_test.go`.)
+  - The schema declares the same keys, with `source` closed to `url` and `kind`,
+    and a test ties it to the struct. (The reference keeps this sentence. "it"
+    is the schema and "the struct" is `helmTemplateProperties`; the test is
+    `TestHelmTemplateHandler_SchemaMatchesProperties` in
+    `helmtemplate_internal_test.go`.)
+
+## oci
+
+- **History:**
+  - go-kure/launcher#784 (`oci` is lowered by `OCIRule` to an `ocirepository`
+    and a `fluxcd-kustomization`).
+  - go-kure/launcher#999 (the source's registry access: `source.secretRef`,
+    `source.provider`, `source.insecure`, `source.certSecretRef` and
+    `source.proxySecretRef`).
+  - go-kure/launcher#1009 (`source.serviceAccountName`).
+  - go-kure/launcher#1012 (the Secret a trait makes moves to the Flux namespace
+    with the source the component keeps to itself).
+  - go-kure/launcher#1016 (the same for a source generated on its own, which
+    every consumer is ordered after).
+  - go-kure/launcher#1039 (the transform refuses a Secret-making trait on a
+    consumer in a later group under
+    `TransformContext.GroupsWaitForFluxObjects`).
+  - go-kure/launcher#1079 (any Flux object that requires a ConfigMap or Secret a
+    trait makes in a later group).
+  - go-kure/launcher#1086 (a component of a later group that makes a ConfigMap
+    or Secret where it lands with the source).
+  - go-kure/launcher#787 (the `Naming` hook's `helm-source` role, `source.name`,
+    `kustomizationName` and `source.objectName`).
+  - go-kure/launcher#622 (`targetNamespace` has no default).
+  - go-kure/launcher#432 (`wait` and `healthChecks`).
+  - go-kure/launcher#580 (under a non-empty registry allowlist `source.url` must
+    name its registry explicitly).
+  - go-kure/launcher#590 (`interval` is checked exactly as for `helmrelease`).
