@@ -171,7 +171,7 @@ jobs:
   validate:
     name: lint
     runs-on: autops-kube-kure
-    timeout-minutes: 20
+    timeout-minutes: 35
     needs: [changes]
     if: (github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.changes.outputs.go == 'true'
 
