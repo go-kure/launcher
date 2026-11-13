@@ -819,20 +819,13 @@ before, into a Deployment the API server rejects. A webservice's name is
 checked against the Service-name rule first, so an over-long name is refused
 there, before this check.
 
-## Sections not yet in the new layout
-
-The sections below are not yet in the new layout.
-
 ### Container fields
 
 Seven `corev1.Container` fields are read on every container of a hand-parsed
-workload kind (go-kure/launcher#790): as top-level keys for the main container
+workload kind: as top-level keys for the main container
 of `deployment`, `statefulset`, `daemonset`, `job` and `cronjob` — and of
 `webservice` and `worker`, which forward them to their `deployment` member — and
-as keys of each `initContainers` and `sidecars` entry. One parser
-(`parseContainerFields`, `container_fields.go`) and one schema fragment
-(`schemaContainerFields`) serve the three positions, pinned to each other by
-`TestContainerFieldsSchemaMatchesParser`.
+as keys of each `initContainers` and `sidecars` entry.
 
 | Property | Type | Effect |
 |---|---|---|
@@ -876,17 +869,17 @@ as keys of each `initContainers` and `sidecars` entry. One parser
   label first (`sidecars[0] "proxy": tty: must be a boolean, got string`).
 
 An `initContainers` entry also reads its own `restartPolicy` and
-`restartPolicyRules` (go-kure/launcher#790), held to upstream's
+`restartPolicyRules`, held to upstream's
 `validateInitContainerRestartPolicy` and `validateContainerRestartPolicy`:
 
 - `restartPolicy` is `Never` or `OnFailure`, overriding the pod's restart
   policy for that container, or `Always`, which makes the entry a **native
-  sidecar** (go-kure/launcher#1180): it starts in list order like any init
+  sidecar**: it starts in list order like any init
   container, but stays running for the life of the pod, alongside the main
   container. Only such an entry takes `ports`, `probes`, `lifecycle` and a
   `RestartContainer` resize policy (the same parsers as a `sidecars` entry);
   `restartPolicyRules` is refused beside `Always`. Its `ports` are read as a
-  `sidecars` entry's are (go-kure/launcher#1225), so a probe or hook may address
+  `sidecars` entry's are, so a probe or hook may address
   one by name and a consumer that generates Services can resolve a named
   `targetPort` to it; a port name is unique across the whole pod, main
   container, `sidecars` and native sidecars together. `ports` on any other
@@ -906,11 +899,10 @@ An `initContainers` entry also reads its own `restartPolicy` and
   restart policy. `Always` is not tied to that gate: upstream validation
   accepts it with the gate on or off. A build for a `ClusterProfile` that
   states `spec.kubernetesVersion` below 1.35 refuses `restartPolicyRules`,
-  naming the gate and the version (go-kure/launcher#1183). The same build
+  naming the gate and the version. The same build
   refuses the `Never` and `OnFailure` values of `restartPolicy` below 1.35,
   naming the value, the gate and the version; the schema names the gate per
-  value (`valueGates`), so `Always` is accepted at every version
-  (go-kure/launcher#1230). A profile whose `spec.featureGates` sets
+  value (`valueGates`), so `Always` is accepted at every version. A profile whose `spec.featureGates` sets
   `ContainerRestartRules` on accepts them below 1.35, and one that sets it off
   refuses them at any version. With no version stated nothing is checked.
 
@@ -930,7 +922,7 @@ three probe fields, `volumeMounts`, `volumeDevices`).
 ### Referencing an existing claim (`pvc.claimName`)
 
 A `pvc` volume with `claimName` mounts an existing claim instead of generating
-one (go-kure/launcher#702). The claim usually comes from a
+one. The claim usually comes from a
 `persistentvolumeclaim` component or a `pvc` trait, but it can be any claim in
 the namespace. The volume generates no object, and its claim name is used
 exactly as written: it is not qualified with the component name the way a
@@ -953,13 +945,13 @@ limit and default now apply to that claim, not to the volume.
 claim. The rule turns each one into a synthesized `pvc` trait on its
 `deployment` member, named `<component>-<volume>` as before, and rewrites the
 volume to reference it by `claimName`. The output is unchanged. The volume's
-`claimObjectName` names that claim instead (go-kure/launcher#787, role
+`claimObjectName` names that claim instead (role
 `workload-volume-claim`; see the `deploymentObjectName` entry of
 [Kinds: core workloads](kinds-core-workloads.md)).
 
 Such a volume that leaves `storageClass` unauthored (absent or `null`) takes
 the ClusterProfile `pvc` capability's `storageClassName`, as an authored `pvc`
-trait and the `persistentvolumeclaim` kind do (go-kure/launcher#746). The
+trait and the `persistentvolumeclaim` kind do. The
 synthesized trait is sealed, so the engine merges no rendering into it; the
 rule reads the binding through `LoweringContext.Capability`, which records
 `pvc` in `ConsumedCapabilities`, and fills the value itself. An authored
@@ -970,7 +962,7 @@ assigned `storageClassName` cannot change: if the binding's class differs
 from it, the claim fails to apply until it is recreated or the volume
 authors the assigned class. A claim created with no class may take one
 later, so it applies. A `statefulset` `volumeClaimTemplates` entry takes the
-same default (go-kure/launcher#761; see "StatefulSet-level and claim-template
+same default (see "StatefulSet-level and claim-template
 properties").
 
 - `claimName` must be a DNS-1123 subdomain.
@@ -993,8 +985,7 @@ refuses a `PVCConfig` that carries a `ClaimName`: there is no object to build.
 ### Raw block volumes (`volumeMode: Block`)
 
 A claim with `volumeMode: Block` has no filesystem. A container consumes it
-through `volumeDevices` at a `devicePath`, never through `volumeMounts`
-(go-kure/launcher#385). The claim and the pod template are validated as
+through `volumeDevices` at a `devicePath`, never through `volumeMounts`. The claim and the pod template are validated as
 separate objects, so the apiserver accepts a Block claim paired with a
 filesystem mount and the pods then fail at kubelet mount time; every rule
 below reports that mismatch at build time instead. The rules are the same on
@@ -1017,8 +1008,7 @@ all seven kinds (`webservice`, `worker`, `deployment`, `statefulset`,
   `volumeMode: Block` and a main-container `volumeDevices` entry.
 - **The published schema says "exactly one of".** A `volumes[]` entry and a
   `volumeClaimTemplates[]` entry publish `mountPath` and `devicePath` as two
-  optional keys plus a required `exclusive` group of the two
-  (go-kure/launcher#790), so a validator built from the schema refuses both
+  optional keys plus a required `exclusive` group of the two, so a validator built from the schema refuses both
   and neither, as the build does. A key counts as authored when it is present
   and not null, an empty string included: `mountPath: ""` beside a
   `devicePath` is both, through the transform and through a direct handler
@@ -1052,7 +1042,7 @@ claim templates; the parsers still require one of the two paths.
 ### Pod-level properties
 
 The seven kind components also share one pod-level property surface
-(go-kure/launcher#342, ADR-036 L1), parsed by `parsePodSpec` (`podspec.go`)
+(ADR-036 L1), parsed by `parsePodSpec` (`podspec.go`)
 straight into a `corev1.PodSpec` and rendered by the shared `buildPodSpec`,
 which every kind assigns to its pod template. Property names are the
 `corev1.PodSpec` JSON names, except three that carry a `pod` prefix because
@@ -1067,7 +1057,7 @@ set the Linux-only pod and container fields, a `linux` pod may not set
 `windowsOptions`); checks needing cluster state (host ports under
 `hostNetwork`, RuntimeClass existence) are left to the cluster, and so are feature
 gates, with one exception: a `ClusterProfile` that states `spec.kubernetesVersion` has
-a property whose gate is off by default at that release (or set off in `spec.featureGates`) refused (go-kure/launcher#1183):
+a property whose gate is off by default at that release (or set off in `spec.featureGates`) refused:
 `hostnameOverride` below 1.35 (`HostnameOverride`) and `podResources` below 1.34
 (`PodLevelResources`), and a container's `env[].valueFrom.fileKeyRef` below 1.35
 (`EnvFiles`) and an init container's `restartPolicyRules` below 1.35
@@ -1075,18 +1065,18 @@ a property whose gate is off by default at that release (or set off in `spec.fea
 release are in the property's published schema (`gate`). With no version stated nothing
 is checked, and a profile's `spec.featureGates` replaces the release default for a gate it
 names: set on, the property is accepted below its release; set off, it is refused at any
-release (go-kure/launcher#1231). The `Never` and `OnFailure` values of an init container's `restartPolicy`
+release. The `Never` and `OnFailure` values of an init container's `restartPolicy`
 are refused below 1.35 by the same gate, and `service`'s `trafficDistribution` values
 `PreferSameZone` and `PreferSameNode` below 1.34 (`PreferSameTrafficDistribution`); the
 other values are accepted at every version, and the gate is named per value in the
-schema (`valueGates`, go-kure/launcher#1230). The raw-PodSpec kinds (`pod` and the kinds that take a pod
+schema (`valueGates`). The raw-PodSpec kinds (`pod` and the kinds that take a pod
 template: `podtemplate`, `replicaset`, `replicationcontroller`) leave their containers and
-template spec open, as does the `template` of `cnpg-pooler` (go-kure/launcher#1321), and the check reads declared schema, so their open nodes name the
+template spec open, as does the `template` of `cnpg-pooler`, and the check reads declared schema, so their open nodes name the
 gated paths in `gatedPaths` instead: `env[].valueFrom.fileKeyRef` and `restartPolicyRules` of `containers[]` and
 `initContainers[]`, the `restartPolicy` of `containers[]` (Kubernetes forbids the field on a regular
 container with the gate off, `Always` included), and `hostnameOverride` and
 `resources` of the pod spec (`template.spec.*` on a pod template and on the `cnpg-pooler` template). A path is refused the
-same way, naming the authored path (go-kure/launcher#1245). Field names match
+same way, naming the authored path. Field names match
 case-insensitively, as in the decode, so a key spelled in another case is refused too and
 is named as written; property validation does not read `gatedPaths`, so what a document is
 accepted as does not change. A path that gates a value, not the field, sits in
@@ -1096,12 +1086,12 @@ below 1.35 on these kinds as on the workload kinds, and `Always` is accepted at 
 version. The match is exact and only a string is looked up, so a null, a number or a
 string that the table does not name is not refused. The workload kinds and the raw-PodSpec
 kinds share one table, so the two cannot differ. The refusal names the authored path and
-the value (go-kure/launcher#1330). This check does not read whether a value such as
+the value. This check does not read whether a value such as
 `never` reaches a cluster. It only refuses the values the table names.
 
 | Property | Type | Effect | Kind |
 |----------|------|--------|------|
-| `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account; on `webservice` and `worker` the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). Unset on a pod kind, the pod names no account (the namespace's `default`), and the kind sets the pod-level `automountServiceAccountToken: false` unless that is authored (go-kure/launcher#702); a role kind's generated account carries `automountServiceAccountToken: false` itself. An authored account is owned elsewhere and its own setting governs, so authors who want the pod not to mount a token set the pod-level `automountServiceAccountToken: false` explicitly — the handler does not inject it. | additive when unset |
+| `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account; on `webservice` and `worker` the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). Unset on a pod kind, the pod names no account (the namespace's `default`), and the kind sets the pod-level `automountServiceAccountToken: false` unless that is authored; a role kind's generated account carries `automountServiceAccountToken: false` itself. An authored account is owned elsewhere and its own setting governs, so authors who want the pod not to mount a token set the pod-level `automountServiceAccountToken: false` explicitly — the handler does not inject it. | additive when unset |
 | `automountServiceAccountToken` | bool | Pod-level token automount override. | additive |
 | `terminationGracePeriodSeconds` | int ≥ 0 | Grace period before SIGKILL. A `lifecycle` `sleep` hook may not exceed it (30 when unset). | additive |
 | `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob and job only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it, and refuse the upstream name `activeDeadlineSeconds` with that reason (on `job` and `cronjob` that name is the JobSpec's). Distinct from the JobSpec-level `activeDeadlineSeconds` below: this one bounds a single pod, that one the whole job. | additive |
@@ -1111,7 +1101,7 @@ the value (go-kure/launcher#1330). This check does not read whether a value such
 | `shareProcessNamespace` | bool | Mutually exclusive with `hostPID: true`. | additive |
 | `hostname`, `subdomain`, `setHostnameAsFQDN`, `hostnameOverride`, `hostAliases[]{ip,hostnames}` | naming | `hostname`/`subdomain` are DNS-1123 labels; `hostnameOverride` is a ≤64-char subdomain and cannot combine with `hostNetwork` or `setHostnameAsFQDN`. `hostAliases[].ip` is a plain IPv4/IPv6 literal, zone suffixes rejected as for `dnsConfig.nameservers`. | additive |
 | `podSecurityContext` | object | The full `corev1.PodSecurityContext` field set (`runAsUser`/`runAsGroup`/`runAsNonRoot`/`fsGroup`/`fsGroupChangePolicy`/`supplementalGroups`/`supplementalGroupsPolicy`/`sysctls`/`seLinuxOptions`/`seLinuxChangePolicy`/`seccompProfile`/`appArmorProfile`/`windowsOptions`), closed and validated like the container `securityContext`; the `windowsOptions` strings are held to upstream's rules as on a container (see "Container fields"). `sysctls[].name` must match the sysctl grammar (≤253 characters of dot- or slash-separated lowercase alphanumeric segments) and be unique within the list. `windowsOptions.hostProcess: true` additionally requires `hostNetwork: true`, which upstream demands of any pod containing HostProcess containers. The `runAsUser: 0` / `runAsNonRoot: true` contradiction is judged per container on the *effective* values once the containers are assembled, not on this object alone — a container-level `runAsUser` overrides the pod-level one, so the pair is a valid document when every container names a non-root UID, and the deferred check also catches a container-level `runAsUser: 0` under a pod-level `runAsNonRoot`. **Partly policy-gated**: `windowsOptions.hostProcess: true` is rejected unless `AllowPrivileged()` allows it (a HostProcess pod runs with the node's own privileges, and upstream forces every container in it to be HostProcess too); every other field has no policy hook. | additive |
-| `imagePullSecrets[]{name}`, `enableServiceLinks`, `os{name}`, `hostUsers`, `readinessGates[]{conditionType}`, `resourceClaims[]{name, resourceClaimName \| resourceClaimTemplateName}`, `podResources{requests,limits}` | misc | `podResources` accepts only `cpu`, `memory` and `hugepages-<size>` (pod-level resources have no ephemeral-storage or extended resources), and a `hugepages-<size>` entry needs `cpu` or `memory` in `requests` or `limits` (admission's "HugePages require cpu or memory"; pod-level resources get no defaults); claim names must be unique and name exactly one source (an empty name beside the other counts as a second; the schema publishes the pair as an `exclusive` group, go-kure/launcher#790). `hostUsers: false` cannot combine with `hostPID` or `hostIPC` (upstream forbids both outright); it stays authorable alongside `hostNetwork`, which upstream forbids only on a cluster without user-namespace host-network support, so whether that pair is accepted is a property of the target cluster rather than of the document. **`podResources` is policy-gated**: its cpu and memory requests and limits are checked against `MaxCPU()`/`MaxMemory()`, the same budget the container `resources` are checked against. | additive |
+| `imagePullSecrets[]{name}`, `enableServiceLinks`, `os{name}`, `hostUsers`, `readinessGates[]{conditionType}`, `resourceClaims[]{name, resourceClaimName \| resourceClaimTemplateName}`, `podResources{requests,limits}` | misc | `podResources` accepts only `cpu`, `memory` and `hugepages-<size>` (pod-level resources have no ephemeral-storage or extended resources), and a `hugepages-<size>` entry needs `cpu` or `memory` in `requests` or `limits` (admission's "HugePages require cpu or memory"; pod-level resources get no defaults); claim names must be unique and name exactly one source (an empty name beside the other counts as a second; the schema publishes the pair as an `exclusive` group). `hostUsers: false` cannot combine with `hostPID` or `hostIPC` (upstream forbids both outright); it stays authorable alongside `hostNetwork`, which upstream forbids only on a cluster without user-namespace host-network support, so whether that pair is accepted is a property of the target cluster rather than of the document. **`podResources` is policy-gated**: its cpu and memory requests and limits are checked against `MaxCPU()`/`MaxMemory()`, the same budget the container `resources` are checked against. | additive |
 
 Deliberately **not** accepted — each is rejected with an error naming the
 reason rather than silently ignored: `ephemeralContainers` (added to a running
@@ -1152,7 +1142,7 @@ generated ServiceAccount carries the same name.
 `enforce.go`'s `enforceContainerCapabilities`). `enforcePrivileged` gates a
 second field besides `privileged`: `securityContext.windowsOptions.hostProcess`
 is rejected under the same `AllowPrivileged()`, on any container that authors
-it (go-kure/launcher#790 made the container `windowsOptions` authorable).
+it.
 Those three fields are the whole container-level policy surface:
 `enforcePrivileged` and `enforceContainerCapabilities` are the only enforcers
 taking a `*corev1.SecurityContext`, and every policy call outside `enforce.go`
@@ -1162,8 +1152,7 @@ pod-level pair described below, plus `enforceHostNamespaces`,
 `enforceHostPathVolumes`, the `enforceMax*` family and
 `enforceAllowedRegistries`/`enforceAllowedURLHosts` — but none of them reads a
 container `securityContext`. Both checks cover the main container and
-every `initContainers`/`sidecars` entry (go-kure/launcher#312's shared
-`enforceExtraContainer` helper), not just the main container.
+every `initContainers`/`sidecars` entry (the shared `enforceExtraContainer` helper), not just the main container.
 
 The pod-level `podSecurityContext` has a **separate** hook —
 `enforcePodHostProcess` (`enforce.go`) rejects
@@ -1204,7 +1193,7 @@ Setting any `securityContext` field makes the container's `SecurityContext`
 non-nil, which opts it out of the downstream runtime's nil-only backfill for
 every *other* `SecurityContext` field too. If a component uses both this and
 the `security-context` trait, the trait's `Generate()` pass runs later and
-**merges into** what is authored (go-kure/launcher#1171), field by field, on
+**merges into** what is authored, field by field, on
 the pod's `securityContext` and on every entry of `podSpec.Containers` (which
 includes rendered sidecars) and `podSpec.InitContainers`; an init container's
 or sidecar's own `securityContext` is merged the same way as the main
@@ -1256,7 +1245,7 @@ policy choice, not something this shared schema hardcodes.
 ### Deployment-level properties (`deployment`, `webservice`, `worker`)
 
 Three components produce an `appsv1.Deployment`: the kind-named `deployment`
-(go-kure/launcher#343; ADR-036 L1, the stratified-levels decision: one
+(ADR-036 L1, the stratified-levels decision: one
 PodSpec/Container projection shared by every kind, with kind-named components
 projecting their own API kind), and the two role-named kinds `webservice`
 (Deployment + Service) and `worker` (Deployment, no Service). Everything above
@@ -1264,8 +1253,8 @@ projecting their own API kind), and the two role-named kinds `webservice`
 unchanged, and so does the rest of `DeploymentSpec` below: it is parsed by
 `parseDeploymentSpec` (`deployment_spec.go`) into real `appsv1` types and
 written by its `apply` onto the built object, from one fragment all three
-handlers compose (go-kure/launcher#341). The pod template's `podMetadata` is the
-same on all three (go-kure/launcher#1216; see ["The pod template's labels and
+handlers compose. The pod template's `podMetadata` is the
+same on all three (see ["The pod template's labels and
 annotations"](conventions.md#the-pod-templates-labels-and-annotations-podmetadata)).
 
 Sharing the fragment is the point rather than a convenience. These fields are
@@ -1299,11 +1288,10 @@ already carries raw `topologySpreadConstraints`, so the two never merge.
 
 #### Main container ports
 
-`deployment` publishes `ports`, the main container's `corev1.ContainerPort` list
-(go-kure/launcher#280). It declares container ports only: the kind still emits
+`deployment` publishes `ports`, the main container's `corev1.ContainerPort` list. It declares container ports only: the kind still emits
 no Service (use `webservice`, or a `service` component, for one).
 
-**Endpoints (go-kure/launcher#1132).** `deployment`, `statefulset` and
+**Endpoints.** `deployment`, `statefulset` and
 `daemonset` implement `oam.EndpointProvider` from the main container's `ports`:
 one endpoint per entry, in the authored order. An endpoint's `Name` is the port's
 `name` (empty when unnamed), its `Ports` hold the numeric `containerPort` alone,
@@ -1314,18 +1302,18 @@ as ["The `app` label"](conventions.md#the-app-label) derives it (a name over 63 
 refuses has no endpoint and is refused in the parse's words. Sidecar ports are
 not the component's service surface and declare none. `job` and `cronjob`
 publish `ports` but report no endpoint, and `worker` lowers into a `deployment`
-without ports, so it reports none (go-kure/launcher#225). Only TCP endpoints
+without ports, so it reports none. Only TCP endpoints
 synthesize a NetworkPolicy allow; a UDP or SCTP endpoint is collected and
 validated, and synthesizes nothing.
 
 `daemonset`, `statefulset`, `job` and `cronjob` publish the same `ports`, with
-the same entry rules (go-kure/launcher#334): container ports are a PodSpec
+the same entry rules: container ports are a PodSpec
 field, so every kind-named workload component projects them. `ports` emits no
 Service on any of them. A named probe or hook port resolves against the
 main container's `ports`; with none declared, it is refused.
 
-**Breaking (go-kure/launcher#690): `daemonset` and `statefulset` dropped `port`
-and the Service it drove**, as `deployment` did in go-kure/launcher#343. `port`
+**Breaking: `daemonset` and `statefulset` dropped `port`
+and the Service it drove**, as `deployment` did. `port`
 declared the main container's first port and a Service in front of it: a
 ClusterIP Service named after the component on `daemonset`, a headless one
 named `serviceName` (default: the component name) on `statefulset`. An authored
@@ -1360,7 +1348,11 @@ named `serviceName` (default: the component name) on `statefulset`. An authored
 
 | property | type | notes | compat |
 |---|---|---|---|
-| `ports` | array | Each entry is `containerPort` (required, 1–65535), `name` (an IANA service name, as the API server checks a container port name) and `protocol` (`TCP`/`UDP`/`SCTP`, default `TCP`; an empty string is refused, as the published enum refuses it); any other key, `hostPort` and `hostIP` included, is refused. Names must be unique, as the API server requires, and also unique across the pod: a sidecar port of the same name is refused (go-kure/launcher#660). A repeated `containerPort`/`protocol` pair is refused too, which the API server only warns about: the second entry declares nothing new. The same number on two protocols is two ports. An absent, null or empty list declares no ports. A probe or lifecycle hook may address a declared port by name; a name the main container does not declare is refused, since the kubelet resolves it only against that container's own ports. Without `ports`, a named probe or hook port is refused. | additive (`daemonset`/`statefulset`: replaces `port`, go-kure/launcher#690) |
+| `ports` | array | Each entry is `containerPort` (required, 1–65535), `name` (an IANA service name, as the API server checks a container port name) and `protocol` (`TCP`/`UDP`/`SCTP`, default `TCP`; an empty string is refused, as the published enum refuses it); any other key, `hostPort` and `hostIP` included, is refused. Names must be unique, as the API server requires, and also unique across the pod: a sidecar port of the same name is refused. A repeated `containerPort`/`protocol` pair is refused too, which the API server only warns about: the second entry declares nothing new. The same number on two protocols is two ports. An absent, null or empty list declares no ports. A probe or lifecycle hook may address a declared port by name; a name the main container does not declare is refused, since the kubelet resolves it only against that container's own ports. Without `ports`, a named probe or hook port is refused. | additive (`daemonset`/`statefulset`: replaces `port`) |
+
+## Sections not yet in the new layout
+
+The sections below are not yet in the new layout.
 
 #### Raw scheduling properties
 
