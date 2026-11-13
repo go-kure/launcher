@@ -92,10 +92,13 @@ concurrency:
 
 validate-manifests  ← kurel build + flux-schema validate (non-blocking, not in `build`'s gate)
 
-PR-only jobs (parallel, non-blocking):
-┌─────────────────┐  ┌────────────┐
-│ analyze-changes │  │ docs-build │
-└─────────────────┘  └────────────┘
+docs-build  ← Hugo build and docs checks; a PR runs it when a docs path changes, every merge-queue
+              group, push and schedule run it; it is in `build`'s gate
+
+PR-only job (non-blocking):
+┌─────────────────┐
+│ analyze-changes │
+└─────────────────┘
 
 PR and merge-queue job (no needs):
 ┌─────────────┐
@@ -467,7 +470,8 @@ Runs on main and `release/*` branches only (not PRs):
   `make deps` while carrying no `make` guard of its own, so this step is the only thing that
   guarantees `make` there — a `gcc`-only guard would skip the install on an image with gcc but no
   make and break `make deps`
-- **Binary artifact** — `kurel` linux/amd64 binary uploaded per run (7-day retention)
+- **Binary artifact** — `kurel` linux/amd64 binary uploaded by each run in which `build-binaries`
+  runs (7-day retention)
 - **Cross-platform artifacts** — 5 binaries uploaded per main push (30-day retention)
 - **Runs on draft PRs** — no draft gate on any job (2026-08-19, GitLab `mr-review` parity — draft
   blocks merge only, via branch protection, not what CI runs)
