@@ -3,913 +3,912 @@ title: "Kinds: PostgreSQL and CloudNativePG"
 weight: 10
 ---
 
-- **cnpg-imagecatalog**, **cnpg-clusterimagecatalog**, **cnpg-backup**,
-  **cnpg-scheduledbackup**, **cnpg-databaserole**, **cnpg-publication**,
-  **cnpg-subscription** (go-kure/launcher#790) are the kind-named projections
-  of seven objects of the CloudNativePG API, `postgresql.cnpg.io/v1`, beyond
-  those of **cnpg-cluster** and **cnpg-pooler**, below: an
-  ImageCatalog, a ClusterImageCatalog, a Backup, a ScheduledBackup, a
-  DatabaseRole, a Publication and a Subscription. Each emits that one object,
-  named after the component unless `objectName` names it; the handler adds no
-  label, no annotation and no default of its own. **The ClusterImageCatalog
-  is cluster-scoped**: the object carries no namespace, whatever namespace the
-  application is built for, and its name is claimed cluster-wide. The other
-  six are namespaced and are written in the build namespace. One rule lowers
-  onto one of them: `postgresql` emits a `cnpg-scheduledbackup` for each
-  `backup.schedules` entry (go-kure/launcher#1001, below); it emits none of
-  the other six.
+Each kind below with a heading has the same sections: Properties, Outputs,
+Validation and Example. Its implementation, history and tests are on the
+[contributor page](../../contributing/oam-reference/kinds-postgres.md).
 
-  **No capability is required, and none gates these kinds**: where the
-  CloudNativePG CRDs are not installed the component builds. Whoever may
-  author a component may author these, and with them the images the Clusters
-  of a namespace or of the whole cluster may run, a role with any attribute
-  PostgreSQL has (`superuser`, `bypassrls`, `replication`), and what a
-  database publishes or subscribes to. A policy can keep the kinds out of a
-  build through the object kind policy (`oam.ObjectKindPolicy`,
-  go-kure/launcher#922).
+## cnpg-imagecatalog, cnpg-clusterimagecatalog, cnpg-backup, cnpg-scheduledbackup, cnpg-databaserole, cnpg-publication, cnpg-subscription
 
-  **Authored.** The properties are the top-level json fields of the spec type,
-  decoded strictly at every depth: an unknown key is refused wherever it sits
-  (an image, an extension, a plugin configuration, a target's object).
-  - `cnpg-imagecatalog` and `cnpg-clusterimagecatalog` (`ImageCatalogSpec`,
-    which the two objects share): `images`, each an `image`, a `major` and
-    its `extensions` (a `name`, an `image` volume source with its `reference`
-    and `pullPolicy`, the four path lists and `env`), and `componentImages`,
-    each a `key` and an `image`.
-  - `cnpg-backup` (`BackupSpec`): `cluster`, `target`, `method`,
-    `pluginConfiguration` (`name`, `parameters`), `online` and
-    `onlineConfiguration`.
-  - `cnpg-scheduledbackup` (`ScheduledBackupSpec`): the six of a Backup, and
-    `schedule`, `suspend`, `immediate` and `backupOwnerReference`.
-  - `cnpg-databaserole` (`DatabaseRoleSpec`): `cluster`,
-    `databaseRoleReclaimPolicy`, `clientCertificate`, and the fields of the
-    role configuration the type embeds: `name`, `comment`, `ensure`,
-    `passwordSecret`, `disablePassword`, `connectionLimit`, `validUntil`,
-    `inRoles`, `inherit`, `superuser`, `createdb`, `createrole`, `login`,
-    `replication` and `bypassrls`.
-  - `cnpg-publication` (`PublicationSpec`): `cluster`, `name`, `dbname`,
-    `parameters`, `target` (`allTables`, or `objects`, each a
-    `tablesInSchema` or a `table` with its `name`, `schema`, `only` and
-    `columns`) and `publicationReclaimPolicy`.
-  - `cnpg-subscription` (`SubscriptionSpec`): `cluster`, `name`, `dbname`,
-    `parameters`, `publicationName`, `publicationDBName`,
-    `externalClusterName` and `subscriptionReclaimPolicy`.
-  - **No default is filled.** An unauthored `method`, `ensure`, `inherit`,
-    `backupOwnerReference` or reclaim policy is left out and the API server
-    fills its own.
-  - **A role's `connectionLimit: 0` is refused** (`connectionLimit: 0 cannot
-    be carried by the CloudNativePG API types`): the field is no pointer and
-    is omitted when zero, and the CRD's default, `-1` (no limit), would apply
-    in its place, so a role authored to accept no connection would accept
-    any number.
-  - **An empty string is refused on the seven string fields the CRDs
-    default** (`method: "" cannot be carried by the CloudNativePG API types
-    (the field is omitted when zero, so the operator would apply its default
-    "barmanObjectStore")`): `method` on a Backup and a ScheduledBackup
-    (`barmanObjectStore`), a ScheduledBackup's `backupOwnerReference`
-    (`none`), a role's `ensure` (`present`) and `databaseRoleReclaimPolicy`
-    (`retain`), and `publicationReclaimPolicy` and
-    `subscriptionReclaimPolicy` (`retain`). The type omits an empty string,
-    so the default would replace the authored value. With `connectionLimit`
-    these are every such field of the seven specs;
-    `TestCnpgKindsDefaultedZeroFields_MatchCRD` derives each kind's list from
-    the linked CRDs and fails on another.
-  - **A role's `validUntil` is written in UTC.** The API type holds an
-    instant: `2030-01-01T02:00:00+02:00` is written
-    `2030-01-01T00:00:00Z`. It writes the instant to the second and the zero
-    time as null, which the API server drops, so a `validUntil` with a
-    fraction of a second other than zero is refused
-    (`validUntil "2030-01-01T00:00:00.5Z": a fraction of a second cannot be
-    carried by the CloudNativePG API types`), after a period or a comma, read
-    from the authored string, since the decode keeps only nine digits of a
-    fraction; and so is
-    `0001-01-01T00:00:00Z` (`validUntil: the zero time cannot be carried by
-    the CloudNativePG API types`), which would leave a password that never
-    expires. The time as the API type writes it is held to the CRD's
-    `date-time` format and to the decoded instant, so an instant outside the
-    four-digit years in UTC is refused whatever its authored offset:
-    `9999-12-31T23:00:00-02:00` (`validUntil: the CloudNativePG API types
-    write it as 10000-01-01T01:00:00Z, which the DatabaseRole CRD's date-time
-    format refuses`).
+**cnpg-imagecatalog**, **cnpg-clusterimagecatalog**, **cnpg-backup**,
+**cnpg-scheduledbackup**, **cnpg-databaserole**, **cnpg-publication**,
+**cnpg-subscription** are the kind-named projections of seven objects of the
+CloudNativePG API, `postgresql.cnpg.io/v1`, beyond those of **cnpg-cluster** and
+**cnpg-pooler**, below: an ImageCatalog, a ClusterImageCatalog, a Backup, a
+ScheduledBackup, a DatabaseRole, a Publication and a Subscription. Each emits
+that one object, named after the component unless `objectName` names it; the
+handler adds no label, no annotation and no default of its own.
 
-  **Required** follows the rule of the other kinds built on `policyFreeKind`:
-  a field the API requires that the Go type writes whether or not it was
-  authored. Each must be authored (`images[1].major: required (…)`):
-  - a catalog's `images`; an image's `image` and `major`; an extension's
-    `name`, and the `name` and the `value` of each of its `env` entries; a
-    component image's `key` and `image`;
-  - `cluster`, on the five kinds that refer to a Cluster, and its `name` on a
-    `cnpg-backup` and a `cnpg-scheduledbackup`. The DatabaseRole,
-    Publication and Subscription CRDs default the `name` to an empty string,
-    which no Cluster has, so the other three refuse a reference with no name
-    on launcher's own account, with the same `cluster.name: required`;
-  - a plugin configuration's `name`, on a `cnpg-backup` and a
-    `cnpg-scheduledbackup` that author one;
-  - a `cnpg-scheduledbackup`'s `schedule`;
-  - a `cnpg-databaserole`'s `name`, and the `name` of an authored
-    `passwordSecret`;
-  - a `cnpg-publication`'s `name`, `dbname` and `target`, and the `name` of a
-    target's `table`;
-  - a `cnpg-subscription`'s `name`, `dbname`, `publicationName` and
-    `externalClusterName`.
+### Properties
 
-  These lists are generated from the fields the linked module's CRDs require
-  and the types write unauthored (go-kure/launcher#883; see ["Required fields
-  a kind writes unauthored and does not refuse"](conventions.md#required-fields-a-kind-writes-unauthored-and-does-not-refuse)), so a dependency bump that
-  adds, drops or moves one fails until they are regenerated;
-  `TestCnpgFurtherKinds_RequiredMatchCRD` holds them to those CRDs as well.
-  They are read where the hand-kept lists were, before the kinds' own
-  checks, so every refusal reads as it did. An authored
-  empty value satisfies the rule and is the API server's to refuse
-  (`schedule: ""`), with three exceptions the build refuses itself: a
-  `cluster.name` must be a name CloudNativePG admits for a Cluster (a DNS-1035
-  label of at most 50 characters), as on `cnpg-pooler` and `cnpg-database`;
-  a role's `name: ""` breaks a rule of its CRD (below); and a catalog's
-  `image: ""`, on an image or a component image, is no image reference and is
-  refused by the tag rule (below).
+**Authored.** The properties are the top-level json fields of the spec type,
+decoded strictly at every depth: an unknown key is refused wherever it sits (an
+image, an extension, a plugin configuration, a target's object).
+- `cnpg-imagecatalog` and `cnpg-clusterimagecatalog` (`ImageCatalogSpec`, which
+  the two objects share): `images`, each an `image`, a `major` and its
+  `extensions` (a `name`, an `image` volume source with its `reference` and
+  `pullPolicy`, the four path lists and `env`), and `componentImages`, each a
+  `key` and an `image`.
+- `cnpg-backup` (`BackupSpec`): `cluster`, `target`, `method`,
+  `pluginConfiguration` (`name`, `parameters`), `online` and
+  `onlineConfiguration`.
+- `cnpg-scheduledbackup` (`ScheduledBackupSpec`): the six of a Backup, and
+  `schedule`, `suspend`, `immediate` and `backupOwnerReference`.
+- `cnpg-databaserole` (`DatabaseRoleSpec`): `cluster`,
+  `databaseRoleReclaimPolicy`, `clientCertificate`, and the fields of the role
+  configuration the type embeds: `name`, `comment`, `ensure`, `passwordSecret`,
+  `disablePassword`, `connectionLimit`, `validUntil`, `inRoles`, `inherit`,
+  `superuser`, `createdb`, `createrole`, `login`, `replication` and `bypassrls`.
+- `cnpg-publication` (`PublicationSpec`): `cluster`, `name`, `dbname`,
+  `parameters`, `target` (`allTables`, or `objects`, each a `tablesInSchema` or
+  a `table` with its `name`, `schema`, `only` and `columns`) and
+  `publicationReclaimPolicy`.
+- `cnpg-subscription` (`SubscriptionSpec`): `cluster`, `name`, `dbname`,
+  `parameters`, `publicationName`, `publicationDBName`, `externalClusterName`
+  and `subscriptionReclaimPolicy`.
 
-  **The CRDs' expression rules.** The seven CRDs declare 26. The build checks
-  the 15 that read one document, each a comparison of authored fields with
-  each other or with a string the CRD itself states, so a document that
-  breaks one could never be admitted:
-  - a catalog (two rules, on each of the two CRDs): no two images of one
-    `major` (`images[1].major: 17 is also the major version of images[0]; the
-    API takes each major version once`), and no two component images of one
-    `key`. The component images are a list keyed on `key`, so the API server
-    refuses a key held twice by its schema as well as by the rule;
-  - a role (eight): a `name` that is empty, `postgres` or
-    `streaming_replica`, or that starts with `pg_` or `cnpg_` (`name
-    "postgres": reserved, the DatabaseRole CRD refuses it`); `ensure:
-    absent`, which the API does not take on a DatabaseRole (a role is removed
-    by deleting the object with `databaseRoleReclaimPolicy: delete`);
-    `passwordSecret` beside `disablePassword: true`; and a client certificate
-    that is enabled without `login: true`. A certificate is enabled where its
-    block is authored and `enabled` is not `false`: the API fills `true` into
-    an omitted one before it evaluates the rule. It fills nothing into
-    `login`, which the rule reads without asking whether it is there: an
-    enabled certificate with no `login` authored is refused by the API server
-    as a rule it cannot evaluate (`no such key: login`), and one beside
-    `login: false` by the rule's own message. The build gives both the one
-    refusal;
-  - a publication (three): a `target` that publishes neither or both of
-    `allTables: true` and `objects` (`target: one of allTables: true and
-    objects is required`); an object that is neither or both of
-    `tablesInSchema` and `table`; and a table that lists its `columns` where
-    another object publishes `tablesInSchema`. The Go type leaves out a false
-    `allTables` and an empty `objects`, `tablesInSchema` or `columns`, so
-    each is read as the object will hold it: `allTables: false` beside a list
-    of objects builds, and is a list of objects. The API server reads the
-    document it is sent, so the two differ on a document that authors one of
-    the four, and agree on the object: sent as authored, `allTables: false`
-    beside a list of objects is refused, and the object the build writes for
-    it is accepted; `allTables: false` alone is accepted as authored and
-    refused by the build, since the object written holds neither.
-    `TestCnpgPublication_TargetAsWritten` shows the first for each of the
-    four, and the second for the three that can stand alone (an empty
-    `columns` alone is a table that lists none).
+**Labels and annotations** are the `labels` and `annotations` properties, and
+the object also carries the component label (see "Component label and ownership"
+in the OAM model).
 
-  The other eleven refuse a change of the stored object, which a build does
-  not have, and stay the API server's: a Backup's whole `spec`; the `cluster`
-  of a ScheduledBackup, a DatabaseRole, a Publication and a Subscription; the
-  `name` of a role; the `name` and the `dbname` of a publication and of a
-  subscription; and a publication's `target.allTables`, from one authored
-  value to another. Such a change builds here and is refused at apply, until
-  the object is deleted and created again. The rule on `allTables` sits on
-  that optional field, and the API server does not evaluate it where the
-  field is absent from the stored object or from the new one: a target moved
-  from `allTables` to `objects`, or back, is not refused by it.
-  `TestCnpgFurtherKinds_ExpressionRules` lists all 26 with what is
-  done with each, and fails on a rule that is added, dropped or reworded. It
-  holds each of the 15 to the API server's own expression validator, run
-  over the linked CRD after the defaults the API server fills: with every
-  other rule set aside, the validator refuses the properties that break the
-  rule, and with every rule it accepts the ones next to them and the object
-  the build writes for them; the build answers the same on both.
+### Outputs
 
-  **A Backup is a one-shot request.** The operator takes the backup once,
-  when the object is created, and the API refuses every later change of its
-  `spec`. A `cnpg-backup` kept in a repository and applied again is the same
-  object: nothing runs, and a change to its properties is refused at apply.
-  Where the repository is applied continuously, the API refuses the changed
-  document at every apply, so the delivery fails on it each time until the
-  change is taken back, or the request is authored as a new object (another
-  `objectName`), which is a new Backup and a new backup taken. What a
-  delivery tool set to replace an object it cannot update does with that
-  refusal is the tool's, and is not read here.
-  It suits a backup that is asked for once, under a name of its own (before
-  an upgrade, say), and is then left as the record of that backup. A backup
-  that recurs is a `cnpg-scheduledbackup`, whose Backups the operator creates
-  and names.
+**The ClusterImageCatalog is cluster-scoped**: the object carries no namespace,
+whatever namespace the application is built for, and its name is claimed
+cluster-wide. The other six are namespaced and are written in the build
+namespace. One rule lowers onto one of them: `postgresql` emits a
+`cnpg-scheduledbackup` for each `backup.schedules` entry (below); it emits none
+of the other six.
 
-  **Not checked**, and the API server's or the operator's to refuse:
-  - the number of a catalog's images (one to eight) and of its component
-    images (at most 32), a `major` below 10, and the forms of a `key`, of an
-    extension's `name` and of an `env` name;
-  - a `schedule`: launcher does not parse it. The operator reads a cron
-    expression of six fields, the first of which is the seconds; its webhook
-    refuses a schedule that does not parse and only warns of one that parses
-    with another number of fields;
-  - what the operator's webhook holds a Backup and a ScheduledBackup to: that
-    `online` and `onlineConfiguration` do not come with the
-    `barmanObjectStore` method, which is also the method of a document that
-    authors none, and, on a Backup only, that the `plugin` method comes with
-    a `pluginConfiguration`;
-  - `parameters` on a publication, a subscription and a plugin configuration:
-    a free map of strings, written as authored;
-  - every other value rule of the API: the enumerations (`method`, `target`,
-    `backupOwnerReference`, `ensure`, the reclaim policies, an image volume's
-    `pullPolicy`). A `validUntil` is the exception: the strict decode reads
-    an RFC 3339 time and refuses anything else.
+- **No default is filled.** An unauthored `method`, `ensure`, `inherit`,
+  `backupOwnerReference` or reclaim policy is left out and the API server fills
+  its own.
 
-  **The tag rule on a catalog's images.** The three fields of a catalog that
-  name an image are held to `ValidateImageRef`, as a container's image is,
-  when the component is read, with or without a policy: an image's `image`, a
-  component image's `image` and the `reference` of an extension's image
-  volume. One without a tag or digest, or tagged `:latest` (with a digest
-  too), or one that is no image reference, is refused by the field's path
-  (`images[0].image: image "registry.example/team/postgresql" rejected: no tag
-  or digest specified; use an explicit version tag or digest`), and the
-  refusal carries no policy class: a Cluster that takes its image from the
-  catalog runs what the entry names. An extension that names no reference
-  names no image and is not checked. A reference by digest alone passes; what
-  CloudNativePG itself requires of a catalog's image is the operator's rule
-  and is left to it. The rule runs at that read and nowhere else: generation
-  builds the object from what the read decoded and does not repeat it.
-  `cnpg-cluster` and `cnpg-pooler` repeat theirs at generation because their
-  config is an exported value a caller can change after the read; nothing but
-  the read can make a catalog's config.
-  `TestImageTagRule_CnpgImageCatalogs` holds the three, on both kinds.
+**A Backup is a one-shot request.** The operator takes the backup once, when the
+object is created, and the API refuses every later change of its `spec`. A
+`cnpg-backup` kept in a repository and applied again is the same object: nothing
+runs, and a change to its properties is refused at apply. Where the repository
+is applied continuously, the API refuses the changed document at every apply, so
+the delivery fails on it each time until the change is taken back, or the
+request is authored as a new object (another `objectName`), which is a new
+Backup and a new backup taken. What a delivery tool set to replace an object it
+cannot update does with that refusal is the tool's, and is not read here. It
+suits a backup that is asked for once, under a name of its own (before an
+upgrade, say), and is then left as the record of that backup. A backup that
+recurs is a `cnpg-scheduledbackup`, whose Backups the operator creates and
+names.
 
-  **Policy.** The two catalogs are held to the environment policy; the other
-  five have no field an `oam.Policy` method speaks to, and build the same
-  under every policy and under none.
-  - **Every image a catalog names is held to the allowed registries.** A
-    catalog runs no pod, but an image a Cluster takes from it is one the
-    operator runs. `ApplyPolicy` checks the three fields that name one, and
-    refuses by the field's path with the class `oam.RefusalRegistry`: an
-    image's `image`
-    (`images[0].image`), a component image's `image`
-    (`componentImages[0].image`) and the `reference` of an extension's image
-    volume (`images[0].extensions[0].image.reference`). An extension that
-    names no reference names no image, and nothing is checked for it.
-    `TestCnpgImageCatalogs_ImagesAreHeldToTheAllowedRegistries` holds the
-    three, on both kinds.
-  - **A Cluster's reference to a catalog is a name.** A `cnpg-cluster`'s
-    `imageCatalogRef` names a catalog and a major version, and holds no
-    image: the host is read where the image is authored, on the catalog. A
-    catalog that is not built with launcher is not seen.
-  - **No field holds a literal secret.** A role's `passwordSecret` is the
-    name of a Secret in the role's namespace, and launcher emits no Secret
-    for it; a subscription's credentials are those of the external cluster
-    the subscriber Cluster defines. A plugin's `parameters` and an
-    extension's `env` are free text: a value written there is written into
-    the object as authored and is not checked.
+### Validation
 
-  **Labels and annotations** are the `labels` and `annotations` properties,
-  and the object also carries the component label (see "Component label and
-  ownership" in the OAM model).
+**No capability is required, and none gates these kinds**: where the
+CloudNativePG CRDs are not installed the component builds. Whoever may author a
+component may author these, and with them the images the Clusters of a namespace
+or of the whole cluster may run, a role with any attribute PostgreSQL has
+(`superuser`, `bypassrls`, `replication`), and what a database publishes or
+subscribes to. A policy can keep the kinds out of a build through the object
+kind policy (`oam.ObjectKindPolicy`).
 
-  **Not covered.** Whether what is referred to exists: the Cluster, the
-  Secret, the database, the publication, the external cluster of a
-  subscription, the plugin, the schema and the tables a publication names. A
-  status of any of the seven is the operator's and is not written. The
-  Backups a ScheduledBackup creates, and the Secret a role's client
-  certificate is issued into (`<object name>-client-cert`), are the
-  operator's too.
+- **A role's `connectionLimit: 0` is refused** (`connectionLimit: 0 cannot be
+  carried by the CloudNativePG API types`): the field is no pointer and is
+  omitted when zero, and the CRD's default, `-1` (no limit), would apply in its
+  place, so a role authored to accept no connection would accept any number.
+- **An empty string is refused on the seven string fields the CRDs default**
+  (`method: "" cannot be carried by the CloudNativePG API types (the field is
+  omitted when zero, so the operator would apply its default
+  "barmanObjectStore")`): `method` on a Backup and a ScheduledBackup
+  (`barmanObjectStore`), a ScheduledBackup's `backupOwnerReference` (`none`), a
+  role's `ensure` (`present`) and `databaseRoleReclaimPolicy` (`retain`), and
+  `publicationReclaimPolicy` and `subscriptionReclaimPolicy` (`retain`). The
+  type omits an empty string, so the default would replace the authored value.
+- **A role's `validUntil` is written in UTC.** The API type holds an instant:
+  `2030-01-01T02:00:00+02:00` is written `2030-01-01T00:00:00Z`. It writes the
+  instant to the second and the zero time as null, which the API server drops,
+  so a `validUntil` with a fraction of a second other than zero is refused
+  (`validUntil "2030-01-01T00:00:00.5Z": a fraction of a second cannot be
+  carried by the CloudNativePG API types`), after a period or a comma, read from
+  the authored string, since the decode keeps only nine digits of a fraction;
+  and so is `0001-01-01T00:00:00Z` (`validUntil: the zero time cannot be carried
+  by the CloudNativePG API types`), which would leave a password that never
+  expires. The time as the API type writes it is held to the CRD's `date-time`
+  format and to the decoded instant, so an instant outside the four-digit years
+  in UTC is refused whatever its authored offset: `9999-12-31T23:00:00-02:00`
+  (`validUntil: the CloudNativePG API types write it as 10000-01-01T01:00:00Z,
+  which the DatabaseRole CRD's date-time format refuses`).
 
-- **postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
-  (precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
-  `backup` (`objectStore`, `objectStoreObjectName`, `retentionPolicy`,
-  `serverName`, `schedules`; see "Backup" below), `monitoring.enabled`,
-  `pooler.enabled`, `poolerName`, `managedRoles`, `databases` (each with an
-  optional `objectName`), `clusterObjectName`.
-  **`clusterObjectName` names the Cluster in place of the component name.
-  CloudNativePG derives the Cluster's Services and Secrets from the Cluster's
-  name, the default backup path moves with it, and renaming an existing
-  Cluster creates a new one: the old one is pruned with its data unless it is
-  protected** (see "The Cluster's and the ObjectStore's names" below).
-  **A component lowering rule** (`PostgresqlRule`, `postgresql_lowering.go`,
-  go-kure/launcher#281), not a dispatchable handler: it reads the properties
-  as before (`Parse`; the published schema is pinned byte for byte,
-  `testdata/postgresql-property-schema.json`: the former handler's, with
-  `poolerName` and `clusterObjectName` added and, since go-kure/launcher#1001,
-  `backup` typed and the top-level `objectStore` and `objectStoreObjectName`
-  removed, the store's name now `backup.objectStoreObjectName`) and emits
-  the CNPG kind components that build the same objects — a `cnpg-cluster`
-  under the component's name, a `cnpg-objectstore` under the same name (one
-  same-name sibling group) when `backup` is set, a `cnpg-pooler`
-  `<name>-pooler` when `pooler.enabled`, a `cnpg-database` `<name>-<db>`
-  per `databases` entry (a Database given the Pooler's name, by default the
-  one named `pooler` beside an enabled pooler, joins its same-name sibling
-  group, as two objects of different kinds), and a `cnpg-scheduledbackup`
-  `<name>-<schedule>` per `backup.schedules` entry, in that order. `replicas` and `storageSize` are written to the
-  Cluster only when authored, so the policy applies to them exactly as
-  before. The two values postgresql derived from the policy are set after
-  it by a post-policy step the rule attaches to the Cluster
-  (`oam.Component.AfterPolicy`), which runs before the authored traits:
-  `enablePDB` (`instances > 1`) and the `1Gi` storage fallback, under the
-  policy maximum with postgresql's text (`storageSize "1Gi" exceeds enforced
-  maximum "512Mi"`). Authored traits go to the Cluster, and those that
-  covered every object postgresql generated are forwarded to the other
-  members so they still do: `prune-protection` and `force-replace` to each
-  member, and `fluxcd-patches` and `fluxcd-postbuild` (not built in; a consumer
-  that delivers through Flux registers them) to the first member that is
-  ordered after the Cluster (below): the members share one group, so one of
-  them carries the trait for that group's bundle. For that reason a document
-  that authors one of these two traits on the postgresql component may not
-  order or place a member on its own (a `dependency` rule or a `placement`
-  whose component is the Pooler's, a Database's or a ScheduledBackup's
-  generated name): the
-  member could leave the group the trait reaches, so the rule refuses it and
-  asks for the postgresql component's name instead (the rule for every
-  lowering rule, and the message, are under ["Traits a lowering rule
-  forwards"](https://www.gokure.dev/launcher/api-reference/oam-components/#traits-a-lowering-rule-forwards)). Policies that name the
-  postgresql component are extended to the members the same way. A `placement` of it is repeated
-  for each member, so they stay in the Cluster's tier and, without a
-  dependency policy, in its bundle. When the document orders its components
-  with a `dependency` policy that has a rule, the rule adds one making the
-  Pooler, the Databases and the ScheduledBackups depend on the Cluster, and every component the
-  document makes depend on the postgresql component depend on them too:
-  the members are then in a later group than the Cluster's. Without one it adds
-  no edge, since a dependency edge would order a document that never asked
-  for ordering. The policies it adds are named `<name>-dependencies` and
-  `<name>-placement-<i>` (one per member), or, when a policy of the document
-  already uses the name, the first free one with `-<n>` appended.
-  **Behavior-changing** under `launcher.gokure.dev/v1alpha1`
-  (go-kure/launcher#281): with both `objectStore` (now `backup`) and `pooler`, the objects
-  now come in the order Cluster, ObjectStore, Pooler (was Cluster, Pooler,
-  ObjectStore; the objects are the same), and a Database named `pooler`
-  comes right after the Pooler, ahead of the other Databases. Under a
-  `dependency` policy the Pooler, the Databases and the ScheduledBackups
-  are deployed from one bundle they share, after the Cluster's, unless the document orders
-  or places a generated member on its own (was one bundle for all of
-  postgresql's objects). A Pooler, Database or ScheduledBackup name,
-  generated or chosen, that is already the name of another component in the
-  document is refused, naming both. A database name repeated in
-  `databases` is refused, naming both entries: each entry is one Database
-  object, so the Flux build already failed on it, and the plain manifest
-  output carried duplicate Database documents (kubectl kept the last). The Cluster kind's policy checks now
-  apply, under its field names: the registry allowlist on the image
-  (`imageName`, derived or authored), and `instances`/`storage.size` in the
-  policy messages. Refusals the API server or the operator gave at apply
-  now come at build: a resource request above its limit, a database named
-  `postgres`, `template0`, `template1` or not a DNS-1123 subdomain, and an
-  authored `storageSize: ""` (`storageSize: must not be empty; omit it to
-  take the policy default or 1Gi`), which built a Cluster CloudNativePG's
-  webhook refuses ("Size not configured").
-  The component name becomes the Cluster's name and its `cnpg.io/cluster`
-  endpoint selector unless the Cluster is named apart (`clusterObjectName`
-  or the `Naming` hook, below), so it carries cnpg-cluster's name rule: a DNS-1035
-  label (no leading digit, no dot) of at most 50 characters. Any other name
-  is refused when the rule lowers it and when endpoints are collected
-  (`postgresql name "db.main": must be a DNS-1035 label of at most 50
-  characters …`). The cap also keeps both endpoint selector values, the
-  name and the pooler's default `<name>-pooler`, within the 63-character label-value
-  limit (a `poolerName` or a hook-given name is held to it as a DNS-1123
-  label, and so is the default where the Cluster is named apart and the
-  component name is not bounded by the Cluster's rule). **Behavior-changing** under `launcher.gokure.dev/v1alpha1`:
-  such a name used to build and was then refused by CloudNativePG at apply,
-  or, over 63 characters (56 with the pooler), gave a network-policy
-  selector the API server refuses; it is now refused at build
-  (go-kure/launcher#615, go-kure/launcher#589).
-  An authored `version: ""` is refused by name (`version: must not be empty;
-  omit it to default to "16"`), with or without `imageName`: it used to be
-  kept as a value, so without `imageName` the cluster image was
-  `ghcr.io/cloudnative-pg/postgresql:` — an empty tag that only the image
-  pull rejected (go-kure/launcher#539). Only an omitted or null `version`
-  takes the default. `storageSize: ""` is refused (above).
-  The image is held to the tag rule (`ValidateImageRef`), with or without a
-  policy (**breaking**, go-kure/launcher#790). Without `imageName` the image
-  is `ghcr.io/cloudnative-pg/postgresql:<version>`, so a `version` that makes
-  a `:latest` reference, or none that parses, is refused under the property
-  the author wrote, with the image it made: `version: "latest" is refused as
-  the tag of the default image: image
-  "ghcr.io/cloudnative-pg/postgresql:latest" rejected: :latest tag not
-  allowed; use an explicit version tag or digest`. An authored `imageName`
-  is refused under `imageName`; `version` is read for the default image only
-  and is not checked beside one. The default `version` builds.
-  `pooler.image` is the PgBouncer image, written to the Pooler's
-  `pgbouncer.image` and held to the tag rule under its own name
-  (`pooler.image: image "…" rejected: …`) and, by the `cnpg-pooler` the pooler
-  lowers to, to the registry allowlist. Like the other pooler settings it
-  needs `pooler.enabled`. Without it the CloudNativePG operator chooses the
-  PgBouncer image, so under a non-empty allowlist an enabled pooler without
-  `pooler.image` is refused (**breaking**, go-kure/launcher#790: it built
-  before), reported under the Pooler's component name:
-  `pgbouncer.image (pooler.image on a postgresql component): unset, so the
-  CloudNativePG operator chooses the image the pods run, which the allowed
-  registries [...] cannot hold; name an image from one of them`. Set
-  `pooler.image` to an image from the list. With no allowlist nothing
-  changes.
-  Any other storage size the Cluster would carry, authored or from the
-  policy default, must parse and be positive (`storageSize: quantity must be
-  positive, got "0"`): CloudNativePG's webhook parses only the size, so a
-  zero or negative one was admitted and its claims failed the API server's
-  positive storage-request check. A policy storage-size default is checked
-  when it is applied (`policy default for storage.size: invalid quantity
-  "lots"`), as the cpu/memory defaults are. The instance count must be at
-  least 1, the CRD's minimum: a replicas policy default of 0 is refused
-  (`instances: must be >= 1, got 0 from the policy default`), and so is an
-  authored `replicas: 0` when the rule lowers it (`replicas: must be >= 1,
-  got 0`).
-  **Behavior-changing** under `launcher.gokure.dev/v1alpha1`: an authored
-  `replicas: 0` or a non-positive `storageSize` used to build and was then
-  refused at apply; it is now refused at build (go-kure/launcher#623).
-  `resources` forwards every name the shared parser admits — `cpu`, `memory`,
-  `ephemeral-storage`, `hugepages-<size>` and qualified extended resources
-  such as `nvidia.com/gpu`, under the same validation as the other seven
-  workload kinds — onto the Cluster's `spec.resources` `requests`/`limits`
-  unchanged (go-kure/launcher#484; until then any name other than
-  `cpu`/`memory` was rejected, so this is an additive change). Only
-  `cpu`/`memory` carry a policy default and maximum; CNPG-specific sizing
-  such as `ephemeralVolumesSizeLimit` is not derived from these entries.
-  CNPG copies this block onto the instance pods unchanged and nothing
-  defaults cpu/memory into it except a policy, so generation refuses a block
-  that names `hugepages-<size>` without `cpu` or `memory` on either side
-  after policy defaults (`resources: hugepages require cpu or memory in
-  requests or limits`) — admission would refuse every instance pod.
-  `affinity` takes the same four keys as the shared `affinity` property
-  (`enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType`,
-  `nodeSelector`) with the same defaults — `kubernetes.io/hostname` and
-  `preferred` — but the handler parses it itself into the CNPG
-  `AffinityConfiguration` instead of calling `parseAffinity`, because CNPG
-  carries its own affinity shape rather than a `corev1.Affinity`. The block
-  and each of its four sub-fields are read with the presence-reporting
-  helpers, so a value authored with the wrong type is rejected by name
-  (`affinity.topologyKey: must be a string, got float64`) rather than
-  discarded while a default reaches the emitted cluster, and
-  `podAntiAffinityType` must be `preferred` or `required` — an explicit empty
-  string is an error here, not a fallback to the default
-  (go-kure/launcher#448). Rejection reaches the `nodeSelector` **values**, not
-  just its envelope: `nodeSelector: {rack: 3}` is refused by key rather than
-  dropped, so a selector cannot silently reach the cluster narrower than
-  authored. When more than one entry is wrong, the **alphabetically first**
-  offending key is the one reported: Go randomises map iteration order, so
-  without an explicit sort the same document names a different key run to run
-  and its diagnostic cannot be reproduced or asserted in a test. The same
-  ordering rule applies to the other three parsers in this package that report
-  a bad map entry by key — `parseResourceList`, `rejectUnknownKeys` and
-  `parseManifestSource`. An explicit **null** `affinity` is **absence** —
-  Launcher supplies no explicit affinity settings, exactly as when the
-  property is omitted — matching what `pkg/oam`'s own property validation
-  already does with a null under an optional property; without that,
-  `affinity:` with no value validated against the published schema and then
-  failed to convert, while the same value built in Go turned pod
-  anti-affinity on with every default. A null on a sub-field *inside* a
-  present block is also absence — it takes the same default an omitted
-  sub-field takes (go-kure/launcher#444 established this nested-null contract
-  in the shared presence primitive `authoredValue`, which this block's four
-  sub-fields go through; a nested key read raw elsewhere, such as a probe
-  handler key, does not follow it); a non-null wrong-typed sub-field, and an
-  explicitly empty `podAntiAffinityType`, remain errors.
-  The shared `parseAffinity` (`common.go`) applies the same rules to its
-  four sub-fields since go-kure/launcher#452, so the two readers agree; a
-  change to one belongs in the other.
-  The handler's other string→string maps — `inheritedMetadata.labels`,
-  `inheritedMetadata.annotations`, `postgresql.parameters`,
-  `pooler.parameters` and `externalClusters[].connectionParameters` — take
-  string values only: a non-string value (`tier: 3`,
-  `max_connections: 100`, `enabled: true`) is refused by field and key
-  (`postgresql.parameters["max_connections"]: must be a string, got int`)
-  instead of being dropped from the emitted resources, with the same
-  alphabetically-first rule as `nodeSelector` when several are wrong
-  (go-kure/launcher#466). Quote such a value to keep it
-  (`max_connections: "100"`), and declare a Package parameter substituted as
-  a whole value there as `type: string`, since whole-value substitution keeps
-  the parameter's type; a number is not converted to its string form,
-  because YAML's rendering of a number is not always the text the author
-  typed (`1.10` decodes to `1.1`). An explicit null value is absence, per
-  ["The null contract"](null-and-spellings.md#the-null-contract): the key is left out, not refused. The same
-  holds for `nodeSelector` values in both affinity readers, which share the
-  helper.
-  **Backup** (go-kure/launcher#1001). `backup` takes backups and archives WAL
-  to an S3-compatible object store through the Barman Cloud plugin, the one
-  path CloudNativePG keeps once its in-tree Barman support is removed. It
-  lowers into the base kinds and adds nothing to them:
-  - `backup.objectStore` (required) is the configuration of a barman-cloud
-    `ObjectStore` the component emits, named after the component (or by
-    `backup.objectStoreObjectName` or the `Naming` hook, below). It reads
-    `destinationPath` (required, not empty), `endpointURL`, `endpointCA`
-    (`{name, key}` of a Secret), `s3Credentials` (required: `accessKeyId` and
-    `secretAccessKey`, each `{name, key}` of a Secret, with an optional
-    `region` and `sessionToken` alike, or `inheritFromIAMRole: true`; exactly
-    one of the two ways), `wal` (`compression`, `encryption`, `maxParallel`)
-    and `data` (`compression`, `encryption`, `jobs`, `immediateCheckpoint`).
-    It is decoded strictly into the vendored Barman Cloud type, and the
-    values the ObjectStore CRD bounds are checked at build, since the Go type
-    alone does not hold them: a `compression` or `encryption` outside the
-    CRD's enum (`data` takes no `xz` or `zstd`), and a `maxParallel` or `jobs`
-    under 1, an authored `0` included (`backup.objectStore.wal.compression
-    "brotli": must be one of …`). A Secret reference without its `name` or
-    `key` is refused. `serverName` there is refused
-    (the ObjectStore CRD forbids it; use `backup.serverName`), and so are
-    `azureCredentials` and `googleCredentials` (S3-compatible storage only; the
-    `cnpg-objectstore` kind takes them), with that reason also where no
-    `s3Credentials` is written: the schema does not mark the store's required
-    keys Required, so the document check gives a refused key's reason first.
-  - `backup.retentionPolicy` is the ObjectStore's, a positive count of days,
-    weeks or months (`30d`, `4w`, `6m`); anything else is refused
-    (`backup.retentionPolicy "30 days": must be a positive count …`).
-  - The Cluster gets one plugin entry, `barman-cloud.cloudnative-pg.io` with
-    `isWALArchiver: true`, whose `barmanObjectName` parameter names the store
-    by the name it took. `backup.serverName` becomes its `serverName`
-    parameter, the folder the plugin writes under (it defaults to the Cluster
-    name). The Cluster has no in-tree `spec.backup`.
-  - Each `backup.schedules` entry emits a `cnpg-scheduledbackup` of the
-    Cluster, `method: plugin` through the same plugin (no parameters: the
-    plugin reads the store from the Cluster's entry). `name` (required,
-    unique among the schedules) makes its name, `<component>-<name>`;
-    `schedule` (required) is a cron expression of six fields, seconds first
-    (`0 0 3 * * *`), refused unless it parses as CloudNativePG's webhook parses
-    it (`robfig/cron` at the version the vendored CloudNativePG requires).
-    Five fields parse there too, seconds first, with only a warning at the
-    webhook that Flux does not show: a crontab line `0 3 * * *` would back up
-    at minute 3 of every hour. It is refused, naming each six-field form that
-    parses, read as a crontab line and as the operator reads it
-    (`backup.schedules[0].schedule "0 3 * * *": five fields, … write six
-    fields, seconds first ("0 0 3 * * *" as a crontab line, or "0 3 * * * *"
-    as the operator reads it)`). A descriptor (`@daily`) is accepted.
-    A schedule must also find a time within the operator's look-ahead from
-    every instant (go-kure/launcher#1032): the operator asks for the next time
-    after now, searching through the end of the year five years on, and on
-    none records NoSchedule and takes no further backup for that
-    ScheduledBackup, not even the immediate one, with no retry. The search is
-    computed in UTC, exactly, over one 400-year Gregorian cycle (fixed years,
-    so a build does not depend on the clock): February the 30th
-    (`0 0 3 30 2 *`) is refused as a time that never comes, and February the
-    29th (`0 0 3 29 2 *`) is refused too, since 2100 is no leap year
-    (`… no time from the end of 2096 through the end of 2101 (UTC), longer
-    than the five years the operator looks ahead …`). A seconds, minutes,
-    hours or months field that selects no value (`,`) is refused outright,
-    naming the field. An empty day of month or day of week can still fire:
-    `0 0 3 , * MON` (ORed with Mondays) is accepted, `0 0 0 , * *` (ANDed with
-    a starred day of week) is refused. `@every` is accepted, however long its
-    delay; how often a backup is taken is not judged.
-    `immediate` defaults to `true` (a new Cluster gets a base backup at once),
-    `backupOwnerReference` to `self` (`none`, `self` or `cluster`), `target`
-    is `primary` or `prefer-standby` and `suspend` is written only when
-    authored.
+**Required** follows the rule of the other kinds built on `policyFreeKind`: a
+field the API requires that the Go type writes whether or not it was authored.
+Each must be authored (`images[1].major: required (…)`):
+- a catalog's `images`; an image's `image` and `major`; an extension's `name`,
+  and the `name` and the `value` of each of its `env` entries; a component
+  image's `key` and `image`;
+- `cluster`, on the five kinds that refer to a Cluster, and its `name` on a
+  `cnpg-backup` and a `cnpg-scheduledbackup`. The DatabaseRole, Publication and
+  Subscription CRDs default the `name` to an empty string, which no Cluster has,
+  so the other three refuse a reference with no name on launcher's own account,
+  with the same `cluster.name: required`;
+- a plugin configuration's `name`, on a `cnpg-backup` and a
+  `cnpg-scheduledbackup` that author one;
+- a `cnpg-scheduledbackup`'s `schedule`;
+- a `cnpg-databaserole`'s `name`, and the `name` of an authored
+  `passwordSecret`;
+- a `cnpg-publication`'s `name`, `dbname` and `target`, and the `name` of a
+  target's `table`;
+- a `cnpg-subscription`'s `name`, `dbname`, `publicationName` and
+  `externalClusterName`.
 
-  **Prerequisites, and what happens at apply.** `backup` needs, in the
-  cluster: the CloudNativePG operator 1.26 or later (the emitted objects follow
-  the vendored 1.30.1 API), the Barman Cloud plugin v0.15.x with its
-  `ObjectStore` CRD, and cert-manager, which the plugin's install recommends.
-  The bucket, and the Secrets `s3Credentials` and `endpointCA` name, must exist
-  beforehand: launcher neither creates nor checks them. The build cannot see
-  the cluster: a missing CRD fails the apply, while an older CRD can prune a
-  field it does not know without an error. Check the installed versions, and
-  read the applied object back. The backup and recovery guide
-  (`docs/postgresql-backup-recovery.md`) walks through both, with the checks
-  that show a backup and a recovery working. The rule's contract metadata
-  carries the same list for a tool to read (`ContractMetadata.Prerequisites`,
-  go-kure/launcher#1027; the oam package README, "Contract metadata"), each
-  entry with the use that needs it, plus the ObjectStore a recovery's
-  `source.objectStoreName` names and the Secret its `secret.name` names, with
-  the owner's credentials. cert-manager is not an entry: what launcher writes
-  does not depend on it, as the plugin's TLS certificates can come from
-  elsewhere.
-  **Behavior-changing**: the former `backup` keys `destinationPath`,
-  `endpointURL` and `secretName`, which built the Cluster's in-tree
-  `barmanObjectStore`, and the top-level `objectStore` and
-  `objectStoreObjectName` are refused, whatever their value, naming where each
-  went (`objectStore: moved to backup.objectStore (…)`,
-  `backup.secretName: removed; use backup.objectStore.s3Credentials (…)`),
-  by the document check and by the lowering alike. `backup.retentionPolicy`
-  stays, and now sets the ObjectStore's retention. `backup: {}` is refused
-  too (`backup.objectStore: required (…)`). For a library consumer that
-  registers handlers itself: the rule now also lowers into
-  `cnpg-scheduledbackup`, so a registry with `PostgresqlRule` and without a
-  `cnpg-scheduledbackup` handler fails every transform at `Seal`, whatever the
-  document (`registry incomplete: … lowers into component type
-  "cnpg-scheduledbackup", which is not registered`); the built-in set registers it.
-  Until go-kure/launcher#643 the plugin entry named a plugin CloudNativePG does not
-  register (`barman-cloud.barmancloud.cnpg.io`) under a key the plugin does
-  not read (`objectStoreName`), and `serverName` went on the ObjectStore,
-  which the API server refused.
-  Every other optional property the handler reads goes through the same
-  presence-reporting helpers (go-kure/launcher#512): `provider`, `version`,
-  `storageSize`, `imageName`, the `backup`, `monitoring`, `pooler`,
-  `bootstrap` and `replication.synchronous` blocks and their
-  fields, and each entry of `managedRoles`, `databases` (with its
-  `extensions`), `externalClusters` and `monitoring.customQueries`. A value of
-  the wrong type is refused by its path
-  (`managedRoles[0].login: must be a boolean, got string`,
-  `databases[0].extensions[1]: must be an object, got string`) where it used
-  to be dropped, so `pooler.enabled: "true"` no longer builds a cluster with
-  no pooler and `backup: "s3"` no longer builds one with no backup; an
-  explicit null is absence, typed or untyped, so a typed-nil `storageSize`
-  takes the policy default and a typed-nil `pooler.instances` or
-  `replication.synchronous.number` takes the handler default rather than
-  being refused as a bad number. Two further shapes that used to vanish are now
-  errors: a non-string `managedRoles[].inRoles` entry, and an
-  `externalClusters` entry without a `name`. So is a managed role's
-  `connectionLimit: 0` (go-kure/launcher#659), as `cnpg-cluster` refuses it:
-  CloudNativePG omits a zero `connectionLimit` from the Cluster and applies its
-  default `-1`, so the role would deploy with no limit. A role that must not
-  connect sets `login: false` instead. The lowering repeats the refusal for a
-  `PostgresqlConfig` built directly rather than parsed. `Endpoints` runs the
-  rule's lowering on the component, so what the lowering refuses of it has no
-  endpoint, in the same words. What a kind it lowers into refuses of a member
-  (a database named `postgres`) is not seen there: one of the four things an
-  endpoint entry does not see (`pkg/oam`, "Name roles and the `Naming`
-  hook").
-  **Recovery** (go-kure/launcher#1001). `recovery` bootstraps a new Cluster
-  from the base backups and WAL another cluster wrote to an object store
-  through the Barman Cloud plugin, to the end of the WAL or to a target
-  (point-in-time recovery). It lowers into the base kinds and adds nothing to
-  them. A bootstrap is read only when the Cluster is created: recover into a
-  new component beside the source one; set on a component whose Cluster
-  exists already, it changes nothing. Recovering by renaming the source
-  component's Cluster instead (`clusterObjectName`) creates a new Cluster and
-  prunes the original with its data unless it is protected. It is not
-  combined with
-  `bootstrap.pg_basebackup` (`recovery: not with bootstrap.pg_basebackup …`)
-  or `bootstrap.initdb` (`recovery: not with bootstrap.initdb …`).
-  - `recovery.source` (required) is where the backups are read from:
-    `serverName` (required, not empty), the folder the source cluster wrote
-    within the store (its `backup.serverName`, else its Cluster's name), and
-    exactly one of `objectStoreName`, an existing ObjectStore in the namespace,
-    and `objectStore`, one defined here. The inline store reads as
-    `backup.objectStore` does, with the same checks and refusals under its own
-    path (`recovery.source.objectStore.serverName: not allowed …; use
-    recovery.source.serverName`), and the component emits it as a
-    `cnpg-objectstore` named `<component>-recovery-source` (or by the `Naming`
-    hook, below).
-  - The Cluster gets `bootstrap.recovery` whose `source` is one
-    `externalClusters` entry the rule writes, `<component>-recovery-source`:
-    the plugin `barman-cloud.cloudnative-pg.io` with the parameters
-    `barmanObjectName`, the store by the name it took, and `serverName`, always
-    written, since the plugin would otherwise read the new Cluster's own folder.
-    An authored `externalClusters` entry of that name is refused.
-  - `recovery.target` is where the recovery stops, the vendored
-    `RecoveryTarget`: `time`, `lsn`, `xid`, `name` and `immediate`, at most one
-    of them; `backupID`; `timeline` (`latest` or a positive integer, written as
-    a string, and emitted in plain decimal: the plugin matches it against the
-    backups' timelines as text, so `"01"` is written `"1"`); `exclusive`. What CloudNativePG's webhook refuses without
-    looking at a cluster is refused at build: two targets (an authored
-    `immediate`, `false` included, counts), a `time` or `lsn` that does not
-    parse as the operator parses it, an `xid` that is no 32-bit integer, a
-    `name` of 64 bytes or more or with a control character, an `xid`, `name`
-    or `immediate` without `backupID` (the plugin finds the base backup from
-    the catalog by time or LSN only), and a `timeline` that is neither. An
-    authored `""` in a target, `database` or `owner` is refused: the Cluster
-    omits an empty value, which would recover to the end of the WAL, or take
-    the operator's default.
-  - `recovery.database`, `recovery.owner` and `recovery.secret.name` (the
-    owner's credentials) are the Cluster's, written only when authored.
-  - A cluster that would archive its WAL into the folder it is recovered from
-    is refused where launcher sees both (`recovery.source: the cluster would
-    archive its WAL into the folder it is recovered from …`): the endpoint,
-    the destination path (one trailing `/` aside, as Barman joins it with the
-    server name) and the server name of `backup` (its `serverName`,
-    else the Cluster's name) against those of the source, read from the inline
-    store, from the component's own backup store, or from the store another
-    component of the document emits (a `postgresql` component's backup store
-    or a `cnpg-objectstore`, its `labels` and `annotations` aside, known by
-    the name its author wrote, else by its component name; or a `postgresql`
-    component's inline recovery store, by its default name
-    `<component>-recovery-source`, shortened as every generated name is;
-    go-kure/launcher#1044), an unauthored name only where no `Naming` hook is
-    set. A store outside the document, or another component's store the
-    author did not name while a hook is set (its name may be the hook's
-    answer, asked by that component's lowering), is left to the plugin's own
-    check before it archives.
-  - **Ordering.** The recovering Cluster reads its source store before it can
-    become ready, so the store never waits for the Cluster as the other members
-    do. Where the document orders its components (a `dependency` policy), the
-    Cluster waits for the store: the store is in a group before the Cluster's,
-    with the placements and the bundle traits the members get, and waits for
-    what the document's dependency rules make the component wait for, as all
-    of its objects do (`Component.WaitsAs`). That includes the rules another
-    component's lowering adds: made to wait for another `postgresql`
-    component, the store waits for its Pooler, Databases and ScheduledBackups too
-    (go-kure/launcher#1041). Where it does not, nothing is ordered, and the
-    store is applied with the Cluster.
-  - **`bootstrap`** is declared key by key (go-kure/launcher#1269), and a key
-    under it that the component does not read is refused naming it
-    (`bootstrap: unrecognized key "…"`), where it used to be dropped. It reads
-    `initdb` and `pg_basebackup` (whose `source` is its only key; another
-    was dropped before and is refused now), at most one of them and neither with
-    `recovery`, and refuses the former `bootstrap.recovery` with its
-    replacement. `bootstrap.initdb` creates the Cluster with an application
-    database and its owner in place of the operator's default, `app`: both
-    `database` and `owner` are required, not empty (the CloudNativePG webhook
-    refuses one without the other), and they are written to the Cluster's
-    `spec.bootstrap.initdb`. An empty `initdb` is refused the same way; to get
-    the operator's default (database `app`, owned by `app`), leave `bootstrap`
-    out. Any other CloudNativePG initdb key (`secret`,
-    `encoding`, `postInitSQL`, `import`, …) is refused
-    (`bootstrap.initdb: unrecognized key "…"`), never dropped; each can be
-    modelled later. The owner's connection Secret is the operator's, named
-    after the Cluster, and this component creates none. A bootstrap is read
-    only when the Cluster is created; set on a component whose Cluster exists
-    already, it changes nothing. `cnpg-cluster` takes the whole CloudNativePG
-    `bootstrap.initdb`, strictly decoded.
-  **Behavior-changing**: the former `bootstrap.recovery` is refused, whatever
-  its value (`bootstrap.recovery: moved to recovery (…)`), and so is an
-  external cluster's in-tree `barmanObjectStore`
-  (`externalClusters[0].barmanObjectStore: removed (in-tree Barman Cloud, gone
-  in CloudNativePG 1.31); use recovery.source`). `externalClusters` keeps its
-  `name` and `connectionParameters`, the source of `bootstrap.pg_basebackup`.
-  **Two object store paths are required** (go-kure/launcher#790):
-  `backup.objectStore.destinationPath` (go-kure/launcher#1001; until then
-  `backup.destinationPath`, where another value of `backup` was set), and
-  `recovery.source.objectStore.destinationPath` for an inline recovery store
-  (`backup.objectStore.destinationPath: required (…)`). The ObjectStore CRD
-  requires it. An authored empty path is refused in each (`must not be empty
-  (…)`). Until go-kure/launcher#1001 the second was the path of an external
-  cluster's in-tree `barmanObjectStore`, now refused (above). Of the strings
-  `cnpg-cluster` refuses unauthored, the lowering fills the parent of two,
-  `bootstrap.pg_basebackup.source` and the Cluster's
-  `postgresql.synchronous.method` (authored here as
-  `replication.synchronous.method`), only from the string itself, and of the
-  other nine (the Cluster's `backup.barmanObjectStore.destinationPath` and
-  `externalClusters[].barmanObjectStore.destinationPath` among them, since
-  `backup` and `recovery` write no in-tree Barman configuration, only plugin
-  entries) never. `TestPostgresqlRule_UnauthoredRequiredStrings` reads all
-  eleven in the lowered component.
-  **A block that would not be built is refused, not dropped**
-  (go-kure/launcher#790). Five blocks are built only when one field of
-  theirs is set, and a document that authored other values of such a block
-  without that field used to build with none of them in the result. It is
-  refused by the name of the missing field:
-  - `backup`: built from `objectStore`, so any `backup`, an empty one
-    included, without one is refused (`backup.objectStore: required (…)`);
-    the store itself needs a `destinationPath` that is not empty and
-    `s3Credentials` (go-kure/launcher#1001, above; until then the Cluster's
-    backup was built from `backup.destinationPath`).
-  - `bootstrap.pg_basebackup`: the bootstrap is built from a non-empty
-    `source`, so the block without one is refused
-    (`bootstrap.pg_basebackup.source: required (…)`, or `must not be empty
-    (…)` for an authored `""`). `recovery`, which replaced
-    `bootstrap.recovery`, is refused without its `source` likewise
-    (`recovery.source: required (…)`). `bootstrap.initdb` is built from
-    `database` and `owner` together, so the block without either is refused
-    by that field's name (`bootstrap.initdb.owner: required (…)`).
-  - `replication.synchronous`: built from `method`, so the block without one
-    is refused (`replication.synchronous.method: required (any or first)`),
-    after a wrongly typed `number` or `dataDurability`, which is still
-    refused by its own path.
-  - `monitoring`: built when `enabled` is true, so `customQueries` beside an
-    `enabled` that is not authored is refused (`monitoring.enabled: required
-    where monitoring.customQueries is set (…)`).
-  - `pooler`: the Pooler is emitted when `enabled` is true, so `instances`,
-    `type`, `poolMode`, `parameters` or `image` beside an `enabled` that is not
-    authored is refused (`pooler.enabled: required where pooler.instances is
-    set (…)`).
+These lists are generated from the fields the linked module's CRDs require and
+the types write unauthored (see ["Required fields a kind writes unauthored and
+does not
+refuse"](conventions.md#required-fields-a-kind-writes-unauthored-and-does-not-refuse)),
+so a dependency bump that adds, drops or moves one fails until they are
+regenerated; `TestCnpgFurtherKinds_RequiredMatchCRD` holds them to those CRDs as
+well. They are read where the hand-kept lists were, before the kinds' own
+checks, so every refusal reads as it did. An authored empty value satisfies the
+rule and is the API server's to refuse (`schedule: ""`), with three exceptions
+the build refuses itself: a `cluster.name` must be a name CloudNativePG admits
+for a Cluster (a DNS-1035 label of at most 50 characters), as on `cnpg-pooler`
+and `cnpg-database`; a role's `name: ""` breaks a rule of its CRD (below); and a
+catalog's `image: ""`, on an image or a component image, is no image reference
+and is refused by the tag rule (below).
 
-  **An authored `enabled: false` keeps building**, in `pooler` and in
-  `monitoring`: `enabled` is the block's own switch, the author wrote "off",
-  and the settings beside it are kept in the document for when it is
-  switched on. `poolerName` differs (refused whenever `pooler.enabled` is not
-  true, an authored false included) because it is a property outside the
-  block that names an object which does not exist while the pooler is off.
-  A block with nothing in it (`bootstrap: {}`, `replication:
-  {}`, `monitoring: {}`, `pooler: {}`), or with an empty `customQueries` list
-  or `parameters` map only, authors no value and builds as before; `backup:
-  {}` is the exception, refused since go-kure/launcher#1001 (above).
-  `TestPostgresqlRule_BlockNotBuilt` holds each case. Breaking for a
-  document that authored one of these blocks without its field, among them
-  a `backup` with an `endpointURL` or an empty `retentionPolicy` and no
-  path, a `bootstrap.pg_basebackup: {}` and a `replication.synchronous`
-  with a `number` only. Such a document built,
-  without what the author wrote.
-  **An authored `pooler.instances` is written as authored**
-  (go-kure/launcher#790), a 0 or a negative count included. The Pooler CRD
-  gives `instances` a default of 1 and no minimum, and a count of 0 or less
-  used to be left out of the Pooler, so the operator ran the one pod the
-  author had switched off. The upstream type carries a 0, so it is written;
-  the CRD does not bound the count, so a negative one is written too and
-  refusing it is left to the cluster. A count that is not authored is still
-  3 (`TestPostgresqlRule_PoolerInstances`). Behavior-changing for a document
-  with `pooler.instances: 0` or less: its Pooler now holds that count. A
-  document with `instances: 0` got one pod before and gets none now (the
-  `postgresql-bootstrap-external` fixture shows it).
-  **An additional Service's name** is the `serviceTemplate.metadata.name` of a
-  `managed.services.additional[]` entry, and CloudNativePG creates the Service
-  under it: a name with a leading digit is refused when `spec.kubernetesVersion`
-  is below 1.36, RelaxedServiceNameValidation, unless `spec.featureGates` sets
-  that gate on, naming the entry by its index
-  (go-kure/launcher#1230; `docs/delivery-scope.md` §3.5).
-  **The Pooler's and the Databases' names** (go-kure/launcher#787) are
-  resolved in the order of every name role (see "Name roles and the `Naming`
-  hook" in `site/content/api-reference/oam/names-and-overrides.md`): the author's property, else the consumer's
-  `Naming` hook, else the default. `poolerName` names the Pooler (role
-  `pooler`, default `<name>-pooler`) and must be a DNS-1123 label, since
-  CloudNativePG names the pooler's Service after it (a leading digit is refused when
-  `spec.kubernetesVersion` is below 1.36, RelaxedServiceNameValidation, unless
-  `spec.featureGates` sets that gate on, the default
-  `<name>-pooler` included; `docs/delivery-scope.md` §3.5); it is refused when
-  `pooler.enabled` is not true. `databases[].objectName` names that entry's
-  Database object (role `database`, default `<name>-<db>`) and must be a
-  DNS-1123 subdomain; the entry's `name` stays the database created in
-  PostgreSQL. A database whose `name` cannot be part of an object name
-  (`app_data`) has no default and needs an `objectName`: without one it is
-  refused, and the hook is not asked for it. A name is used as written or
-  refused, never shortened. Each is
-  also the name of the component the rule emits, so one that is already a
-  component of the document, the postgresql component's own name included, is
-  refused, naming both; two Databases given one name are refused, naming
-  both entries; a Database given the Pooler's name is its sibling, as above.
-  The hook is asked only inside `Transform`: a rule driven directly keeps
-  the author's names and the defaults. With neither an authored name nor a
-  hook the output is what it was.
-  **The Cluster's and the ObjectStore's names** (go-kure/launcher#787) are
-  resolved in the same order. `clusterObjectName` names the Cluster (role
-  `postgresql-cluster`) and `backup.objectStoreObjectName` the ObjectStore (role
-  `postgresql-objectstore`; a top-level property until
-  go-kure/launcher#1001); the default of each is the component name. The
-  two end in `ObjectName` as `objectName` does on a kind component, while
-  `poolerName`, the older property, keeps the name it has.
-  Without `backup` there is no store, and the hook is not asked for one.
-  The Cluster's name is held to the
-  Cluster's rule whoever chose it, a DNS-1035 label of at most 50 characters:
-  a name that is no label is refused as every role's is, and a label over 50
-  characters by the rule, naming both places it can come from
-  (`clusterObjectName (or the Naming hook's answer for role
-  "postgresql-cluster"): postgresql Cluster name "…": must be a DNS-1035
-  label of at most 50 characters …`). A component whose own name is no such
-  label is accepted once its Cluster is named apart. The ObjectStore's name is a
-  DNS-1123 subdomain. Each is used as written or refused, never shortened.
-  Each names its object alone: the two member components, their same-name
-  sibling group, the policies the rule adds and the component label keep the
-  component name. What the rule writes to the two objects follows the names
-  they took: the Pooler's `cluster.name`, each Database's and each
-  ScheduledBackup's `cluster.name`, the
-  `cnpg.io/cluster` endpoint selector, and the `barmanObjectName` parameter
-  of the Cluster's backup plugin. **The default names of the Pooler, the
-  Databases and the ScheduledBackups keep deriving from the component name**
-  (`<name>-pooler`, `<name>-<db>`, `<name>-<schedule>`), whatever the Cluster
-  is named.
-  **The recovery ObjectStore's name** (go-kure/launcher#1001) is the `Naming`
-  hook's answer for role `postgresql-recovery-objectstore`, else
-  `<name>-recovery-source`, with no property of its own; the hook is not asked
-  where `recovery.source.objectStoreName` names an existing store. It is a
-  DNS-1123 subdomain, a component of its own, and the Cluster's recovery
-  source names the store by it; a name another component of the document
-  holds is refused, naming both.
-  **The ScheduledBackups' names** (go-kure/launcher#1001) are resolved the
-  same way, with no property of their own: the `Naming` hook's answer for
-  role `postgresql-scheduledbackup`, else `<name>-<schedule>`, where the
-  schedule's `name` is the suffix. Whichever it is, it is held to 63
-  characters, since CloudNativePG copies it into a label of each Backup it
-  creates (`backup.schedules[0] "nightly": ScheduledBackup name "…" is 64
-  characters long, …; shorten the component or the schedule name`, or, for the
-  hook's answer, `…; shorten the Naming hook's answer for role
-  "postgresql-scheduledbackup"`), and,
-  as every member's, a name another component of the document or another
-  member already holds is refused, naming both. With the Cluster named
-  apart the component name is no longer bounded by the Cluster's rule, so
-  the Pooler's default is held to the Pooler's own, by the lowering and where
-  endpoints are collected alike, and the refusal says what settles it
-  (`pooler: cnpg-pooler name "db.main-pooler": must be a DNS-1123 label of
-  at most 63 characters (CloudNativePG names the pooler's Service after it);
-  the default derives from the component name: set poolerName to name the
-  Pooler otherwise`). A Pooler cannot carry its Cluster's name, and with the
-  Cluster named apart the two can meet (a `clusterObjectName` of `db-pooler`
-  on component `db`): it is refused where the Pooler is built, and where
-  endpoints are collected in the same words (`cluster.name "db-pooler": a
-  pooler cannot have the same name as its cluster`). A Pooler or a Database
-  named like the `postgresql` component itself (a `poolerName` of `db` on
-  component `db`, a database's `objectName`, or the hook's answer) is a name
-  the document already holds: it is refused by the lowering, and where
-  endpoints are collected in the same words (`pooler: generates component
-  "db", which is already the name of component "db" (type "postgresql") in
-  the document; rename one of them`). One named like another component of
-  the document is refused by the lowering only: endpoints are collected for
-  one component (`pkg/oam`, "Name roles and the `Naming` hook").
-  **CloudNativePG derives the Cluster's Services (`<cluster>-rw`,
-  `<cluster>-ro`, `<cluster>-r`) and Secrets (`<cluster>-app` and the others)
-  from the Cluster's name, and the default backup path moves with it: the
-  server name a backup is stored under is the Cluster's name unless
-  `backup.serverName` sets it. Renaming an existing Cluster creates a
-  new one: the old one is pruned with its data unless it is protected. Every
-  address or Secret reference written with the old name is the author's to
-  change.**
-  A model part that reads this component writes no name by hand: `parts.<part>.app_secret`
-  gives the name of the Secret `<cluster>-app` (go-kure/launcher#1261), and
-  `parts.<part>.cluster` gives the Cluster's name. A part that sets `recovery.secret.name`
-  declares no `app_secret`, because CloudNativePG does not generate that Secret then, and a read
-  of it fails. The name follows `clusterObjectName` and the
-  `Naming` hook, like the name of the Cluster the build makes. The Secret is
-  of type `kubernetes.io/basic-auth`. CloudNativePG writes these keys into it (cloudnative-pg
-  v1.30.1, `pkg/specs/secrets.go`): `username`, `user`, `password`, `dbname`, `host`, `port`,
-  `pgpass`, `uri`, `jdbc-uri`, `fqdn-uri` and `fqdn-jdbc-uri`. A consumer reads one of these as
-  the `key` of a `secretKeyRef`. Only a part later in the document reads the output.
-  Its rule implements the optional `oam.EndpointProvider`: it declares the CNPG cluster's
-  data-plane endpoint (`cnpg.io/cluster: <Cluster name>`, the component name unless the
-  Cluster is named apart, on port `5432`) so a downstream
-  platform can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)
-  without hardcoding the operator selector. When `pooler.enabled` is set it declares a **second**
-  endpoint for the pooler (PgBouncer) pods (`cnpg.io/poolerName: <pooler name>` on port
-  `5432`), so a consumer that dials the pooler — whose pods carry a different label set and are not
-  matched by the direct-cluster selector — also gets its connection synthesized. The pooler
-  name there is the authored `poolerName`, else `<component-name>-pooler`, and the Cluster
-  name the authored `clusterObjectName`, else the component name:
-  `Transformer.ComponentEndpoints` asks no naming hook. The rule also implements
-  `oam.NamedEndpointProvider`, through which `Transformer.ComponentEndpointsNamed` resolves each
-  name with the consumer's hook, asked the request the transform asks, so a consumer that
-  names the Pooler or the Cluster through the hook gets a selector for the name the object has.
+**The CRDs' expression rules.** The seven CRDs declare 26. The build checks the
+15 that read one document, each a comparison of authored fields with each other
+or with a string the CRD itself states, so a document that breaks one could
+never be admitted:
+- a catalog (two rules, on each of the two CRDs): no two images of one `major`
+  (`images[1].major: 17 is also the major version of images[0]; the API takes
+  each major version once`), and no two component images of one `key`. The
+  component images are a list keyed on `key`, so the API server refuses a key
+  held twice by its schema as well as by the rule;
+- a role (eight): a `name` that is empty, `postgres` or `streaming_replica`, or
+  that starts with `pg_` or `cnpg_` (`name "postgres": reserved, the
+  DatabaseRole CRD refuses it`); `ensure: absent`, which the API does not take
+  on a DatabaseRole (a role is removed by deleting the object with
+  `databaseRoleReclaimPolicy: delete`); `passwordSecret` beside
+  `disablePassword: true`; and a client certificate that is enabled without
+  `login: true`. A certificate is enabled where its block is authored and
+  `enabled` is not `false`: the API fills `true` into an omitted one before it
+  evaluates the rule. It fills nothing into `login`, which the rule reads
+  without asking whether it is there: an enabled certificate with no `login`
+  authored is refused by the API server as a rule it cannot evaluate (`no such
+  key: login`), and one beside `login: false` by the rule's own message. The
+  build gives both the one refusal;
+- a publication (three): a `target` that publishes neither or both of
+  `allTables: true` and `objects` (`target: one of allTables: true and objects
+  is required`); an object that is neither or both of `tablesInSchema` and
+  `table`; and a table that lists its `columns` where another object publishes
+  `tablesInSchema`. The Go type leaves out a false `allTables` and an empty
+  `objects`, `tablesInSchema` or `columns`, so each is read as the object will
+  hold it: `allTables: false` beside a list of objects builds, and is a list of
+  objects. The API server reads the document it is sent, so the two differ on a
+  document that authors one of the four, and agree on the object: sent as
+  authored, `allTables: false` beside a list of objects is refused, and the
+  object the build writes for it is accepted; `allTables: false` alone is
+  accepted as authored and refused by the build, since the object written holds
+  neither.
+
+The other eleven refuse a change of the stored object, which a build does not
+have, and stay the API server's: a Backup's whole `spec`; the `cluster` of a
+ScheduledBackup, a DatabaseRole, a Publication and a Subscription; the `name` of
+a role; the `name` and the `dbname` of a publication and of a subscription; and
+a publication's `target.allTables`, from one authored value to another. Such a
+change builds here and is refused at apply, until the object is deleted and
+created again. The rule on `allTables` sits on that optional field, and the API
+server does not evaluate it where the field is absent from the stored object or
+from the new one: a target moved from `allTables` to `objects`, or back, is not
+refused by it.
+
+**Not checked**, and the API server's or the operator's to refuse:
+- the number of a catalog's images (one to eight) and of its component images
+  (at most 32), a `major` below 10, and the forms of a `key`, of an extension's
+  `name` and of an `env` name;
+- a `schedule`: launcher does not parse it. The operator reads a cron expression
+  of six fields, the first of which is the seconds; its webhook refuses a
+  schedule that does not parse and only warns of one that parses with another
+  number of fields;
+- what the operator's webhook holds a Backup and a ScheduledBackup to: that
+  `online` and `onlineConfiguration` do not come with the `barmanObjectStore`
+  method, which is also the method of a document that authors none, and, on a
+  Backup only, that the `plugin` method comes with a `pluginConfiguration`;
+- `parameters` on a publication, a subscription and a plugin configuration: a
+  free map of strings, written as authored;
+- every other value rule of the API: the enumerations (`method`, `target`,
+  `backupOwnerReference`, `ensure`, the reclaim policies, an image volume's
+  `pullPolicy`). A `validUntil` is the exception: the strict decode reads an RFC
+  3339 time and refuses anything else.
+
+**The tag rule on a catalog's images.** The three fields of a catalog that name
+an image are held to `ValidateImageRef`, as a container's image is, when the
+component is read, with or without a policy: an image's `image`, a component
+image's `image` and the `reference` of an extension's image volume. One without
+a tag or digest, or tagged `:latest` (with a digest too), or one that is no
+image reference, is refused by the field's path (`images[0].image: image
+"registry.example/team/postgresql" rejected: no tag or digest specified; use an
+explicit version tag or digest`), and the refusal carries no policy class: a
+Cluster that takes its image from the catalog runs what the entry names. An
+extension that names no reference names no image and is not checked. A reference
+by digest alone passes; what CloudNativePG itself requires of a catalog's image
+is the operator's rule and is left to it. The rule runs at that read and nowhere
+else: generation builds the object from what the read decoded and does not
+repeat it. `cnpg-cluster` and `cnpg-pooler` repeat theirs at generation because
+their config is an exported value a caller can change after the read; nothing
+but the read can make a catalog's config.
+
+**Policy.** The two catalogs are held to the environment policy; the other five
+have no field an `oam.Policy` method speaks to, and build the same under every
+policy and under none.
+- **Every image a catalog names is held to the allowed registries.** A catalog
+  runs no pod, but an image a Cluster takes from it is one the operator runs.
+  `ApplyPolicy` checks the three fields that name one, and refuses by the
+  field's path with the class `oam.RefusalRegistry`: an image's `image`
+  (`images[0].image`), a component image's `image` (`componentImages[0].image`)
+  and the `reference` of an extension's image volume
+  (`images[0].extensions[0].image.reference`). An extension that names no
+  reference names no image, and nothing is checked for it.
+- **A Cluster's reference to a catalog is a name.** A `cnpg-cluster`'s
+  `imageCatalogRef` names a catalog and a major version, and holds no image: the
+  host is read where the image is authored, on the catalog. A catalog that is
+  not built with launcher is not seen.
+- **No field holds a literal secret.** A role's `passwordSecret` is the name of
+  a Secret in the role's namespace, and launcher emits no Secret for it; a
+  subscription's credentials are those of the external cluster the subscriber
+  Cluster defines. A plugin's `parameters` and an extension's `env` are free
+  text: a value written there is written into the object as authored and is not
+  checked.
+
+**Not covered.** Whether what is referred to exists: the Cluster, the Secret,
+the database, the publication, the external cluster of a subscription, the
+plugin, the schema and the tables a publication names. A status of any of the
+seven is the operator's and is not written. The Backups a ScheduledBackup
+creates, and the Secret a role's client certificate is issued into (`<object
+name>-client-cert`), are the operator's too.
+
+### Example
+
+- `cnpg-imagecatalog`: The component in
+  `pkg/cmd/kurel/testdata/cnpg-imagecatalog-component/app.yaml`, built against
+  the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.
+- `cnpg-clusterimagecatalog`: The component in
+  `pkg/cmd/kurel/testdata/cnpg-clusterimagecatalog-component/app.yaml`, built
+  against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The
+  fixture test compares the two.
+- `cnpg-backup`: The component in
+  `pkg/cmd/kurel/testdata/cnpg-backup-component/app.yaml`, built against the
+  `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.
+- `cnpg-scheduledbackup`: The component in
+  `pkg/cmd/kurel/testdata/cnpg-scheduledbackup-component/app.yaml`, built
+  against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The
+  fixture test compares the two.
+- `cnpg-databaserole`: The component in
+  `pkg/cmd/kurel/testdata/cnpg-databaserole-component/app.yaml`, built against
+  the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.
+- `cnpg-publication`: The component in
+  `pkg/cmd/kurel/testdata/cnpg-publication-component/app.yaml`, built against
+  the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.
+- `cnpg-subscription`: The component in
+  `pkg/cmd/kurel/testdata/cnpg-subscription-component/app.yaml`, built against
+  the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+  test compares the two.
+
+## postgresql
+
+**postgresql** — `provider: cnpg`, `version` (default `16`), `storageSize`
+(precedence: authored > policy default `storageSize` > `1Gi`), `replicas`,
+`backup` (`objectStore`, `objectStoreObjectName`, `retentionPolicy`,
+`serverName`, `schedules`; see "Backup" below), `monitoring.enabled`,
+`pooler.enabled`, `poolerName`, `managedRoles`, `databases` (each with an
+optional `objectName`), `clusterObjectName`.
+
+### Properties
+
+**`clusterObjectName` names the Cluster in place of the component name.
+CloudNativePG derives the Cluster's Services and Secrets from the Cluster's
+name, the default backup path moves with it, and renaming an existing Cluster
+creates a new one: the old one is pruned with its data unless it is protected**
+(see "The Cluster's and the ObjectStore's names" below).
+
+`resources` forwards every name the shared parser admits — `cpu`, `memory`,
+`ephemeral-storage`, `hugepages-<size>` and qualified extended resources such as
+`nvidia.com/gpu`, under the same validation as the other seven workload kinds —
+onto the Cluster's `spec.resources` `requests`/`limits` unchanged
+(go-kure/launcher#484; until then any name other than `cpu`/`memory` was
+rejected, so this is an additive change). Only `cpu`/`memory` carry a policy
+default and maximum; CNPG-specific sizing such as `ephemeralVolumesSizeLimit` is
+not derived from these entries. CNPG copies this block onto the instance pods
+unchanged and nothing defaults cpu/memory into it except a policy, so generation
+refuses a block that names `hugepages-<size>` without `cpu` or `memory` on
+either side after policy defaults (`resources: hugepages require cpu or memory
+in requests or limits`) — admission would refuse every instance pod. `affinity`
+takes the same four keys as the shared `affinity` property
+(`enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType`, `nodeSelector`)
+with the same defaults — `kubernetes.io/hostname` and `preferred` — but the
+handler parses it itself into the CNPG `AffinityConfiguration` instead of
+calling `parseAffinity`, because CNPG carries its own affinity shape rather than
+a `corev1.Affinity`. The block and each of its four sub-fields are read with the
+presence-reporting helpers, so a value authored with the wrong type is rejected
+by name (`affinity.topologyKey: must be a string, got float64`) rather than
+discarded while a default reaches the emitted cluster, and `podAntiAffinityType`
+must be `preferred` or `required` — an explicit empty string is an error here,
+not a fallback to the default. Rejection reaches the `nodeSelector` **values**,
+not just its envelope: `nodeSelector: {rack: 3}` is refused by key rather than
+dropped, so a selector cannot silently reach the cluster narrower than authored.
+When more than one entry is wrong, the **alphabetically first** offending key is
+the one reported: Go randomises map iteration order, so without an explicit sort
+the same document names a different key run to run and its diagnostic cannot be
+reproduced or asserted in a test. The same ordering rule applies to the other
+three parsers in this package that report a bad map entry by key —
+`parseResourceList`, `rejectUnknownKeys` and `parseManifestSource`. An explicit
+**null** `affinity` is **absence** — Launcher supplies no explicit affinity
+settings, exactly as when the property is omitted — matching what `pkg/oam`'s
+own property validation already does with a null under an optional property;
+without that, `affinity:` with no value validated against the published schema
+and then failed to convert, while the same value built in Go turned pod
+anti-affinity on with every default. A null on a sub-field *inside* a present
+block is also absence — it takes the same default an omitted sub-field takes
+(go-kure/launcher#444 established this nested-null contract in the shared
+presence primitive `authoredValue`, which this block's four sub-fields go
+through; a nested key read raw elsewhere, such as a probe handler key, does not
+follow it); a non-null wrong-typed sub-field, and an explicitly empty
+`podAntiAffinityType`, remain errors. The shared `parseAffinity` (`common.go`)
+applies the same rules to its four sub-fields since go-kure/launcher#452, so the
+two readers agree; a change to one belongs in the other. The handler's other
+string→string maps — `inheritedMetadata.labels`,
+`inheritedMetadata.annotations`, `postgresql.parameters`, `pooler.parameters`
+and `externalClusters[].connectionParameters` — take string values only: a
+non-string value (`tier: 3`, `max_connections: 100`, `enabled: true`) is refused
+by field and key (`postgresql.parameters["max_connections"]: must be a string,
+got int`) instead of being dropped from the emitted resources, with the same
+alphabetically-first rule as `nodeSelector` when several are wrong. Quote such a
+value to keep it (`max_connections: "100"`), and declare a Package parameter
+substituted as a whole value there as `type: string`, since whole-value
+substitution keeps the parameter's type; a number is not converted to its string
+form, because YAML's rendering of a number is not always the text the author
+typed (`1.10` decodes to `1.1`). An explicit null value is absence, per ["The
+null contract"](null-and-spellings.md#the-null-contract): the key is left out,
+not refused. The same holds for `nodeSelector` values in both affinity readers,
+which share the helper.
+
+- **`bootstrap`** is declared key by key, and a key under it that the component
+  does not read is refused naming it (`bootstrap: unrecognized key "…"`), where
+  it used to be dropped. It reads `initdb` and `pg_basebackup` (whose `source`
+  is its only key; another was dropped before and is refused now), at most one
+  of them and neither with `recovery`, and refuses the former
+  `bootstrap.recovery` with its replacement. `bootstrap.initdb` creates the
+  Cluster with an application database and its owner in place of the operator's
+  default, `app`: both `database` and `owner` are required, not empty (the
+  CloudNativePG webhook refuses one without the other), and they are written to
+  the Cluster's `spec.bootstrap.initdb`. An empty `initdb` is refused the same
+  way; to get the operator's default (database `app`, owned by `app`), leave
+  `bootstrap` out. Any other CloudNativePG initdb key (`secret`, `encoding`,
+  `postInitSQL`, `import`, …) is refused (`bootstrap.initdb: unrecognized key
+  "…"`), never dropped; each can be modelled later. The owner's connection
+  Secret is the operator's, named after the Cluster, and this component creates
+  none. A bootstrap is read only when the Cluster is created; set on a component
+  whose Cluster exists already, it changes nothing. `cnpg-cluster` takes the
+  whole CloudNativePG `bootstrap.initdb`, strictly decoded.
+
+`externalClusters` keeps its `name` and `connectionParameters`, the source of
+`bootstrap.pg_basebackup`.
+
+**An authored `pooler.instances` is written as authored**, a 0 or a negative
+count included. The Pooler CRD gives `instances` a default of 1 and no minimum,
+and a count of 0 or less used to be left out of the Pooler, so the operator ran
+the one pod the author had switched off. The upstream type carries a 0, so it is
+written; the CRD does not bound the count, so a negative one is written too and
+refusing it is left to the cluster. A count that is not authored is still 3
+(`TestPostgresqlRule_PoolerInstances`). Behavior-changing for a document with
+`pooler.instances: 0` or less: its Pooler now holds that count. A document with
+`instances: 0` got one pod before and gets none now (the
+`postgresql-bootstrap-external` fixture shows it).
+
+### Outputs
+
+**A component lowering rule** (`PostgresqlRule`, `postgresql_lowering.go`), not
+a dispatchable handler: it reads the properties as before (`Parse`; the
+published schema is pinned byte for byte,
+`testdata/postgresql-property-schema.json`: the former handler's, with
+`poolerName` and `clusterObjectName` added and, since go-kure/launcher#1001,
+`backup` typed and the top-level `objectStore` and `objectStoreObjectName`
+removed, the store's name now `backup.objectStoreObjectName`) and emits the CNPG
+kind components that build the same objects — a `cnpg-cluster` under the
+component's name, a `cnpg-objectstore` under the same name (one same-name
+sibling group) when `backup` is set, a `cnpg-pooler` `<name>-pooler` when
+`pooler.enabled`, a `cnpg-database` `<name>-<db>` per `databases` entry (a
+Database given the Pooler's name, by default the one named `pooler` beside an
+enabled pooler, joins its same-name sibling group, as two objects of different
+kinds), and a `cnpg-scheduledbackup` `<name>-<schedule>` per `backup.schedules`
+entry, in that order. `replicas` and `storageSize` are written to the Cluster
+only when authored, so the policy applies to them exactly as before. The two
+values postgresql derived from the policy are set after it by a post-policy step
+the rule attaches to the Cluster (`oam.Component.AfterPolicy`), which runs
+before the authored traits: `enablePDB` (`instances > 1`) and the `1Gi` storage
+fallback, under the policy maximum with postgresql's text (`storageSize "1Gi"
+exceeds enforced maximum "512Mi"`). Authored traits go to the Cluster, and those
+that covered every object postgresql generated are forwarded to the other
+members so they still do: `prune-protection` and `force-replace` to each member,
+and `fluxcd-patches` and `fluxcd-postbuild` (not built in; a consumer that
+delivers through Flux registers them) to the first member that is ordered after
+the Cluster (below): the members share one group, so one of them carries the
+trait for that group's bundle. For that reason a document that authors one of
+these two traits on the postgresql component may not order or place a member on
+its own (a `dependency` rule or a `placement` whose component is the Pooler's, a
+Database's or a ScheduledBackup's generated name): the member could leave the
+group the trait reaches, so the rule refuses it and asks for the postgresql
+component's name instead (the rule for every lowering rule, and the message, are
+under ["Traits a lowering rule
+forwards"](https://www.gokure.dev/launcher/api-reference/oam-components/#traits-a-lowering-rule-forwards)).
+Policies that name the postgresql component are extended to the members the same
+way. A `placement` of it is repeated for each member, so they stay in the
+Cluster's tier and, without a dependency policy, in its bundle. When the
+document orders its components with a `dependency` policy that has a rule, the
+rule adds one making the Pooler, the Databases and the ScheduledBackups depend
+on the Cluster, and every component the document makes depend on the postgresql
+component depend on them too: the members are then in a later group than the
+Cluster's. Without one it adds no edge, since a dependency edge would order a
+document that never asked for ordering. The policies it adds are named
+`<name>-dependencies` and `<name>-placement-<i>` (one per member), or, when a
+policy of the document already uses the name, the first free one with `-<n>`
+appended. **Behavior-changing** under `launcher.gokure.dev/v1alpha1`: with both
+`objectStore` (now `backup`) and `pooler`, the objects now come in the order
+Cluster, ObjectStore, Pooler (was Cluster, Pooler, ObjectStore; the objects are
+the same), and a Database named `pooler` comes right after the Pooler, ahead of
+the other Databases. Under a `dependency` policy the Pooler, the Databases and
+the ScheduledBackups are deployed from one bundle they share, after the
+Cluster's, unless the document orders or places a generated member on its own
+(was one bundle for all of postgresql's objects).
+
+**Backup**. `backup` takes backups and archives WAL to an S3-compatible object
+store through the Barman Cloud plugin, the one path CloudNativePG keeps once its
+in-tree Barman support is removed. It lowers into the base kinds and adds
+nothing to them:
+- `backup.objectStore` (required) is the configuration of a barman-cloud
+  `ObjectStore` the component emits, named after the component (or by
+  `backup.objectStoreObjectName` or the `Naming` hook, below). It reads
+  `destinationPath` (required, not empty), `endpointURL`, `endpointCA` (`{name,
+  key}` of a Secret), `s3Credentials` (required: `accessKeyId` and
+  `secretAccessKey`, each `{name, key}` of a Secret, with an optional `region`
+  and `sessionToken` alike, or `inheritFromIAMRole: true`; exactly one of the
+  two ways), `wal` (`compression`, `encryption`, `maxParallel`) and `data`
+  (`compression`, `encryption`, `jobs`, `immediateCheckpoint`). It is decoded
+  strictly into the vendored Barman Cloud type, and the values the ObjectStore
+  CRD bounds are checked at build, since the Go type alone does not hold them: a
+  `compression` or `encryption` outside the CRD's enum (`data` takes no `xz` or
+  `zstd`), and a `maxParallel` or `jobs` under 1, an authored `0` included
+  (`backup.objectStore.wal.compression "brotli": must be one of …`). A Secret
+  reference without its `name` or `key` is refused. `serverName` there is
+  refused (the ObjectStore CRD forbids it; use `backup.serverName`), and so are
+  `azureCredentials` and `googleCredentials` (S3-compatible storage only; the
+  `cnpg-objectstore` kind takes them), with that reason also where no
+  `s3Credentials` is written: the schema does not mark the store's required keys
+  Required, so the document check gives a refused key's reason first.
+- `backup.retentionPolicy` is the ObjectStore's, a positive count of days, weeks
+  or months (`30d`, `4w`, `6m`); anything else is refused
+  (`backup.retentionPolicy "30 days": must be a positive count …`).
+- The Cluster gets one plugin entry, `barman-cloud.cloudnative-pg.io` with
+  `isWALArchiver: true`, whose `barmanObjectName` parameter names the store by
+  the name it took. `backup.serverName` becomes its `serverName` parameter, the
+  folder the plugin writes under (it defaults to the Cluster name). The Cluster
+  has no in-tree `spec.backup`.
+- Each `backup.schedules` entry emits a `cnpg-scheduledbackup` of the Cluster,
+  `method: plugin` through the same plugin (no parameters: the plugin reads the
+  store from the Cluster's entry). `name` (required, unique among the schedules)
+  makes its name, `<component>-<name>`; `schedule` (required) is a cron
+  expression of six fields, seconds first (`0 0 3 * * *`), refused unless it
+  parses as CloudNativePG's webhook parses it (`robfig/cron` at the version the
+  vendored CloudNativePG requires). Five fields parse there too, seconds first,
+  with only a warning at the webhook that Flux does not show: a crontab line `0
+  3 * * *` would back up at minute 3 of every hour. It is refused, naming each
+  six-field form that parses, read as a crontab line and as the operator reads
+  it (`backup.schedules[0].schedule "0 3 * * *": five fields, … write six
+  fields, seconds first ("0 0 3 * * *" as a crontab line, or "0 3 * * * *" as
+  the operator reads it)`). A descriptor (`@daily`) is accepted. A schedule must
+  also find a time within the operator's look-ahead from every instant: the
+  operator asks for the next time after now, searching through the end of the
+  year five years on, and on none records NoSchedule and takes no further backup
+  for that ScheduledBackup, not even the immediate one, with no retry. The
+  search is computed in UTC, exactly, over one 400-year Gregorian cycle (fixed
+  years, so a build does not depend on the clock): February the 30th (`0 0 3 30
+  2 *`) is refused as a time that never comes, and February the 29th (`0 0 3 29
+  2 *`) is refused too, since 2100 is no leap year (`… no time from the end of
+  2096 through the end of 2101 (UTC), longer than the five years the operator
+  looks ahead …`). A seconds, minutes, hours or months field that selects no
+  value (`,`) is refused outright, naming the field. An empty day of month or
+  day of week can still fire: `0 0 3 , * MON` (ORed with Mondays) is accepted,
+  `0 0 0 , * *` (ANDed with a starred day of week) is refused. `@every` is
+  accepted, however long its delay; how often a backup is taken is not judged.
+  `immediate` defaults to `true` (a new Cluster gets a base backup at once),
+  `backupOwnerReference` to `self` (`none`, `self` or `cluster`), `target` is
+  `primary` or `prefer-standby` and `suspend` is written only when authored.
+
+**Prerequisites, and what happens at apply.** `backup` needs, in the cluster:
+the CloudNativePG operator 1.26 or later (the emitted objects follow the
+vendored 1.30.1 API), the Barman Cloud plugin v0.15.x with its `ObjectStore`
+CRD, and cert-manager, which the plugin's install recommends. The bucket, and
+the Secrets `s3Credentials` and `endpointCA` name, must exist beforehand:
+launcher neither creates nor checks them. The build cannot see the cluster: a
+missing CRD fails the apply, while an older CRD can prune a field it does not
+know without an error. Check the installed versions, and read the applied object
+back. The backup and recovery guide (`docs/postgresql-backup-recovery.md`) walks
+through both, with the checks that show a backup and a recovery working. The
+rule's contract metadata carries the same list for a tool to read
+(`ContractMetadata.Prerequisites`; the oam package README, "Contract metadata"),
+each entry with the use that needs it, plus the ObjectStore a recovery's
+`source.objectStoreName` names and the Secret its `secret.name` names, with the
+owner's credentials. cert-manager is not an entry: what launcher writes does not
+depend on it, as the plugin's TLS certificates can come from elsewhere.
+
+**Recovery**. `recovery` bootstraps a new Cluster from the base backups and WAL
+another cluster wrote to an object store through the Barman Cloud plugin, to the
+end of the WAL or to a target (point-in-time recovery). It lowers into the base
+kinds and adds nothing to them. A bootstrap is read only when the Cluster is
+created: recover into a new component beside the source one; set on a component
+whose Cluster exists already, it changes nothing. Recovering by renaming the
+source component's Cluster instead (`clusterObjectName`) creates a new Cluster
+and prunes the original with its data unless it is protected. It is not combined
+with `bootstrap.pg_basebackup` (`recovery: not with bootstrap.pg_basebackup …`)
+or `bootstrap.initdb` (`recovery: not with bootstrap.initdb …`).
+- `recovery.source` (required) is where the backups are read from: `serverName`
+  (required, not empty), the folder the source cluster wrote within the store
+  (its `backup.serverName`, else its Cluster's name), and exactly one of
+  `objectStoreName`, an existing ObjectStore in the namespace, and
+  `objectStore`, one defined here. The inline store reads as
+  `backup.objectStore` does, with the same checks and refusals under its own
+  path (`recovery.source.objectStore.serverName: not allowed …; use
+  recovery.source.serverName`), and the component emits it as a
+  `cnpg-objectstore` named `<component>-recovery-source` (or by the `Naming`
+  hook, below).
+- The Cluster gets `bootstrap.recovery` whose `source` is one `externalClusters`
+  entry the rule writes, `<component>-recovery-source`: the plugin
+  `barman-cloud.cloudnative-pg.io` with the parameters `barmanObjectName`, the
+  store by the name it took, and `serverName`, always written, since the plugin
+  would otherwise read the new Cluster's own folder. An authored
+  `externalClusters` entry of that name is refused.
+- `recovery.target` is where the recovery stops, the vendored `RecoveryTarget`:
+  `time`, `lsn`, `xid`, `name` and `immediate`, at most one of them; `backupID`;
+  `timeline` (`latest` or a positive integer, written as a string, and emitted
+  in plain decimal: the plugin matches it against the backups' timelines as
+  text, so `"01"` is written `"1"`); `exclusive`. What CloudNativePG's webhook
+  refuses without looking at a cluster is refused at build: two targets (an
+  authored `immediate`, `false` included, counts), a `time` or `lsn` that does
+  not parse as the operator parses it, an `xid` that is no 32-bit integer, a
+  `name` of 64 bytes or more or with a control character, an `xid`, `name` or
+  `immediate` without `backupID` (the plugin finds the base backup from the
+  catalog by time or LSN only), and a `timeline` that is neither. An authored
+  `""` in a target, `database` or `owner` is refused: the Cluster omits an empty
+  value, which would recover to the end of the WAL, or take the operator's
+  default.
+- `recovery.database`, `recovery.owner` and `recovery.secret.name` (the owner's
+  credentials) are the Cluster's, written only when authored.
+- A cluster that would archive its WAL into the folder it is recovered from is
+  refused where launcher sees both (`recovery.source: the cluster would archive
+  its WAL into the folder it is recovered from …`): the endpoint, the
+  destination path (one trailing `/` aside, as Barman joins it with the server
+  name) and the server name of `backup` (its `serverName`, else the Cluster's
+  name) against those of the source, read from the inline store, from the
+  component's own backup store, or from the store another component of the
+  document emits (a `postgresql` component's backup store or a
+  `cnpg-objectstore`, its `labels` and `annotations` aside, known by the name
+  its author wrote, else by its component name; or a `postgresql` component's
+  inline recovery store, by its default name `<component>-recovery-source`,
+  shortened as every generated name is), an unauthored name only where no
+  `Naming` hook is set. A store outside the document, or another component's
+  store the author did not name while a hook is set (its name may be the hook's
+  answer, asked by that component's lowering), is left to the plugin's own check
+  before it archives.
+- **Ordering.** The recovering Cluster reads its source store before it can
+  become ready, so the store never waits for the Cluster as the other members
+  do. Where the document orders its components (a `dependency` policy), the
+  Cluster waits for the store: the store is in a group before the Cluster's,
+  with the placements and the bundle traits the members get, and waits for what
+  the document's dependency rules make the component wait for, as all of its
+  objects do (`Component.WaitsAs`). That includes the rules another component's
+  lowering adds: made to wait for another `postgresql` component, the store
+  waits for its Pooler, Databases and ScheduledBackups too. Where it does not,
+  nothing is ordered, and the store is applied with the Cluster.
+
+Its rule implements the optional `oam.EndpointProvider`: it declares the CNPG
+cluster's data-plane endpoint (`cnpg.io/cluster: <Cluster name>`, the component
+name unless the Cluster is named apart, on port `5432`) so a downstream platform
+can synthesize the target-side ingress allow (`{comp}-allow-endpoint-ingress`)
+without hardcoding the operator selector. When `pooler.enabled` is set it
+declares a **second** endpoint for the pooler (PgBouncer) pods
+(`cnpg.io/poolerName: <pooler name>` on port `5432`), so a consumer that dials
+the pooler — whose pods carry a different label set and are not matched by the
+direct-cluster selector — also gets its connection synthesized. The pooler name
+there is the authored `poolerName`, else `<component-name>-pooler`, and the
+Cluster name the authored `clusterObjectName`, else the component name:
+`Transformer.ComponentEndpoints` asks no naming hook. The rule also implements
+`oam.NamedEndpointProvider`, through which `Transformer.ComponentEndpointsNamed`
+resolves each name with the consumer's hook, asked the request the transform
+asks, so a consumer that names the Pooler or the Cluster through the hook gets a
+selector for the name the object has.
+
+### Validation
+
+A Pooler, Database or ScheduledBackup name, generated or chosen, that is already
+the name of another component in the document is refused, naming both. A
+database name repeated in `databases` is refused, naming both entries: each
+entry is one Database object, so the Flux build already failed on it, and the
+plain manifest output carried duplicate Database documents (kubectl kept the
+last). The Cluster kind's policy checks now apply, under its field names: the
+registry allowlist on the image (`imageName`, derived or authored), and
+`instances`/`storage.size` in the policy messages. Refusals the API server or
+the operator gave at apply now come at build: a resource request above its
+limit, a database named `postgres`, `template0`, `template1` or not a DNS-1123
+subdomain, and an authored `storageSize: ""` (`storageSize: must not be empty;
+omit it to take the policy default or 1Gi`), which built a Cluster
+CloudNativePG's webhook refuses ("Size not configured"). The component name
+becomes the Cluster's name and its `cnpg.io/cluster` endpoint selector unless
+the Cluster is named apart (`clusterObjectName` or the `Naming` hook, below), so
+it carries cnpg-cluster's name rule: a DNS-1035 label (no leading digit, no dot)
+of at most 50 characters. Any other name is refused when the rule lowers it and
+when endpoints are collected (`postgresql name "db.main": must be a DNS-1035
+label of at most 50 characters …`). The cap also keeps both endpoint selector
+values, the name and the pooler's default `<name>-pooler`, within the
+63-character label-value limit (a `poolerName` or a hook-given name is held to
+it as a DNS-1123 label, and so is the default where the Cluster is named apart
+and the component name is not bounded by the Cluster's rule).
+**Behavior-changing** under `launcher.gokure.dev/v1alpha1`: such a name used to
+build and was then refused by CloudNativePG at apply, or, over 63 characters (56
+with the pooler), gave a network-policy selector the API server refuses; it is
+now refused at build. An authored `version: ""` is refused by name (`version:
+must not be empty; omit it to default to "16"`), with or without `imageName`: it
+used to be kept as a value, so without `imageName` the cluster image was
+`ghcr.io/cloudnative-pg/postgresql:` — an empty tag that only the image pull
+rejected. Only an omitted or null `version` takes the default. `storageSize: ""`
+is refused (above). The image is held to the tag rule (`ValidateImageRef`), with
+or without a policy (**breaking**). Without `imageName` the image is
+`ghcr.io/cloudnative-pg/postgresql:<version>`, so a `version` that makes a
+`:latest` reference, or none that parses, is refused under the property the
+author wrote, with the image it made: `version: "latest" is refused as the tag
+of the default image: image "ghcr.io/cloudnative-pg/postgresql:latest" rejected:
+:latest tag not allowed; use an explicit version tag or digest`. An authored
+`imageName` is refused under `imageName`; `version` is read for the default
+image only and is not checked beside one. The default `version` builds.
+`pooler.image` is the PgBouncer image, written to the Pooler's `pgbouncer.image`
+and held to the tag rule under its own name (`pooler.image: image "…" rejected:
+…`) and, by the `cnpg-pooler` the pooler lowers to, to the registry allowlist.
+Like the other pooler settings it needs `pooler.enabled`. Without it the
+CloudNativePG operator chooses the PgBouncer image, so under a non-empty
+allowlist an enabled pooler without `pooler.image` is refused (**breaking**: it
+built before), reported under the Pooler's component name: `pgbouncer.image
+(pooler.image on a postgresql component): unset, so the CloudNativePG operator
+chooses the image the pods run, which the allowed registries [...] cannot hold;
+name an image from one of them`. Set `pooler.image` to an image from the list.
+With no allowlist nothing changes. Any other storage size the Cluster would
+carry, authored or from the policy default, must parse and be positive
+(`storageSize: quantity must be positive, got "0"`): CloudNativePG's webhook
+parses only the size, so a zero or negative one was admitted and its claims
+failed the API server's positive storage-request check. A policy storage-size
+default is checked when it is applied (`policy default for storage.size: invalid
+quantity "lots"`), as the cpu/memory defaults are. The instance count must be at
+least 1, the CRD's minimum: a replicas policy default of 0 is refused
+(`instances: must be >= 1, got 0 from the policy default`), and so is an
+authored `replicas: 0` when the rule lowers it (`replicas: must be >= 1, got
+0`). **Behavior-changing** under `launcher.gokure.dev/v1alpha1`: an authored
+`replicas: 0` or a non-positive `storageSize` used to build and was then refused
+at apply; it is now refused at build.
+
+**Behavior-changing**: the former `backup` keys `destinationPath`, `endpointURL`
+and `secretName`, which built the Cluster's in-tree `barmanObjectStore`, and the
+top-level `objectStore` and `objectStoreObjectName` are refused, whatever their
+value, naming where each went (`objectStore: moved to backup.objectStore (…)`,
+`backup.secretName: removed; use backup.objectStore.s3Credentials (…)`), by the
+document check and by the lowering alike. `backup.retentionPolicy` stays, and
+now sets the ObjectStore's retention. `backup: {}` is refused too
+(`backup.objectStore: required (…)`). For a library consumer that registers
+handlers itself: the rule now also lowers into `cnpg-scheduledbackup`, so a
+registry with `PostgresqlRule` and without a `cnpg-scheduledbackup` handler
+fails every transform at `Seal`, whatever the document (`registry incomplete: …
+lowers into component type "cnpg-scheduledbackup", which is not registered`);
+the built-in set registers it. Until go-kure/launcher#643 the plugin entry named
+a plugin CloudNativePG does not register (`barman-cloud.barmancloud.cnpg.io`)
+under a key the plugin does not read (`objectStoreName`), and `serverName` went
+on the ObjectStore, which the API server refused. Every other optional property
+the handler reads goes through the same presence-reporting helpers: `provider`,
+`version`, `storageSize`, `imageName`, the `backup`, `monitoring`, `pooler`,
+`bootstrap` and `replication.synchronous` blocks and their fields, and each
+entry of `managedRoles`, `databases` (with its `extensions`), `externalClusters`
+and `monitoring.customQueries`. A value of the wrong type is refused by its path
+(`managedRoles[0].login: must be a boolean, got string`,
+`databases[0].extensions[1]: must be an object, got string`) where it used to be
+dropped, so `pooler.enabled: "true"` no longer builds a cluster with no pooler
+and `backup: "s3"` no longer builds one with no backup; an explicit null is
+absence, typed or untyped, so a typed-nil `storageSize` takes the policy default
+and a typed-nil `pooler.instances` or `replication.synchronous.number` takes the
+handler default rather than being refused as a bad number. Two further shapes
+that used to vanish are now errors: a non-string `managedRoles[].inRoles` entry,
+and an `externalClusters` entry without a `name`. So is a managed role's
+`connectionLimit: 0`, as `cnpg-cluster` refuses it: CloudNativePG omits a zero
+`connectionLimit` from the Cluster and applies its default `-1`, so the role
+would deploy with no limit. A role that must not connect sets `login: false`
+instead. The lowering repeats the refusal for a `PostgresqlConfig` built
+directly rather than parsed. `Endpoints` runs the rule's lowering on the
+component, so what the lowering refuses of it has no endpoint, in the same
+words. What a kind it lowers into refuses of a member (a database named
+`postgres`) is not seen there: one of the four things an endpoint entry does not
+see (`pkg/oam`, "Name roles and the `Naming` hook").
+
+**Behavior-changing**: the former `bootstrap.recovery` is refused, whatever its
+value (`bootstrap.recovery: moved to recovery (…)`), and so is an external
+cluster's in-tree `barmanObjectStore` (`externalClusters[0].barmanObjectStore:
+removed (in-tree Barman Cloud, gone in CloudNativePG 1.31); use
+recovery.source`).
+
+**Two object store paths are required**: `backup.objectStore.destinationPath`
+(go-kure/launcher#1001; until then `backup.destinationPath`, where another value
+of `backup` was set), and `recovery.source.objectStore.destinationPath` for an
+inline recovery store (`backup.objectStore.destinationPath: required (…)`). The
+ObjectStore CRD requires it. An authored empty path is refused in each (`must
+not be empty (…)`). Until go-kure/launcher#1001 the second was the path of an
+external cluster's in-tree `barmanObjectStore`, now refused (above). Of the
+strings `cnpg-cluster` refuses unauthored, the lowering fills the parent of two,
+`bootstrap.pg_basebackup.source` and the Cluster's
+`postgresql.synchronous.method` (authored here as
+`replication.synchronous.method`), only from the string itself, and of the other
+nine (the Cluster's `backup.barmanObjectStore.destinationPath` and
+`externalClusters[].barmanObjectStore.destinationPath` among them, since
+`backup` and `recovery` write no in-tree Barman configuration, only plugin
+entries) never.
+
+**A block that would not be built is refused, not dropped**. Five blocks are
+built only when one field of theirs is set, and a document that authored other
+values of such a block without that field used to build with none of them in the
+result. It is refused by the name of the missing field:
+- `backup`: built from `objectStore`, so any `backup`, an empty one included,
+  without one is refused (`backup.objectStore: required (…)`); the store itself
+  needs a `destinationPath` that is not empty and `s3Credentials`
+  (go-kure/launcher#1001, above; until then the Cluster's backup was built from
+  `backup.destinationPath`).
+- `bootstrap.pg_basebackup`: the bootstrap is built from a non-empty `source`,
+  so the block without one is refused (`bootstrap.pg_basebackup.source: required
+  (…)`, or `must not be empty (…)` for an authored `""`). `recovery`, which
+  replaced `bootstrap.recovery`, is refused without its `source` likewise
+  (`recovery.source: required (…)`). `bootstrap.initdb` is built from `database`
+  and `owner` together, so the block without either is refused by that field's
+  name (`bootstrap.initdb.owner: required (…)`).
+- `replication.synchronous`: built from `method`, so the block without one is
+  refused (`replication.synchronous.method: required (any or first)`), after a
+  wrongly typed `number` or `dataDurability`, which is still refused by its own
+  path.
+- `monitoring`: built when `enabled` is true, so `customQueries` beside an
+  `enabled` that is not authored is refused (`monitoring.enabled: required where
+  monitoring.customQueries is set (…)`).
+- `pooler`: the Pooler is emitted when `enabled` is true, so `instances`,
+  `type`, `poolMode`, `parameters` or `image` beside an `enabled` that is not
+  authored is refused (`pooler.enabled: required where pooler.instances is set
+  (…)`).
+
+**An authored `enabled: false` keeps building**, in `pooler` and in
+`monitoring`: `enabled` is the block's own switch, the author wrote "off", and
+the settings beside it are kept in the document for when it is switched on.
+`poolerName` differs (refused whenever `pooler.enabled` is not true, an authored
+false included) because it is a property outside the block that names an object
+which does not exist while the pooler is off. A block with nothing in it
+(`bootstrap: {}`, `replication: {}`, `monitoring: {}`, `pooler: {}`), or with an
+empty `customQueries` list or `parameters` map only, authors no value and builds
+as before; `backup: {}` is the exception, refused since go-kure/launcher#1001
+(above).
+
+Breaking for a document that authored one of these blocks without its field,
+among them a `backup` with an `endpointURL` or an empty `retentionPolicy` and no
+path, a `bootstrap.pg_basebackup: {}` and a `replication.synchronous` with a
+`number` only. Such a document built, without what the author wrote.
+
+**An additional Service's name** is the `serviceTemplate.metadata.name` of a
+`managed.services.additional[]` entry, and CloudNativePG creates the Service
+under it: a name with a leading digit is refused when `spec.kubernetesVersion`
+is below 1.36, RelaxedServiceNameValidation, unless `spec.featureGates` sets
+that gate on, naming the entry by its index (`docs/delivery-scope.md` §3.5).
+**The Pooler's and the Databases' names** are resolved in the order of every
+name role (see "Name roles and the `Naming` hook" in
+`site/content/api-reference/oam/names-and-overrides.md`): the author's property,
+else the consumer's `Naming` hook, else the default. `poolerName` names the
+Pooler (role `pooler`, default `<name>-pooler`) and must be a DNS-1123 label,
+since CloudNativePG names the pooler's Service after it (a leading digit is
+refused when `spec.kubernetesVersion` is below 1.36,
+RelaxedServiceNameValidation, unless `spec.featureGates` sets that gate on, the
+default `<name>-pooler` included; `docs/delivery-scope.md` §3.5); it is refused
+when `pooler.enabled` is not true. `databases[].objectName` names that entry's
+Database object (role `database`, default `<name>-<db>`) and must be a DNS-1123
+subdomain; the entry's `name` stays the database created in PostgreSQL. A
+database whose `name` cannot be part of an object name (`app_data`) has no
+default and needs an `objectName`: without one it is refused, and the hook is
+not asked for it. A name is used as written or refused, never shortened. Each is
+also the name of the component the rule emits, so one that is already a
+component of the document, the postgresql component's own name included, is
+refused, naming both; two Databases given one name are refused, naming both
+entries; a Database given the Pooler's name is its sibling, as above. The hook
+is asked only inside `Transform`: a rule driven directly keeps the author's
+names and the defaults. With neither an authored name nor a hook the output is
+what it was. **The Cluster's and the ObjectStore's names** are resolved in the
+same order. `clusterObjectName` names the Cluster (role `postgresql-cluster`)
+and `backup.objectStoreObjectName` the ObjectStore (role
+`postgresql-objectstore`; a top-level property until go-kure/launcher#1001); the
+default of each is the component name. The two end in `ObjectName` as
+`objectName` does on a kind component, while `poolerName`, the older property,
+keeps the name it has. Without `backup` there is no store, and the hook is not
+asked for one. The Cluster's name is held to the Cluster's rule whoever chose
+it, a DNS-1035 label of at most 50 characters: a name that is no label is
+refused as every role's is, and a label over 50 characters by the rule, naming
+both places it can come from (`clusterObjectName (or the Naming hook's answer
+for role "postgresql-cluster"): postgresql Cluster name "…": must be a DNS-1035
+label of at most 50 characters …`). A component whose own name is no such label
+is accepted once its Cluster is named apart. The ObjectStore's name is a
+DNS-1123 subdomain. Each is used as written or refused, never shortened. Each
+names its object alone: the two member components, their same-name sibling
+group, the policies the rule adds and the component label keep the component
+name. What the rule writes to the two objects follows the names they took: the
+Pooler's `cluster.name`, each Database's and each ScheduledBackup's
+`cluster.name`, the `cnpg.io/cluster` endpoint selector, and the
+`barmanObjectName` parameter of the Cluster's backup plugin. **The default names
+of the Pooler, the Databases and the ScheduledBackups keep deriving from the
+component name** (`<name>-pooler`, `<name>-<db>`, `<name>-<schedule>`), whatever
+the Cluster is named. **The recovery ObjectStore's name** is the `Naming` hook's
+answer for role `postgresql-recovery-objectstore`, else
+`<name>-recovery-source`, with no property of its own; the hook is not asked
+where `recovery.source.objectStoreName` names an existing store. It is a
+DNS-1123 subdomain, a component of its own, and the Cluster's recovery source
+names the store by it; a name another component of the document holds is
+refused, naming both. **The ScheduledBackups' names** are resolved the same way,
+with no property of their own: the `Naming` hook's answer for role
+`postgresql-scheduledbackup`, else `<name>-<schedule>`, where the schedule's
+`name` is the suffix. Whichever it is, it is held to 63 characters, since
+CloudNativePG copies it into a label of each Backup it creates
+(`backup.schedules[0] "nightly": ScheduledBackup name "…" is 64 characters long,
+…; shorten the component or the schedule name`, or, for the hook's answer, `…;
+shorten the Naming hook's answer for role "postgresql-scheduledbackup"`), and,
+as every member's, a name another component of the document or another member
+already holds is refused, naming both. With the Cluster named apart the
+component name is no longer bounded by the Cluster's rule, so the Pooler's
+default is held to the Pooler's own, by the lowering and where endpoints are
+collected alike, and the refusal says what settles it (`pooler: cnpg-pooler name
+"db.main-pooler": must be a DNS-1123 label of at most 63 characters
+(CloudNativePG names the pooler's Service after it); the default derives from
+the component name: set poolerName to name the Pooler otherwise`). A Pooler
+cannot carry its Cluster's name, and with the Cluster named apart the two can
+meet (a `clusterObjectName` of `db-pooler` on component `db`): it is refused
+where the Pooler is built, and where endpoints are collected in the same words
+(`cluster.name "db-pooler": a pooler cannot have the same name as its cluster`).
+A Pooler or a Database named like the `postgresql` component itself (a
+`poolerName` of `db` on component `db`, a database's `objectName`, or the hook's
+answer) is a name the document already holds: it is refused by the lowering, and
+where endpoints are collected in the same words (`pooler: generates component
+"db", which is already the name of component "db" (type "postgresql") in the
+document; rename one of them`). One named like another component of the document
+is refused by the lowering only: endpoints are collected for one component
+(`pkg/oam`, "Name roles and the `Naming` hook"). **CloudNativePG derives the
+Cluster's Services (`<cluster>-rw`, `<cluster>-ro`, `<cluster>-r`) and Secrets
+(`<cluster>-app` and the others) from the Cluster's name, and the default backup
+path moves with it: the server name a backup is stored under is the Cluster's
+name unless `backup.serverName` sets it. Renaming an existing Cluster creates a
+new one: the old one is pruned with its data unless it is protected. Every
+address or Secret reference written with the old name is the author's to
+change.** A model part that reads this component writes no name by hand:
+`parts.<part>.app_secret` gives the name of the Secret `<cluster>-app`, and
+`parts.<part>.cluster` gives the Cluster's name. A part that sets
+`recovery.secret.name` declares no `app_secret`, because CloudNativePG does not
+generate that Secret then, and a read of it fails. The name follows
+`clusterObjectName` and the `Naming` hook, like the name of the Cluster the
+build makes. The Secret is of type `kubernetes.io/basic-auth`. CloudNativePG
+writes these keys into it (cloudnative-pg v1.30.1, `pkg/specs/secrets.go`):
+`username`, `user`, `password`, `dbname`, `host`, `port`, `pgpass`, `uri`,
+`jdbc-uri`, `fqdn-uri` and `fqdn-jdbc-uri`. A consumer reads one of these as the
+`key` of a `secretKeyRef`. Only a part later in the document reads the output.
+
+### Example
+
+The component in `pkg/cmd/kurel/testdata/postgresql-full/app.yaml`, built
+against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The
+fixture test compares the two.
+
+## Kinds not yet in sections
+
+The kinds below are not yet in these sections.
+
 - **cnpg-cluster** — the operator-CR kind component for a CloudNativePG
   `Cluster` (design: `docs/oam/design-operator-cr-components.md`). The
   component name becomes the Cluster's name and its `cnpg.io/cluster`
@@ -1189,6 +1188,7 @@ weight: 10
   listed with a reason in `cnpgClusterExcludedFields` (empty today), and a
   schema key with no field or a stale exclusion also fails, so a CNPG bump
   that adds, removes or retypes a field names it.
+
 - **cnpg-pooler**, **cnpg-database**, **cnpg-objectstore** — the operator-CR
   kind components for a CloudNativePG `Pooler` and `Database` and a Barman
   Cloud plugin `ObjectStore` (`barmancloud.cnpg.io/v1`), built on the
