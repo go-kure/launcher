@@ -3,6 +3,9 @@ title: "Transform, extension and lowering"
 weight: 5
 ---
 
+The implementation, history and tests of the sections below are on the
+[contributor page](../../contributing/oam-reference/transform-and-lowering.md).
+
 ## Transform & extension
 
 `NewTransformer(...)` builds a transformer from maps of component/trait handlers, and
@@ -13,27 +16,27 @@ Extend the system by implementing:
 | Interface | Role |
 |-----------|------|
 | `ComponentHandler` | `CanHandle(type)` + `ToApplicationConfig(...)` — see [components](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components). |
-| `TraitHandler` | `CanHandle(type)` + `Apply(...)` — see [traits](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits). `Apply` mutates the application it is given and may append sub-applications to the bundle. It must not replace, remove or rename a component's application there, its own or any other component's of the bundle, including one whose traits already ran: the transform fails, naming the trait and the component, because NetworkPolicy synthesis finds a component's application by its name and then its pointer, and a replaced, removed or renamed one would silently get no policy (go-kure/launcher#734). Nor may it rename a sibling group member's application: the member would generate its objects under a name the group does not carry, so the transform fails, naming the trait, the group and the member's type (go-kure/launcher#752). |
+| `TraitHandler` | `CanHandle(type)` + `Apply(...)` — see [traits](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits). `Apply` mutates the application it is given and may append sub-applications to the bundle. It must not replace, remove or rename a component's application there, its own or any other component's of the bundle, including one whose traits already ran: the transform fails, naming the trait and the component, because NetworkPolicy synthesis finds a component's application by its name and then its pointer, and a replaced, removed or renamed one would silently get no policy. Nor may it rename a sibling group member's application: the member would generate its objects under a name the group does not carry, so the transform fails, naming the trait, the group and the member's type. |
 | `PolicyHandler` | `CanHandle(type)` + `Apply(policy, components, result)` — validates one `spec.policies` entry and records its effect (tier overrides, dependency edges), or its own data under `PolicyResult.Extensions`, on the shared `PolicyResult`; see [policies](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies). A policy type with no registered handler fails the transform. The transform returns an error from `Apply` as `policy "<name>": <error>`, so a handler says what is wrong and does not name the policy itself. |
 | `CapabilityAware` | Mark a handler as requiring a `ClusterProfile` capability. |
-| `ComponentCapabilityDefaults` | `CapabilityDefaults() (key string, properties []string)` — on a `ComponentHandler` whose properties take defaults from a `ClusterProfile` capability. Before `ToApplicationConfig`, the engine fills each listed property the component leaves unauthored (absent or `null`) from that binding's rendering; an authored value, `""` included, wins. It reads only the listed keys, never the rest of the rendering, and records the key in `ConsumedCapabilities` when the profile binds it. A component a lowering rule synthesized is skipped, as a sealed trait is. Each filled value is validated against the component's own `PropertySchema`, which must declare every listed key (go-kure/launcher#751): the trait side's schema may differ. A handler that declares no schema relies on `EvaluateProfile`, which validates the binding only through the trait handler or trait lowering rule of the key's type. Its fill is refused unless that handler or rule validates the rendering: it implements `ValidateAndApplyDefaults`, or the type is not built in and has a `CapabilityDefinition`, whose schema `EvaluateProfile` applies (go-kure/launcher#772). Implemented by `persistentvolumeclaim` (`pvc`, `storageClassName`; go-kure/launcher#742). |
-| `ComponentCapabilityFiller` | `FillCapabilityDefaults(props map[string]any, lctx LoweringContext) (map[string]any, error)` — on a `ComponentHandler` whose capability defaults land below the top level of its properties, where `ComponentCapabilityDefaults` cannot reach. The engine calls it right after `ComponentCapabilityDefaults`, on a component no lowering rule synthesized, and passes the result to `ToApplicationConfig`; an error fails the component. On a kind component `props` no longer holds `objectName`, which the engine took out. It must not mutate `props`, and reads a binding only through `lctx.Capability`, which records the key in `ConsumedCapabilities`; `lctx` carries nothing else. The handler validates the values it fills; the engine's schema check covers only `ComponentCapabilityDefaults` keys. Implemented by `statefulset` (`pvc`'s `storageClassName` into each `volumeClaimTemplates` entry that leaves `storageClass` unauthored; go-kure/launcher#761). |
+| `ComponentCapabilityDefaults` | `CapabilityDefaults() (key string, properties []string)` — on a `ComponentHandler` whose properties take defaults from a `ClusterProfile` capability. Before `ToApplicationConfig`, the engine fills each listed property the component leaves unauthored (absent or `null`) from that binding's rendering; an authored value, `""` included, wins. It reads only the listed keys, never the rest of the rendering, and records the key in `ConsumedCapabilities` when the profile binds it. A component a lowering rule synthesized is skipped, as a sealed trait is. Each filled value is validated against the component's own `PropertySchema`, which must declare every listed key: the trait side's schema may differ. A handler that declares no schema relies on `EvaluateProfile`, which validates the binding only through the trait handler or trait lowering rule of the key's type. Its fill is refused unless that handler or rule validates the rendering: it implements `ValidateAndApplyDefaults`, or the type is not built in and has a `CapabilityDefinition`, whose schema `EvaluateProfile` applies. Implemented by `persistentvolumeclaim` (`pvc`, `storageClassName`). |
+| `ComponentCapabilityFiller` | `FillCapabilityDefaults(props map[string]any, lctx LoweringContext) (map[string]any, error)` — on a `ComponentHandler` whose capability defaults land below the top level of its properties, where `ComponentCapabilityDefaults` cannot reach. The engine calls it right after `ComponentCapabilityDefaults`, on a component no lowering rule synthesized, and passes the result to `ToApplicationConfig`; an error fails the component. On a kind component `props` no longer holds `objectName`, which the engine took out. It must not mutate `props`, and reads a binding only through `lctx.Capability`, which records the key in `ConsumedCapabilities`; `lctx` carries nothing else. The handler validates the values it fills; the engine's schema check covers only `ComponentCapabilityDefaults` keys. Implemented by `statefulset` (`pvc`'s `storageClassName` into each `volumeClaimTemplates` entry that leaves `storageClass` unauthored). |
 | `PropertySchemaProvider` | Declare a `PropertySchema` for the handler's user-facing properties (see [Property schemas](schemas-and-contract.md#property-schemas)). |
 | `ContractDescriber` | Declare `ContractMetadata` — contract family, version, required capability keys, prerequisites, readiness, deprecation info (see [Contract metadata](schemas-and-contract.md#contract-metadata)). Every built-in handler and lowering rule implements it. |
 | `LoweringTargetDeclarer` | `LoweringTargets() LoweringTargets` — on a lowering rule of any kind: the component, trait and policy types it lowers into. `Transformer.Seal` refuses a registry in which one of them is not registered (see [Contract metadata](schemas-and-contract.md#contract-metadata)). Every built-in lowering rule implements it. |
 | `ComponentNamed` | Expose the owning OAM component (`ComponentName() string`) on a trait/component sub-app config, so consumers can attribute each emitted resource to its component without re-deriving it from sub-app names. The value is the raw component name; a consumer writing it into a label or selector passes it through `ComponentLabelValue` first. |
-| `ApplicationNameSetter` | `SetApplicationName(name string)` — on a component config that builds a name out of the OAM application it belongs to, so the name differs when two differently named applications each have a component of the same name (the application's namespace is not part of it). The transform calls it once, right after `ToApplicationConfig` and before policy and traits, with the name of the document it transforms (the name the application's bundle carries). A config built directly, outside a transform, is never told one. Implemented by `helmtemplate`, whose hook-group child layouts are named `<application>-<component>-NN-<phase-slug>` (go-kure/launcher#792). |
-| `HookGroupNamePrefixSetter` | `AuthoredHookGroupNamePrefix() (prefix string, authored bool)` and `SetHookGroupNamePrefix(prefix string)` — on a component config whose `AugmentLayout` partitions it into hook-group layouts. The transform resolves the `hook-group` name role for it once, right after `ApplicationNameSetter`: the prefix the config reports as authored (the `hookGroupNamePrefix` property, `HookGroupNamePrefixProperty`), else the `Naming` hook's answer, else the default `<application>-<component>`, and it calls `SetHookGroupNamePrefix` only with an authored or hook-given prefix, so a config left alone keeps its default names. A config built directly, outside a transform, sets its own. Implemented by `helmtemplate` (`HelmTemplateConfig.HookGroupNamePrefix`; go-kure/launcher#787). |
-| `LayoutKustomizationNameSetter` | `AuthoredLayoutKustomizationName() (name string, authored bool)` and `SetLayoutKustomizationName(name string)` — on a component config kure's walker gives a layout of its own, which kure's Flux integration under per-layout placement gives a Kustomization. The transform resolves the `layout` name role for it once, where it builds the bundle holding the component, before any trait: the name the config reports as authored (the `layoutKustomizationName` property, `LayoutKustomizationNameProperty`), else the `Naming` hook's answer, else the default `<bundle>-<component>`. It calls `SetLayoutKustomizationName` with an authored or hook-given name only, never with the default, which is kure's own. A config built directly, outside a transform, sets its own. Implemented by `helmtemplate` (`HelmTemplateConfig.LayoutKustomizationName`, which `AugmentLayout` sets on the layout unless it carries one; go-kure/launcher#787). |
-| `SubApplicationDecorator` | `DecoratesSubApplications() bool` — on a `TraitHandler` whose `Apply` decorates an application's objects. When it returns `true`, the engine also calls `Apply` on every sub-application the component's traits appended to the bundle, as the last step of the transform, so trait order does not matter; a trait forwarded to several sibling-group members decorates the group's sub-applications once. `Apply` must not add, remove, replace, rename or reorder the bundle's applications there (the transform fails), nor rename a sibling group member's application, which the bundle does not hold: the transform fails, naming the trait, the sub-application it was decorating, the group and the member's type (go-kure/launcher#763). Implemented by `prune-protection` and `force-replace`, whose `Apply` sets the application's delivery intent and wraps nothing (go-kure/launcher#782). |
-| `ServiceAccountNamer` | `ServiceAccountName() (name string, runsPods bool)` — the ServiceAccount a workload component's pods run as: the authored `serviceAccountName`, or `""` when none is authored (no pod kind generates an account, go-kure/launcher#702; a `webservice`/`worker` hands its `deployment` member the name of the account it generates). `runsPods` reports whether the config runs pods at all; a trait decorator or sibling group that wraps no pod-running config reports `false`. Traits that bind identity to the workload (the `rbac` trait's binding subject) read this instead of assuming the component name, and `rbac` refuses a pod-running component with no name. Implemented by every built-in pod kind config. **Breaking library change**: the method gained the `runsPods` result. |
+| `ApplicationNameSetter` | `SetApplicationName(name string)` — on a component config that builds a name out of the OAM application it belongs to, so the name differs when two differently named applications each have a component of the same name (the application's namespace is not part of it). The transform calls it once, right after `ToApplicationConfig` and before policy and traits, with the name of the document it transforms (the name the application's bundle carries). A config built directly, outside a transform, is never told one. Implemented by `helmtemplate`, whose hook-group child layouts are named `<application>-<component>-NN-<phase-slug>`. |
+| `HookGroupNamePrefixSetter` | `AuthoredHookGroupNamePrefix() (prefix string, authored bool)` and `SetHookGroupNamePrefix(prefix string)` — on a component config whose `AugmentLayout` partitions it into hook-group layouts. The transform resolves the `hook-group` name role for it once, right after `ApplicationNameSetter`: the prefix the config reports as authored (the `hookGroupNamePrefix` property, `HookGroupNamePrefixProperty`), else the `Naming` hook's answer, else the default `<application>-<component>`, and it calls `SetHookGroupNamePrefix` only with an authored or hook-given prefix, so a config left alone keeps its default names. A config built directly, outside a transform, sets its own. Implemented by `helmtemplate` (`HelmTemplateConfig.HookGroupNamePrefix`). |
+| `LayoutKustomizationNameSetter` | `AuthoredLayoutKustomizationName() (name string, authored bool)` and `SetLayoutKustomizationName(name string)` — on a component config kure's walker gives a layout of its own, which kure's Flux integration under per-layout placement gives a Kustomization. The transform resolves the `layout` name role for it once, where it builds the bundle holding the component, before any trait: the name the config reports as authored (the `layoutKustomizationName` property, `LayoutKustomizationNameProperty`), else the `Naming` hook's answer, else the default `<bundle>-<component>`. It calls `SetLayoutKustomizationName` with an authored or hook-given name only, never with the default, which is kure's own. A config built directly, outside a transform, sets its own. Implemented by `helmtemplate` (`HelmTemplateConfig.LayoutKustomizationName`, which `AugmentLayout` sets on the layout unless it carries one). |
+| `SubApplicationDecorator` | `DecoratesSubApplications() bool` — on a `TraitHandler` whose `Apply` decorates an application's objects. When it returns `true`, the engine also calls `Apply` on every sub-application the component's traits appended to the bundle, as the last step of the transform, so trait order does not matter; a trait forwarded to several sibling-group members decorates the group's sub-applications once. `Apply` must not add, remove, replace, rename or reorder the bundle's applications there (the transform fails), nor rename a sibling group member's application, which the bundle does not hold: the transform fails, naming the trait, the sub-application it was decorating, the group and the member's type. Implemented by `prune-protection` and `force-replace`, whose `Apply` sets the application's delivery intent and wraps nothing. |
+| `ServiceAccountNamer` | `ServiceAccountName() (name string, runsPods bool)` — the ServiceAccount a workload component's pods run as: the authored `serviceAccountName`, or `""` when none is authored (no pod kind generates an account; a `webservice`/`worker` hands its `deployment` member the name of the account it generates). `runsPods` reports whether the config runs pods at all; a trait decorator or sibling group that wraps no pod-running config reports `false`. Traits that bind identity to the workload (the `rbac` trait's binding subject) read this instead of assuming the component name, and `rbac` refuses a pod-running component with no name. Implemented by every built-in pod kind config. **Breaking library change**: the method gained the `runsPods` result. |
 | `LayoutAugmentationCoverage` | `GenerateCoversAugmentLayout() bool` — for a config that also implements kure's `layout.LayoutAugmenter`, declare whether `Generate` alone already produces every resource `AugmentLayout` places into the layout. `kurel build` (which never walks a `layout.ManifestLayout`) uses this to fail closed: an augmenter that doesn't implement this interface, or that implements it and returns `false`, is rejected outright rather than silently dropping layout-level resources from the output. |
 | `ConfigWrapper` | `WrappedApplicationConfig() stack.ApplicationConfig` — a config that wraps another one and says so. The ownership wrapper is one; `UnwrapConfig(cfg)` returns the config under every such wrapper. After `Transform` every application's config answers `ComponentNamed` through the ownership wrapper: the authored component, or `""` for an application the document as a whole owns ([Component label and ownership](labels-and-ownership.md#component-label-and-ownership)). |
 
 `PolicyResult.Extensions` is a `map[string]any` a consumer's policy handler writes its own
 result into, under a key it owns (a domain-qualified name, as a label key is). Launcher
 neither reads nor changes it: `TransformWithPolicy` returns it as the handlers left it, and
-no built-in handler writes one (go-kure/launcher#781). A consumer that delivers through Flux
+no built-in handler writes one. A consumer that delivers through Flux
 uses it to carry what its own `reconciliation` or `health-checks` handler read. Launcher has
 no handler for those two policy types, nor for the `fluxcd-patches` and `fluxcd-postbuild`
 traits: a document using one fails the transform with `no handler for policy type
@@ -45,10 +48,10 @@ the two traits).
 `PolicyResult.ConsumedCapabilities` is the sorted, deduped set of capability keys this
 app's traits actually resolved against `ctx.Capabilities` during the transform — a real
 `ClusterProfile` match, not every syntactically possible key a trait could name — plus
-every bound key a `ComponentCapabilityDefaults` handler takes defaults from
-(go-kure/launcher#742), and every key a component, trait, document or policy lowering rule reads through
-`LoweringContext.Capability` (go-kure/launcher#686), as a `ComponentCapabilityFiller`
-handler does (go-kure/launcher#761). A read by a
+every bound key a `ComponentCapabilityDefaults` handler takes defaults from,
+and every key a component, trait, document or policy lowering rule reads through
+`LoweringContext.Capability`, as a `ComponentCapabilityFiller`
+handler does. A read by a
 `RawDocumentLoweringRule` under `LowerRaws` is not among them: `LowerRaws` returns no
 `PolicyResult`, and the capabilities the rewritten document's traits resolve against are
 recorded when `TransformWithPolicy` runs on it. Populated
@@ -76,7 +79,7 @@ properties), the leaf `Path` and a `Source`. A `Source` has a `Kind`:
 |------|---------|
 | `authored` | The value is in the properties the caller passed. |
 | `capability` | A `ClusterProfile` binding supplied it. `Ref` is the binding's key: the scoped key or the bare type key that matched, `pvc` for a top-level fill, or, for a value a `ComponentCapabilityFiller` wrote below the top level, the capability the filler read (the sorted keys joined by `,` when it read several). |
-| `copied` | A lowering rule emitted the element (a component whose origin names a rule, whether or not it counts as synthesized, or a sealed trait), and the value is one the rule's input held at the same path. `Ref` is the rule's identity, such as `component/<type>`. `From` is the kind the value had in that input: `authored`, `capability` (its `Detail` is kept) or `rendered` (an earlier rule's). A rule that hands a value on unchanged reports where it came from, not that the rule touched it. A collection the rule hands back in another Go type (a `[]any` as a `[]string`) is copied when every item had the same source, and rendered when they differ. An integer of a kind that emission validation turns into an `int` (`int8`, `int16`, every unsigned kind, a named integer type) is compared by value, not by Go type: an `int16(3)` the rule copied into a target whose schema declares an integer is still copied after that change, and a rule that changes the number reports rendered. A named string, boolean or float type, and a named unsigned integer above `math.MaxInt`, is compared as the predeclared type of its kind, which a string, boolean or number schema writes for it. A named `int32` or `int64` is the same value as the `int` an integer schema gives it and as the `int32` or `int64` a number schema keeps, in either width and at any depth in a list or object: a rule that hands a named `int32` on as an `int64`, or the reverse, reports copied under either schema (go-kure/launcher#1317). A plain `int`, `int32` or `int64` is left as it is, and so is an unnamed unsigned integer above `math.MaxInt`, which an integer schema refuses. A rule that changes the number, or its kind (an integer to a float), still reports rendered, and so does a change of width between plain integers, which keep their width (go-kure/launcher#1308). Provenance assumes a 64-bit `int`: on a 32-bit build a named `int64` outside the range of `int` is not folded and reports rendered. Launcher builds for amd64 and arm64 only (go-kure/launcher#1323). |
+| `copied` | A lowering rule emitted the element (a component whose origin names a rule, whether or not it counts as synthesized, or a sealed trait), and the value is one the rule's input held at the same path. `Ref` is the rule's identity, such as `component/<type>`. `From` is the kind the value had in that input: `authored`, `capability` (its `Detail` is kept) or `rendered` (an earlier rule's). A rule that hands a value on unchanged reports where it came from, not that the rule touched it. A collection the rule hands back in another Go type (a `[]any` as a `[]string`) is copied when every item had the same source, and rendered when they differ. An integer of a kind that emission validation turns into an `int` (`int8`, `int16`, every unsigned kind, a named integer type) is compared by value, not by Go type: an `int16(3)` the rule copied into a target whose schema declares an integer is still copied after that change, and a rule that changes the number reports rendered. A named string, boolean or float type, and a named unsigned integer above `math.MaxInt`, is compared as the predeclared type of its kind, which a string, boolean or number schema writes for it. A named `int32` or `int64` is the same value as the `int` an integer schema gives it and as the `int32` or `int64` a number schema keeps, in either width and at any depth in a list or object: a rule that hands a named `int32` on as an `int64`, or the reverse, reports copied under either schema. A plain `int`, `int32` or `int64` is left as it is, and so is an unnamed unsigned integer above `math.MaxInt`, which an integer schema refuses. A rule that changes the number, or its kind (an integer to a float), still reports rendered, and so does a change of width between plain integers, which keep their width. Provenance assumes a 64-bit `int`: on a 32-bit build a named `int64` outside the range of `int` is not folded and reports rendered. Launcher builds for amd64 and arm64 only. |
 | `builtin` | launcher's own code filled the value after the policy decided, because nothing else held one (not a `Policy` accessor). `Ref` is the fill, such as `postgresql.enablePDB`; `From` and `Detail` are empty. |
 | `rendered` | The same elements, and the value is any other: one the rule added, changed or moved to another path. `Ref` is the rule's identity. This is what `lowered` reported before, for the part of the output the rule made. A capability fill on a rule-emitted component no rule synthesized stays `capability`. |
 | `policy` | The `Policy` supplied the value, as a default the author left out. `Ref` is the `Policy` accessor that supplied it, such as `DefaultCPURequest`; `From` is empty. `Detail` is `capped-to-limit` for a default request the engine lowered to the authored limit (the `DefaultCPURequest` and `DefaultMemoryRequest` accessors), empty otherwise. |
@@ -216,14 +219,14 @@ identities included), rule arity, component and policy schemas of each emitted d
 and that each emitted document's apiVersion is `SupportedAPIVersion` or the group its
 rule claims. Emitted traits are not checked in `LowerRaws`. A component or policy is
 checked on its own copy of its properties, so checking it cannot strip a reserved
-`null` from a trait or another element that shares its map before `Transform` sees it
-(go-kure/launcher#626). `Transform` does not
+`null` from a trait or another element that shares its map before `Transform` sees it.
+`Transform` does not
 shape-check trait properties either (it enforces only their platform-reserved keys): like
 any authored document, each parsed output document must go through
 `ValidateAuthoredProperties`, after parameter substitution, before `Transform`, which then
 takes the document the validator returned (see its paragraph under [Property schemas](schemas-and-contract.md#property-schemas)). Without it, a raw rule's `enablePDB: "true"` on
-a trait whose schema declares a boolean builds cleanly and is silently dropped. Before
-go-kure/launcher#357 `LowerRaws` schema-checked emitted traits itself; a caller that
+a trait whose schema declares a boolean builds cleanly and is silently dropped.
+`LowerRaws` does not schema-check emitted traits itself; a caller that
 relied on that must now add the `ValidateAuthoredProperties` call.
 
 The returned bytes cannot say which rule produced them: the element origin is unexported
@@ -275,7 +278,7 @@ compared.
 Both checks return the refusal as a `*oam.GeneratedObjectCollisionError`, with the text
 unchanged. `errors.Is(err, oam.ErrGeneratedObjectCollision)` is true, also behind a prefix a
 caller adds, and `errors.As` finds the error and tells which objects collide and who
-produces each, without parsing the text (go-kure/launcher#1338):
+produces each, without parsing the text:
 
 ```go
 var collision *oam.GeneratedObjectCollisionError
@@ -290,9 +293,9 @@ if errors.As(err, &collision) {
 
 Nothing above compares the applications inside one document: a component and another
 component's trait, two components, or two traits can each generate the same object, and
-both pass `Transform` (go-kure/launcher#646). That includes one component's own: two of
+both pass `Transform`. That includes one component's own: two of
 its traits, or a trait and an application the component generates itself (a `helm`
-component's values ConfigMap), rendering one object (go-kure/launcher#757). `Transform` alone refuses only those whose
+component's values ConfigMap), rendering one object. `Transform` alone refuses only those whose
 names it resolves under a name role (see [Name roles and the `Naming` hook](names-and-overrides.md#name-roles-and-the-naming-hook): two `scaler`,
 two `rbac` or two `networkpolicy` traits naming one object, on one component or on two), so a
 library caller must run both steps below on every transformed document, as `kurel build`
@@ -307,12 +310,11 @@ sibling group is one) or as a trait's sub-application and its component. Produce
 read alike are named once with their count, since the cluster cannot tell them apart: two
 traits of one component whose sub-applications share a name read as `2 sub-applications
 "dup" of component "web"`, a trait named after its own component and that component as
-`2 applications "web" of component "web"` (go-kure/launcher#757). The transform itself refuses
-both of those shapes within one bundle (two applications of one name, go-kure/launcher#787), so
+`2 applications "web" of component "web"`. The transform itself refuses
+both of those shapes within one bundle (two applications of one name), so
 the check meets them only in a cluster built some other way. A repeat within one application is not reported. `kurel build` runs both before it writes anything.
 
-Both checks also hold an object a controller generates for a generated object as generated
-(go-kure/launcher#1072, go-kure/launcher#1074): for a HelmRelease with a chart template
+Both checks also hold an object a controller generates for a generated object as generated: for a HelmRelease with a chart template
 (`spec.chart`), helm-controller generates a source of the template's kind named
 `<namespace>-<name>` after the HelmRelease, takes over any object of that name and deletes
 it with the HelmRelease, when the kind, name or namespace of the chart source it generates
@@ -327,19 +329,19 @@ reported as generated by `helm-controller for HelmRelease … (chart.kind <kind>
 producer, after the other collisions. The HelmRelease's namespace is the one it is
 generated in, so under a Flux namespace the name, and a HelmChart's namespace when no
 sourceRef namespace is set, follow the Flux namespace. The HelmChart claim is a refusal
-that a document building before go-kure/launcher#1074 may now meet: a `helmchart` component
+that a document that built before the claim existed may now meet: a `helmchart` component
 named `<namespace>-<name>` after a `helmrelease` beside it, in the same namespace.
 
 `GeneratedChartSource(obj)` returns that source as a `ChartSource` (kind, namespace and name)
 and whether obj makes one, a typed HelmRelease counting as one whether or not it states its
 kind; the checks read their claim from it, and so does the `helmrelease`
-component, which refuses a HelmRelease whose source helm-controller could not apply
-(go-kure/launcher#1080). The name is always `<namespace>-<name>` after the HelmRelease's own
+component, which refuses a HelmRelease whose source helm-controller could not apply.
+The name is always `<namespace>-<name>` after the HelmRelease's own
 namespace (helm-controller API v1.7.1 `v2/helmrelease_types.go:1633-1649`); a sourceRef
 namespace moves only the HelmChart.
 
 A PersistentVolume or PersistentVolumeClaim that is force-applied, or covered by the
-`ForceReplace` delivery intent, is warned about, not refused (go-kure/launcher#720): when an
+`ForceReplace` delivery intent, is warned about, not refused: when an
 update changes an immutable field of a force-applied object, Flux deletes and recreates it
 instead of failing the apply, which can lose a claim's data. Pass the same
 `GenerateApplications` result, after `CheckInDocumentCollisions`, to
@@ -347,9 +349,8 @@ instead of failing the apply, which can lose a claim's data. Pass the same
 (`SetWarningHandler`) per PersistentVolume and PersistentVolumeClaim that carries
 `kustomize.toolkit.fluxcd.io/force: enabled` itself (an author's own, in a `manifests`
 component for one) or whose application is `GeneratedApplication.Forced`. An application is
-forced when it carries the `ForceReplace` delivery intent (the `force-replace` trait sets
-it, go-kure/launcher#782) or when its bundle sets `Force` (launcher never does, so only a
-bundle whose `Force` the caller set before generating, go-kure/launcher#781). The warning
+forced when it carries the `ForceReplace` delivery intent (the `force-replace` trait sets it) or when its bundle sets `Force` (launcher never does, so only a
+bundle whose `Force` the caller set before generating). The warning
 names the kind, `namespace/name`, the producer and every reason the object is forced — the
 annotation, the intent, the bundle, in that order:
 `PersistentVolumeClaim shop/data (component "db") is force-applied
@@ -374,8 +375,7 @@ naming its first producer and every reason any copy is forced. Objects are read 
 generated: what a consumer's delivery changes afterwards (patches, post-build substitution)
 and anything the cluster changes on apply are not modelled. It
 covers every generated claim alike — a `webservice`/`worker` `volumes` entry (a
-synthesized `pvc` trait, so named as a sub-application of its component,
-go-kure/launcher#702), the `pvc` trait, the `persistentvolumeclaim` component, a `manifests` component's objects — and changes no
+synthesized `pvc` trait, so named as a sub-application of its component), the `pvc` trait, the `persistentvolumeclaim` component, a `manifests` component's objects — and changes no
 output. A `volumes` entry with `claimName` and the `volsync` trait's `sourcePVC` generate no
 claim: an existing claim is warned where it is generated. With no warning handler it
 does nothing. An embedder that does not
@@ -445,7 +445,7 @@ first object in emission order, then every member's remaining objects in the sam
 order, as a single component generating all of them orders them. `webservice`
 lowers to a deployment, a service and a serviceaccount member, which give
 Deployment, Service, ServiceAccount, then the claims of the deployment member's
-synthesized `pvc` traits (go-kure/launcher#702). It answers every config contract the transform reads
+synthesized `pvc` traits. It answers every config contract the transform reads
 (Service port and port name, backend Service name, routing target, ServiceAccount,
 single-pod claim) from the one member that has a value, gives the Flux namespace
 to every member that takes one, and reports the group's name as its component
@@ -461,7 +461,7 @@ its number and a non-TCP port is dropped. A member that remaps a port or names a
 listen on. A member reports its pod template labels through an optional method on
 its config, `PodTemplateLabels() map[string]string`; a member without it counts as
 running no pods. Of the built-in pod kinds only `deployment` has it, the one pod
-kind a lowering rule emits into a group (go-kure/launcher#794, item 3). A rule that
+kind a lowering rule emits into a group. A rule that
 emits another pod kind into a group must add the method to that kind's config, or
 a routing member selecting its pods gets the Service `selector` policy.
 
@@ -493,7 +493,7 @@ The build refuses a group:
   both members derives one name, such as `web-rbac`, from the shared name). The names
   are compared after each sub-application's `ApplyPolicy` has run, so a policy that
   renames a sub-application onto another member's is refused, and the name it moved
-  away from is free (go-kure/launcher#755). Two sub-applications that both still carry
+  away from is free. Two sub-applications that both still carry
   the name the `Naming` hook gave them are compared by their defaults instead: the same
   trait on both members is refused whatever the hook answers, and two different
   sub-applications the hook gave one name are left to the bundle, which refuses two
@@ -502,7 +502,7 @@ The build refuses a group:
   trait creates cannot be told apart: they are the hook's only when the hook named
   every one of them, and are then compared by all their defaults. A name the hook gave
   that meets, on another member, one it did not give (a trait's own, or one a policy
-  renamed onto it) is refused by name (go-kure/launcher#787).
+  renamed onto it) is refused by name.
 
 An authored duplicate name is still refused. So is a name repeated by different
 rule invocations, or by a trait or document rule, including a copy of a member.
@@ -577,7 +577,7 @@ trait, a policy, metadata or another component, or changed after recording it, i
 refused like any authored one — including a number that only prints the same, such
 as an authored `1.0000000000000001e+18` over a rendered `1000000000000000100`, or one
 that only compares equal, such as an authored `-0.0` over a rendered `0.0`, which a
-handler tells apart with `math.Signbit` (go-kure/launcher#612). `RenderReserved`
+handler tells apart with `math.Signbit`. `RenderReserved`
 refuses a value that is or holds a `null`, NaN or ±Inf, any Go type other than strings, booleans, numbers, slices, arrays and
 string-keyed maps, or a collection that contains itself. The record follows the component
 through copies and later lowering rounds; a rule that rebuilds a component from its
@@ -590,8 +590,8 @@ and is checked like anything a user wrote, so a schema-less rule cannot pass an
 authored reserved value through. Its components and traits — those it emits at trait position and those
 nested in the components it emits — are checked for reserved keys as they are
 emitted, before emission validation strips an explicit `null`, so a reserved key
-written as `null` is refused here exactly as when authored directly
-(go-kure/launcher#609, go-kure/launcher#626). Emission validation of any rule's output
+written as `null` is refused here exactly as when authored directly.
+Emission validation of any rule's output
 normalizes the element's own copy of its properties, never the map the rule emitted,
 so validating an element whose type does not reserve a key cannot strip that key's
 `null` from another element sharing the map (including one the rule forwarded), which
@@ -626,7 +626,7 @@ component's handler built, in the order attached, right after
 transform, naming the component. A step that holds the config to the policy refuses as
 `ApplyPolicy` does: an error that holds a `PolicyRefusal` fails the transform as the
 component's `ViolationError` with the refusal's class, any other error as a
-`TransformError` (go-kure/launcher#849). The transform does not apply the policy again
+`TransformError`. The transform does not apply the policy again
 after a step. A kind may hold its own config to the policy once more when it generates,
 as `passthrough` does, but no kind has to: holding what the step writes to the policy is
 the rule author's responsibility. A step is part of the component value: it survives
@@ -636,12 +636,11 @@ traits, but not serialization, and a document cannot author one. A
 by copying that component; a component it builds anew has no step, and the engine
 cannot tell one was dropped. The built-in user is the `postgresql` rule, which
 attaches a step to the `cnpg-cluster` it emits to set the values postgresql derives
-after the policy (`CnpgClusterConfig.ApplyPostgresqlDefaults`; go-kure/launcher#281,
-go-kure/launcher#729).
+after the policy (`CnpgClusterConfig.ApplyPostgresqlDefaults`).
 
 **Order between a rule's own components.** A rule that emits components of which one
 must be applied before another declares it on the later one:
-`Component.OrderAfter(names...)` (go-kure/launcher#783). Each name is a component of the
+`Component.OrderAfter(names...)`. Each name is a component of the
 document once lowering has settled, usually one the same rule emits or adopts
 (`LoweringContext.ResolveSharedName`); an unknown name, or the component's own, fails the
 transform, naming the component and the rule's order. Like a post-policy step it is
@@ -659,12 +658,12 @@ rule emits is a component like any other and takes the order. `OrderAfter` is on
 the three ordering declarations described under [Pipeline](pipeline.md#pipeline).
 The built-in users are the `helm` rule, which orders the release after the source it
 generates or adopts, and the `oci` rule, which does the same for each Kustomization of a
-source several `oci` components share (go-kure/launcher#784). A component alone on its
+source several `oci` components share. A component alone on its
 artifact orders nothing: its source is a member of its same-name sibling group.
 
 **Waiting as another component.** A component a rule emits that must not wait for the
 component it lowers, but must still wait for what that one waits for, declares it with
-`Component.WaitsAs(name)` (go-kure/launcher#1041). It follows every component the
+`Component.WaitsAs(name)`. It follows every component the
 document's `dependency` rules make `name` follow, itself excepted, as if each rule named
 it too. The rules are read once every lowering has run, so a rule another component's
 lowering generates counts as an authored one does, though the rule lowering the
@@ -683,7 +682,7 @@ component, and the Cluster is ordered after the store.
 A source that several components share is always a component a rule emits once and the
 others adopt. The engine has no other sharing mechanism: the `SourceDeduplicatable`
 interface and the pass that let the first config of a shared source key emit it were
-removed with go-kure/launcher#784.
+removed.
 
 A trait-position rule that implements `CapabilityAware` is enforced by the engine
 exactly as `applyTraits` enforces it for a dispatchable `TraitHandler`: missing the
