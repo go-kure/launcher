@@ -46,6 +46,9 @@ func (r *Rule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 	if lctx.Namer == nil {
 		return oam.LoweringResult{}, errors.Errorf("model: %s: no name allocator in the lowering context", r.m.Key())
 	}
+	if err := refuseAuthoredTraits(comp, r.m.Key()); err != nil {
+		return oam.LoweringResult{}, err
+	}
 	inputs := make(map[string]any, len(r.m.Spec.Inputs))
 	for name, s := range r.m.Spec.Inputs {
 		if s.Default != nil {
