@@ -195,14 +195,10 @@ is its own.
   (`pkg/apis/rbac/validation/validation.go` of `k8s.io/kubernetes`, which
   no module launcher links holds). No test derives them, and a later
   Kubernetes that changes one is not noticed by a dependency bump.
-- **Required from the markers** are the fields the API's source marks
-  required and the Go type writes whether or not they were authored.
-The API
-  marks no field of the four required that the type leaves out when
-  unauthored.
-These checks are of
-  presence: an authored empty value (`verbs: []`, `name: ""`) builds and is
-  the API server's to refuse.
+- **Required from the markers** are the fields the API's source marks required and the Go type
+  writes whether or not they were authored. The API marks no field of the four required that
+  the type leaves out when unauthored. The checks on required fields are of presence: an
+  authored empty value (`verbs: []`, `name: ""`) builds and is the API server's to refuse.
 - **A rule** (`rules[]` of a `role` or a `clusterrole`) must write its
   `verbs` (`rules[0].verbs: required …`, from the markers). By hand: it
   must name at least one of `apiGroups` and at least one of `resources`
