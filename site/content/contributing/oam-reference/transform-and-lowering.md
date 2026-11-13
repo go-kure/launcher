@@ -31,9 +31,9 @@ Implementation, history and tests of the sections on the reference page
 - **History:**
   - go-kure/launcher#626 (a component or policy is checked on its own copy of its properties in `LowerRaws`, so checking it cannot strip a reserved `null` from a trait or another element that shares its map before `Transform` sees it).
   - go-kure/launcher#357 (`LowerRaws` schema-checked emitted traits itself; it does not any more, so a caller that relied on that adds the `ValidateAuthoredProperties` call).
-  - go-kure/launcher#1338 (`errors.Is(err, oam.ErrGeneratedObjectCollision)` and `errors.As` tell which objects collide and who produces each, without parsing the text).
+  - go-kure/launcher#1338 (`errors.Is(err, oam.ErrGeneratedObjectCollision)` is true, also behind a prefix a caller adds, and `errors.As` finds the error and tells which objects collide and who produces each, without parsing the text).
   - go-kure/launcher#646 (a component and another component's trait, two components, or two traits can each generate the same object, and both pass `Transform`).
-  - go-kure/launcher#757 (one component's own traits, or a trait and an application the component generates itself, rendering one object; the two shapes read as `2 sub-applications "dup" of component "web"` and `2 applications "web" of component "web"`).
+  - go-kure/launcher#757 (one component's own traits, or a trait and an application the component generates itself, rendering one object; traits of one component whose sub-applications share a name read as `2 sub-applications "dup" of component "web"`, a trait named after its own component and that component as `2 applications "web" of component "web"`).
   - go-kure/launcher#787 (the transform refuses two applications of one name within one bundle; a name the `Naming` hook gave that meets, on another member, one it did not give is refused by name).
   - go-kure/launcher#1072 and go-kure/launcher#1074 (both checks hold an object a controller generates for a generated object as generated, for a HelmRelease with a chart template; the HelmChart claim is a refusal that a document that built before the claim existed may now meet).
   - go-kure/launcher#1080 (the `helmrelease` component refuses a HelmRelease whose source helm-controller could not apply).
