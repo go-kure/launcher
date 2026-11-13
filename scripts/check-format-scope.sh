@@ -176,6 +176,7 @@ LEFT_OUT_PATHS=(
   # No refusal of an authored document: the package comment, and files that only pass on an
   # error they received.
   pkg/oam/doc.go
+  pkg/oam/emit_hook.go
   pkg/oam/post_policy_step.go
   pkg/oam/provenance.go
   pkg/oam/routed_backend.go

@@ -65,9 +65,15 @@ func (r *Rule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 	}
 	sc := Scope{Inputs: inputs, Self: Self{Name: comp.Name, Application: application}}
 	name := func(part string) (string, error) { return lctx.Namer.Name(comp.Name, part, lctx.Origin) }
-	comps, err := r.c.Expand(r.t, sc, objectNameUnhooked(lctx.NamingHook()), name)
+	comps, parts, err := r.c.expand(r.t, sc, objectNameUnhooked(lctx.NamingHook()), name)
 	if err != nil {
 		return oam.LoweringResult{}, errors.Wrapf(err, "model: %s", r.m.Key())
+	}
+	// The consumer hook sees the components only of a render that succeeded, in part order.
+	for i, c := range comps {
+		if err := lctx.EmitModelComponent(r.m.Key(), parts[i], c); err != nil {
+			return oam.LoweringResult{}, err
+		}
 	}
 	return oam.LoweringResult{Components: comps}, nil
 }

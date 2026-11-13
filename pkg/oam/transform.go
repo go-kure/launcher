@@ -129,6 +129,14 @@ type TransformContext struct {
 	// further call), and again by ComponentEndpointsNamed, which builds a
 	// selector from the answer.
 	Naming func(NameRequest) (string, bool)
+	// EmitHook is the consumer's say in what a configuration-defined model emits
+	// (go-kure/launcher#1261). It is called once for each component that a model's
+	// lowering rule emits, in part order, after the whole render succeeded, with the
+	// model, the part, the type as the model wrote it, the name and a copy of the
+	// properties. A returned error fails the transform and names the model and the
+	// part. Go lowering rules and authored components never reach it. nil asks
+	// nothing. Non-authorable platform input.
+	EmitHook func(ModelEmit) error
 	// ReservedMetadataKeys names the label and annotation keys the consumer keeps
 	// to itself (go-kure/launcher#790). An entry is a key ("example.com/owner",
 	// "owner"), or a key prefix followed by "/" ("example.com/"), which reserves
@@ -951,6 +959,7 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 	// documents.
 	ctx.nameClaims = NewNameAllocator()
 	ctx.nameClaims.hook = ctx.Naming
+	ctx.nameClaims.emit = ctx.EmitHook
 	docs, err := t.lower(app, ctx)
 	if err != nil {
 		return nil, nil, err
