@@ -468,7 +468,9 @@ test compares the two.
 ### Properties
 
 Its properties are exactly the top-level JSON keys of `HelmReleaseSpec` in the
-helm-controller API version `go.mod` links.
+helm-controller API version `go.mod` links; a test ties the published schema to
+that struct, so a helm-controller bump that adds or drops a spec field fails the
+suite until the schema follows.
 
 **Decoding.** The whole property map is decoded with `builtin.DecodeStrictJSON`
 into `HelmReleaseSpec`. A key the struct does not declare, at any depth
@@ -1334,7 +1336,7 @@ as a `CiliumNetworkPolicy`'s endpoint selector, which the kind inventory records
 and an authored Cilium policy checks on its own. A key next to `properties` in
 the same schema is reported and kept. No type under a workload or a claim does
 this beyond scalar leaves (`Quantity`, `IntOrString`, `Time`) and the raw field
-set of `managedFields`.
+set of `managedFields`; a test walks those types and fails when one starts to.
 
 Limits. The items of a list, whatever its kind, are checked as documents of
 their own are, a list among them opened in turn. A workload, claim or

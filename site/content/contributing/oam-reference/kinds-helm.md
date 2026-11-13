@@ -103,11 +103,13 @@ file.
     release lands, or the source of the `chartRef` or chart template, is
     refused).
 - **Tests:**
-  - a test ties the published schema to that struct, so a helm-controller bump
-    that adds or drops a spec field fails the suite until the schema follows.
-    ("that struct" is `HelmReleaseSpec`, of the reference's "Its properties are
-    exactly the top-level JSON keys of `HelmReleaseSpec`"; the test is
-    `TestHelmReleaseHandler_SchemaMatchesSpec` in `helmrelease_test.go`.)
+  - Its properties are exactly the top-level JSON keys of `HelmReleaseSpec` in
+    the helm-controller API version `go.mod` links; a test ties the published
+    schema to that struct, so a helm-controller bump that adds or drops a spec
+    field fails the suite until the schema follows. (The reference keeps this
+    sentence. "Its" is the `helmrelease` kind's, "that struct" is
+    `HelmReleaseSpec`, and the test is `TestHelmReleaseHandler_SchemaMatchesSpec`
+    in `helmrelease_test.go`.)
   - `TestKindComponents_OmittedRequiredAndWrittenDefaults` holds both to the
     markers in the source of the linked Flux modules, which ship no CRD: the
     required field to a refusal shown on a document, and the written value to
@@ -165,10 +167,14 @@ file.
     overrides. ("the two components" are `helmtemplate` and `manifests`; the
     test is `TestScopeOverrides_ManifestsAndTemplateDeliveryResolveAlike` in
     `helmtemplate_scope_overrides_internal_test.go`.)
-  - a test walks those types and fails when one starts to. ("those types" are
-    the types under a workload or a claim, and "one" is a type that unmarshals
-    itself beyond the scalar leaves and the field set of `managedFields`; the
-    test is `TestUndeclaredFields_NoSelfUnmarshallingStructUnderAWorkload` in
+  - No type under a workload or a claim does this beyond scalar leaves
+    (`Quantity`, `IntOrString`, `Time`) and the raw field set of `managedFields`;
+    a test walks those types and fails when one starts to. (The reference keeps
+    this sentence. "this" is decoding its own keys, as the known limit above
+    states it, "those types" are the types under a workload or a claim, and "one"
+    is a type that unmarshals itself beyond the scalar leaves and the field set
+    of `managedFields`; the test is
+    `TestUndeclaredFields_NoSelfUnmarshallingStructUnderAWorkload` in
     `undeclared_fields_internal_test.go`.)
   - The schema declares the same keys, with `source` closed to `url` and `kind`,
     and a test ties it to the struct. (The reference keeps this sentence. "it"
