@@ -3,10 +3,13 @@ title: "Component label and ownership"
 weight: 2
 ---
 
+The implementation, history and tests of the sections below are on the
+[contributor page](../../contributing/oam-reference/labels-and-ownership.md).
+
 ## Component label and ownership
 
 Every application of a transformed document belongs to one authored component, or to the
-document as a whole (go-kure/launcher#788). The transform records that as its last step, and
+document as a whole. The transform records that as its last step, and
 two things follow from it: each application reports its owner, and each object it generates
 carries the owner's component label.
 
@@ -16,7 +19,7 @@ carries the owner's component label.
 | A component a lowering rule emitted for it, under any name (the `postgresql` pooler `<comp>-pooler`, a database, an object store) | The authored component the rule lowered. |
 | A sub-application a trait added | The trait's component. |
 | A synthesized `NetworkPolicy` (`{comp}-allow-ingress-traffic`, `{comp}-allow-egress-traffic`, `{comp}-allow-endpoint-ingress`) | The authored component of the entry it was synthesized for. |
-| A generated source the application bundle holds (go-kure/launcher#783), which every consumer shares | None: the document as a whole. |
+| A generated source the application bundle holds, which every consumer shares | None: the document as a whole. |
 | The external-backend policy (`{service}-allow-ingress-traffic`) | None. |
 
 **Provenance.** `GeneratedApplication.Component` is the owner, and empty for an application
@@ -25,10 +28,7 @@ launcher's ownership wrapper: `ComponentName()` (`ComponentNamed`) answers the s
 it. The wrapper forwards every optional contract launcher reads on a config after the
 transform (`Validate`, the Flux namespace, Service port and routing answers,
 `ServiceAccountNamer`, the single-pod claim, pod template labels, identity target ports, the
-layout contracts). A test fails when the code asserts or switches on a new type directly on
-an application's config (`app.Config.(T)`, `switch app.Config.(type)`) and the wrapper's
-list does not account for it. It reads syntax only: a config first copied to a variable or
-passed to a function, and asserted there, is outside what it sees. A caller that needs the
+layout contracts). A caller that needs the
 concrete config, or a contract of its own, reads `UnwrapConfig(app.Config)`; the wrapper is a
 `ConfigWrapper`
 (`WrappedApplicationConfig()`). An application a caller adds to the cluster itself has no
@@ -50,7 +50,7 @@ goes on:
   is: the layout walker puts there what the application generated, which carries the label;
 - nothing an application without an owner generates.
 
-**The label is authoritative** (go-kure/launcher#790). Before it writes the label, the
+**The label is authoritative**. Before it writes the label, the
 wrapper holds every object the application generates to it: a value the object already holds
 under the key is the owner's, or generation fails. That holds whatever wrote the value: a
 `manifests` or `passthrough` document, an authored pod label, a kind's property, a chart
@@ -84,8 +84,7 @@ a kind puts it. A typed object of a `monitoring.coreos.com`, `volsync.backube`,
 `cert-manager.io` or `gateway.networking.k8s.io` kind is recognized when it states its kind; a
 typed Flux `Kustomization` or `HelmRelease` by its Go type as well. The component label and
 reserved-key checks read a typed object in its JSON form with numbers kept exact, so a
-`HelmRelease` whose `values` hold a number no float64 holds is not refused for it
-(go-kure/launcher#1085); so does the claim a chart template makes, for a typed object other
+`HelmRelease` whose `values` hold a number no float64 holds is not refused for it; so does the claim a chart template makes, for a typed object other
 than the Flux `HelmRelease` type, whose `spec.chart` alone it reads. A `ResourceSet` has no
 component type: the row holds one that a `manifests` or `passthrough` document carries, as
 every row does. A refusal names the labels by their path, with the index of the solver where
@@ -93,10 +92,10 @@ they are in the list (`spec.acme.solvers[1].http01.ingress.podTemplate.metadata.
 read: `spec.commonMetadata` of an `ArtifactGenerator` and a `FluxInstance`, which go onto the
 ExternalArtifacts it generates and onto the objects of the Flux installation, no pods, and a
 `StatefulSet`'s volume claim templates (`spec.volumeClaimTemplates[].metadata`), which go onto
-the PersistentVolumeClaims the StatefulSet controller creates (go-kure/launcher#944), and the
+the PersistentVolumeClaims the StatefulSet controller creates, and the
 claim template of the storage of a `Prometheus`, `PrometheusAgent`, `Alertmanager` or
 `ThanosRuler` (`spec.storage.volumeClaimTemplate.metadata`), which the operator copies onto
-the volume claim template of the StatefulSet it creates (go-kure/launcher#957). The reserved
+the volume claim template of the StatefulSet it creates. The reserved
 metadata keys are read in all four; the storage claim template only where neither
 `spec.storage.emptyDir` nor `spec.storage.ephemeral` is set, since the operator uses the first
 storage arm set and makes no claim from the template beside either. Launcher writes no label into a volume claim template
@@ -116,11 +115,7 @@ pods. Metadata an operator copies onto other objects it creates (the Ingress of 
 Secret of a Certificate, the Services of a Cluster) is held to the reserved keys alone
 ([Reserved metadata keys](#reserved-metadata-keys)): nothing selects those objects by the
 component label, so another component's value there builds, and launcher writes nothing
-there. `labelReachReservedOnly` in `pkg/cmd/kurel/label_reach_test.go` names each such field
-with what it reaches, and `labelReachNotRead` each field neither check reads.
-`TestLabelReach_EveryFieldIsHeldOrListed` derives these fields from the API types of the
-registered kind components, so a field a dependency adds fails the test until it is held or
-listed.
+there.
 
 A workload whose own selector **requires** another value for the key is refused too: a
 `matchLabels` entry, an `In` expression that does not hold the component's value, or the
@@ -286,7 +281,7 @@ case of pods selected is reached only through a consumer's own lowering rule.
   value there is refused (the table above).
 - Pods of a kind the post-renderer has no patch for in a Flux-installed chart.
 
-**Breaking library changes** (go-kure/launcher#788):
+**Breaking library changes**:
 
 - Output: every owned object and pod template gains the component label, a `HelmRelease`
   gains the post-renderer, and a component's synthesized NetworkPolicies gain the label.
@@ -311,7 +306,7 @@ case of pods selected is reached only through a consumer's own lowering rule.
 - `stack.Application.Config` is the ownership wrapper after `Transform`: a type assertion on
   a concrete config type goes through `UnwrapConfig`.
 
-**Breaking library changes** (go-kure/launcher#790, the authoritative label):
+**Breaking library changes** (the authoritative label):
 
 - A document that built before is refused at generation when an object it generates holds
   the component label's key with a value that is not its component's: on the object, on a
@@ -352,7 +347,7 @@ case of pods selected is reached only through a consumer's own lowering rule.
   `FluxInstance` have no component type: the checks read them in a `manifests` or
   `passthrough` document.
 
-**Breaking library changes** (go-kure/launcher#790, a CronJob's job template):
+**Breaking library changes** (a CronJob's job template):
 
 - Output: every `CronJob` an owned application generates, typed or unstructured, gains the
   component label on its job template (`spec.jobTemplate.metadata.labels`), and the
@@ -365,7 +360,7 @@ case of pods selected is reached only through a consumer's own lowering rule.
 - New exported API: `ReservedKeyInJobTemplate`, the `ReservedKeyHolder` of a CronJob's job
   template (`job template label "…"`).
 
-**Breaking library changes** (go-kure/launcher#790, a selector that rules the label out):
+**Breaking library changes** (a selector that rules the label out):
 
 - A document that built before is refused at generation when an owned workload's own selector
   rules the component label out of a pod template that carries no value for the key (a
@@ -382,7 +377,7 @@ case of pods selected is reached only through a consumer's own lowering rule.
 - New exported API: `ComponentLabelSelectorRulesOut`, the `ComponentLabelRefusal` of that
   refusal.
 
-**Breaking library changes** (go-kure/launcher#790, a renamed entry under the key `app`):
+**Breaking library changes** (a renamed entry under the key `app`):
 
 - Output: with `ComponentLabelKey: "app"`, the synthesized inbound and egress NetworkPolicies
   of an entry a lowering rule emitted under a name whose label value differs from its
@@ -390,7 +385,7 @@ case of pods selected is reached only through a consumer's own lowering rule.
   `matchLabels` with the component's value. The entry's own pods, which the kinds label
   with the entry's value, are now inside them. No other key and no other entry changes.
 
-**New exported API** (go-kure/launcher#790, the authoritative label): the sentinel
+**New exported API** (the authoritative label): the sentinel
 `ErrComponentLabelValue`, the error type `ComponentLabelError`, the type
 `ComponentLabelRefusal` with its values `ComponentLabelForeignValue`,
 `ComponentLabelSelectorRequiresAnother`, `ComponentLabelInLabelsProperty` and
@@ -403,14 +398,14 @@ transform returned before as an error of no type, is a `*ComponentLabelError` no
 same text. Under the key `app` the kinds' own `app` check refused such a value first, with a
 text of its own; that refusal is the component label's now, text included.
 
-**New exported API** (go-kure/launcher#790, metadata that reaches no pods): nine values of
+**New exported API** (metadata that reaches no pods): nine values of
 `ReservedKeyHolder`: `ReservedKeyInSolverIngressTemplate`, `ReservedKeyInSolverHTTPRoute`,
 `ReservedKeyInSecretTemplate`, `ReservedKeyInServiceTemplate`,
 `ReservedKeyInServiceAccountTemplate`, `ReservedKeyInVolumeSnapshot`,
 `ReservedKeyInExternalSecretMetadata`, `ReservedKeyInChartTemplate` and
 `ReservedKeyInMoverService`.
 
-**Breaking library changes** (go-kure/launcher#944, a StatefulSet's volume claim templates):
+**Breaking library changes** (a StatefulSet's volume claim templates):
 
 - A document that built before is refused at generation when a volume claim template of a
   `StatefulSet` (`spec.volumeClaimTemplates[].metadata`) holds a reserved metadata key as a
@@ -423,7 +418,7 @@ text of its own; that refusal is the component label's now, text included.
 - New exported API: `ReservedKeyInVolumeClaimTemplate`, the `ReservedKeyHolder` of a volume
   claim template (`volume claim template label "…"`).
 
-**Breaking library changes** (go-kure/launcher#957, a Prometheus operator kind's storage claim
+**Breaking library changes** (a Prometheus operator kind's storage claim
 template):
 
 - A document that built before is refused at generation when the storage claim template of a
@@ -441,7 +436,7 @@ template):
 ## Reserved metadata keys
 
 A consumer that keeps label and annotation keys to itself names them in
-`TransformContext.ReservedMetadataKeys` (go-kure/launcher#790). One rule holds every
+`TransformContext.ReservedMetadataKeys`. One rule holds every
 application the transform returns to the list, whatever wrote the key: a kind component, a
 `passthrough` or `manifests` object, a chart rendered at build time, a trait's `annotations`,
 a `postgresql` or `cnpg-cluster` component's `inheritedMetadata`.
@@ -567,12 +562,12 @@ Flux applies it (a `List`, or an envelope with `items`):
   - the metadata of each volume claim template of an `apps` `StatefulSet`
     (`spec.volumeClaimTemplates[].metadata`), in every template of the list, which the
     StatefulSet controller copies onto each PersistentVolumeClaim it creates: `volume claim
-    template label "…"` (go-kure/launcher#944);
+    template label "…"`;
   - the metadata of the storage claim template of a `monitoring.coreos.com` `Prometheus`,
     `PrometheusAgent`, `Alertmanager` or `ThanosRuler`
     (`spec.storage.volumeClaimTemplate.metadata`), which the operator copies onto the volume
-    claim template of its StatefulSet: `volume claim template label "…"`
-    (go-kure/launcher#957), where neither `spec.storage.emptyDir` nor `spec.storage.ephemeral`
+    claim template of its StatefulSet: `volume claim template label "…"`,
+    where neither `spec.storage.emptyDir` nor `spec.storage.ephemeral`
     is set, the operator using the first storage arm set. The claim template of its ephemeral storage
     (`spec.storage.ephemeral.volumeClaimTemplate`) goes onto a claim of a pod and is not read.
 
@@ -619,8 +614,7 @@ object named, and is not read as holding no key.
   cluster, where launcher reads nothing. The `HelmRelease` object itself is checked.
 - Metadata an object hands on to others in a field of its own: the claim template of an
   ephemeral volume, in a pod spec or a CloudNativePG `Cluster`'s
-  `spec.ephemeralVolumeSource`. `labelReachNotRead` in `pkg/cmd/kurel/label_reach_test.go` is
-  the full list of fields of the kinds' API types that hand metadata on and are not read.
+  `spec.ephemeralVolumeSource`.
 - What a controller or an admission webhook adds in the cluster.
 - An application a caller adds to the cluster itself after `Transform`: it has no ownership
   wrapper.
@@ -634,7 +628,7 @@ object named, and is not read as holding no key.
   again (no built-in component edits one), and a caller that calls `AugmentLayout` itself on
   a layout holding objects that never came from `Generate` gets them unchecked.
 
-**Library changes** (go-kure/launcher#790): a new exported field,
+**Library changes**: a new exported field,
 `TransformContext.ReservedMetadataKeys`, the sentinel `ErrReservedMetadataKey`, the error
 type `ReservedMetadataKeyError` with its `ReservedKeyHolder` values, and the
 method `PlatformAnnotations()` on the `ingress` trait's config (`traits.IngressConfig`).
