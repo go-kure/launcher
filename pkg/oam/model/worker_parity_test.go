@@ -140,7 +140,7 @@ func parityCompare(goObjs, modelObjs objMap) (problems []string, mapped int) {
 			continue
 		}
 		used[match[0]] = true
-		parityWalk(gk[0]+" "+gk[1], goObjs[gk], modelObjs[match[0]], &problems, &mapped)
+		parityWalk(gk[0]+" "+gk[1], match[0][1], goObjs[gk], modelObjs[match[0]], &problems, &mapped)
 	}
 	for mk := range modelObjs {
 		if !used[mk] {
@@ -164,7 +164,7 @@ func lookupString(o map[string]any, path ...string) (string, bool) {
 	return s, ok
 }
 
-func parityWalk(path string, g, m any, problems *[]string, mapped *int) {
+func parityWalk(path, own string, g, m any, problems *[]string, mapped *int) {
 	switch gv := g.(type) {
 	case map[string]any:
 		mv, ok := m.(map[string]any)
@@ -178,7 +178,7 @@ func parityWalk(path string, g, m any, problems *[]string, mapped *int) {
 				*problems = append(*problems, fmt.Sprintf("%s.%s: the model has no such key", path, k))
 				continue
 			}
-			parityWalk(path+"."+k, v, mm, problems, mapped)
+			parityWalk(path+"."+k, own, v, mm, problems, mapped)
 		}
 		for k := range mv {
 			if _, has := gv[k]; !has {
@@ -192,7 +192,7 @@ func parityWalk(path string, g, m any, problems *[]string, mapped *int) {
 			return
 		}
 		for i := range gv {
-			parityWalk(fmt.Sprintf("%s[%d]", path, i), gv[i], mv[i], problems, mapped)
+			parityWalk(fmt.Sprintf("%s[%d]", path, i), own, gv[i], mv[i], problems, mapped)
 		}
 	case string:
 		ms, ok := m.(string)
@@ -205,10 +205,19 @@ func parityWalk(path string, g, m any, problems *[]string, mapped *int) {
 		}
 		if gv == parityComponent {
 			for _, part := range parityParts {
-				if ms == parityComponent+"-"+part {
-					*mapped++
+				if ms != parityComponent+"-"+part {
+					continue
+				}
+				// A part name inside an object is the object's own, except the ServiceAccount
+				// reference, which names another object and is checked against the emitted
+				// ServiceAccounts before the walk. This catches a selector, a label or a container
+				// name that names the wrong part, which the mapping alone would hide.
+				if ms != own && !strings.HasSuffix(path, ".serviceAccountName") {
+					*problems = append(*problems, fmt.Sprintf("%s: the model has %q, which is not the part of the object (%q)", path, ms, own))
 					return
 				}
+				*mapped++
+				return
 			}
 		}
 		*problems = append(*problems, fmt.Sprintf("%s: Go has %q, the model has %q", path, gv, ms))
@@ -306,6 +315,13 @@ func TestWorkerParity_ComparerControls(t *testing.T) {
 	pod["serviceAccountName"] = parityComponent + "-plain"
 	if problems, _ := parityCompare(goObjs, wrongRef); len(problems) == 0 {
 		t.Error("the comparer passed a Deployment that references a ServiceAccount the model does not emit")
+	}
+	// A selector that names another part must fail, though it maps to the same string.
+	wrongSel := parityRender(t, tr, "worker-cfg.acme.example@v1", props)
+	sel := wrongSel[[2]string{"Deployment", parityComponent + "-spread"}]["spec"].(map[string]any)["selector"].(map[string]any)["matchLabels"].(map[string]any)
+	sel["app"] = parityComponent + "-sa"
+	if problems, _ := parityCompare(goObjs, wrongSel); len(problems) == 0 {
+		t.Error("the comparer passed a selector that names another part")
 	}
 	// A mapped leaf in a place where Go carries something else must fail.
 	skewed := parityRender(t, tr, "worker-cfg.acme.example@v1", props)
