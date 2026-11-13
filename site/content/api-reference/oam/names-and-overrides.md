@@ -3,10 +3,13 @@ title: "Names and overrides"
 weight: 3
 ---
 
+The implementation, history and tests of the sections below are on the
+[contributor page](../../contributing/oam-reference/names-and-overrides.md).
+
 ## Names and overrides
 
 Launcher shortens a name only when it generated that name itself, and always by one rule,
-`ShortenName(name, limit)` (go-kure/launcher#793). A name of at most `limit` characters is
+`ShortenName(name, limit)`. A name of at most `limit` characters is
 returned unchanged, so no document whose names fit changes output. A longer one becomes its
 first `limit-11` characters with trailing `-`/`.` trimmed, a `-`, and the first 10 hex
 characters (`ShortenNameDigestLength`) of the sha256 of the whole name. The result is
@@ -34,15 +37,14 @@ which is the name emitted. A role component's PVC claim name is checked the same
 
 A name an author writes, or an override of a generated name, is used as written or refused. It
 is never shortened and never changed, and one that cannot be the name of its object fails the
-transform with the property in the error, so the cluster never has to refuse it
-(go-kure/launcher#787). The built-in traits' authored names and the rule each is checked by are
+transform with the property in the error, so the cluster never has to refuse it. The built-in traits' authored names and the rule each is checked by are
 listed in the trait handlers' README (`pkg/oam/builtin/traits/README.md`). The application
 bundle carries the Application's name as written.
 
 ### Name roles and the `Naming` hook
 
 A consumer changes a name launcher generates through `TransformContext.Naming`, a
-`func(NameRequest) (string, bool)` (go-kure/launcher#787). Every name of the roles below is
+`func(NameRequest) (string, bool)`. Every name of the roles below is
 resolved in one order: the author's own property when the author wrote it, else the hook's
 answer, else the default. The roles are a closed set, `NameRoles()`.
 
@@ -79,7 +81,7 @@ answer, else the default. The roles are a closed set, `NameRoles()`.
 | `postgresql-scheduledbackup` | Each ScheduledBackup a `postgresql` component generates, asked once per `backup.schedules` entry, with the component. It names the Cluster by the name the Cluster took. Every name is held to 63 characters, the hook's and the default included: the operator copies it into a label of each Backup. | `<component>-<schedule name>` | none: the schedule's `name` is the suffix | once per `backup.schedules` entry |
 | `postgresql-recovery-objectstore` | The ObjectStore a `postgresql` component generates for an inline `recovery.source.objectStore`, the store the new Cluster is recovered from, asked with the component. The Cluster's recovery source names the store by it (`barmanObjectName`). | `<component>-recovery-source` | none | unless `recovery.source.objectStoreName` names an existing store, since the component then generates none; not without `recovery` |
 | `hook-group` | The prefix of the names of a `helmtemplate` component's hook-group layouts, each `<prefix>-<NN>-<phase>`: the directory of a group and, for a prefix the author or the hook set, its Flux Kustomization; with the default the Kustomization's name is kure's, `<unit name>-<layout name>` ([Pipeline](pipeline.md#pipeline)). It is no object, and the one role whose answer is a prefix and not a name: how many groups a chart has is known only once it is rendered, and the prefix is resolved before that. | `<application>-<component>` | `hookGroupNamePrefix`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `hookGroupNamePrefix` is set |
-| `layout` | The Flux Kustomization kure generates under `FluxIntegratedPerLayout` placement for a chart's own layout: a `helmtemplate` component's, the only layout of its own a component has under the default `ApplicationGrouping`. It is no object launcher writes and names neither the layout nor its directory; under any other placement the layout has no Kustomization of its own, and kure's Flux integration refuses a name set on it (go-kure/kure#1032). | `<bundle>-<component>`, the bundle as launcher named it (the `bundle` or `group` role's answer): kure's own default, which launcher never sets and kure shortens past 63 characters by its own rule. | `layoutKustomizationName`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `layoutKustomizationName` is set |
+| `layout` | The Flux Kustomization kure generates under `FluxIntegratedPerLayout` placement for a chart's own layout: a `helmtemplate` component's, the only layout of its own a component has under the default `ApplicationGrouping`. It is no object launcher writes and names neither the layout nor its directory; under any other placement the layout has no Kustomization of its own, and kure's Flux integration refuses a name set on it. | `<bundle>-<component>`, the bundle as launcher named it (the `bundle` or `group` role's answer): kure's own default, which launcher never sets and kure shortens past 63 characters by its own rule. | `layoutKustomizationName`, on `helmtemplate` and on `helm` under `delivery: template` | once per `helmtemplate` component, unless `layoutKustomizationName` is set |
 | `generated` | An object a lowering rule or a trait handler generates that no other role names: the role for a rule or a handler outside launcher's own. No builtin rule or handler asks it. | The one the rule or the handler builds. | the rule's or the handler's own, if it has one | once per object, unless the author named it |
 
 The last column says when the hook is asked for a name, not how many times. `once per X` names
@@ -129,7 +131,7 @@ the component, the role and the full name. On a `helm` component under `delivery
 property is refused: a HelmRelease installs the chart, no hook-group layout exists, and the
 prefix would name nothing.
 
-**The over-long name fails the transform** (go-kure/launcher#787). It used to fail only when
+**The over-long name fails the transform.** It used to fail only when
 the layout was built, in `AugmentLayout`. The names exist once the chart is rendered, and the
 transform has it rendered: it holds every config to the environment policy, the default
 `NoopPolicy` when `TransformContext.Policy` is nil, and a `helmtemplate` config renders its
@@ -228,7 +230,7 @@ DNS-1123 subdomain by the one rule for generated names (`ShortenNameWithSuffix`)
 error `ResolveName` gives where it cannot be built. It is the name an object takes where
 no name is authored and no hook is set (`HasNamingHook` false), so a rule can tell the name
 another component's lowering gives such an object without lowering it: the `postgresql`
-rule matches another component's inline recovery store by it (go-kure/launcher#1044).
+rule matches another component's inline recovery store by it.
 
 `LoweringContext.ResolveMemberName(member, spec)` names the one object of a kind component
 the rule is about to emit under the component's name, where the rule lets the author and the
@@ -249,8 +251,7 @@ member whose type declares no object is refused by the transform. On a context w
 may be the hook's answer. A rule that reads another component of `Document` and needs the
 name that component's object takes knows it only where the author wrote it, or where no hook
 is set: the hook is asked by the rule that generates the object, never on another rule's
-behalf, and the same name may be asked again (see above; `postgresql`'s archive check,
-go-kure/launcher#1001).
+behalf, and the same name may be asked again (see above; `postgresql`'s archive check).
 
 `LoweringContext.ResolveSharedName(base, suffix, identity, spec)` is `ResolveName` for an
 object the components of one document share: one its content identity determines wholly, as
@@ -397,7 +398,7 @@ by its component, or by its Service (`external backend Service "db"`): two exter
 whose shortened default policy names meet are refused too. Each synthesized policy is held in a
 sub-application whose default is the policy's default name, resolved apart from the policy's: a
 hook that names two such policies apart and not their sub-applications leaves two applications
-of one name in the bundle, which is refused (go-kure/launcher#787).
+of one name in the bundle, which is refused.
 
 A caller tells this refusal from every other error of the transform without reading its
 text. The transform returns it behind a prefix of its own (`component "api": …`), and through
@@ -492,7 +493,7 @@ name), which way named which sub-application is not known, and the error says so
 than guess; a hook that gave one name for two of a trait's defaults is reported without the
 default (`returned by the Naming hook for one of the trait's defaults`). The refusal is a
 `*NameCollisionError` with no `Kind`; a component's own application is the member with no
-`Role` and no `Trait`. **This is a behaviour change** (go-kure/launcher#787): before it, two
+`Role` and no `Trait`. **This is a behaviour change**: before it, two
 sub-applications of one name were accepted. Two of one name in two bundles (two tiers, two
 groups) are two applications and stay accepted. A Naming hook that answers for role
 `sub-application` gives each a name of its own. A sub-application's
@@ -510,9 +511,7 @@ sets `NameSpec.ClusterScoped` for an object that has none.
 A trait that names its object itself, under no role, claims the name with
 `(*Trait).ClaimObjectName(kind, namespace, name, property)`, or, for an object the trait
 generates, `(*Trait).ClaimGeneratedObjectName` (below): the `cilium-networkpolicy` trait's
-CiliumNetworkPolicy, whose required `name` leaves the hook nothing to be asked. The `ingress`
-trait's Ingress and the `httproute` trait's HTTPRoute used to be claimed the same way; they are
-resolved under their roles now (`ingress`, `httproute`). The name is the handler's own and is
+CiliumNetworkPolicy, whose required `name` leaves the hook nothing to be asked. The name is the handler's own and is
 not changed, and the `Naming` hook is not asked about it: there is no role for the object. The
 claim only holds the name against every other one of the transform, so that a second owner of
 the same kind, namespace and name is refused with both named, whichever comes first:
@@ -623,8 +622,7 @@ validation makes of the document (`ValidateAuthoredPropertiesWithCapabilities` a
 feature-gate check) follows the same rule: it shares a pointer, and what a struct holds by
 reference, with the caller's `Application`, and a caller that writes through one in the returned
 copy changes its own document. Validation's own code only reads through a pointer or a struct and
-never writes through either, for a value under an open object. A test pins this
-(`TestValidateAuthoredProperties_NeverWritesThroughAPointerOrStruct`). An error message formats
+never writes through either, for a value under an open object. An error message formats
 the value it refuses, or the object that holds it, with `%v`, so a `String`, `Error` or `Format`
 method that the value supplies runs, and such a method can write. For a handler of a kind
 component the query and the build give it
@@ -798,7 +796,7 @@ names its chart derives from it, where they were.
 ### `labels` and `annotations`: the metadata of a kind component's object
 
 A kind component takes two more properties the engine reads, `labels` and `annotations`, each
-a map of strings (go-kure/launcher#790). They go on the metadata of the component's one object
+a map of strings. They go on the metadata of the component's one object
 and nowhere else:
 
 ```yaml
@@ -848,7 +846,7 @@ them, unread by the engine, if it declares them or declares no schema.
 
 The two properties never reach a pod template. The pod template's labels and annotations are
 a handler's own property, `podMetadata`, on `deployment`, `statefulset`, `daemonset`, `job` and
-`cronjob` (go-kure/launcher#1178) and on `webservice` and `worker`, which hand it to their
-deployment member (go-kure/launcher#1216); the engine neither reads nor removes it. What it writes is
+`cronjob` and on `webservice` and `worker`, which hand it to their
+deployment member; the engine neither reads nor removes it. What it writes is
 checked as any pod template is: `ReservedMetadataKeys` and the component label.
 
