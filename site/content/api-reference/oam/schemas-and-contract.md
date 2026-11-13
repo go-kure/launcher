@@ -3,6 +3,9 @@ title: "Property schemas and contract metadata"
 weight: 6
 ---
 
+The implementation, history and tests of the sections below are on the
+[contributor page](../../contributing/oam-reference/schemas-and-contract.md).
+
 ## Property schemas
 
 Handlers may implement `PropertySchemaProvider` (`PropertySchema() map[string]PropertySchema`)
@@ -15,15 +18,14 @@ single schema vocabulary — the same type also backs `kurel.yaml` parameters (`
 parameters, capability rendering) reject them at decode time, so unifying the type does not widen
 their accepted behavior.
 
-A kurel parameter's `Type` is `string`, `integer`, `boolean`, `array` or `object`
-(go-kure/launcher#421). `ResolveParameters` replaces a whole-value `${name}` for an `array` or
+A kurel parameter's `Type` is `string`, `integer`, `boolean`, `array` or `object`. `ResolveParameters` replaces a whole-value `${name}` for an `array` or
 `object` parameter with the value's YAML list or map. With no `items` or `properties` to declare,
 the parameter checks only that shape (its default too, and a string default is refused); the
 substituted value is checked by `ValidateAuthoredProperties` against the consuming handler's schema
 like any authored property. Such a parameter cannot be embedded in a larger string, in the template
 or in another parameter's string default.
 
-`Types` is the union idiom (go-kure/launcher#383): a leaf that accepts more than one scalar type
+`Types` is the union idiom: a leaf that accepts more than one scalar type
 lists them, and a value is accepted when any member's single `Type` accepts it — whatever order the
 members are listed in — normalised exactly as the first member, in declared order, that accepts it
 would (below). Members are two or more distinct scalar types (string, integer,
@@ -33,13 +35,12 @@ union, is a schema error reported as soon as a value reaches the leaf. Every Kub
 `port`, the `service` kind's `ports[].targetPort` — declares `integer`/`string`, and every `resource.Quantity` leaf (`cpu`, `memory`, a claim's
 `storage`) declares `string`/`number`, because their parsers take a fractional number too. `Type`
 stays empty on a union leaf, so a schema consumer that does not read `Types` sees an untyped leaf and
-keeps accepting every member. A completeness test (`pkg/cmd/kurel`) enforces that every built-in
-schema node declares exactly one of `Type` and `Types`. `Transformer.HandlerSchemas()` returns a `HandlerSchemaSet{ Components, Traits, Policies, Exclusive }`
+keeps accepting every member. `Transformer.HandlerSchemas()` returns a `HandlerSchemaSet{ Components, Traits, Policies, Exclusive }`
 of every registered handler and lowering rule that declares one, so the downstream runtime's validator can check a
 component's, trait's or policy's properties before the handler is invoked. Built-in examples: the `configmap` trait and the
 `passthrough` component.
 
-`Exclusive` is the one-of idiom (go-kure/launcher#790): on an `object` node it lists groups of that
+`Exclusive` is the one-of idiom: on an `object` node it lists groups of that
 object's `Properties` keys, `ExclusiveGroup{ Keys, Required }`, of which a value sets at most one, and
 exactly one when the group is `Required`. A key counts as set when it is present and not a null, as
 for `Required`. A handler's top level is a map with no node to carry the groups, so a handler or
@@ -69,8 +70,7 @@ for each node of the input schemas it visits, so a malformed group in a model is
 
 `Description` is optional (`json:"description,omitempty"`) but every built-in property populates it —
 including nested object fields and array item schemas at every depth — so the downstream runtime can surface prose in
-its generated Handler API Reference. A completeness test (`pkg/cmd/kurel`) enforces that no built-in
-schema node is left without a description.
+its generated Handler API Reference.
 
 A schema field may also be marked `PlatformReserved`: its value may arrive only via
 `ClusterProfile` capability rendering, never authored inline. `enforcePlatformReserved`
@@ -78,8 +78,7 @@ A schema field may also be marked `PlatformReserved`: its value may arrive only 
 explicit `null` — before capability rendering is merged in, with a `*PropertyError` of
 kind `platform-reserved` that wraps `ErrPlatformReserved`; it walks declared nested object fields and the items of a
 declared array of objects too (named `properties.items[0]`), so a reservation on an
-inner field is enforced wherever it is declared, not only at the top level
-(go-kure/launcher#635).
+inner field is enforced wherever it is declared, not only at the top level.
 `createApplications` and `applyTraits` (`transform.go`) run this check on the authored
 path, and the lowering engine runs it on a `TraitLoweringRule`'s input trait before
 capability rendering is resolved into it (see [Lowering](transform-and-lowering.md#lowering)). A value a lowering rule
@@ -91,12 +90,12 @@ the field needs that gate on the cluster. A `ClusterProfile` that states
 `spec.kubernetesVersion` below the release where the gate is on by default has an authored
 value refused by `ValidateAuthoredPropertiesForTarget`, naming the property's path, the gate,
 that release and the profile's version; with no version nothing is checked. A profile's
-`spec.featureGates` overrides a gate's state in both directions (go-kure/launcher#1231); it
+`spec.featureGates` overrides a gate's state in both directions; it
 needs `spec.kubernetesVersion`, refuses a name the table lacks, and has no lock or removal
 state. The gates are
 rows of one table in `featuregates.go` (name, first release with Default true, read from the
 Kubernetes feature gates reference), held to the schemas by tests in both directions: a `Gate`
-no row names, or a row no schema uses, fails (go-kure/launcher#1183). Only Kubernetes core
+no row names, or a row no schema uses, fails. Only Kubernetes core
 properties of the built-in components carry one today: `EnvFiles`
 (`env[].valueFrom.fileKeyRef`), `ContainerRestartRules` (`restartPolicyRules`: an init
 container's on the workload kinds, any container's on the raw-PodSpec kinds below), `PodLevelResources` (`podResources`) and `HostnameOverride`
@@ -106,17 +105,17 @@ that take a pod template, and the `template` of `cnpg-pooler`) leave their conta
 nodes carry `GatedPaths` (published as `gatedPaths`) instead: gate-relative paths
 (`env[].valueFrom.fileKeyRef`, with `[]` after an array key) to the gate the field needs,
 read by the gate check alone, so property validation and what a document is accepted as do
-not change (go-kure/launcher#1245). A consumer that predates `gatedPaths` ignores it.
+not change. A consumer that predates `gatedPaths` ignores it.
 The gate check reads a value as the writer writes it. A property value built in Go can
 hold a struct from the Kubernetes API types (a `corev1.PodSpec` in a template, a
 `[]corev1.EnvVar`) where a decoded document holds a map. The check reads such a struct, a
 pointer to one, or a slice of either, through its JSON form, so it is held to the same
 gates as the decoded document. A struct that encodes to null is absent, as a decoded null
 is. A struct that does not encode as JSON is refused, with its path, where a gate
-below it is off at the target (go-kure/launcher#1320). The read comes before the null
+below it is off at the target. The read comes before the null
 check, so a nil slice of a named type whose own `MarshalJSON` writes an array is present,
 and a pointer type that is its own element type (`type P *P`) is read through its JSON
-form like any other (go-kure/launcher#1450).
+form like any other.
 
 A gate may also cover single values of an enum property: `ValueGates` (published as
 `valueGates`) maps an `Enum` value to the gate that value alone needs, and the property is
@@ -124,8 +123,7 @@ accepted at every version for its other values. An authored value listed there i
 below the gate's release with the same fields plus the value
 (`value "Never" requires the Kubernetes feature gate ContainerRestartRules, ...`). A key
 that is not an `Enum` value, or a gate no row names, fails the schema tests. Like `Gate`,
-the key is rejected at the two flat call sites, so it is absent from their allow-sets
-(go-kure/launcher#1230). Two properties carry it today: an init container's
+the key is rejected at the two flat call sites, so it is absent from their allow-sets. Two properties carry it today: an init container's
 `restartPolicy` (`Never` and `OnFailure`, `ContainerRestartRules`) and `service`'s
 `trafficDistribution` (`PreferSameZone` and `PreferSameNode`, `PreferSameTrafficDistribution`).
 `GatedPaths` names a field, not a value. A path that gates values sits in `ValueGatedPaths`
@@ -135,8 +133,7 @@ for the `restartPolicy` of an init container, from the same table as the shortha
 (`Never` and `OnFailure`, `ContainerRestartRules`). Their `restartPolicy` on a regular
 container is a plain `GatedPaths` entry, because Kubernetes forbids the field there with
 the gate off, `Always` included. A null, a value that is not a string and a string the table
-does not name use no gate. Like `Gate`, the key is rejected at the two flat call sites
-(go-kure/launcher#1330).
+does not name use no gate. Like `Gate`, the key is rejected at the two flat call sites.
 
 Separately, `validateProperties` (`property_validate.go`) checks an EMITTED
 component/trait/policy's properties against its TARGET handler's declared schema —
@@ -157,7 +154,7 @@ rewritten by whichever member the value matched. A property whose schema declare
 neither `Type` nor `Types`, or a key an open object leaves undeclared, is not rewritten.
 
 `ValidateAuthoredProperties` (`property_validate_authored.go`) is that check's
-authored-path counterpart, and closes go-kure/launcher#408. Parsing is strict
+authored-path counterpart. Parsing is strict
 (`KnownFields(true)`) only down to the envelope: `Component.Properties`,
 `Trait.Properties` and `ApplicationPolicy.Properties` are each `map[string]any`, so
 before this every handler read the keys it knew and silently dropped the rest — a
@@ -185,9 +182,8 @@ and the `pvc` trait with the `persistentvolumeclaim` kind's
 (`site/content/api-reference/oam-components/upstream-fields-not-read.md`, "Upstream fields a hand-parsed kind does
 not read"); `helmchart` and `helmrelease` point a removed key to its replacement,
 and `postgresql` a key its `backup` replaced (`objectStore`, `objectStoreObjectName`)
-to where it went (go-kure/launcher#1001).
-An empty answer adds nothing. The hint was asked of a terminal component
-handler alone before go-kure/launcher#790; the three other positions are new.
+to where it went.
+An empty answer adds nothing.
 
 A key refused *below* the top level, inside an object the type declares, is
 never passed to `UnsupportedFieldHint`, so a hint written for a top-level key is
@@ -206,13 +202,13 @@ The built-in workload kinds, `webservice` and `worker` answer with the reason
 their parser gives for the key at that position (the components README, "Below
 the top level"), and `postgresql` names the replacement of a key `backup` no longer
 takes (`destinationPath`, `endpointURL`, `secretName`) and the reason `backup.objectStore` refuses a key
-(`serverName`, `azureCredentials`, `googleCredentials`; go-kure/launcher#1001). Before go-kure/launcher#790 a nested refusal carried no hint.
+(`serverName`, `azureCredentials`, `googleCredentials`).
 The refusal text itself is unchanged at every depth.
 
 **Where a refusal is, as data.** Every refusal the property validators make is a
-`*PropertyError` (go-kure/launcher#1466): `errors.As` finds it in the error the call
+`*PropertyError`: `errors.As` finds it in the error the call
 returns, a hinted refusal included, and `Error()` is the text above, byte for byte.
-The platform-reservation check described below is one of them (go-kure/launcher#1469).
+The platform-reservation check described below is one of them.
 Its refusal has the kind `platform-reserved`, and it also wraps `ErrPlatformReserved`,
 so `errors.Is` finds the sentinel too. A caller that maps a refusal to a reply of its
 own reads these fields and parses no text:
@@ -242,11 +238,10 @@ Before any of that, it runs `Transform`'s own reservation check
 (`enforcePlatformReserved`) over the document, with the same schemas and the same
 error text `Transform` would report for it. It has to come first: validation drops an
 explicit `null` under a nested declared object, so a reserved key authored as
-`config: {locked: null}` would otherwise be gone before `Transform` could refuse it
-(go-kure/launcher#635).
+`config: {locked: null}` would otherwise be gone before `Transform` could refuse it.
 
 The shape check is also the only place an authored scalar's *type* is enforced for
-every property (go-kure/launcher#325). Many built-in handlers read string properties
+every property. Many built-in handlers read string properties
 with a comma-ok assertion (`cfg.Delivery, _ = props["delivery"].(string)`), so on
 the handler alone a `delivery: 123` becomes `""` and is defaulted as though it were
 absent. Type-checking once here, against the schema each handler already declares,
@@ -262,8 +257,7 @@ property trees carry the result of the check: under the schema-declared fields, 
 explicit nested `null` is stripped, and a named scalar or a typed collection is
 rewritten to the plain Go shape a handler reads. A key accepted through
 `AdditionalProperties` is left as authored, as before. The `app` argument is never
-edited, for a plain type name and for a declared type identity alike
-(go-kure/launcher#1282). `Transform` strips and normalizes
+edited, for a plain type name and for a declared type identity alike. `Transform` strips and normalizes
 nothing itself, so **`Transform` the document the validator returned**, not `app`: a
 nested `null` in `app` still reaches the handler as `nil`. On an error the returned
 document is nil and `app` is as it was authored. A nil `app` returns nil and no error.
@@ -281,24 +275,21 @@ by the type allowlists and by `validateSettled`); a custom trait type from a
 it accepts; and a policy type nothing is registered for, which the transform rejects
 with `no handler for policy type`.
 
-`Required` is enforced at the top level too, as written, and a null counts as absent
-(go-kure/launcher#1463): `component "web" (type "webservice"): properties: "image" is
+`Required` is enforced at the top level too, as written, and a null counts as absent: `component "web" (type "webservice"): properties: "image" is
 required`. Two cases are left to the platform and are not refused here. A trait a
 capability binding matches is checked on the merged properties, as described below, because
 `ClusterProfile` capability rendering merges into its top-level property map after this
 runs. A component key that its handler lists in `ComponentCapabilityDefaults` is filled by
 the capability, so its absence is accepted.
 
-Nested `Required`, inside an object the author did write, is enforced
-(go-kure/launcher#765), and top-level `Required` on a matched trait follows the same
+Nested `Required`, inside an object the author did write, is enforced, and top-level `Required` on a matched trait follows the same
 rule:
 
 - `ValidateAuthoredProperties` knows no profile, so it checks nested `Required` as
   written, on every trait.
 - `ValidateAuthoredPropertiesWithCapabilities(app, capabilities)` does the same for a
   trait no binding matches. For a trait a binding matches, it checks the trait's
-  properties as the rendering merges into them, recursively
-  (go-kure/launcher#750), so a required key the rendering supplies is not refused:
+  properties as the rendering merges into them, recursively, so a required key the rendering supplies is not refused:
   a partial override such as `issuerRef: {kind: Issuer}` over a rendered
   `issuerRef: {name: ca}` is accepted. A missing key is then reported as `"name" is
   required; neither the trait nor capability "certificate"'s rendering sets it`. A
@@ -451,13 +442,9 @@ of thing:
   and `PropertySchema` is exported, so a handler outside this repo would have seen
   a schema this validator used to accept start failing for a reason that does not
   apply to it. No built-in schema declares an `Enum` on a non-scalar type today,
-  but nothing asserts that as a rule and this check does not depend on it. What is
-  asserted is the rule above: `TestBuiltinHandlerSchemaEnumMembersHoldNoNull`
-  (`pkg/cmd/kurel`) walks every schema that ships for a member holding a null,
-  because the runtime arm only fires once a document validates against the property
-  carrying the `Enum`.
+  but nothing asserts that as a rule and this check does not depend on it.
 
-  That walk is exported as `CheckEnumMembersHoldNoNull(schema PropertySchema) error`,
+  The walk of every schema that ships for an `Enum` member holding a null is exported as `CheckEnumMembersHoldNoNull(schema PropertySchema) error`,
   so a handler outside this package can assert the same of its own schemas. It
   reports every `Enum` member — on the schema and on every schema nested under its
   `Properties` (in sorted key order) or `Items` — that holds a null anywhere, named
@@ -502,8 +489,7 @@ What the contract does *not* reach is any path that skips both validators
 entirely — a component a lowering rule constructs directly in Go, or a
 built-in parser's own field read (`pkg/oam/builtin/components`) — which is why
 those parsers keep their explicit-null guards regardless. Aligning that
-parser-level layer with this contract is a separate, lower-level concern,
-tracked as `go-kure/launcher#394`, and is not closed by this.
+parser-level layer with this contract is a separate, lower-level concern, and is not closed by this.
 
 Two surfaces used to be named here as sitting outside the contract; both are now
 fixed, so the note is historical rather than a live caveat:
@@ -513,10 +499,9 @@ fixed, so the note is historical rather than a live caveat:
   not a call-through to `validatePropertyValue` — but it now agrees with the
   contract's own behaviour: a present null reads as absence, matching the handler
   surface, and the type switch has a `default` arm. See [Capability rendering:
-  types and nulls](policy-and-capability.md#capability-rendering-types-and-nulls) for the current, authoritative description. Fixed as
-  `go-kure/launcher#431`.
+  types and nulls](policy-and-capability.md#capability-rendering-types-and-nulls) for the current, authoritative description.
 - **The networkpolicy peer parser** used to read a *typed* nil `namespaceSelector`
-  differently from an untyped one. Fixed as `go-kure/launcher#430` — both parsers
+  differently from an untyped one. Fixed — both parsers
   now route their presence check through `oam.IsNullValue`'s reflect-based
   classification, so a typed nil reads as omission on every path that reaches it,
   the same as an untyped one.
@@ -548,15 +533,14 @@ component, trait and policy lowering rule, that implements `ContractDescriber` �
 same six registries `HandlerSchemas()` covers (componentHandlers, traitHandlers,
 policyHandlers and the three lowering-rule registries), for the identical reason: a
 type reachable only through a lowering rule must still publish its metadata.
-**Breaking library change** (go-kure/launcher#789): `HandlerContractSet` gained the
+**Breaking library change**: `HandlerContractSet` gained the
 `Policies` field, so an unkeyed composite literal of it no longer compiles.
 
 A lowering rule that implements `ContractDescriber` also has its `Version` folded
 into the lowering-rule identity recorded on `Origin.Rule` (see [Lowering](transform-and-lowering.md#lowering)), e.g.
 `"trait/expose@v1alpha1"`.
 
-Every built-in handler and lowering rule implements `ContractDescriber`
-(go-kure/launcher#789). The scheme: `Family` is the type name the built-in is
+Every built-in handler and lowering rule implements `ContractDescriber`. The scheme: `Family` is the type name the built-in is
 registered under (`webservice`, `expose`, `placement`), `Version` is
 `builtin.ContractVersion` (`v1alpha1`, one value for all of them), and
 `RequiredCapabilityKeys` is the type name for a built-in whose
@@ -565,7 +549,7 @@ empty otherwise. No built-in is deprecated. A built-in rule's identity therefore
 reads `component/webservice@v1alpha1`, on `Origin.Rule`, on `LoweringStep.Rule` and
 in a `LoweringError` chain, where it read `component/webservice`.
 
-`Prerequisites` (go-kure/launcher#1027) lists what must be in place in the target
+`Prerequisites` lists what must be in place in the target
 cluster, or beside it, for the output to work once applied: an operator, a CRD, an
 object the output names and does not create. Each `ContractPrerequisite{ Name,
 Version, When }` is text for a reader: `Version` is `""` when any version will do,
@@ -586,7 +570,7 @@ is not on it: the plugin's install recommends it for its own TLS, which can be
 supplied otherwise. **Breaking library change**: `ContractMetadata` gained the
 field, so an unkeyed composite literal of it no longer compiles.
 
-`Readiness` (go-kure/launcher#1134) lists, for each kind of resource an entity of
+`Readiness` lists, for each kind of resource an entity of
 this contract provides, how a reader judges that the resource is ready. Each
 `ContractReadiness{ Group, Kind, NamePattern, Condition, Field, Value, Generic }` names
 the kind (`Group` is `""` for the core group), says in text how the resource is named
@@ -603,7 +587,7 @@ consumer and enforced by nothing: the engine never reads the field, no registrat
 or build step checks it, and nothing checks that the named condition or field exists
 on the real resource. A nil list means none is declared, not that the resources are
 ready at once or need no waiting; an empty non-nil list reads the same as nil. Only
-`postgresql` declares readiness (go-kure/launcher#1144), one entry for each kind it
+`postgresql` declares readiness, one entry for each kind it
 lowers into; `pkg/oam/builtin/components/README.md` lists them. **Breaking library change**: `ContractMetadata`
 gained the field, so an unkeyed composite literal of it no longer compiles.
 
@@ -635,7 +619,7 @@ registry incomplete: lowering rule component/webservice@v1alpha1 lowers into com
 called any number of times, and accepts on the next call a type registered after a
 refusal. A rule that does not implement `LoweringTargetDeclarer` is not checked, and
 the engine does not check that a rule emits only what it declares.
-**Breaking library change** (go-kure/launcher#789): a consumer that registers a
+**Breaking library change**: a consumer that registers a
 built-in lowering rule without the types it lowers into now fails at `Seal` or at
 the first transform, where it failed only for a document that reached the missing
 type. The built-in rules declare:
