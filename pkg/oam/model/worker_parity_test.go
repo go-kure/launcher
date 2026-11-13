@@ -284,6 +284,12 @@ func TestWorkerParity_Default(t *testing.T) {
 	requireParity(t, map[string]any{"image": "nginx:1.27", "replicas": 3}, spreadPaths)
 }
 
+// An image alone leaves every other input to its default: one replica, and no topology constraints
+// because a single replica has none to spread. The model's own defaults must give what Go gives.
+func TestWorkerParity_Defaults(t *testing.T) {
+	requireParity(t, map[string]any{"image": "nginx:1.27"}, plainPaths)
+}
+
 // The full property set goes through both parts of the model, the one with the trait and the one
 // without, because each part has its own expressions for every property.
 func TestWorkerParity_Properties(t *testing.T) {
