@@ -245,3 +245,141 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - The type has no number or boolean that is omitted when zero, which
     `TestHorizontalPodAutoscalerSpec_NoOmittedZeros` holds it to. [the test is in
     `horizontalpodautoscaler_internal_test.go`]
+
+## statefulset
+
+- **History:**
+  - go-kure/launcher#690 (`statefulset` emits no Service, and `serviceName` no longer defaults
+    to the component name).
+  - go-kure/launcher#790 (`affinity`, `tolerations` and `topologySpreadConstraints` as the raw
+    `corev1` shapes).
+  - go-kure/launcher#546 (an authored `serviceName` that is not a DNS-1123 label refused at
+    conversion).
+  - go-kure/launcher#959, go-kure/launcher#1230 (the name of the governing Service is
+    checked).
+
+## daemonset
+
+- **History:**
+  - go-kure/launcher#340 (`updateStrategy`, `minReadySeconds` and `revisionHistoryLimit` as
+    the DaemonSetSpec-level properties).
+  - go-kure/launcher#412 (`tolerationSeconds` and the toleration cross-field rules came with
+    the shared parser).
+  - go-kure/launcher#690 (`daemonset` emits no Service, and `port > 0` no longer adds one).
+  - go-kure/launcher#545, go-kure/launcher#546 (the ClusterIP Service that `port > 0` added
+    held the component name to the Service-name rule and an ingress `portName` to `http`).
+  - go-kure/launcher#790 (the raw `affinity` and `topologySpreadConstraints` and `sidecars` on
+    `daemonset`, and the refusal of an authored `template` by the parser).
+  - go-kure/launcher#383 (`maxUnavailable` and `maxSurge` published as the `Types: [integer,
+    string]` union).
+  - go-kure/launcher#408 (authored-document validation did not check property shape, so a
+    `selector:` on a `daemonset` was ignored).
+  - `6aed090` (`feat(format): enforce policy and support securityContext on init/sidecar
+    containers`) is the in-repo precedent for shipping this class of tightening under an
+    unchanged version string. ["this class of tightening" is the rejection of an undeclared
+    `selector` that the paragraph before it describes on the reference page]
+
+## cronjob
+
+- **History:**
+  - go-kure/launcher#790 (the raw `affinity`, `tolerations` and `topologySpreadConstraints` on
+    `cronjob`).
+  - go-kure/launcher#787 (the CronJob name held to 52 characters).
+
+## job
+
+- **Implementation:** The workflow annotates the Job once it is generated, so the annotation
+  is not lost when `createJob` clears the generated Job's annotations wholesale
+  (`job.Annotations = nil` — a no-op since go-kure/launcher#361, because kure's `Create<Kind>`
+  constructors now return TypeMeta and identity only; the assignment is kept so the field
+  stays empty whatever a future constructor does). ["the annotation" is the Flux force
+  annotation that the `force-replace` trait asks for, in the sentence before it on the
+  reference page]
+- **History:**
+  - go-kure/launcher#344 (the `job` component, in `job.go`).
+  - go-kure/launcher#790 (the raw `affinity`, `tolerations` and `topologySpreadConstraints` on
+    `job`; `cronjob` refuses `selector`, `manualSelector` and `template` as `job` does;
+    `scheduling` refused on `job` and `cronjob`; an empty `onPodConditions: []` beside
+    `onExitCodes` counted in the published `exclusive` group; the reason for the refusal of
+    `selector` and `manualSelector` also given in a document).
+  - go-kure/launcher#702 (`job` emits a `Job` and nothing else).
+  - go-kure/launcher#787 (the Job name held to 63 characters, and to the rule for the hostname
+    of the last index).
+  - go-kure/launcher#345 (`podFailurePolicy` published by `job` and `cronjob` through the
+    shared parser).
+  - go-kure/launcher#410 (`onPodConditions[].status` defaults to `True`).
+  - go-kure/launcher#408 (`kurel build` calls `ValidateAuthoredProperties`, so an authored key
+    and its shape are checked on the document itself).
+  - go-kure/launcher#394 (every optional-field helper in `common.go` routes its presence check
+    through `authoredValue`).
+  - go-kure/launcher#406 (a Job's pod template is immutable, and updating in place stays a
+    failure by default).
+  - go-kure/launcher#782 (the `force-replace` trait sets the `ForceReplace` delivery intent on
+    the component's application).
+  - So does `completionMode`, which the shared `parseJobSpec` read with a bare lookup until
+    go-kure/launcher#570, on `cronjob` as well. ["So" means that the property reads an
+    explicit `null` as an omission, in the sentence before it on the reference page]
+
+## passthrough
+
+- **Implementation:**
+  - Its config exposes `ComponentName() string` (the `oam.ComponentNamed` interface) so
+    consumers can attribute the emitted resource to its owning OAM component. ["Its" is the
+    `passthrough` component's]
+  - The validated object is deep-copied when the config is built, not aliased, so a caller
+    that keeps mutating the map it passed in cannot change what was validated. The copy
+    detaches nested maps and slices whatever their concrete type — the authored path only ever
+    yields `map[string]any` and `[]any`, but a Go-assembled body can hold a
+    `map[string]string` or a `[]string`, and those used to alias straight through. A null
+    survives as a null rather than becoming an empty `{}`/`[]`. Two things it deliberately
+    does not do: it does not chase pointers (a `*Location` inside a `time.Time`,
+    `resource.Quantity`'s `*inf.Dec`), and it does not reject the shapes it cannot fully
+    detach. ["it" is the copy, and "the object" is the `object` property]
+  - The copy is **not** what makes the rejection binding, and this section used to claim it
+    was. `Object` is an exported field, so a caller holding the config can assign a fresh map
+    over it, and a struct literal or a JSON decode never runs `ToApplicationConfig` at all —
+    three routes reaching `Generate` with a body the arms never saw. `Generate` therefore
+    re-runs, on the map it is about to emit, every check that must hold of an emitted body: a
+    non-empty `apiVersion` and `kind`, and both list arms. Checking the bytes being emitted,
+    rather than trusting a check that ran on some earlier map, is what closes those routes.
+    ["The copy" is the deep copy in the paragraph before it, and "the rejection" is the
+    refusal of a list, which the reference page describes, and of an empty object, which
+    the paragraph after this one describes]
+  - Those checks live in one function precisely so the two call sites cannot disagree about
+    what a valid body is. While they were split — the constructor checking identity,
+    `Generate` checking only list shape — a `PassthroughConfig` holding an *empty* map passed
+    both: non-nil, so it cleared the no-object guard, and carrying no `items`, so it cleared
+    both arms, leaving `Generate` to emit a document consisting of nothing but the metadata it
+    had just stamped on. ["Those checks" are the checks that `Generate` runs again, in the
+    paragraph before it]
+- **History:**
+  - go-kure/launcher#1162 (the emitted object holds JSON values only, so it can be
+    deep-copied).
+  - go-kure/launcher#1167, go-kure/launcher#1170 (a number is emitted with its own digits, as
+    an `int64`, a `float64` or a `json.Number`).
+  - go-kure/launcher#1166 (a value with no JSON form is refused, naming the field).
+  - go-kure/launcher#1176 (a number beyond `float64` range in the object is read as text and
+    not refused).
+  - go-kure/launcher#794 (the scope of the object, the environment policy check, the refusal
+    of a core Secret under a policy that forbids explicit secrets, and the refusal of a
+    workload or claim with an undeclared field).
+  - go-kure/launcher#790 (an image volume held to the registry allowlist and to the tag rule).
+  - go-kure/kure#1009 (the parse error kure gives an object whose decoder panicked, a
+    `CiliumNetworkPolicy` whose `icmps` field leaves its `type` out).
+  - go-kure/kure#1007 (a MetalLB `BGPPeer` at `metallb.io/v1beta2` is a registered kind).
+  - go-kure/kure#1014 (an object of a registered kind that states `Kind` or `apiversion`
+    beside the exact key is refused).
+
+## crd, manifests
+
+- **History:**
+  - go-kure/launcher#794 (the environment policy check on every object a `manifests` or `crd`
+    source yields, the refusal of a core Secret under a policy that forbids explicit secrets,
+    and the refusal of a workload or claim with an undeclared field).
+  - go-kure/launcher#790 (an image volume from a registry outside the allowed list refused,
+    and the table under `helmtemplate` that lists what built before and is refused now).
+  - go-kure/kure#1012 (malformed JSON that the decoder cannot read past is a build error,
+    where the build did not return on it).
+  - go-kure/kure#1007 (a MetalLB `BGPPeer` at `metallb.io/v1beta2` is a registered kind).
+  - go-kure/kure#1014 (a list of a kind the scheme does not register, that states `items`, is
+    replaced by its items).
