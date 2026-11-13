@@ -249,6 +249,7 @@ func TestHostileBuild_CostSumAtALoweredLimit(t *testing.T) {
 // reach 10,000,000 units. This pins what happens, which is not an enforcement of the cost limit at
 // 10,000,000: the build fails with ErrLimit, and names the deadline or the cost, whichever came first.
 func TestHostileBuild_CostAtTheRealLimitIsStoppedByTheDeadline(t *testing.T) {
+	t.Cleanup(model.SetBuildClock(time.Now)) // the real deadline is the thing this row pins
 	tr, _ := registered(t, modelHeader+fiveThousandSteps)
 	buildOK(t, tr, orders(), "one 5,000-step expression")
 	var comps []oam.Component
@@ -309,10 +310,12 @@ func TestHostileBuild_DeadlineInterruptsALongComprehension(t *testing.T) {
 // Row 5b: a build of eight real comprehensions of 50,000 steps fails at the 1 s deadline with
 // ErrLimit on the real clock, where unaided it runs for longer. A 100-step comprehension builds.
 // The row shows the deadline only on a host that is slow enough, which is the case under -race and
-// coverage, and it is skipped with its measured time where the build passes inside twice the
-// deadline. It asserts no upper bound on the time: that is a property of the host, and the
-// interrupt is pinned by row 5a. The cel-go version is logged beside the result.
+// coverage, and it is skipped with its measured time where the build passes. It asserts no upper
+// bound on the time: that is a property of the host, and the interrupt is pinned by row 5a. The
+// cel-go version is logged beside the result. It keeps the real clock, as row 3b does, because
+// the rest of the package runs on a frozen one (TestMain).
 func TestHostileBuild_DeadlineStopsARealLongBuild(t *testing.T) {
+	t.Cleanup(model.SetBuildClock(time.Now)) // a frozen clock would never reach the deadline this row shows
 	if info, ok := debug.ReadBuildInfo(); ok {
 		for _, dep := range info.Deps {
 			if dep.Path == "cel.dev/cel-go" {
