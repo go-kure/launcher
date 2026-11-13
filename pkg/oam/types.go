@@ -186,6 +186,12 @@ func (t Trait) Origin() (Origin, bool) {
 	return *t.origin, true
 }
 
+// Synthesized reports whether a lowering rule wrote the trait, as opposed to the author of the
+// document. A rule's own trait, and a trait that a rule nested in a component it emitted, count
+// as written by the rule. A trait of the authored document does not, and neither does an authored
+// trait that a rule forwarded unchanged.
+func (t Trait) Synthesized() bool { return t.synthesized }
+
 // ApplicationPolicy defines an application-level policy entry. The transform
 // dispatches it by Type to the PolicyHandler registered for that type (see
 // Transformer.RegisterPolicy), which records its effect on the PolicyResult; a

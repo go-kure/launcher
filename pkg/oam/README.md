@@ -136,6 +136,7 @@ properties of an emitted component, trait or policy are checked against that sch
 when the rule wrote the type as an identity. The same holds for the platform-reserved check
 and for the members of a same-name sibling group. A rule reads the Naming hook of the run
 through `LoweringContext.NamingHook`.
+`Trait.Synthesized` reports whether a lowering rule wrote a trait, as opposed to the author of the document, so a rule can tell the two apart.
 `Transformer.CheckComponentTypes` is a dry run of `DeclareComponentTypes`. It checks that
 the declaration is valid and declares nothing. It does not need the handler or rule to be
 registered yet, and `DeclareComponentTypes` does. A component model registers its rule
