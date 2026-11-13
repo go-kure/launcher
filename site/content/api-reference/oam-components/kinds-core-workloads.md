@@ -206,8 +206,7 @@ properties"](common-config.md#deployment-level-properties-deployment-webservice-
 `DeploymentSpec`-level surface, the last of which it now shares with
 `webservice` and `worker` rather than owning. What distinguishes it is mostly
 what it leaves out: no `topologySpread`, no four-key `affinity` shorthand, no
-`port`; it emits no Service, and declares one endpoint per main-container
-`ports` entry (see ["Main container ports"](common-config.md#main-container-ports)). It is not `worker` minus
+`port`. It is not `worker` minus
 a few things either — it reads nulls as omissions across its whole surface,
 which the role kinds do not. The one thing it
 adds is the raw `corev1` scheduling surface the role kinds lack: `affinity`,
@@ -215,6 +214,15 @@ adds is the raw `corev1` scheduling surface the role kinds lack: `affinity`,
 (see ["Raw scheduling properties"](common-config.md#raw-scheduling-properties)). That is the
 same distinction in the other direction — the role kinds carry the opinion,
 this kind carries the API.
+
+### Outputs
+
+It emits no Service, and declares one endpoint per main-container
+`ports` entry (see ["Main container ports"](common-config.md#main-container-ports)).
+
+### Validation
+
+None stated in this section.
 
 ### Example
 
@@ -711,6 +719,8 @@ the two.
 
 ## pod
 
+### Properties
+
 **pod** is the kind-named projection of a v1 Pod, on
 the same recipe: one schema key per json field of `corev1.PodSpec`, the
 property map decoded strictly into that type, two spellings of one field
@@ -897,6 +907,8 @@ two.
 
 ## replicaset
 
+### Properties
+
 **replicaset** is the kind-named projection of an
 apps/v1 ReplicaSet, on the same recipe: one schema key per json field of
 `appsv1.ReplicaSetSpec` (`replicas`, `minReadySeconds`, `selector`,
@@ -991,6 +1003,8 @@ two.
 
 ## replicationcontroller
 
+### Properties
+
 **replicationcontroller** is the kind-named
 projection of a v1 ReplicationController, on the `replicaset` kind's recipe:
 one schema key per json field of `corev1.ReplicationControllerSpec`
@@ -1017,6 +1031,14 @@ differences:
 - No selector is refused against the `app` label: a map selector asks only
   for labels to be present, which a further label on the pods cannot break.
 
+### Outputs
+
+As for `replicaset`.
+
+### Validation
+
+As for `replicaset`, with the refusals among the differences listed under Properties.
+
 ### Example
 
 The component in `pkg/cmd/kurel/testdata/replicationcontroller-component/app.yaml`, built
@@ -1024,6 +1046,8 @@ against the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The f
 compares the two.
 
 ## podtemplate
+
+### Properties
 
 **podtemplate** is the kind-named projection of a v1
 PodTemplate. The object has no spec: beside its identity it holds one field,
@@ -1313,6 +1337,8 @@ compares the two.
 
 ## statefulset
 
+### Properties
+
 **statefulset** — `serviceName` and `volumeClaimTemplates`
 (`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
 `size`, `storageClass`, `accessModes`, plus the rest of
@@ -1320,12 +1346,10 @@ compares the two.
 StatefulSetSpec-level and
 claim-template field sets are classified in ["StatefulSet-level and
 claim-template properties"](common-config.md#statefulset-level-and-claim-template-properties). `ports` declares the main container's
-ports (see ["Main container ports"](common-config.md#main-container-ports)). It emits no Service. For scheduling it takes `affinity`, `tolerations`
+ports (see ["Main container ports"](common-config.md#main-container-ports)). For scheduling it takes `affinity`, `tolerations`
 and `topologySpreadConstraints` as the raw `corev1` shapes
 (see ["Raw scheduling properties"](common-config.md#raw-scheduling-properties)); the four-key
 `affinity` shorthand is not published on this kind.
-
-### Properties
 
 **`serviceName` names the governing Service, which the component does
 not emit.** Author it as a headless `service` component (`clusterIP:
@@ -1343,6 +1367,10 @@ Service, so `spec.kubernetesVersion` does not change it. The governing Service i
 component name and the component emitted that headless Service itself;
 ["Main container ports"](common-config.md#main-container-ports) has the migration, including why an existing
 StatefulSet must be recreated.
+
+### Outputs
+
+It emits no Service.
 
 ### Validation
 
@@ -1463,6 +1491,8 @@ two.
 
 ## cronjob
 
+### Properties
+
 **cronjob** — `schedule` accepts a standard 5-field cron expression (e.g.
 `0 2 * * *`; not 6-field — a seconds field is rejected), one of the fixed
 `@`-descriptors (`@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
@@ -1496,12 +1526,19 @@ described in ["Common config"](common-config.md#common-config)): `backoffLimit`,
 `podReplacementPolicy`, `managedBy`, `successPolicy`, `podFailurePolicy`.
 `suspend` on a cronjob
 is the **CronJobSpec** field, not the JobSpec one — see the `suspend` note in
-["Common config"](common-config.md#common-config). Every CronJobSpec-level and JobSpec-level field above except
+["Common config"](common-config.md#common-config).
+
+### Outputs
+
+Every CronJobSpec-level and JobSpec-level field above except
 `restartPolicy` and the two history limits is presence-gated: omitting it
 never adds a key to the generated output, even where the corresponding
 Kubernetes default (e.g. `concurrencyPolicy: Allow`) would otherwise appear
 to have been authored. Those three are always written, taking `OnFailure`, 3
 and 1 when omitted.
+
+### Validation
+
 The CronJob's name is at most 52 characters, the longest the API server
 creates one under (`ValidateCronJobCreate`: the controller names each Job
 after the CronJob plus an 11-character suffix, and that Job's name is held to
@@ -1769,9 +1806,9 @@ beside it, gives the `expected.yaml` beside it. The fixture test compares the tw
 
 ## passthrough
 
-**passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
-
 ### Properties
+
+**passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
 
 **`object` must be a single object; a list is rejected.** `Generate` emits the map
 verbatim as one resource and fills in metadata it finds missing: `metadata.name`
@@ -1795,6 +1832,8 @@ joined by dots, and a key that is empty or holds a dot, a bracket or a quote
 written as a quoted index, `labels[""]` or `labels["a.b"]`, so that two different
 fields never share a path. A number
 beyond `float64` range in that object is read as text and is not refused.
+
+### Outputs
 
 **Scope**. Whether the object is namespaced is
 resolved with the precedence `manifests` gives a `scopeOverrides` entry,
@@ -1981,6 +2020,8 @@ No example yet.
 
 ## crd, manifests
 
+### Properties
+
 **crd / manifests** — `inline` xor `url`; `manifests` adds `scopeOverrides`
 (`apiVersion`/`kind`/`scope`), the author's explicit statement of a kind's scope.
 An override outranks kure's own non-API-governed scope-table entry — a kind
@@ -2008,6 +2049,9 @@ no other scope source still fails closed when it carries no
 any scope source) that authors `metadata.namespace` is rejected rather than
 emitted as-is — the Kubernetes API forbids a namespace on a cluster-scoped
 object, so letting it through would only defer the failure to apply time.
+
+### Outputs
+
 Both components decode a document of a registered kind into its Go type, with the
 decode `helmtemplate` gives a rendered chart, and treat a field that type does not
 declare — one a newer Kubernetes version added, say — as it does (`helmtemplate`'s
