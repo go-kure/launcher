@@ -67,19 +67,39 @@ jobs:
     name: detect-changes
     runs-on: autops-kube-kure
     timeout-minutes: 2
-    # On merge_group there is no PR base to diff against; dorny/paths-filter would
-    # error. Skip the filter and force both outputs to 'true' so every gating job
-    # runs in the queue — otherwise required checks never report and merges hang.
+    # The filter runs on merge_group too, so a group that changes no Go-relevant path
+    # skips the gated jobs (go-kure/launcher#1538). A job skipped by its own `if:`
+    # reports success, so the required checks still report; the `build` gate reads
+    # this job's result, so a failed filter cannot pass as a skip.
     outputs:
-      go: ${{ github.event_name == 'merge_group' && 'true' || steps.filter.outputs.go }}
-      docs: ${{ github.event_name == 'merge_group' && 'true' || steps.filter.outputs.docs }}
+      go: ${{ steps.filter.outputs.go }}
+      docs: ${{ steps.filter.outputs.docs }}
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        # A merge group needs the history to find its merge base; other events keep depth 1.
+        fetch-depth: ${{ github.event_name == 'merge_group' && '0' || '1' }}
+    # The diff base is the merge base of the group head with the branch it merges into, so
+    # it covers every entry of the group that is not on the branch yet. The event's own
+    # base_sha is the group's parent commit, which can be the entry ahead and not the branch.
+    - name: Find the merge base of the merge group
+      id: base
+      if: github.event_name == 'merge_group'
+      env:
+        BASE_REF: ${{ github.event.merge_group.base_ref }}
+      run: |
+        # A missing base branch or an empty answer fails the job: an empty diff would skip
+        # every gated job, and build fails on a failed detect-changes.
+        set -euo pipefail
+        sha=$(git merge-base "origin/${BASE_REF#refs/heads/}" HEAD)
+        test -n "$sha"
+        echo "sha=$sha" >> "$GITHUB_OUTPUT"
     - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
-      if: github.event_name != 'merge_group'
       id: filter
       with:
+        # Empty on every event but merge_group, where it replaces the event's base_sha.
+        base: ${{ steps.base.outputs.sha }}
         filters: |
           go:
             - '**.go'
@@ -153,7 +173,7 @@ jobs:
     runs-on: autops-kube-kure
     timeout-minutes: 20
     needs: [changes]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.go == 'true'
+    if: (github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.changes.outputs.go == 'true'
 
     # GOMEMLIMIT keeps Go's GC under the runner pod memory limit so golangci-lint doesn't get
     # OOMKilled on the in-cluster ARC runner. Pairs with the 6Gi ARC runner limit: uncapped,
@@ -548,7 +568,7 @@ jobs:
     runs-on: autops-kube-kure
     timeout-minutes: 35
     needs: [changes]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.go == 'true'
+    if: (github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.changes.outputs.go == 'true'
 
     steps:
     - name: Checkout code
@@ -674,7 +694,7 @@ jobs:
     runs-on: autops-kube-kure
     timeout-minutes: 15
     needs: [changes]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.go == 'true'
+    if: (github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.changes.outputs.go == 'true'
 
     # GOMEMLIMIT keeps Go's GC under the runner pod memory limit so govulncheck doesn't get
     # OOMKilled on the in-cluster ARC runner. Pairs with the 6Gi ARC runner limit.
@@ -902,7 +922,7 @@ jobs:
     runs-on: autops-kube-kure
     timeout-minutes: 10
     needs: [changes, test]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.go == 'true'
+    if: (github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.changes.outputs.go == 'true'
 
     steps:
     - name: Checkout code
@@ -991,7 +1011,7 @@ jobs:
     runs-on: autops-kube-kure
     timeout-minutes: 15
     needs: [changes]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.docs == 'true'
+    if: (github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.changes.outputs.docs == 'true'
 
     steps:
     - name: Checkout code
@@ -1355,7 +1375,7 @@ jobs:
     runs-on: autops-kube-kure
     timeout-minutes: 10
     needs: [changes]
-    if: github.event_name != 'pull_request' || needs.changes.outputs.go == 'true'
+    if: (github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.changes.outputs.go == 'true'
     # Non-blocking for the first cycle: a flux-schema catalog gap (a real
     # Kubernetes/Flux field the tool's built-in schema doesn't yet know about)
     # should surface as visible, not immediately block every PR. Not added to
@@ -1414,11 +1434,17 @@ jobs:
     name: build
     runs-on: autops-kube-kure
     timeout-minutes: 1
-    needs: [validate, test, build-binaries, docs-build, coverage-check, doc-gate, action-pins, security, pin-impact, issue-refs]
+    needs: [changes, validate, test, build-binaries, docs-build, coverage-check, doc-gate, action-pins, security, pin-impact, issue-refs]
     if: always()
     steps:
     - name: Check build results
       run: |
+        # detect-changes decides which gated jobs skip. If it failed, they all skip and
+        # every result below reads as skipped, so it must be success and never skipped.
+        if [ "${{ needs.changes.result }}" != "success" ]; then
+          echo "detect-changes did not succeed (result: ${{ needs.changes.result }})"
+          exit 1
+        fi
         vl="${{ needs.validate.result }}"
         tt="${{ needs.test.result }}"
         bb="${{ needs.build-binaries.result }}"
