@@ -3,6 +3,9 @@ title: "Common config"
 weight: 1
 ---
 
+The issues behind the entries on this page, and the sentences that told how an entry used to behave, are on the
+[contributor page](../../contributing/oam-reference/common-config.md).
+
 ## Common config
 
 `env`, `command`, `args`, `initContainers`, `sidecars` and `affinity` each read
@@ -10,15 +13,9 @@ their property with a bare comma-ok type assertion and, when that failed,
 returned the zero value with no error. So a property authored with the **wrong
 container type** — a mapping where the schema wants a list, a list or scalar
 where it wants an object — built cleanly and emitted nothing for the property,
-and nothing in the output said it had been seen. Closed in go-kure/launcher#423
-by routing those six through presence-reporting helpers (`common.go`), which
+and nothing in the output said it had been seen. Closed by routing those six through presence-reporting helpers (`common.go`), which
 report presence separately from value, so each of the six now rejects a
-mistyped value by name instead of discarding it. (go-kure/launcher#444 later
-folded the dedicated `optionalObject`/`optionalObjectList`/`optionalStringList`
-wrappers those six originally used into the base `parseObjectField`/
-`parseStringField`/etc. helpers themselves — callers now use the base helpers
-directly, and the null-as-absence behavior applies uniformly rather than only
-through the wrappers.) Those helpers were already how several other properties on the
+mistyped value by name instead of discarding it. Those helpers were already how several other properties on the
 same components are read — `updateStrategy` and `ordinals` on `statefulset`
 (`statefulset_spec.go`), `successPolicy` and `podFailurePolicy` on `job` and
 `cronjob` (`common.go`) — so the six behaved differently from properties an
@@ -42,7 +39,7 @@ before (with the variable dropped) and is now rejected, and so is a top-level
 entry with `name: ""` — schema validation checks only that `name` is present
 and a string, so the empty name reached `parseEnv` and was skipped the same
 way. A top-level entry with `name` absent or null was already refused by
-schema validation and still is (go-kure/launcher#447).
+schema validation and still is.
 
 A required string field given a value of the wrong type is reported as a type
 error, not as missing. Fourteen required-string reads used to discard a failed
@@ -65,7 +62,7 @@ own. What is accepted is unchanged: every one of these values was rejected
 before and still is, and only the message changed. For a document run through
 schema validation, the schema already refuses a non-string at every one of
 these positions, so the parser message is what a caller sees that hands
-properties to a handler without schema validation (go-kure/launcher#453).
+properties to a handler without schema validation.
 
 **The main container is named after the component, so a workload component
 name must be a DNS-1123 *label*, not merely a subdomain.** A component name is
@@ -84,14 +81,12 @@ builder they share. The name is refused rather than rewritten to `batch-worker`:
 a derived name would silently rename the container and could collide with an
 init container or sidecar of that name. Component types that name no container
 after the component (`helmrelease`, `manifests`, `passthrough`, …) keep accepting
-a dotted or longer name, so the component-name rule itself is unchanged. `job` refused
-the name from its introduction; the other six gained the check in
-go-kure/launcher#407. Nothing that previously produced an applyable manifest is
+a dotted or longer name, so the component-name rule itself is unchanged. Nothing that previously produced an applyable manifest is
 affected — such a document never did. A kind that also names a Service after
 the component (`webservice`) refuses a dotted or longer name earlier, at
 conversion, by the stricter Service-name rule described under each kind in
-["Per-type highlights"](https://www.gokure.dev/launcher/api-reference/oam-components/#per-type-highlights) (go-kure/launcher#546). `daemonset` and `statefulset`
-named one too until they stopped emitting a Service (go-kure/launcher#690).
+["Per-type highlights"](https://www.gokure.dev/launcher/api-reference/oam-components/#per-type-highlights). `daemonset` and `statefulset`
+named one too until they stopped emitting a Service.
 `cronjob` and `job` refuse a name past the length of their own object earlier
 too, at conversion: a CronJob's name is at most 52 characters, a Job's at most
 63 (see each kind in ["Per-type highlights"](https://www.gokure.dev/launcher/api-reference/oam-components/#per-type-highlights)).
@@ -196,11 +191,7 @@ an unprefixed import instead of the intended one),
 wrong type (`resources: "big"`, `requests: 3`) is **rejected by name**
 (`resources: must be an object, got string`) by each of the eight kinds that accept `resources` (webservice, worker,
 deployment, statefulset, daemonset, cronjob, job, postgresql) and by each
-`initContainers`/`sidecars` entry, and a null reads as absence. Until
-go-kure/launcher#405 all three were read with a bare comma-ok assertion, so a
-handler called directly — without the schema validation an authored document
-gets first, which already refused these shapes — dropped the value and emitted
-a container with no requests or limits. `requests`/`limits`
+`initContainers`/`sidecars` entry, and a null reads as absence. `requests`/`limits`
 accept `cpu`/`memory` (defaults 100m/128Mi — subject to the environment
 policy's `MaxCPU()`/`MaxMemory()` maxima the same as an authored value; see
 ["Policy defaults & enforcement ordering"](policy-and-endpoints.md#policy-defaults--enforcement-ordering)) plus any other well-formed
@@ -212,7 +203,7 @@ YAML/JSON number (`1`, `0.5`) — both are valid `resource.Quantity` input
 (`Quantity.UnmarshalJSON` parses a bare numeric literal the same way it parses
 a quoted one), and both forms are also accepted by the published property
 schema itself: `cpu`/`memory` are declared as the `Types: [string, number]`
-union (go-kure/launcher#383), so a value of any other type is rejected by
+union, so a value of any other type is rejected by
 property validation before the parser sees it — parsed as `resource.Quantity` and
 round-tripped unmodified. A resource name is validated the same way real
 admission validates `corev1.Container.Resources` (mirrors
@@ -257,7 +248,7 @@ default/max hook exists for names other than cpu/memory
 today; the container-level `claims` list (Dynamic Resource Allocation) is
 deliberately not covered — it only *references* pod-level claims by name, and
 the pod-level `resourceClaims` property that declares them is now accepted
-(see Pod-level properties below, go-kure/launcher#342), so what remains
+(see Pod-level properties below), so what remains
 missing is the container-side reference list alone, tracked with the rest of
 DRA support, see `parseResources`'s doc comment. An authored `claims` is
 refused by name, whatever its value, on the main container and on an
@@ -267,13 +258,7 @@ check; see
 [Upstream fields a hand-parsed kind does not read](upstream-fields-not-read.md#upstream-fields-a-hand-parsed-kind-does-not-read)),
 `command`/`args` (must be an
 array, and each element must be a string — both are rejected outright rather
-than silently discarded. Until go-kure/launcher#423 they were mishandled twice
-over: a mistyped `command: /bin/sh -c true` fell through their comma-ok guard
-and the container built with no command at all, and `command: [ls, 3]` emitted
-`["ls"]` and said nothing about the `3`. Closing it changed their signature to
-return an error, which is why the fix touches all 9 call sites — the seven
-workload kinds' own main containers, plus `initContainers` and `sidecars` in
-`common.go`), `probes`
+than silently discarded), `probes`
 (rejected outright if authored with a non-object value, e.g. `probes: true`,
 and likewise for each of its own `readiness`/`liveness`/`startup` keys, e.g.
 `probes: {liveness: true}` — same two-level presence-then-type-check shape as
@@ -315,7 +300,7 @@ and `webservice` never (its `port` always defaults to 80, so the main
 container is always named `"http"`) — a numeric port is unaffected either way,
 since it dials the kubelet directly rather than resolving a declared name.
 (Those rules predate `ports`, and the `port` they describe on `daemonset` and
-`statefulset` is gone (go-kure/launcher#690). Today `deployment`, `daemonset`,
+`statefulset` is gone. Today `deployment`, `daemonset`,
 `statefulset`, `job` and `cronjob` resolve a named port against the main
 container's `ports` list, refusing a name that list does not declare and any
 named port when it is empty; see "Main container ports".)
@@ -404,7 +389,7 @@ above)/`sleep` (`seconds` is required and must be a non-negative integer, and
 at most the pod's `terminationGracePeriodSeconds`, 30 when it sets none —
 checked on the assembled pod for the main container, every `sidecars` entry
 and every native sidecar, so a longer sleep is refused at `Generate` instead
-of by the API server (go-kure/launcher#1228); a
+of by the API server; a
 key other than `seconds` in the object, e.g. a misspelled `sconds`, is
 rejected outright too, instead of silently ignored) — at
 most one of these three may be authored, and a present-but-non-object value
@@ -521,7 +506,7 @@ value, e.g. `procMount: false`, is rejected rather than silently omitted
 string is still treated as absent, not an error, which is `parseStringField`'s
 own convention), `windowsOptions` (`gmsaCredentialSpecName`,
 `gmsaCredentialSpec`, `runAsUserName` and `hostProcess`, the closed key set the
-pod-level `podSecurityContext.windowsOptions` reads, go-kure/launcher#790; an
+pod-level `podSecurityContext.windowsOptions` reads; an
 `os.name: linux` pod refuses it, as it refuses the pod-level one. Its strings
 are held to upstream's `validateWindowsSecurityContextOptions`, at both
 levels: `gmsaCredentialSpecName` is a DNS-1123 subdomain, `gmsaCredentialSpec`
@@ -529,7 +514,7 @@ is at most 64 KiB, and `runAsUserName` is `USER` or `DOMAIN\USER` with no
 control character, a domain under 256 characters in the NetBIOS or the DNS
 format, and a user of at most 104 characters that is not only periods and
 spaces and holds none of `"/\:;|=,+*?<>@[]`; an empty string is absent, by the
-same convention (**breaking**, go-kure/launcher#790: a pod-level value that
+same convention (**breaking**: a pod-level value that
 breaks these rules built before and is refused now). Upstream's `validateWindowsHostProcessPod` rules are held on the assembled pod, so they
 are reported at `Generate`: a container's `hostProcess` must equal the pod's
 when both are set; a pod with one HostProcess container — its own
@@ -582,8 +567,7 @@ size limit at all. A zero `sizeLimit` is accepted on purpose: upstream
 the limit only when it is greater than zero, so `"0"` means "no volume-level
 limit" rather than an inadmissible quantity; `pvc.size` is required (the
 same missing-vs-wrong-type rejection as `name`/`mountPath` above) and, once
-present, must be a **positive** quantity. **Behavior-changing**
-(go-kure/launcher#384): `size: "0"` used to build and is now rejected, because
+present, must be a **positive** quantity. **Behavior-changing**: `size: "0"` used to build and is now rejected, because
 `ValidatePersistentVolumeClaimSpec` runs `ValidatePositiveQuantityValue` over
 `requests[storage]`, which refuses zero as well as negative values — the
 claim built before was never admissible. `BuildPVC` applies the same rule,
@@ -599,8 +583,7 @@ explicitly authored `storageClass: ""` is preserved as an
 opt-out request (Kubernetes distinguishes a nil `StorageClassName` — use the
 cluster default — from a pointer to `""` — request no class) rather than
 being collapsed to "absent" and silently provisioned through the default
-class; `volumeClaimTemplates.storageClass` keeps the same distinction since
-go-kure/launcher#761 (see "StatefulSet-level and claim-template properties"
+class; `volumeClaimTemplates.storageClass` keeps the same distinction (see "StatefulSet-level and claim-template properties"
 below).
 `pvc.accessModes`, if authored, must be a non-empty array of non-empty
 strings, each one of the four real `corev1.PersistentVolumeAccessMode`
@@ -630,15 +613,14 @@ before concatenating, since plain `<appName>-<localName>` string
 concatenation is not collision-free when either half itself contains a
 hyphen — component `a-b` with volume `data`, and component `a` with volume
 `b-data`, would otherwise both qualify to `a-b-data`; a qualified name over
-253 characters is shortened by the one rule (`oam.ShortenNameWithSuffix`,
-go-kure/launcher#793), the escaped component cut and the escaped volume kept
+253 characters is shortened by the one rule (`oam.ShortenNameWithSuffix`), the escaped component cut and the escaped volume kept
 whole, after its characters are checked on the unshortened name, so only the
 length is forgiven; `hostPath.path`
 is likewise required and must be absolute — a raw host filesystem path has
 no defined root to resolve a relative value against, and real admission
 (`validateHostPathVolumeSource`) rejects a relative one the same way;
 `configMap.configMapName` and `secret.secretName` are each required the same
-way as `pvc.size`; since go-kure/launcher#1177 an entry can also author its
+way as `pvc.size`; an entry can also author its
 source as the upstream object under a key named like its `type`: `projected`,
 `downwardAPI`, `csi`, `ephemeral` and `image` take only that nested form
 (`- {name: tok, type: projected, mountPath: /var/run/tok, projected: {sources: [...]}}`),
@@ -681,20 +663,19 @@ present — same presence-then-type-check shape as `volumes.readOnly` above;
 `volumeMounts[].mountPath` must also be unique within that entry's own
 mount list, the identical rule as `volumes`' duplicate-mountPath check
 above, since each `initContainers`/`sidecars` entry is its own container;
-a `volumeMounts` item is a **closed key set** (go-kure/launcher#1172): it accepts
+a `volumeMounts` item is a **closed key set**: it accepts
 `name`, `mountPath`, `readOnly`, `subPath`, `subPathExpr`, `mountPropagation`
 and `recursiveReadOnly`. Any other key is refused by name. Earlier versions
 dropped `subPathExpr`, `mountPropagation` and `recursiveReadOnly` without an
-error. Since go-kure/launcher#1193 one helper reads them and applies the rules
+error. One helper reads them and applies the rules
 that upstream `ValidateVolumeMounts` applies to one mount: `mountPropagation`
 is `None`, `HostToContainer` or `Bidirectional`, and `Bidirectional` needs
 `securityContext.privileged: true` on the same entry; `recursiveReadOnly` is
 `Disabled`, `IfPossible` or `Enabled`, and the last two need `readOnly: true`
 and a `mountPropagation` of `None` or none at all; `subPath` and `subPathExpr`
 are mutually exclusive, and each is a relative path with no `..` element
-(`subPath` since go-kure/launcher#1199; an empty `subPath` is absent, as
-upstream skips it). The main container reads the same keys since
-go-kure/launcher#1198: a `volumes` entry of any type and a
+(an empty `subPath` is absent, as
+upstream skips it). The main container reads the same keys: a `volumes` entry of any type and a
 `volumeClaimTemplates` entry with a `mountPath` take `subPath`, `subPathExpr`, `mountPropagation` and `recursiveReadOnly`, and a
 claim template takes `readOnly` too. A `volumes` entry keeps its own per-type
 `readOnly`, and `recursiveReadOnly` is checked against it. A `devicePath` entry
@@ -706,8 +687,7 @@ with `devicePath` refuses it, because it never had that key. `Bidirectional` nee
 kind checks it. A `subPath` that is absolute or holds a `..` element is refused
 in all four places (`initContainers`, `sidecars`, `volumes` and
 `volumeClaimTemplates`) by the helper that refuses it for `subPathExpr`, with
-the same wording, where the API server would refuse it later
-(go-kure/launcher#1199);
+the same wording, where the API server would refuse it later;
 the `pod`, `podtemplate`, `replicaset` and `replicationcontroller` kinds, the
 workload objects of a `manifests` source (`inline` or `url`), the object of a
 `passthrough` component and the workloads a `helmtemplate` chart renders read
@@ -717,7 +697,7 @@ and `subPathExpr` are exclusive and relative with no `..` element,
 `mountPropagation` and `recursiveReadOnly` are one of their modes with the
 same preconditions, and `Bidirectional` needs `securityContext.privileged:
 true` on that container, with the error naming the container and the mount's
-position (go-kure/launcher#1212, go-kure/launcher#1223). A `passthrough`
+position. A `passthrough`
 object is refused when the component is read; a chart is refused when it is
 rendered, and the refusal quotes the mount value even with `secretValues` set,
 as the environment policy check quotes what it refuses. A workload in an API
@@ -727,7 +707,7 @@ mount path and the volume a mount names are not checked by this rule;
 each entry also accepts its own `securityContext`, the identical field set
 and validation as the main container's own `securityContext` described
 below — see that prose for the field list rather than restating it here;
-each entry is a **closed key set** (go-kure/launcher#321): an
+each entry is a **closed key set**: an
 `initContainers` entry accepts `name`, `image`, `command`, `args`, `env`,
 `envFrom`, `resources`, `volumeMounts`, `volumeDevices` (see "Raw block
 volumes" below), `securityContext`, `workingDir` and the seven keys of
@@ -752,13 +732,10 @@ and any of them is accepted. A sidecar's `ports` list is read exactly as
 `deployment` reads its main container's (see "Main container ports" below):
 closed entries, an IANA service `name`, a `protocol` from `TCP`/`UDP`/`SCTP`
 (an empty string refused), and no repeated name or `containerPort`/`protocol`
-pair within the sidecar (go-kure/launcher#660; before that the name and
-protocol were taken unchecked, and a non-list `ports`, an unknown key, a
-non-string name or a non-string protocol, which then read as `TCP`, was
-dropped). A port name must also be unique across the
+pair within the sidecar. A port name must also be unique across the
 pod: the main container's ports (webservice's `http`, the `ports` list of
 statefulset, daemonset, deployment, job and cronjob), every
-sidecar's and every native sidecar's (go-kure/launcher#1225). The
+sidecar's and every native sidecar's. The
 API server checks names only per container and merely warns across them,
 while a Service selecting the name reaches only the first container that
 declares it, so a repeated name is refused, naming both containers. A regular
@@ -766,12 +743,11 @@ init container declares no ports, so it takes no part. A container name must be
 unique across the pod too: the main container (named after the component),
 every `initContainers` entry and every `sidecars` entry, and within each list.
 The API server refuses a pod whose containers share a name, so the document is
-refused when it is read, naming both entries (go-kure/launcher#1226). A name in
+refused when it is read, naming both entries. A name in
 either list must also be a DNS-1123 label, as the main container's name is:
 lowercase alphanumerics and `-`, starting and ending with an alphanumeric, no
-dots, at most 63 characters. Any other is refused, naming the entry
-(go-kure/launcher#1254), and again when the pod is generated, so a config built
-by hand or changed after it was read cannot emit one (go-kure/launcher#1278). `job` and
+dots, at most 63 characters. Any other is refused, naming the entry, and again when the pod is generated, so a config built
+by hand or changed after it was read cannot emit one. `job` and
 `cronjob` take no `sidecars`, so their pod holds the main container and the
 `initContainers` entries. Closing the entry is behavior-changing under an
 unchanged `launcher.gokure.dev/v1alpha1`: a document that authored any other
@@ -788,7 +764,7 @@ supplies the two defaults above, and omitting the block entirely leaves
 `topologyKey`/`podAntiAffinityType` empty rather than defaulted (the defaults
 are applied by `parseAffinity` only once the block is present, unlike the
 `postgresql` component, which also tracks whether the block was authored at all).
-The key set is closed (go-kure/launcher#790). The shorthand is not a
+The key set is closed. The shorthand is not a
 Kubernetes `Affinity`: `nodeAffinity`, `podAffinity` and `podAntiAffinity`
 under it are each refused with what the shorthand has for the field and where
 an affinity in the Kubernetes shape is authored (`deployment`, `statefulset`,
@@ -806,16 +782,14 @@ been written, and a non-string `nodeSelector` **value** is refused by key
 alphabetically first offending key when several are wrong. A null sub-field
 is absence and takes the default an omitted one takes, and a null
 `nodeSelector` value is absence too: `nodeSelector: {zone: a, rack: null}`
-builds the selector `{zone: a}` (before go-kure/launcher#466 it was refused
-as `must be a string, got <nil>`). `podAntiAffinityType`
+builds the selector `{zone: a}`. `podAntiAffinityType`
 must be `preferred` or `required`: a well-formed string outside the enum is
 refused by name, and an explicitly authored `podAntiAffinityType: ""` is an
 error rather than a fall back to `preferred` — the empty string reaches the
 enum check instead of being read as an absent key. An authored
 `topologyKey: ""`, by contrast, *does* fall back to the default. This is the
-same contract the `postgresql` component's own affinity block has
-(go-kure/launcher#448). **Behavior-changing** under
-`launcher.gokure.dev/v1alpha1` (go-kure/launcher#452) for one authored shape:
+same contract the `postgresql` component's own affinity block has. **Behavior-changing** under
+`launcher.gokure.dev/v1alpha1` for one authored shape:
 the published schema leaves `nodeSelector` values untyped, so a document
 with a non-string value (`rack: 3`) passed schema validation, built with that
 entry dropped, and is now rejected. A wrongly typed sub-field itself was
@@ -842,6 +816,10 @@ message, as the last step of its parse, as a pre-GA format change too
 before, into a Deployment the API server rejects. A webservice's name is
 checked against the Service-name rule first, so an over-long name is refused
 there, before this check.
+
+## Sections not yet in the new layout
+
+The sections below are not yet in the new layout.
 
 ### Container fields
 
