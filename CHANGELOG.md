@@ -1,6 +1,193 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.7] - 2026-11-13
+
+### Added
+
+- Type the platform-reservation refusal as a PropertyError
+- Bind parts.<part>.<key> from the outputs of an earlier part
+- Lower a component of a model type into its parts
+- Tell the consumer what a model emits through TransformContext.EmitHook
+- Limit one build of model renders to 500 parts, 10,000,000 cost units, 1 MiB of properties and 1 s
+
+### Build
+
+- Read links to the published site and require registered parts in the anchor check
+- Update dependency goreleaser to v2.20.2
+- Update module github.com/prometheus/common to v0.74.0
+- Update module github.com/go-kure/kure to v0.2.0-rc.2
+- Move the CEL import to cel.dev/cel-go v0.32.0
+- Move cel.dev/cel-go to v0.33 and report the cost of the charge nodes
+- Drop the cel-go v0.32.0 checksums from go.sum
+
+### CI
+
+- Raise the test job timeout from 25 to 35 minutes
+- Skip the Go jobs in the merge queue for a group that changes no Go path
+- Run docs-build on every merge_group
+- Raise the lint job timeout to 35 minutes
+
+### Document Format
+
+- Webservice and worker accept tolerations and topologySpreadConstraints in app.yaml
+- Evaluate CEL templates of a model with a cost limit and a program cache
+- Refuse a non-string map key at every single-hole site and state the dyn rule in text
+- Repair the defects of the first evaluation review
+- Count each byte of a bytes result in the result budget
+- Bound the comparison of nested lists and maps
+- Keep the call cost, make the budget stop final and bound flatten
+- Charge a join and a long string by size, not by node
+- Charge every call and value read by size in the model evaluation
+- Check replace before it builds, charge an index key, count join by what it writes
+- Resolve an index key once and charge it, for every kind of key attribute
+- Compare every key of a map, and cap a string nested in an input
+- Spend a step for a missing map key, and cap a map key in the export
+- Charge the keys of a sort before it compares them
+- Check every element of a join before it writes
+- Charge the bytes of a map key when the result is copied
+- Use pkg/errors for the sort type error and Create for the cache constructor
+- Let a ClusterProfile override feature gates with spec.featureGates
+- Refuse a format result before it is built
+- Spend the shared budget in the format walk
+- State spec.featureGates in the gate descriptions and the admission version note
+- Judge the traits a component rule emits against the capability lists
+- Refuse a trait authored on a model component
+- Refuse every trait on a model component
+
+### Documentation
+
+- Add the seven OAM parts as site pages
+- Link the prose that points across parts and carry the upstream sentence
+- Link the remaining pointers that name a section of another part
+- Reduce the OAM page to an overview that links the parts
+- Cite the names-and-overrides page for the Naming hook section
+- Link the overview pointer to the Lowering section
+- Keep the opening lines of five sections in the overview
+- State that the cost limit stops lists.range at the cap
+- State the join limit and the known limit of the class
+- State the failed format as a known limit of go-kure/launcher#1461
+- Correct the known limits and add the dynamic sort
+- Known limit, dyn receiver reverse
+- Known limits list may be incomplete
+- Known limits, ambiguity is sort and reverse only
+- Split out the common config and PostgreSQL pages (1 of 4)
+- Split out the core workloads and Helm pages (2 of 4)
+- Split out the monitoring and networking pages (3 of 4)
+- Split out the Flux, secrets, MetalLB and remaining pages (4 of 4)
+- List the part pages in the docs map and point the citations at them
+- Link the pointers that leave their page
+- Carry the role placement text into the core workloads page
+- Give the MetalLB kinds page fixed sections and a contributor page
+- Quote moved test sentences verbatim, keep the BGPPeer version rationale in the reference
+- Keep moved sentences whole, fix two bracketed notes
+- State spec.featureGates beside every release default in the reference
+- Move the null contract's history, tests and helpers to the contributor notes
+- Split the secrets and flux kinds pages into reference sections
+- Keep moved implementation sentences whole on the contributor pages
+- Move the policy defaults page's history, helpers and tests to the contributor notes
+- Move the conventions page's history, helpers and tests to the contributor notes
+- Describe the resolve after each lowering round and the declaration dry run
+- Move the implementation, history and tests of parsing-and-types to a contributor page
+- Move the hand-parsed kinds' history and tests to the contributor notes
+- Move the implementation and history of policy-and-capability to a contributor page
+- Split the networking kinds page into reference sections
+- Keep the emission and naming rule of the Cilium and Gateway groups in the reference
+- Keep the empty specs rule of the Cilium clusterwide policy in the reference
+- Fix dangling referents in the MetalLB, Flux and secrets pages
+- Move the implementation, history and tests of labels-and-ownership to a contributor page
+- Move the names-and-overrides page's history and test to a contributor page
+- Keep the condition on the GeneratedName history bullet
+- Move the schemas-and-contract page's history and tests to a contributor page
+- Name ValueGates and ValueGatedPaths in the contributor page's history
+- Restructure the first kinds of the core workloads page into sections
+- Restructure the alertmanager kind of the monitoring page (part 1 of 3)
+- Give the Helm kinds page its first sections and a contributor page
+- Move the implementation, history and tests of transform-and-lowering to a contributor page
+- Keep the Is/As distinction and the shared-name condition in two History bullets
+- Keep the authored-output and generated-claim conditions in two History bullets
+- Restore four more conditions in History bullets
+- Make every History bullet carry its old sentence's conditions
+- Restore two lists and the error type in three History bullets
+- Explain the builtin exemption in the package README
+- Move the issue references of common-config, part 1, to a contributor page
+- Point the Cilium policy refusal pointer at Validation
+- Move the implementation and history of pipeline to a contributor page
+- Name the change the pipeline page's root-node note refers to
+- Move access-and-admission history to a contributor page
+- Name the checks a presence sentence refers to
+- Restructure the thanosruler kind of the monitoring page (part 2 of 3)
+- Restructure the pod to hpa kinds of the core workloads page (part 2 of 3)
+- Move the issue references of common-config, part 2, to the contributor page
+- Restructure the CRD kinds and postgresql of the postgres page (part 1 of 2)
+- Restructure the prometheus and monitor kinds of the monitoring page (part 3 of 3)
+- Give the Helm template and OCI kinds their sections
+- Restructure the statefulset to crd kinds of the core workloads page (part 3 of 3)
+- Restructure the cnpg-cluster, pooler, database and objectstore kinds of the postgres page (part 2 of 2)
+- State what the merge queue runs now that the Go jobs are path-filtered
+- Correct the docs-build and binary-artifact descriptions
+- Give every section of the access-and-admission kinds page its four headings
+- Move the issue references of common-config, part 3, to the contributor page
+- Give every section of the core workloads kinds page its four headings
+
+### Fixed
+
+- Stop the anchor check when the read of the parts fails
+- Cap the text of a mixed template at maxValueSize
+- Refuse a string search before its loops run
+- Refuse a regex match before it runs
+- Name a kind part as the build does, keep dispatch keys, and refuse before registering
+- Keep the hook for a direct Expand, and give the declaration test its own causes
+- Check an emitted identity against its schema, and give each model its own compile cache
+- Read the registered name of an emitted identity in the reservation check and the sibling group
+- Let an explicit null input take the default
+- Size the input map from the declared inputs only
+- Point the hpa Validation text above to the passage it names
+- Restore the time qualifier of five sentences on the core workloads page
+
+### Testing
+
+- Record the platform-reservation refusal's message and location cases
+- Pin template walker, evaluation, cost limit and text forms for CEL expressions
+- Move format out of the size rows and pin the lists.range cap by its text
+- Pin the six defects of the first evaluation review
+- Pin the result budget defects of the second evaluation review
+- Pin the bound on comparing shared nested values
+- Pin the three defects of the third evaluation review
+- Pin the two defects of the fourth evaluation review
+- Pin the members of the class that cel-go charges by node
+- Pin the four findings of the review of the charge by size
+- Pin the two findings of the second review of the charge by size
+- Pin the two defects of the full-range review of the charge by size
+- Pin the findings of the fifth review of the charge by size
+- Declare the inputs that the missing-key row reads
+- Pin a failed sort that compares long keys for no charge
+- Pin a failed join and sweep the fail-after-work shape over every budgeted node
+- Make the replace and sortBy sweep rows fail without their guard
+- Pin a result copy that hashes long map keys for one unit each
+- A mixed text template is bounded by maxValueSize
+- A string search is refused before its loops run
+- A regex match is refused before it runs
+- Read the moved text from the part pages
+- Bound the scalar list write-back by a size ratio, not by seconds
+- Pin spec.featureGates overrides of the gate lifecycle table
+- Pin the refusal of the go-kure/launcher#1451 expression at N=1000
+- Format is refused before it builds its result
+- Hold the declaration dry run to the declaration, and check no type is left declared
+- Pin the template text in the program cache key
+- Compare 4n with n against 8.0 in the scalar-list linearity test
+- Pin the builtin worker against the same component as a model
+- Check the ServiceAccount reference before the part suffix is mapped
+- Require every mapped part name to be the object's own
+- Pin the affinity refusal with a shorthand that Go accepts
+- Run the full property set through both parts of the model
+- Require the exact places where a part name is mapped
+- Run an image-only component through the model's defaults
+- Cut the package time of the heavy charge tests under race
+- Keep only the map test change
+- Pin the limits of one expression against hostile models
+- Pin the limits of one build against hostile model builds
+
 ## [0.2.0-beta.6] - 2026-11-12
 
 ### Added
