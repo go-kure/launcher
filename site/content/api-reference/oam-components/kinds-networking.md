@@ -322,7 +322,8 @@ the empty string, and the API refuses both (a priority is 1 to 100, a kind is
 `CiliumEnvoyConfig` or `CiliumClusterwideEnvoyConfig`), so a listener that
 leaves one out cannot be emitted. The CRD names a `nodeSelector`'s match
 expressions as well, and so does the list: an incomplete one is refused by this
-rule, a complete one by the rule above. A rule label without its `key` is
+rule, a complete one by the rule below, in Validation (a rule with a
+`nodeSelector`). A rule label without its `key` is
 refused earlier, by Cilium's own decoding, as an `icmps` field without its
 `type` is (below). An authored empty value in a required field is not checked:
 it is the API server's to refuse.
