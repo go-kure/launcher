@@ -1011,7 +1011,10 @@ jobs:
     runs-on: autops-kube-kure
     timeout-minutes: 15
     needs: [changes]
-    if: (github.event_name != 'pull_request' && github.event_name != 'merge_group') || needs.changes.outputs.docs == 'true'
+    # Runs on every merge_group, whatever the filter says: the full-tree forbidden-terms
+    # guard below is the queue's backstop for a pull request whose own run skipped this
+    # job because it changed no docs path.
+    if: github.event_name != 'pull_request' || needs.changes.outputs.docs == 'true'
 
     steps:
     - name: Checkout code

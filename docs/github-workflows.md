@@ -108,8 +108,9 @@ temporary branch — the merged result — before the PR is allowed to land. `de
 same path filter as on a PR, diffed from the merge base of the group head with the branch the
 group merges into, so it covers every entry of the group that is not on the branch yet. A group
 that changes no Go-relevant path skips `lint`, `test`, `Security`, `Build kurel` and
-`validate-manifests` (and `docs-build` when it changes no docs path). A job skipped by its own
-`if:` reports success, so the required checks still report. `build` fails when `detect-changes`
+`validate-manifests`. `docs-build` still runs on every `merge_group`, because its full-tree
+forbidden-terms guard is the queue's backstop for a pull request that skipped it. A job skipped
+by its own `if:` reports success, so the required checks still report. `build` fails when `detect-changes`
 fails, so a failed filter cannot pass as a skip. `pin-impact` is skipped
 on a push; on a merge-queue run it checks only that the merged tree's `go-kure/.github` pins agree
 (see the pin-impact gate below).
@@ -149,7 +150,7 @@ self-test (`make test-verify-merge`).
 
 | Job | Check Name | Timeout | Dependencies | Purpose |
 |-----|------------|---------|--------------|---------|
-| `changes` | `detect-changes` | 2 min | — | Path filter: `go:` and `docs:` outputs control downstream jobs on a PR and in the merge queue (push, schedule and manual runs run them all) |
+| `changes` | `detect-changes` | 2 min | — | Path filter: the `go:` output controls downstream jobs on a PR and in the merge queue, the `docs:` output controls `docs-build` on a PR only (push, schedule and manual runs run them all) |
 | `validate` | `lint` | 20 min | changes | go-version, fmt, tidy, vet, lint, tool-version parity (golangci-lint pin across Makefile/ci.yml/docs), govulncheck doc parity, verify-merge self-test, `check-pin-impact.sh` cases (`make test-pin-impact`); diff-based lint on PRs |
 | `test` | `test` | 35 min | changes | Unit tests with race detection and coverage (`-race`); CGO enabled |
 | `security` | `Security` | 15 min | changes | govulncheck (symbol scan, allowlist-gated), outdated deps check, sensitive file scan |
