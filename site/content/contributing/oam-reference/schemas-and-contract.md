@@ -19,8 +19,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - go-kure/launcher#1245 (`gatedPaths` is read by the gate check alone, so property validation and what a document is accepted as do not change).
   - go-kure/launcher#1320 (a struct that does not encode as JSON is refused, with its path, where a gate below it is off at the target).
   - go-kure/launcher#1450 (a pointer type that is its own element type, `type P *P`, is read through its JSON form like any other).
-  - go-kure/launcher#1230 (like `Gate`, the restart-policy gate key is rejected at the two flat call sites, so it is absent from their allow-sets).
-  - go-kure/launcher#1330 (like `Gate`, the key is rejected at the two flat call sites).
+  - go-kure/launcher#1230 (`ValueGates`, which maps an `Enum` value to the gate that value alone needs; like `Gate`, its key is rejected at the two flat call sites, so it is absent from their allow-sets).
+  - go-kure/launcher#1330 (`ValueGatedPaths`, a path that gates values; like `Gate`, its key is rejected at the two flat call sites).
   - go-kure/launcher#408 (`ValidateAuthoredProperties` is the authored-path counterpart of the emitted-path check, and closes it).
   - go-kure/launcher#1001 (`postgresql` points a key its `backup` replaced, `objectStore` and `objectStoreObjectName`, to where it went; and names the reason `backup.objectStore` refuses `serverName`, `azureCredentials` and `googleCredentials`).
   - The hint was asked of a terminal component
