@@ -97,6 +97,12 @@ var parityParts = []string{"sa", "spread", "plain"}
 type objMap = map[[2]string]map[string]any
 
 // parityRender transforms one component of the given type and properties.
+func sortedCopy(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
+}
+
 func parityRender(t *testing.T, tr *oam.Transformer, typ string, props map[string]any) objMap {
 	t.Helper()
 	return objectsOK(t, tr, []oam.Component{{Name: parityComponent, Type: typ, Properties: props}}, nil)
@@ -105,7 +111,7 @@ func parityRender(t *testing.T, tr *oam.Transformer, typ string, props map[strin
 // parityCompare compares the Go objects with the model objects. It returns the problems it found and
 // the number of leaves where the model carried `<component>-<part>` and the Go output carried
 // `<component>`.
-func parityCompare(goObjs, modelObjs objMap) (problems []string, mapped int) {
+func parityCompare(goObjs, modelObjs objMap) (problems []string, mapped []string) {
 	if len(goObjs) != len(modelObjs) {
 		problems = append(problems, fmt.Sprintf("Go has %d objects, the model has %d", len(goObjs), len(modelObjs)))
 	}
@@ -147,6 +153,7 @@ func parityCompare(goObjs, modelObjs objMap) (problems []string, mapped int) {
 			problems = append(problems, fmt.Sprintf("%s %s: the model object has no Go counterpart", mk[0], mk[1]))
 		}
 	}
+	sort.Strings(mapped)
 	return problems, mapped
 }
 
@@ -164,7 +171,7 @@ func lookupString(o map[string]any, path ...string) (string, bool) {
 	return s, ok
 }
 
-func parityWalk(path, own string, g, m any, problems *[]string, mapped *int) {
+func parityWalk(path, own string, g, m any, problems, mapped *[]string) {
 	switch gv := g.(type) {
 	case map[string]any:
 		mv, ok := m.(map[string]any)
@@ -216,7 +223,7 @@ func parityWalk(path, own string, g, m any, problems *[]string, mapped *int) {
 					*problems = append(*problems, fmt.Sprintf("%s: the model has %q, which is not the part of the object (%q)", path, ms, own))
 					return
 				}
-				*mapped++
+				*mapped = append(*mapped, path)
 				return
 			}
 		}
@@ -229,7 +236,7 @@ func parityWalk(path, own string, g, m any, problems *[]string, mapped *int) {
 }
 
 // parityCase renders the Go worker and the model for one property set and compares them.
-func parityCase(t *testing.T, props map[string]any) (problems []string, mapped int) {
+func parityCase(t *testing.T, props map[string]any) (problems, mapped []string) {
 	t.Helper()
 	goObjs := parityRender(t, expandTransformer(t), "worker", props)
 	tr, _ := registered(t, workerModel)
@@ -237,21 +244,44 @@ func parityCase(t *testing.T, props map[string]any) (problems []string, mapped i
 	return parityCompare(goObjs, modelObjs)
 }
 
-func requireParity(t *testing.T, props map[string]any, wantMapped int) {
+// requireParity requires no difference and requires the mapped places to be exactly wantMapped: a
+// count would let one place that lost its part name hide behind another that gained one.
+func requireParity(t *testing.T, props map[string]any, wantMapped []string) {
 	t.Helper()
 	problems, mapped := parityCase(t, props)
 	if len(problems) > 0 {
 		t.Fatalf("the model differs from the Go worker:\n  %s", strings.Join(problems, "\n  "))
 	}
-	if mapped != wantMapped {
-		t.Errorf("the model carries %s-<part> at %d places where Go carries %s, want %d", parityComponent, mapped, parityComponent, wantMapped)
+	want := append([]string(nil), wantMapped...)
+	sort.Strings(want)
+	if !reflect.DeepEqual(mapped, want) {
+		t.Errorf("the model carries %s-<part> at\n  %s\nwhere Go carries %s, want\n  %s", parityComponent, strings.Join(mapped, "\n  "), parityComponent, strings.Join(want, "\n  "))
 	}
 }
+
+// The places where the model carries `<component>-<part>` and Go carries `<component>`, per object,
+// for a Deployment with the topology constraints and for one without. Written out, never counted.
+var (
+	plainPaths = []string{
+		"Deployment orders.metadata.labels.app",
+		"Deployment orders.metadata.name",
+		"Deployment orders.spec.selector.matchLabels.app",
+		"Deployment orders.spec.template.metadata.labels.app",
+		"Deployment orders.spec.template.spec.containers[0].name",
+		"Deployment orders.spec.template.spec.serviceAccountName",
+		"ServiceAccount orders.metadata.labels.app",
+		"ServiceAccount orders.metadata.name",
+	}
+	spreadPaths = append([]string{
+		"Deployment orders.spec.template.spec.topologySpreadConstraints[0].labelSelector.matchLabels.app",
+		"Deployment orders.spec.template.spec.topologySpreadConstraints[1].labelSelector.matchLabels.app",
+	}, plainPaths...)
+)
 
 // The default worker: a Deployment with the two topology constraints and a ServiceAccount, both
 // named after the component by Go.
 func TestWorkerParity_Default(t *testing.T) {
-	requireParity(t, map[string]any{"image": "nginx:1.27", "replicas": 3}, 10)
+	requireParity(t, map[string]any{"image": "nginx:1.27", "replicas": 3}, spreadPaths)
 }
 
 // The full property set goes through both parts of the model, the one with the trait and the one
@@ -260,8 +290,8 @@ func TestWorkerParity_Properties(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		spread bool
-		mapped int
-	}{{"spread", true, 10}, {"plain", false, 8}} {
+		mapped []string
+	}{{"spread", true, spreadPaths}, {"plain", false, plainPaths}} {
 		t.Run(tc.name, func(t *testing.T) {
 			requireParity(t, map[string]any{
 				"image":          "nginx:1.27",
@@ -280,7 +310,7 @@ func TestWorkerParity_Properties(t *testing.T) {
 }
 
 func TestWorkerParity_TopologySpreadOff(t *testing.T) {
-	requireParity(t, map[string]any{"image": "nginx:1.27", "replicas": 3, "topologySpread": false}, 8)
+	requireParity(t, map[string]any{"image": "nginx:1.27", "replicas": 3, "topologySpread": false}, plainPaths)
 }
 
 // The affinity shorthand (`enablePodAntiAffinity`) is valid on the Go worker and undeclared in the
@@ -322,8 +352,8 @@ func TestWorkerParity_ComparerControls(t *testing.T) {
 	tr, _ := registered(t, workerModel)
 	props := map[string]any{"image": "nginx:1.27", "replicas": 3}
 	good := parityRender(t, tr, "worker-cfg.acme.example@v1", props)
-	if problems, mapped := parityCompare(goObjs, good); len(problems) > 0 || mapped == 0 {
-		t.Fatalf("control: the unchanged model must pass with mapped leaves: %v (mapped %d)", problems, mapped)
+	if problems, mapped := parityCompare(goObjs, good); len(problems) > 0 || len(mapped) == 0 {
+		t.Fatalf("control: the unchanged model must pass with mapped leaves: %v (mapped %d)", problems, len(mapped))
 	}
 	bad := parityRender(t, tr, "worker-cfg.acme.example@v1", map[string]any{"image": "nginx:1.28", "replicas": 3})
 	if problems, _ := parityCompare(goObjs, bad); len(problems) == 0 {
@@ -342,6 +372,23 @@ func TestWorkerParity_ComparerControls(t *testing.T) {
 	sel["app"] = parityComponent + "-sa"
 	if problems, _ := parityCompare(goObjs, wrongSel); len(problems) == 0 {
 		t.Error("the comparer passed a selector that names another part")
+	}
+	// Two changes that cancel in the count must still fail: a selector that lost its part name
+	// (it now equals Go's) beside an environment value that gained one. The count stays the same,
+	// and the places do not.
+	envProps := map[string]any{"image": "nginx:1.27", "replicas": 3,
+		"env": []any{map[string]any{"name": "MODE", "value": parityComponent}}}
+	envGo := parityRender(t, expandTransformer(t), "worker", envProps)
+	swapped := parityRender(t, tr, "worker-cfg.acme.example@v1", envProps)
+	sw := swapped[[2]string{"Deployment", parityComponent + "-spread"}]["spec"].(map[string]any)
+	sw["selector"].(map[string]any)["matchLabels"].(map[string]any)["app"] = parityComponent
+	sw["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)["env"].([]any)[0].(map[string]any)["value"] = parityComponent + "-spread"
+	problems, mapped := parityCompare(envGo, swapped)
+	if len(problems) > 0 || len(mapped) != len(spreadPaths) {
+		t.Fatalf("test bug: the swap must leave the comparer silent with the same count: %v, %d places", problems, len(mapped))
+	}
+	if reflect.DeepEqual(mapped, sortedCopy(spreadPaths)) {
+		t.Error("the places of a swapped selector and environment value equal the expected places")
 	}
 	// A mapped leaf in a place where Go carries something else must fail.
 	skewed := parityRender(t, tr, "worker-cfg.acme.example@v1", props)
