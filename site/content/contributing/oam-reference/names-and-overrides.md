@@ -23,8 +23,9 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - go-kure/kure#1032 (kure's Flux integration refuses a name set on a layout under any
     placement but `FluxIntegratedPerLayout`).
   - go-kure/launcher#787 (the over-long name of a hook-group child fails the transform).
-  - go-kure/launcher#1044 (`GeneratedName` gives the name an object takes, so the
-    `postgresql` rule matches another component's inline recovery store by it).
+  - go-kure/launcher#1044 (`GeneratedName` is the name an object takes where no name is
+    authored and no hook is set, so the `postgresql` rule matches another component's
+    inline recovery store by it).
   - go-kure/launcher#1001 (`postgresql`'s archive check, a rule that reads another
     component of `Document` and needs the name that component's object takes).
   - go-kure/launcher#787 (a hook that names two synthesized policies apart and not their
