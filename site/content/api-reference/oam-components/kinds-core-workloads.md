@@ -1267,7 +1267,7 @@ its default policies for `behavior.scaleUp` and `behavior.scaleDown`. So
 an authored `[]` cannot be carried (`metrics: [] cannot be carried by the
 Kubernetes API types (the field is omitted when empty, so the API server
 would apply its default …)`). See *Authored empty lists the API defaults*
-below.
+above.
 
 **Required** are the two top-level fields the API server refuses an
 autoscaler without: `scaleTargetRef` (`scaleTargetRef: required …`) and
