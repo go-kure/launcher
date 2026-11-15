@@ -651,7 +651,8 @@ The policy defaults (tier 2) reach every container of those seven kinds: the
 main container and each `initContainers` and `sidecars` entry, reported at the
 entry's own path (go-kure/launcher#1581). A default limit that lands under the
 container's request fails the build, naming the container and the remedy
-(go-kure/launcher#1582).
+(go-kure/launcher#1582); under an authored request it carries the
+`resource-default-limit` refusal class (go-kure/launcher#1580).
 
 Full text: [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
 

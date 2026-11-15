@@ -534,6 +534,11 @@ func applyContainerPolicyDefaults(p oam.Policy, log *oam.PolicyDefaultLog, main 
 // fill the limit of (a config built through the Go API, which the parser never
 // saw) gets the parser's own check and words. prefix names the container, as in
 // applyContainerPolicyDefaults.
+//
+// Only the author's request is a policy refusal with a class,
+// oam.RefusalResourceDefaultLimit (go-kure/launcher#1580): an authored value
+// caused it. The other two have no authored value to point at and stay plain
+// errors.
 func (r *ResourceRequirements) checkDefaultedLimits(log *oam.PolicyDefaultLog, prefix string) error {
 	filled := map[string]bool{}
 	for _, d := range log.PolicyDefaults() {
@@ -549,8 +554,9 @@ func (r *ResourceRequirements) checkDefaultedLimits(log *oam.PolicyDefaultLog, p
 			return errors.Errorf("%sresources: the policy's default %s request %q is above its default limit %q: the policy must set a default request at or under its default limit",
 				prefix, name, request.String(), limit.String())
 		}
-		return errors.Errorf("%sresources.requests.%s %q is above the policy's default limit %q: write %sresources.limits.%s, or lower the request",
-			prefix, name, request.String(), limit.String(), prefix, name)
+		return oam.NewPolicyRefusal(oam.RefusalResourceDefaultLimit, fmt.Sprintf(
+			"%sresources.requests.%s %q is above the policy's default limit %q: write %sresources.limits.%s, or lower the request",
+			prefix, name, request.String(), limit.String(), prefix, name))
 	}
 	if err := validateResourceRequestLimit(r.Requests, r.Limits); err != nil {
 		return errors.Errorf("%s%w", prefix, err)

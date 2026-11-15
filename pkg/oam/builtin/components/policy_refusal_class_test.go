@@ -189,9 +189,17 @@ func TestPolicyRefusalClass_ObjectPaths(t *testing.T) {
 	}
 	// The trait-capability class is the transform's own (pkg/oam): no object
 	// raises it. The object-kind class is the ownership wrapper's (pkg/oam),
-	// held on every path in object_kind_policy_test.go.
+	// held on every path in object_kind_policy_test.go. The
+	// resource-default-limit class needs a limit the policy defaulted, and the
+	// policy defaults nothing on an object written elsewhere: it is held on the
+	// component's own policy step in TestPolicyRefusalClass_ComponentApplyPolicy.
+	notAnObjectClass := map[oam.RefusalClass]bool{
+		oam.RefusalTraitCapability:      true,
+		oam.RefusalObjectKind:           true,
+		oam.RefusalResourceDefaultLimit: true,
+	}
 	for _, class := range oam.RefusalClasses() {
-		if !covered[class] && class != oam.RefusalTraitCapability && class != oam.RefusalObjectKind {
+		if !covered[class] && !notAnObjectClass[class] {
 			t.Errorf("no object case holds the class %q", class)
 		}
 	}
@@ -369,6 +377,18 @@ func TestPolicyRefusalClass_ComponentApplyPolicy(t *testing.T) {
 			props: props(map[string]any{"type": "GitHubPullRequest", "url": "https://git.other.example/shop/fleet"}),
 		},
 		{name: "pod, cpu limit", class: oam.RefusalResourceMaximum, typ: "pod", handler: &components.PodHandler{}, props: pod(rcCPULimit)},
+		{
+			name: "deployment, request above the policy default limit", class: oam.RefusalResourceDefaultLimit, typ: "deployment", handler: &components.DeploymentHandler{},
+			props:  props(map[string]any{"image": "registry.example/team/app:1.0.0", "resources": map[string]any{"requests": map[string]any{"cpu": "1"}}}),
+			policy: rcWith(func(p *stubPolicy) { p.defaultCPULimit = "500m" }),
+		},
+		{
+			name: "deployment, init container request above the policy default limit", class: oam.RefusalResourceDefaultLimit, typ: "deployment", handler: &components.DeploymentHandler{},
+			props: props(map[string]any{"image": "registry.example/team/app:1.0.0", "initContainers": []any{map[string]any{
+				"name": "setup", "image": "registry.example/team/setup:1.0.0", "resources": map[string]any{"requests": map[string]any{"memory": "512Mi"}},
+			}}}),
+			policy: rcWith(func(p *stubPolicy) { p.defaultMemoryLimit = "256Mi" }),
+		},
 		{name: "persistentvolume, capacity", class: oam.RefusalStorageMaximum, typ: "persistentvolume", handler: &components.PersistentVolumeHandler{}, props: pod(pvOverMax)},
 		{
 			name: "persistentvolumeclaim, size", class: oam.RefusalStorageMaximum, typ: "persistentvolumeclaim", handler: &components.PersistentVolumeClaimHandler{},
@@ -568,5 +588,19 @@ func TestPolicyRefusalClass_Unclassified(t *testing.T) {
 				t.Errorf("error %q lacks %q: the case did not reach the failure it names", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestPolicyRefusalClass_PolicyDefaultsThatDisagree: a policy whose default
+// request is above its own default limit is a defect of the policy, as a
+// maximum that does not parse is. The document authors neither value, so no
+// authored value caused it: the violation is unclassified and holds no refusal.
+func TestPolicyRefusalClass_PolicyDefaultsThatDisagree(t *testing.T) {
+	policy := rcWith(func(p *stubPolicy) { p.defaultCPURequest, p.defaultCPULimit = "1", "500m" })
+	_, err := pvTransform("deployment", &components.DeploymentHandler{},
+		map[string]any{"image": "registry.example/team/app:1.0.0"}, policy())
+	rcWantClass(t, err, oam.RefusalUnclassified)
+	if want := "the policy's default cpu request"; err != nil && !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q lacks %q: the case did not reach the failure it names", err, want)
 	}
 }

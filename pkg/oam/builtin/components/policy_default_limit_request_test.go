@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -71,8 +72,27 @@ func defaultedContainers(kind string) []defaultedContainer {
 	return out
 }
 
+// wantDefaultLimitRefusal reads the policy refusal in err's cause chain. Only a
+// request the author wrote is one, with the class
+// oam.RefusalResourceDefaultLimit (go-kure/launcher#1580); want false asserts
+// that the chain holds none.
+func wantDefaultLimitRefusal(t *testing.T, err error, want bool) {
+	t.Helper()
+	var r *oam.PolicyRefusal
+	switch found := errors.As(err, &r); {
+	case want && !found:
+		t.Errorf("the cause chain holds no *oam.PolicyRefusal: %v", err)
+	case want && r.Class != oam.RefusalResourceDefaultLimit:
+		t.Errorf("refusal class = %q, want %q: %v", r.Class, oam.RefusalResourceDefaultLimit, err)
+	case !want && found:
+		t.Errorf("an error no authored value caused carries a refusal of class %q: %v", r.Class, err)
+	}
+}
+
 // The author wrote the request and left the limit to the policy: the message
 // names the request, the policy's default limit, and what the author can write.
+// It is a policy refusal with a class, on every container that takes the
+// defaults.
 func TestPolicyDefaultLimit_AuthoredRequestAboveItIsRefused(t *testing.T) {
 	for _, kind := range workloadKinds {
 		for _, c := range defaultedContainers(kind.name) {
@@ -89,6 +109,7 @@ func TestPolicyDefaultLimit_AuthoredRequestAboveItIsRefused(t *testing.T) {
 						"write "+c.prefix+"resources.limits."+rc.name,
 						"or lower the request",
 					)
+					wantDefaultLimitRefusal(t, err, true)
 				})
 			}
 		}
@@ -128,6 +149,7 @@ func TestPolicyDefaultLimit_DefaultRequestAboveItNamesThePolicy(t *testing.T) {
 						`its default limit "`+values[name][1]+`"`,
 						"the policy must set",
 					)
+					wantDefaultLimitRefusal(t, err, false)
 				})
 			}
 		}
@@ -168,6 +190,7 @@ func TestPolicyDefaultLimit_ALimitThePolicyDidNotFillIsNotBlamedOnIt(t *testing.
 	dc.Resources.Requests[corev1.ResourceCPU] = resource.MustParse("1")
 	err := dc.ApplyPolicy(&stubPolicy{defaultCPULimit: "250m"})
 	assertErrorContains(t, err, "resources: cpu: request 1 must not exceed limit 500m")
+	wantDefaultLimitRefusal(t, err, false)
 	if strings.Contains(err.Error(), "policy") {
 		t.Errorf("error %q names the policy for a limit it did not fill", err)
 	}

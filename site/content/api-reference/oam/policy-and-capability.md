@@ -118,6 +118,7 @@ A `RefusalClass` is a string, and the value is what a consumer may log or store.
 | `RefusalContainerCapability` | `container-capability` | A Linux capability a container adds that the policy forbids or does not list as allowed. |
 | `RefusalRegistry` | `registry` | A host outside `AllowedRegistries`, or one that cannot be held to that list: the registry of a container image or of an image volume's reference; an image an operator chooses because the document names none (`cnpg-cluster`, `cnpg-pooler`); the host a chart, a `manifests` `url` source or a Flux source is fetched from; an `oci://` url that does not name its registry; an Amazon S3 bucket endpoint, whose host Flux picks at runtime. |
 | `RefusalResourceMaximum` | `resource-maximum` | A cpu or memory request or limit over `MaxCPU` or `MaxMemory`: on a container, on the pod, or on the pod template of an ACME HTTP01 solver of an `issuer` or `clusterissuer`. |
+| `RefusalResourceDefaultLimit` | `resource-default-limit` | A cpu or memory request the document authors above the limit the policy defaults for that resource (`DefaultCPULimit`, `DefaultMemoryLimit`), on a container that authors no such limit: the main container, an init container or a sidecar of a workload kind. The author writes a limit or lowers the request. |
 | `RefusalStorageMaximum` | `storage-maximum` | A storage request, or the capacity of a PersistentVolume, over `MaxStorageSize`. |
 | `RefusalReplicaMaximum` | `replica-maximum` | A replica count, an autoscaler's `maxReplicas` or a database cluster's instance count over `MaxReplicas`. |
 | `RefusalExplicitSecret` | `explicit-secret` | Secret material the document carries itself, under a policy that forbids explicit secrets (`ExplicitSecretPolicy`): a `secret` component or trait, a Secret that `passthrough` or a `manifests` source carries, `secretValues`, a `certificate`'s keystore password, a `fluxcd-provider` `address` that is the credential, and a credential or the `fake` provider's data written into a `secretstore` or `clustersecretstore`. |
@@ -140,9 +141,12 @@ the transform. The text of no refusal changed with the class: it is the
 cause is not a refusal by the policy. No class is guessed from text. It covers:
 
 - an `ApplyPolicy` error of another kind: a chart that does not render, a policy default or
-  maximum that does not parse, and the library's own rules on an object, which hold with or
-  without a policy (no ephemeral containers, an image with no tag or digest, an undeclared
-  field on a workload or a claim a chart renders);
+  maximum that does not parse, a policy whose default request is above its own default limit
+  (a defect of the policy: the document authors neither value), a request above a limit the
+  policy did not fill (only a config built in code can hold one: the parser refuses it in a
+  document), and the library's own rules on an object, which hold with or without a policy
+  (no ephemeral containers, an image with no tag or digest, an undeclared field on a
+  workload or a claim a chart renders);
 - a refusal a consumer's own `Enforceable` returns as a plain error;
 - a `ViolationError` literal that leaves `Class` out.
 
