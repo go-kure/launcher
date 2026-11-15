@@ -168,7 +168,7 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 		return nil, err
 	}
 	config.JobSpec = jobSpec
-	config.parseFills = append(config.parseFills, jobSpec.fills...)
+	config.parseFills = append(config.parseFills, podFailurePolicyStatusFills(props)...)
 	if err := validateJobNameAllowsCompletions(component.ObjectName(), component.Name, jobSpec); err != nil {
 		return nil, err
 	}
