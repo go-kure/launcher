@@ -33,7 +33,12 @@ tiers, in precedence order:
    written: `resources.requests.cpu` for the main container,
    `initContainers[0].resources.requests.cpu` for the first init container. A
    request lowered to the
-   authored limit (tier 3 below) carries the detail `capped-to-limit`. What
+   authored limit (tier 3 below) carries the detail `capped-to-limit`. A
+   default limit that lands under the container's request fails the build,
+   since Kubernetes refuses a request above its limit (go-kure/launcher#1582):
+   under an authored request the error names it and asks for a limit or a lower
+   request, and where the policy's default request is above its own default
+   limit the error names the policy. What
    the postgresql defaults step fills after the policy (`enablePDB`, and the
    `1Gi` `storage.size` fallback) is reported as a `builtin` entry, not as `policy`.
 3. **Intrinsic handler default** — `buildResourceRequirements`
