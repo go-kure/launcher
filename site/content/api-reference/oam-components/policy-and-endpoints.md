@@ -53,6 +53,14 @@ tiers, in precedence order:
    limit for that resource, and an authored request is never changed. Two
    consequences are easy to miss: a policy `DefaultMemoryRequest()` flows into
    the mirrored memory limit, and the handler never defaults a CPU limit.
+   Each value this tier fills is reported to the provenance report as a
+   `builtin` entry (go-kure/launcher#1580), at the path the author would have
+   written and for every container: `resources.requests.cpu`,
+   `sidecars[0].resources.limits.memory`. The report also holds
+   `automountServiceAccountToken` where the kind switches the token mount off,
+   which it does when the component sets neither `serviceAccountName` nor
+   `automountServiceAccountToken`. A value the author wrote or a policy default
+   filled is never a `builtin` entry.
 
 `oam.Policy.MaxCPU()`/`MaxMemory()` are enforced against the *effective*
 value — what `Generate()` will actually emit, after all three tiers — not

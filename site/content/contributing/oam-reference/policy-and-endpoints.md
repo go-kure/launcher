@@ -21,6 +21,12 @@ Text in square brackets is added here to say what a moved sentence refers to.
     ["is reported as a `builtin` entry", in the reference's tier 2.]
   - `common.go`
     ["`buildResourceRequirements`", in the reference's tier 3.]
+  - `builtin_defaults_generate.go`: `BuiltinDefaults` on the five controller
+    kinds records nothing. It answers from the config with
+    `builtinResourceFills` and `tokenAutomountIsBuiltin`, the functions
+    `buildResourceRequirements` and `buildPodSpec` decide by, so the report and
+    the generated object cannot disagree
+    ["is reported to the provenance report as a `builtin` entry", in the reference's tier 3.]
   - `capPolicyRequestDefaults`, `resource_policy_defaults.go`
     ["held to the authored limit for that resource", in the reference's tier 3.]
   - `enforceMaxResources` (`enforce.go`) closes this by calling the same
@@ -59,6 +65,12 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - go-kure/launcher#344
     ["`job` onto its own `spec`", in the reference's paragraph on the twelve JobSpec-level properties.]
 - **Tests:**
+  - `TestBuiltinDefaults_ResourceFillsAreWhatGenerationAdds` and
+    `TestBuiltinDefaults_TokenAutomount` derive what generation added from the
+    authored properties, the policy's report and the generated object, and hold
+    the built-in report to it; `TestBuiltinDefaults_ReadingChangesNothing` holds
+    that reading the report changes neither it nor the objects
+    ["A value the author wrote or a policy default filled is never a `builtin` entry", in the reference's tier 3.]
   - Both halves are pinned: `TestSchemaJobSpec_HasNoSuspendKey` on the schema,
     `TestCronjobHandler_SuspendWritesCronJobSpecOnly` and
     `TestJobHandler_SuspendWritesJobSpec` on the generated objects.

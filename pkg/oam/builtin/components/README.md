@@ -654,6 +654,11 @@ container's request fails the build, naming the container and the remedy
 (go-kure/launcher#1582); under an authored request it carries the
 `resource-default-limit` refusal class (go-kure/launcher#1580).
 
+What the handler itself fills at generation (tier 3: the cpu and memory
+requests and the mirrored memory limit of every container, and the token
+automount it switches off) is reported to the provenance report as `builtin`
+entries (go-kure/launcher#1580).
+
 Full text: [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
 
 ## Policy refusal classes
