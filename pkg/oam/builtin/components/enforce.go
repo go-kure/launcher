@@ -491,13 +491,19 @@ func (r *ResourceRequirements) applyPolicyRequestDefaults(p oam.Policy, log *oam
 // is reported at its own path: the main container's, with "initContainers[<i>]."
 // or "sidecars[<i>]." in front. The entries are written by index, so the defaults
 // land in the config Generate reads. A kind without sidecars passes nil.
+//
+// A default limit that lands under the container's request is refused
+// (go-kure/launcher#1582): see checkDefaultedLimits.
 func applyContainerPolicyDefaults(p oam.Policy, log *oam.PolicyDefaultLog, main *ResourceRequirements,
 	inits []InitContainerConfig, sidecars []SidecarContainerConfig) error {
 	apply := func(r *ResourceRequirements, prefix string) error {
 		if err := r.applyPolicyRequestDefaults(p, log, prefix); err != nil {
 			return err
 		}
-		return r.applyPolicyLimitDefaults(p, log, prefix)
+		if err := r.applyPolicyLimitDefaults(p, log, prefix); err != nil {
+			return err
+		}
+		return r.checkDefaultedLimits(log, prefix)
 	}
 	if err := apply(main, ""); err != nil {
 		return err
@@ -511,6 +517,43 @@ func applyContainerPolicyDefaults(p oam.Policy, log *oam.PolicyDefaultLog, main 
 		if err := apply(&sidecars[i].Resources, fmt.Sprintf("sidecars[%d].", i)); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// checkDefaultedLimits refuses a request above its limit once the policy's
+// defaults are applied (go-kure/launcher#1582): the apiserver refuses such a
+// container. For a document, only a policy default limit can produce one here:
+// an authored pair is checked when it is parsed (validateResourceRequestLimit),
+// and a default request is held to an authored limit (capPolicyRequestDefaults).
+//
+// What the policy filled is read from log, at the paths the defaults are
+// reported under, so a second ApplyPolicy answers as the first did. Where the
+// policy filled the limit, the error says whose the request is: the author's,
+// who then has a remedy, or the policy's own default. A pair the policy did not
+// fill the limit of (a config built through the Go API, which the parser never
+// saw) gets the parser's own check and words. prefix names the container, as in
+// applyContainerPolicyDefaults.
+func (r *ResourceRequirements) checkDefaultedLimits(log *oam.PolicyDefaultLog, prefix string) error {
+	filled := map[string]bool{}
+	for _, d := range log.PolicyDefaults() {
+		filled[d.Path] = true
+	}
+	for _, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
+		request, hasRequest := r.Requests[name]
+		limit, hasLimit := r.Limits[name]
+		if !hasRequest || !hasLimit || request.Cmp(limit) <= 0 || !filled[fmt.Sprintf("%sresources.limits.%s", prefix, name)] {
+			continue
+		}
+		if filled[fmt.Sprintf("%sresources.requests.%s", prefix, name)] {
+			return errors.Errorf("%sresources: the policy's default %s request %q is above its default limit %q: the policy must set a default request at or under its default limit",
+				prefix, name, request.String(), limit.String())
+		}
+		return errors.Errorf("%sresources.requests.%s %q is above the policy's default limit %q: write %sresources.limits.%s, or lower the request",
+			prefix, name, request.String(), limit.String(), prefix, name)
+	}
+	if err := validateResourceRequestLimit(r.Requests, r.Limits); err != nil {
+		return errors.Errorf("%s%w", prefix, err)
 	}
 	return nil
 }
