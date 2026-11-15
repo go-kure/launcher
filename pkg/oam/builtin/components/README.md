@@ -647,6 +647,10 @@ tiers, in precedence order:
    absence, not an opt-out. A policy sub-option to accept `unlimited` as a
    policy default is not provided.
 
+The policy defaults (tier 2) reach every container of those seven kinds: the
+main container and each `initContainers` and `sidecars` entry, reported at the
+entry's own path (go-kure/launcher#1581).
+
 Full text: [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
 
 ## Policy refusal classes

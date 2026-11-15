@@ -457,15 +457,16 @@ func enforceMaxResources(res ResourceRequirements, maxCPU, maxMemory string) err
 // (tier 2) to the limits the author left unmentioned, skipping a resource the
 // author opted out of with `unlimited` (tier 1, go-kure/launcher#1181). The
 // opt-out also stops buildResourceRequirements' memory-limit mirror. Each limit it
-// fills is reported to log under the property path the author would have written.
-func (r *ResourceRequirements) applyPolicyLimitDefaults(p oam.Policy, log *oam.PolicyDefaultLog) error {
+// fills is reported to log under the property path the author would have written:
+// prefix, then "resources.limits.<name>".
+func (r *ResourceRequirements) applyPolicyLimitDefaults(p oam.Policy, log *oam.PolicyDefaultLog, prefix string) error {
 	if !r.NoCPULimit {
-		if err := applyReportedQuantity(log, "resources.limits.cpu", "DefaultCPULimit", &r.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
+		if err := applyReportedQuantity(log, prefix+"resources.limits.cpu", "DefaultCPULimit", &r.Limits, corev1.ResourceCPU, p.DefaultCPULimit()); err != nil {
 			return err
 		}
 	}
 	if !r.NoMemoryLimit {
-		if err := applyReportedQuantity(log, "resources.limits.memory", "DefaultMemoryLimit", &r.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
+		if err := applyReportedQuantity(log, prefix+"resources.limits.memory", "DefaultMemoryLimit", &r.Limits, corev1.ResourceMemory, p.DefaultMemoryLimit()); err != nil {
 			return err
 		}
 	}
@@ -474,13 +475,44 @@ func (r *ResourceRequirements) applyPolicyLimitDefaults(p oam.Policy, log *oam.P
 
 // applyPolicyRequestDefaults applies the policy's default cpu and memory requests
 // to the requests the author left unmentioned: first capPolicyRequestDefaults, then
-// the defaults themselves. Each value it sets is reported to log.
-func (r *ResourceRequirements) applyPolicyRequestDefaults(p oam.Policy, log *oam.PolicyDefaultLog) error {
-	r.capPolicyRequestDefaults(p, log)
-	if err := applyReportedQuantity(log, "resources.requests.cpu", "DefaultCPURequest", &r.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
+// the defaults themselves. Each value it sets is reported to log under prefix, then
+// "resources.requests.<name>".
+func (r *ResourceRequirements) applyPolicyRequestDefaults(p oam.Policy, log *oam.PolicyDefaultLog, prefix string) error {
+	r.capPolicyRequestDefaults(p, log, prefix)
+	if err := applyReportedQuantity(log, prefix+"resources.requests.cpu", "DefaultCPURequest", &r.Requests, corev1.ResourceCPU, p.DefaultCPURequest()); err != nil {
 		return err
 	}
-	return applyReportedQuantity(log, "resources.requests.memory", "DefaultMemoryRequest", &r.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest())
+	return applyReportedQuantity(log, prefix+"resources.requests.memory", "DefaultMemoryRequest", &r.Requests, corev1.ResourceMemory, p.DefaultMemoryRequest())
+}
+
+// applyContainerPolicyDefaults applies the policy's default requests, then its
+// default limits, to the main container and to every init container and sidecar
+// (go-kure/launcher#1581): each container takes them by the same rules. An entry
+// is reported at its own path: the main container's, with "initContainers[<i>]."
+// or "sidecars[<i>]." in front. The entries are written by index, so the defaults
+// land in the config Generate reads. A kind without sidecars passes nil.
+func applyContainerPolicyDefaults(p oam.Policy, log *oam.PolicyDefaultLog, main *ResourceRequirements,
+	inits []InitContainerConfig, sidecars []SidecarContainerConfig) error {
+	apply := func(r *ResourceRequirements, prefix string) error {
+		if err := r.applyPolicyRequestDefaults(p, log, prefix); err != nil {
+			return err
+		}
+		return r.applyPolicyLimitDefaults(p, log, prefix)
+	}
+	if err := apply(main, ""); err != nil {
+		return err
+	}
+	for i := range inits {
+		if err := apply(&inits[i].Resources, fmt.Sprintf("initContainers[%d].", i)); err != nil {
+			return err
+		}
+	}
+	for i := range sidecars {
+		if err := apply(&sidecars[i].Resources, fmt.Sprintf("sidecars[%d].", i)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // applyDefaultQuantity sets (*rl)[name] = dflt when rl has no entry for name

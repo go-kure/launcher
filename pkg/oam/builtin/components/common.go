@@ -4848,9 +4848,9 @@ func copyPtr[T any](p *T) *T {
 // 128Mi memory request when unset, and a memory limit equal to the
 // (possibly just-defaulted) memory request when no memory limit was set.
 // This is a distinct, lower-priority tier from the environment-policy
-// defaults ApplyPolicy already applied to the main container's Resources
-// before this call — init/sidecar containers have no ApplyPolicy equivalent,
-// so this is their only defaulting. Requests/Limits are deep-copied before
+// defaults ApplyPolicy already applied before this call, to the main
+// container's Resources and to each init container's and sidecar's
+// (go-kure/launcher#1581). Requests/Limits are deep-copied before
 // mutation so this never aliases the caller's maps (res is shared with the
 // ResourceRequirements still held by the container's Config).
 //
