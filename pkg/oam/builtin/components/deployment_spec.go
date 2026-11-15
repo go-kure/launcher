@@ -456,11 +456,20 @@ func applyNonRWXConstraint(dep *appsv1.Deployment, name string, pvcs []PVCConfig
 	if replicas > 1 {
 		return errors.Errorf("deployment %q: a non-RWX PVC allows at most one replica, got %d", name, replicas)
 	}
-	if strategy != nil && strategy.Type != appsv1.RecreateDeploymentStrategyType {
+	if !nonRWXFillsStrategy(pvcs, strategy) && strategy.Type != appsv1.RecreateDeploymentStrategyType {
 		return errors.Errorf("deployment %q: strategy.type must be %s when a non-RWX PVC is attached, got %s; a rolling update would start the replacement pod before the old one released the volume", name, appsv1.RecreateDeploymentStrategyType, strategy.Type)
 	}
 	dep.Spec.Strategy = appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
 	return nil
+}
+
+// nonRWXFillsStrategy decides whether the library, and not the author, sets the
+// Deployment's strategy to Recreate: a non-RWX claim is attached and the author
+// wrote no `strategy`. applyNonRWXConstraint takes this decision when it builds the
+// object, and DeploymentConfig.BuiltinDefaults reports the same one at
+// `strategy.type`, so the two cannot drift (go-kure/launcher#1580).
+func nonRWXFillsStrategy(pvcs []PVCConfig, strategy *appsv1.DeploymentStrategy) bool {
+	return hasNonRWXPVC(pvcs) && strategy == nil
 }
 
 // schemaDeploymentSpec describes the DeploymentSpec-level properties (see

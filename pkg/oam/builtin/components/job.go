@@ -147,6 +147,8 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 		default:
 			return nil, errors.Errorf("invalid restartPolicy %q, must be 'Never' or 'OnFailure'", rp)
 		}
+	} else {
+		config.parseFills = append(config.parseFills, "restartPolicy")
 	}
 
 	// An explicit null reads as omission here. Since go-kure/launcher#394
@@ -166,6 +168,7 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 		return nil, err
 	}
 	config.JobSpec = jobSpec
+	config.parseFills = append(config.parseFills, jobSpec.fills...)
 	if err := validateJobNameAllowsCompletions(component.ObjectName(), component.Name, jobSpec); err != nil {
 		return nil, err
 	}
@@ -199,11 +202,12 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 		return nil, err
 	}
 	config.Args = args
-	ports, err := parseContainerPorts(props)
+	ports, portFills, err := parseContainerPorts(props)
 	if err != nil {
 		return nil, err
 	}
 	config.Ports = ports
+	config.parseFills = append(config.parseFills, portFills...)
 	// Without `ports`, namedPortsAllowed=false for the same reason as cronjob:
 	// the main container then declares no ContainerPort for the kubelet to
 	// resolve a named probe/lifecycle port against. With `ports`, a name
@@ -290,6 +294,9 @@ type JobConfig struct {
 	Name string
 	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
 	oam.PolicyDefaultLog
+	// parseFills are the property paths the parser filled because the author wrote
+	// no value (BuiltinDefaults reads them).
+	parseFills []string
 	// ObjectName names the Job (oam.Component.ObjectName); its labels and main
 	// container keep Name. Empty for the application's name.
 	ObjectName string

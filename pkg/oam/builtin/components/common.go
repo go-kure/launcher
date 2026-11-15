@@ -216,6 +216,9 @@ type InitContainerConfig struct {
 	Ports     []corev1.ContainerPort
 	Probes    ProbeConfig
 	Lifecycle *corev1.Lifecycle
+	// portFills are the `ports[i].protocol` paths parseContainerPorts filled,
+	// relative to this container (BuiltinDefaults prefixes the container's own).
+	portFills []string
 }
 
 // Restartable reports whether the init container is a native sidecar: its own
@@ -245,6 +248,9 @@ type SidecarContainerConfig struct {
 	// Fields are the container fields every container of the pod accepts
 	// (parseContainerFields).
 	Fields ContainerFields
+	// portFills are the `ports[i].protocol` paths parseContainerPorts filled,
+	// relative to this container (BuiltinDefaults prefixes the container's own).
+	portFills []string
 }
 
 // initContainerPropertyKeys is the accepted key set of one `initContainers`
@@ -323,6 +329,13 @@ type PVCConfig struct {
 	// persistentvolumeclaim kind and the pvc trait, through
 	// ParseClaimProperties); a workload's pvc volume leaves it zero.
 	Spec ClaimSpecFields
+
+	// accessModesFilled records that parseClaimReference filled AccessModes with
+	// ReadWriteOnce because the author wrote none, and volumeIndex is the entry's
+	// position in the authored `volumes`: together they name the path a config's
+	// BuiltinDefaults reports (go-kure/launcher#1580).
+	accessModesFilled bool
+	volumeIndex       int
 }
 
 // ParsedVolumes holds the results of parsing volume definitions from OAM
@@ -2814,6 +2827,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 				if err != nil {
 					return result, err
 				}
+				ref.volumeIndex = i
 				result.Volumes = append(result.Volumes, corev1.Volume{
 					Name: volName,
 					VolumeSource: corev1.VolumeSource{
@@ -2977,6 +2991,8 @@ func parseClaimReference(m map[string]any, volName, claimName string, volumeMode
 		ClaimName:   claimName,
 		AccessModes: accessModes,
 		VolumeMode:  volumeMode,
+
+		accessModesFilled: accessModesOmitted(m),
 	}, nil
 }
 
@@ -3051,11 +3067,19 @@ func firstNonRWXPVC(pvcs []PVCConfig) string {
 	return ""
 }
 
+// accessModesOmitted is the one test of whether the author left `accessModes`
+// out (absent or null), which parseAccessModes fills with ReadWriteOnce and the
+// configs' BuiltinDefaults report (go-kure/launcher#1580).
+func accessModesOmitted(m map[string]any) bool {
+	_, present := authoredValue(m, "accessModes")
+	return !present
+}
+
 func parseAccessModes(m map[string]any) ([]string, error) {
-	v, present := authoredValue(m, "accessModes")
-	if !present {
+	if accessModesOmitted(m) {
 		return []string{string(corev1.ReadWriteOnce)}, nil
 	}
+	v, _ := authoredValue(m, "accessModes")
 	// Presence-then-type-check, not a bare assertion: a non-array value
 	// (e.g. a bare string) previously fell through this check silently and
 	// built with the ReadWriteOnce default instead of rejecting the
@@ -3212,7 +3236,7 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 			// Read as a sidecar's are: its ports first (go-kure/launcher#1225),
 			// then the probes and hooks, which may address a name only against
 			// those ports.
-			if ic.Ports, err = parseContainerPorts(m); err != nil {
+			if ic.Ports, ic.portFills, err = parseContainerPorts(m); err != nil {
 				return nil, errors.Errorf("%s: %w", label, err)
 			}
 			if ic.Probes, err = parseProbes(m, true, ""); err != nil {
@@ -3309,7 +3333,7 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 		// were taken unchecked, a repeated name reached the API server, and a
 		// non-list `ports`, an unknown key, a non-string name or a non-string
 		// protocol (which read as TCP) was dropped.
-		if sc.Ports, err = parseContainerPorts(m); err != nil {
+		if sc.Ports, sc.portFills, err = parseContainerPorts(m); err != nil {
 			return nil, errors.Errorf("%s: %w", label, err)
 		}
 		parsedSC, err := parseSecurityContext(m)
@@ -3930,6 +3954,9 @@ type JobSpecConfig struct {
 	ManagedBy               *string
 	SuccessPolicy           *batchv1.SuccessPolicy
 	PodFailurePolicy        *batchv1.PodFailurePolicy
+	// fills are the property paths parseJobSpec filled because the author wrote
+	// none (BuiltinDefaults of job and cronjob reads them).
+	fills []string
 }
 
 // jobSpecPropertyKeys lists every JobSpec-level property schemaJobSpec publishes
@@ -4107,6 +4134,7 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 			return cfg, err
 		}
 		cfg.PodFailurePolicy = pfp
+		cfg.fills = podFailurePolicyStatusFills(raw)
 	}
 
 	if err := parseJobSpecIndexedFields(&cfg); err != nil {
@@ -4686,6 +4714,34 @@ func parseJobPodFailurePolicyOnPodConditions(raw any, label string) ([]batchv1.P
 	return patterns, nil
 }
 
+// podConditionStatusOmitted is the one test of whether the author left an
+// onPodConditions pattern's `status` out (absent or null), which
+// parseJobPodFailurePolicyConditionStatus fills with True and
+// podFailurePolicyStatusFills reports.
+func podConditionStatusOmitted(obj map[string]any) bool {
+	raw, present := obj["status"]
+	return !present || isExplicitNull(raw)
+}
+
+// podFailurePolicyStatusFills lists the `podFailurePolicy.rules[i].onPodConditions[j].status`
+// paths parseJobPodFailurePolicy filled with True, for the config's
+// BuiltinDefaults (go-kure/launcher#1580). It reads a policy that already parsed.
+func podFailurePolicyStatusFills(raw map[string]any) []string {
+	var paths []string
+	rules, _ := raw["rules"].([]any)
+	for i, rule := range rules {
+		ruleObj, _ := nullElem(rule).(map[string]any)
+		patterns, _ := ruleObj["onPodConditions"].([]any)
+		for j, pattern := range patterns {
+			obj, ok := nullElem(pattern).(map[string]any)
+			if ok && podConditionStatusOmitted(obj) {
+				paths = append(paths, fmt.Sprintf("podFailurePolicy.rules[%d].onPodConditions[%d].status", i, j))
+			}
+		}
+	}
+	return paths
+}
+
 // parseJobPodFailurePolicyConditionStatus decodes one onPodConditions pattern's
 // `status`. An absent (or null) key defaults to True, as upstream's
 // SetDefaults_PodFailurePolicyOnPodConditionsPattern does before validation runs
@@ -4693,10 +4749,10 @@ func parseJobPodFailurePolicyOnPodConditions(raw any, label string) ([]batchv1.P
 // server because PodFailurePolicyOnPodConditionsPattern.Status carries no
 // omitempty: left unset, it would be emitted as `status: ""`.
 func parseJobPodFailurePolicyConditionStatus(obj map[string]any, entryLabel string) (corev1.ConditionStatus, error) {
-	raw, present := obj["status"]
-	if !present || isExplicitNull(raw) {
+	if podConditionStatusOmitted(obj) {
 		return corev1.ConditionTrue, nil
 	}
+	raw := obj["status"]
 	s, ok := raw.(string)
 	if !ok {
 		return "", errors.Errorf("%s.status: must be a string, got %T", entryLabel, raw)
@@ -5112,7 +5168,12 @@ type VolumeClaimTemplate struct {
 	StorageClassExplicitEmpty bool
 	Size                      string
 	AccessModes               []string
-	MountPath                 string
+	// accessModesFilled records that the parser filled AccessModes with
+	// ReadWriteOnce because the author wrote none, and index is the entry's
+	// position in the authored `volumeClaimTemplates` (go-kure/launcher#1580).
+	accessModesFilled bool
+	index             int
+	MountPath         string
 	// DevicePath is where a volumeMode: Block claim appears in the main
 	// container as a raw block device. Exactly one of MountPath and
 	// DevicePath is set (go-kure/launcher#385).
@@ -5171,7 +5232,7 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 		return nil, errors.Errorf("volumeClaimTemplates: must be a list, got %T", raw)
 	}
 	var vcts []VolumeClaimTemplate
-	for _, v := range vctList {
+	for authoredIndex, v := range vctList {
 		v = nullElem(v)
 		m, ok := v.(map[string]any)
 		if !ok {
@@ -5242,6 +5303,8 @@ func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, err
 			return nil, errors.Wrapf(err, "volumeClaimTemplate %q", vct.Name)
 		}
 		vct.AccessModes = accessModes
+		vct.accessModesFilled = accessModesOmitted(m)
+		vct.index = authoredIndex
 		if vct.Name == "" {
 			return nil, errors.New("volumeClaimTemplate entry missing required field 'name'")
 		}
