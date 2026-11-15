@@ -657,9 +657,11 @@ container's request fails the build, naming the container and the remedy
 The parser of `deployment`, `statefulset`, `daemonset`, `job` and `cronjob` fills a few
 values when the author wrote none (`replicas`, `restartPolicy`, the `cronjob` history
 limits, a port's `protocol`, the `status` of a pod failure policy condition, the
-`accessModes` of a claim and the `Recreate` strategy of a `deployment` with a non-RWX
-claim). Each config reports them through `BuiltinDefaults()` as `builtin`, at the path the
-author would have written, and never at a path where the policy default stands.
+`accessModes` of a claim). Each config reports them through `BuiltinDefaults()` as
+`builtin`, at the path the author would have written, and never at a path where the policy
+default stands. A `deployment` with a non-RWX claim and no authored `strategy` also reports
+`strategy.type`: the `Recreate` strategy is decided when the object is generated, by the
+predicate the report shares with the generator.
 
 Full text: [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
 

@@ -49,8 +49,10 @@ tiers, in precedence order:
    (also in a `sidecars` entry and in a restartable `initContainers` entry), the
    `status` `True` of a pod failure policy condition, the `accessModes`
    `ReadWriteOnce` of a `pvc` volume that references a claim and of a
-   `volumeClaimTemplates` entry, and the `Recreate` strategy of a `deployment` with
-   a non-RWX claim (`strategy.type`). A path is reported by one source only, the one
+   `volumeClaimTemplates` entry. A `deployment` with a non-RWX claim and no authored
+   `strategy` is built with the `Recreate` strategy, a decision taken when the object
+   is generated; it is reported at `strategy.type` from the same predicate the
+   generator uses. A path is reported by one source only, the one
    whose value stands: where the policy default fills `replicas`, the entry is
    `policy`, and under a `scaler` trait there is none, since the kind is then built
    without a count. The list is what the library reports today, not every default

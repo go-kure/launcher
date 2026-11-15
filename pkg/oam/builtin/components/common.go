@@ -3954,9 +3954,6 @@ type JobSpecConfig struct {
 	ManagedBy               *string
 	SuccessPolicy           *batchv1.SuccessPolicy
 	PodFailurePolicy        *batchv1.PodFailurePolicy
-	// fills are the property paths parseJobSpec filled because the author wrote
-	// none (BuiltinDefaults of job and cronjob reads them).
-	fills []string
 }
 
 // jobSpecPropertyKeys lists every JobSpec-level property schemaJobSpec publishes
@@ -4134,7 +4131,6 @@ func parseJobSpec(props map[string]any) (JobSpecConfig, error) {
 			return cfg, err
 		}
 		cfg.PodFailurePolicy = pfp
-		cfg.fills = podFailurePolicyStatusFills(raw)
 	}
 
 	if err := parseJobSpecIndexedFields(&cfg); err != nil {
@@ -4725,9 +4721,14 @@ func podConditionStatusOmitted(obj map[string]any) bool {
 
 // podFailurePolicyStatusFills lists the `podFailurePolicy.rules[i].onPodConditions[j].status`
 // paths parseJobPodFailurePolicy filled with True, for the config's
-// BuiltinDefaults (go-kure/launcher#1580). It reads a policy that already parsed.
-func podFailurePolicyStatusFills(raw map[string]any) []string {
+// BuiltinDefaults (go-kure/launcher#1580). It reads the authored properties of a
+// job or cronjob that already parsed, and returns nothing without a policy. It
+// returns the paths rather than storing them on JobSpecConfig, which stays
+// comparable.
+func podFailurePolicyStatusFills(props map[string]any) []string {
 	var paths []string
+	policy, _ := authoredValue(props, "podFailurePolicy")
+	raw, _ := policy.(map[string]any)
 	rules, _ := raw["rules"].([]any)
 	for i, rule := range rules {
 		ruleObj, _ := nullElem(rule).(map[string]any)
