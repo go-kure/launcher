@@ -853,17 +853,19 @@ its text:
 
 - `oam.ViolationError` has a `Class` (`pkg/oam/pipeline.go`), filled from the first
   `oam.PolicyRefusal` in the cause chain (`NewViolationError`, `pkg/oam/policy_refusal.go`).
-- The classes are a closed set of twelve: host namespace, privileged, host path, container
-  capability, registry, resource maximum, storage maximum, replica maximum, explicit
-  secret, trait capability, unreadable object and object kind (`RefusalClasses`; object
-  kind since go-kure/launcher#934, §5.4). Every built-in refusal by the policy carries
+- The classes are a closed set of thirteen: host namespace, privileged, host path, container
+  capability, registry, resource maximum, resource default limit, storage maximum, replica
+  maximum, explicit secret, trait capability, unreadable object and object kind
+  (`RefusalClasses`; object kind since go-kure/launcher#934, §5.4; resource default limit
+  since go-kure/launcher#1580, an authored request above the policy's default limit). Every built-in refusal by the policy carries
   one, on every path: a component's `ApplyPolicy`, a trait sub-application's, the
   rendered-object check of template delivery (§5.2), `passthrough` and `manifests` at the
   transform and at generation (§7), and the object kind check at generation (§5.4).
 - No message changed.
 - What is not a refusal by the policy is unclassified, an explicit value and never a guess:
-  a chart that does not render, a policy default or maximum that does not parse, and the
-  library's own rules on an object.
+  a chart that does not render, a policy default or maximum that does not parse, a policy
+  whose default request is above its own default limit, and the library's own rules on an
+  object.
 - A consumer's own `Enforceable` gives a class through `oam.NewPolicyRefusal`.
 - **Limit:** a redirect of a `manifests` `url` source to a host outside the allowed
   registries stays a fetch failure and no violation; its error holds the refusal with the

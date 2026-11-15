@@ -24,6 +24,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
 - **History:**
   - go-kure/launcher#849 (the `Class` of a `ViolationError`, so that a consumer does not match
     error text).
+  - go-kure/launcher#1580 (`RefusalResourceDefaultLimit`: the refusal of an authored request
+    above the policy's default limit, added by go-kure/launcher#1582, had no class).
 
 ## Capability system
 

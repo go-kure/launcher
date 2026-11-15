@@ -55,14 +55,15 @@ func TestPolicyRefusal_ErrorIsItsMessage(t *testing.T) {
 	}
 }
 
-// TestRefusalClasses_ClosedSet: the documented set holds twelve distinct
+// TestRefusalClasses_ClosedSet: the documented set holds thirteen distinct
 // classes, none of them the unclassified value, and that value is the zero
 // value of the type.
 func TestRefusalClasses_ClosedSet(t *testing.T) {
 	want := []RefusalClass{
 		RefusalHostNamespace, RefusalPrivileged, RefusalHostPath, RefusalContainerCapability,
-		RefusalRegistry, RefusalResourceMaximum, RefusalStorageMaximum, RefusalReplicaMaximum,
-		RefusalExplicitSecret, RefusalTraitCapability, RefusalUnreadableObject, RefusalObjectKind,
+		RefusalRegistry, RefusalResourceMaximum, RefusalResourceDefaultLimit, RefusalStorageMaximum,
+		RefusalReplicaMaximum, RefusalExplicitSecret, RefusalTraitCapability, RefusalUnreadableObject,
+		RefusalObjectKind,
 	}
 	got := RefusalClasses()
 	if !slices.Equal(got, want) {

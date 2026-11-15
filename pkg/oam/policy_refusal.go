@@ -43,6 +43,11 @@ const (
 	// RefusalResourceMaximum: a cpu or memory request or limit over the
 	// policy's maximum.
 	RefusalResourceMaximum RefusalClass = "resource-maximum"
+	// RefusalResourceDefaultLimit: a cpu or memory request the document authors
+	// above the limit the policy defaults for that resource, on a container
+	// that authors no such limit. The author writes a limit or lowers the
+	// request.
+	RefusalResourceDefaultLimit RefusalClass = "resource-default-limit"
 	// RefusalStorageMaximum: a storage request, or the capacity of a
 	// PersistentVolume, over the policy's maximum.
 	RefusalStorageMaximum RefusalClass = "storage-maximum"
@@ -76,6 +81,7 @@ func RefusalClasses() []RefusalClass {
 		RefusalContainerCapability,
 		RefusalRegistry,
 		RefusalResourceMaximum,
+		RefusalResourceDefaultLimit,
 		RefusalStorageMaximum,
 		RefusalReplicaMaximum,
 		RefusalExplicitSecret,

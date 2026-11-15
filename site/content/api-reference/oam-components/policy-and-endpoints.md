@@ -37,8 +37,9 @@ tiers, in precedence order:
    default limit that lands under the container's request fails the build,
    since Kubernetes refuses a request above its limit (go-kure/launcher#1582):
    under an authored request the error names it and asks for a limit or a lower
-   request, and where the policy's default request is above its own default
-   limit the error names the policy. What
+   request, with the `resource-default-limit` refusal class
+   (go-kure/launcher#1580), and where the policy's default request is above its
+   own default limit the error names the policy and carries no class. What
    the postgresql defaults step fills after the policy (`enablePDB`, and the
    `1Gi` `storage.size` fallback) is reported as a `builtin` entry, not as `policy`.
 3. **Intrinsic handler default** — `buildResourceRequirements`
@@ -127,6 +128,12 @@ The classes, what each covers and what stays unclassified are in
   and a `cnpg-cluster` volume, the `1Gi` fallback of `postgresql` included, which its
   post-policy step holds to the maximum. `oam.RefusalReplicaMaximum` covers `replicas`, a
   HorizontalPodAutoscaler's `maxReplicas` and `cnpg-cluster`'s `instances`.
+- **A request above the policy's default limit is `oam.RefusalResourceDefaultLimit`:** an
+  authored cpu or memory request, on the main container, an init container or a sidecar of
+  the seven workload kinds, above the limit the policy fills because the container authors
+  none (go-kure/launcher#1582). The author has the remedy, a limit or a lower request.
+  `cnpg-cluster` makes the same comparison when it generates its object, and that is a
+  generation error with no violation and no class.
 - **Secret material in the document is `oam.RefusalExplicitSecret`:** a `secret`
   component, a Secret that `passthrough` or a `manifests` source carries, `helmtemplate`'s
   `secretValues`, a `certificate`'s keystore password (`keystores.jks.password`,
@@ -142,9 +149,11 @@ The classes, what each covers and what stays unclassified are in
 - **Unclassified, though it is the component's violation:** the rules that hold with or
   without a policy and are checked at the policy step (`ephemeralContainers` and the image
   rule on an object written elsewhere, an undeclared field on a workload or a claim a chart
-  renders), a policy default or maximum that does not parse, and a chart that does not
-  render or whose render does not decode (an `items` array on a kind that is no list, for
-  one).
+  renders), a policy default or maximum that does not parse, a policy whose default request
+  is above its own default limit (a defect of the policy: the document authors neither value), a
+  request above a limit the policy did not fill on a config built in code, and a chart that
+  does not render or whose render does not decode (an `items` array on a kind that is no
+  list, for one).
 - **A redirect of a `manifests` `url` source to a host outside the allowed registries** is a
   fetch failure, with the error a fetch failure has and no `oam.ViolationError`; that error
   holds the `oam.PolicyRefusal` of class `oam.RefusalRegistry`, which `errors.As` reaches.
