@@ -260,7 +260,7 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		return nil, err
 	}
 	config.JobSpec = jobSpec
-	config.parseFills = append(config.parseFills, jobSpec.fills...)
+	config.parseFills = append(config.parseFills, podFailurePolicyStatusFills(props)...)
 
 	env, err := parseEnv(props)
 	if err != nil {
