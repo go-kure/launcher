@@ -19,6 +19,12 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - `oam.BuiltinDefaultReporter`, embedded `oam.BuiltinDefaultLog` in
     `cnpg-cluster`
     ["is reported as a `builtin` entry", in the reference's tier 2.]
+  - `builtin_defaults.go`: `BuiltinDefaults()` of the five workload configs, answered
+    from the paths each parser recorded (`parseFills`, `portFills`,
+    `accessModesFilled`) minus the paths the policy reported, so it is pure; the
+    decision of `strategy.type` is `nonRWXFillsStrategy` in `deployment_spec.go`,
+    which `applyNonRWXConstraint` takes too
+    ["So is what the parser of `deployment`, ... fills", in the reference's tier 2.]
   - `common.go`
     ["`buildResourceRequirements`", in the reference's tier 3.]
   - `builtin_defaults_generate.go`: `BuiltinDefaults` on the five controller

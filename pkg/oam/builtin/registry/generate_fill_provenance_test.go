@@ -1,6 +1,7 @@
 package registry_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -91,7 +92,9 @@ func TestGenerateTimeFills_PolicyValueKeepsItsSource(t *testing.T) {
 }
 
 // TestGenerateTimeFills_AuthoredValueIsNotReported: what the author wrote has
-// no built-in entry.
+// no built-in entry. The workload leaves other values to the parser (replicas
+// among them), which reports its own fills, so only the generate-time paths are
+// read here.
 func TestGenerateTimeFills_AuthoredValueIsNotReported(t *testing.T) {
 	prov, _ := policyProvenanceFor(t, &defaultsPolicy{}, workload("web", "deployment", map[string]any{
 		"resources": map[string]any{
@@ -101,7 +104,8 @@ func TestGenerateTimeFills_AuthoredValueIsNotReported(t *testing.T) {
 		"serviceAccountName": "shared",
 	}))
 	for path, src := range entriesOf(prov, owner{component: "web"}) {
-		if src.Kind == oam.SourceBuiltin {
+		generated := path == "automountServiceAccountToken" || strings.HasPrefix(path, "resources.")
+		if generated && src.Kind == oam.SourceBuiltin {
 			t.Errorf("entry at %q is built-in (%+v) on a workload that authors every such value", path, src)
 		}
 	}

@@ -113,11 +113,12 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		return nil, err
 	}
 	config.Args = args
-	ports, err := parseContainerPorts(props)
+	ports, portFills, err := parseContainerPorts(props)
 	if err != nil {
 		return nil, err
 	}
 	config.Ports = ports
+	config.parseFills = append(config.parseFills, portFills...)
 	probes, lifecycle, err := parseMainContainerHandlers(props, ports)
 	if err != nil {
 		return nil, err
@@ -214,6 +215,9 @@ type DaemonsetConfig struct {
 	Name string
 	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
 	oam.PolicyDefaultLog
+	// parseFills are the property paths the parser filled because the author wrote
+	// no value (BuiltinDefaults reads them).
+	parseFills []string
 	// ObjectName names the DaemonSet (oam.Component.ObjectName); its labels,
 	// selector and main container keep Name. Empty for the application's name.
 	ObjectName string
