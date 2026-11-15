@@ -145,6 +145,9 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	}
 	config.Replicas = replicas
 	config.explicitReplicas = replicasAuthored
+	if !replicasAuthored {
+		config.parseFills = append(config.parseFills, "replicas")
+	}
 	config.scaled = slices.ContainsFunc(component.Traits, func(t oam.Trait) bool { return t.Type == "scaler" })
 
 	// serviceName names the governing Service, which the component does not
@@ -190,11 +193,12 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 	}
 	config.Args = args
 
-	ports, err := parseContainerPorts(props)
+	ports, portFills, err := parseContainerPorts(props)
 	if err != nil {
 		return nil, err
 	}
 	config.Ports = ports
+	config.parseFills = append(config.parseFills, portFills...)
 	probes, lifecycle, err := parseMainContainerHandlers(props, ports)
 	if err != nil {
 		return nil, err
@@ -312,6 +316,9 @@ type StatefulsetConfig struct {
 	Name string
 	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
 	oam.PolicyDefaultLog
+	// parseFills are the property paths the parser filled because the author wrote
+	// no value (BuiltinDefaults reads them).
+	parseFills []string
 	// ObjectName names the StatefulSet (oam.Component.ObjectName), and with it
 	// the pods and volume claims the controller names after it; its labels,
 	// selector and main container keep Name. Empty for the application's name.

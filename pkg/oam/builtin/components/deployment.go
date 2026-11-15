@@ -152,6 +152,9 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 	}
 	config.Replicas = replicas
 	config.explicitReplicas = replicasAuthored
+	if !replicasAuthored {
+		config.parseFills = append(config.parseFills, "replicas")
+	}
 	config.scaled = slices.ContainsFunc(component.Traits, func(t oam.Trait) bool { return t.Type == "scaler" })
 
 	env, err := parseEnv(props)
@@ -183,11 +186,12 @@ func (h *DeploymentHandler) ToApplicationConfig(component *oam.Component, namesp
 		return nil, err
 	}
 	config.Args = args
-	ports, err := parseContainerPorts(props)
+	ports, portFills, err := parseContainerPorts(props)
 	if err != nil {
 		return nil, err
 	}
 	config.Ports = ports
+	config.parseFills = append(config.parseFills, portFills...)
 	// A named probe/lifecycle port resolves only against a name the main
 	// container itself declares. With no `ports`, namedPortsAllowed=false keeps
 	// the outright refusal every portless kind gives. With `ports`, any
@@ -305,6 +309,9 @@ type DeploymentConfig struct {
 	Name string
 	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
 	oam.PolicyDefaultLog
+	// parseFills are the property paths the parser filled because the author wrote
+	// no value (BuiltinDefaults reads them).
+	parseFills []string
 	// ObjectName names the Deployment (oam.Component.ObjectName); its labels,
 	// selector and main container keep Name. Empty for the application's name.
 	ObjectName string
@@ -580,35 +587,40 @@ func schemaContainerPorts(description string) oam.PropertySchema {
 // about: the second entry declares nothing the first did not. An absent or
 // empty list declares no ports. A name repeated in another container of the
 // pod is checkPodPortNames' to refuse.
-func parseContainerPorts(props map[string]any) ([]corev1.ContainerPort, error) {
+//
+// The second result lists the `ports[i].protocol` paths the author left out and
+// this function filled with TCP (go-kure/launcher#1580), for the config's
+// BuiltinDefaults.
+func parseContainerPorts(props map[string]any) ([]corev1.ContainerPort, []string, error) {
 	entries, _, err := parseObjectList(props, "ports")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []corev1.ContainerPort
+	var filled []string
 	names := map[string]bool{}
 	pairs := map[string]bool{}
 	for i, m := range entries {
 		label := indexedLabel("ports", i)
 		if err := rejectUnknownKeys(m, []string{"containerPort", "name", "protocol"}, label); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		port, present, err := parsePortField(m, "containerPort", label+".containerPort", 1)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if !present {
-			return nil, errors.Errorf("%s.containerPort: required", label)
+			return nil, nil, errors.Errorf("%s.containerPort: required", label)
 		}
 		cp := corev1.ContainerPort{ContainerPort: port, Protocol: corev1.ProtocolTCP}
 		if name, present, err := parseStringField(m, "name", label+".name"); err != nil {
-			return nil, err
+			return nil, nil, err
 		} else if present {
 			if errs := validation.IsValidPortName(name); len(errs) > 0 {
-				return nil, errors.Errorf("%s.name: invalid port name %q: %s", label, name, strings.Join(errs, "; "))
+				return nil, nil, errors.Errorf("%s.name: invalid port name %q: %s", label, name, strings.Join(errs, "; "))
 			}
 			if names[name] {
-				return nil, errors.Errorf("%s.name: duplicate port name %q", label, name)
+				return nil, nil, errors.Errorf("%s.name: duplicate port name %q", label, name)
 			}
 			names[name] = true
 			cp.Name = name
@@ -616,21 +628,23 @@ func parseContainerPorts(props map[string]any) ([]corev1.ContainerPort, error) {
 		// Raw, so an explicit "" reaches the enum check and is refused, as the
 		// published schema's enum refuses it, rather than reading as TCP.
 		if proto, present, err := parseRawStringField(m, "protocol", label+".protocol"); err != nil {
-			return nil, err
+			return nil, nil, err
 		} else if present {
 			if !containsValue(containerPortProtocols, corev1.Protocol(proto)) {
-				return nil, errors.Errorf("%s.protocol: must be one of %s, got %q", label, joinValues(containerPortProtocols), proto)
+				return nil, nil, errors.Errorf("%s.protocol: must be one of %s, got %q", label, joinValues(containerPortProtocols), proto)
 			}
 			cp.Protocol = corev1.Protocol(proto)
+		} else {
+			filled = append(filled, label+".protocol")
 		}
 		pair := fmt.Sprintf("%d/%s", cp.ContainerPort, cp.Protocol)
 		if pairs[pair] {
-			return nil, errors.Errorf("%s: duplicate port %s", label, pair)
+			return nil, nil, errors.Errorf("%s: duplicate port %s", label, pair)
 		}
 		pairs[pair] = true
 		out = append(out, cp)
 	}
-	return out, nil
+	return out, filled, nil
 }
 
 // (applyNonRWXConstraint is shared by every kind that projects a Deployment;

@@ -177,6 +177,8 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		default:
 			return nil, errors.Errorf("invalid restartPolicy %q, must be 'Never' or 'OnFailure'", rp)
 		}
+	} else {
+		config.parseFills = append(config.parseFills, "restartPolicy")
 	}
 
 	config.SuccessfulJobsHistoryLimit = 3
@@ -186,6 +188,8 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 			return nil, err
 		}
 		config.SuccessfulJobsHistoryLimit = limit
+	} else {
+		config.parseFills = append(config.parseFills, "successfulJobsHistoryLimit")
 	}
 
 	config.FailedJobsHistoryLimit = 1
@@ -195,6 +199,8 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 			return nil, err
 		}
 		config.FailedJobsHistoryLimit = limit
+	} else {
+		config.parseFills = append(config.parseFills, "failedJobsHistoryLimit")
 	}
 
 	if v, present, err := parseStringField(props, "concurrencyPolicy", "concurrencyPolicy"); err != nil {
@@ -254,6 +260,7 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		return nil, err
 	}
 	config.JobSpec = jobSpec
+	config.parseFills = append(config.parseFills, jobSpec.fills...)
 
 	env, err := parseEnv(props)
 	if err != nil {
@@ -284,11 +291,12 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		return nil, err
 	}
 	config.Args = args
-	ports, err := parseContainerPorts(props)
+	ports, portFills, err := parseContainerPorts(props)
 	if err != nil {
 		return nil, err
 	}
 	config.Ports = ports
+	config.parseFills = append(config.parseFills, portFills...)
 	// Without `ports`, namedPortsAllowed=false: the main container then
 	// declares no ContainerPort for the kubelet to resolve a named
 	// probe/lifecycle port against. With `ports`, a name resolves against them.
@@ -374,6 +382,9 @@ type CronjobConfig struct {
 	Name string
 	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
 	oam.PolicyDefaultLog
+	// parseFills are the property paths the parser filled because the author wrote
+	// no value (BuiltinDefaults reads them).
+	parseFills []string
 	// ObjectName names the CronJob (oam.Component.ObjectName); its labels and
 	// main container keep Name. Empty for the application's name.
 	ObjectName string

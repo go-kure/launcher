@@ -184,8 +184,9 @@ func (l *PolicyDefaultLog) PolicyDefaults() []PolicyDefault {
 	return slices.Clone(l.defaults)
 }
 
-// BuiltinDefault is one value that launcher's own code filled after the policy
-// decided, because nothing else held one: not a Default* accessor of the Policy.
+// BuiltinDefault is one value that launcher's own code supplied because nothing
+// else held one: not a Default* accessor of the Policy, and not a value the author
+// wrote.
 type BuiltinDefault struct {
 	// Path is the property path the author would have written for the value, for
 	// example "enablePDB". The properties the handler received do not hold it.
@@ -194,11 +195,21 @@ type BuiltinDefault struct {
 	Ref string
 }
 
-// BuiltinDefaultReporter is an optional interface of a config that a step after the
-// policy (Component.AfterPolicy) fills values on. The runtime reads it right after
-// those steps, and TransformWithProvenance reports each as SourceBuiltin under the
-// owner of the properties the config was built from. A config that does not
-// implement it reports nothing, and the transform's output never depends on it.
+// BuiltinDefaultReporter is an optional interface of a config that holds a value
+// launcher's own code supplied because nothing else did: a step after the policy
+// (Component.AfterPolicy) that fills it, or the handler's own parse of the
+// properties. The runtime reads it right after those steps, and
+// TransformWithProvenance reports each as SourceBuiltin under the owner of the
+// properties the config was built from. A config that does not implement it
+// reports nothing, and the transform's output never depends on it.
+//
+// An entry names the value that stands. A path is reported by one source only, the
+// one whose value stands: where ApplyPolicy applied a Default* accessor at the path
+// (PolicyDefaultReporter), the config does not report it as built in, and a value
+// the author wrote is reported by neither. The runtime replaces whatever is
+// recorded at a path with the later report, so a config that reported both would
+// name the wrong source. The method must be pure: it reads the config's state, and
+// answers the same when called twice or after ApplyPolicy ran twice.
 type BuiltinDefaultReporter interface {
 	BuiltinDefaults() []BuiltinDefault
 }

@@ -42,6 +42,19 @@ tiers, in precedence order:
    own default limit the error names the policy and carries no class. What
    the postgresql defaults step fills after the policy (`enablePDB`, and the
    `1Gi` `storage.size` fallback) is reported as a `builtin` entry, not as `policy`.
+   So is what the parser of `deployment`, `statefulset`, `daemonset`, `job` and
+   `cronjob` fills when the author wrote no value (an explicit `null` counts as no
+   value): `replicas` 1 (`deployment` and `statefulset`), `restartPolicy`
+   `OnFailure` and the two history limits of `cronjob`, `ports[i].protocol` `TCP`
+   (also in a `sidecars` entry and in a restartable `initContainers` entry), the
+   `status` `True` of a pod failure policy condition, the `accessModes`
+   `ReadWriteOnce` of a `pvc` volume that references a claim and of a
+   `volumeClaimTemplates` entry, and the `Recreate` strategy of a `deployment` with
+   a non-RWX claim (`strategy.type`). A path is reported by one source only, the one
+   whose value stands: where the policy default fills `replicas`, the entry is
+   `policy`, and under a `scaler` trait there is none, since the kind is then built
+   without a count. The list is what the library reports today, not every default
+   these kinds apply.
 3. **Intrinsic handler default** — `buildResourceRequirements`
    fills anything still unset at `Generate()` time: 100m CPU request, 128Mi
    memory request, and a memory limit mirroring the (possibly just-defaulted)
