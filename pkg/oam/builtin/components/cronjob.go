@@ -451,10 +451,7 @@ func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
 		return nil
 	}
 
-	if err := c.Resources.applyPolicyRequestDefaults(p, &c.PolicyDefaultLog); err != nil {
-		return err
-	}
-	if err := c.Resources.applyPolicyLimitDefaults(p, &c.PolicyDefaultLog); err != nil {
+	if err := applyContainerPolicyDefaults(p, &c.PolicyDefaultLog, &c.Resources, c.InitContainers, nil); err != nil {
 		return err
 	}
 

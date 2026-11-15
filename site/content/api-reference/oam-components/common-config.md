@@ -884,8 +884,8 @@ An `initContainers` entry also reads its own `restartPolicy` and
   `targetPort` to it; a port name is unique across the whole pod, main
   container, `sidecars` and native sidecars together. `ports` on any other
   init entry is refused with the reason, since that container has exited before
-  anything could reach it. It needs a cluster with sidecar container support. Built-in resource defaults apply to it; a
-  `policy`'s defaults are the main container's only;
+  anything could reach it. It needs a cluster with sidecar container support. A `policy`'s resource defaults apply to it as to
+  every container, then the built-in defaults;
 - `restartPolicyRules` needs `restartPolicy` (not `Always`) and holds at most 20 rules. A rule
   is a closed object: `action` is required and is `Restart` (upstream's
   `RestartAllContainers` needs a separate feature gate, and is refused), and

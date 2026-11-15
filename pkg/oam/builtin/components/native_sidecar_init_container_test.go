@@ -245,9 +245,9 @@ func TestNativeSidecar_ResizeRestartContainer(t *testing.T) {
 }
 
 // TestNativeSidecar_PolicyAndResourceDefaults: a restartable entry is held to
-// the same environment policy as any init container, and gets the built-in
-// request defaults and memory limit, not the policy's defaults, which only
-// the main container takes.
+// the same environment policy as any init container, and takes the policy's
+// default requests as every container does (go-kure/launcher#1581); the memory
+// limit mirrors the request the policy supplied.
 func TestNativeSidecar_PolicyAndResourceDefaults(t *testing.T) {
 	for _, k := range workloadKinds {
 		t.Run(k.name+"/defaults", func(t *testing.T) {
@@ -257,8 +257,8 @@ func TestNativeSidecar_PolicyAndResourceDefaults(t *testing.T) {
 				t.Fatalf("ApplyPolicy: %v", err)
 			}
 			res := ps.InitContainers[0].Resources
-			assertQuantities(t, "requests", res.Requests, map[corev1.ResourceName]string{corev1.ResourceCPU: "100m", corev1.ResourceMemory: "128Mi"})
-			assertQuantities(t, "limits", res.Limits, map[corev1.ResourceName]string{corev1.ResourceMemory: "128Mi"})
+			assertQuantities(t, "requests", res.Requests, map[corev1.ResourceName]string{corev1.ResourceCPU: "200m", corev1.ResourceMemory: "256Mi"})
+			assertQuantities(t, "limits", res.Limits, map[corev1.ResourceName]string{corev1.ResourceMemory: "256Mi"})
 		})
 		t.Run(k.name+"/maximum", func(t *testing.T) {
 			entry := nativeSidecarEntry()

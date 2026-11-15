@@ -365,6 +365,108 @@ func TestPolicyDefaults_PostgresqlOwnerShapes(t *testing.T) {
 	}
 }
 
+// extraContainerCases lists every type that publishes `initContainers`, with
+// `sidecars` where the type has it, and the owner its report is under: the
+// policy runs on the workload, so webservice and worker report on their
+// deployment member (go-kure/launcher#1581).
+func extraContainerCases() []struct {
+	typ      string
+	extra    map[string]any
+	sidecars bool
+	owner    owner
+} {
+	return []struct {
+		typ      string
+		extra    map[string]any
+		sidecars bool
+		owner    owner
+	}{
+		{"deployment", nil, true, owner{component: "app"}},
+		{"statefulset", nil, true, owner{component: "app"}},
+		{"daemonset", nil, true, owner{component: "app"}},
+		{"job", nil, false, owner{component: "app"}},
+		{"cronjob", map[string]any{"schedule": "0 2 * * *"}, false, owner{component: "app"}},
+		{"webservice", map[string]any{"port": 8080}, true, owner{component: "app", member: "deployment"}},
+		{"worker", nil, true, owner{component: "app", member: "deployment"}},
+	}
+}
+
+func extraContainerComponent(typ string, extra map[string]any, sidecars bool) oam.Component {
+	props := map[string]any{
+		"initContainers": []any{map[string]any{"name": "setup", "image": "ghcr.io/org/setup:v1"}},
+	}
+	if sidecars {
+		props["sidecars"] = []any{map[string]any{"name": "side", "image": "ghcr.io/org/side:v1"}}
+	}
+	for k, v := range extra {
+		props[k] = v
+	}
+	return workload("app", typ, props)
+}
+
+// A default an init container or a sidecar takes is reported as policy at the
+// entry's own path, under the owner of the workload's properties.
+func TestPolicyDefaults_ExtraContainersReportedAtTheirOwnPaths(t *testing.T) {
+	p := &defaultsPolicy{cpuRequest: "250m", memoryLimit: "512Mi"}
+	for _, tc := range extraContainerCases() {
+		t.Run(tc.typ, func(t *testing.T) {
+			prov, _ := policyProvenanceFor(t, p, extraContainerComponent(tc.typ, tc.extra, tc.sidecars))
+			entries := entriesOf(prov, tc.owner)
+			lists := []string{"initContainers"}
+			if tc.sidecars {
+				lists = append(lists, "sidecars")
+			}
+			for _, list := range lists {
+				for path, want := range map[string]oam.Source{
+					list + "[0].resources.requests.cpu":  {Kind: oam.SourcePolicy, Ref: "DefaultCPURequest"},
+					list + "[0].resources.limits.memory": {Kind: oam.SourcePolicy, Ref: "DefaultMemoryLimit"},
+				} {
+					if got := entries[path]; got != want {
+						t.Errorf("%s of %+v: got %+v, want %+v\npolicy entries: %v", path, tc.owner, got, want, policyEntries(prov))
+					}
+				}
+			}
+		})
+	}
+}
+
+// The report changes nothing the transform produces for those containers.
+func TestPolicyDefaults_ExtraContainerReportDoesNotChangeTheOutput(t *testing.T) {
+	p := &defaultsPolicy{cpuRequest: "250m", memoryLimit: "512Mi"}
+	for _, tc := range extraContainerCases() {
+		t.Run(tc.typ, func(t *testing.T) {
+			comp := extraContainerComponent(tc.typ, tc.extra, tc.sidecars)
+			app := &oam.Application{
+				APIVersion: oam.SupportedAPIVersion,
+				Kind:       "Application",
+				Metadata:   oam.Metadata{Name: "pkg", Namespace: "default"},
+				Spec:       oam.ApplicationSpec{Components: []oam.Component{comp}},
+			}
+			cluster, _, err := newTransformer().TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Policy: p})
+			if err != nil {
+				t.Fatalf("TransformWithPolicy: %v", err)
+			}
+			plain := manifestsOf(t, cluster)
+			_, reported := policyProvenanceFor(t, p, comp)
+			if string(plain) != string(reported) {
+				t.Errorf("the generated objects differ with the report on")
+			}
+			// Control: the compared bytes hold the entry's default, at a value the
+			// main container does not have. The main container authors every value
+			// the policy would fill, so only the extra containers can carry 250m.
+			authoredMain := extraContainerComponent(tc.typ, tc.extra, tc.sidecars)
+			authoredMain.Properties["resources"] = map[string]any{
+				"requests": map[string]any{"cpu": "100m", "memory": "64Mi"},
+				"limits":   map[string]any{"cpu": "1", "memory": "1Gi"},
+			}
+			_, withMain := policyProvenanceFor(t, p, authoredMain)
+			if !strings.Contains(string(withMain), "cpu: 250m") {
+				t.Errorf("the generated objects do not hold the policy default request on an extra container")
+			}
+		})
+	}
+}
+
 // The report changes nothing the transform produces.
 func TestPolicyDefaults_ReportDoesNotChangeTheOutput(t *testing.T) {
 	for _, tc := range policyDefaultCases() {

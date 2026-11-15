@@ -14,9 +14,10 @@ import (
 // request above its limit, which the apiserver refuses (go-kure/launcher#1217).
 // An authored request is never touched, and a default at or under the limit is
 // left for applyDefaultQuantity. An unparsable policy default is left for it to
-// report. A request it fixes is reported to log as the policy's, with the detail
-// oam.DetailCappedToLimit: the value is the author's limit, the cause the default.
-func (r *ResourceRequirements) capPolicyRequestDefaults(p oam.Policy, log *oam.PolicyDefaultLog) {
+// report. A request it fixes is reported to log as the policy's, at prefix then
+// "resources.requests.<name>", with the detail oam.DetailCappedToLimit: the value
+// is the author's limit, the cause the default.
+func (r *ResourceRequirements) capPolicyRequestDefaults(p oam.Policy, log *oam.PolicyDefaultLog, prefix string) {
 	for _, d := range []struct {
 		name     corev1.ResourceName
 		dflt     string
@@ -41,6 +42,6 @@ func (r *ResourceRequirements) capPolicyRequestDefaults(p oam.Policy, log *oam.P
 			r.Requests = corev1.ResourceList{}
 		}
 		r.Requests[d.name] = limit.DeepCopy()
-		log.ReportPolicyDefault(d.path, d.accessor, oam.DetailCappedToLimit)
+		log.ReportPolicyDefault(prefix+d.path, d.accessor, oam.DetailCappedToLimit)
 	}
 }

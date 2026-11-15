@@ -26,8 +26,13 @@ tiers, in precedence order:
    unset from `oam.Policy.DefaultCPURequest()`/`DefaultMemoryRequest()`/
    `DefaultCPULimit()`/`DefaultMemoryLimit()`. A negative policy default fails the build, as a
    negative authored quantity does, since Kubernetes would refuse it at apply;
-   zero is accepted. Each default that fills a value is reported to the
-   provenance report as a `policy` entry; a request lowered to the
+   zero is accepted. The defaults reach every container of the seven kinds
+   below: the main container and each `initContainers` and `sidecars` entry,
+   by the same rules. Each default that fills a value is reported to the
+   provenance report as a `policy` entry, at the path the author would have
+   written: `resources.requests.cpu` for the main container,
+   `initContainers[0].resources.requests.cpu` for the first init container. A
+   request lowered to the
    authored limit (tier 3 below) carries the detail `capped-to-limit`. What
    the postgresql defaults step fills after the policy (`enablePDB`, and the
    `1Gi` `storage.size` fallback) is reported as a `builtin` entry, not as `policy`.
@@ -59,8 +64,12 @@ components that call `buildResourceRequirements` on their main container
 `buildResourceRequirements`, so it has no intrinsic tier for its existing
 direct-form checks to diverge from.
 
-Init containers and sidecars receive the same intrinsic defaults,
-and `ApplyPolicy` enforces them too:
+Init containers and sidecars receive the same three tiers as the main
+container: the policy defaults (tier 2) fill what an entry leaves unset before
+the intrinsic defaults do, so the policy maximum is checked against the value
+the policy supplied. An entry that authors its values keeps them, and
+`unlimited` opts an entry out of a default limit. `ApplyPolicy` enforces the
+entries too:
 each entry's resources, image registry, `securityContext.privileged`, and
 `securityContext.capabilities.add` are checked against the same policy
 methods the main container uses, via the shared `enforceExtraContainer`
