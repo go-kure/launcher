@@ -173,6 +173,47 @@ func TestPolicyDefaultLimit_ALimitThePolicyDidNotFillIsNotBlamedOnIt(t *testing.
 	}
 }
 
+// The built-in request (100m cpu, 128Mi memory) is filled when the workload is
+// generated, after the policy. It is held to the limit the policy filled, as it
+// is to an authored one (go-kure/launcher#1217): a default limit under the
+// built-in request renders a request at that limit, never above it.
+func TestPolicyDefaultLimit_BuiltinRequestIsHeldToIt(t *testing.T) {
+	cases := []struct {
+		name   string
+		limit  string
+		policy *stubPolicy
+	}{
+		{"cpu", "50m", &stubPolicy{defaultCPULimit: "50m"}},
+		{"memory", "64Mi", &stubPolicy{defaultMemoryLimit: "64Mi"}},
+	}
+	for _, kind := range workloadKinds {
+		for _, c := range defaultedContainers(kind.name) {
+			for _, tc := range cases {
+				t.Run(kind.name+"/"+c.label+"/"+tc.name, func(t *testing.T) {
+					props := withProps(kind.props, c.props(nil))
+					if c.prefix == "" {
+						delete(props, "resources")
+					}
+					ps, err := generateKindWithPolicy(t, kind, props, tc.policy)
+					if err != nil {
+						t.Fatalf("ApplyPolicy: %v", err)
+					}
+					res := c.find(t, ps).Resources
+					name := corev1.ResourceName(tc.name)
+					limit, ok := res.Limits[name]
+					if !ok || limit.String() != tc.limit {
+						t.Fatalf("%s limit = %s (set: %t), want the policy default %s", tc.name, limit.String(), ok, tc.limit)
+					}
+					request, ok := res.Requests[name]
+					if !ok || request.String() != tc.limit {
+						t.Errorf("%s request = %s (set: %t), want it held to the limit %s", tc.name, request.String(), ok, tc.limit)
+					}
+				})
+			}
+		}
+	}
+}
+
 // What renders today still renders: a request at or under the default limit,
 // an authored limit with its request, and `unlimited` on the limit.
 func TestPolicyDefaultLimit_ControlsRenderAsToday(t *testing.T) {
