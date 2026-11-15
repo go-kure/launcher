@@ -4860,6 +4860,9 @@ func copyPtr[T any](p *T) *T {
 // default, which the apiserver refuses; leaving it out would have moved the
 // request of every limit-only document that is valid today, since the
 // apiserver would copy the whole limit into it.
+//
+// What is added is decided by builtinResourceFills and only written here, so
+// the built-in report (generateFillPaths) names exactly these values.
 func buildResourceRequirements(res ResourceRequirements) corev1.ResourceRequirements {
 	rr := res.ResourceRequirements
 	rr.Requests = rr.Requests.DeepCopy()
@@ -4867,28 +4870,75 @@ func buildResourceRequirements(res ResourceRequirements) corev1.ResourceRequirem
 	if rr.Requests == nil {
 		rr.Requests = corev1.ResourceList{}
 	}
-	defaultRequest(rr.Requests, rr.Limits, corev1.ResourceCPU, "100m")
-	defaultRequest(rr.Requests, rr.Limits, corev1.ResourceMemory, "128Mi")
 	if rr.Limits == nil {
 		rr.Limits = corev1.ResourceList{}
 	}
-	if _, ok := rr.Limits[corev1.ResourceMemory]; !ok && !res.NoMemoryLimit {
-		rr.Limits[corev1.ResourceMemory] = rr.Requests[corev1.ResourceMemory]
+	for _, f := range builtinResourceFills(res) {
+		if f.limit {
+			rr.Limits[f.name] = f.value
+		} else {
+			rr.Requests[f.name] = f.value
+		}
 	}
 	return rr
 }
 
-// defaultRequest sets requests[name] to the lower of dflt and limits[name] when
-// the author set no such request; see buildResourceRequirements.
-func defaultRequest(requests, limits corev1.ResourceList, name corev1.ResourceName, dflt string) {
-	if _, ok := requests[name]; ok {
-		return
+// builtinResourceFill is one value buildResourceRequirements adds to a
+// container that holds none: a request, or the memory limit.
+type builtinResourceFill struct {
+	limit bool
+	name  corev1.ResourceName
+	value resource.Quantity
+}
+
+// path returns the property path of the value under a container's own path.
+func (f builtinResourceFill) path() string {
+	if f.limit {
+		return "resources.limits." + string(f.name)
 	}
+	return "resources.requests." + string(f.name)
+}
+
+// builtinResourceFills decides what this package adds to res, and changes
+// nothing: the cpu and memory requests res does not hold, and a memory limit
+// equal to the memory request where res holds no memory limit and the author
+// did not write `unlimited`. A value already in res, the author's or a policy
+// default's, is never among them.
+func builtinResourceFills(res ResourceRequirements) []builtinResourceFill {
+	var fills []builtinResourceFill
+	// The memory request the container ends with: the one res holds, or the
+	// one filled below.
+	memoryRequest := res.Requests[corev1.ResourceMemory]
+	for _, d := range []struct {
+		name corev1.ResourceName
+		dflt string
+	}{
+		{corev1.ResourceCPU, "100m"},
+		{corev1.ResourceMemory, "128Mi"},
+	} {
+		if _, ok := res.Requests[d.name]; ok {
+			continue
+		}
+		q := defaultedRequest(res.Limits, d.name, d.dflt)
+		if d.name == corev1.ResourceMemory {
+			memoryRequest = q
+		}
+		fills = append(fills, builtinResourceFill{name: d.name, value: q})
+	}
+	if _, ok := res.Limits[corev1.ResourceMemory]; !ok && !res.NoMemoryLimit {
+		fills = append(fills, builtinResourceFill{limit: true, name: corev1.ResourceMemory, value: memoryRequest.DeepCopy()})
+	}
+	return fills
+}
+
+// defaultedRequest returns the lower of dflt and limits[name]: the request a
+// container without one gets; see buildResourceRequirements.
+func defaultedRequest(limits corev1.ResourceList, name corev1.ResourceName, dflt string) resource.Quantity {
 	q := resource.MustParse(dflt)
 	if limit, ok := limits[name]; ok && limit.Cmp(q) < 0 {
 		q = limit.DeepCopy()
 	}
-	requests[name] = q
+	return q
 }
 
 func applyProbes(container *corev1.Container, probes ProbeConfig) {

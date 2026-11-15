@@ -1483,7 +1483,7 @@ func buildPodSpec(in podSpecInput) (corev1.PodSpec, error) {
 	// unless automountServiceAccountToken was authored — the posture the
 	// per-component account each kind generated before
 	// go-kure/launcher#702 gave it.
-	if ps.ServiceAccountName == "" && ps.AutomountServiceAccountToken == nil {
+	if tokenAutomountIsBuiltin(ps) {
 		automount := false
 		ps.AutomountServiceAccountToken = &automount
 	}
