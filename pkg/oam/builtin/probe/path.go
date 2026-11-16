@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -34,6 +35,12 @@ func cloneComponents(comps []oam.Component) []oam.Component {
 	out := make([]oam.Component, len(comps))
 	for i, c := range comps {
 		c.Properties = cloneValue(c.Properties).(map[string]any)
+		c.Traits = slices.Clone(c.Traits)
+		for j := range c.Traits {
+			if c.Traits[j].Properties != nil {
+				c.Traits[j].Properties = cloneValue(c.Traits[j].Properties).(map[string]any)
+			}
+		}
 		out[i] = c
 	}
 	return out

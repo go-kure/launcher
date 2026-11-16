@@ -228,3 +228,84 @@ func TestProbes_FaultA_AnEntryNamingNoDefault(t *testing.T) {
 		t.Errorf("want the finding naming concurrencyPolcy, got %q", got)
 	}
 }
+
+// A trait's fills are named by the trait: an entry no row lists is found, and a row
+// that names the wrong trait is found in both directions.
+func TestProbes_FaultB_ATraitEntryNoRowLists(t *testing.T) {
+	p := probeNamed(t, "deployment with a certificate")
+	p.Fills = slices.DeleteFunc(slices.Clone(p.Fills), func(f probe.Fill) bool { return f.Trait == "certificate" && f.Path == "duration" })
+	got := strings.Join(probe.CheckReportedFillsAreReal(newTransformer(), []probe.Probe{p}), "\n")
+	if !strings.Contains(got, "app trait certificate[0] duration") || !strings.Contains(got, "no Fill of the probe lists") {
+		t.Errorf("want the unlisted trait entry named, got %q", got)
+	}
+}
+
+func TestProbes_FaultB_AWrongTrait(t *testing.T) {
+	p := probeNamed(t, "deployment with a certificate")
+	fills := slices.Clone(p.Fills)
+	i := slices.IndexFunc(fills, func(f probe.Fill) bool { return f.Trait == "certificate" && f.Path == "duration" })
+	fills[i].Trait = "external-secret"
+	p.Fills = fills
+	got := strings.Join(probe.CheckReportedFillsAreReal(newTransformer(), []probe.Probe{p}), "\n")
+	for _, want := range []string{"app trait external-secret[0] duration", "app trait certificate[0] duration"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("finding lacks %q: %s", want, got)
+		}
+	}
+}
+
+// Two traits of one type are two keys: a fill of the second with no row of its own
+// is found and is never covered by the first trait's row.
+func TestProbes_FaultB_ASecondTraitOfOneType(t *testing.T) {
+	p := probeNamed(t, "deployment with an ingress")
+	second := slices.Clone(p.Components[0].Traits)
+	second[0].Properties = map[string]any{
+		"servicePort": 8080,
+		"name":        "second",
+		"rules":       []any{map[string]any{"host": "b.example.com", "paths": []any{map[string]any{}}}},
+	}
+	p.Components[0].Traits = append(p.Components[0].Traits, second...)
+	got := strings.Join(probe.CheckReportedFillsAreReal(newTransformer(), []probe.Probe{p}), "\n")
+	if !strings.Contains(got, "trait ingress[1] rules[0].paths[0].path") || !strings.Contains(got, "no Fill of the probe lists") {
+		t.Errorf("want the second trait's entry named as unlisted, got %q", got)
+	}
+}
+
+// Authoring reaches the trait's properties: an Other value equal to the default changes
+// no object, which is the finding that shows the row proves nothing.
+func TestProbes_FaultB_ATraitOtherThatChangesNothing(t *testing.T) {
+	p := probeNamed(t, "deployment with a claim")
+	fills := slices.Clone(p.Fills)
+	i := slices.IndexFunc(fills, func(f probe.Fill) bool { return f.Trait == "pvc" && f.Path == "accessModes" })
+	fills[i].Other = fills[i].ValueWithPolicy
+	p.Fills = fills
+	got := strings.Join(probe.CheckReportedFillsAreReal(newTransformer(), []probe.Probe{p}), "\n")
+	if !strings.Contains(got, "leaves the generated objects unchanged") {
+		t.Errorf("want the unchanged-objects finding, got %q", got)
+	}
+}
+
+// A default the document's own rule refuses to have written is listed in NotAuthorable,
+// and the entry must stay true in both directions.
+func TestProbes_FaultA_NotAuthorable(t *testing.T) {
+	p := probeNamed(t, "deployment with a scaler")
+	p.NotAuthorable = nil
+	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{p}), "\n"); !strings.Contains(got, "NotAuthorable") {
+		t.Errorf("an unlisted refusal: want a finding naming NotAuthorable, got %q", got)
+	}
+	e := probeNamed(t, "deployment with a scaler")
+	e.NotAuthorable = map[string]string{"replicas": ""}
+	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{e}), "\n"); !strings.Contains(got, "no text the refusal must contain") {
+		t.Errorf("an empty text: want the finding, got %q", got)
+	}
+	w := probeNamed(t, "deployment with a scaler")
+	w.NotAuthorable = map[string]string{"replicas": "some other reason"}
+	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{w}), "\n"); !strings.Contains(got, "does not contain the stated") {
+		t.Errorf("a refusal for another reason: want the finding, got %q", got)
+	}
+	q := probeNamed(t, "deployment")
+	q.NotAuthorable = map[string]string{"replicas": "stale"}
+	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{q}), "\n"); !strings.Contains(got, "remove the entry from NotAuthorable") {
+		t.Errorf("a stale row: want the finding, got %q", got)
+	}
+}

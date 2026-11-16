@@ -75,7 +75,7 @@ func CheckDeclaredDefaults(tr *oam.Transformer, probes []Probe) []string {
 	schemas := tr.HandlerSchemas().Components
 	keys := tr.ComponentLoweringKeys()
 	for _, p := range probes {
-		prov, base, err := Run(tr, cloneComponents(p.Components), NoPolicy())
+		prov, base, err := RunWith(tr, cloneComponents(p.Components), NoPolicy(), p.Capabilities)
 		if err != nil {
 			// A probe that states it is refused without a policy has no document to
 			// compare; check B holds that outcome against the statement. Any other
@@ -99,9 +99,22 @@ func CheckDeclaredDefaults(tr *oam.Transformer, probes []Probe) []string {
 					add("%s: %v", label, err)
 					continue
 				}
-				_, authored, err := Run(tr, comps, NoPolicy())
-				if err != nil {
-					add("%s, and writing it is refused: %v", label, err)
+				_, authored, err := RunWith(tr, comps, NoPolicy(), p.Capabilities)
+				want, notAuthorable := p.NotAuthorable[d.path]
+				switch {
+				case notAuthorable && want == "":
+					add("%s, and the probe lists it as not authorable with no text the refusal must contain, so any refusal would pass: state the text", label)
+					continue
+				case err != nil && notAuthorable && strings.Contains(err.Error(), want):
+					continue
+				case err != nil && notAuthorable:
+					add("%s, and writing it is refused with %q, which does not contain the stated %q", label, err.Error(), want)
+					continue
+				case err != nil:
+					add("%s, and writing it is refused: %v; if the document's own rule refuses it, list the path in the probe's NotAuthorable with the reason", label, err)
+					continue
+				case notAuthorable:
+					add("%s, and the probe lists it as not authorable, yet writing it is accepted: remove the entry from NotAuthorable", label)
 					continue
 				}
 				_, left := p.LeftToCluster[d.path]
@@ -129,7 +142,7 @@ func CheckDeclaredDefaults(tr *oam.Transformer, probes []Probe) []string {
 		for _, list := range []struct {
 			name string
 			rows map[string]string
-		}{{"LeftToCluster", p.LeftToCluster}, {"Unreported", p.Unreported}} {
+		}{{"LeftToCluster", p.LeftToCluster}, {"Unreported", p.Unreported}, {"NotAuthorable", p.NotAuthorable}} {
 			for _, path := range slices.Sorted(maps.Keys(list.rows)) {
 				if !seen[path] {
 					add("probe %q: %s lists %q, which is no declared default the probe leaves out: remove the entry or fix its path", p.Name, list.name, path)
