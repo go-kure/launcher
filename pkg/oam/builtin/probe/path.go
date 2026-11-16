@@ -1,10 +1,10 @@
 package probe
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -50,11 +50,11 @@ func splitPath(path string) ([]any, error) {
 		for rest != "" {
 			idx, tail, ok := strings.Cut(rest, "]")
 			if !ok {
-				return nil, fmt.Errorf("path %q: unclosed index", path)
+				return nil, errors.Errorf("path %q: unclosed index", path)
 			}
 			n, err := strconv.Atoi(idx)
 			if err != nil {
-				return nil, fmt.Errorf("path %q: index %q is not a number", path, idx)
+				return nil, errors.Errorf("path %q: index %q is not a number", path, idx)
 			}
 			steps = append(steps, n)
 			rest = strings.TrimPrefix(tail, "[")
@@ -78,16 +78,17 @@ func setAt(props map[string]any, path string, value any) error {
 		case string:
 			m, ok := cur.(map[string]any)
 			if !ok {
-				return fmt.Errorf("path %q: %q is not under an object", path, s)
+				return errors.Errorf("path %q: %q is not under an object", path, s)
 			}
 			if last {
 				m[s] = cloneValue(value)
 				return nil
 			}
 			next, ok := m[s]
-			if !ok {
+			if !ok || next == nil {
+				// An explicit null reads as omitted, as the pipeline reads it.
 				if _, isIndex := steps[i+1].(int); isIndex {
-					return fmt.Errorf("path %q: no list at %q", path, s)
+					return errors.Errorf("path %q: no list at %q", path, s)
 				}
 				next = map[string]any{}
 				m[s] = next
@@ -96,7 +97,7 @@ func setAt(props map[string]any, path string, value any) error {
 		case int:
 			l, ok := cur.([]any)
 			if !ok || s < 0 || s >= len(l) {
-				return fmt.Errorf("path %q: no element %d", path, s)
+				return errors.Errorf("path %q: no element %d", path, s)
 			}
 			if last {
 				l[s] = cloneValue(value)

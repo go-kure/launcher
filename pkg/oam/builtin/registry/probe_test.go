@@ -155,3 +155,15 @@ func TestProbes_FaultA_ANullReadsAsOmitted(t *testing.T) {
 		t.Fatalf("want a finding naming concurrencyPolicy, got %q", got)
 	}
 }
+
+// An explicit null on the way to a fill reads as omitted when the fill is authored,
+// as the pipeline reads it: the probe still renders and the fill is still compared.
+func TestProbes_FaultB_ANullOnTheWayToAFill(t *testing.T) {
+	p := probeNamed(t, "deployment")
+	p.Components[0].Properties["resources"] = map[string]any{"requests": nil}
+	for _, f := range probe.CheckReportedFillsAreReal(newTransformer(), []probe.Probe{p}) {
+		if strings.Contains(f, "not under an object") {
+			t.Errorf("a null on the way read as an object: %s", f)
+		}
+	}
+}
