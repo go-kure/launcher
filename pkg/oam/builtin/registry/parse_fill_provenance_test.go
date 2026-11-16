@@ -22,7 +22,7 @@ func TestParseFills_DeploymentReportsBuiltinAndPolicyOncePerPath(t *testing.T) {
 	t.Run("no policy default", func(t *testing.T) {
 		prov, _ := policyProvenanceFor(t, &defaultsPolicy{}, comp)
 		got := entriesOf(prov, owner{component: "app"})
-		for path, ref := range map[string]string{"replicas": "deployment.replicas", "ports[0].protocol": "deployment.ports[].protocol"} {
+		for path, ref := range map[string]string{"replicas": "deployment.replicas", "ports[0].protocol": "deployment.ports[0].protocol"} {
 			if want := (oam.Source{Kind: oam.SourceBuiltin, Ref: ref}); got[path] != want {
 				t.Errorf("%s = %+v, want %+v\nentries: %v", path, got[path], want, got)
 			}

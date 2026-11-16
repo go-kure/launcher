@@ -247,12 +247,12 @@ func TestBuiltinDefaults_ReportedFillsAreReal(t *testing.T) {
 	}
 }
 
-// TestBuiltinDefaults_RefNamesTheKindAndTheFill: the ref is the kind and the path
-// with item indexes dropped, so one name stands for every item.
+// TestBuiltinDefaults_RefNamesTheKindAndTheFill: the ref is the kind and the path,
+// item indexes kept.
 func TestBuiltinDefaults_RefNamesTheKindAndTheFill(t *testing.T) {
 	cfg := newKindConfig(t, "deployment", map[string]any{"ports": ctrPorts})
 	got := reportedBuiltin(cfg)
-	if got["replicas"] != "deployment.replicas" || got["ports[0].protocol"] != "deployment.ports[].protocol" {
+	if got["replicas"] != "deployment.replicas" || got["ports[0].protocol"] != "deployment.ports[0].protocol" {
 		t.Errorf("refs = %v", got)
 	}
 }
@@ -404,5 +404,30 @@ func TestBuiltinDefaults_StatefulSetClaimTemplateAccessModes(t *testing.T) {
 	}
 	if a, b := generatedJSON(t, bare), generatedJSON(t, written); a != b {
 		t.Errorf("authoring accessModes changed the objects:\n%s\n%s", a, b)
+	}
+}
+
+// TestBuiltinDefaults_RefsAreKindAndFullPath: a built-in fill's Ref is the kind and
+// the path with its indexes, for a parse-time fill and a generation-time fill of a
+// container list entry alike.
+func TestBuiltinDefaults_RefsAreKindAndFullPath(t *testing.T) {
+	cfg := newKindConfig(t, "deployment", map[string]any{"initContainers": init1(ctrPorts)})
+	r, ok := cfg.(oam.BuiltinDefaultReporter)
+	if !ok {
+		t.Fatalf("%T does not report built-in defaults", cfg)
+	}
+	got := map[string]string{}
+	for _, d := range r.BuiltinDefaults() {
+		got[d.Path] = d.Ref
+	}
+	for path, ref := range map[string]string{
+		"initContainers[0].ports[0].protocol":         "deployment.initContainers[0].ports[0].protocol",
+		"initContainers[0].resources.requests.cpu":    "deployment.initContainers[0].resources.requests.cpu",
+		"initContainers[0].resources.limits.memory":   "deployment.initContainers[0].resources.limits.memory",
+		"initContainers[0].resources.requests.memory": "deployment.initContainers[0].resources.requests.memory",
+	} {
+		if got[path] != ref {
+			t.Errorf("Ref at %q = %q, want %q (reported: %v)", path, got[path], ref, got)
+		}
 	}
 }

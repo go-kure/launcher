@@ -27,8 +27,9 @@ Text in square brackets is added here to say what a moved sentence refers to.
     ["So is what the parser of `deployment`, ... fills", in the reference's tier 2.]
   - `common.go`
     ["`buildResourceRequirements`", in the reference's tier 3.]
-  - `builtin_defaults_generate.go`: `BuiltinDefaults` on the five controller
-    kinds records nothing. It answers from the config with
+  - `builtin_defaults_generate.go`: the generate-time fills, which
+    `BuiltinDefaults` of the five controller kinds (`builtin_defaults.go`) adds
+    through `generateFillPaths`. They record nothing. They answer from the config with
     `builtinResourceFills` and `tokenAutomountIsBuiltin`, the functions
     `buildResourceRequirements` and `buildPodSpec` decide by, so the report and
     the generated object cannot disagree
