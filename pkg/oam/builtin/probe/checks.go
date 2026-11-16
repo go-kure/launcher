@@ -100,7 +100,7 @@ func CheckReportedFillsAreReal(tr *oam.Transformer, probes []Probe) []string {
 			got := fillEntries(prov)
 			listed := map[entryKey]bool{}
 			for _, f := range p.Fills {
-				k := entryKey{f.Component, "", f.Path}
+				k := entryKey{f.Component, f.Member, f.Path}
 				listed[k] = true
 				if want := f.expected(i); got[k] != want {
 					add("%s: the report holds source %q at %s, the probe states %q", label, got[k], k, want)
@@ -138,7 +138,7 @@ func CheckReportedFillsAreReal(tr *oam.Transformer, probes []Probe) []string {
 				if !bytes.Equal(base, authored) {
 					add("%s: authoring %v at %s changes the generated objects, so the fill the report names is not what the library does", label, v, f.Path)
 				}
-				if src, ok := fillEntries(authoredProv)[entryKey{f.Component, "", f.Path}]; ok {
+				if src, ok := fillEntries(authoredProv)[entryKey{f.Component, f.Member, f.Path}]; ok {
 					add("%s: the report still holds a %s entry at %s after the author wrote the value", label, src, f.Path)
 				}
 				if f.Other == nil {

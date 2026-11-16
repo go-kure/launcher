@@ -12,10 +12,13 @@ import (
 // probe policy on and off; an empty one means the report holds no entry at the
 // path in that state.
 type Fill struct {
-	// Component is the component the entry belongs to. The probes hold handler-built
-	// types, whose entries carry no member.
-	Component string
-	// Path is the property path the author would have written.
+	// Component is the component the entry belongs to. Member is the member of a
+	// type that lowers to one: the report speaks at the member's place, with the
+	// member's component type (empty for a handler-built type's own entries).
+	Component, Member string
+	// Path is the property path of the entry. Checks A and B write a value at the
+	// same path on the authored component, so a row whose key the lowering renames
+	// carries no value.
 	Path string
 	// WithPolicy and WithoutPolicy are the source kinds observed at Path with the
 	// probe policy and with none.
@@ -50,6 +53,14 @@ type Probe struct {
 	// leaves unset for the cluster to apply, with the reason. Check A expects
 	// writing such a default to change the objects, and fails when it does not.
 	LeftToCluster map[string]string
+	// Unreported names, by path, a declared default the handler applies and the
+	// report holds no entry for, with the reason: a known gap in what the report
+	// says. Check A fails when an entry here is no longer a gap.
+	Unreported map[string]string
+	// DefaultPlaces maps the path of a declared default to the path the report
+	// speaks at, for a type that lowers and publishes no key map (postgresql: the
+	// authored storageSize lands at storage.size of the cluster).
+	DefaultPlaces map[string]string
 }
 
 // Run transforms comps as one application under p and returns the provenance

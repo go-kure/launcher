@@ -167,3 +167,64 @@ func TestProbes_FaultB_ANullOnTheWayToAFill(t *testing.T) {
 		}
 	}
 }
+
+// The lowered types speak at the place of a member. A row naming the wrong member is
+// found in both directions: the report's entry is unlisted and the row's own place
+// holds none.
+func TestProbes_FaultB_AWrongMember(t *testing.T) {
+	p := probeNamed(t, "worker")
+	fills := slices.Clone(p.Fills)
+	i := slices.IndexFunc(fills, func(f probe.Fill) bool { return f.Path == "replicas" })
+	fills[i].Member = "statefulset"
+	p.Fills = fills
+	got := strings.Join(probe.CheckReportedFillsAreReal(newTransformer(), []probe.Probe{p}), "\n")
+	for _, want := range []string{"app/statefulset replicas", "app/deployment replicas"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("finding lacks %q: %s", want, got)
+		}
+	}
+}
+
+// Check A reads a declared default of a lowered type at the places its key map
+// names, and a gap the probe lists must still be a gap.
+func TestProbes_FaultA_LoweredTypes(t *testing.T) {
+	p := probeNamed(t, "worker")
+	p.Unreported = nil
+	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{p}), "\n"); !strings.Contains(got, "topologySpread") {
+		t.Errorf("an unlisted gap: want a finding naming topologySpread, got %q", got)
+	}
+	q := probeNamed(t, "job")
+	q.Unreported = map[string]string{"restartPolicy": "stale"}
+	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{q}), "\n"); !strings.Contains(got, "remove the entry from Unreported") {
+		t.Errorf("a stale Unreported row: want the finding, got %q", got)
+	}
+}
+
+// Provenance records leaves, so a default that lands under an object is reported at
+// a path below the place the key map names, and check A must find it there. The worker
+// schema declares defaults under affinity, so the probe reaches them and every finding
+// must be empty. It catches a check that reads the place as an exact path; it does not
+// catch one that skips the defaults, which TestProbes_FaultA_LoweredTypes' gap rows cover.
+func TestProbes_FaultA_ADefaultReportedBelowItsPlace(t *testing.T) {
+	p := probeNamed(t, "worker")
+	p.Components[0].Properties["affinity"] = map[string]any{"enablePodAntiAffinity": true}
+	if got := probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{p}); len(got) != 0 {
+		t.Errorf("want no finding, got %v", got)
+	}
+}
+
+// A row of LeftToCluster or Unreported that names no declared default is a finding, so
+// a misspelled path or a default removed from the schema cannot stay behind.
+func TestProbes_FaultA_AnEntryNamingNoDefault(t *testing.T) {
+	p := probeNamed(t, "postgresql")
+	p.Unreported = map[string]string{"provder": "misspelled"}
+	got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{p}), "\n")
+	if !strings.Contains(got, `Unreported lists "provder"`) {
+		t.Errorf("want the finding naming provder, got %q", got)
+	}
+	q := probeNamed(t, "cronjob")
+	q.LeftToCluster = map[string]string{"concurrencyPolicy": "ok", "concurrencyPolcy": "misspelled"}
+	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{q}), "\n"); !strings.Contains(got, `LeftToCluster lists "concurrencyPolcy"`) {
+		t.Errorf("want the finding naming concurrencyPolcy, got %q", got)
+	}
+}
