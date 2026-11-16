@@ -456,30 +456,106 @@ func TestTraitFills_HookNamedIsNotReported(t *testing.T) {
 }
 
 // The one `name` of rbac names every object the trait generates, and the hook
-// is asked per object: where it names one of them, the property is not
-// launcher's fill.
+// is asked per object: where it names any one of them, the first or the last,
+// namespaced or cluster-scoped, the property is not launcher's fill. Where it
+// names none, the four objects keep the default and the property is reported.
 func TestTraitFills_RBACNameHookedForOneObjectIsNotReported(t *testing.T) {
 	c := traitFillCase{trait: "rbac", extra: map[string]any{"serviceAccountName": "runner"}}
-	app, ctx := traitFillApplication(t, c, traitDoc{props: map[string]any{
-		"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}}},
-	}})
-	asked := 0
-	ctx.Naming = func(req oam.NameRequest) (string, bool) {
-		if req.Role != oam.NameRoleRBAC || !strings.HasPrefix(req.Kind, "RoleBinding.") {
-			return "", false
+	doc := traitDoc{props: map[string]any{
+		"clusterWide": true,
+		"rules":       []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}}},
+	}}
+	run := func(t *testing.T, hooked string) (oam.Source, bool) {
+		t.Helper()
+		app, ctx := traitFillApplication(t, c, doc)
+		asked := 0
+		ctx.Naming = func(req oam.NameRequest) (string, bool) {
+			if req.Role != oam.NameRoleRBAC || !strings.HasPrefix(req.Kind, hooked+".") {
+				return "", false
+			}
+			asked++
+			return "hooked", true
 		}
-		asked++
-		return "hooked", true
+		_, _, prov, err := newTransformer().TransformWithProvenance(app, ctx)
+		if err != nil {
+			t.Fatalf("TransformWithProvenance: %v", err)
+		}
+		if want := min(len(hooked), 1); asked != want {
+			t.Fatalf("the hook named %d objects, want %d", asked, want)
+		}
+		got, ok := entriesOf(prov, owner{component: "app", trait: "rbac"})["name"]
+		return got, ok
 	}
-	_, _, prov, err := newTransformer().TransformWithProvenance(app, ctx)
-	if err != nil {
-		t.Fatalf("TransformWithProvenance: %v", err)
+	for _, kind := range []string{"Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding"} {
+		t.Run(kind, func(t *testing.T) {
+			if got, ok := run(t, kind); ok {
+				t.Errorf("name = %+v, want no entry: the hook named the %s", got, kind)
+			}
+		})
 	}
-	if asked != 1 {
-		t.Fatalf("the hook named %d objects, want the RoleBinding alone", asked)
+	t.Run("none", func(t *testing.T) {
+		got, _ := run(t, "")
+		if want := (oam.Source{Kind: oam.SourceBuiltin, Ref: "rbac.name"}); got != want {
+			t.Errorf("name = %+v, want %+v: every object kept the default", got, want)
+		}
+	})
+}
+
+// A backend's port is launcher's where the document gives none: a null port is
+// none, and a portName is the author's port, so nothing is reported for it.
+func TestTraitFills_BackendPortSpellings(t *testing.T) {
+	ingress := func(path map[string]any) map[string]any {
+		return map[string]any{"servicePort": 8080, "rules": []any{map[string]any{"host": "a.example.com", "paths": []any{path}}}}
 	}
-	if got, ok := entriesOf(prov, owner{component: "app", trait: "rbac"})["name"]; ok {
-		t.Errorf("name = %+v, want no entry: the hook named the RoleBinding", got)
+	route := map[string]any{
+		"servicePort": 8080,
+		"parentRefs":  []any{map[string]any{"name": "gw", "namespace": "infra"}},
+		"rules":       []any{map[string]any{"backendRefs": []any{map[string]any{"port": nil}}}},
+	}
+	for _, tc := range []struct {
+		name, trait, path string
+		props             map[string]any
+		extra             map[string]any
+		filled            bool
+	}{
+		{"ingress/null port", "ingress", "rules[0].paths[0].port", ingress(map[string]any{"port": nil}), nil, true},
+		{"ingress/portName", "ingress", "rules[0].paths[0].port", ingress(map[string]any{"portName": "http"}), nil, false},
+		{"httproute/null port", "httproute", "rules[0].backendRefs[0].port", route, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := traitFillCase{trait: tc.trait, extra: tc.extra}
+			prov, _ := traitProvenance(t, c, traitDoc{props: tc.props})
+			got, ok := entriesOf(prov, owner{component: "app", trait: tc.trait})[tc.path]
+			switch {
+			case tc.filled && got != (oam.Source{Kind: oam.SourceBuiltin, Ref: tc.trait + "." + tc.path}):
+				t.Errorf("%s = %+v, want the built-in fill", tc.path, got)
+			case !tc.filled && ok:
+				t.Errorf("%s = %+v, want no entry: the author named the port", tc.path, got)
+			}
+		})
+	}
+}
+
+// Under creationPolicy Merge or None the operator creates no Secret: the trait
+// resolves no name for one, and targetSecretName has no entry.
+func TestTraitFills_ExternalSecretTargetNotCreatedIsNotReported(t *testing.T) {
+	for _, policy := range []string{"Merge", "None"} {
+		t.Run(policy, func(t *testing.T) {
+			c := traitFillCase{trait: "external-secret"}
+			prov, _ := traitProvenance(t, c, traitDoc{props: map[string]any{
+				"secretName":     "db",
+				"secretStoreRef": map[string]any{"name": "vault"},
+				"target":         map[string]any{"creationPolicy": policy},
+				"data":           []any{map[string]any{"secretKey": "password"}},
+			}})
+			entries := entriesOf(prov, owner{component: "app", trait: "external-secret"})
+			if got, ok := entries["targetSecretName"]; ok {
+				t.Errorf("targetSecretName = %+v, want no entry: the trait creates no Secret", got)
+			}
+			if len(entries) == 0 {
+				t.Fatal("the trait has no entry at all: the case reads nothing")
+			}
+		})
 	}
 }
 
