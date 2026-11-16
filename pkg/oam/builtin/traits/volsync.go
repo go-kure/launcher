@@ -69,8 +69,12 @@ func (h *VolSyncHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 	if def == "" {
 		def = oam.ShortenNameWithSuffix(config.SourcePVC, "-backup", oam.ShortenLimitSubdomain)
 	}
-	if config.objectName, err = resolveObjectName(trait, oam.NameRoleVolSyncReplicationSource, replicationSourceKind, app.Namespace, "name", config.Name, def); err != nil {
+	var defaulted bool
+	if config.objectName, defaulted, err = resolveObjectName(trait, oam.NameRoleVolSyncReplicationSource, replicationSourceKind, app.Namespace, "name", config.Name, def); err != nil {
 		return err
+	}
+	if defaulted {
+		reportFill(&config.BuiltinDefaultLog, "volsync", "name")
 	}
 	// The hook's answer names the ReplicationSource alone: the sub-application
 	// keeps the authored name, else launcher's default (go-kure/launcher#787).
@@ -124,6 +128,8 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 			return nil, err
 		}
 		config.Repository = repo
+	} else {
+		reportFill(&config.BuiltinDefaultLog, "volsync", "repository")
 	}
 
 	if cm, ok := props["copyMethod"].(string); ok && cm != "" {

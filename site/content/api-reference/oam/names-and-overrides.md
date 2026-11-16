@@ -507,6 +507,10 @@ built outside a transform (a handler's `Apply` called directly) `ResolveName` va
 authored name and returns it or the default, the hook is not consulted and nothing is kept
 apart. The handler names the namespace its object is generated in (`NameSpec.Namespace`), or
 sets `NameSpec.ClusterScoped` for an object that has none.
+`(*Trait).ResolveNameDefaulted(NameSpec)` resolves the same way and also says whether
+launcher's default stood: false for the author's name and for one the hook gave, the default
+word for word included. A handler reads it to report the name as a fill
+([provenance report](transform-and-lowering.md)).
 
 A trait that names its object itself, under no role, claims the name with
 `(*Trait).ClaimObjectName(kind, namespace, name, property)`, or, for an object the trait

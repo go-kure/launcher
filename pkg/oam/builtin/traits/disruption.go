@@ -69,13 +69,13 @@ func (h *DisruptionHandler) Apply(trait *oam.Trait, app *stack.Application, bund
 	if err != nil {
 		return err
 	}
-	name, err := resolveObjectName(trait, oam.NameRolePDB,
+	name, defaulted, err := resolveObjectName(trait, oam.NameRolePDB,
 		schema.GroupKind{Group: policyv1.GroupName, Kind: "PodDisruptionBudget"},
 		app.Namespace, "pdbName", config.PDBName, config.defaultPDBName())
 	if err != nil {
 		return err
 	}
-	config.PDBName = name
+	config.PDBName, config.pdbNameFilled = name, defaulted
 	config.bundle = bundle
 	subAppName, err := resolveSubApplicationName(trait, app.Name+"-disruption")
 	if err != nil {
@@ -228,6 +228,9 @@ type DisruptionConfig struct {
 	// PDBName is the object name, resolved by Apply. "" on a config built
 	// directly leaves the default, <component>-pdb, shortened to fit.
 	PDBName string
+	// pdbNameFilled says that PDBName is launcher's default: neither the author
+	// nor the Naming hook named the budget (BuiltinDefaults).
+	pdbNameFilled bool
 
 	// bundle is the bundle the trait was applied to. Generate reads the scaler
 	// among its applications; the pointer stays valid when the transform

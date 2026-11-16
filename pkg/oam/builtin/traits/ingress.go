@@ -249,14 +249,21 @@ func (h *IngressHandler) Apply(trait *oam.Trait, app *stack.Application, bundle 
 	if def == "" {
 		def = routingObjectName(app.Name, "ingress", config.Scope)
 	}
-	if config.objectName, err = resolveObjectName(trait, oam.NameRoleIngress, ingressKind, app.Namespace, "name", config.Name, def); err != nil {
+	var defaulted bool
+	if config.objectName, defaulted, err = resolveObjectName(trait, oam.NameRoleIngress, ingressKind, app.Namespace, "name", config.Name, def); err != nil {
 		return err
 	}
+	if defaulted {
+		reportFill(&config.BuiltinDefaultLog, "ingress", "name")
+	}
 	if m := config.managedTLS; m != nil {
-		name, err := resolveObjectName(trait, oam.NameRoleTLSSecret, secretKind, app.Namespace,
+		name, defaulted, err := resolveObjectName(trait, oam.NameRoleTLSSecret, secretKind, app.Namespace,
 			"secretName", m.secretName, managedTLSSecretName(app.Name))
 		if err != nil {
 			return err
+		}
+		if defaulted {
+			reportFill(&config.BuiltinDefaultLog, "ingress", managedTLSProperty+".secretName")
 		}
 		config.TLS = append(config.TLS, IngressTLS{Hosts: m.hosts, SecretName: name})
 	}
@@ -580,6 +587,13 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 				return nil, errors.Errorf(
 					"rules[%d].paths[%d]: cannot determine backend port — configure the component port or specify 'port'/'portName' in the path",
 					i, j)
+			}
+			// The component's own service and its port, where the path names none.
+			if p.ServiceName == "" {
+				reportFill(&config.BuiltinDefaultLog, "ingress", fmt.Sprintf("rules[%d].paths[%d].backend", i, j))
+			}
+			if !portExplicit {
+				reportFill(&config.BuiltinDefaultLog, "ingress", fmt.Sprintf("rules[%d].paths[%d].port", i, j))
 			}
 
 			rule.Paths = append(rule.Paths, p)

@@ -12,14 +12,14 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/registry"
 )
 
-// These tests hold the provenance report to the fixed values the trait handlers
-// fill when the properties they are handed hold none (go-kure/launcher#1580):
-// reported as SourceBuiltin at the path the author would have written, under
-// the trait's owner, one source per path. They share the helpers of
-// policy_default_provenance_test.go.
+// These tests hold the provenance report to the values the trait handlers fill
+// when the properties they are handed hold none (go-kure/launcher#1580), fixed
+// or computed from the component: reported as SourceBuiltin at the path the
+// author would have written, under the trait's owner, one source per path. They
+// share the helpers of policy_default_provenance_test.go.
 //
-// Not every value a trait supplies is reported: a name or a backend a trait
-// derives from the component, the fields security-context and topology-spread
+// Not every value a trait supplies is reported: a name the Naming hook gave, a
+// sub-application's name, the fields security-context and topology-spread
 // write into the workload, and the expose rule are not
 // (traitDefaultExemptions holds the schema defaults among them).
 
@@ -44,6 +44,10 @@ type traitFillCase struct {
 	// extra is added to the properties of the deployment the trait sits on.
 	extra  map[string]any
 	policy *defaultsPolicy
+	// nameRole is the role the fill is resolved under when it is the name of an
+	// object, which the consumer's Naming hook may give in launcher's place; ""
+	// for every other fill.
+	nameRole oam.NameRole
 }
 
 func (c traitFillCase) name() string { return c.trait + "/" + c.path }
@@ -151,6 +155,57 @@ func traitFillCases() []traitFillCase {
 	})
 
 	add("pvc", "accessModes", "accessModes", map[string]any{"name": "data", "size": "1Gi"}, nil, []any{"ReadWriteMany"}, "accessModes")
+
+	// The values launcher computes from the component or from another property
+	// where the author wrote none: the name of a generated object, resolved under
+	// a name role, and the reference to a backend, a Secret or a remote key.
+	addName := func(trait, property string, role oam.NameRole, base map[string]any) {
+		add(trait, "", property, base, nil, "own-"+strings.ToLower(property), property)
+		cases[len(cases)-1].nameRole = role
+	}
+	np := map[string]any{"ingress": []any{map[string]any{"from": []any{peer}, "ports": []any{map[string]any{"port": 8080}}}}}
+	addName("networkpolicy", "name", oam.NameRoleNetworkPolicy, np)
+	addName("rbac", "name", oam.NameRoleRBAC, map[string]any{
+		"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}}},
+	})
+	cases[len(cases)-1].extra = map[string]any{"serviceAccountName": "runner"}
+	addName("scaler", "hpaName", oam.NameRoleHPA, map[string]any{"minReplicas": 2, "maxReplicas": 5})
+	addName("scaler", "pdbName", oam.NameRolePDB, map[string]any{"minReplicas": 2, "maxReplicas": 5, "enablePDB": true})
+	addName("disruption", "pdbName", oam.NameRolePDB, map[string]any{"maxUnavailable": 1})
+	addName("volsync", "name", oam.NameRoleVolSyncReplicationSource, vs)
+	addName("ingress", "name", oam.NameRoleIngress, ing)
+	addName("httproute", "name", oam.NameRoleHTTPRoute, pathMatch)
+	addName("external-secret", "targetSecretName", oam.NameRoleExternalSecret, es)
+	// The managed TLS entry is platform-reserved: a capability renders it.
+	managed := func(entry map[string]any) traitDoc {
+		return traitDoc{props: ing, caps: map[string]oam.CapabilityBinding{"ingress": {Rendering: map[string]any{"managedTLS": entry}}}}
+	}
+	cases = append(cases, traitFillCase{
+		trait: "ingress", path: "managedTLS.secretName", nameRole: oam.NameRoleTLSSecret,
+		omitted: managed(map[string]any{"hosts": []any{"a.example.com"}}),
+		written: managed(map[string]any{"hosts": []any{"a.example.com"}, "secretName": "own-tls"}),
+	})
+
+	add("volsync", "", "repository", vs, nil, "own-repository", "repository")
+	add("external-secret", "", "data[0].remoteRef.key", es, nil, "team/db", "data", "remoteRef", "key")
+	add("external-secret", "", "data[0].remoteRef.property", es, nil, "pw", "data", "remoteRef", "property")
+	// A path's backend is the component's Service and its port unless the path
+	// names another, which then needs its own port.
+	cases = append(cases, traitFillCase{
+		trait: "ingress", path: "rules[0].paths[0].backend",
+		omitted: traitDoc{props: ing},
+		written: traitDoc{props: with(with(ing, "other", "rules", "paths", "backend"), 9090, "rules", "paths", "port")},
+	})
+	add("ingress", "", "rules[0].paths[0].port", ing, nil, 8080, "rules", "paths", "port")
+	add("httproute", "", "rules[0].backendRefs", pathMatch, nil,
+		[]any{map[string]any{"name": "other", "port": 9090}}, "rules", "backendRefs")
+	cases = append(cases, traitFillCase{
+		trait: "httproute", path: "rules[0].backendRefs[0].name",
+		omitted: traitDoc{props: with(pathMatch, []any{map[string]any{"port": 8080}}, "rules", "backendRefs")},
+		written: traitDoc{props: with(pathMatch, []any{map[string]any{"name": "other", "port": 9090}}, "rules", "backendRefs")},
+	})
+	add("httproute", "", "rules[0].backendRefs[0].port",
+		with(pathMatch, []any{map[string]any{}}, "rules", "backendRefs"), nil, 8080, "rules", "backendRefs", "port")
 	return cases
 }
 
@@ -360,6 +415,71 @@ func TestTraitFills_ReplacedCapabilityValueIsBuiltin(t *testing.T) {
 	}
 	if got["issuerRef.kind"].Kind != oam.SourceCapability {
 		t.Errorf("issuerRef.kind = %+v, want the capability: the handler keeps that value", got["issuerRef.kind"])
+	}
+}
+
+// A name the consumer's Naming hook gave is not launcher's: the property has no
+// entry, also where the hook answers with launcher's default word for word.
+func TestTraitFills_HookNamedIsNotReported(t *testing.T) {
+	answers := map[string]func(def string) string{
+		"another name":         func(string) string { return "hooked" },
+		"the default verbatim": func(def string) string { return def },
+	}
+	for _, c := range traitFillCases() {
+		if c.nameRole == "" {
+			continue
+		}
+		for label, answer := range answers {
+			t.Run(c.name()+"/"+label, func(t *testing.T) {
+				app, ctx := traitFillApplication(t, c, c.omitted)
+				asked := 0
+				ctx.Naming = func(req oam.NameRequest) (string, bool) {
+					if req.Role != c.nameRole {
+						return "", false
+					}
+					asked++
+					return answer(req.Default), true
+				}
+				_, _, prov, err := newTransformer().TransformWithProvenance(app, ctx)
+				if err != nil {
+					t.Fatalf("TransformWithProvenance: %v", err)
+				}
+				if asked == 0 {
+					t.Fatalf("the hook was not asked for role %q: the case proves nothing", c.nameRole)
+				}
+				if got, ok := entriesOf(prov, owner{component: "app", trait: c.trait})[c.path]; ok {
+					t.Errorf("%s = %+v, want no entry: the hook named the object", c.path, got)
+				}
+			})
+		}
+	}
+}
+
+// The one `name` of rbac names every object the trait generates, and the hook
+// is asked per object: where it names one of them, the property is not
+// launcher's fill.
+func TestTraitFills_RBACNameHookedForOneObjectIsNotReported(t *testing.T) {
+	c := traitFillCase{trait: "rbac", extra: map[string]any{"serviceAccountName": "runner"}}
+	app, ctx := traitFillApplication(t, c, traitDoc{props: map[string]any{
+		"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}}},
+	}})
+	asked := 0
+	ctx.Naming = func(req oam.NameRequest) (string, bool) {
+		if req.Role != oam.NameRoleRBAC || !strings.HasPrefix(req.Kind, "RoleBinding.") {
+			return "", false
+		}
+		asked++
+		return "hooked", true
+	}
+	_, _, prov, err := newTransformer().TransformWithProvenance(app, ctx)
+	if err != nil {
+		t.Fatalf("TransformWithProvenance: %v", err)
+	}
+	if asked != 1 {
+		t.Fatalf("the hook named %d objects, want the RoleBinding alone", asked)
+	}
+	if got, ok := entriesOf(prov, owner{component: "app", trait: "rbac"})["name"]; ok {
+		t.Errorf("name = %+v, want no entry: the hook named the RoleBinding", got)
 	}
 }
 
