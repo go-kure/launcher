@@ -111,6 +111,7 @@ The report does not name every value a trait supplies. Not reported:
 
 - the name of a sub-application a trait adds, which no property names;
 - the trait-level `serviceName` and `servicePort` of `ingress` and `httproute`, and the single entry the `remoteRef` shorthand of `external-secret` stands for;
+- the `targetSecretName` of `external-secret` under creationPolicy `Merge` or `None`: the name is then of a Secret the trait does not make;
 - what `security-context` and `topology-spread` write into the workload: they add no sub-application, so no config of theirs is read;
 - what the `expose` rule fills before it emits its trait (the gateway namespace among them): the emitted trait's properties are reported as the rule's output;
 - the fills of a trait not listed above. The `enablePDB` of `scaler` left out is no fill: no object holds a value for it.

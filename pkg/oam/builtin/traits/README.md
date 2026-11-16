@@ -1047,10 +1047,12 @@ author would have written, with the ref `<trait>.<path>`, and the engine records
 a `builtin` entry under the trait once the policy ran on that config. The paths are
 listed in [Transform and lowering](/site/content/api-reference/oam/transform-and-lowering.md).
 
-Six configs embed `oam.BuiltinDefaultLog` and report in `parseProperties`
-(`reportFill`, `builtin_defaults.go`). Most fills are reported in the `else` of the
-branch that reads the authored value, so the report and the fill cannot disagree. Four
-are reported by a condition of their own, which has to stay in step with the fill:
+Six configs embed `oam.BuiltinDefaultLog` and report through `reportFill`
+(`builtin_defaults.go`): in `parseProperties` for a value the parser fills, in `Apply`
+for an object's name, which is resolved there. Most parse-time fills are reported in the
+`else` of the branch that reads the authored value, so the report and the fill cannot
+disagree. The others are reported by a condition of their own, which has to stay in
+step with the fill:
 
 - the `retain` counts of `volsync`, in a loop over the same keys ahead of the block that
   reads them;
@@ -1060,14 +1062,19 @@ are reported by a condition of their own, which has to stay in step with the fil
   `gatewayName` with no namespace;
 - the match types of `httproute`, where the type the generator gives the HTTPRoute
   (`toGatewayPathType`, `toGatewayHeaderType`) is not the word the author wrote: none,
-  an empty one, or one it does not know.
+  an empty one, or one it does not know;
+- the backend and port of an `ingress` path and the name and port of an `httproute`
+  backendRef, once the entry passed its checks: where no service name was read, and
+  where neither `port` nor (for `ingress`) `portName` gave the port;
+- the remote key and property of an `external-secret` `data[]` entry, in the branch
+  that sets each.
 
 `ScalerConfig` keeps plain fields so that it stays comparable, `NetworkPolicyConfig`
 answers from its parsed ports and a plain field, and `DisruptionConfig` and the rbac
 config keep one plain field each.
 
-A value the handler computes from the component or from another property is reported
-the same way: an object's name, the service and port of a backend that names none, the
+A value the handler computes from the component or from another property is a fill like
+a fixed one: an object's name, the service and port of a backend that names none, the
 repository Secret of `volsync`, the remote key and property of an `external-secret`
 entry. A name is resolved in `Apply`, through helpers that also return whether
 launcher's default stood (`resolveObjectName`, `oam.Trait.ResolveNameDefaulted`), and
@@ -1077,9 +1084,10 @@ one of them kept the default.
 
 Not reported: the name of the sub-application a trait adds, the trait-level
 `serviceName` and `servicePort` of `ingress` and `httproute`, the entry the `remoteRef`
-shorthand of `external-secret` stands for, what `security-context` and
-`topology-spread` write into the workload, and what the `expose` rule fills before it
-emits its trait.
+shorthand of `external-secret` stands for, the `targetSecretName` of `external-secret`
+under creationPolicy `Merge` or `None` (the name is then of a Secret the trait does not
+make, and no name is resolved for it), what `security-context` and `topology-spread`
+write into the workload, and what the `expose` rule fills before it emits its trait.
 
 A handler that gains a schema `Default` either reports the fill or is listed with its
 reason in `traitDefaultExemptions` (`builtin/registry/trait_fill_provenance_test.go`):

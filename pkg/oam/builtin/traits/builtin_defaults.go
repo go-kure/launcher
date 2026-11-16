@@ -27,9 +27,11 @@ import (
 // not launcher's fill, and the report has no source for it.
 //
 // Not reported: the name of the sub-application a trait adds, the trait-level
-// serviceName and servicePort of ingress and httproute, the fields
-// security-context and topology-spread write into the workload, which add no
-// sub-application, and what the expose rule fills before it emits its trait.
+// serviceName and servicePort of ingress and httproute, the targetSecretName
+// of external-secret where the trait makes no Secret (creationPolicy Merge or
+// None), the fields security-context and topology-spread write into the
+// workload, which add no sub-application, and what the expose rule fills
+// before it emits its trait.
 
 var (
 	_ oam.BuiltinDefaultReporter = (*CertificateConfig)(nil)
