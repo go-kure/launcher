@@ -15,7 +15,7 @@ func (valueConfig) Generate(*stack.Application) ([]*client.Object, error) { retu
 
 // pointerConfig has a field so that two of them are two objects: pointers to a
 // zero-size value may compare equal.
-type pointerConfig struct{ name string }
+type pointerConfig struct{ _ byte }
 
 func (*pointerConfig) Generate(*stack.Application) ([]*client.Object, error) { return nil, nil }
 
