@@ -2,7 +2,6 @@ package components
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -14,8 +13,9 @@ import (
 // paths they filled, and each method answers from that record and the config's
 // state when the transform asks, so:
 //
-//   - reading changes nothing, and reading twice, or before and after ApplyPolicy
-//     ran twice, gives the same answer;
+//   - reading changes nothing, and reading twice, or after ApplyPolicy ran twice,
+//     gives the same answer; the first ApplyPolicy may remove a path from the
+//     report, because the policy then reports a default there;
 //   - a path is reported by one source only: where ApplyPolicy reported a policy
 //     default at the path, the value that stands is the policy's and the built-in
 //     fill is not reported (oam.BuiltinDefaultReporter);
@@ -24,7 +24,8 @@ import (
 //     without one.
 //
 // A config built without a parse, by a test or a caller of its own, has recorded
-// nothing and reports nothing.
+// no parse-time fill and reports none; it still reports the fills made at
+// generation (builtin_defaults_generate.go), which it reads from its own state.
 
 var (
 	_ oam.BuiltinDefaultReporter = (*DeploymentConfig)(nil)
@@ -34,13 +35,10 @@ var (
 	_ oam.BuiltinDefaultReporter = (*CronjobConfig)(nil)
 )
 
-// itemIndex matches the index of a list item in a property path.
-var itemIndex = regexp.MustCompile(`\[\d+\]`)
-
-// builtinRef names a fill by its kind and its path with the item indexes dropped,
-// so one name stands for every item of a list: "deployment.ports[].protocol".
+// builtinRef names a fill by its kind and its path, as the generation-time fills
+// do: "deployment.ports[0].protocol".
 func builtinRef(kind, path string) string {
-	return kind + "." + itemIndex.ReplaceAllString(path, "[]")
+	return kind + "." + path
 }
 
 // builtinReport turns the paths a config filled into its report, leaving out each
