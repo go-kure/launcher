@@ -41,6 +41,7 @@ packages:
       - api-reference/oam/transform-and-lowering
       - api-reference/oam/schemas-and-contract
       - api-reference/oam/policy-and-capability
+      - api-reference/oam/fill-report
   - path: pkg/oam/model
     readme: pkg/oam/model/README.md
     mount: {target: api-reference/oam-models.md, title: Component Models, weight: 21, group: OAM, desc: "Configuration-defined component models: document format and loader"}
@@ -73,12 +74,11 @@ packages:
   - path: pkg/oam/builtin/registry
     readme: pkg/oam/builtin/registry/README.md
     mount: {target: api-reference/oam-registry.md, title: Built-in Registry, weight: 28, group: OAM, desc: "Every built-in handler and lowering rule, for registering the builtins"}
-
-  # ─── Unmounted: internal support; not a user-facing API ───
   - path: pkg/oam/builtin/probe
     readme: pkg/oam/builtin/probe/README.md
-    mounted: false
-    reason: "Probe documents and checks a consumer runs against its own transformer; the reference page for the fill report (go-kure/launcher#1580, step 8) will describe them."
+    mount: {target: api-reference/oam-probe.md, title: Fill Probes, weight: 29, group: OAM, desc: "Probe documents and checks a consumer runs against its own transformer, for the fills the provenance report names"}
+
+  # ─── Unmounted: internal support; not a user-facing API ───
   - path: pkg/oam/builtin
     readme: pkg/oam/builtin/README.md
     mounted: false
