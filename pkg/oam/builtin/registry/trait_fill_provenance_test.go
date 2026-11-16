@@ -343,6 +343,26 @@ func TestTraitFills_HTTPRouteUnknownMatchTypeIsBuiltin(t *testing.T) {
 	}
 }
 
+// A value a capability rendered that the handler replaces with its own is a fill
+// as an authored one is: the entry names the fill, not the capability.
+func TestTraitFills_ReplacedCapabilityValueIsBuiltin(t *testing.T) {
+	c := traitFillCase{trait: "certificate"}
+	prov, _ := traitProvenance(t, c, traitDoc{
+		props: map[string]any{"secretName": "tls", "dnsNames": []any{"a.example.com"}},
+		caps: map[string]oam.CapabilityBinding{"certificate": {Rendering: map[string]any{
+			"issuerRef": map[string]any{"name": "letsencrypt", "kind": "ClusterIssuer"},
+			"duration":  "",
+		}}},
+	})
+	got := entriesOf(prov, owner{component: "app", trait: "certificate"})
+	if want := (oam.Source{Kind: oam.SourceBuiltin, Ref: "certificate.duration"}); got["duration"] != want {
+		t.Errorf("duration = %+v, want %+v", got["duration"], want)
+	}
+	if got["issuerRef.kind"].Kind != oam.SourceCapability {
+		t.Errorf("issuerRef.kind = %+v, want the capability: the handler keeps that value", got["issuerRef.kind"])
+	}
+}
+
 // listIndex matches the index of a list item in a report path.
 var listIndex = regexp.MustCompile(`\[\d+\]`)
 
