@@ -182,6 +182,7 @@ LEFT_OUT_PATHS=(
   pkg/oam/post_policy_step.go
   pkg/oam/provenance.go
   pkg/oam/routed_backend.go
+  pkg/oam/schema_bounds.go
 )
 
 # The builtin component, trait and policy handlers refuse and build in one method, and their

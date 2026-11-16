@@ -53,7 +53,8 @@ func (h *PVCHandler) ValidateAndApplyDefaults(rendering map[string]any) (map[str
 func (h *PVCHandler) PropertySchema() map[string]oam.PropertySchema {
 	schema := maps.Clone((&components.PersistentVolumeClaimHandler{}).PropertySchema())
 	schema["name"] = oam.PropertySchema{Type: oam.PropertyTypeString, Required: true, Description: "Name of the PersistentVolumeClaim to create (a DNS-1123 subdomain)."}
-	return schema
+	// The trait's own bound: the kind this schema is taken from declares none.
+	return oam.DeclareBounds(schema, map[string][]oam.RefusalClass{"size": {oam.RefusalStorageMaximum}})
 }
 
 // Apply parses the trait properties and appends a standalone PVC to the bundle.

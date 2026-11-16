@@ -96,7 +96,7 @@ func (h *DeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDeploymentSpec())
-	return m
+	return oam.DeclareBounds(m, workloadBounds(true, true, false))
 }
 
 // Endpoints implements oam.EndpointProvider: one endpoint per port the main

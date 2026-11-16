@@ -1313,6 +1313,12 @@ its `maxStorageSize`. The violation names the component the trait is on. A trait
 policy forbids, does not allow, or requires and does not find is refused by the transform,
 with `oam.RefusalTraitCapability`.
 
+Two trait properties publish their bound in the schema, as `boundedBy`
+(go-kure/launcher#1580): `maxReplicas` of `scaler` (`replica-maximum`) and `size` of `pvc`
+(`storage-maximum`). The `pvc` trait states its own bound on the schema it takes from the
+`persistentvolumeclaim` kind, which declares none. The `secret` trait declares nothing:
+`explicit-secret` refuses the trait as a whole, not one property.
+
 A trait that generates several objects gives each one its own label map, never one map
 shared between them. These maps leave the package on objects the caller owns and edits,
 so a shared map turns a label added to the Role into a label on the RoleBinding, or one

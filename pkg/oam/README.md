@@ -171,6 +171,11 @@ single schema vocabulary — the same type also backs `kurel.yaml` parameters (`
 parameters, capability rendering) reject them at decode time, so unifying the type does not widen
 their accepted behavior.
 
+`BoundedBy` (published as `boundedBy`) names the refusal classes an authored value at a property
+can cause under the environment policy, and never the limit. Nothing reads it to accept or refuse
+a value. A handler states its bounds with `DeclareBounds`, over fragments it may share with other
+schemas. The two flat call sites and a model input refuse the key (go-kure/launcher#1580).
+
 Full text: [Property schemas and contract metadata](/site/content/api-reference/oam/schemas-and-contract.md#property-schemas).
 
 ### What an explicit `null` means on the emitted path
@@ -210,6 +215,8 @@ in [Transform and lowering](/site/content/api-reference/oam/transform-and-loweri
 ### Refusal classes
 
 See [Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md#refusal-classes).
+Which properties of the built-in types declare a class is under
+[Declared bounds](/site/content/api-reference/oam/policy-and-capability.md#declared-bounds).
 
 ## Capability system
 

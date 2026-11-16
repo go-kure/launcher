@@ -50,7 +50,7 @@ spec:
 | `metadata.name` | `<name>.<domain>`. It must have a domain, so a model never takes the name of a Kubernetes kind. It follows the type identity grammar in `pkg/oam` (`oam.ValidateTypeIdentity`). |
 | `metadata.version` | `v<major>`, `v<major>.<minor>` or `v<major>.<minor>.<patch>`. A short version is exact: `v2` is `v2.0.0`. |
 | `spec.celEnv` | Required. It must be `"1"`. The value names a fixed set of CEL functions, so a model means the same later. |
-| `spec.inputs` | Map of input name to `oam.PropertySchema`. Each name is a CEL identifier. Each schema has a `type` or `types`. |
+| `spec.inputs` | Map of input name to `oam.PropertySchema`. Each name is a CEL identifier. Each schema has a `type` or `types`. A schema may not set `boundedBy`, at any depth, an empty list included: a bound is published where a test holds it, and nothing holds one a model states (go-kure/launcher#1580). |
 | `spec.values` | Ordered list of `{name, expr}`. A value reads inputs and earlier values only. Each name is a CEL identifier and is unique. |
 | `spec.parts` | At least one part. A model that expands to nothing is an error. |
 | `parts[].id` | A CEL identifier, unique in the model. A later part reads `parts.<id>.<key>`, the object name of one output that the part declares. A part reads only an earlier part, and never a part with `when` or `forEach`. A read of any other part, or of the part itself, fails when the model compiles, and the error names the site and the part. A key the part does not declare fails when `Expand` runs, and the error names the site, the part and the key. |

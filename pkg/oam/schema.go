@@ -165,6 +165,31 @@ type PropertySchema struct {
 	// A consumer that predates ValueGates ignores it and accepts the value, as it
 	// did before the field existed; the field is additive for it.
 	ValueGates map[string]string `json:"valueGates,omitempty" yaml:"valueGates,omitempty"`
+	// BoundedBy names the classes of refusal by the environment policy that an
+	// authored value at this property can cause (go-kure/launcher#1580): a
+	// consumer that builds an input form reads here which properties the
+	// environment limits. It names the class and never the limit, which is the
+	// policy's. On an open node (an object that takes keys the schema does not
+	// declare, or an array of such items) it lists every class a value at an
+	// undeclared key below the node can cause, with no path; a property the node
+	// does declare carries its own.
+	//
+	// It is a published fact, not a rule: nothing reads it to accept or refuse a
+	// value, so a document is accepted as it is with or without it. A built-in
+	// type declares only what a test holds, in one direction: a declared class is
+	// shown to refuse a value at that property, and a property that declares none
+	// is not shown to be unbounded. A class that is about a type as a whole, not
+	// about one property (RefusalTraitCapability, RefusalObjectKind), is declared
+	// nowhere. The classes are listed in RefusalClasses order.
+	//
+	// Like PlatformReserved, it belongs to each schema declaration and never to a
+	// shared schema fragment (DeclareBounds), and it is only meaningful for
+	// handler properties: the two flat call sites reject the key at decode time
+	// (flatschema.go's key allow-sets leave it out), and a model input may not
+	// declare it (pkg/oam/model).
+	//
+	// A consumer that predates BoundedBy ignores it; the field is additive for it.
+	BoundedBy []RefusalClass `json:"boundedBy,omitempty" yaml:"boundedBy,omitempty"`
 }
 
 // ExclusiveGroup is one group of PropertySchema.Exclusive: keys of one object, at

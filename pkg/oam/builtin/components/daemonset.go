@@ -50,7 +50,7 @@ func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDaemonSetSpec())
-	return m
+	return oam.DeclareBounds(m, workloadBounds(true, false, false))
 }
 
 // Endpoints implements oam.EndpointProvider: one endpoint per port the main

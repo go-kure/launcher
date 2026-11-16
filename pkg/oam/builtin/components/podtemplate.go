@@ -47,7 +47,7 @@ type podTemplateProperties struct {
 func (h *PodTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 	template := podTemplateSchema("Required. PodTemplate template: the pod the template describes. Its spec is held to what the pod kind holds its own to (containers required, the image rule, ephemeralContainers, priority and overhead refused) and to the environment policy. metadata is carried as authored; no label is added.")
 	template.Required = true
-	return map[string]oam.PropertySchema{"template": template}
+	return oam.DeclareBounds(map[string]oam.PropertySchema{"template": template}, podTemplateBounds(false))
 }
 
 // ToApplicationConfig decodes an OAM podtemplate component into a

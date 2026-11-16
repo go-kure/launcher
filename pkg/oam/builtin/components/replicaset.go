@@ -37,12 +37,12 @@ func (h *ReplicaSetHandler) PropertySchema() map[string]oam.PropertySchema {
 	selector.Required = true
 	template := podTemplateSchema("Required. ReplicaSet spec.template: the pods the ReplicaSet creates. Its spec is held to what the pod kind holds its own to (containers required, the image rule, ephemeralContainers, priority and overhead refused) and to the environment policy; activeDeadlineSeconds is refused. metadata.labels gains the `app` label; an authored `app` with another value is refused.")
 	template.Required = true
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"replicas":        {Type: oam.PropertyTypeInteger, Description: "ReplicaSet spec.replicas: the number of pods. The API server defaults it to 1. Held to the environment policy's replica maximum; no policy default is filled."},
 		"minReadySeconds": {Type: oam.PropertyTypeInteger, Description: "ReplicaSet spec.minReadySeconds: seconds a new pod must be ready, without a container crashing, to count as available. The API server defaults it to 0."},
 		"selector":        selector,
 		"template":        template,
-	}
+	}, podTemplateBounds(true))
 }
 
 // ToApplicationConfig decodes an OAM replicaset component into a

@@ -702,6 +702,10 @@ Full text: [Policy defaults, endpoints and outputs](/site/content/api-reference/
 
 See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-refusal-classes).
 
+The seven workload types and the four kinds that take a pod as the API type publish, in
+`boundedBy`, which classes an authored value at a property can cause (`bounds.go`,
+go-kure/launcher#1580). No schema fragment carries a bound: each type states its own.
+
 ## Pod view of a monitoring workload object (`MonitoringPodSpec`)
 
 See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#pod-view-of-a-monitoring-workload-object-monitoringpodspec).
