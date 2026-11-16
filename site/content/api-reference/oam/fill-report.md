@@ -90,7 +90,9 @@ Only a config that reports its fills has `policy` and `builtin` entries. These d
 
 A fill can depend on the document. The `topology-spread` trait reports
 `topologySpreadConstraints` for a Deployment of two replicas or more, and nothing at one
-replica.
+replica. The `security-context` trait reports `runAsNonRoot`, `allowPrivilegeEscalation`
+and `readOnlyRootFilesystem` at `psaLevel: restricted` only, and each only where neither
+the trait nor the workload set it. The table states the exact condition.
 
 A handler whose config reports nothing leaves the defaults it applies out of the report.
 For such a type, no entry at a path says nothing about who supplies the value.
