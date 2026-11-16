@@ -1886,6 +1886,10 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 						return nil, err
 					}
 				}
+				// What the trait's handler filled, read after the policy as a
+				// component's is: a path the policy filled is the policy's, and
+				// the config does not report it as built in.
+				recordBuiltinDefaults(rec, newApp.Config)
 			}
 			if len(e.members) > 0 {
 				groupSubApps = append(groupSubApps, created...)

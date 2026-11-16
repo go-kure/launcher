@@ -960,8 +960,10 @@ func (r *ownerRecorder) builtin(path, ref string) {
 	r.entries[path] = Source{Kind: SourceBuiltin, Ref: ref}
 }
 
-// recordBuiltinDefaults reads the values a config's post-policy steps filled into
-// rec. It reads only: the config and the transform's output are unchanged.
+// recordBuiltinDefaults reads the values launcher's own code filled in a config
+// into rec: a component's, after its post-policy steps, and that of each
+// sub-application a trait adds, after the policy ran on it. It reads only: the
+// config and the transform's output are unchanged.
 func recordBuiltinDefaults(rec *ownerRecorder, config any) {
 	if rec == nil {
 		return

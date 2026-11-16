@@ -208,11 +208,15 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 		config.StoreRefKind = "ClusterSecretStore"
 		if kind, ok := rawStoreRef["kind"].(string); ok && kind != "" {
 			config.StoreRefKind = kind
+		} else {
+			reportFill(&config.BuiltinDefaultLog, "external-secret", "secretStoreRef.kind")
 		}
 	}
 
 	if ri, ok := props["refreshInterval"].(string); ok && ri != "" {
 		config.RefreshInterval = ri
+	} else {
+		reportFill(&config.BuiltinDefaultLog, "external-secret", "refreshInterval")
 	}
 
 	config.TargetSecretName = secretName
@@ -578,6 +582,10 @@ type ExternalSecretConfig struct {
 	DataFrom             []esDataFromEntry
 	envFrom              bool
 	mountPath            string
+
+	// BuiltinDefaultLog holds the values parseProperties filled
+	// (oam.BuiltinDefaultReporter).
+	oam.BuiltinDefaultLog
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource

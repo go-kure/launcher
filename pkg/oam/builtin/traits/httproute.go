@@ -205,6 +205,9 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 			return nil, errors.New("required property 'parentRefs' missing or empty (and no gatewayName capability to synthesize from)")
 		}
 		gatewayNamespace, _ := props["gatewayNamespace"].(string)
+		if gatewayNamespace == "" {
+			reportFill(&config.BuiltinDefaultLog, "httproute", "gatewayNamespace")
+		}
 		rawParentRefs = []any{synthesizeParentRef(gatewayName, gatewayNamespace)}
 	}
 	for i, rawRef := range rawParentRefs {
@@ -270,9 +273,13 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 					}
 					if t, ok := rawPath["type"].(string); ok {
 						pm.Type = t
+					} else {
+						reportFill(&config.BuiltinDefaultLog, "httproute", fmt.Sprintf("rules[%d].matches[%d].path.type", i, j))
 					}
 					if v, ok := rawPath["value"].(string); ok {
 						pm.Value = v
+					} else {
+						reportFill(&config.BuiltinDefaultLog, "httproute", fmt.Sprintf("rules[%d].matches[%d].path.value", i, j))
 					}
 					match.Path = pm
 				}
@@ -289,6 +296,8 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 						}
 						if t, ok := headerMap["type"].(string); ok {
 							hm.Type = t
+						} else {
+							reportFill(&config.BuiltinDefaultLog, "httproute", fmt.Sprintf("rules[%d].matches[%d].headers[%d].type", i, j, k))
 						}
 						name, ok := headerMap["name"].(string)
 						if !ok || name == "" {
@@ -981,6 +990,10 @@ type HTTPRouteConfig struct {
 	// ownServiceName is the Service of the application the trait ran on, the one ports belongs to
 	// (go-kure/launcher#1157).
 	ownServiceName string
+
+	// BuiltinDefaultLog holds the values parseProperties filled
+	// (oam.BuiltinDefaultReporter).
+	oam.BuiltinDefaultLog
 }
 
 // TrafficSources implements the cluster-level trafficSourceCollector contract.

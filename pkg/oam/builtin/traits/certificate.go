@@ -137,6 +137,8 @@ func (h *CertificateHandler) parseProperties(props map[string]any, app *stack.Ap
 	config.IssuerKind = "ClusterIssuer"
 	if kind, ok := issuerRef["kind"].(string); ok && kind != "" {
 		config.IssuerKind = kind
+	} else {
+		reportFill(&config.BuiltinDefaultLog, "certificate", "issuerRef.kind")
 	}
 
 	dnsNamesRaw, ok := props["dnsNames"].([]any)
@@ -155,9 +157,13 @@ func (h *CertificateHandler) parseProperties(props map[string]any, app *stack.Ap
 
 	if dur, ok := props["duration"].(string); ok && dur != "" {
 		config.Duration = dur
+	} else {
+		reportFill(&config.BuiltinDefaultLog, "certificate", "duration")
 	}
 	if renew, ok := props["renewBefore"].(string); ok && renew != "" {
 		config.RenewBefore = renew
+	} else {
+		reportFill(&config.BuiltinDefaultLog, "certificate", "renewBefore")
 	}
 
 	if err := parsePrivateKey(props, config); err != nil {
@@ -253,6 +259,10 @@ type CertificateConfig struct {
 	PKSize           int
 	PKEncoding       string
 	PKRotationPolicy string
+
+	// BuiltinDefaultLog holds the values parseProperties filled
+	// (oam.BuiltinDefaultReporter).
+	oam.BuiltinDefaultLog
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource

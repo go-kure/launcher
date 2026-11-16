@@ -860,7 +860,9 @@ func parseNPPort(raw any, path string) (npPort, error) {
 	// absence is the upstream default of TCP (k8s.io/api
 	// networking/v1/types.go:159-162).
 	port.Protocol = corev1.ProtocolTCP
+	port.protocolFilled = true
 	if rawProto, present := portMap["protocol"]; present && !oam.IsNullValue(rawProto) {
+		port.protocolFilled = false
 		proto, ok := npStringValue(rawProto)
 		if !ok {
 			return npPort{}, errors.Errorf("%s.protocol: expected string, got %T", path, rawProto)
@@ -929,6 +931,9 @@ func (p npPeer) policyPeer() networkingv1.NetworkPolicyPeer {
 type npPort struct {
 	Port     intstr.IntOrString
 	Protocol corev1.Protocol
+	// protocolFilled records that parseNPPort set Protocol because the port
+	// names none (NetworkPolicyConfig.BuiltinDefaults).
+	protocolFilled bool
 }
 
 func (c *NetworkPolicyConfig) defaultName() string {

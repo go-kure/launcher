@@ -1037,6 +1037,29 @@ every object a trait's sub-application generates, with its component's value
 (go-kure/launcher#788); after `Transform` the sub-application's config is the ownership
 wrapper, so a caller reaches a trait config's concrete type through `oam.UnwrapConfig`.
 
+## Fills in the provenance report
+
+Eight handlers report the fixed values they fill when the properties they are handed
+hold none (`oam.BuiltinDefaultReporter`, go-kure/launcher#1580): `certificate`,
+`external-secret`, `volsync`, `scaler`, `networkpolicy`, `ingress`, `httproute` and
+`pvc`. The config of the sub-application the trait adds names each fill at the path the
+author would have written, with the ref `<trait>.<path>`, and the engine records it as
+a `builtin` entry under the trait once the policy ran on that config. The paths are
+listed in [Transform and lowering](/site/content/api-reference/oam/transform-and-lowering.md).
+
+Six configs embed `oam.BuiltinDefaultLog` and report in `parseProperties`, in the
+`else` of the branch that reads the authored value, so the report and the fill cannot
+disagree (`reportFill`, `builtin_defaults.go`). `ScalerConfig` keeps a plain field so
+that it stays comparable, and `NetworkPolicyConfig` answers from its parsed ports.
+
+Not reported: a value derived from the component or from another property (a name, an
+implicit backend's service and port), what `security-context` and `topology-spread`
+write into the workload, and what the `expose` rule fills before it emits its trait.
+
+A handler that gains a schema `Default` either reports the fill or is listed with its
+reason in `traitDefaultExemptions` (`builtin/registry/trait_fill_provenance_test.go`):
+`TestTraitFills_EverySchemaDefaultIsReportedOrExempt` fails otherwise.
+
 ## The object kind policy
 
 A trait's objects are held to the object kind policy (`oam.ObjectKindPolicy`,

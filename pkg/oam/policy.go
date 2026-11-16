@@ -189,7 +189,9 @@ func (l *PolicyDefaultLog) PolicyDefaults() []PolicyDefault {
 // wrote.
 type BuiltinDefault struct {
 	// Path is the property path the author would have written for the value, for
-	// example "enablePDB". The properties the handler received do not hold it.
+	// example "enablePDB". The properties the handler received do not hold it, or
+	// hold a value the handler replaced with its own (an empty string it reads as
+	// unset).
 	Path string
 	// Ref names the fill, for example "postgresql.enablePDB".
 	Ref string
@@ -198,10 +200,12 @@ type BuiltinDefault struct {
 // BuiltinDefaultReporter is an optional interface of a config that holds a value
 // launcher's own code supplied because nothing else did: a step after the policy
 // (Component.AfterPolicy) that fills it, or the handler's own parse of the
-// properties. The runtime reads it right after those steps, and
+// properties. The runtime reads it right after those steps, on a component's
+// config and on the config of each sub-application a trait adds, and
 // TransformWithProvenance reports each as SourceBuiltin under the owner of the
-// properties the config was built from. A config that does not implement it
-// reports nothing, and the transform's output never depends on it.
+// properties the config was built from: the component, or the trait. A config
+// that does not implement it reports nothing, and the transform's output never
+// depends on it.
 //
 // An entry names the value that stands. A path is reported by one source only, the
 // one whose value stands: where ApplyPolicy applied a Default* accessor at the path

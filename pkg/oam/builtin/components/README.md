@@ -692,7 +692,9 @@ limits, a port's `protocol`, the `status` of a pod failure policy condition, the
 `builtin`, at the path the author would have written, and never at a path where the policy
 default stands. A `deployment` with a non-RWX claim and no authored `strategy` also reports
 `strategy.type`: the `Recreate` strategy is decided when the object is generated, by the
-predicate the report shares with the generator.
+predicate the report shares with the generator. `ClaimAccessModesOmitted` is the test of a
+claim's `accessModes` being left out, exported for the `pvc` trait, which reports the same
+fill for the claim it builds through `ParseClaimProperties`.
 
 Full text: [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
 
