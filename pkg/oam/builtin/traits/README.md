@@ -744,6 +744,26 @@ at `baseline` the `Unconfined` seccomp refusal and the `capabilities.add` list
 Windows workload asking for `fsGroup` fails at `Generate` instead of emitting a
 manifest the API server refuses.
 
+### What the report holds for it
+
+`TransformWithProvenance` reports the properties the profile fills as `builtin` under the
+trait, with the ref `security-context.<property>`: `runAsNonRoot`, `allowPrivilegeEscalation`
+and `readOnlyRootFilesystem`, at `psaLevel: restricted` only. A property is reported when
+the trait did not set it and the workload had none of its own: for `runAsNonRoot`, the
+pod or any container, init container included, had none; for the other two, any container
+did. The workload's own values are read from the objects the inner config generates, so
+they include what a trait applied earlier wrote. `baseline` and `privileged` add nothing,
+a Windows pod is filled for `runAsNonRoot` only, and a document the trait refuses reports
+nothing. The seccomp profile and `capabilities.drop` the profile also writes have no
+property of the trait and are not reported. As for `topology-spread`, the report is read
+once every trait has applied and generates the component's objects once more (the render
+or the fetch of a `helmtemplate` or `manifests` URL source then runs during a report
+call), and it changes nothing the transform produces. Observed in the probes of
+`pkg/oam/builtin/probe`: for `readOnlyRootFilesystem` the probe shows that authoring `true`
+gives the fill's objects and `false` changes them. The opposite value of the other two is
+refused at `restricted`, so their probe rows state a source only, and a registry test holds
+the objects of the three authored values equal to the fill's.
+
 ## The topology-spread trait
 
 `topology-spread` makes launcher's default spread opinion available on a kind
@@ -1050,14 +1070,14 @@ wrapper, so a caller reaches a trait config's concrete type through `oam.UnwrapC
 
 ## Fills in the provenance report
 
-Eleven handlers report the values they fill when the properties they are handed
+Twelve handlers report the values they fill when the properties they are handed
 hold none (`oam.BuiltinDefaultReporter`, go-kure/launcher#1580): `certificate`,
 `external-secret`, `volsync`, `scaler`, `disruption`, `rbac`, `networkpolicy`,
-`ingress`, `httproute`, `pvc` and `topology-spread`. The config of the sub-application the
+`ingress`, `httproute`, `pvc`, `topology-spread` and `security-context`. The config of the sub-application the
 trait adds names each fill at the path the author would have written, with the ref
 `<trait>.<path>`, and the engine records it as a `builtin` entry under the trait once the
-policy ran on that config. `topology-spread` adds no sub-application: the engine reads the
-config it puts in place once every trait of the document has applied (see its section above). The paths are
+policy ran on that config. `topology-spread` and `security-context` add no sub-application: the engine reads the
+config it puts in place once every trait of the document has applied (see their sections). The paths are
 listed in [Transform and lowering](/site/content/api-reference/oam/transform-and-lowering.md).
 
 Six configs embed `oam.BuiltinDefaultLog` and report through `reportFill`
@@ -1096,8 +1116,9 @@ Not reported: the name of the sub-application a trait adds, the trait-level
 `serviceName` and `servicePort` of `ingress` and `httproute`, the entry the `remoteRef`
 shorthand of `external-secret` stands for, the `targetSecretName` of `external-secret`
 under creationPolicy `Merge` or `None` (the name is then of a Secret the trait does not
-make, and no name is resolved for it), what `security-context` writes into the
-workload, and what the `expose` rule fills before it emits its trait.
+make, and no name is resolved for it), the seccomp profile and `capabilities.drop` that
+`security-context` writes into the workload, and what the `expose` rule fills before it
+emits its trait.
 
 A handler that gains a schema `Default` either reports the fill or is listed with its
 reason in `traitDefaultExemptions` (`builtin/registry/trait_fill_provenance_test.go`):

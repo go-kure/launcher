@@ -64,8 +64,24 @@ func traitProbes() []Probe {
 		nil, []Fill{derived("topology-spread", spreadPath)})
 	spread.Components[0].Properties["replicas"] = 2
 	spread.Fills = slices.DeleteFunc(spread.Fills, func(f Fill) bool { return f.Trait == "" && f.Path == "replicas" })
+	// At restricted the profile fills three properties the workload did not author.
+	// readOnlyRootFilesystem can be written either way. The other two cannot be
+	// written the other way at restricted (the trait refuses runAsNonRoot: false
+	// and the level refuses allowPrivilegeEscalation: true), so no Other value
+	// shows they reach an object: they are stated as a source only, and the
+	// registry tests hold the objects of an authored value equal to the fill's.
+	secure := withTrait("deployment with a restricted security context", oam.Trait{Type: "security-context", Properties: map[string]any{
+		"psaLevel": "restricted",
+	}}, nil, []Fill{
+		derived("security-context", "runAsNonRoot"), derived("security-context", "allowPrivilegeEscalation"),
+		tf("security-context", "readOnlyRootFilesystem", true, false),
+	})
+	// baseline and privileged fill nothing, so the report holds no entry.
+	baseline := withTrait("deployment with a baseline security context", oam.Trait{Type: "security-context", Properties: map[string]any{
+		"psaLevel": "baseline",
+	}}, nil, nil)
 	return []Probe{
-		spread,
+		spread, secure, baseline,
 		withTrait("deployment with a certificate", oam.Trait{Type: "certificate", Properties: map[string]any{
 			"secretName": "tls", "dnsNames": []any{"a.example.com"},
 		}}, issuer, []Fill{
