@@ -97,8 +97,8 @@ re-shaped keys. `helm` hands some keys on as written, a set that depends on the 
 mode, and builds the rest of its members from moved and re-shaped keys; its map is not
 built here. The map says where to read, never which source
 supplied the value: an omitted `port` and an authored one are both `rendered` at
-`ports[0].containerPort`, and telling them apart takes the report of a document that leaves
-the key out.
+`ports[0].containerPort`, and no report tells them apart: whether the author wrote such a
+key is read from the document.
 
 ## Traits a lowering rule forwards
 

@@ -700,8 +700,9 @@ publishes none either.
 
 The map is structure, not a report. A place holds an entry whether the author wrote
 the key or the rule, the policy or a built-in default filled it: an omitted `port`
-and an authored one are both `rendered` at `ports[0].containerPort`. Telling them
-apart takes the report of a document that leaves the key out.
+and an authored one are both `rendered` at `ports[0].containerPort`, and no report
+tells them apart: whether the author wrote such a key is read from the document. At
+an unchanged place an authored value is `copied` from `authored`.
 
 ### The "no handler" error
 

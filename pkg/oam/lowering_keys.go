@@ -37,8 +37,10 @@ type LoweredKey struct {
 //
 // The declaration is structure, not a report: it says where to read, never
 // which source supplied the value there. A place holds an entry whether the
-// author wrote the key or the rule, the policy or a built-in default filled it,
-// so telling those apart takes the report of a document that leaves the key out.
+// author wrote the key or the rule, the policy or a built-in default filled it.
+// At a place the rule builds, the report gives an authored key and the rule's
+// default the same source, so whether the author wrote the key is read from the
+// document.
 type LoweringKeyDeclarer interface {
 	LoweringKeys() map[string][]LoweredKey
 }
