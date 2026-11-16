@@ -29,6 +29,7 @@ The rest of this page is split into parts. Each part holds the full text of its 
 - [Transform, extension and lowering](/site/content/api-reference/oam/transform-and-lowering.md): The transform step, how to register builtins and the lowering rules.
 - [Property schemas and contract metadata](/site/content/api-reference/oam/schemas-and-contract.md): Property schemas, what an explicit null means and the contract metadata.
 - [Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md): Policy defaults, refusal classes and how a capability renders.
+- [Fill report](/site/content/api-reference/oam/fill-report.md): Where a consumer reads who supplies a value the author leaves out, and which policy refusal an authored value can cause.
 
 The headings below stay so that a link to an old section still lands here. Each one links to the part that holds the text. Some also keep the opening lines of the section.
 

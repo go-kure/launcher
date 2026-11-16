@@ -56,7 +56,7 @@ name for any kind:
 | `postgresql.cnpg.io` `Database` | `<component>-<database>`, or `databases[].objectName` | `status.applied` is `true` (`DatabaseStatus.Applied`) | cannot judge |
 | `postgresql.cnpg.io` `ScheduledBackup` | `<component>-<schedule>` | none: `ScheduledBackupStatus` holds schedule times and an error | cannot judge |
 
-The four rules (`webservice`, `worker`, `helm`, `postgresql`) also implement
+The five rules (`webservice`, `worker`, `helm`, `postgresql`, `oci`) also implement
 `oam.LoweringTargetDeclarer`, naming every type they lower into:
 
 | Rule | Components | Traits | Policies |
@@ -65,6 +65,7 @@ The four rules (`webservice`, `worker`, `helm`, `postgresql`) also implement
 | `worker` | `deployment`, `serviceaccount` | `topology-spread`, `pvc` | |
 | `helm` | `helmrelease`, `helmtemplate`, `helmrepository`, `ocirepository`, `gitrepository`, `bucket` | `configmap`, `secret` | |
 | `postgresql` | `cnpg-cluster`, `cnpg-objectstore`, `cnpg-pooler`, `cnpg-database`, `cnpg-scheduledbackup` | | `dependency`, `placement` |
+| `oci` | `ocirepository`, `fluxcd-kustomization` | | |
 
 `Transformer.Seal`, which every transform runs first, refuses a registry that holds a rule
 without all of its targets, whatever the document: `registry incomplete: lowering rule

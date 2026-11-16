@@ -398,12 +398,13 @@ map and run `bash site/scripts/gen-docs-tables.sh`.
 | `pkg/cmd/kurel/` | `api-reference/kurel-cli` | — |
 | `pkg/errors/` | `api-reference/errors` | — |
 | `pkg/patch/` | `api-reference/patch` | — |
-| `pkg/oam/` | `api-reference/oam` | `api-reference/oam/pipeline`, `api-reference/oam/labels-and-ownership`, `api-reference/oam/names-and-overrides`, `api-reference/oam/parsing-and-types`, `api-reference/oam/transform-and-lowering`, `api-reference/oam/schemas-and-contract`, `api-reference/oam/policy-and-capability` |
+| `pkg/oam/` | `api-reference/oam` | `api-reference/oam/pipeline`, `api-reference/oam/labels-and-ownership`, `api-reference/oam/names-and-overrides`, `api-reference/oam/parsing-and-types`, `api-reference/oam/transform-and-lowering`, `api-reference/oam/schemas-and-contract`, `api-reference/oam/policy-and-capability`, `api-reference/oam/fill-report` |
 | `pkg/oam/model/` | `api-reference/oam-models` | — |
 | `pkg/oam/builtin/components/` | `api-reference/oam-components` | `api-reference/oam-components/common-config`, `api-reference/oam-components/policy-and-endpoints`, `api-reference/oam-components/kinds-core-workloads`, `api-reference/oam-components/kinds-networking`, `api-reference/oam-components/kinds-access-and-admission`, `api-reference/oam-components/kinds-flux`, `api-reference/oam-components/kinds-helm`, `api-reference/oam-components/kinds-monitoring`, `api-reference/oam-components/kinds-metallb`, `api-reference/oam-components/kinds-postgres`, `api-reference/oam-components/kinds-secrets-certs-backup`, `api-reference/oam-components/adding-a-kind`, `api-reference/oam-components/upstream-fields-not-read`, `api-reference/oam-components/extending`, `api-reference/oam-components/null-and-spellings`, `api-reference/oam-components/conventions` |
 | `pkg/oam/builtin/traits/` | `api-reference/oam-traits` | — |
 | `pkg/oam/builtin/policies/` | `api-reference/oam-policies` | — |
 | `pkg/oam/builtin/registry/` | `api-reference/oam-registry` | — |
+| `pkg/oam/builtin/probe/` | `api-reference/oam-probe` | — |
 | `.github/workflows/` | — | `contributing/github-workflows`, `contributing/shared-workflows`, `contributing/releasing` |
 <!-- END GENERATED: reverse-mapping -->
 

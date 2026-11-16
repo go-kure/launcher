@@ -655,6 +655,7 @@ type. The built-in rules declare:
 | `worker` | `deployment`, `serviceaccount` | `topology-spread`, `pvc` | |
 | `helm` | `helmrelease`, `helmtemplate`, `helmrepository`, `ocirepository`, `gitrepository`, `bucket` | `configmap`, `secret` | |
 | `postgresql` | `cnpg-cluster`, `cnpg-objectstore`, `cnpg-pooler`, `cnpg-database`, `cnpg-scheduledbackup` | | `dependency`, `placement` |
+| `oci` | `ocirepository`, `fluxcd-kustomization` | | |
 | `expose` (trait) | | `ingress`, `httproute` | |
 
 ### Lowering keys
