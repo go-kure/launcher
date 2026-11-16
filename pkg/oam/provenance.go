@@ -977,6 +977,34 @@ func recordBuiltinDefaults(rec *ownerRecorder, config any) {
 	}
 }
 
+// decoratorFill is a config a trait put in place of its component's own, with
+// the trait's entry in the report.
+type decoratorFill struct {
+	rec    *ownerRecorder
+	config stack.ApplicationConfig
+}
+
+// sameConfig reports whether a and b are one config. A config of a type that
+// cannot be compared counts as another one, so a trait is read rather than
+// skipped; every config the builtins hold is a pointer, which compares.
+func sameConfig(a, b stack.ApplicationConfig) bool {
+	ta := reflect.TypeOf(a)
+	return ta == reflect.TypeOf(b) && ta != nil && ta.Comparable() && a == b
+}
+
+// recordDecoratorFills reads the values launcher's own code filled in each
+// config a decorating trait put in place. It runs after every trait of the
+// build has applied, so a fill that depends on another trait (the replica count
+// a scaler decides) is read as that trait left it. It reads only.
+func recordDecoratorFills(fills *[]decoratorFill) {
+	if fills == nil {
+		return
+	}
+	for _, f := range *fills {
+		recordBuiltinDefaults(f.rec, f.config)
+	}
+}
+
 // replace records the leaves of v, which now stand at path, as src. Whatever was
 // recorded at or under path is gone: the merge replaced that value whole.
 func (r *ownerRecorder) replace(path string, v any, src Source) {

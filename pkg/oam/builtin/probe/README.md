@@ -66,13 +66,16 @@ applies those three fills.
 Check A also found declared defaults the report holds no entry for, observed in these
 probes. Each is listed in its probe's `Unreported` with the reason, and check A fails when
 an entry there stops being a gap: `topologySpread` on `webservice` and `worker` (the
-topology-spread trait it switches reports nothing yet), and `provider`, `version` and, without
-a policy default, `replicas` on `postgresql`.
+document with no policy runs one replica, where the topology-spread trait it switches writes
+no constraints and the report holds no entry; the document with the policy runs two and
+holds it), and `provider`, `version` and, without a policy default, `replicas` on
+`postgresql`.
 
 The trait probes put one trait on a deployment, with the capability bindings the transform
 runs with (`Probe.Capabilities`), and name the fills the report holds under the trait
 (`Fill.Trait`): `certificate`, `external-secret`, `volsync`, `scaler`, `networkpolicy`,
-`ingress`, `httproute` (also the gateway namespace of a platform gateway) and `pvc`. A
+`ingress`, `httproute` (also the gateway namespace of a platform gateway), `pvc` and
+`topology-spread`. A
 probe row writes its value at the trait at `Fill.TraitIndex`, when that trait has the row's type. Five limits, observed in these
 probes:
 
@@ -84,7 +87,8 @@ probes:
 - The computed fills (names, backends, a target secret, the repository of a backup) have
   rows that state sources only: no value an author writes is the computed one, so check B
   does not show that the library applies them.
-- A fill the report does not hold yet has no row: `security-context`, `topology-spread`
-  and what the `expose` rule fills.
+- A fill the report does not hold yet has no row: `security-context` and what the
+  `expose` rule fills. The `topology-spread` row states a source only: the trait takes no
+  property and fills a field of the Deployment, so no value an author writes is its fill.
 - `scaler` lists `replicas` in `NotAuthorable`: the trait owns the replica count and the
   document refuses an authored one with the stated text, so check A cannot compare objects for it.

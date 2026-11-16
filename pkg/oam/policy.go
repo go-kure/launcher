@@ -203,7 +203,11 @@ type BuiltinDefault struct {
 // properties. The runtime reads it right after those steps, on a component's
 // config and on the config of each sub-application a trait adds, and
 // TransformWithProvenance reports each as SourceBuiltin under the owner of the
-// properties the config was built from: the component, or the trait. A config
+// properties the config was built from: the component, or the trait. A trait
+// that wraps its component's config adds no sub-application, so its config is
+// read once every trait of the document has applied, under that trait, only
+// when the trait replaced the component's config; what it reports may depend on
+// a trait applied after it. A config
 // that does not implement it reports nothing, and the transform's output never
 // depends on it.
 //

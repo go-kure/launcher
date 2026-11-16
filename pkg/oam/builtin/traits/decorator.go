@@ -300,6 +300,16 @@ type augmentingDecorator struct {
 	augmenter layout.LayoutAugmenter
 }
 
+// BuiltinDefaults forwards to the decorator it wraps, which is the one that
+// fills: the wrapper hides every method decoratedConfig does not name, and the
+// runtime reads oam.BuiltinDefaultReporter on the config the trait put in place.
+func (a augmentingDecorator) BuiltinDefaults() []oam.BuiltinDefault {
+	if r, ok := a.decoratedConfig.(oam.BuiltinDefaultReporter); ok {
+		return r.BuiltinDefaults()
+	}
+	return nil
+}
+
 // AugmentLayout forwards to the inner config's LayoutAugmenter implementation.
 // No decorator processes the augmented layout: every one rewrites only what its
 // inner Generate returns (security-context patching a PodSpec, for one). What
