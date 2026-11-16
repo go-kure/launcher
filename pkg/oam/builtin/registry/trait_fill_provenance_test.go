@@ -19,9 +19,10 @@ import (
 // share the helpers of policy_default_provenance_test.go.
 //
 // Not every value a trait supplies is reported: a name the Naming hook gave, a
-// sub-application's name, the fields security-context and topology-spread
-// write into the workload, and the expose rule are not
-// (traitDefaultExemptions holds the schema defaults among them).
+// sub-application's name, the fields security-context writes into the
+// workload, and the expose rule are not (traitDefaultExemptions holds the schema
+// defaults among them). The topology-spread fill is held by
+// decorator_fill_provenance_test.go.
 
 // traitDoc is the properties of one trait and the capability bindings the
 // transform runs with.

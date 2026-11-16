@@ -11,7 +11,9 @@ import (
 // go-kure/launcher#1580): the config of the sub-application the trait adds
 // names each at the path the author would have written, with the ref
 // "<trait>.<path>". The engine reads the report after the policy ran on that
-// config and records it under the trait. A fill is a fixed value, or one the
+// config and records it under the trait. A trait that adds no sub-application
+// but wraps its component's config (topology-spread) is read from that config
+// once every trait of the document has applied. A fill is a fixed value, or one the
 // handler computes from the component or from another property (an object's
 // name, a backend's service and port, the repository Secret of volsync).
 //
@@ -29,9 +31,8 @@ import (
 // Not reported: the name of the sub-application a trait adds, the trait-level
 // serviceName and servicePort of ingress and httproute, the targetSecretName
 // of external-secret where the trait makes no Secret (creationPolicy Merge or
-// None), the fields security-context and topology-spread write into the
-// workload, which add no sub-application, and what the expose rule fills
-// before it emits its trait.
+// None), the fields security-context writes into the workload, which adds no
+// sub-application, and what the expose rule fills before it emits its trait.
 
 var (
 	_ oam.BuiltinDefaultReporter = (*CertificateConfig)(nil)
@@ -44,6 +45,7 @@ var (
 	_ oam.BuiltinDefaultReporter = (*IngressConfig)(nil)
 	_ oam.BuiltinDefaultReporter = (*HTTPRouteConfig)(nil)
 	_ oam.BuiltinDefaultReporter = (*PVCTraitConfig)(nil)
+	_ oam.BuiltinDefaultReporter = (*topologySpreadConfig)(nil)
 )
 
 // reportFill records in log that the handler of trait filled path.
