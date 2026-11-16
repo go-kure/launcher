@@ -131,16 +131,9 @@ func (r WorkerRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext
 		return oam.LoweringResult{}, err
 	}
 
-	schema := r.PropertySchema()
-	props := make(map[string]any, len(comp.Properties))
-	for k, v := range comp.Properties {
-		if _, declared := schema[k]; declared {
-			props[k] = v
-		}
-	}
-	delete(props, "topologySpread")
-	delete(props, "affinity")
-	dropRoleObjectNames(props)
+	// Every declared key the rule does not evaluate itself, as written
+	// (roleKeys, which the key map the rule publishes is built from).
+	props := r.keys().forward(comp.Properties)
 	if affinity := buildAffinity(opinions.affinity, appLabels(comp.Name)); affinity != nil {
 		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(affinity)
 		if err != nil {

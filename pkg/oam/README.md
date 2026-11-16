@@ -185,6 +185,10 @@ See [Property schemas and contract metadata](/site/content/api-reference/oam/sch
 
 See [Property schemas and contract metadata](/site/content/api-reference/oam/schemas-and-contract.md#lowering-targets-and-seal).
 
+### Lowering keys
+
+See [Property schemas and contract metadata](/site/content/api-reference/oam/schemas-and-contract.md#lowering-keys).
+
 ### The "no handler" error
 
 See [Property schemas and contract metadata](/site/content/api-reference/oam/schemas-and-contract.md#the-no-handler-error).

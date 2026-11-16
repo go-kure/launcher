@@ -43,14 +43,6 @@ func schemaRoleObjectNames(service bool) map[string]oam.PropertySchema {
 	return m
 }
 
-// dropRoleObjectNames removes the object-name properties from the properties a
-// role rule hands its deployment member: the rule reads them itself.
-func dropRoleObjectNames(depProps map[string]any) {
-	delete(depProps, deploymentObjectNameProperty)
-	delete(depProps, serviceObjectNameProperty)
-	delete(depProps, serviceAccountObjectNameProperty)
-}
-
 // nameRoleMember resolves the name of the object of member, one a role rule is
 // about to emit for comp, and sets it on member
 // (oam.LoweringContext.ResolveMemberName): the author's property, else the

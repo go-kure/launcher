@@ -189,17 +189,9 @@ func (r WebserviceRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 		return oam.LoweringResult{}, err
 	}
 
-	schema := r.PropertySchema()
-	depProps := make(map[string]any, len(comp.Properties))
-	for k, v := range comp.Properties {
-		if _, declared := schema[k]; declared {
-			depProps[k] = v
-		}
-	}
-	delete(depProps, "port")
-	delete(depProps, "topologySpread")
-	delete(depProps, "affinity")
-	dropRoleObjectNames(depProps)
+	// Every declared key the rule does not evaluate itself, as written
+	// (roleKeys, which the key map the rule publishes is built from).
+	depProps := r.keys().forward(comp.Properties)
 	depProps["ports"] = []any{map[string]any{"name": webservicePortName, "containerPort": int(opinions.port)}}
 	if affinity := buildAffinity(opinions.affinity, appLabels(comp.Name)); affinity != nil {
 		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(affinity)

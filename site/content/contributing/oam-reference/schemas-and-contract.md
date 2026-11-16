@@ -64,3 +64,11 @@ Text in square brackets is added here to say what a moved sentence refers to.
 
 - **History:**
   - go-kure/launcher#789 (a consumer that registers a built-in lowering rule without the types it lowers into now fails at `Seal`, a breaking library change).
+
+### Lowering keys
+
+- **History:**
+  - go-kure/launcher#1580 (`webservice` and `worker` publish where each key of their schema lands in their members, from the function the rule forwards with: `roleKeys` in `pkg/oam/builtin/components/role_keys.go`).
+- **Tests:**
+  - `pkg/oam/builtin/registry/lowering_keys_test.go` authors every key of both schemas and reads the result twice. From what the rule emits: the key changes a value at each declared place and at no other, and an unchanged place holds the authored value. From the provenance report, which names sources and holds no value: the entries the key moves sit at the declared places, and every entry of a sibling group names its member. A fill the key causes at the place of another key (a ReadWriteOnce or ReadWriteOncePod claim that is not also ReadWriteMany gives the deployment `Recreate` at `strategy.type`) is a row of the key's sample; one with no row fails, and so does a row whose fill no longer happens. It fails for a key added to a schema with no map entry or no sample, and for a built-in component lowering rule that has neither a map nor a row in its list of rules without one. The destinations of the keys a rule evaluates itself are a table beside the rule; these tests are what holds that table to the rule.
+  - `pkg/oam/lowering_keys_test.go` holds `ComponentLoweringKeys()` to the declared maps and to returning a copy.
