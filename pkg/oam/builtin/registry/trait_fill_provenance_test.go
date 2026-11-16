@@ -312,6 +312,37 @@ func TestTraitFills_ExternalSecretProviderShorthandFillsNoKind(t *testing.T) {
 	}
 }
 
+// An httproute match type the generator does not know, the empty string
+// included, is not refused: the HTTPRoute gets the default type. The value that
+// stands is the handler's, so the path reports the fill.
+func TestTraitFills_HTTPRouteUnknownMatchTypeIsBuiltin(t *testing.T) {
+	route := func(match map[string]any) map[string]any {
+		return map[string]any{
+			"servicePort": 8080,
+			"parentRefs":  []any{map[string]any{"name": "gw", "namespace": "infra"}},
+			"rules":       []any{map[string]any{"matches": []any{match}}},
+		}
+	}
+	for _, tc := range []struct {
+		name, path string
+		match      map[string]any
+	}{
+		{"path/empty", "rules[0].matches[0].path.type", map[string]any{"path": map[string]any{"type": "", "value": "/api"}}},
+		{"path/unknown", "rules[0].matches[0].path.type", map[string]any{"path": map[string]any{"type": "Prefix", "value": "/api"}}},
+		{"header/empty", "rules[0].matches[0].headers[0].type", map[string]any{"headers": []any{map[string]any{"name": "x-tenant", "value": "a", "type": ""}}}},
+		{"header/unknown", "rules[0].matches[0].headers[0].type", map[string]any{"headers": []any{map[string]any{"name": "x-tenant", "value": "a", "type": "Regex"}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := traitFillCase{trait: "httproute"}
+			prov, _ := traitProvenance(t, c, traitDoc{props: route(tc.match)})
+			got := entriesOf(prov, owner{component: "app", trait: "httproute"})
+			if want := (oam.Source{Kind: oam.SourceBuiltin, Ref: "httproute." + tc.path}); got[tc.path] != want {
+				t.Errorf("%s = %+v, want %+v", tc.path, got[tc.path], want)
+			}
+		})
+	}
+}
+
 // listIndex matches the index of a list item in a report path.
 var listIndex = regexp.MustCompile(`\[\d+\]`)
 

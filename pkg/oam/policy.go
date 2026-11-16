@@ -190,8 +190,8 @@ func (l *PolicyDefaultLog) PolicyDefaults() []PolicyDefault {
 type BuiltinDefault struct {
 	// Path is the property path the author would have written for the value, for
 	// example "enablePDB". The properties the handler received do not hold it, or
-	// hold a value the handler replaced with its own (an empty string it reads as
-	// unset).
+	// hold a value the handler replaced with its own (for example an empty string
+	// it reads as unset).
 	Path string
 	// Ref names the fill, for example "postgresql.enablePDB".
 	Ref string
