@@ -11,6 +11,7 @@ import (
 	"github.com/go-kure/kure/pkg/stack"
 
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/probe"
 )
 
 // These tests hold the provenance report to the policy defaults the built-in
@@ -45,22 +46,13 @@ type owner struct{ component, member, trait string }
 
 func policyProvenanceFor(t *testing.T, p oam.Policy, comps ...oam.Component) (*oam.Provenance, []byte) {
 	t.Helper()
-	app := &oam.Application{
-		APIVersion: oam.SupportedAPIVersion,
-		Kind:       "Application",
-		Metadata:   oam.Metadata{Name: "pkg", Namespace: "default"},
-		Spec:       oam.ApplicationSpec{Components: comps},
-	}
-	tr := newTransformer()
-	validated, err := tr.ValidateAuthoredProperties(app)
+	// One pipeline, shared with the probe package: a consumer's own harness runs
+	// the same function.
+	prov, out, err := probe.Run(newTransformer(), comps, p)
 	if err != nil {
-		t.Fatalf("ValidateAuthoredProperties: %v", err)
+		t.Fatalf("probe.Run: %v", err)
 	}
-	cluster, _, prov, err := tr.TransformWithProvenance(validated, oam.TransformContext{Namespace: "default", Policy: p})
-	if err != nil {
-		t.Fatalf("TransformWithProvenance: %v", err)
-	}
-	return prov, manifestsOf(t, cluster)
+	return prov, out
 }
 
 // manifestsOf generates every application of cluster and marshals the objects.
