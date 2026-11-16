@@ -193,6 +193,13 @@ See [Property schemas and contract metadata](/site/content/api-reference/oam/sch
 
 See [Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md#policy-defaults--enforcement).
 
+A config reports the defaults it applied so the provenance report can name their source.
+`PolicyDefaultReporter` reports what the policy filled (source `policy`). `BuiltinDefaultReporter`
+reports what launcher's own code filled, at parse or at generation (source `builtin`). A path has
+one source, the one whose value stands, and `BuiltinDefaults()` is pure: the same call after
+`ApplyPolicy` ran twice gives the same answer. The contract and the fills of each workload kind are
+in [Transform and lowering](/site/content/api-reference/oam/transform-and-lowering.md).
+
 ### Refusal classes
 
 See [Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md#refusal-classes).
