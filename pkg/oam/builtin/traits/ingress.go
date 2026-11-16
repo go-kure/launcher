@@ -497,9 +497,9 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 				reportFill(&config.BuiltinDefaultLog, "ingress", fmt.Sprintf("rules[%d].paths[%d].path", i, j))
 			}
 
-			if pathType, ok := pathMap["pathType"].(string); ok {
-				if !validPathTypes[pathType] {
-					return nil, errors.Errorf("rules[%d].paths[%d]: pathType must be 'Prefix', 'Exact', or 'ImplementationSpecific', got %q", i, j, pathType)
+			if pathType, present, refused := authoredWord(pathMap, "pathType", validPathTypes); present {
+				if refused != "" {
+					return nil, errors.Errorf("rules[%d].paths[%d]: pathType must be 'Prefix', 'Exact', or 'ImplementationSpecific', got %s", i, j, refused)
 				}
 				p.PathType = pathType
 			} else {
