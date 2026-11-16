@@ -1,10 +1,9 @@
 package probe
 
 import (
-	"fmt"
-
 	"sigs.k8s.io/yaml"
 
+	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
@@ -65,22 +64,22 @@ func Run(tr *oam.Transformer, comps []oam.Component, p oam.Policy) (*oam.Provena
 	}
 	validated, err := tr.ValidateAuthoredProperties(app)
 	if err != nil {
-		return nil, nil, fmt.Errorf("validate authored properties: %w", err)
+		return nil, nil, errors.Wrap(err, "validate authored properties")
 	}
 	cluster, _, prov, err := tr.TransformWithProvenance(validated, oam.TransformContext{Namespace: "default", Policy: p})
 	if err != nil {
-		return nil, nil, fmt.Errorf("transform: %w", err)
+		return nil, nil, errors.Wrap(err, "transform")
 	}
 	// The cluster is not compared: the engine wraps its application configs in a
 	// type whose fields are unexported, so marshalling the cluster would hide the
 	// values a policy default fills.
 	apps, err := oam.GenerateApplications(cluster)
 	if err != nil {
-		return nil, nil, fmt.Errorf("generate: %w", err)
+		return nil, nil, errors.Wrap(err, "generate")
 	}
 	out, err := yaml.Marshal(apps)
 	if err != nil {
-		return nil, nil, fmt.Errorf("marshal the generated objects: %w", err)
+		return nil, nil, errors.Wrap(err, "marshal the generated objects")
 	}
 	return prov, out, nil
 }
