@@ -1,6 +1,64 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.9] - 2026-11-16
+
+### Added
+
+- A request above the policy's default limit is refused with a class
+- The provenance report names what a workload fills at generation
+- Report the parse-time fills of the five workload kinds as builtin
+- Webservice and worker declare where each of their keys lands
+- Probe package holding the fill report to the generated objects
+- The provenance report names what eight traits fill
+- An httproute match type the generator replaces is reported as a fill
+- Probes for the lowered workload types and postgresql
+- The provenance report names what a trait computes
+- Probes for the traits that report fills
+- Report what a decorating trait fills, starting with topology-spread
+- A property schema names the policy refusals that bound it
+- Report what the security-context profile fills in the provenance report
+
+### Document Format
+
+- App.yaml init containers and sidecars take policy resource defaults
+- App.yaml refuses a request above a policy default limit
+- App.yaml httproute match types outside the Gateway API words are refused
+- App.yaml a match type or pathType that is not a string is refused
+
+### Documentation
+
+- Summarise the built-in default reporter contract in the package README
+- A capability value the trait handler replaces is reported as a fill
+- Say where a trait's computed fill is reported, and what is left out
+- State that the report holds the topology-spread fill
+- Drop the remaining statements that topology-spread is not reported
+- Say which node of an open array carries its bounds
+- A reference page says where the fill facts are read
+- The fill report page names a fourth reading and one more reporter
+- The fill report page names when security-context reports
+- Hedge the policy-only reading and list RunWith on the probe page
+- State what the report says about the expose gateway namespace
+- Give the real reason the expose namespace reads rendered and pin every source of it
+
+### Fixed
+
+- Keep JobSpecConfig comparable and describe the Recreate fill as generation-time
+- Keep the builtin ref of a generation-time fill as it was and point the docs at the right file
+- Probe package uses the repository error helpers and reads a null on the way to a fill as omitted
+- Report no topology-spread fill when Generate refuses a Deployment
+- Never panic when reading whether a trait replaced the config
+
+### Testing
+
+- The built-in request is held to a policy default limit
+- The key map test reads the entries a key removes
+- Pin where an httproute match type is reported as a fill
+- The trait probes name the computed fills the report now holds
+- Give the pointer config of the sameConfig test a blank field
+- Hold the security-context report to every place a workload authors a context
+- The bound test header says what a row changes
+
 ## [0.2.0-beta.8] - 2026-11-13
 
 ### Build
