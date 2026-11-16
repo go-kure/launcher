@@ -250,7 +250,14 @@ func validateInputs(inputs map[string]oam.PropertySchema) error {
 
 // validateSchema checks that a declared schema names a known type. It looks at
 // the type vocabulary only. The value rules stay with pkg/oam.
+//
+// It refuses boundedBy, an empty list included: a bound is published where a
+// test holds it (oam.PropertySchema.BoundedBy), and nothing holds one a model
+// document states (go-kure/launcher#1580). A null is the key left out.
 func validateSchema(path string, s oam.PropertySchema) error {
+	if s.BoundedBy != nil {
+		return invalid(path, "boundedBy is not supported on a model input: a model cannot declare which refusals by the environment policy bound its inputs")
+	}
 	switch {
 	case s.Type == "" && len(s.Types) == 0:
 		return invalid(path, "type is required")

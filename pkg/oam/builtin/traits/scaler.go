@@ -26,7 +26,7 @@ func (h *ScalerHandler) CanHandle(traitType string) bool {
 
 // PropertySchema declares the scaler trait's user-facing properties.
 func (h *ScalerHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		// minReplicas/maxReplicas are not schema-required: an EnvironmentPolicy may
 		// supply them via DefaultScalerMinReplicas/DefaultScalerMaxReplicas. When
 		// neither the trait nor a policy default provides a value, ApplyPolicy errors.
@@ -37,7 +37,7 @@ func (h *ScalerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"enablePDB":         {Type: oam.PropertyTypeBoolean, Default: false, Description: "When true, also generate a PodDisruptionBudget (requires minReplicas >= 2)."},
 		"hpaName":           {Type: oam.PropertyTypeString, Description: "Name of the HorizontalPodAutoscaler, used as written or refused; defaults to <component>-hpa."},
 		"pdbName":           {Type: oam.PropertyTypeString, Description: "Name of the PodDisruptionBudget, used as written or refused; needs enablePDB. Defaults to <component>-pdb."},
-	}
+	}, map[string][]oam.RefusalClass{"maxReplicas": {oam.RefusalReplicaMaximum}})
 }
 
 // Apply creates HPA and optionally PDB resources for the component.

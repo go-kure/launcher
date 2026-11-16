@@ -36,12 +36,12 @@ func (h *ReplicationControllerHandler) CanHandle(componentType string) bool {
 func (h *ReplicationControllerHandler) PropertySchema() map[string]oam.PropertySchema {
 	template := podTemplateSchema("Required. ReplicationController spec.template: the pods the controller creates. Its spec is held to what the pod kind holds its own to (containers required, the image rule, ephemeralContainers, priority and overhead refused) and to the environment policy; activeDeadlineSeconds is refused. metadata.labels gains the `app` label; an authored `app` with another value is refused.")
 	template.Required = true
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"replicas":        {Type: oam.PropertyTypeInteger, Description: "ReplicationController spec.replicas: the number of pods. The API server defaults it to 1. Held to the environment policy's replica maximum; no policy default is filled."},
 		"minReadySeconds": {Type: oam.PropertyTypeInteger, Description: "ReplicationController spec.minReadySeconds: seconds a new pod must be ready, without a container crashing, to count as available. The API server defaults it to 0."},
 		"selector":        {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "ReplicationController spec.selector: the labels of the pods the controller owns, as a map of label to value. It must match the template's labels. Unset, the API server defaults it to the template's labels, the `app` label launcher adds included."},
 		"template":        template,
-	}
+	}, podTemplateBounds(true))
 }
 
 // ToApplicationConfig decodes an OAM replicationcontroller component into a

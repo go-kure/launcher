@@ -131,7 +131,8 @@ func (WebserviceRule) Endpoints(component *oam.Component) ([]netpol.Endpoint, er
 // schema exactly as it publishes a handler's, and
 // TestWebserviceRule_PropertySchemaUnchanged pins it byte for byte. The three
 // object-name properties (schemaRoleObjectNames) were added since, by
-// go-kure/launcher#787.
+// go-kure/launcher#787, and the bounds (roleBounds) by
+// go-kure/launcher#1580.
 func (WebserviceRule) PropertySchema() map[string]oam.PropertySchema {
 	m := map[string]oam.PropertySchema{
 		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
@@ -163,7 +164,8 @@ func (WebserviceRule) PropertySchema() map[string]oam.PropertySchema {
 	// The deployment member takes it as the deployment component does
 	// (go-kure/launcher#1216).
 	m[podMetadataProperty] = schemaPodMetadata("Deployment")
-	return m
+	// The deployment member and each generated claim are what the policy judges.
+	return oam.DeclareBounds(m, roleBounds())
 }
 
 // webserviceServiceTraits are the authored trait types the rule forwards to the

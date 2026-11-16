@@ -21,6 +21,7 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - go-kure/launcher#1450 (a pointer type that is its own element type, `type P *P`, is read through its JSON form like any other).
   - go-kure/launcher#1230 (`ValueGates`, which maps an `Enum` value to the gate that value alone needs; like `Gate`, its key is rejected at the two flat call sites, so it is absent from their allow-sets).
   - go-kure/launcher#1330 (`ValueGatedPaths`, a path that gates values; like `Gate`, its key is rejected at the two flat call sites).
+  - go-kure/launcher#1580 (`BoundedBy`, the refusal classes an authored value at a property can cause; its key is rejected at the two flat call sites and on a model input. Which facts a model may declare for its inputs is an open point of that issue).
   - go-kure/launcher#408 (`ValidateAuthoredProperties` is the authored-path counterpart of the emitted-path check, and closes it).
   - go-kure/launcher#1001 (`postgresql` points a key its `backup` replaced, `objectStore` and `objectStoreObjectName`, to where it went; and names the reason `backup.objectStore` refuses `serverName`, `azureCredentials` and `googleCredentials`).
   - The hint was asked of a terminal component
@@ -38,6 +39,13 @@ Text in square brackets is added here to say what a moved sentence refers to.
     schema node declares exactly one of `Type` and `Types`.
   - A completeness test (`pkg/cmd/kurel`) enforces that no built-in
     schema node is left without a description.
+  - `TestPropertySchemaFields_FlatSiteDecisions` (`pkg/oam`) and
+    `TestLoad_InputSchemaFieldDecisions` (`pkg/oam/model`) read the fields of
+    `PropertySchema` by reflection and fail for one with no recorded decision: whether a
+    kurel parameter, a capability rendering property and a model input accept its key.
+  - The `TestBoundedBy` tests (`pkg/oam/builtin/registry`) hold every `boundedBy` a
+    registered schema publishes to a row that shows the refusal, and every row to a
+    declaration. A declaration with no row, and a row with no declaration, both fail.
 
 ### What an explicit `null` means on the emitted path
 

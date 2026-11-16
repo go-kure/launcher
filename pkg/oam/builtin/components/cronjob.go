@@ -116,7 +116,7 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaJobSpec(false))
 	maps.Copy(m, schemaPodSpec(false, true))
-	return m
+	return oam.DeclareBounds(m, workloadBounds(false, false, false))
 }
 
 // ToApplicationConfig converts an OAM cronjob component to a CronjobConfig. The

@@ -54,7 +54,7 @@ func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaStatefulSetSpec())
-	return m
+	return oam.DeclareBounds(m, workloadBounds(true, true, true))
 }
 
 // FillCapabilityDefaults gives each volumeClaimTemplates entry that leaves

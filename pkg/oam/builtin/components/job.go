@@ -91,7 +91,7 @@ func (h *JobHandler) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaJobSpec(false))
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, true))
-	return m
+	return oam.DeclareBounds(m, workloadBounds(false, false, false))
 }
 
 // ToApplicationConfig converts an OAM job component to a JobConfig. The Job's

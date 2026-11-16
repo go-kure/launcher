@@ -168,6 +168,46 @@ the same way, for a config that reports one itself at generation, as `passthroug
 one is unaffected. And for a caller that matched `*TransformError` on a refusal by the
 policy raised in a post-policy step: it is a `*ViolationError` now, with the same text.
 
+### Declared bounds
+
+A property schema can name the classes an authored value at that property can cause, in
+`boundedBy` (see [Property schemas](schemas-and-contract.md#property-schemas)). These
+built-in types declare them. Each entry is held by a test that shows the refusal; a property
+with no entry is not shown to be free of a bound.
+
+| Class | Declared on |
+|---|---|
+| `host-namespace` | `hostNetwork`, `hostPID`, `hostIPC`. |
+| `privileged` | `securityContext.privileged` and `securityContext.windowsOptions.hostProcess` of a container; `podSecurityContext.windowsOptions.hostProcess`. |
+| `host-path` | `volumes[].type`: the refusal is of a volume whose type is `hostPath`. |
+| `container-capability` | `securityContext.capabilities.add` of a container. |
+| `registry` | `image` of a container; `volumes[].image`, an open node. |
+| `resource-maximum` | `resources.requests` and `resources.limits`, `cpu` and `memory`, of a container; the same four under `podResources`. |
+| `resource-default-limit` | `resources.requests.cpu` and `resources.requests.memory` of a container. |
+| `storage-maximum` | `volumes[].ephemeral`, an open node; `volumes[]` of `webservice` and `worker`, an open node, for the `size` of a `pvc` volume that generates its claim; `volumeClaimTemplates[].size` and `volumeClaimTemplates[].resources.requests.storage` of `statefulset`; `size` of the `pvc` trait. |
+| `replica-maximum` | `replicas` of `deployment`, `webservice`, `worker`, `statefulset`, `replicaset` and `replicationcontroller`; `maxReplicas` of the `scaler` trait. |
+
+The container properties are those of the main container, at the top of the component, and
+the same ones under `initContainers[]` and `sidecars[]`. Where an entry names no type, it
+holds for the seven workload types: `deployment`, `webservice`, `worker`, `statefulset`,
+`daemonset`, `job` and `cronjob` (the last two have no `sidecars`).
+
+The kinds that take a pod as the API type leave most of it open, so their bounds sit on the
+open nodes, with no path below them. `pod` declares `host-namespace` on `hostNetwork`,
+`hostPID` and `hostIPC`; `privileged`, `container-capability`, `registry` and
+`resource-maximum` on `containers` and on `initContainers`; `privileged` on
+`securityContext`; `resource-maximum` on `resources`; and `host-path`, `registry` and
+`storage-maximum` on `volumes`. `podtemplate`, `replicaset` and `replicationcontroller`
+declare those seven classes on their one `template` node.
+
+Four classes are declared on no property yet. `trait-capability` and `object-kind` are about
+a type as a whole. `explicit-secret` and `unreadable-object` cannot be caused on the types
+above. Other built-in types do raise them, some from one property (the keystore `password`
+of a `certificate` component, for one) and some for the type as a whole (a `secret`
+component or trait, whatever its properties hold). Those types, like every built-in type
+not named above, declare no bound yet: that says nothing about whether the policy holds
+them.
+
 ## Capability system
 
 Capability-aware traits (e.g. `expose`, `certificate`, `external-secret`) declare

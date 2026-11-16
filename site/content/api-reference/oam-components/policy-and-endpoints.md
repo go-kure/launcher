@@ -184,6 +184,37 @@ The classes, what each covers and what stays unclassified are in
 A new policy check in this package builds its refusal with `oam.NewPolicyRefusal` and a class
 constant; `TestBuiltinPolicyRefusalsCarryAClass` (`pkg/oam`) fails on one that does not.
 
+**Bounds in the schema.** The seven workload types (`deployment`, `webservice`, `worker`,
+`statefulset`, `daemonset`, `job`, `cronjob`) and the four kinds that take a pod as the API
+type (`pod`, `podtemplate`, `replicaset`, `replicationcontroller`) publish, in `boundedBy`,
+the classes an authored value at a property can cause. The list of properties is in
+`site/content/api-reference/oam/policy-and-capability.md`, "Declared bounds". What is
+particular to this package:
+
+- **No schema fragment carries a bound.** The fragments (`schemaResources`,
+  `schemaSecurityContext`, `schemaVolumes` and the others) are shared with types that
+  declare none. A type states its own bounds in its `PropertySchema`, through
+  `oam.DeclareBounds` and one of `workloadBounds`, `roleBounds`, `podBounds` or
+  `podTemplateBounds` (`bounds.go`).
+- **A declaration needs a row.** `TestBoundedBy_DeclaredAndTested`
+  (`pkg/oam/builtin/registry`) fails for a declared class with no row in its table, and for
+  a row no schema declares. A row changes one value of a document that passes, expects the
+  class, and expects the refusal gone once the one policy setting behind it is relaxed. That
+  last step tells `hostNetwork`, `hostPID` and `hostIPC` apart, which share a class.
+- **A HostProcess container is bounded, and invalid alone.** `hostProcess: true` on one
+  container is refused as `privileged`. Once the policy allows it, the object is still
+  refused, as invalid, unless every container of the pod is a HostProcess one and the pod
+  sets `hostNetwork: true`: a pod with one HostProcess container must have only such
+  containers.
+  The pod-level `podSecurityContext.windowsOptions.hostProcess` needs `hostNetwork: true`,
+  which the parser checks before the policy runs.
+- **A `pvc` volume is bounded only where it generates a claim.** On `webservice` and
+  `worker` a `pvc` volume with no `claimName` generates its claim from `size`, and that
+  claim is held to the storage maximum. The schema declares no `size` on a volume, so the
+  two types declare `storage-maximum` on the volume itself, `volumes[]`, an open node
+  (`roleBounds`). On the other five workload types a `pvc` volume must name an existing
+  claim (`claimName`) and generates none, so the storage maximum has nothing to hold there.
+
 ## Pod view of a monitoring workload object (`MonitoringPodSpec`)
 
 An object from which the Prometheus operator builds pods, the `Alertmanager`, `Prometheus` and

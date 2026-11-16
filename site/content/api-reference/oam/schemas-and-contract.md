@@ -135,6 +135,29 @@ container is a plain `GatedPaths` entry, because Kubernetes forbids the field th
 the gate off, `Always` included. A null, a value that is not a string and a string the table
 does not name use no gate. Like `Gate`, the key is rejected at the two flat call sites.
 
+A property may also say which refusals by the environment policy an authored value can
+cause: `BoundedBy` (published as `boundedBy`) lists
+[refusal classes](policy-and-capability.md#refusal-classes), in `RefusalClasses` order. A
+consumer that builds an input form reads there which properties the environment limits. The
+list names the class and never the limit, which is the policy's. On an open node (an
+object that takes keys the schema does not declare, or an array of such items) it lists every
+class a value at an undeclared key below the node can cause, with no path; a property the
+node does declare carries its own. Nothing reads `boundedBy` to accept or refuse
+a value, so a document is accepted as it is with or without it, and a consumer that predates
+the key ignores it.
+
+The built-in types declare a bound only where a test holds it, and the claim runs one way. A
+declared class is shown to refuse a value at that property: from a document that passes, the
+one value is changed, the build is refused with that class, and the refusal is gone once the
+one policy setting behind it is relaxed. A property that declares no class is not shown to be
+free of one. Which built-in types declare bounds, and on which properties, is in
+[Declared bounds](policy-and-capability.md#declared-bounds). A handler states its own bounds
+with `DeclareBounds`, which takes a schema and a map from a path (`volumes[].type`, with
+`[]` after an array key) to its classes, and leaves the schema it was given unchanged: a
+fragment that several schemas share carries no bound, so a bound never reaches a type that
+did not state it. Like `Gate`, the key is rejected at the two flat call sites, and a
+component model (`pkg/oam/model`) may not write it on an input.
+
 Separately, `validateProperties` (`property_validate.go`) checks an EMITTED
 component/trait/policy's properties against its TARGET handler's declared schema —
 enforcing `Required`, `Type`/`Types`, `Enum`, and nested `Properties`/`Items`/
