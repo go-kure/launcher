@@ -119,6 +119,9 @@ type loweringKeySample struct {
 	// there, so the key map declares no such place; the entry is listed here so
 	// that one nobody listed still fails.
 	alsoFills map[reportedAt]oam.SourceKind
+	// removesMember names a member the rule no longer emits when this value is
+	// authored, so its entries leave the report. Read both ways, as alsoFills is.
+	removesMember string
 }
 
 // hostNamespacePolicy is defaultsPolicy allowing the host namespaces, so a
@@ -190,7 +193,8 @@ func loweringKeySamples() map[string]loweringKeySample {
 		"schedulingGates":         {value: []any{map[string]any{"name": "example.org/gate"}}},
 		"schedulingGroup":         {value: map[string]any{"podGroupName": "batch"}},
 		"securityContext":         {value: map[string]any{"runAsNonRoot": true}},
-		"serviceAccountName":      {value: "existing"},
+		// An existing account: the rule generates none.
+		"serviceAccountName": {value: "existing", removesMember: "serviceaccount"},
 		// The deployment's pods run as the account under the name it was given.
 		"serviceAccountObjectName": {value: "account", lands: map[reportedAt]any{
 			{"deployment", "", "serviceAccountName"}: "account",
@@ -273,7 +277,9 @@ func within(r reportedAt, p oam.LoweredKey) bool {
 // that key. An Unchanged place holds the authored value as the rule received it
 // (copied, from authored) and nothing the rule built. A fill the key causes at the
 // place of another key is a row of its sample (alsoFills), read both ways: a fill
-// with no row fails, and so does a row with no fill.
+// with no row fails, and so does a row with no fill. An entry the key removes is
+// read the same way: it sat at a declared place, or on the member the sample says
+// the key removes (removesMember).
 //
 // The comparison is against the same document without the key, so only what the
 // key moved is read. `image` is required and has no such baseline: for it every
@@ -339,6 +345,26 @@ func TestLoweringKeys_AuthoredKeyLandsWhereDeclared(t *testing.T) {
 					if src, ok := report[at]; !ok || src.Kind != kind || baseline[at] == src {
 						t.Errorf("sample says authoring %q makes launcher fill member %q path %q (%s), but the report does not show that fill", key, at.member, at.path, kind)
 					}
+				}
+				// An entry the key removes is moved too: it sat at a declared place,
+				// or on the member the sample says the key removes.
+				removedOnMember := false
+				for at, was := range baseline {
+					if _, still := report[at]; still {
+						continue
+					}
+					if slices.ContainsFunc(places, func(p oam.LoweredKey) bool { return within(at, p) }) {
+						continue
+					}
+					if sample.removesMember != "" && at.member == sample.removesMember {
+						removedOnMember = true
+						continue
+					}
+					t.Errorf("authoring %q removed the entry at member %q trait %q path %q (%s), which the key map does not declare for it (%v)",
+						key, at.member, at.trait, at.path, was.Kind, places)
+				}
+				if sample.removesMember != "" && !removedOnMember {
+					t.Errorf("sample says authoring %q removes member %q, but no entry of that member left the report", key, sample.removesMember)
 				}
 
 				// At every declared place.
