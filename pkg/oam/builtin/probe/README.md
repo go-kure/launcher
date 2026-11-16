@@ -21,6 +21,7 @@ A consumer passes its own `*oam.Transformer`. The probes bring their own policie
 | `Probe`, `Fill` | One document, and one fill it shows: path, source in each state, and the value an author can write for it. |
 | `ProbePolicy()`, `NoPolicy()` | The two policy states. |
 | `Run(tr, components, policy)` | Validate, transform with provenance, generate: the report and the marshalled objects. |
+| `RunWith(tr, components, policy, caps)` | `Run` with the capability bindings the transform runs with. A probe states its own in `Probe.Capabilities`. |
 | `CheckDeclaredDefaults` | Check A. |
 | `CheckReportedFillsAreReal` | Check B. |
 | `CheckProbePolicyCoversEveryDefault` | Check E. |
