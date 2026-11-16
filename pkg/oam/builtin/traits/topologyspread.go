@@ -243,6 +243,7 @@ func (c *topologySpreadConfig) BuiltinDefaults() []oam.BuiltinDefault {
 	if err != nil {
 		return nil
 	}
+	filled := false
 	for _, objPtr := range objects {
 		if objPtr == nil {
 			continue
@@ -252,9 +253,15 @@ func (c *topologySpreadConfig) BuiltinDefaults() []oam.BuiltinDefault {
 			continue
 		}
 		scaled, underScaler := c.scaledMinReplicas(c.app, dep)
-		if constraints, err := topologySpreadFor(dep, scaled, underScaler); err == nil && len(constraints) > 0 {
-			return []oam.BuiltinDefault{{Path: "topologySpreadConstraints", Ref: "topology-spread.topologySpreadConstraints"}}
+		constraints, err := topologySpreadFor(dep, scaled, underScaler)
+		if err != nil {
+			// Generate stops at the first refused Deployment and the build fails.
+			return nil
 		}
+		filled = filled || len(constraints) > 0
 	}
-	return nil
+	if !filled {
+		return nil
+	}
+	return []oam.BuiltinDefault{{Path: "topologySpreadConstraints", Ref: "topology-spread.topologySpreadConstraints"}}
 }
