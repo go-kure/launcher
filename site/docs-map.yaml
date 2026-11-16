@@ -75,6 +75,10 @@ packages:
     mount: {target: api-reference/oam-registry.md, title: Built-in Registry, weight: 28, group: OAM, desc: "Every built-in handler and lowering rule, for registering the builtins"}
 
   # ─── Unmounted: internal support; not a user-facing API ───
+  - path: pkg/oam/builtin/probe
+    readme: pkg/oam/builtin/probe/README.md
+    mounted: false
+    reason: "Probe documents and checks a consumer runs against its own transformer; the reference page for the fill report (go-kure/launcher#1580, step 8) will describe them."
   - path: pkg/oam/builtin
     readme: pkg/oam/builtin/README.md
     mounted: false
