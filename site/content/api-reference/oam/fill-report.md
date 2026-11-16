@@ -51,13 +51,15 @@ author can write for it. The two sources of a path read as follows:
 | With the policy | With none | Reading |
 |-----------------|-----------|---------|
 | `policy` | `builtin` | The policy default where the policy sets one, launcher's value where it sets none. |
-| `policy` | no entry | Only a policy default fills it. |
+| `policy` | no entry | A policy default fills it. With none the report holds nothing, which does not show that nothing fills it. |
 | `builtin` | `builtin` | Launcher fills it under any policy. |
 | `builtin` | no entry | Launcher fills it for some documents only, and a policy default made this one such a document. |
 
 The last row is `topologySpreadConstraints` of `webservice` and `worker`: the trait fills
 it from two replicas, and the probe document runs two under the policy's default and one
-under none. No entry in a state is therefore not "nothing ever fills it".
+under none. No entry in a state is therefore not "nothing ever fills it". The second row
+has such a case too: `instances` of the Cluster a `postgresql` component builds. With no
+policy launcher's default of 1 stands, and the report holds no entry for it.
 
 The values `ProbePolicy()` supplies are arbitrary, and they can make a document refused in
 that state (`Probe.RefusedWithPolicy`). They never belong in what a consumer publishes: the
