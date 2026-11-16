@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/go-kure/launcher/pkg/oam"
 )
@@ -72,6 +73,7 @@ func CheckDeclaredDefaults(tr *oam.Transformer, probes []Probe) []string {
 	var findings []string
 	add := func(format string, args ...any) { findings = append(findings, fmt.Sprintf(format, args...)) }
 	schemas := tr.HandlerSchemas().Components
+	keys := tr.ComponentLoweringKeys()
 	for _, p := range probes {
 		prov, base, err := Run(tr, cloneComponents(p.Components), NoPolicy())
 		if err != nil {
@@ -83,12 +85,14 @@ func CheckDeclaredDefaults(tr *oam.Transformer, probes []Probe) []string {
 			}
 			continue
 		}
+		seen := map[string]bool{}
 		for _, comp := range p.Components {
 			if _, ok := schemas[comp.Type]; !ok {
 				add("probe %q: no schema is registered under the component type %q, so no declared default was checked", p.Name, comp.Type)
 				continue
 			}
 			for _, d := range declaredDefaults(comp, schemas[comp.Type]) {
+				seen[d.path] = true
 				label := fmt.Sprintf("probe %q: the %s schema declares %v as the default of %s", p.Name, d.typ, d.value, d.path)
 				comps := cloneComponents(p.Components)
 				if err := setAt(comps[componentIndex(comps, d.component)].Properties, d.path, d.value); err != nil {
@@ -111,8 +115,24 @@ func CheckDeclaredDefaults(tr *oam.Transformer, probes []Probe) []string {
 					add("%s, and writing it changes the generated objects: the default is not what the handler applies; if the cluster applies it, list the path in the probe's LeftToCluster with the reason", label)
 					continue
 				}
-				if !reportsPath(prov, d.component, d.path) {
-					add("%s; the handler applies it (the objects are equal) and the report holds no policy or builtin entry at that path", label)
+				reported := reportedAt(prov, d.component, placesOf(keys[d.typ], p, d.path))
+				_, unreported := p.Unreported[d.path]
+				switch {
+				case unreported && reported:
+					add("%s, and the probe lists it as unreported, yet the report now holds an entry for it: remove the entry from Unreported", label)
+				case unreported:
+				case !reported:
+					add("%s; the handler applies it (the objects are equal) and the report holds no policy, builtin or rendered entry at its place; if that is a known gap, list the path in the probe's Unreported with the reason", label)
+				}
+			}
+		}
+		for _, list := range []struct {
+			name string
+			rows map[string]string
+		}{{"LeftToCluster", p.LeftToCluster}, {"Unreported", p.Unreported}} {
+			for _, path := range slices.Sorted(maps.Keys(list.rows)) {
+				if !seen[path] {
+					add("probe %q: %s lists %q, which is no declared default the probe leaves out: remove the entry or fix its path", p.Name, list.name, path)
 				}
 			}
 		}
@@ -120,12 +140,52 @@ func CheckDeclaredDefaults(tr *oam.Transformer, probes []Probe) []string {
 	return findings
 }
 
-// reportsPath reports whether the report holds a policy or builtin entry of the
-// component, or of one of its members, at path.
-func reportsPath(p *oam.Provenance, component, path string) bool {
+// place is one place the report can name a declared default at.
+type place struct{ member, trait, path string }
+
+// placesOf returns the places a declared default lands: every place of the
+// lowering key map where the type publishes one, the probe's DefaultPlaces where
+// it names the path, and the authored path itself otherwise.
+func placesOf(typeKeys map[string][]oam.LoweredKey, p Probe, path string) []place {
+	key, _, _ := strings.Cut(path, ".")
+	if places, ok := typeKeys[key]; ok {
+		out := make([]place, 0, len(places))
+		for _, l := range places {
+			out = append(out, place{l.Member, l.Trait, l.Path})
+		}
+		return out
+	}
+	if to, ok := p.DefaultPlaces[path]; ok {
+		return []place{{"", "", to}}
+	}
+	return []place{{"", "", path}}
+}
+
+// reportedAt reports whether the report holds an entry of source policy, builtin
+// or rendered for the component at every one of the places. An entry below a
+// place's path counts for it, because provenance records leaves: a nested default
+// under a key the rule builds (affinity) is therefore read as "some leaf below
+// affinity", which is weaker than its own leaf, and the findings say so.
+func reportedAt(p *oam.Provenance, component string, places []place) bool {
+	for _, pl := range places {
+		if !reportedAtOne(p, component, pl) {
+			return false
+		}
+	}
+	return len(places) > 0
+}
+
+func reportedAtOne(p *oam.Provenance, component string, pl place) bool {
 	for _, e := range p.Entries {
-		if e.Component == component && e.Path == path && e.Trait == "" &&
-			(e.Source.Kind == oam.SourcePolicy || e.Source.Kind == oam.SourceBuiltin) {
+		if e.Component != component || e.Member != pl.member || e.Trait != pl.trait {
+			continue
+		}
+		switch e.Source.Kind {
+		case oam.SourcePolicy, oam.SourceBuiltin, oam.SourceRendered:
+		default:
+			continue
+		}
+		if pl.path == "" || e.Path == pl.path || strings.HasPrefix(e.Path, pl.path+".") || strings.HasPrefix(e.Path, pl.path+"[") {
 			return true
 		}
 	}

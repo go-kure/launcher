@@ -131,7 +131,7 @@ func Probes() []Probe {
 			ValueWithPolicy: "OnFailure", ValueWithoutPolicy: "OnFailure"}
 	}
 
-	return withOthers([]Probe{
+	return withOthers(append([]Probe{
 		{Name: "deployment", Components: component("app", "deployment", nil),
 			Fills: join([]Fill{replicas("app"), automount("app")}, resourceFills("app", ""))},
 		{Name: "deployment with an init container, a sidecar and ports", Components: component("app", "deployment", containers),
@@ -170,7 +170,7 @@ func Probes() []Probe {
 				{Component: "app", Path: "failedJobsHistoryLimit", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin, ValueWithPolicy: 1, ValueWithoutPolicy: 1},
 			}, resourceFills("app", "")),
 			LeftToCluster: map[string]string{"concurrencyPolicy": "the handler omits it and the cluster applies Allow"}},
-	})
+	}, loweredProbes()...))
 }
 
 // withoutPolicyOnly keeps the fills a document with no policy shows, as that

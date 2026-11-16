@@ -51,4 +51,20 @@ probe lists it in `LeftToCluster`. It is the one place check A disagrees with a 
 
 The probes cover the handler-built workload types: deployment, statefulset, daemonset,
 job and cronjob, with their init containers, sidecars, claim templates and pod failure
-policy. Types that lower to other kinds are not probed yet.
+policy. It also probes the types that lower to other components: `webservice` and `worker`,
+whose entries the report names at the place of their `deployment` member (`Fill.Member`),
+and `postgresql`, which the report names at the cluster it builds. For a type that
+publishes a lowering key map check A reads the places of a declared default from it. For
+`postgresql`, which publishes none, the probe's `DefaultPlaces` names them. A default that lands in several
+places needs an entry at each. Provenance records leaves, so a default under a key the rule
+builds (`affinity`) is read as "some entry below that key": weaker than its own leaf.
+For `postgresql`, check B compares written values for the four resource rows only; the
+`enablePDB`, `instances` and `storage.size` rows state sources and no value, because the
+authored keys differ (`replicas`, `storageSize`), so check B does not show that the library
+applies those three fills.
+
+Check A also found declared defaults the report holds no entry for, observed in these
+probes. Each is listed in its probe's `Unreported` with the reason, and check A fails when
+an entry there stops being a gap: `topologySpread` on `webservice` and `worker` (the
+topology-spread trait it switches reports nothing yet), and `provider`, `version` and, without
+a policy default, `replicas` on `postgresql`. Trait fills have no probes yet.
