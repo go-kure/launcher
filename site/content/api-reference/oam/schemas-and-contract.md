@@ -142,13 +142,15 @@ consumer that builds an input form reads there which properties the environment 
 list names the class and never the limit, which is the policy's. On an open node (an
 object that takes keys the schema does not declare, or an array of such items) it lists every
 class a value at an undeclared key below the node can cause, with no path; a property the
-node does declare carries its own. Nothing reads `boundedBy` to accept or refuse
+node does declare carries its own. For an array of open items the list is on the array where
+its items declare no property, and on the items where they do. Nothing reads `boundedBy` to accept or refuse
 a value, so a document is accepted as it is with or without it, and a consumer that predates
 the key ignores it.
 
 The built-in types declare a bound only where a test holds it, and the claim runs one way. A
 declared class is shown to refuse a value at that property: from a document that passes, the
-one value is changed, the build is refused with that class, and the refusal is gone once the
+value there, or one below it for an open node, is changed, with the keys the changed
+document needs beside it, the build is refused with that class, and the refusal is gone once the
 one policy setting behind it is relaxed. A property that declares no class is not shown to be
 free of one. Which built-in types declare bounds, and on which properties, is in
 [Declared bounds](policy-and-capability.md#declared-bounds). A handler states its own bounds

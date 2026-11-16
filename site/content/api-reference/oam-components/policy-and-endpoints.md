@@ -198,7 +198,8 @@ particular to this package:
   `podTemplateBounds` (`bounds.go`).
 - **A declaration needs a row.** `TestBoundedBy_DeclaredAndTested`
   (`pkg/oam/builtin/registry`) fails for a declared class with no row in its table, and for
-  a row no schema declares. A row changes one value of a document that passes, expects the
+  a row no schema declares. A row changes the value at or below its path in a document that passes, with the keys that
+  value needs beside it (a volume's `name`, for one), expects the
   class, and expects the refusal gone once the one policy setting behind it is relaxed. That
   last step tells `hostNetwork`, `hostPID` and `hostIPC` apart, which share a class.
 - **A HostProcess container is bounded, and invalid alone.** `hostProcess: true` on one
