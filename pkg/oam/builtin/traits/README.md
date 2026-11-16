@@ -1050,12 +1050,14 @@ wrapper, so a caller reaches a trait config's concrete type through `oam.UnwrapC
 
 ## Fills in the provenance report
 
-Ten handlers report the values they fill when the properties they are handed
+Eleven handlers report the values they fill when the properties they are handed
 hold none (`oam.BuiltinDefaultReporter`, go-kure/launcher#1580): `certificate`,
 `external-secret`, `volsync`, `scaler`, `disruption`, `rbac`, `networkpolicy`,
-`ingress`, `httproute` and `pvc`. The config of the sub-application the trait adds names each fill at the path the
-author would have written, with the ref `<trait>.<path>`, and the engine records it as
-a `builtin` entry under the trait once the policy ran on that config. The paths are
+`ingress`, `httproute`, `pvc` and `topology-spread`. The config of the sub-application the
+trait adds names each fill at the path the author would have written, with the ref
+`<trait>.<path>`, and the engine records it as a `builtin` entry under the trait once the
+policy ran on that config. `topology-spread` adds no sub-application: the engine reads the
+config it puts in place once every trait of the document has applied (see its section above). The paths are
 listed in [Transform and lowering](/site/content/api-reference/oam/transform-and-lowering.md).
 
 Six configs embed `oam.BuiltinDefaultLog` and report through `reportFill`
