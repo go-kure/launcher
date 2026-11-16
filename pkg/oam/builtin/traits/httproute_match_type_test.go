@@ -11,6 +11,11 @@ import (
 // handler does not know, the empty string included, is refused with the path
 // and the accepted words: before go-kure/launcher#1592 it was accepted and the
 // HTTPRoute got the default type.
+//
+// The default is reported as a built-in fill exactly where it stands: where the
+// type is left out, and where it is not a string, which the parser reads as
+// left out (as the ingress trait reads a pathType that is not a string). A
+// known word is the author's and is not reported.
 func TestHTTPRouteHandler_MatchType(t *testing.T) {
 	h := &HTTPRouteHandler{}
 	app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 80})
@@ -44,16 +49,19 @@ func TestHTTPRouteHandler_MatchType(t *testing.T) {
 		match      map[string]any
 		wantPath   string
 		wantHeader string
+		wantFill   bool
 		wantErr    string
 	}{
-		{name: "path/left out", match: path(nil), wantPath: "PathPrefix"},
+		{name: "path/left out", match: path(nil), wantPath: "PathPrefix", wantFill: true},
+		{name: "path/not a string", match: path(5), wantPath: "PathPrefix", wantFill: true},
 		{name: "path/PathPrefix", match: path("PathPrefix"), wantPath: "PathPrefix"},
 		{name: "path/Exact", match: path("Exact"), wantPath: "Exact"},
 		{name: "path/RegularExpression", match: path("RegularExpression"), wantPath: "RegularExpression"},
 		{name: "path/the ingress word", match: path("Prefix"), wantErr: pathWords + `"Prefix"`},
 		{name: "path/wrong case", match: path("exact"), wantErr: pathWords + `"exact"`},
 		{name: "path/empty", match: path(""), wantErr: pathWords + `""`},
-		{name: "header/left out", match: header(nil), wantHeader: "Exact"},
+		{name: "header/left out", match: header(nil), wantHeader: "Exact", wantFill: true},
+		{name: "header/not a string", match: header(5), wantHeader: "Exact", wantFill: true},
 		{name: "header/Exact", match: header("Exact"), wantHeader: "Exact"},
 		{name: "header/RegularExpression", match: header("RegularExpression"), wantHeader: "RegularExpression"},
 		{name: "header/short word", match: header("Regex"), wantErr: headerWords + `"Regex"`},
@@ -77,6 +85,19 @@ func TestHTTPRouteHandler_MatchType(t *testing.T) {
 			}
 			if tc.wantHeader != "" && (len(match.Headers) != 1 || match.Headers[0].Type != tc.wantHeader) {
 				t.Errorf("headers = %+v, want one of type %q", match.Headers, tc.wantHeader)
+			}
+			typePath := "rules[0].matches[0].path.type"
+			if tc.wantHeader != "" {
+				typePath = "rules[0].matches[0].headers[0].type"
+			}
+			filled := false
+			for _, d := range cfg.BuiltinDefaults() {
+				if d.Path == typePath {
+					filled = true
+				}
+			}
+			if filled != tc.wantFill {
+				t.Errorf("fill reported at %s = %v, want %v (report: %+v)", typePath, filled, tc.wantFill, cfg.BuiltinDefaults())
 			}
 		})
 	}
