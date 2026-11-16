@@ -3075,6 +3075,11 @@ func accessModesOmitted(m map[string]any) bool {
 	return !present
 }
 
+// ClaimAccessModesOmitted reports whether a claim's properties leave
+// `accessModes` out, which ParseClaimProperties fills with ReadWriteOnce: the
+// test the pvc trait reports that fill by (oam.BuiltinDefaultReporter).
+func ClaimAccessModesOmitted(props map[string]any) bool { return accessModesOmitted(props) }
+
 func parseAccessModes(m map[string]any) ([]string, error) {
 	if accessModesOmitted(m) {
 		return []string{string(corev1.ReadWriteOnce)}, nil

@@ -95,7 +95,11 @@ func (h *PVCHandler) parseProperties(props map[string]any, app *stack.Applicatio
 	if err != nil {
 		return nil, errors.Wrapf(err, "PVC %q", name)
 	}
-	return &PVCTraitConfig{Name: name, componentName: app.Name, Claim: claim}, nil
+	config := &PVCTraitConfig{Name: name, componentName: app.Name, Claim: claim}
+	if components.ClaimAccessModesOmitted(props) {
+		reportFill(&config.BuiltinDefaultLog, "pvc", "accessModes")
+	}
+	return config, nil
 }
 
 // PVCTraitConfig implements stack.ApplicationConfig for standalone PVC traits.
@@ -109,6 +113,9 @@ type PVCTraitConfig struct {
 	Claim components.PVCConfig
 	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
 	oam.PolicyDefaultLog
+	// BuiltinDefaultLog holds the values parseProperties filled
+	// (oam.BuiltinDefaultReporter).
+	oam.BuiltinDefaultLog
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource

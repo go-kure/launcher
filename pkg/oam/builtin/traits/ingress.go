@@ -486,6 +486,8 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 
 			if path, ok := pathMap["path"].(string); ok {
 				p.Path = path
+			} else {
+				reportFill(&config.BuiltinDefaultLog, "ingress", fmt.Sprintf("rules[%d].paths[%d].path", i, j))
 			}
 
 			if pathType, ok := pathMap["pathType"].(string); ok {
@@ -493,6 +495,8 @@ func (h *IngressHandler) parseProperties(props map[string]any, app *stack.Applic
 					return nil, errors.Errorf("rules[%d].paths[%d]: pathType must be 'Prefix', 'Exact', or 'ImplementationSpecific', got %q", i, j, pathType)
 				}
 				p.PathType = pathType
+			} else {
+				reportFill(&config.BuiltinDefaultLog, "ingress", fmt.Sprintf("rules[%d].paths[%d].pathType", i, j))
 			}
 
 			// backendExplicit is true only when the backend names a DIFFERENT service than
@@ -676,6 +680,10 @@ type IngressConfig struct {
 	// ownServiceName is the Service of the application the trait ran on, the one ports belongs to
 	// (go-kure/launcher#1157).
 	ownServiceName string
+
+	// BuiltinDefaultLog holds the values parseProperties filled
+	// (oam.BuiltinDefaultReporter).
+	oam.BuiltinDefaultLog
 }
 
 // TrafficSources implements the cluster-level trafficSourceCollector contract.

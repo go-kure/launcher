@@ -133,6 +133,8 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 		default:
 			return nil, errors.Errorf("unsupported copyMethod %q; supported: Snapshot, Direct, Clone", cm)
 		}
+	} else {
+		reportFill(&config.BuiltinDefaultLog, "volsync", "copyMethod")
 	}
 
 	if sc, ok := props["storageClassName"].(string); ok {
@@ -151,8 +153,18 @@ func (h *VolSyncHandler) parseProperties(props map[string]any, app *stack.Applic
 			return nil, errors.Errorf("'pruneIntervalDays' must be between 1 and %d", math.MaxInt32)
 		}
 		config.PruneIntervalDays = pid
+	} else {
+		reportFill(&config.BuiltinDefaultLog, "volsync", "pruneIntervalDays")
 	}
 
+	// A count the retain block leaves out keeps its default, the whole block
+	// left out included (a read of a nil map finds no key).
+	retain, _ := props["retain"].(map[string]any)
+	for _, field := range []string{"daily", "weekly", "monthly"} {
+		if _, ok := retain[field]; !ok {
+			reportFill(&config.BuiltinDefaultLog, "volsync", "retain."+field)
+		}
+	}
 	if rawRetain, ok := props["retain"].(map[string]any); ok {
 		for field, dst := range map[string]*int{
 			"daily":   &config.RetainDaily,
@@ -194,6 +206,10 @@ type VolsyncConfig struct {
 	RetainDaily             int
 	RetainWeekly            int
 	RetainMonthly           int
+
+	// BuiltinDefaultLog holds the values parseProperties filled
+	// (oam.BuiltinDefaultReporter).
+	oam.BuiltinDefaultLog
 }
 
 // ComponentName returns the OAM component this sub-app belongs to, for resource

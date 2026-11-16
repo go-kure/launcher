@@ -174,6 +174,7 @@ func (h *ScalerHandler) parseProperties(props map[string]any, app *stack.Applica
 	if config.CPUUtilization == nil && config.MemoryUtilization == nil {
 		defaultCPU := int32(80)
 		config.CPUUtilization = &defaultCPU
+		config.cpuFilled = true
 	}
 
 	if pdb, ok := props["enablePDB"].(bool); ok {
@@ -270,6 +271,11 @@ type ScalerConfig struct {
 	// so the exported ScalerConfig stays comparable.
 	minFromPolicy bool
 	maxFromPolicy bool
+
+	// cpuFilled records that parseProperties set CPUUtilization because the
+	// author wrote no target at all (BuiltinDefaults). A plain field, for the
+	// reason above.
+	cpuFilled bool
 
 	// nonRWXClaim is the component's single-pod claim (see nonRWXClaimer),
 	// captured at Apply; "" when the component has none.

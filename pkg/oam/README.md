@@ -201,7 +201,9 @@ A config reports the defaults it applied so the provenance report can name their
 `PolicyDefaultReporter` reports what the policy filled (source `policy`). `BuiltinDefaultReporter`
 reports what launcher's own code filled, at parse or at generation (source `builtin`). A path has
 one source, the one whose value stands, and `BuiltinDefaults()` is pure: the same call after
-`ApplyPolicy` ran twice gives the same answer. The contract and the fills of each workload kind are
+`ApplyPolicy` ran twice gives the same answer. The engine reads both on a component's config and on
+the config of each sub-application a trait adds. The contract, the fills of each workload kind and
+of the traits that report, and what is not reported are
 in [Transform and lowering](/site/content/api-reference/oam/transform-and-lowering.md).
 
 ### Refusal classes
