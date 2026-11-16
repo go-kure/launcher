@@ -13,10 +13,11 @@ import (
 
 // These tests hold every boundedBy a built-in schema publishes
 // (go-kure/launcher#1580). A declared class is shown to refuse a value at that
-// property: from a document that passes, one path is changed, the build is
-// refused with that class, and it is refused no more once the one policy
-// setting behind the class is relaxed. The test runs one way: a property that
-// is bounded and declares nothing is not found here.
+// property: from a document that passes, the value at or below the property's
+// path is changed, with the keys the changed document needs beside it, the
+// build is refused with that class, and it is refused no more once the one
+// policy setting behind the class is relaxed. The test runs one way: a property
+// that is bounded and declares nothing is not found here.
 
 // boundsPolicy is a Policy with the limits a test sets; every other accessor
 // is NoopPolicy's.
