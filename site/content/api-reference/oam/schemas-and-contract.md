@@ -672,7 +672,10 @@ lands unchanged at the same key of the `deployment` member:
 | `deploymentObjectName`, `serviceObjectName` (`webservice`) | no place: they name objects | |
 
 The `topology-spread` trait the rule attaches holds no property, so the report has
-no entry for it, present or absent. `serviceAccountObjectName` names the
+no leaf for `topologySpread`, present or absent. The trait does fill a field of the
+Deployment: from two replicas the report holds one `builtin` entry for it,
+`topologySpreadConstraints` under the trait, and none at one replica, so `replicas`
+declares that place as a fill it can make. `serviceAccountObjectName` names the
 ServiceAccount the component generates, and the deployment's pods run as it: the
 member's `serviceAccountName` holds the name resolved for the account, which is the
 `Naming` hook's answer or the component name when the key is left out.
