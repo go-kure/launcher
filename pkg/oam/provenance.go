@@ -984,12 +984,19 @@ type decoratorFill struct {
 	config stack.ApplicationConfig
 }
 
-// sameConfig reports whether a and b are one config. A config of a type that
-// cannot be compared counts as another one, so a trait is read rather than
-// skipped; every config the builtins hold is a pointer, which compares.
-func sameConfig(a, b stack.ApplicationConfig) bool {
-	ta := reflect.TypeOf(a)
-	return ta == reflect.TypeOf(b) && ta != nil && ta.Comparable() && a == b
+// sameConfig reports whether a and b are one config. Two configs of one type
+// whose values cannot be compared (a value type with a map in an interface
+// field: the comparison panics for it) count as one: a handler that replaces its
+// config with another of that type is not read, and a handler that panics the
+// report where the transform succeeds would break the rule that the report
+// changes nothing. Every config the builtins hold is a pointer, which compares.
+func sameConfig(a, b stack.ApplicationConfig) (same bool) {
+	defer func() {
+		if recover() != nil {
+			same = true
+		}
+	}()
+	return reflect.TypeOf(a) == reflect.TypeOf(b) && a == b
 }
 
 // recordDecoratorFills reads the values launcher's own code filled in each
