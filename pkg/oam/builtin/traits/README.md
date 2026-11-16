@@ -1096,8 +1096,8 @@ Not reported: the name of the sub-application a trait adds, the trait-level
 `serviceName` and `servicePort` of `ingress` and `httproute`, the entry the `remoteRef`
 shorthand of `external-secret` stands for, the `targetSecretName` of `external-secret`
 under creationPolicy `Merge` or `None` (the name is then of a Secret the trait does not
-make, and no name is resolved for it), what `security-context` and `topology-spread`
-write into the workload, and what the `expose` rule fills before it emits its trait.
+make, and no name is resolved for it), what `security-context` writes into the
+workload, and what the `expose` rule fills before it emits its trait.
 
 A handler that gains a schema `Default` either reports the fill or is listed with its
 reason in `traitDefaultExemptions` (`builtin/registry/trait_fill_provenance_test.go`):
