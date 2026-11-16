@@ -57,14 +57,19 @@ func sameStrings(a, b []string) bool {
 	return true
 }
 
-func TestDecoratorFills_SecurityContextReportsWhatTheLevelFills(t *testing.T) {
+type securityCase struct {
+	name string
+	comp oam.Component
+	want []string
+}
+
+func securityCases() []securityCase {
 	all := []string{"allowPrivilegeEscalation", "readOnlyRootFilesystem", "runAsNonRoot"}
 	restricted := map[string]any{"psaLevel": "restricted"}
-	cases := []struct {
-		name string
-		comp oam.Component
-		want []string
-	}{
+	allAuthored := map[string]any{"runAsNonRoot": true, "allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true}
+	podAuthored := map[string]any{"runAsNonRoot": true}
+	extra := []any{map[string]any{"name": "extra", "image": "registry.example/extra:1"}}
+	return []securityCase{
 		{"restricted on a workload that authors nothing", spreadDeployment(nil, securityTrait(restricted)), all},
 		{"baseline adds nothing", spreadDeployment(nil, securityTrait(map[string]any{"psaLevel": "baseline"})), nil},
 		{"privileged adds nothing", spreadDeployment(nil, securityTrait(map[string]any{"psaLevel": "privileged"})), nil},
@@ -83,8 +88,28 @@ func TestDecoratorFills_SecurityContextReportsWhatTheLevelFills(t *testing.T) {
 		{"the workload authors readOnlyRootFilesystem false", spreadDeployment(map[string]any{
 			"securityContext": map[string]any{"readOnlyRootFilesystem": false}}, securityTrait(restricted)),
 			[]string{"allowPrivilegeEscalation", "runAsNonRoot"}},
+		// runAsNonRoot is filled on the pod and on each container, so it is
+		// reported while any of them has none.
+		{"the pod and the container author runAsNonRoot", spreadDeployment(map[string]any{
+			"podSecurityContext": podAuthored, "securityContext": podAuthored}, securityTrait(restricted)),
+			[]string{"allowPrivilegeEscalation", "readOnlyRootFilesystem"}},
+		{"only the container authors runAsNonRoot", spreadDeployment(map[string]any{
+			"securityContext": podAuthored}, securityTrait(restricted)), all},
+		{"only the pod authors runAsNonRoot", spreadDeployment(map[string]any{
+			"podSecurityContext": podAuthored}, securityTrait(restricted)), all},
+		// Everything authored on the pod and the main container: nothing is filled
+		// until a container with no context of its own is added.
+		{"everything is authored", spreadDeployment(map[string]any{
+			"podSecurityContext": podAuthored, "securityContext": allAuthored}, securityTrait(restricted)), nil},
+		{"a sidecar authors nothing", spreadDeployment(map[string]any{
+			"podSecurityContext": podAuthored, "securityContext": allAuthored, "sidecars": extra}, securityTrait(restricted)), all},
+		{"an init container authors nothing", spreadDeployment(map[string]any{
+			"podSecurityContext": podAuthored, "securityContext": allAuthored, "initContainers": extra}, securityTrait(restricted)), all},
 	}
-	for _, tc := range cases {
+}
+
+func TestDecoratorFills_SecurityContextReportsWhatTheLevelFills(t *testing.T) {
+	for _, tc := range securityCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := securityFills(t, tc.comp); !sameStrings(got, tc.want) {
 				t.Errorf("the report holds %v under the trait, want %v", got, tc.want)
@@ -106,25 +131,22 @@ func TestDecoratorFills_SecurityContextFillsMatchWhatAnAuthorWritesForTheSameVal
 	}
 }
 
-// The report changes nothing the transform produces.
+// The report changes nothing the transform produces, for every case above.
 func TestDecoratorFills_SecurityContextReportDoesNotChangeTheOutput(t *testing.T) {
-	for name, comp := range map[string]oam.Component{
-		"restricted": spreadDeployment(nil, securityTrait(map[string]any{"psaLevel": "restricted"})),
-		"baseline":   spreadDeployment(nil, securityTrait(map[string]any{"psaLevel": "baseline"})),
-	} {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range securityCases() {
+		t.Run(tc.name, func(t *testing.T) {
 			p := &oam.NoopPolicy{}
 			app := &oam.Application{
 				APIVersion: oam.SupportedAPIVersion,
 				Kind:       "Application",
 				Metadata:   oam.Metadata{Name: "pkg", Namespace: "default"},
-				Spec:       oam.ApplicationSpec{Components: []oam.Component{comp}},
+				Spec:       oam.ApplicationSpec{Components: []oam.Component{tc.comp}},
 			}
 			cluster, _, err := newTransformer().TransformWithPolicy(app, oam.TransformContext{Namespace: "default", Policy: p})
 			if err != nil {
 				t.Fatalf("TransformWithPolicy: %v", err)
 			}
-			_, reported := policyProvenanceFor(t, p, comp)
+			_, reported := policyProvenanceFor(t, p, tc.comp)
 			if string(manifestsOf(t, cluster)) != string(reported) {
 				t.Errorf("the generated objects differ with the report on")
 			}
