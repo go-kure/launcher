@@ -87,8 +87,13 @@ probes:
 - The computed fills (names, backends, a target secret, the repository of a backup) have
   rows that state sources only: no value an author writes is the computed one, so check B
   does not show that the library applies them.
-- A fill the report does not hold yet has no row: `security-context` and what the
-  `expose` rule fills. The `topology-spread` row states a source only: the trait takes no
-  property and fills a field of the Deployment, so no value an author writes is its fill.
+- A fill the report does not hold yet has no row: what the `expose` rule fills. The
+  `topology-spread` row states a source only: the trait takes no property and fills a field
+  of the Deployment, so no value an author writes is its fill.
+- The `security-context` probes cover `restricted` (three fills) and `baseline` (none).
+  Only `readOnlyRootFilesystem` has a value and an `Other`: the opposite of `runAsNonRoot`
+  and of `allowPrivilegeEscalation` is refused at `restricted`, so their rows state a source
+  only. A workload that authors some of the three, a Windows pod and `privileged` have no
+  probe; the registry tests read each of them.
 - `scaler` lists `replicas` in `NotAuthorable`: the trait owns the replica count and the
   document refuses an authored one with the stated text, so check A cannot compare objects for it.

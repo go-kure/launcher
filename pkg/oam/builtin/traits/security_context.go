@@ -57,7 +57,7 @@ func (h *SecurityContextHandler) Apply(trait *oam.Trait, app *stack.Application,
 		return err
 	}
 	app.Config = wrapIfAugmenter(
-		&securityContextConfig{decoratorBase: decoratorBase{Inner: app.Config}, spec: spec},
+		&securityContextConfig{decoratorBase: decoratorBase{Inner: app.Config}, spec: spec, app: app},
 		app.Config)
 	return nil
 }
@@ -163,6 +163,93 @@ func validateSecurityContextSpec(spec securityContextSpec) error {
 type securityContextConfig struct {
 	decoratorBase
 	spec securityContextSpec
+	// app is the application the trait decorates: BuiltinDefaults generates the
+	// inner config's objects for it, as Generate does.
+	app *stack.Application
+}
+
+// BuiltinDefaults implements oam.BuiltinDefaultReporter: the properties the
+// psaLevel profile fills where neither the trait nor the workload set them,
+// which are runAsNonRoot, allowPrivilegeEscalation and readOnlyRootFilesystem
+// at psaLevel restricted. baseline and privileged add nothing, and a Windows pod
+// is filled only for runAsNonRoot (applyToPodSpec states why). A property is
+// reported when any container, init container or the pod (runAsNonRoot only)
+// had none of its own, read from the objects the inner config generates, which
+// are the workload's authored values at that point. The seccomp profile and
+// capabilities.drop the profile also writes have no property of the trait, so
+// they are not reported.
+//
+// It runs applyToPodSpec on each workload as Generate does, so a document the
+// trait refuses reports nothing: Generate raises the refusal itself. The
+// objects are generated for the report and thrown away.
+func (c *securityContextConfig) BuiltinDefaults() []oam.BuiltinDefault {
+	if c.app == nil || c.spec.PSALevel != kubernetes.PSARestricted {
+		return nil
+	}
+	objects, err := c.Inner.Generate(c.app)
+	if err != nil {
+		return nil
+	}
+	var nonRoot, escalation, readOnly bool
+	for _, w := range workloadRefs(objects) {
+		windows := w.podSpec.OS != nil && w.podSpec.OS.Name == corev1.Windows
+		if c.spec.RunAsNonRoot == nil {
+			nonRoot = nonRoot || podRunAsNonRootUnset(w.podSpec)
+		}
+		if !windows {
+			if c.spec.AllowPrivilegeEscalation == nil {
+				escalation = escalation || anyContainerLacks(w.podSpec, func(sc *corev1.SecurityContext) bool { return sc.AllowPrivilegeEscalation == nil })
+			}
+			if c.spec.ReadOnlyRootFilesystem == nil {
+				readOnly = readOnly || anyContainerLacks(w.podSpec, func(sc *corev1.SecurityContext) bool { return sc.ReadOnlyRootFilesystem == nil })
+			}
+		}
+		if err := c.spec.applyToPodSpec(w.podSpec, "report"); err != nil {
+			// Generate stops at the first refused workload and the build fails.
+			return nil
+		}
+	}
+	var out []oam.BuiltinDefault
+	for _, f := range []struct {
+		set  bool
+		path string
+	}{
+		{nonRoot, "runAsNonRoot"},
+		{escalation, "allowPrivilegeEscalation"},
+		{readOnly, "readOnlyRootFilesystem"},
+	} {
+		if f.set {
+			out = append(out, oam.BuiltinDefault{Path: f.path, Ref: "security-context." + f.path})
+		}
+	}
+	return out
+}
+
+// podRunAsNonRootUnset reports whether the pod or any of its containers has no
+// runAsNonRoot of its own: the profile fills each level that has none.
+func podRunAsNonRootUnset(podSpec *corev1.PodSpec) bool {
+	if podSpec.SecurityContext == nil || podSpec.SecurityContext.RunAsNonRoot == nil {
+		return true
+	}
+	return anyContainerLacks(podSpec, func(sc *corev1.SecurityContext) bool { return sc.RunAsNonRoot == nil })
+}
+
+// anyContainerLacks reports whether a container or init container of podSpec
+// has a security context for which lacks is true, a missing context counting
+// as an empty one.
+func anyContainerLacks(podSpec *corev1.PodSpec, lacks func(*corev1.SecurityContext) bool) bool {
+	for _, list := range [][]corev1.Container{podSpec.Containers, podSpec.InitContainers} {
+		for i := range list {
+			sc := list[i].SecurityContext
+			if sc == nil {
+				sc = &corev1.SecurityContext{}
+			}
+			if lacks(sc) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Generate delegates to the inner config and then applies the security context
