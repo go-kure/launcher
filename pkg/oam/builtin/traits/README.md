@@ -1047,10 +1047,23 @@ author would have written, with the ref `<trait>.<path>`, and the engine records
 a `builtin` entry under the trait once the policy ran on that config. The paths are
 listed in [Transform and lowering](/site/content/api-reference/oam/transform-and-lowering.md).
 
-Six configs embed `oam.BuiltinDefaultLog` and report in `parseProperties`, in the
-`else` of the branch that reads the authored value, so the report and the fill cannot
-disagree (`reportFill`, `builtin_defaults.go`). `ScalerConfig` keeps a plain field so
-that it stays comparable, and `NetworkPolicyConfig` answers from its parsed ports.
+Six configs embed `oam.BuiltinDefaultLog` and report in `parseProperties`
+(`reportFill`, `builtin_defaults.go`). Most fills are reported in the `else` of the
+branch that reads the authored value, so the report and the fill cannot disagree. Four
+are reported by a condition of their own, which has to stay in step with the fill:
+
+- the `retain` counts of `volsync`, in a loop over the same keys ahead of the block that
+  reads them;
+- the `accessModes` of `pvc`, by `components.ClaimAccessModesOmitted`, the predicate
+  the claim parser fills by;
+- the `gatewayNamespace` of `httproute`, where the parent reference is built from a
+  `gatewayName` with no namespace;
+- the match types of `httproute`, where the type the generator gives the HTTPRoute
+  (`toGatewayPathType`, `toGatewayHeaderType`) is not the word the author wrote: none,
+  an empty one, or one it does not know.
+
+`ScalerConfig` keeps a plain field so that it stays comparable, and
+`NetworkPolicyConfig` answers from its parsed ports.
 
 Not reported: a value derived from the component or from another property (a name, an
 implicit backend's service and port), what `security-context` and `topology-spread`

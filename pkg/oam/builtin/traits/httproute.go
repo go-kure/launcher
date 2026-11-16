@@ -273,7 +273,11 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 					}
 					if t, ok := rawPath["type"].(string); ok {
 						pm.Type = t
-					} else {
+					}
+					// The type the HTTPRoute gets is the generator's reading of
+					// pm.Type: where that is not the word the author wrote (none,
+					// an empty one, one it does not know), the default stands.
+					if string(toGatewayPathType(pm.Type)) != rawPath["type"] {
 						reportFill(&config.BuiltinDefaultLog, "httproute", fmt.Sprintf("rules[%d].matches[%d].path.type", i, j))
 					}
 					if v, ok := rawPath["value"].(string); ok {
@@ -296,7 +300,10 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 						}
 						if t, ok := headerMap["type"].(string); ok {
 							hm.Type = t
-						} else {
+						}
+						// As for a path's type: the default stands where the
+						// generator's reading is not the word the author wrote.
+						if string(toGatewayHeaderType(hm.Type)) != headerMap["type"] {
 							reportFill(&config.BuiltinDefaultLog, "httproute", fmt.Sprintf("rules[%d].matches[%d].headers[%d].type", i, j, k))
 						}
 						name, ok := headerMap["name"].(string)

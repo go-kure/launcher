@@ -15,9 +15,9 @@ import (
 //
 // A fill is reported exactly where the handler's value stands: the key is left
 // out, or holds a value the handler replaces with its own (a null or an empty
-// string, where the parser reads one as unset and does not refuse it). A value
-// a capability rendered is in the properties the handler is handed, so it is
-// not a fill.
+// string, where the parser reads one as unset and does not refuse it, and an
+// httproute match type that is not a known word). A value a capability rendered
+// is in the properties the handler is handed, so it is not a fill.
 //
 // Not reported: a value a handler derives from the component or from another
 // property (an object's name, a backend's service and port, the repository
