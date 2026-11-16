@@ -127,7 +127,7 @@ func (h *NetworkPolicyHandler) Apply(trait *oam.Trait, app *stack.Application, b
 	}
 	// The policy's name: the authored one parseProperties stored, else the
 	// consumer hook's, else the default (go-kure/launcher#787).
-	config.Name, err = resolveObjectName(trait, oam.NameRoleNetworkPolicy,
+	config.Name, config.nameFilled, err = resolveObjectName(trait, oam.NameRoleNetworkPolicy,
 		schema.GroupKind{Group: networkingv1.GroupName, Kind: "NetworkPolicy"},
 		app.Namespace, "name", config.Name, config.defaultName())
 	if err != nil {
@@ -884,9 +884,12 @@ type NetworkPolicyConfig struct {
 	// one: the authored name, used as written, else the consumer hook's, else
 	// the default. "" on a config built directly leaves the default,
 	// <component>-allow, shortened to fit.
-	Name    string
-	Ingress []npIngressRule
-	Egress  []npEgressRule
+	Name string
+	// nameFilled says that Name is launcher's default: neither the author nor
+	// the Naming hook named the policy (BuiltinDefaults).
+	nameFilled bool
+	Ingress    []npIngressRule
+	Egress     []npEgressRule
 
 	// ingressSet and egressSet record that the authored document carried the key
 	// with a non-null value, including an empty list. They, not len(Ingress) or

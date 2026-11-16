@@ -732,20 +732,36 @@ func hookDefaults(resolved []subAppName, created int) []string {
 // validates an authored name and returns it or the default: the hook is not
 // consulted and nothing is claimed.
 func (t *Trait) ResolveName(spec NameSpec) (string, error) {
+	name, _, err := t.resolveNameFrom(spec)
+	return name, err
+}
+
+// ResolveNameDefaulted is ResolveName, and also says whether launcher's default
+// stood: true when neither the author nor the Naming hook named the object. A
+// name the hook gave is the hook's even when it is the default word for word.
+// A handler reads it to report the name as a fill it made
+// (BuiltinDefaultReporter).
+func (t *Trait) ResolveNameDefaulted(spec NameSpec) (string, bool, error) {
+	name, source, err := t.resolveNameFrom(spec)
+	return name, err == nil && source == nameFromDefault, err
+}
+
+// resolveNameFrom is ResolveName, also returning where the name came from.
+func (t *Trait) resolveNameFrom(spec NameSpec) (string, nameSource, error) {
 	owner := t.naming.ownerOf(t.Type, spec.Role, spec.Default)
 	// A FluxInput name is claimed where its object lands, known only once the name
 	// is resolved (landingNamespace).
 	var landing func(name string) string
 	if spec.FluxInput {
 		if err := fluxInputProblem(fmt.Sprintf("the NameSpec for role %q", spec.Role), spec.Kind, spec.ClusterScoped); err != nil {
-			return "", err
+			return "", nameFromDefault, err
 		}
 		namespace, kind := spec.Namespace, spec.Kind.Kind
 		spec.FluxInput = false
 		landing = func(name string) string { return t.naming.landingNamespace(namespace, kind, name) }
 	}
 	if t.naming == nil {
-		return (*nameResolver)(nil).resolve(owner, spec)
+		return (*nameResolver)(nil).resolveFrom(owner, spec)
 	}
 	name, source, err := t.naming.resolver.resolveLanding(owner, spec, landing)
 	// Recorded with its source: a name the hook gave is the hook's even when it is
@@ -760,7 +776,7 @@ func (t *Trait) ResolveName(spec NameSpec) (string, error) {
 		}
 		t.naming.subApps[name] = append(t.naming.subApps[name], subAppName{source: source, def: spec.Default, property: property})
 	}
-	return name, err
+	return name, source, err
 }
 
 // ClaimObjectName claims the name of an object the trait generates and names

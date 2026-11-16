@@ -200,6 +200,11 @@ type rbacTraitConfig struct {
 	// kind: the authored one, else the consumer hook's, else the component's. A
 	// kind with no entry (a config built directly) is named by name().
 	resolved map[string]string
+	// nameFilled says that every object kept launcher's default name: the author
+	// wrote no `name` and the Naming hook named none of them (BuiltinDefaults).
+	// The one property names them all, so a hook's name for any one of them
+	// leaves it unreported.
+	nameFilled bool
 	// serviceAccountName is the RoleBinding/ClusterRoleBinding subject; it never
 	// names the Role/RoleBinding objects themselves.
 	serviceAccountName string
@@ -241,6 +246,7 @@ var rbacKinds = []string{"Role", "RoleBinding", "ClusterRole", "ClusterRoleBindi
 // follows the name its role resolved to.
 func (c *rbacTraitConfig) resolveNames(trait *oam.Trait) error {
 	c.resolved = make(map[string]string, len(rbacKinds))
+	allDefaulted := true
 	for _, kind := range rbacKinds {
 		clusterScoped := strings.HasPrefix(kind, "Cluster")
 		if clusterScoped && !c.ClusterWide {
@@ -248,17 +254,20 @@ func (c *rbacTraitConfig) resolveNames(trait *oam.Trait) error {
 		}
 		groupKind := schema.GroupKind{Group: rbacv1.GroupName, Kind: kind}
 		var name string
+		var defaulted bool
 		var err error
 		if clusterScoped {
-			name, err = resolveClusterObjectName(trait, oam.NameRoleRBAC, groupKind, "name", c.objectName, c.componentName)
+			name, defaulted, err = resolveClusterObjectName(trait, oam.NameRoleRBAC, groupKind, "name", c.objectName, c.componentName)
 		} else {
-			name, err = resolveObjectName(trait, oam.NameRoleRBAC, groupKind, c.Namespace, "name", c.objectName, c.componentName)
+			name, defaulted, err = resolveObjectName(trait, oam.NameRoleRBAC, groupKind, c.Namespace, "name", c.objectName, c.componentName)
 		}
 		if err != nil {
 			return err
 		}
 		c.resolved[kind] = name
+		allDefaulted = allDefaulted && defaulted
 	}
+	c.nameFilled = allDefaulted
 	return nil
 }
 

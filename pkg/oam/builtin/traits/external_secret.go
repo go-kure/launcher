@@ -62,10 +62,14 @@ func (h *ExternalSecretHandler) Apply(trait *oam.Trait, app *stack.Application, 
 	// the component that reads it moves it to the Flux namespace, so it is
 	// claimed where it lands.
 	if config.createsTarget() {
-		config.TargetSecretName, err = resolveFluxInputName(trait, oam.NameRoleExternalSecret, secretKind,
+		var defaulted bool
+		config.TargetSecretName, defaulted, err = resolveFluxInputName(trait, oam.NameRoleExternalSecret, secretKind,
 			app.Namespace, "targetSecretName", config.targetSecretAuthored, config.SecretName)
 		if err != nil {
 			return err
+		}
+		if defaulted {
+			reportFill(&config.BuiltinDefaultLog, "external-secret", "targetSecretName")
 		}
 	}
 	// The ExternalSecret is named by the required secretName, so no hook could be
@@ -340,9 +344,11 @@ func (h *ExternalSecretHandler) parseProperties(props map[string]any, app *stack
 			}
 			if ref.Key == "" {
 				ref.Key = app.Namespace + "/" + config.SecretName
+				reportFill(&config.BuiltinDefaultLog, "external-secret", fmt.Sprintf("data[%d].remoteRef.key", i))
 			}
 			if ref.Property == "" {
 				ref.Property = secretKey
+				reportFill(&config.BuiltinDefaultLog, "external-secret", fmt.Sprintf("data[%d].remoteRef.property", i))
 			}
 			config.Data = append(config.Data, esDataEntry{
 				SecretKey: secretKey,

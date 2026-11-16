@@ -44,28 +44,32 @@ func checkAuthoredObjectName(property, object, name string) error {
 // property as the handler parsed it, "" when the author left the property out;
 // an empty authored string is refused before it gets here
 // (checkAuthoredObjectName), so "" never stands for one.
-func resolveObjectName(trait *oam.Trait, role oam.NameRole, kind schema.GroupKind, namespace, property, authored, def string) (string, error) {
+//
+// defaulted says that def stood: neither the author nor the hook named the
+// object (oam.Trait.ResolveNameDefaulted). The handler then reports property as
+// a fill it made (reportFill); a name the hook gave is not launcher's fill.
+func resolveObjectName(trait *oam.Trait, role oam.NameRole, kind schema.GroupKind, namespace, property, authored, def string) (name string, defaulted bool, err error) {
 	return resolveNameSpec(trait, oam.NameSpec{Role: role, Kind: kind, Namespace: namespace, Default: def}, property, authored)
 }
 
 // resolveFluxInputName is resolveObjectName for a ConfigMap or Secret a
 // component's Flux object can read by name, which moves with that object to the
 // Flux namespace when it does (oam.NameSpec.FluxInput), so it is claimed there.
-func resolveFluxInputName(trait *oam.Trait, role oam.NameRole, kind schema.GroupKind, namespace, property, authored, def string) (string, error) {
+func resolveFluxInputName(trait *oam.Trait, role oam.NameRole, kind schema.GroupKind, namespace, property, authored, def string) (name string, defaulted bool, err error) {
 	return resolveNameSpec(trait, oam.NameSpec{Role: role, Kind: kind, Namespace: namespace, FluxInput: true, Default: def}, property, authored)
 }
 
 // resolveClusterObjectName is resolveObjectName for a cluster-scoped object,
 // which has no namespace (oam.NameSpec.ClusterScoped).
-func resolveClusterObjectName(trait *oam.Trait, role oam.NameRole, kind schema.GroupKind, property, authored, def string) (string, error) {
+func resolveClusterObjectName(trait *oam.Trait, role oam.NameRole, kind schema.GroupKind, property, authored, def string) (name string, defaulted bool, err error) {
 	return resolveNameSpec(trait, oam.NameSpec{Role: role, Kind: kind, ClusterScoped: true, Default: def}, property, authored)
 }
 
-func resolveNameSpec(trait *oam.Trait, spec oam.NameSpec, property, authored string) (string, error) {
+func resolveNameSpec(trait *oam.Trait, spec oam.NameSpec, property, authored string) (string, bool, error) {
 	if authored != "" {
 		spec.Property, spec.Authored = property, authored
 	}
-	return trait.ResolveName(spec)
+	return trait.ResolveNameDefaulted(spec)
 }
 
 // The kinds of the routing and volsync traits' objects, resolved under their

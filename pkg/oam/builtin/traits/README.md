@@ -1039,10 +1039,10 @@ wrapper, so a caller reaches a trait config's concrete type through `oam.UnwrapC
 
 ## Fills in the provenance report
 
-Eight handlers report the fixed values they fill when the properties they are handed
+Ten handlers report the values they fill when the properties they are handed
 hold none (`oam.BuiltinDefaultReporter`, go-kure/launcher#1580): `certificate`,
-`external-secret`, `volsync`, `scaler`, `networkpolicy`, `ingress`, `httproute` and
-`pvc`. The config of the sub-application the trait adds names each fill at the path the
+`external-secret`, `volsync`, `scaler`, `disruption`, `rbac`, `networkpolicy`,
+`ingress`, `httproute` and `pvc`. The config of the sub-application the trait adds names each fill at the path the
 author would have written, with the ref `<trait>.<path>`, and the engine records it as
 a `builtin` entry under the trait once the policy ran on that config. The paths are
 listed in [Transform and lowering](/site/content/api-reference/oam/transform-and-lowering.md).
@@ -1062,12 +1062,24 @@ are reported by a condition of their own, which has to stay in step with the fil
   (`toGatewayPathType`, `toGatewayHeaderType`) is not the word the author wrote: none,
   an empty one, or one it does not know.
 
-`ScalerConfig` keeps a plain field so that it stays comparable, and
-`NetworkPolicyConfig` answers from its parsed ports.
+`ScalerConfig` keeps plain fields so that it stays comparable, `NetworkPolicyConfig`
+answers from its parsed ports and a plain field, and `DisruptionConfig` and the rbac
+config keep one plain field each.
 
-Not reported: a value derived from the component or from another property (a name, an
-implicit backend's service and port), what `security-context` and `topology-spread`
-write into the workload, and what the `expose` rule fills before it emits its trait.
+A value the handler computes from the component or from another property is reported
+the same way: an object's name, the service and port of a backend that names none, the
+repository Secret of `volsync`, the remote key and property of an `external-secret`
+entry. A name is resolved in `Apply`, through helpers that also return whether
+launcher's default stood (`resolveObjectName`, `oam.Trait.ResolveNameDefaulted`), and
+is reported only then: a name the consumer's Naming hook gave is not launcher's fill.
+The one `name` of `rbac` names up to four objects, and is reported only where every
+one of them kept the default.
+
+Not reported: the name of the sub-application a trait adds, the trait-level
+`serviceName` and `servicePort` of `ingress` and `httproute`, the entry the `remoteRef`
+shorthand of `external-secret` stands for, what `security-context` and
+`topology-spread` write into the workload, and what the `expose` rule fills before it
+emits its trait.
 
 A handler that gains a schema `Default` either reports the fill or is listed with its
 reason in `traitDefaultExemptions` (`builtin/registry/trait_fill_provenance_test.go`):

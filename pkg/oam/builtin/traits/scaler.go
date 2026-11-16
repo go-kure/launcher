@@ -92,23 +92,23 @@ func (c *ScalerConfig) setScaleTarget(componentType, componentName string) error
 // consumer hook's, else the default. A PodDisruptionBudget is named only when
 // the trait generates one.
 func (c *ScalerConfig) resolveNames(trait *oam.Trait, namespace string) error {
-	hpa, err := resolveObjectName(trait, oam.NameRoleHPA,
+	hpa, defaulted, err := resolveObjectName(trait, oam.NameRoleHPA,
 		schema.GroupKind{Group: autoscalingv2.GroupName, Kind: "HorizontalPodAutoscaler"},
 		namespace, "hpaName", c.HPAName, c.defaultHPAName())
 	if err != nil {
 		return err
 	}
-	c.HPAName = hpa
+	c.HPAName, c.hpaNameFilled = hpa, defaulted
 	if !c.EnablePDB {
 		return nil
 	}
-	pdb, err := resolveObjectName(trait, oam.NameRolePDB,
+	pdb, defaulted, err := resolveObjectName(trait, oam.NameRolePDB,
 		schema.GroupKind{Group: policyv1.GroupName, Kind: "PodDisruptionBudget"},
 		namespace, "pdbName", c.PDBName, c.defaultPDBName())
 	if err != nil {
 		return err
 	}
-	c.PDBName = pdb
+	c.PDBName, c.pdbNameFilled = pdb, defaulted
 	return nil
 }
 
@@ -276,6 +276,12 @@ type ScalerConfig struct {
 	// author wrote no target at all (BuiltinDefaults). A plain field, for the
 	// reason above.
 	cpuFilled bool
+
+	// hpaNameFilled and pdbNameFilled say that the name is launcher's default:
+	// neither the author nor the Naming hook named the object (BuiltinDefaults).
+	// Plain fields, for the reason above.
+	hpaNameFilled bool
+	pdbNameFilled bool
 
 	// nonRWXClaim is the component's single-pod claim (see nonRWXClaimer),
 	// captured at Apply; "" when the component has none.

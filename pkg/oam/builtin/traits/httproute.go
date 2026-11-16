@@ -39,8 +39,12 @@ func (h *HTTPRouteHandler) Apply(trait *oam.Trait, app *stack.Application, bundl
 	if def == "" {
 		def = routingObjectName(app.Name, "httproute", config.Scope)
 	}
-	if config.objectName, err = resolveObjectName(trait, oam.NameRoleHTTPRoute, httpRouteKind, app.Namespace, "name", config.Name, def); err != nil {
+	var defaulted bool
+	if config.objectName, defaulted, err = resolveObjectName(trait, oam.NameRoleHTTPRoute, httpRouteKind, app.Namespace, "name", config.Name, def); err != nil {
 		return err
+	}
+	if defaulted {
+		reportFill(&config.BuiltinDefaultLog, "httproute", "name")
 	}
 	// The hook's answer names the HTTPRoute alone: the sub-application keeps the
 	// authored name, else launcher's default (go-kure/launcher#787).
@@ -340,8 +344,10 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 					Name: selfServiceName,
 					Port: defaultPort,
 				}
+				nameFilled := true
 				if name, ok := backendMap["name"].(string); ok {
 					br.Name = name
+					nameFilled = false
 					if name != selfServiceName {
 						nameExplicit = true
 					}
@@ -397,6 +403,13 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 						"rules[%d].backendRefs[%d]: cannot determine backend port — specify 'port' in the backendRef",
 						i, j)
 				}
+				// The component's own service and its port, where the ref names none.
+				if nameFilled {
+					reportFill(&config.BuiltinDefaultLog, "httproute", fmt.Sprintf("rules[%d].backendRefs[%d].name", i, j))
+				}
+				if !portExplicit {
+					reportFill(&config.BuiltinDefaultLog, "httproute", fmt.Sprintf("rules[%d].backendRefs[%d].port", i, j))
+				}
 				rule.BackendRefs = append(rule.BackendRefs, br)
 			}
 		} else {
@@ -412,6 +425,7 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 					i, app.Name)
 			}
 			rule.BackendRefs = []BackendRef{{Name: defaultServiceName, Port: defaultPort}}
+			reportFill(&config.BuiltinDefaultLog, "httproute", fmt.Sprintf("rules[%d].backendRefs", i))
 		}
 
 		// Optional: filters
