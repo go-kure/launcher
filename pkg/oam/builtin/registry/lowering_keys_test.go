@@ -183,16 +183,20 @@ func loweringKeySamples() map[string]loweringKeySample {
 		"probes":                  {value: map[string]any{"readiness": map[string]any{"httpGet": map[string]any{"path": "/", "port": 8080}}}},
 		"progressDeadlineSeconds": {value: 120},
 		"readinessGates":          {value: []any{map[string]any{"conditionType": "example.org/ready"}}},
-		"replicas":                {value: 3},
-		"resizePolicy":            {value: []any{map[string]any{"resourceName": "cpu", "restartPolicy": "NotRequired"}}},
-		"resourceClaims":          {value: []any{map[string]any{"name": "gpu", "resourceClaimName": "gpu-claim"}}},
-		"resources":               {value: map[string]any{"requests": map[string]any{"cpu": "200m"}}},
-		"revisionHistoryLimit":    {value: 3},
-		"runtimeClassName":        {value: "gvisor"},
-		"schedulerName":           {value: "custom"},
-		"schedulingGates":         {value: []any{map[string]any{"name": "example.org/gate"}}},
-		"schedulingGroup":         {value: map[string]any{"podGroupName": "batch"}},
-		"securityContext":         {value: map[string]any{"runAsNonRoot": true}},
+		// Three replicas make the topology-spread trait the rule attaches write
+		// constraints, which the report holds under the trait.
+		"replicas": {value: 3, alsoFills: map[reportedAt]oam.SourceKind{
+			{"deployment", "topology-spread", "topologySpreadConstraints"}: oam.SourceBuiltin,
+		}},
+		"resizePolicy":         {value: []any{map[string]any{"resourceName": "cpu", "restartPolicy": "NotRequired"}}},
+		"resourceClaims":       {value: []any{map[string]any{"name": "gpu", "resourceClaimName": "gpu-claim"}}},
+		"resources":            {value: map[string]any{"requests": map[string]any{"cpu": "200m"}}},
+		"revisionHistoryLimit": {value: 3},
+		"runtimeClassName":     {value: "gvisor"},
+		"schedulerName":        {value: "custom"},
+		"schedulingGates":      {value: []any{map[string]any{"name": "example.org/gate"}}},
+		"schedulingGroup":      {value: map[string]any{"podGroupName": "batch"}},
+		"securityContext":      {value: map[string]any{"runAsNonRoot": true}},
 		// An existing account: the rule generates none.
 		"serviceAccountName": {value: "existing", removesMember: "serviceaccount"},
 		// The deployment's pods run as the account under the name it was given.

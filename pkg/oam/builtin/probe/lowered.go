@@ -23,10 +23,10 @@ func loweredProbes() []Probe {
 		{Name: "webservice", Components: component("app", "webservice", nil),
 			// The webservice authors one port and not a list, so the protocol the
 			// rule fills has no value an author can write.
-			Fills:      deployment("app", Fill{Component: "app", Path: "ports[0].protocol", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin}),
+			Fills:      join(deployment("app", Fill{Component: "app", Path: "ports[0].protocol", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin}), []Fill{topologyFill()}),
 			Unreported: topologyGap()},
 		{Name: "worker", Components: component("app", "worker", nil),
-			Fills: deployment("app"), Unreported: topologyGap()},
+			Fills: join(deployment("app"), []Fill{topologyFill()}), Unreported: topologyGap()},
 		{Name: "postgresql", Components: []oam.Component{{Name: "db", Type: "postgresql", Properties: map[string]any{}}},
 			Fills: join([]Fill{
 				{Component: "db", Path: "enablePDB", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin},
@@ -56,9 +56,22 @@ func withPolicyOnly(fills []Fill) []Fill {
 	return out
 }
 
-// topologyGap is the one declared default of webservice and worker the report does
-// not name: the key switches the topology-spread trait, and trait fills are
-// reported by a later step of go-kure/launcher#1580.
+// spreadPath is the Deployment field the topology-spread trait fills, the path
+// the report holds under the trait.
+const spreadPath = "topologySpreadConstraints"
+
+// topologyFill is the fill of the trait that `topologySpread` switches on
+// webservice and worker. The trait writes constraints from two replicas, and
+// the document with no policy runs one, so only the document with the policy
+// (two replicas) holds it.
+func topologyFill() Fill {
+	return Fill{Component: "app", Member: "deployment", Trait: "topology-spread", Path: spreadPath, WithPolicy: oam.SourceBuiltin}
+}
+
+// topologyGap is the one declared default of webservice and worker that check A
+// reads as unreported: with no policy the document has one replica, the trait
+// writes nothing at one, and the report holds nothing. topologyFill states the
+// entry the document with the policy holds.
 func topologyGap() map[string]string {
-	return map[string]string{"topologySpread": "the trait the key switches reports no entry yet"}
+	return map[string]string{"topologySpread": "at one replica, which the document with no policy has, the trait writes no constraints and the report holds no entry"}
 }

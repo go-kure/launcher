@@ -200,6 +200,13 @@ type TransformContext struct {
 	// appended, recorded by applyEntryTraits and read
 	// by postProcessFluxNamespace. Internal only, shared like subAppDecorations.
 	traitSubApps *[]traitSubApps
+	// decoratorFills accumulates each config a trait put in place of its
+	// component's own (a decorating trait adds no sub-application, so nothing
+	// else reads it), with the trait's entry in the provenance report. Read by
+	// recordDecoratorFills once every trait has applied, because what a decorator
+	// fills can depend on a trait applied after it. Internal only, nil unless a
+	// report is wanted, shared like subAppDecorations.
+	decoratorFills *[]decoratorFill
 	// generatedSourceReaders maps each Flux object a lowering rule ordered after
 	// a generated source to those sources (generatedSourceReaders), set once the
 	// order is known and read by applyEntryTraits (fluxInputReaders). Internal
@@ -897,6 +904,9 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 	ctx.consumedCapabilities = make(map[string]struct{})
 	ctx.subAppDecorations = &[]subAppDecoration{}
 	ctx.traitSubApps = &[]traitSubApps{}
+	if ctx.provenance != nil {
+		ctx.decoratorFills = &[]decoratorFill{}
+	}
 	ctx.subAppOrigins = make(map[*stack.Application]subAppOrigin)
 
 	// Validate + normalize the platform domain (and the optional full-key override) once,
@@ -1104,6 +1114,9 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 	if err := decorateSubApplications(*ctx.subAppDecorations); err != nil {
 		return nil, nil, err
 	}
+	// What a decorating trait filled, read once no trait is left to change it.
+	// Before markComponentOwnership, which wraps each application's config.
+	recordDecoratorFills(ctx.decoratorFills)
 	// Every bundle again, now that no step adds or renames an application: the
 	// synthesized NetworkPolicies' sub-applications, and a bundle a trait added
 	// as a child, were not there when each bundle's traits were checked.
@@ -1840,11 +1853,15 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 			prev := slices.Clone(bundle.Applications)
 			// A trait may rename a sub-application an earlier one added.
 			named := recordedNames(origins)
+			configBefore := entry.app.Config
 			if err := handler.Apply(&resolved, entry.app, bundle); err != nil {
 				return nil, &TransformError{
 					Message: fmt.Sprintf("component %q trait %q", entry.component.Name, trait.Type),
 					Cause:   err,
 				}
+			}
+			if rec != nil && ctx.decoratorFills != nil && !sameConfig(configBefore, entry.app.Config) {
+				*ctx.decoratorFills = append(*ctx.decoratorFills, decoratorFill{rec: rec, config: entry.app.Config})
 			}
 			recordRenames(origins, named, nil)
 			if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type, entryAppStep{}); err != nil {

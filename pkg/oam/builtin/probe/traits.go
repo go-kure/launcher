@@ -57,7 +57,15 @@ func traitProbes() []Probe {
 	}}, nil, []Fill{tf("scaler", "cpuUtilization", 80, 70), derived("scaler", "hpaName")})
 	scaler.Fills = slices.DeleteFunc(scaler.Fills, func(f Fill) bool { return f.Trait == "" && f.Path == "replicas" })
 	scaler.NotAuthorable = map[string]string{"replicas": "owns the replica count"}
+	// The trait writes constraints from two replicas, so the document authors two
+	// and the deployment reports no replicas. It takes no property: the fill is a
+	// field of the Deployment, stated as a source only.
+	spread := withTrait("deployment with a topology spread", oam.Trait{Type: "topology-spread", Properties: map[string]any{}},
+		nil, []Fill{derived("topology-spread", spreadPath)})
+	spread.Components[0].Properties["replicas"] = 2
+	spread.Fills = slices.DeleteFunc(spread.Fills, func(f Fill) bool { return f.Trait == "" && f.Path == "replicas" })
 	return []Probe{
+		spread,
 		withTrait("deployment with a certificate", oam.Trait{Type: "certificate", Properties: map[string]any{
 			"secretName": "tls", "dnsNames": []any{"a.example.com"},
 		}}, issuer, []Fill{

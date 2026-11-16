@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -89,7 +90,7 @@ func (h *TopologySpreadHandler) Apply(trait *oam.Trait, app *stack.Application, 
 		}
 	}
 	app.Config = wrapIfAugmenter(
-		&topologySpreadConfig{decoratorBase: decoratorBase{Inner: app.Config}, bundle: bundle},
+		&topologySpreadConfig{decoratorBase: decoratorBase{Inner: app.Config}, bundle: bundle, app: app},
 		app.Config)
 	return nil
 }
@@ -102,6 +103,9 @@ type topologySpreadConfig struct {
 	// scaler among its applications; the pointer stays valid when the
 	// transform reorders the applications.
 	bundle *stack.Bundle
+	// app is the application the trait decorates: BuiltinDefaults generates the
+	// inner config's objects for it, as Generate does.
+	app *stack.Application
 }
 
 // scaledMinReplicas returns the effective minReplicas of the scaler that
@@ -163,9 +167,11 @@ func (c *topologySpreadConfig) Generate(app *stack.Application) ([]*client.Objec
 		}
 		found = true
 		scaled, underScaler := c.scaledMinReplicas(app, dep)
-		if err := applyTopologySpread(dep, scaled, underScaler); err != nil {
+		constraints, err := topologySpreadFor(dep, scaled, underScaler)
+		if err != nil {
 			return nil, err
 		}
+		dep.Spec.Template.Spec.TopologySpreadConstraints = constraints
 	}
 	if !found {
 		return nil, errors.Errorf("topology-spread: component %q generates no Deployment the trait can act on; it needs a Deployment built by a launcher kind, decoded from a manifests source or rendered from a helmtemplate chart, and a Deployment passed through as raw, unstructured output (passthrough) is not inspected", app.Name)
@@ -173,9 +179,11 @@ func (c *topologySpreadConfig) Generate(app *stack.Application) ([]*client.Objec
 	return objects, nil
 }
 
-// applyTopologySpread sets dep's pod-template topology spread constraints from
-// its replica count and selector. The count is its own spec.replicas, or
-// scaledMin, the minReplicas of the scaler that scales it, when underScaler.
+// topologySpreadFor returns the pod-template topology spread constraints dep
+// gets from its replica count and selector, nil at one replica or fewer. The
+// count is its own spec.replicas, or scaledMin, the minReplicas of the scaler
+// that scales it, when underScaler. Generate sets the result and BuiltinDefaults
+// reads it, so the report and the object cannot disagree.
 //
 // Constraints already on the pod template are refused rather than merged: they
 // come either from the component's raw `topologySpreadConstraints` or from a
@@ -192,15 +200,15 @@ func (c *topologySpreadConfig) Generate(app *stack.Application) ([]*client.Objec
 // environment policy, or from the scaler's minReplicas when one matches, and a
 // check that only ran once constraints were due would let one document build in
 // one environment and fail in another.
-func applyTopologySpread(dep *appsv1.Deployment, scaledMin int32, underScaler bool) error {
+func topologySpreadFor(dep *appsv1.Deployment, scaledMin int32, underScaler bool) ([]corev1.TopologySpreadConstraint, error) {
 	if n := len(dep.Spec.Template.Spec.TopologySpreadConstraints); n > 0 {
-		return errors.Errorf(
+		return nil, errors.Errorf(
 			"topology-spread: Deployment %q already carries %d topologySpreadConstraints (authored on the component, or from its own topologySpread default); remove them, or set topologySpread: false, or drop the trait",
 			dep.Name, n)
 	}
 	sel := dep.Spec.Selector
 	if sel == nil || len(sel.MatchLabels) == 0 || len(sel.MatchExpressions) > 0 {
-		return errors.Errorf(
+		return nil, errors.Errorf(
 			"topology-spread: Deployment %q needs a selector made of matchLabels only to derive the spread selector from",
 			dep.Name)
 	}
@@ -216,6 +224,37 @@ func applyTopologySpread(dep *appsv1.Deployment, scaledMin int32, underScaler bo
 	// BuildTopologySpreadConstraints copies the map it is given, so the
 	// constraints never alias the Deployment's own selector. It returns nil at
 	// one replica or fewer, which leaves the field unset.
-	dep.Spec.Template.Spec.TopologySpreadConstraints = components.BuildTopologySpreadConstraints(replicas, sel.MatchLabels)
+	return components.BuildTopologySpreadConstraints(replicas, sel.MatchLabels), nil
+}
+
+// BuiltinDefaults implements oam.BuiltinDefaultReporter: the constraints the
+// trait writes onto a Deployment, which are launcher's own opinion and have no
+// property of the trait (it takes none). It generates the inner config's
+// objects as Generate does and asks topologySpreadFor of each typed Deployment,
+// so a Deployment at one replica, one that is refused, and a config that does
+// not generate report nothing: Generate raises the last two itself. The runtime
+// reads it once every trait has applied (go-kure/launcher#1580), so a scaler
+// applied after this trait has decided the count by then.
+func (c *topologySpreadConfig) BuiltinDefaults() []oam.BuiltinDefault {
+	if c.app == nil {
+		return nil
+	}
+	objects, err := c.Inner.Generate(c.app)
+	if err != nil {
+		return nil
+	}
+	for _, objPtr := range objects {
+		if objPtr == nil {
+			continue
+		}
+		dep, ok := (*objPtr).(*appsv1.Deployment)
+		if !ok || dep == nil {
+			continue
+		}
+		scaled, underScaler := c.scaledMinReplicas(c.app, dep)
+		if constraints, err := topologySpreadFor(dep, scaled, underScaler); err == nil && len(constraints) > 0 {
+			return []oam.BuiltinDefault{{Path: "topologySpreadConstraints", Ref: "topology-spread.topologySpreadConstraints"}}
+		}
+	}
 	return nil
 }
