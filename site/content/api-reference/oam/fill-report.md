@@ -53,6 +53,11 @@ author can write for it. The two sources of a path read as follows:
 | `policy` | `builtin` | The policy default where the policy sets one, launcher's value where it sets none. |
 | `policy` | no entry | Only a policy default fills it. |
 | `builtin` | `builtin` | Launcher fills it under any policy. |
+| `builtin` | no entry | Launcher fills it for some documents only, and a policy default made this one such a document. |
+
+The last row is `topologySpreadConstraints` of `webservice` and `worker`: the trait fills
+it from two replicas, and the probe document runs two under the policy's default and one
+under none. No entry in a state is therefore not "nothing ever fills it".
 
 The values `ProbePolicy()` supplies are arbitrary, and they can make a document refused in
 that state (`Probe.RefusedWithPolicy`). They never belong in what a consumer publishes: the
@@ -80,14 +85,15 @@ Only a config that reports its fills has `policy` and `builtin` entries. These d
   [policy defaults](../oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
 - `webservice` and `worker`, through the `deployment` they lower to.
 - The Cluster a `postgresql` component builds.
+- The `persistentvolumeclaim` component: the policy's default `size`.
 - The traits in the table under "Property provenance", each with the paths it reports.
 
 A fill can depend on the document. The `topology-spread` trait reports
 `topologySpreadConstraints` for a Deployment of two replicas or more, and nothing at one
-replica, so no single document shows it both ways.
+replica.
 
-A built-in type or trait not named there reports none of the defaults its handler applies:
-no entry at a path of such a type says nothing about who supplies the value.
+A handler whose config reports nothing leaves the defaults it applies out of the report.
+For such a type, no entry at a path says nothing about who supplies the value.
 
 ## The checks
 
@@ -105,10 +111,12 @@ What each check compares, and the rows it cannot compare, is on
 
 ## Limits
 
-Every statement above is observed in these probes. None is a claim about every fill.
+The kinds, the list of types that report and the key maps are read from the code and from
+the pages linked above. What a probe states, and what the checks hold, is observed in these
+probes. Neither is a claim about every fill.
 
 - A fill no probe document triggers is not seen, so a clean run of the checks says nothing
-  about it.
+  about it. Not every trait in the table has a probe.
 - A fill that no schema declares, that no config reports and that happens only for some
   documents is found by no check.
 - The report does not name every value a trait supplies. The list is under "Not reported"
