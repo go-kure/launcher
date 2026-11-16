@@ -13,9 +13,9 @@ import (
 // HTTPRoute got the default type.
 //
 // The default is reported as a built-in fill exactly where it stands: where the
-// type is left out, and where it is not a string, which the parser reads as
-// left out (as the ingress trait reads a pathType that is not a string). A
-// known word is the author's and is not reported.
+// type is left out. A known word is the author's and is not reported. A value
+// that is not a string is refused as an unknown word is
+// (TestHTTPRouteHandler_MatchTypeNotAString).
 func TestHTTPRouteHandler_MatchType(t *testing.T) {
 	h := &HTTPRouteHandler{}
 	app := stack.NewApplication("web", "default", &mockServicePortConfig{port: 80})
@@ -53,7 +53,7 @@ func TestHTTPRouteHandler_MatchType(t *testing.T) {
 		wantErr    string
 	}{
 		{name: "path/left out", match: path(nil), wantPath: "PathPrefix", wantFill: true},
-		{name: "path/not a string", match: path(5), wantPath: "PathPrefix", wantFill: true},
+		{name: "path/not a string", match: path(5), wantErr: pathWords + `a value that is not a string (int)`},
 		{name: "path/PathPrefix", match: path("PathPrefix"), wantPath: "PathPrefix"},
 		{name: "path/Exact", match: path("Exact"), wantPath: "Exact"},
 		{name: "path/RegularExpression", match: path("RegularExpression"), wantPath: "RegularExpression"},
@@ -61,7 +61,7 @@ func TestHTTPRouteHandler_MatchType(t *testing.T) {
 		{name: "path/wrong case", match: path("exact"), wantErr: pathWords + `"exact"`},
 		{name: "path/empty", match: path(""), wantErr: pathWords + `""`},
 		{name: "header/left out", match: header(nil), wantHeader: "Exact", wantFill: true},
-		{name: "header/not a string", match: header(5), wantHeader: "Exact", wantFill: true},
+		{name: "header/not a string", match: header(5), wantErr: headerWords + `a value that is not a string (int)`},
 		{name: "header/Exact", match: header("Exact"), wantHeader: "Exact"},
 		{name: "header/RegularExpression", match: header("RegularExpression"), wantHeader: "RegularExpression"},
 		{name: "header/short word", match: header("Regex"), wantErr: headerWords + `"Regex"`},

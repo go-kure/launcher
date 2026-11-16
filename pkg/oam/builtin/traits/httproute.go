@@ -276,11 +276,12 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 						Value: "/",
 					}
 					// A type is one of the Gateway API words or is left out: a word
-					// the generator does not know is refused, never read as the
-					// default (go-kure/launcher#1592).
-					if t, ok := rawPath["type"].(string); ok {
-						if !validPathMatchTypes[t] {
-							return nil, errors.Errorf("rules[%d].matches[%d].path: type must be 'PathPrefix', 'Exact', or 'RegularExpression', got %q", i, j, t)
+					// the generator does not know, and a value that is not a
+					// string, are refused, never read as the default
+					// (go-kure/launcher#1592, go-kure/launcher#1598).
+					if t, present, refused := authoredWord(rawPath, "type", validPathMatchTypes); present {
+						if refused != "" {
+							return nil, errors.Errorf("rules[%d].matches[%d].path: type must be 'PathPrefix', 'Exact', or 'RegularExpression', got %s", i, j, refused)
 						}
 						pm.Type = t
 					} else {
@@ -305,9 +306,9 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 							Type: "Exact",
 						}
 						// As for a path's type: a known word, or left out.
-						if t, ok := headerMap["type"].(string); ok {
-							if !validHeaderMatchTypes[t] {
-								return nil, errors.Errorf("rules[%d].matches[%d].headers[%d]: type must be 'Exact' or 'RegularExpression', got %q", i, j, k, t)
+						if t, present, refused := authoredWord(headerMap, "type", validHeaderMatchTypes); present {
+							if refused != "" {
+								return nil, errors.Errorf("rules[%d].matches[%d].headers[%d]: type must be 'Exact' or 'RegularExpression', got %s", i, j, k, refused)
 							}
 							hm.Type = t
 						} else {
