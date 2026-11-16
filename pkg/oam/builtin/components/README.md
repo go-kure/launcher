@@ -74,6 +74,32 @@ handlers its own documents reach (a `postgresql` without the pooler, say) now fa
 first transform, and registers the rest. See Contract metadata in
 [`pkg/oam`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam).
 
+`webservice` and `worker` also implement `oam.LoweringKeyDeclarer`: for every key of their
+schema, where its value lands in the members, which is where the provenance report speaks.
+Which keys the rule forwards is one decision the map and the rule share (`roleKeys` in
+`role_keys.go`), so they cannot disagree on it. The places of the keys the rule evaluates
+itself are a table beside it, held to the rule by tests. Every key not listed lands unchanged at the same key of the
+`deployment` member:
+
+| Key | Lands at | Unchanged |
+|-----|----------|-----------|
+| `port` (`webservice`) | `deployment` `ports[0].containerPort`, `service` `ports[0].port` | no |
+| `affinity` | `deployment` `affinity`, as a Kubernetes affinity | no |
+| `volumes` | `deployment` `volumes`, and a `pvc` trait on it for each claim a volume generates | no |
+| `topologySpread` | the `topology-spread` trait on `deployment`, which holds no property | no |
+| `serviceAccountObjectName` | `deployment` `serviceAccountName`: the pods run as the account under the name it was given | no |
+| `deploymentObjectName`, `serviceObjectName` (`webservice`) | no place: they name objects | |
+
+A `worker` with an authored `serviceAccountName` emits its deployment alone, and the report
+then names no member: the same places are read under the plain owner. `helm`, `postgresql`
+and `oci` publish no map. `postgresql` and `oci` build their members from moved and
+re-shaped keys. `helm` hands some keys on as written, a set that depends on the delivery
+mode, and builds the rest of its members from moved and re-shaped keys; its map is not
+built here. The map says where to read, never which source
+supplied the value: an omitted `port` and an authored one are both `rendered` at
+`ports[0].containerPort`, and telling them apart takes the report of a document that leaves
+the key out.
+
 ## Traits a lowering rule forwards
 
 A rule that emits several components decides which of them carries each authored trait,
