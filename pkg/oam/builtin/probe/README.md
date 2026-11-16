@@ -74,9 +74,9 @@ holds it), and `provider`, `version` and, without a policy default, `replicas` o
 The trait probes put one trait on a deployment, with the capability bindings the transform
 runs with (`Probe.Capabilities`), and name the fills the report holds under the trait
 (`Fill.Trait`): `certificate`, `external-secret`, `volsync`, `scaler`, `networkpolicy`,
-`ingress`, `httproute` (also the gateway namespace of a platform gateway), `pvc` and
-`topology-spread`. A
-probe row writes its value at the trait at `Fill.TraitIndex`, when that trait has the row's type. Five limits, observed in these
+`ingress`, `httproute` (also the gateway namespace of a platform gateway), `pvc`,
+`topology-spread` and `security-context`. A
+probe row writes its value at the trait at `Fill.TraitIndex`, when that trait has the row's type. Six limits, observed in these
 probes:
 
 - Check A reads declared defaults of components and not of traits, so a declared trait
@@ -94,6 +94,7 @@ probes:
   Only `readOnlyRootFilesystem` has a value and an `Other`: the opposite of `runAsNonRoot`
   and of `allowPrivilegeEscalation` is refused at `restricted`, so their rows state a source
   only. A workload that authors some of the three, a Windows pod and `privileged` have no
-  probe; the registry tests read each of them.
+  probe; the registry tests read each of them, and compare the generated objects with the
+  report on and off for each.
 - `scaler` lists `replicas` in `NotAuthorable`: the trait owns the replica count and the
   document refuses an authored one with the stated text, so check A cannot compare objects for it.
