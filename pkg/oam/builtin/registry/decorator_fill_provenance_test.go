@@ -100,3 +100,30 @@ func TestDecoratorFills_ReportDoesNotChangeTheOutput(t *testing.T) {
 		})
 	}
 }
+
+// Generate stops at the first Deployment it refuses and the build fails, so a
+// later Deployment that would get constraints reports nothing.
+func TestDecoratorFills_ARefusedDeploymentReportsNothing(t *testing.T) {
+	inline := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: a\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: a\n" +
+		"  template:\n    metadata:\n      labels:\n        app: a\n    spec:\n      containers:\n      - name: a\n        image: registry.example/a:1\n" +
+		"      topologySpreadConstraints:\n      - maxSkew: 1\n        topologyKey: zone\n        whenUnsatisfiable: DoNotSchedule\n        labelSelector:\n          matchLabels:\n            app: a\n" +
+		"---\n" +
+		"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: b\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: b\n" +
+		"  template:\n    metadata:\n      labels:\n        app: b\n    spec:\n      containers:\n      - name: b\n        image: registry.example/b:1\n"
+	comp := oam.Component{Name: "app", Type: "manifests", Properties: map[string]any{"inline": inline}, Traits: []oam.Trait{spreadTrait()}}
+	// The transform itself accepts the document: only generating it fails, so
+	// the report is read without generating, as TransformWithProvenance does.
+	app := &oam.Application{
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "pkg", Namespace: "default"},
+		Spec:       oam.ApplicationSpec{Components: []oam.Component{comp}},
+	}
+	_, _, prov, err := newTransformer().TransformWithProvenance(app, oam.TransformContext{Namespace: "default", Policy: &oam.NoopPolicy{}})
+	if err != nil {
+		t.Fatalf("TransformWithProvenance: %v", err)
+	}
+	if got, ok := entriesOf(prov, owner{component: "app", trait: "topology-spread"})[spreadPath]; ok {
+		t.Errorf("%s = %+v, want no entry: Generate refuses the first Deployment", spreadPath, got)
+	}
+}

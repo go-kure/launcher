@@ -814,8 +814,11 @@ The trait is strict in five ways, each an error at build time:
   replica or fewer, and nothing where the trait is refused. The report is read once every
   trait of the document has applied, because the count can come from a scaler applied
   after this trait. It decides with the function `Generate` uses, so the report and the
-  object cannot disagree, and it changes nothing the transform produces. Observed in the
-  probes of `pkg/oam/builtin/probe`.
+  object cannot disagree, and it changes nothing the transform produces. To decide it, the
+  report generates the component's objects once more, so on a `helmtemplate` chart or a
+  `manifests` URL source the render or the fetch runs during a report call, not only when the
+  consumer generates; the config caches the result and a failure reports nothing. Observed in
+  the probes of `pkg/oam/builtin/probe`.
 - **A typed Deployment is required.** The trait acts on the typed Deployment
   objects a component's `Generate` returns: the one `deployment`, `webservice`
   or `worker` builds, and any `apps/v1` Deployment in a `manifests` source or
