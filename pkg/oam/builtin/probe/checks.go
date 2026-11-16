@@ -21,10 +21,18 @@ var states = []state{
 	{"without a policy", NoPolicy},
 }
 
-type entryKey struct{ component, member, path string }
+type entryKey struct {
+	component, member, trait string
+	traitIndex               int
+	path                     string
+}
 
 func (k entryKey) String() string {
-	return strings.TrimRight(k.component+"/"+k.member, "/") + " " + k.path
+	owner := strings.TrimRight(k.component+"/"+k.member, "/")
+	if k.trait != "" {
+		owner += fmt.Sprintf(" trait %s[%d]", k.trait, k.traitIndex)
+	}
+	return owner + " " + k.path
 }
 
 // fillEntries returns the entries of source policy or builtin the report holds,
@@ -32,11 +40,8 @@ func (k entryKey) String() string {
 func fillEntries(p *oam.Provenance) map[entryKey]oam.SourceKind {
 	out := map[entryKey]oam.SourceKind{}
 	for _, e := range p.Entries {
-		if e.Trait != "" {
-			continue
-		}
 		if e.Source.Kind == oam.SourcePolicy || e.Source.Kind == oam.SourceBuiltin {
-			out[entryKey{e.Component, e.Member, e.Path}] = e.Source.Kind
+			out[entryKey{e.Component, e.Member, e.Trait, e.TraitIndex, e.Path}] = e.Source.Kind
 		}
 	}
 	return out
@@ -48,6 +53,24 @@ func (f Fill) expected(i int) oam.SourceKind {
 		return f.WithPolicy
 	}
 	return f.WithoutPolicy
+}
+
+func (f Fill) key() entryKey { return entryKey{f.Component, f.Member, f.Trait, f.TraitIndex, f.Path} }
+
+// properties returns the map a check writes the fill's value into: the
+// properties of the component, or of its trait at TraitIndex when that trait has
+// the fill's type (a throwaway map otherwise, so the value reaches nothing).
+func (f Fill) properties(c oam.Component) map[string]any {
+	if f.Trait == "" {
+		return c.Properties
+	}
+	if f.TraitIndex < 0 || f.TraitIndex >= len(c.Traits) || c.Traits[f.TraitIndex].Type != f.Trait {
+		return map[string]any{}
+	}
+	if c.Traits[f.TraitIndex].Properties == nil {
+		c.Traits[f.TraitIndex].Properties = map[string]any{}
+	}
+	return c.Traits[f.TraitIndex].Properties
 }
 
 func (f Fill) value(i int) any {
@@ -83,7 +106,7 @@ func CheckReportedFillsAreReal(tr *oam.Transformer, probes []Probe) []string {
 	for _, p := range probes {
 		for i, st := range states {
 			label := fmt.Sprintf("probe %q %s", p.Name, st.name)
-			prov, base, err := Run(tr, cloneComponents(p.Components), st.policy())
+			prov, base, err := RunWith(tr, cloneComponents(p.Components), st.policy(), p.Capabilities)
 			if want := p.refused(i); want != "" {
 				switch {
 				case err == nil:
@@ -100,7 +123,7 @@ func CheckReportedFillsAreReal(tr *oam.Transformer, probes []Probe) []string {
 			got := fillEntries(prov)
 			listed := map[entryKey]bool{}
 			for _, f := range p.Fills {
-				k := entryKey{f.Component, f.Member, f.Path}
+				k := f.key()
 				listed[k] = true
 				if want := f.expected(i); got[k] != want {
 					add("%s: the report holds source %q at %s, the probe states %q", label, got[k], k, want)
@@ -126,11 +149,11 @@ func CheckReportedFillsAreReal(tr *oam.Transformer, probes []Probe) []string {
 					add("%s: Fill at %s names a component the probe does not have", label, f.Path)
 					continue
 				}
-				if err := setAt(comps[at].Properties, f.Path, v); err != nil {
+				if err := setAt(f.properties(comps[at]), f.Path, v); err != nil {
 					add("%s: authoring %s: %v", label, f.Path, err)
 					continue
 				}
-				authoredProv, authored, err := Run(tr, comps, st.policy())
+				authoredProv, authored, err := RunWith(tr, comps, st.policy(), p.Capabilities)
 				if err != nil {
 					add("%s: authoring %v at %s is refused: %v", label, v, f.Path, err)
 					continue
@@ -138,7 +161,7 @@ func CheckReportedFillsAreReal(tr *oam.Transformer, probes []Probe) []string {
 				if !bytes.Equal(base, authored) {
 					add("%s: authoring %v at %s changes the generated objects, so the fill the report names is not what the library does", label, v, f.Path)
 				}
-				if src, ok := fillEntries(authoredProv)[entryKey{f.Component, f.Member, f.Path}]; ok {
+				if src, ok := fillEntries(authoredProv)[f.key()]; ok {
 					add("%s: the report still holds a %s entry at %s after the author wrote the value", label, src, f.Path)
 				}
 				if f.Other == nil {
@@ -146,11 +169,11 @@ func CheckReportedFillsAreReal(tr *oam.Transformer, probes []Probe) []string {
 					continue
 				}
 				otherComps := cloneComponents(p.Components)
-				if err := setAt(otherComps[at].Properties, f.Path, f.Other); err != nil {
+				if err := setAt(f.properties(otherComps[at]), f.Path, f.Other); err != nil {
 					add("%s: authoring Other at %s: %v", label, f.Path, err)
 					continue
 				}
-				if _, other, err := Run(tr, otherComps, st.policy()); err != nil {
+				if _, other, err := RunWith(tr, otherComps, st.policy(), p.Capabilities); err != nil {
 					add("%s: authoring Other %v at %s is refused: %v", label, f.Other, f.Path, err)
 				} else if bytes.Equal(base, other) {
 					add("%s: authoring Other %v at %s leaves the generated objects unchanged, so the library never puts %s in an object and the report names a fill nobody sees", label, f.Other, f.Path, f.Path)

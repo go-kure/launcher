@@ -92,7 +92,7 @@ func join(groups ...[]Fill) []Fill {
 	return out
 }
 
-// Probes returns the probe documents of the handler-built workload kinds
+// Probes returns the probe documents of the handler-built workload kinds, the lowered types and the traits
 // (deployment, statefulset, daemonset, job and cronjob), with the fills observed when each runs with the probe policy and
 // without one. What they show is what these documents trigger: a fill under a
 // condition no document meets is not in them.
@@ -170,7 +170,7 @@ func Probes() []Probe {
 				{Component: "app", Path: "failedJobsHistoryLimit", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin, ValueWithPolicy: 1, ValueWithoutPolicy: 1},
 			}, resourceFills("app", "")),
 			LeftToCluster: map[string]string{"concurrencyPolicy": "the handler omits it and the cluster applies Allow"}},
-	}, loweredProbes()...))
+	}, append(loweredProbes(), traitProbes()...)...))
 }
 
 // withoutPolicyOnly keeps the fills a document with no policy shows, as that

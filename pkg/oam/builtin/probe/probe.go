@@ -16,6 +16,12 @@ type Fill struct {
 	// type that lowers to one: the report speaks at the member's place, with the
 	// member's component type (empty for a handler-built type's own entries).
 	Component, Member string
+	// Trait is the type of a trait of the component, for a fill the report holds
+	// under that trait: Path is then a path of the trait's properties, written at
+	// the trait at TraitIndex among the component's traits. Empty for an entry of
+	// the component itself.
+	Trait      string
+	TraitIndex int
 	// Path is the property path of the entry. Checks A and B write a value at the
 	// same path on the authored component, so a row whose key the lowering renames
 	// carries no value.
@@ -41,6 +47,10 @@ type Fill struct {
 type Probe struct {
 	Name       string
 	Components []oam.Component
+	// Capabilities are the capability bindings the transform runs with, by
+	// capability name: the platform's rendering a trait reads (a certificate's
+	// issuer, a route's gateway).
+	Capabilities map[string]oam.CapabilityBinding
 	// Fills lists every entry of source policy or builtin the report holds for
 	// the document, in either state. An entry the report holds that no Fill lists
 	// fails check B.
@@ -57,6 +67,12 @@ type Probe struct {
 	// report holds no entry for, with the reason: a known gap in what the report
 	// says. Check A fails when an entry here is no longer a gap.
 	Unreported map[string]string
+	// NotAuthorable names, by path, a declared default the document's own rule
+	// refuses to have written (a scaler trait owns the replica count), with the text
+	// the refusal must contain. Check A cannot compare objects for it, so it checks
+	// nothing there; the entry fails when writing the default is accepted, or is
+	// refused with other text.
+	NotAuthorable map[string]string
 	// DefaultPlaces maps the path of a declared default to the path the report
 	// speaks at, for a type that lowers and publishes no key map (postgresql: the
 	// authored storageSize lands at storage.size of the cluster).
@@ -67,6 +83,11 @@ type Probe struct {
 // report and the generated objects, marshalled. It is the pipeline a consumer
 // runs: validate the authored properties, transform with provenance, generate.
 func Run(tr *oam.Transformer, comps []oam.Component, p oam.Policy) (*oam.Provenance, []byte, error) {
+	return RunWith(tr, comps, p, nil)
+}
+
+// RunWith is Run with the capability bindings the transform runs with.
+func RunWith(tr *oam.Transformer, comps []oam.Component, p oam.Policy, caps map[string]oam.CapabilityBinding) (*oam.Provenance, []byte, error) {
 	app := &oam.Application{
 		APIVersion: oam.SupportedAPIVersion,
 		Kind:       "Application",
@@ -77,7 +98,7 @@ func Run(tr *oam.Transformer, comps []oam.Component, p oam.Policy) (*oam.Provena
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "validate authored properties")
 	}
-	cluster, _, prov, err := tr.TransformWithProvenance(validated, oam.TransformContext{Namespace: "default", Policy: p})
+	cluster, _, prov, err := tr.TransformWithProvenance(validated, oam.TransformContext{Namespace: "default", Policy: p, Capabilities: caps})
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "transform")
 	}

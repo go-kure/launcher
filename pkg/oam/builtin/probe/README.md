@@ -67,4 +67,21 @@ Check A also found declared defaults the report holds no entry for, observed in 
 probes. Each is listed in its probe's `Unreported` with the reason, and check A fails when
 an entry there stops being a gap: `topologySpread` on `webservice` and `worker` (the
 topology-spread trait it switches reports nothing yet), and `provider`, `version` and, without
-a policy default, `replicas` on `postgresql`. Trait fills have no probes yet.
+a policy default, `replicas` on `postgresql`.
+
+The trait probes put one trait on a deployment, with the capability bindings the transform
+runs with (`Probe.Capabilities`), and name the fills the report holds under the trait
+(`Fill.Trait`): `certificate`, `external-secret`, `volsync`, `scaler`, `networkpolicy`,
+`ingress`, `httproute` (also the gateway namespace of a platform gateway) and `pvc`. A
+probe row writes its value at the trait at `Fill.TraitIndex`, when that trait has the row's type. Four limits, observed in these
+probes:
+
+- Check A reads declared defaults of components and not of traits, so a declared trait
+  default no row names is not seen by it.
+- The `issuerRef.kind` and `gatewayNamespace` rows state sources and no value: an author
+  cannot write that path alone, or the platform owns it, so check B does not show that the
+  library applies them.
+- A fill the report does not hold yet has no row: generated names and other derived
+  values, `security-context`, `topology-spread` and what the `expose` rule fills.
+- `scaler` lists `replicas` in `NotAuthorable`: the trait owns the replica count and the
+  document refuses an authored one with the stated text, so check A cannot compare objects for it.
