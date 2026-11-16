@@ -275,13 +275,15 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 						Type:  "PathPrefix",
 						Value: "/",
 					}
+					// A type is one of the Gateway API words or is left out: a word
+					// the generator does not know is refused, never read as the
+					// default (go-kure/launcher#1592).
 					if t, ok := rawPath["type"].(string); ok {
+						if !validPathMatchTypes[t] {
+							return nil, errors.Errorf("rules[%d].matches[%d].path: type must be 'PathPrefix', 'Exact', or 'RegularExpression', got %q", i, j, t)
+						}
 						pm.Type = t
-					}
-					// The type the HTTPRoute gets is the generator's reading of
-					// pm.Type: where that is not the word the author wrote (none,
-					// an empty one, one it does not know), the default stands.
-					if string(toGatewayPathType(pm.Type)) != rawPath["type"] {
+					} else {
 						reportFill(&config.BuiltinDefaultLog, "httproute", fmt.Sprintf("rules[%d].matches[%d].path.type", i, j))
 					}
 					if v, ok := rawPath["value"].(string); ok {
@@ -302,12 +304,13 @@ func (h *HTTPRouteHandler) parseProperties(props map[string]any, app *stack.Appl
 						hm := HeaderMatch{
 							Type: "Exact",
 						}
+						// As for a path's type: a known word, or left out.
 						if t, ok := headerMap["type"].(string); ok {
+							if !validHeaderMatchTypes[t] {
+								return nil, errors.Errorf("rules[%d].matches[%d].headers[%d]: type must be 'Exact' or 'RegularExpression', got %q", i, j, k, t)
+							}
 							hm.Type = t
-						}
-						// As for a path's type: the default stands where the
-						// generator's reading is not the word the author wrote.
-						if string(toGatewayHeaderType(hm.Type)) != headerMap["type"] {
+						} else {
 							reportFill(&config.BuiltinDefaultLog, "httproute", fmt.Sprintf("rules[%d].matches[%d].headers[%d].type", i, j, k))
 						}
 						name, ok := headerMap["name"].(string)
@@ -1489,6 +1492,15 @@ func buildGatewayExternalAuth(ea *HTTPExternalAuth) *gatewayv1.HTTPExternalAuthF
 	}
 	return gw
 }
+
+// validPathMatchTypes and validHeaderMatchTypes are the match types the parser
+// accepts: the words toGatewayPathType and toGatewayHeaderType know. Those two
+// still read any other word as the default, for a config built directly; the
+// parser refuses one before it gets there.
+var (
+	validPathMatchTypes   = map[string]bool{"PathPrefix": true, "Exact": true, "RegularExpression": true}
+	validHeaderMatchTypes = map[string]bool{"Exact": true, "RegularExpression": true}
+)
 
 func toGatewayPathType(s string) gatewayv1.PathMatchType {
 	switch s {

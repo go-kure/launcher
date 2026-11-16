@@ -368,9 +368,9 @@ func TestTraitFills_ExternalSecretProviderShorthandFillsNoKind(t *testing.T) {
 }
 
 // An httproute match type the generator does not know, the empty string
-// included, is not refused: the HTTPRoute gets the default type. The value that
-// stands is the handler's, so the path reports the fill.
-func TestTraitFills_HTTPRouteUnknownMatchTypeIsBuiltin(t *testing.T) {
+// included, is refused (go-kure/launcher#1592): no document renders with the
+// default type in the word's place, so the report has no such fill to name.
+func TestTraitFills_HTTPRouteUnknownMatchTypeIsRefused(t *testing.T) {
 	route := func(match map[string]any) map[string]any {
 		return map[string]any{
 			"servicePort": 8080,
@@ -379,20 +379,20 @@ func TestTraitFills_HTTPRouteUnknownMatchTypeIsBuiltin(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct {
-		name, path string
+		name, want string
 		match      map[string]any
 	}{
-		{"path/empty", "rules[0].matches[0].path.type", map[string]any{"path": map[string]any{"type": "", "value": "/api"}}},
-		{"path/unknown", "rules[0].matches[0].path.type", map[string]any{"path": map[string]any{"type": "Prefix", "value": "/api"}}},
-		{"header/empty", "rules[0].matches[0].headers[0].type", map[string]any{"headers": []any{map[string]any{"name": "x-tenant", "value": "a", "type": ""}}}},
-		{"header/unknown", "rules[0].matches[0].headers[0].type", map[string]any{"headers": []any{map[string]any{"name": "x-tenant", "value": "a", "type": "Regex"}}}},
+		{"path/empty", `rules[0].matches[0].path: type must be`, map[string]any{"path": map[string]any{"type": "", "value": "/api"}}},
+		{"path/unknown", `rules[0].matches[0].path: type must be`, map[string]any{"path": map[string]any{"type": "Prefix", "value": "/api"}}},
+		{"header/empty", `rules[0].matches[0].headers[0]: type must be`, map[string]any{"headers": []any{map[string]any{"name": "x-tenant", "value": "a", "type": ""}}}},
+		{"header/unknown", `rules[0].matches[0].headers[0]: type must be`, map[string]any{"headers": []any{map[string]any{"name": "x-tenant", "value": "a", "type": "Regex"}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := traitFillCase{trait: "httproute"}
-			prov, _ := traitProvenance(t, c, traitDoc{props: route(tc.match)})
-			got := entriesOf(prov, owner{component: "app", trait: "httproute"})
-			if want := (oam.Source{Kind: oam.SourceBuiltin, Ref: "httproute." + tc.path}); got[tc.path] != want {
-				t.Errorf("%s = %+v, want %+v", tc.path, got[tc.path], want)
+			app, ctx := traitFillApplication(t, c, traitDoc{props: route(tc.match)})
+			_, _, _, err := newTransformer().TransformWithProvenance(app, ctx)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
 			}
 		})
 	}

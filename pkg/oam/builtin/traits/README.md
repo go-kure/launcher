@@ -55,7 +55,7 @@ preflight reject every valid use of the trait.
 | `type` | Produces | Key properties |
 |--------|----------|----------------|
 | `ingress` | Ingress | `rules[]` (`host`, `paths[]`), `ingressClassName`, `tls[]`, `annotations`; `platformAnnotations` and `managedTLS` are platform-reserved (see below) |
-| `httproute` | Gateway API HTTPRoute | `rules[]` (`matches`/`backendRefs`/`filters`/`timeouts`), `hostnames[]`, `annotations`; `parentRefs[]` optional — synthesized from the `gatewayName`/`gatewayNamespace` capability when omitted |
+| `httproute` | Gateway API HTTPRoute | `rules[]` (`matches`/`backendRefs`/`filters`/`timeouts`), `hostnames[]`, `annotations`; `parentRefs[]` optional — synthesized from the `gatewayName`/`gatewayNamespace` capability when omitted. A match's `path.type` is `PathPrefix` (the default where it is left out), `Exact` or `RegularExpression`, and a header's `type` is `Exact` (the default) or `RegularExpression`. **Pre-GA tightening** (go-kure/launcher#1592): any other word, the empty string included, used to build with the default type and is now refused, with the path and the accepted words |
 | `expose` | Ingress **or** HTTPRoute | `rules[]`, `hostnames[]` — controller chosen by ClusterProfile (`controllerType`) |
 | `networkpolicy` | NetworkPolicy | `ingress[]`/`egress[]` (`from`/`to`, `ports`), `name` (optional; the policy's name, default `<component>-allow`) |
 | `cilium-networkpolicy` | CiliumNetworkPolicy | `name`, `endpointSelector` (required), `ingress`/`egress` (raw Cilium rules, at least one rule between them — decoded strictly, and a field the CRD requires must be authored where its parent is, see below) |
@@ -1060,9 +1060,6 @@ step with the fill:
   the claim parser fills by;
 - the `gatewayNamespace` of `httproute`, where the parent reference is built from a
   `gatewayName` with no namespace;
-- the match types of `httproute`, where the type the generator gives the HTTPRoute
-  (`toGatewayPathType`, `toGatewayHeaderType`) is not the word the author wrote: none,
-  an empty one, or one it does not know;
 - the backend and port of an `ingress` path and the name and port of an `httproute`
   backendRef, once the entry passed its checks: where no service name was read, and
   where neither `port` nor (for `ingress`) `portName` gave the port;

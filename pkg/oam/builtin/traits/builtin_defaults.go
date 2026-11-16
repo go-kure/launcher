@@ -17,10 +17,10 @@ import (
 //
 // A fill is reported exactly where the handler's value stands: the key is left
 // out, or holds a value the handler replaces with its own (a null or an empty
-// string, where the parser reads one as unset and does not refuse it, and an
-// httproute match type that is not a known word). A value a capability rendered
-// is in the properties the handler is handed: it is no fill where the handler
-// keeps it, and a fill where the handler replaces it in that same way.
+// string, where the parser reads one as unset and does not refuse it). A value
+// a capability rendered is in the properties the handler is handed: it is no
+// fill where the handler keeps it, and a fill where the handler replaces it in
+// that same way.
 //
 // An object's name is reported only where launcher's default stood
 // (oam.Trait.ResolveNameDefaulted): a name the consumer's Naming hook gave is
