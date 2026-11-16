@@ -26,6 +26,14 @@ func traitFill(trait, path string, value, other any) Fill {
 		ValueWithPolicy: value, ValueWithoutPolicy: value, Other: other}
 }
 
+// derived is a fill the report holds under a trait for a value the handler
+// computes from the component (a name, a backend, a target secret): the same in
+// both policy states, and stated as a source only. No value an author writes is
+// the computed one, so check B does not show the library applies it.
+func derived(trait, path string) Fill {
+	return Fill{Component: "app", Trait: trait, Path: path, WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin}
+}
+
 // traitProbes are the probes of the traits whose fills the report names. They
 // show what these documents trigger. A fill of a trait the documents below do
 // not meet is not seen, and a trait with no probe here is not covered.
@@ -46,7 +54,7 @@ func traitProbes() []Probe {
 	// and the document refuses an authored one.
 	scaler := withTrait("deployment with a scaler", oam.Trait{Type: "scaler", Properties: map[string]any{
 		"minReplicas": 2, "maxReplicas": 5,
-	}}, nil, []Fill{tf("scaler", "cpuUtilization", 80, 70)})
+	}}, nil, []Fill{tf("scaler", "cpuUtilization", 80, 70), derived("scaler", "hpaName")})
 	scaler.Fills = slices.DeleteFunc(scaler.Fills, func(f Fill) bool { return f.Trait == "" && f.Path == "replicas" })
 	scaler.NotAuthorable = map[string]string{"replicas": "owns the replica count"}
 	return []Probe{
@@ -66,6 +74,7 @@ func traitProbes() []Probe {
 		}}, nil, []Fill{
 			tf("external-secret", "refreshInterval", "1h", "30m"),
 			tf("external-secret", "secretStoreRef.kind", "ClusterSecretStore", "SecretStore"),
+			derived("external-secret", "data[0].remoteRef.key"), derived("external-secret", "data[0].remoteRef.property"), derived("external-secret", "targetSecretName"),
 		}),
 		withTrait("deployment with a volsync backup", oam.Trait{Type: "volsync", Properties: map[string]any{
 			"sourcePVC": "data", "schedule": "0 3 * * *",
@@ -75,6 +84,7 @@ func traitProbes() []Probe {
 			tf("volsync", "retain.daily", 7, 1),
 			tf("volsync", "retain.weekly", 4, 1),
 			tf("volsync", "retain.monthly", 3, 1),
+			derived("volsync", "name"), derived("volsync", "repository"),
 		}),
 		scaler,
 		withTrait("deployment with a network policy", oam.Trait{Type: "networkpolicy", Properties: map[string]any{
@@ -83,6 +93,7 @@ func traitProbes() []Probe {
 		}}, nil, []Fill{
 			tf("networkpolicy", "ingress[0].ports[0].protocol", "TCP", "UDP"),
 			tf("networkpolicy", "egress[0].ports[0].protocol", "TCP", "UDP"),
+			derived("networkpolicy", "name"),
 		}),
 		withTrait("deployment with an ingress", oam.Trait{Type: "ingress", Properties: map[string]any{
 			"servicePort": 8080,
@@ -90,6 +101,7 @@ func traitProbes() []Probe {
 		}}, nil, []Fill{
 			tf("ingress", "rules[0].paths[0].path", "/", "/api"),
 			tf("ingress", "rules[0].paths[0].pathType", "Prefix", "Exact"),
+			derived("ingress", "name"), derived("ingress", "rules[0].paths[0].backend"), derived("ingress", "rules[0].paths[0].port"),
 		}),
 		withTrait("deployment with an http route", oam.Trait{Type: "httproute", Properties: route(map[string]any{
 			"path":    map[string]any{},
@@ -98,6 +110,7 @@ func traitProbes() []Probe {
 			tf("httproute", "rules[0].matches[0].path.type", "PathPrefix", "Exact"),
 			tf("httproute", "rules[0].matches[0].path.value", "/", "/api"),
 			tf("httproute", "rules[0].matches[0].headers[0].type", "Exact", "RegularExpression"),
+			derived("httproute", "name"), derived("httproute", "rules[0].backendRefs"),
 		}),
 		// The platform's rendering names the gateway and not its namespace, so the
 		// handler fills it. The property is the platform's to set, so no authored value
@@ -106,6 +119,7 @@ func traitProbes() []Probe {
 			"servicePort": 8080, "rules": []any{map[string]any{}},
 		}}, map[string]oam.CapabilityBinding{"httproute": {Rendering: map[string]any{"gatewayName": "gw"}}}, []Fill{
 			{Component: "app", Trait: "httproute", Path: "gatewayNamespace", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin},
+			derived("httproute", "name"), derived("httproute", "rules[0].backendRefs"),
 		}),
 		withTrait("deployment with a claim", oam.Trait{Type: "pvc", Properties: map[string]any{
 			"name": "data", "size": "1Gi",
