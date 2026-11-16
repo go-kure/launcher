@@ -216,7 +216,7 @@ func traitFillCases() []traitFillCase {
 // no case above reports, keyed "<trait>/<schema path>", each with its reason.
 var traitDefaultExemptions = map[string]string{
 	"scaler/enablePDB":        "no fill: left out, the trait generates no PodDisruptionBudget, and no object holds a value for it",
-	"expose/gatewayNamespace": "expose is a lowering rule: what it writes into the trait it emits is reported as rendered by the rule, and its own fills are not reported",
+	"expose/gatewayNamespace": "expose is a lowering rule: what it writes into the trait it emits is reported as rendered by the rule, and its own fills are not reported. The gateway namespace reads rendered also where the profile omitted it and EvaluateProfile wrote gateway-system into the binding, because the binding does not say who wrote it, so the report cannot say launcher defaulted it (pinned by expose_gateway_namespace_provenance_test.go)",
 }
 
 func traitProvenance(t *testing.T, c traitFillCase, doc traitDoc) (*oam.Provenance, []byte) {

@@ -115,7 +115,7 @@ The report does not name every value a trait supplies. Not reported:
 - the trait-level `serviceName` and `servicePort` of `ingress` and `httproute`, and the single entry the `remoteRef` shorthand of `external-secret` stands for;
 - the `targetSecretName` of `external-secret` under creationPolicy `Merge` or `None`: the name is then of a Secret the trait does not make;
 - the seccomp profile and `capabilities.drop` that `security-context` at `restricted` writes into the workload: the trait has no property for either (the three it has are in the table above);
-- what the `expose` rule fills before it emits its trait (the gateway namespace among them): the emitted trait's properties are reported as the rule's output;
+- what the `expose` rule fills before it emits its trait: the emitted trait's properties are reported as the rule's output. The gateway namespace is one case. The rule folds it into `parentRefs[0].namespace` of the `httproute` trait it emits, and the entry reads `rendered` (ref `trait/expose@v1alpha1`) also where the profile omitted it and `EvaluateProfile` wrote `gateway-system` into the binding. The binding does not say who wrote the value, so the report cannot say that launcher defaulted it;
 - the fills of a trait not listed above. The `enablePDB` of `scaler` left out is no fill: no object holds a value for it.
 
 A lowered component type has no entry of its own in the report: its rule replaces it by members, and the entries are theirs. `webservice` and `worker` declare where each of their keys lands (`LoweringKeyDeclarer`, [Lowering keys](schemas-and-contract.md#lowering-keys)).
