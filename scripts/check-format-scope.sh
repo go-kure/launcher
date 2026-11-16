@@ -173,10 +173,11 @@ LEFT_OUT_PATHS=(
   pkg/oam/policy_refusal.go
   pkg/oam/hook_group_name.go
   pkg/oam/lowering_targets.go
-  # No refusal of an authored document: the package comment, and files that only pass on an
-  # error they received.
+  # No refusal of an authored document: the package comment, files that only pass on an
+  # error they received, and a declaration that reads no document.
   pkg/oam/doc.go
   pkg/oam/emit_hook.go
+  pkg/oam/lowering_keys.go
   pkg/oam/run_state.go
   pkg/oam/post_policy_step.go
   pkg/oam/provenance.go

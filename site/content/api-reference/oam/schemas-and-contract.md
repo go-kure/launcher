@@ -632,6 +632,77 @@ type. The built-in rules declare:
 | `postgresql` | `cnpg-cluster`, `cnpg-objectstore`, `cnpg-pooler`, `cnpg-database`, `cnpg-scheduledbackup` | | `dependency`, `placement` |
 | `expose` (trait) | | `ingress`, `httproute` | |
 
+### Lowering keys
+
+A lowered component type has no entry of its own in the provenance report
+(`TransformWithProvenance`): its rule replaces the component by members, and the
+report speaks at the members' paths. A component lowering rule that implements
+`LoweringKeyDeclarer` says where to read. `LoweringKeys()` returns, for every key of
+the rule's schema, the places its value lands, each a `LoweredKey{ Member, Trait,
+Path, Unchanged }`:
+
+- `Member` is the component type of the emitted member, which is the report's
+  `Member` inside a same-name sibling group. A rule that emits one component for an
+  input leaves no group, and the report then names that component with no member: a
+  `worker` with an authored `serviceAccountName` is read under the plain owner.
+- `Trait` is the type of a trait the rule attaches to that member, when the value
+  lands in a trait.
+- `Path` is the path in the member's properties or the trait's.
+- `Unchanged` is true when the rule hands an authored value on as written. A path
+  below the key is then the same path below `Path`, and the report calls an authored
+  value there `copied`. When false the rule reads the key itself and may build what
+  lands there, in another shape.
+
+A key that reaches no property of a member maps to no place.
+`Transformer.ComponentLoweringKeys()` returns the maps of the registered rules by
+component type; a rule that declares none is left out.
+
+`webservice` and `worker` publish a map. Which keys are forwarded comes from the
+function the rule forwards its properties with, so the two cannot disagree on it; the
+places of the keys the rule evaluates itself are declared beside it. Every key not listed below
+lands unchanged at the same key of the `deployment` member:
+
+| Key | Lands at | Unchanged |
+|-----|----------|-----------|
+| `port` (`webservice`) | `deployment` `ports[0].containerPort`, `service` `ports[0].port` | no |
+| `affinity` | `deployment` `affinity`, as a Kubernetes affinity | no |
+| `volumes` | `deployment` `volumes`, and a `pvc` trait on it for each claim a volume generates | no |
+| `topologySpread` | the `topology-spread` trait on `deployment` | no |
+| `serviceAccountObjectName` | `deployment` `serviceAccountName` | no |
+| `deploymentObjectName`, `serviceObjectName` (`webservice`) | no place: they name objects | |
+
+The `topology-spread` trait the rule attaches holds no property, so the report has
+no entry for it, present or absent. `serviceAccountObjectName` names the
+ServiceAccount the component generates, and the deployment's pods run as it: the
+member's `serviceAccountName` holds the name resolved for the account, which is the
+`Naming` hook's answer or the component name when the key is left out.
+
+Two keys are tied. The rule's own spread (`topologySpread`, on unless set to false)
+and a non-empty authored `topologySpreadConstraints` list are refused together when
+the objects are generated: a component that authors constraints also sets
+`topologySpread: false`. An empty list is accepted beside the rule's own spread.
+
+One key reaches the place of another. A `volumes` entry whose claim is ReadWriteOnce
+or ReadWriteOncePod and not also ReadWriteMany (a claim that names no access mode is
+ReadWriteOnce), on a component that authors no `strategy`, gives the deployment the
+`Recreate` strategy: the report then holds a `builtin` entry at the deployment's
+`strategy.type`, the place of the `strategy` key. With such a claim an authored
+`strategy` of another type is refused. A claim that is only ReadOnlyMany does
+neither.
+
+`helm`, `postgresql` and `oci` publish no map. `postgresql` and `oci` build their
+members from moved and re-shaped keys. `helm` hands some keys on as written, a set
+that depends on the delivery mode, and builds the rest of its members from moved and
+re-shaped keys; its map is not built here. A component type defined by a model
+publishes none either.
+
+`ComponentLoweringKeys()` returns a copy: writing to it changes no rule's map.
+
+The map is structure, not a report. A place holds an entry whether the author wrote
+the key or the rule, the policy or a built-in default filled it: an omitted `port`
+and an authored one are both `rendered` at `ports[0].containerPort`. Telling them
+apart takes the report of a document that leaves the key out.
+
 ### The "no handler" error
 
 A type with no registered handler fails the transform, and the message names where
