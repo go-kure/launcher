@@ -111,15 +111,18 @@ func exclusiveProperties(handler any) []ExclusiveGroup {
 // ContractMetadata is optional registration metadata describing the contract a
 // handler or lowering rule implements: its family, version, the ClusterProfile
 // capability keys it requires, what it needs in the cluster beside the build's
-// output, and deprecation status. It is primarily a discovery/
+// output, the capabilities it needs from the platform, and deprecation status.
+// It is primarily a discovery/
 // documentation surface — the engine does not enforce any of these fields
 // (CapabilityAware.CapabilityRequired is what the engine actually enforces;
-// RequiredCapabilityKeys here is declarative, for a consumer to introspect). Two
-// fields are read: Version, which loweringRuleIdentity (lowering.go) uses to compose the
+// RequiredCapabilityKeys here is declarative, for a consumer to introspect). It is
+// read in three places: Version, which loweringRuleIdentity (lowering.go) uses to compose the
 // "@<version>" suffix on Origin.Rule for a lowering rule that also implements
-// ContractDescriber; and Deprecated with DeprecationMessage, which the transform turns
+// ContractDescriber; Deprecated with DeprecationMessage, which the transform turns
 // into one warning per authored component or trait of that type, through the
-// Transformer's warning handler (never an error, never a change to the output).
+// Transformer's warning handler (never an error, never a change to the output); and
+// PlatformNeeds, which the transform collects from the components that exist after
+// lowering into PolicyResult.PlatformNeeds (a report, never an error).
 // Nothing else on this struct is read or enforced by the engine.
 type ContractMetadata struct {
 	// Family is the contract family this handler/rule belongs to, e.g. "webservice".
@@ -138,6 +141,22 @@ type ContractMetadata struct {
 	// it needs none: a contract whose output is a CRD's object needs that CRD
 	// and its controller whether it lists them or not.
 	Prerequisites []ContractPrerequisite
+	// PlatformNeeds lists the capabilities the platform must serve for the
+	// output of an entity of this contract to work, each as a name and never as
+	// an installation: the consumer chooses how a need is met. The built-in
+	// kinds that emit custom resources name the API group of those resources,
+	// for example "postgresql.cnpg.io". Unlike Prerequisites, which is text for
+	// a reader, a need is a name a consumer can match, and it lists only
+	// capabilities, never an object or a Secret. Nothing enforces it: the
+	// build runs offline and fails on no unmet need. A consumer that wants what
+	// one application needs reads PolicyResult.PlatformNeeds, which reports the
+	// needs of the components that exist after lowering; this field, read
+	// through HandlerContracts, is for discovery and for a lowering rule, whose
+	// own declaration is the superset of what it may emit; a handler whose needs
+	// depend on a component's properties also implements ComponentPlatformNeeds,
+	// which the report reads in its place. nil when the
+	// contract declares none, which does not mean it needs none.
+	PlatformNeeds []PlatformNeed
 	// Readiness lists, for each kind of resource an entity of this contract
 	// provides, how a reader judges that the resource is ready: the status
 	// condition or field that signals it, and whether a generic health check can
@@ -164,6 +183,16 @@ type ContractPrerequisite struct {
 	Version string
 	// When says which use of the entity needs it, e.g. "backup or recovery
 	// set"; "" when every use does.
+	When string
+}
+
+// PlatformNeed is one entry of ContractMetadata.PlatformNeeds.
+type PlatformNeed struct {
+	// Capability names what the platform must serve, e.g. the API group
+	// "postgresql.cnpg.io". It names no installation and no version.
+	Capability string
+	// When says which use of the entity needs it, as text for a reader that
+	// nothing parses, e.g. "backup or recovery set"; "" when every use does.
 	When string
 }
 
@@ -212,7 +241,7 @@ const (
 
 // ContractDescriber is an optional interface implemented by component, trait and
 // policy handlers and lowering rules that declare contract metadata: family,
-// version, required capability keys, prerequisites, readiness, and deprecation info. Queryable at
+// version, required capability keys, prerequisites, platform needs, readiness, and deprecation info. Queryable at
 // registration time alongside PropertySchema(), through
 // Transformer.HandlerContracts() — the HandlerSchemas-shaped accessor covering all
 // six registries a component, trait or policy type can be claimed by (the three
@@ -226,6 +255,18 @@ const (
 // handler and rule implements it (go-kure/launcher#789).
 type ContractDescriber interface {
 	ContractMetadata() ContractMetadata
+}
+
+// ComponentPlatformNeeds is an optional interface for a ComponentHandler whose
+// platform needs depend on the properties of the component, which the static
+// ContractMetadata.PlatformNeeds cannot say: a Cluster needs the Barman Cloud
+// API only when it names that plugin. PolicyResult.PlatformNeeds reads
+// PlatformNeedsFor, in place of the handler's static list, for each component
+// of that type in the lowered application. It must not mutate the component,
+// and it reports a need it cannot tell for sure as the static list would.
+// ContractMetadata.PlatformNeeds stays the declaration published for discovery.
+type ComponentPlatformNeeds interface {
+	PlatformNeedsFor(component *Component) []PlatformNeed
 }
 
 // ComponentNamed is an optional interface for trait/component sub-app

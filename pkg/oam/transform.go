@@ -1140,8 +1140,44 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 		sort.Strings(keys)
 		policyResult.ConsumedCapabilities = keys
 	}
+	policyResult.PlatformNeeds = t.platformNeeds(app)
 
 	return cluster, policyResult, nil
+}
+
+// platformNeeds returns the sorted, deduped capability names that the handlers
+// of the lowered application's components declare: what ComponentPlatformNeeds
+// answers for the component when the handler implements it, else the handler's
+// ContractMetadata.PlatformNeeds. It is what the application emits, not what a
+// lowering rule may emit. nil when
+// nothing is declared. A component whose type has no handler or no contract
+// declares none (createApplications has refused an unknown type by now).
+func (t *Transformer) platformNeeds(app *Application) []string {
+	set := make(map[string]struct{})
+	for i := range app.Spec.Components {
+		component := &app.Spec.Components[i]
+		var needs []PlatformNeed
+		switch handler := t.findComponentHandler(component.Type).(type) {
+		case ComponentPlatformNeeds:
+			needs = handler.PlatformNeedsFor(component)
+		case ContractDescriber:
+			needs = handler.ContractMetadata().PlatformNeeds
+		}
+		for _, need := range needs {
+			if need.Capability != "" {
+				set[need.Capability] = struct{}{}
+			}
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(set))
+	for name := range set {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // componentLabelKey returns the key of the component label: ComponentLabelKey,

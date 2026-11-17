@@ -32,6 +32,21 @@ type PolicyResult struct {
 	// not among them. Nil when nothing consumed anything (AppDependsOn's
 	// nil-until-populated convention).
 	ConsumedCapabilities []string
+	// PlatformNeeds is the sorted, deduped capability names that the handlers of
+	// the components this app has after lowering declare in
+	// ContractMetadata.PlatformNeeds: what the platform must serve for the
+	// output to work. It reports what was emitted, so a lowering rule that emits a
+	// component only for some properties adds its need only then, and a handler
+	// that implements ComponentPlatformNeeds answers for each component by its
+	// properties. A component a
+	// trait lowering rule emits is among them; a sub-application a trait adds
+	// after lowering is not, as it is no component of the lowered document.
+	// Nothing is enforced: no build fails
+	// because a need is unmet, and the ClusterProfile is not consulted. Nil when
+	// nothing declared a need, which does not mean the application needs none. A
+	// RawDocumentLoweringRule's output, under LowerRaws, returns no result and is
+	// not reported (go-kure/launcher#1611).
+	PlatformNeeds []string
 }
 
 // NewPolicyResult creates an empty PolicyResult with initialised maps.

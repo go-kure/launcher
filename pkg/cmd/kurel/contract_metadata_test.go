@@ -37,6 +37,35 @@ func builtinsByPosition() map[string]map[string]any {
 // requires that it does.
 var builtinsDeclaringReadiness = map[string]bool{"component/postgresql": true}
 
+// platformNeedsOfKind is the API group each CloudNativePG family kind needs the
+// platform to serve (go-kure/launcher#1611): ten kinds project postgresql.cnpg.io
+// objects and the object store projects a barmancloud.cnpg.io one.
+var platformNeedsOfKind = map[string]string{
+	"cnpg-backup":              "postgresql.cnpg.io",
+	"cnpg-cluster":             "postgresql.cnpg.io",
+	"cnpg-clusterimagecatalog": "postgresql.cnpg.io",
+	"cnpg-database":            "postgresql.cnpg.io",
+	"cnpg-databaserole":        "postgresql.cnpg.io",
+	"cnpg-imagecatalog":        "postgresql.cnpg.io",
+	"cnpg-objectstore":         "barmancloud.cnpg.io",
+	"cnpg-pooler":              "postgresql.cnpg.io",
+	"cnpg-publication":         "postgresql.cnpg.io",
+	"cnpg-scheduledbackup":     "postgresql.cnpg.io",
+	"cnpg-subscription":        "postgresql.cnpg.io",
+}
+
+// builtinsDeclaringPlatformNeeds lists the built-ins allowed to set
+// ContractMetadata.PlatformNeeds, as "<position>/<type>": the CloudNativePG family
+// kinds and the postgresql rule that lowers into them. A built-in that starts or
+// stops declaring a need is a deliberate edit of this list.
+func builtinsDeclaringPlatformNeeds() map[string]bool {
+	allowed := map[string]bool{"component/postgresql": true}
+	for kind := range platformNeedsOfKind {
+		allowed["component/"+kind] = true
+	}
+	return allowed
+}
+
 // TestBuiltins_EveryOneDescribesItsContract: every built-in implements
 // oam.ContractDescriber under the one scheme: the family is the type it is
 // registered under, the version is builtin.ContractVersion, and the required
@@ -72,6 +101,12 @@ func TestBuiltins_EveryOneDescribesItsContract(t *testing.T) {
 			if allowed := builtinsDeclaringReadiness[position+"/"+name]; declares != allowed {
 				t.Errorf("%s %q: declares readiness = %t (%+v), want %t (builtinsDeclaringReadiness)", position, name, declares, meta.Readiness, allowed)
 			}
+			// Likewise, in the same position: the need lists are exact in the tests
+			// below, and a built-in outside the list declares none.
+			declaresNeeds := len(meta.PlatformNeeds) > 0
+			if allowed := builtinsDeclaringPlatformNeeds()[position+"/"+name]; declaresNeeds != allowed {
+				t.Errorf("%s %q: declares platform needs = %t (%+v), want %t (builtinsDeclaringPlatformNeeds)", position, name, declaresNeeds, meta.PlatformNeeds, allowed)
+			}
 			if position == "component" && name == "postgresql" {
 				continue // TestNewBuiltinTransformer_PublishesPostgresqlPrerequisites
 			}
@@ -103,6 +138,131 @@ func TestNewBuiltinTransformer_PublishesPostgresqlPrerequisites(t *testing.T) {
 %+v
 want
 %+v`, got, want)
+	}
+}
+
+// TestNewBuiltinTransformer_PublishesPostgresqlPlatformNeeds: HandlerContracts
+// publishes the two capabilities postgresql's output can need (go-kure/launcher#1611),
+// exactly these, in this order: the CloudNativePG API always, and the Barman
+// Cloud API for backup and recovery, whose When says so.
+func TestNewBuiltinTransformer_PublishesPostgresqlPlatformNeeds(t *testing.T) {
+	got := newBuiltinTransformer().HandlerContracts().Components["postgresql"].PlatformNeeds
+	want := []oam.PlatformNeed{
+		{Capability: "postgresql.cnpg.io"},
+		{Capability: "barmancloud.cnpg.io", When: "backup or recovery set"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf(`HandlerContracts().Components["postgresql"].PlatformNeeds =
+%+v
+want
+%+v`, got, want)
+	}
+}
+
+// clusterComponent is an authored cnpg-cluster component "pg" with extra
+// properties appended (indented by eight spaces).
+func clusterComponent(extra string) string {
+	return "    - name: pg\n      type: cnpg-cluster\n      properties:\n        instances: 1\n        storage:\n          size: 1Gi\n" + extra
+}
+
+// TestBuiltinTransform_PostgresqlPlatformNeeds: a real build reports what the
+// lowered document emits (go-kure/launcher#1611). A postgresql with neither backup
+// nor recovery has a Cluster that names no plugin, so the Barman Cloud API is not
+// among its needs; with backup, with an inline recovery store, or with a recovery
+// from an existing store by name it is, though the last emits no ObjectStore; an
+// authored Cluster reports it exactly when it names the plugin, enabled; an
+// application with no CloudNativePG kind reports none.
+func TestBuiltinTransform_PostgresqlPlatformNeeds(t *testing.T) {
+	const header = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  components:
+`
+	tests := []struct {
+		name string
+		app  string
+		want []string
+	}{
+		{
+			name: "without backup or recovery",
+			app:  header + "    - name: db\n      type: postgresql\n      properties:\n        replicas: 1\n",
+			want: []string{"postgresql.cnpg.io"},
+		},
+		{
+			name: "recovery from an inline store, no backup",
+			app:  postgresqlRecoveryApp("", "", ""),
+			want: []string{"barmancloud.cnpg.io", "postgresql.cnpg.io"},
+		},
+		{
+			// The Cluster names the plugin and an ObjectStore that already exists:
+			// no ObjectStore is emitted, and the Barman Cloud API is still needed.
+			name: "recovery from an existing store by name, no backup",
+			app:  header + "    - name: db\n      type: postgresql\n      properties:\n        recovery:\n          source:\n            serverName: origin\n            objectStoreName: origin-store\n",
+			want: []string{"barmancloud.cnpg.io", "postgresql.cnpg.io"},
+		},
+		{
+			name: "with backup",
+			app:  postgresqlMembersApp("", ""),
+			want: []string{"barmancloud.cnpg.io", "postgresql.cnpg.io"},
+		},
+		{
+			name: "an authored Cluster without the plugin",
+			app:  header + clusterComponent(""),
+			want: []string{"postgresql.cnpg.io"},
+		},
+		{
+			name: "an authored Cluster that names the plugin as its WAL archiver",
+			app:  header + clusterComponent("        plugins:\n          - name: barman-cloud.cloudnative-pg.io\n            isWALArchiver: true\n            parameters:\n              barmanObjectName: existing\n"),
+			want: []string{"barmancloud.cnpg.io", "postgresql.cnpg.io"},
+		},
+		{
+			name: "an authored Cluster whose plugin entry is disabled",
+			app:  header + clusterComponent("        plugins:\n          - name: barman-cloud.cloudnative-pg.io\n            enabled: false\n"),
+			want: []string{"postgresql.cnpg.io"},
+		},
+		{
+			// The build drops a null key before it decodes, so `plugin: null` beside
+			// `Plugin` leaves the plugin in the emitted recovery source.
+			name: "an authored Cluster whose recovery plugin is spelled Plugin beside a null plugin",
+			app:  header + clusterComponent("        bootstrap:\n          recovery:\n            source: origin\n        externalClusters:\n          - name: origin\n            Plugin:\n              name: barman-cloud.cloudnative-pg.io\n              parameters:\n                barmanObjectName: existing\n                serverName: origin\n            plugin: null\n"),
+			want: []string{"barmancloud.cnpg.io", "postgresql.cnpg.io"},
+		},
+		{
+			name: "an authored Cluster that names another plugin",
+			app:  header + clusterComponent("        plugins:\n          - name: other.example.io\n"),
+			want: []string{"postgresql.cnpg.io"},
+		},
+		{
+			name: "no CloudNativePG kind",
+			app:  header + "    - name: api\n      type: webservice\n      properties:\n        image: ghcr.io/example/api:v1.0.0\n        port: 9090\n",
+			want: nil,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, result, err := transformWithBuiltins(t, tc.app)
+			if err != nil {
+				t.Fatalf("transforming: %v", err)
+			}
+			if !slices.Equal(result.PlatformNeeds, tc.want) {
+				t.Errorf("PlatformNeeds = %#v, want %#v", result.PlatformNeeds, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuiltins_PlatformNeedsOfTheCloudNativePGKinds: each of the eleven kinds
+// publishes exactly one need, the API group its output belongs to, with no When.
+func TestBuiltins_PlatformNeedsOfTheCloudNativePGKinds(t *testing.T) {
+	contracts := newBuiltinTransformer().HandlerContracts().Components
+	for kind, group := range platformNeedsOfKind {
+		want := []oam.PlatformNeed{{Capability: group}}
+		if got := contracts[kind].PlatformNeeds; !slices.Equal(got, want) {
+			t.Errorf("component %q: PlatformNeeds = %+v, want %+v", kind, got, want)
+		}
 	}
 }
 

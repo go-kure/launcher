@@ -19,7 +19,11 @@ A tool can read the same list from the `postgresql` rule's contract metadata
 `Transformer.HandlerContracts()`; see the oam package README, "Contract
 metadata"), with two more entries a recovery may add: the ObjectStore its
 `source.objectStoreName` names, and the Secret with the owner's credentials its
-`secret.name` names.
+`secret.name` names. The operator's and the plugin's APIs are also published as
+platform needs (`ContractMetadata.PlatformNeeds`: `postgresql.cnpg.io` and
+`barmancloud.cnpg.io`), and a build reports the ones the application emits in
+`PolicyResult.PlatformNeeds` (the plugin's only when the emitted Cluster or an emitted
+ObjectStore uses it).
 
 | What | Requirement |
 |---|---|

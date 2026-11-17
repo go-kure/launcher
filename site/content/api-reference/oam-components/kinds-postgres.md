@@ -538,7 +538,11 @@ rule's contract metadata carries the same list for a tool to read
 each entry with the use that needs it, plus the ObjectStore a recovery's
 `source.objectStoreName` names and the Secret its `secret.name` names, with the
 owner's credentials. cert-manager is not an entry: what launcher writes does not
-depend on it, as the plugin's TLS certificates can come from elsewhere.
+depend on it, as the plugin's TLS certificates can come from elsewhere. The
+operator's and the plugin's APIs are also published as platform needs
+(`ContractMetadata.PlatformNeeds`, and `PolicyResult.PlatformNeeds` for what an
+application emits: the plugin's `barmancloud.cnpg.io` only when an ObjectStore is
+emitted or the emitted Cluster archives WAL or recovers through the plugin).
 
 **Recovery**. `recovery` bootstraps a new Cluster from the base backups and WAL
 another cluster wrote to an object store through the Barman Cloud plugin, to the
