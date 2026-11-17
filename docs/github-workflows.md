@@ -183,7 +183,7 @@ Runs on main and `release/*` branches only (not PRs):
 - yq / lychee / Flux CLI versions: read from `mise.toml` at run time, same pattern as Go — no
   hand-copied literal exists in any workflow to fall out of sync
 - Golangci-lint Version: `v2.15.0`
-- govulncheck Version: `v1.9.0` (pinned via the `GOVULNCHECK_VERSION` workflow env)
+- govulncheck Version: `v1.10.0` (pinned via the `GOVULNCHECK_VERSION` workflow env)
 - Coverage Threshold: `80%`
 - Test Timeout: `10m` per test binary (the `test` job's `go test -timeout`); `TEST_TIMEOUT` in the
   `Makefile` is the local copy and matches it
