@@ -10,9 +10,38 @@ import (
 // (oam.LoweringTargetDeclarer). The scheme is builtin.ContractVersion's: the
 // family is the type name. No component requires a ClusterProfile capability.
 
+// The API groups a built-in kind's output needs the platform to serve, as
+// oam.PlatformNeed.Capability names them.
+const (
+	cnpgGroup   = "postgresql.cnpg.io"
+	barmanGroup = "barmancloud.cnpg.io"
+)
+
+// platformNeedsByKind is the platform need of each built-in kind that projects
+// custom resources, keyed by type: the API group of what the kind emits. A
+// kind not listed declares none. The other API-backed kinds
+// (kindRequiredAPI) are not listed yet.
+var platformNeedsByKind = map[string]string{
+	"cnpg-backup":              cnpgGroup,
+	"cnpg-cluster":             cnpgGroup,
+	"cnpg-clusterimagecatalog": cnpgGroup,
+	"cnpg-database":            cnpgGroup,
+	"cnpg-databaserole":        cnpgGroup,
+	"cnpg-imagecatalog":        cnpgGroup,
+	"cnpg-objectstore":         barmanGroup,
+	"cnpg-pooler":              cnpgGroup,
+	"cnpg-publication":         cnpgGroup,
+	"cnpg-scheduledbackup":     cnpgGroup,
+	"cnpg-subscription":        cnpgGroup,
+}
+
 // contract is the metadata of the built-in component type typ.
 func contract(typ string) oam.ContractMetadata {
-	return oam.ContractMetadata{Family: typ, Version: builtin.ContractVersion}
+	meta := oam.ContractMetadata{Family: typ, Version: builtin.ContractVersion}
+	if group, ok := platformNeedsByKind[typ]; ok {
+		meta.PlatformNeeds = []oam.PlatformNeed{{Capability: group}}
+	}
+	return meta
 }
 
 // ContractMetadata implements oam.ContractDescriber.
@@ -443,6 +472,10 @@ func (OCIRule) LoweringTargets() oam.LoweringTargets {
 func (PostgresqlRule) ContractMetadata() oam.ContractMetadata {
 	meta := contract("postgresql")
 	meta.Prerequisites = postgresqlBackupPrerequisites()
+	meta.PlatformNeeds = []oam.PlatformNeed{
+		{Capability: cnpgGroup},
+		{Capability: barmanGroup, When: postgresqlBackupWhen},
+	}
 	meta.Readiness = postgresqlReadiness()
 	return meta
 }

@@ -536,10 +536,10 @@ fixed, so the note is historical rather than a live caveat:
 Handlers and lowering rules may implement `ContractDescriber` (`ContractMetadata()
 ContractMetadata`) to declare registration metadata about the contract they
 implement: `Family`, `Version`, `RequiredCapabilityKeys` (the `ClusterProfile`
-capability keys an entity of this contract needs), `Prerequisites` and `Readiness` (see
-below), `Deprecated`, and `DeprecationMessage`. It is primarily a discovery/documentation surface — the engine
+capability keys an entity of this contract needs), `Prerequisites`, `PlatformNeeds` and
+`Readiness` (see below), `Deprecated`, and `DeprecationMessage`. It is primarily a discovery/documentation surface — the engine
 does not enforce any of these fields (`CapabilityAware.CapabilityRequired` is what the
-engine actually enforces). Two fields are read. A lowering rule's `Version` composes
+engine actually enforces). It is read in three places. A lowering rule's `Version` composes
 the `"@<version>"` suffix on `Origin.Rule` (see below). `Deprecated` turns every
 authored component or trait of that type into one warning through the Transformer's
 warning handler (`SetWarningHandler`), in document order: `component "<name>": type
@@ -547,8 +547,9 @@ warning handler (`SetWarningHandler`), in document order: `component "<name>": t
 `Transform` and `TransformWithPolicy` warn; `LowerRaws` does not, because its output
 re-enters `Transform` as authored and warns there. The check reads the authored
 document before lowering, so a component a rule synthesizes never warns. A
-deprecation is never an error and never changes the output. Nothing else here is
-read or enforced. Consumers otherwise: schema publication, artifact
+deprecation is never an error and never changes the output. `PlatformNeeds` is
+collected into `PolicyResult.PlatformNeeds`, a report that never changes the output
+either (see below). Nothing else here is read or enforced. Consumers otherwise: schema publication, artifact
 provenance in a downstream consumer, and deprecation tooling. Metadata rides the
 existing registration mechanism; there is no separate contract registry.
 
@@ -594,6 +595,46 @@ reasons. cert-manager
 is not on it: the plugin's install recommends it for its own TLS, which can be
 supplied otherwise. **Breaking library change**: `ContractMetadata` gained the
 field, so an unkeyed composite literal of it no longer compiles.
+
+`PlatformNeeds` lists the capabilities the platform must serve for the output of an
+entity of this contract to work. Each `PlatformNeed{ Capability, When }` is a name,
+never an installation, so the consumer chooses how a need is met: for a built-in kind
+that emits custom resources, `Capability` is the API group of those resources, for
+example `postgresql.cnpg.io`. `When` is text for a reader, as in `ContractPrerequisite`
+(`""` when every use of the entity needs it). It differs from `Prerequisites` in three
+ways: a need is a name a consumer can match instead of free text, it lists only
+capabilities (never a bucket or a Secret), and the engine reads it. Nothing is
+enforced: no build fails because a need is unmet, and the `ClusterProfile` is not
+consulted. A nil list means none is declared, not that none is needed. Of the
+built-ins, the eleven CloudNativePG family kinds (`cnpg-cluster`, `cnpg-database`,
+`cnpg-objectstore`, `cnpg-pooler`, `cnpg-backup`, `cnpg-clusterimagecatalog`,
+`cnpg-databaserole`, `cnpg-imagecatalog`, `cnpg-publication`, `cnpg-scheduledbackup`
+and `cnpg-subscription`) each declare one (`barmancloud.cnpg.io` for
+`cnpg-objectstore`, `postgresql.cnpg.io` for the other ten), and the `postgresql` rule
+declares both, the second with When `backup or recovery set`. The other kinds that
+need an API (cert-manager, external-secrets, the Prometheus operator, Flux, Gateway
+and the rest) do not declare one yet.
+
+Two places carry a need, and they answer different questions.
+`Transformer.HandlerContracts()` publishes what each type declares: for a lowering
+rule such as `postgresql` that is the superset of what it may emit, for discovery.
+`PolicyResult.PlatformNeeds`, returned by `TransformWithPolicy`, is the sorted,
+deduplicated union of what the handlers of the components of the lowered application
+declare, so it is what that application emits. A handler that implements the optional
+interface `ComponentPlatformNeeds` (`PlatformNeedsFor(component *Component)
+[]PlatformNeed`) answers for each component by its properties, and that answer is used
+in place of its static list. The `cnpg-cluster` handler does so: it adds
+`barmancloud.cnpg.io` when its `plugins` or `externalClusters[].plugin` carry an enabled
+`barman-cloud.cloudnative-pg.io` entry, so a `postgresql` that archives or recovers
+through the plugin, even by the name of a store it does not emit, reports it, and one
+that does neither reports `postgresql.cnpg.io` only. It follows
+`ConsumedCapabilities` (see [Transform and lowering](transform-and-lowering.md)): a
+report, nothing enforced, nil when nothing declared a need, and not produced by
+`LowerRaws`, which returns no result. The report reads the components of the lowered
+document: a component a trait lowering rule emits is in it, and a sub-application a
+trait adds after lowering is not. No CloudNativePG kind is added that way. **Library addition**: `ContractMetadata` and `PolicyResult`
+gained a field each, so an unkeyed composite literal of either no longer compiles;
+none exists in this repository.
 
 `Readiness` lists, for each kind of resource an entity of
 this contract provides, how a reader judges that the resource is ready. Each

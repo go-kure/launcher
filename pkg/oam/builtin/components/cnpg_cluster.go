@@ -78,6 +78,52 @@ func (h *CnpgClusterHandler) CanHandle(componentType string) bool {
 	return componentType == "cnpg-cluster"
 }
 
+// PlatformNeedsFor implements oam.ComponentPlatformNeeds: the Cluster needs the
+// CloudNativePG API, and the Barman Cloud API when it names the barman-cloud
+// plugin, as an enabled entry of spec.plugins (the WAL archiver) or of an
+// externalClusters entry (a recovery source). The plugin serves the ObjectStore
+// the entry names, whether the document emits that store or refers to one that
+// exists, so this is where a Cluster that only references a store says so
+// (go-kure/launcher#1611). The typed probe reads those two lists alone, on the
+// properties with their null keys removed, as the build reads them. It does not
+// validate the document: ToApplicationConfig refuses what it refuses, and the answer
+// here is the static one only when the properties cannot be normalized or the lists
+// cannot be decoded.
+func (h *CnpgClusterHandler) PlatformNeedsFor(component *oam.Component) []oam.PlatformNeed {
+	needs := []oam.PlatformNeed{{Capability: cnpgGroup}}
+	// The build decodes the properties with their null keys removed, so the probe
+	// reads the same tree: a null spelling of a key must not hide another one.
+	stripped, _, err := jsonProperties(component.Properties)
+	if err != nil {
+		return needs
+	}
+	data, err := json.Marshal(stripped)
+	if err != nil {
+		return needs
+	}
+	var probe struct {
+		Plugins          []cnpgv1.PluginConfiguration `json:"plugins"`
+		ExternalClusters []cnpgv1.ExternalCluster     `json:"externalClusters"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return needs
+	}
+	names := func(p *cnpgv1.PluginConfiguration) bool {
+		return p != nil && p.Name == barmanCloudPluginName && (p.Enabled == nil || *p.Enabled)
+	}
+	uses := false
+	for i := range probe.Plugins {
+		uses = uses || names(&probe.Plugins[i])
+	}
+	for i := range probe.ExternalClusters {
+		uses = uses || names(probe.ExternalClusters[i].PluginConfiguration)
+	}
+	if uses {
+		needs = append(needs, oam.PlatformNeed{Capability: barmanGroup, When: "the Cluster names the barman-cloud plugin"})
+	}
+	return needs
+}
+
 // Endpoints implements oam.EndpointProvider: the Cluster's instance pods,
 // labelled cnpg.io/cluster=<cluster name> (the component's object name: the
 // OAM component name unless `objectName` or the naming hook names the Cluster

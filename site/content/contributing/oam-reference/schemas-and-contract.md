@@ -67,6 +67,7 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - go-kure/launcher#1027 (`Prerequisites` lists what must be in place in the target cluster, or beside it, for the output to work once applied).
   - go-kure/launcher#1134 (`Readiness` lists, for each kind of resource an entity of this contract provides, how a reader judges that the resource is ready).
   - go-kure/launcher#1144 (`postgresql` declares readiness, one entry for each kind it lowers into).
+  - go-kure/launcher#1611 (`PlatformNeeds` lists the capabilities the platform must serve for the output to work, as names; `PolicyResult.PlatformNeeds` reports those of the components the lowered application emits; a handler may answer per component through the optional `ComponentPlatformNeeds`; the CloudNativePG family kinds and `postgresql` declare theirs).
 
 ### Lowering targets and `Seal`
 
