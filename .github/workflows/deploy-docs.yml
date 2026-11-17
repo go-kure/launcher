@@ -119,7 +119,7 @@ jobs:
         echo "version=$GO_VER" >> $GITHUB_OUTPUT
 
     - name: Set up Go
-      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
       with:
         go-version: ${{ steps.go-version.outputs.version }}
         check-latest: true
@@ -165,7 +165,7 @@ jobs:
       run: echo "$HOME/bin" >> $GITHUB_PATH
 
     - name: Validate docs map (code↔docs sync)
-      uses: go-kure/.github/.github/actions/check-doc-sync@678261f6011bd7ed4493dfd746977804808cad94 # main
+      uses: go-kure/.github/.github/actions/check-doc-sync@1a7bb83ef9a7453e290636baf9561d761ed684ce # main
 
     - name: Inject front matter
       run: bash site/scripts/inject-frontmatter.sh
@@ -212,7 +212,7 @@ jobs:
     # because another slot's deploy moved the pages tip is redone on the new tip
     # and retried.
     - name: Deploy to go-kure.github.io
-      uses: go-kure/.github/.github/actions/deploy-docs-push@678261f6011bd7ed4493dfd746977804808cad94 # main
+      uses: go-kure/.github/.github/actions/deploy-docs-push@1a7bb83ef9a7453e290636baf9561d761ed684ce # main
       with:
         source-path: .
         target-path: deploy-target
