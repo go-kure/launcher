@@ -174,18 +174,19 @@ func TestValidatePropertyValue_ValueSchema_ChecksRequiredInTheValue(t *testing.T
 
 // A value schema on a node that is not an object is a defect in the handler's schema.
 func TestValidatePropertyValue_ValueSchema_OnANonObjectIsASchemaError(t *testing.T) {
-	for _, typ := range []PropertyType{PropertyTypeString, PropertyTypeArray, PropertyTypeInteger} {
-		schema := PropertySchema{Type: typ, AdditionalPropertiesSchema: &PropertySchema{Type: PropertyTypeString}}
-		var value any = "x"
-		switch typ {
-		case PropertyTypeArray:
-			value = []any{"x"}
-		case PropertyTypeInteger:
-			value = 1
-		}
-		_, err := validatePropertyValue(schema, value, "properties.field")
+	cases := []struct {
+		typ   PropertyType
+		value any
+	}{
+		{PropertyTypeString, "x"},
+		{PropertyTypeArray, []any{"x"}},
+		{PropertyTypeInteger, 1},
+	}
+	for _, tc := range cases {
+		schema := PropertySchema{Type: tc.typ, AdditionalPropertiesSchema: &PropertySchema{Type: PropertyTypeString}}
+		_, err := validatePropertyValue(schema, tc.value, "properties.field")
 		if pe := propertyErrorOf(t, err); pe.Kind != PropertyErrorSchema {
-			t.Errorf("type %s: kind = %q, want %q: %v", typ, pe.Kind, PropertyErrorSchema, err)
+			t.Errorf("type %s: kind = %q, want %q: %v", tc.typ, pe.Kind, PropertyErrorSchema, err)
 		}
 	}
 }
