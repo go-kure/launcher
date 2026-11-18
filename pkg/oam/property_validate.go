@@ -1179,7 +1179,9 @@ const enumMemberMaxDepth = 32
 //   - An object schema: a DECLARED key holding a null is stripped from the value, and
 //     a declared key's non-null value is walked against its own field schema. A key
 //     left to AdditionalProperties: true is not normalized at all, so a null anywhere
-//     under it is matchable and only the depth cap applies.
+//     under it is matchable and only the depth cap applies. A key typed by an
+//     AdditionalPropertiesSchema is normalized like a declared one and walked against
+//     that schema.
 //   - An array schema: a null element is rejected whatever Items says; a non-null
 //     element is walked against Items, or — with no Items — not normalized.
 //   - No declared Type: nothing is normalized, so only the depth cap applies.
@@ -1226,6 +1228,9 @@ func enumMemberHoldsStrippedNull(schema PropertySchema, member any, depth int) b
 			switch {
 			case declared:
 				holds = enumMemberHoldsStrippedNull(field, val, depth+1)
+			case schema.AdditionalPropertiesSchema != nil:
+				// A key typed by a value schema is normalized as a declared one.
+				holds = enumMemberHoldsStrippedNull(*schema.AdditionalPropertiesSchema, val, depth+1)
 			case schema.AdditionalProperties:
 				holds = exceedsEnumMemberDepth(val, depth+1)
 			default:
@@ -1330,7 +1335,7 @@ func containsNullValue(v any, depth int) bool {
 //
 // Properties keys are visited in sorted order, so the report is deterministic. Each
 // member is named by its schema path — Properties keys joined by ".", "[]" for Items,
-// empty at schema itself — and its index in Enum. The walk over the schema is not
+// "*" for the value schema of an open object, empty at schema itself — and its index in Enum. The walk over the schema is not
 // depth-bounded: schema must be a finite tree (a cyclic Items pointer never ends).
 func CheckEnumMembersHoldNoNull(schema PropertySchema) error {
 	var found []string
@@ -1369,6 +1374,13 @@ func collectEnumMembersHoldingNull(schema PropertySchema, path string, found *[]
 	}
 	if schema.Items != nil {
 		collectEnumMembersHoldingNull(*schema.Items, path+"[]", found)
+	}
+	if schema.AdditionalPropertiesSchema != nil {
+		child := "*"
+		if path != "" {
+			child = path + ".*"
+		}
+		collectEnumMembersHoldingNull(*schema.AdditionalPropertiesSchema, child, found)
 	}
 }
 
