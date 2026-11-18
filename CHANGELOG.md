@@ -1,6 +1,38 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.10] - 2026-11-18
+
+### Added
+
+- A component type declares the platform it needs, and the transform reports what an application emitted
+
+### Build
+
+- Update dependency syft to v1.57.2
+- Update dependency hugo to v0.170.1
+- Update module golang.org/x/vuln to v1.10.0
+
+### Document Format
+
+- A handler schema can type the values of an open object property
+- Check required keys and exclusive groups below a typed open key
+- Enforce platform-reserved fields below a typed open key
+- Judge Enum members against the value schema of a typed open key
+- Check feature gates below a typed open key
+- Relax Required inside the value schema of a typed open key
+- A Model input can type the values of an open object
+
+### Documentation
+
+- Document additionalPropertiesSchema
+- State the open-key rules where a comment or paragraph still held the old one
+
+### Testing
+
+- Pin the JSON and YAML form of additionalPropertiesSchema
+- Drop a non-exhaustive switch from the value schema test
+
 ## [0.2.0-beta.9] - 2026-11-16
 
 ### Added
