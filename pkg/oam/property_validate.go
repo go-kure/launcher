@@ -262,21 +262,23 @@ func checkRequiredIn(field PropertySchema, value any, path, capability string) e
 		if err := checkExclusiveGroups(field.Exclusive, field.Properties, path); err != nil {
 			return err
 		}
-		if len(field.Properties) == 0 {
-			return nil
-		}
-		for _, key := range slices.Sorted(maps.Keys(field.Properties)) {
-			if !field.Properties[key].Required {
-				continue
+		if len(field.Properties) > 0 {
+			for _, key := range slices.Sorted(maps.Keys(field.Properties)) {
+				if !field.Properties[key].Required {
+					continue
+				}
+				if v, present := obj[key]; !present || isNullValue(v) {
+					return requiredError(path, key, capability)
+				}
 			}
-			if v, present := obj[key]; !present || isNullValue(v) {
-				return requiredError(path, key, capability)
+			if err := checkExclusive(field.Exclusive, field.Properties, obj, true, path, capability); err != nil {
+				return err
+			}
+			if err := checkNestedRequired(field.Properties, nil, obj, path, capability); err != nil {
+				return err
 			}
 		}
-		if err := checkExclusive(field.Exclusive, field.Properties, obj, true, path, capability); err != nil {
-			return err
-		}
-		return checkNestedRequired(field.Properties, nil, obj, path, capability)
+		return checkOpenValuesRequired(field, obj, path, capability)
 	case PropertyTypeArray:
 		items, ok := asArrayValue(value)
 		if !ok || field.Items == nil {
@@ -293,6 +295,24 @@ func checkRequiredIn(field PropertySchema, value any, path, capability string) e
 	case PropertyTypeString, PropertyTypeInteger, PropertyTypeBoolean, PropertyTypeNumber:
 		// A scalar holds no keys. A union (Types) is checked member by member
 		// against bare types (validateUnionValue), so it declares none either.
+	}
+	return nil
+}
+
+// checkOpenValuesRequired is checkRequiredIn for the keys an object leaves open and
+// types with AdditionalPropertiesSchema: each present, non-null one is held to that
+// schema, in sorted order. A declared key has its own schema and is not read here.
+func checkOpenValuesRequired(field PropertySchema, obj map[string]any, path, capability string) error {
+	if field.AdditionalPropertiesSchema == nil {
+		return nil
+	}
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
+		if _, declared := field.Properties[key]; declared || isNullValue(obj[key]) {
+			continue
+		}
+		if err := checkRequiredIn(*field.AdditionalPropertiesSchema, obj[key], path+"."+key, capability); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -413,6 +433,9 @@ func checkFieldGroups(field PropertySchema, path string) error {
 			if err := checkFieldGroups(field.Properties[key], path+"."+key); err != nil {
 				return err
 			}
+		}
+		if field.AdditionalPropertiesSchema != nil {
+			return checkFieldGroups(*field.AdditionalPropertiesSchema, path+".*")
 		}
 	case field.Type == PropertyTypeArray && field.Items != nil:
 		return checkFieldGroups(*field.Items, path+"[]")
