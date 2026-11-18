@@ -589,8 +589,8 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 			// property of the array contract itself, not of a declared element type.
 			// An array schema with no Items says nothing about its members, but it
 			// does not thereby license a member that no Items type could ever match —
-			// and unlike an object's undeclared key, whose null this validator leaves
-			// alone because deleting it would exceed what the schema describes, an
+			// and unlike an object's undeclared key with no value schema, whose null this
+			// validator leaves alone because deleting it would exceed what the schema describes, an
 			// array element cannot be left alone in that sense: it still reaches the
 			// handler parser as a nil in a []any, which is the shape the contract
 			// exists to keep out.
