@@ -48,13 +48,13 @@ func (t *Transformer) ValidateAuthoredPropertiesForTargetWithGates(app *Applicat
 	for i := range resolved.Spec.Components {
 		comp := &resolved.Spec.Components[i]
 		path := fmt.Sprintf("component %q (type %q): properties", comp.Name, comp.Type)
-		if err := checkGatedProperties(t.componentSchemaOf(comp.Type), comp.Properties, path, gt); err != nil {
+		if err := checkGatedProperties(t.componentSchemaOf(comp.Type), nil, comp.Properties, path, gt); err != nil {
 			return nil, err
 		}
 		for j := range comp.Traits {
 			trait := &comp.Traits[j]
 			path := fmt.Sprintf("component %q: trait %q: properties", comp.Name, trait.Type)
-			if err := checkGatedProperties(t.traitSchemaOf(trait.Type), trait.Properties, path, gt); err != nil {
+			if err := checkGatedProperties(t.traitSchemaOf(trait.Type), nil, trait.Properties, path, gt); err != nil {
 				return nil, err
 			}
 		}
@@ -62,7 +62,7 @@ func (t *Transformer) ValidateAuthoredPropertiesForTargetWithGates(app *Applicat
 	for i := range resolved.Spec.Policies {
 		pol := &resolved.Spec.Policies[i]
 		path := fmt.Sprintf("policy %q (type %q): properties", pol.Name, pol.Type)
-		if err := checkGatedProperties(t.policySchemaOf(pol.Type), pol.Properties, path, gt); err != nil {
+		if err := checkGatedProperties(t.policySchemaOf(pol.Type), nil, pol.Properties, path, gt); err != nil {
 			return nil, err
 		}
 	}
@@ -116,11 +116,15 @@ func schemaOf(handler any) map[string]PropertySchema {
 // value, in sorted key order, whose Gate is off at target. A key the schema does not
 // declare is not its business (the authored validation refused it already), and
 // neither is a value of the wrong shape.
-func checkGatedProperties(schema map[string]PropertySchema, props map[string]any, path string, target gateTarget) error {
+func checkGatedProperties(schema map[string]PropertySchema, valueSchema *PropertySchema, props map[string]any, path string, target gateTarget) error {
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		field, ok := schema[key]
 		if !ok {
-			continue
+			// A key the object leaves open and types is held to its value schema.
+			if valueSchema == nil {
+				continue
+			}
+			field = *valueSchema
 		}
 		if err := checkGatedValue(field, props[key], path+"."+key, target); err != nil {
 			return err
@@ -159,9 +163,9 @@ func checkGatedValue(field PropertySchema, value any, path string, target gateTa
 			return err
 		}
 	}
-	if len(field.Properties) > 0 {
+	if len(field.Properties) > 0 || field.AdditionalPropertiesSchema != nil {
 		if obj, ok := asObjectValue(value); ok {
-			return checkGatedProperties(field.Properties, obj, path, target)
+			return checkGatedProperties(field.Properties, field.AdditionalPropertiesSchema, obj, path, target)
 		}
 	}
 	if items, ok := asArrayValue(value); ok && field.Items != nil {
@@ -375,6 +379,11 @@ func fieldGateOff(field PropertySchema, target gateTarget) (bool, error) {
 	}
 	if off, err := gateOffIn(field.Properties, target); off || err != nil {
 		return off, err
+	}
+	if field.AdditionalPropertiesSchema != nil {
+		if off, err := fieldGateOff(*field.AdditionalPropertiesSchema, target); off || err != nil {
+			return off, err
+		}
 	}
 	if field.Items != nil {
 		return fieldGateOff(*field.Items, target)
