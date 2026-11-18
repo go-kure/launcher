@@ -1,10 +1,50 @@
 package oam
 
 import (
+	"encoding/json"
 	stderrors "errors"
+	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+// The field is published as additionalPropertiesSchema in both encodings, and decodes
+// back to the schema it came from.
+func TestPropertySchema_AdditionalPropertiesSchemaRoundTrips(t *testing.T) {
+	want := listsOfStrings()
+
+	asJSON, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if !strings.Contains(string(asJSON), `"additionalPropertiesSchema":{"type":"array"`) {
+		t.Errorf("JSON = %s, want the additionalPropertiesSchema key", asJSON)
+	}
+	var fromJSON PropertySchema
+	if err := json.Unmarshal(asJSON, &fromJSON); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(fromJSON, want) {
+		t.Errorf("JSON round trip = %+v, want %+v", fromJSON, want)
+	}
+
+	asYAML, err := yaml.Marshal(want)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if !strings.Contains(string(asYAML), "additionalPropertiesSchema:") {
+		t.Errorf("YAML = %s, want the additionalPropertiesSchema key", asYAML)
+	}
+	var fromYAML PropertySchema
+	if err := yaml.Unmarshal(asYAML, &fromYAML); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(fromYAML, want) {
+		t.Errorf("YAML round trip = %+v, want %+v", fromYAML, want)
+	}
+}
 
 // A map from a free key to a typed value, for example {"group": ["name", ...]}, is
 // published as an object whose AdditionalPropertiesSchema types every key it leaves
