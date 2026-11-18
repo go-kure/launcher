@@ -9,6 +9,15 @@ Handlers use `k8s.io/api` constants for well-known Kubernetes enum values (acces
 modes, restart policies, etc.) rather than string literals — never re-define values
 that already exist upstream.
 
+A property's `Description` says what the property means and what an author may set. It
+never names an issue or a pull request: a consumer publishes each description verbatim, for
+example as JSON Schema text in a page or an editor tooltip, and a number tells its reader
+nothing. The reference goes in the Go comment beside the property, where a maintainer reads
+it. `TestBuiltinDescriptionsCarryNoIssueNumber` (in the registry package) walks the
+description of every property of every built-in component, trait and policy and fails on
+`#` followed by two or more digits, which a qualified reference such as
+`go-kure/launcher#1050` also contains.
+
 Every generated object owns its label maps. `Generate` hands back objects the caller
 owns and routinely edits — stamping ownership, environment or version labels onto the
 workloads it emits — so no two fields and no two objects ever share one

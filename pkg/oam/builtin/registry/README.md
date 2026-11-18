@@ -69,6 +69,10 @@ it to the registered type; the grammar and the resolution rule are in
   claims.
 - `TestRegistries_RegisterTogether`: every entry registers on one transformer without a
   collision.
+- `TestBuiltinDescriptionsCarryNoIssueNumber`: no description of a built-in component,
+  trait or policy property names an issue (`#` and two or more digits), so a consumer that
+  publishes the descriptions never shows a number; `TestBuiltinDescriptionWalk_ReachesEveryDescription`
+  holds the walk to the count of descriptions in each schema's JSON.
 - In `pkg/cmd/kurel`, `TestKindLists_InOrder` holds the entries of `ComponentHandlers` in
   the order of their type, `TestBuiltinRegistries_TypesUnchanged` holds kurel's registered
   set to `testdata/builtin-registries.txt`, and the handler-schema tests cover every entry.
