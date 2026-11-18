@@ -142,3 +142,33 @@ func TestEnforcePlatformReserved_ValueSchemaOnAnObjectWithNoProperties(t *testin
 		t.Fatalf("kind = %q, want %q: %v", pe.Kind, PropertyErrorPlatformReserved, err)
 	}
 }
+
+// A key typed by a value schema is normalized like a declared one, so an Enum member
+// is judged against the value schema and not by the schema-less null rule.
+func TestEnumMemberHoldsStrippedNull_WalksTheValueSchema(t *testing.T) {
+	open := PropertySchema{Type: PropertyTypeObject, AdditionalProperties: true}
+	schema := PropertySchema{Type: PropertyTypeObject, AdditionalPropertiesSchema: &open}
+
+	// The null sits under a key the value schema leaves to AdditionalProperties: matchable.
+	if enumMemberHoldsStrippedNull(schema, map[string]any{"k": map[string]any{"z": nil}}, 0) {
+		t.Error("a null under a key the value schema leaves open is matchable")
+	}
+	// The null sits directly under a typed open key: stripped from any value, so unmatchable.
+	if !enumMemberHoldsStrippedNull(schema, map[string]any{"k": nil}, 0) {
+		t.Error("a null under a typed open key is stripped, so the member can never match")
+	}
+}
+
+func TestCheckEnumMembersHoldNoNull_ReachesTheValueSchema(t *testing.T) {
+	schema := PropertySchema{
+		Type: PropertyTypeObject,
+		AdditionalPropertiesSchema: &PropertySchema{
+			Type: PropertyTypeString,
+			Enum: []any{"a", nil},
+		},
+	}
+	err := CheckEnumMembersHoldNoNull(schema)
+	if err == nil || !strings.Contains(err.Error(), "*: Enum member 1") {
+		t.Fatalf("want the value schema's null member reported at *, got: %v", err)
+	}
+}
