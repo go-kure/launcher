@@ -86,7 +86,8 @@ type ComponentCapabilityFiller interface {
 // trait handlers that declare a schema for their user-facing properties. The
 // downstream runtime's validator consumes these schemas (via Transformer.HandlerSchemas) to validate a
 // component/trait's properties before the handler is invoked. Handlers that accept
-// arbitrary keys declare an open field with PropertySchema.AdditionalProperties.
+// arbitrary keys declare an open field with PropertySchema.AdditionalProperties, and a
+// field that maps a free key to a typed value with PropertySchema.AdditionalPropertiesSchema.
 type PropertySchemaProvider interface {
 	PropertySchema() map[string]PropertySchema
 }

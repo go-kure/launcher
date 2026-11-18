@@ -25,7 +25,8 @@ import (
 // the snapshot into under that schema. So the rewrite validation makes — a typed Go
 // collection becoming []any or map[string]any, a named scalar its predeclared type, an
 // integer of another kind int — compares equal exactly where validation makes it,
-// and nowhere else: below a key an object leaves to AdditionalProperties, or under a
+// and nowhere else: below a key an object leaves to AdditionalProperties with no
+// AdditionalPropertiesSchema, or under a
 // schema with no Type, validation passes the value through as written, so a []byte
 // there still differs from a list of the same integers. Two numbers a property reader
 // tells apart never compare equal, since every value is compared with its Go type and
@@ -230,7 +231,8 @@ func checkRenderedValue(value any, onPath map[propertyCopyKey]bool) error {
 // tells floating-point numbers apart by their bits, so +0.0 never matches -0.0.
 // Normalization equivalence is thereby validation's own, not a copy of its rules: a
 // []byte below a declared array of integers matches the []any of ints validation
-// writes back there, while below a key left to AdditionalProperties, or under a
+// writes back there, while below a key left to AdditionalProperties with no
+// AdditionalPropertiesSchema, or under a
 // schema with no Type, validation writes nothing back and the []byte matches only
 // itself. A null in current is never equal, since the snapshot holds none; a snapshot
 // validation refuses matches only itself.

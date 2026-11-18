@@ -363,7 +363,7 @@ Each parameter has a name, type, required flag, optional default, and optional d
 > shared `PropertySchema` vocabulary (the same type used by handler properties and capability
 > rendering). Parameters remain an *ordered list* — a default may reference only earlier
 > parameters — and are restricted to the flat subset: the rich `PropertySchema` fields (`enum`,
-> nested `properties`, `items`, `additionalProperties`) are rejected at decode time. Unifying the
+> nested `properties`, `items`, `additionalProperties`, `additionalPropertiesSchema`) are rejected at decode time. Unifying the
 > type does not change the accepted wire format.
 
 ```yaml

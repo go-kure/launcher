@@ -167,10 +167,18 @@ to declare a constrained schema for their user-facing properties. `PropertySchem
 single schema vocabulary — the same type also backs `kurel.yaml` parameters (`ParameterDecl`) and
 `CapabilityDefinition` rendering properties. It has `Type` (string/integer/boolean/number/array/object),
 `Types`, `Description`, `Required`, `Default`, `Enum`, nested `Properties`, `Items`, `AdditionalProperties`
-(default false; escape-hatch fields set it true), and `Exclusive`. The rich fields (`Types`, `Enum`, `Properties`, `Items`,
-`AdditionalProperties`, `Exclusive`) are meaningful only for handler properties: the two flat call sites (kurel
+(default false; escape-hatch fields set it true), `AdditionalPropertiesSchema`, and `Exclusive`. The rich fields
+(`Types`, `Enum`, `Properties`, `Items`, `AdditionalProperties`, `AdditionalPropertiesSchema`, `Exclusive`) are
+meaningful only for handler properties: the two flat call sites (kurel
 parameters, capability rendering) reject them at decode time, so unifying the type does not widen
 their accepted behavior.
+
+`AdditionalPropertiesSchema` (published as `additionalPropertiesSchema`) types the values of the keys an
+object leaves open, for a map from a free key to a typed value such as `{"<group>": ["name", ...]}`.
+Authored values are checked against it as an array's elements are checked against `Items`, and a null
+under such a key is stripped as a declared optional key's null is. A non-nil value schema opens the
+object and wins over the boolean `AdditionalProperties`, which stays the shorthand for "any value". It
+may sit beside `Properties` (declared keys keep their own schema), and only an object may carry it.
 
 `BoundedBy` (published as `boundedBy`) names the refusal classes an authored value at a property
 can cause under the environment policy, and never the limit. Nothing reads it to accept or refuse

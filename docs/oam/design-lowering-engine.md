@@ -240,7 +240,7 @@ Holds, and required writing the validator the design assumed existed —
 `PropertySchema` was published (`HandlerSchemas`) but nothing in launcher enforced it
 before this work. `validateProperties`/`validateObjectProperties`
 (`property_validate.go`) cover type/required/enum/nested `Properties`/`Items`/
-`AdditionalProperties`. Two enforcement points, matching the design: emission-time
+`AdditionalProperties`/`AdditionalPropertiesSchema`. Two enforcement points, matching the design: emission-time
 (`validateEmittedComponent`/`validateEmittedTrait`/`validateEmittedPolicy`, called the
 moment a rule emits an element, citing the **authored** origin first per D7) and a
 post-fixpoint whole-document pass with an **empty** `LowerableTypes`
