@@ -477,10 +477,11 @@ of thing:
   instead of leaving an `Enum` that silently never matches.
 
   The member is walked alongside its schema, because normalisation does not reach
-  everywhere: a key an object leaves to `AdditionalProperties: true`, anything inside
-  an array element with no `Items` schema, and anything below a schema with no
-  declared `Type` pass through as written. A key an `AdditionalPropertiesSchema`
-  types is walked against that schema, as a declared key is. A value can hold a null there, so a member
+  everywhere: a key an object leaves to `AdditionalProperties: true` without an
+  `AdditionalPropertiesSchema`, anything inside an array element with no `Items`
+  schema, and anything below a schema with no declared `Type` pass through as
+  written. (A key an `AdditionalPropertiesSchema` types is walked against that
+  schema, as a declared key is.) A value can hold a null there, so a member
   holding the same null matches it and is accepted — `{opaque: null}` against
   `Enum: [{opaque: null}]` on an open object. A member's null compares equal only to
   a null value, whatever either side's Go type, and never to an empty collection. The

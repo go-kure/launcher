@@ -114,8 +114,10 @@ func schemaOf(handler any) map[string]PropertySchema {
 
 // checkGatedProperties walks props against schema and returns the first authored
 // value, in sorted key order, whose Gate is off at target. A key the schema does not
-// declare is not its business (the authored validation refused it already), and
-// neither is a value of the wrong shape.
+// declare is held to valueSchema, the object's AdditionalPropertiesSchema, when it has
+// one; with none it is not this check's business (the authored validation refused it
+// already or, as an open key, left it as written), and neither is a value of the
+// wrong shape.
 func checkGatedProperties(schema map[string]PropertySchema, valueSchema *PropertySchema, props map[string]any, path string, target gateTarget) error {
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		field, ok := schema[key]

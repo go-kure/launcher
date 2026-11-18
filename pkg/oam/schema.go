@@ -82,8 +82,10 @@ type PropertySchema struct {
 	// Enum/Properties/Items, only meaningful for handler properties — the two flat call
 	// sites reject the key at decode time (flatschema.go's key allow-sets).
 	//
-	// A consumer that predates it reads the key as an object that accepts any value,
-	// as it did before the field existed; the field is additive for it.
+	// A consumer that predates it ignores the key and reads the node as it read it before
+	// the field existed: the keys AdditionalProperties allows, and no more. A handler
+	// that sets AdditionalProperties as well (the shorthand) keeps that consumer
+	// accepting any value; one that sets only this field is closed for it.
 	AdditionalPropertiesSchema *PropertySchema `json:"additionalPropertiesSchema,omitempty" yaml:"additionalPropertiesSchema,omitempty"`
 	// PlatformReserved marks a property as platform-supplied only (D3): its value
 	// may arrive solely via ClusterProfile capability rendering, never authored
