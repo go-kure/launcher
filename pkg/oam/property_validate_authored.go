@@ -439,26 +439,36 @@ func (t *Transformer) validateAuthoredTraitAt(trait *Trait, capabilities map[str
 // capability rendering merges into, and on that object's exclusive groups: the
 // rendering may supply a group's key too. Everything under an array's Items keeps its
 // flags: a list is authored whole, never merged into, so a required key of one of its
-// elements is genuinely missing when the author leaves it out. schema is never
-// mutated, as in withEngineTraitProperties.
+// elements is genuinely missing when the author leaves it out. The value schema of an
+// open object (AdditionalPropertiesSchema) is relaxed like a declared object field:
+// the rendering merges into the object a key of the open object holds, as it merges
+// into a declared one. schema is never mutated, as in withEngineTraitProperties.
 func relaxObjectRequired(schema map[string]PropertySchema) map[string]PropertySchema {
 	out := make(map[string]PropertySchema, len(schema))
 	for key, field := range schema {
-		field.Required = false
-		if field.Type == PropertyTypeObject && len(field.Properties) > 0 {
-			field.Properties = relaxObjectRequired(field.Properties)
-			for k, sub := range field.Properties {
-				sub.Required = false
-				field.Properties[k] = sub
-			}
-			field.Exclusive = slices.Clone(field.Exclusive)
-			for i := range field.Exclusive {
-				field.Exclusive[i].Required = false
-			}
-		}
-		out[key] = field
+		out[key] = relaxFieldRequired(field)
 	}
 	return out
+}
+
+// relaxFieldRequired is relaxObjectRequired for one field, returned as a copy.
+func relaxFieldRequired(field PropertySchema) PropertySchema {
+	field.Required = false
+	if field.Type != PropertyTypeObject {
+		return field
+	}
+	if len(field.Properties) > 0 {
+		field.Properties = relaxObjectRequired(field.Properties)
+		field.Exclusive = slices.Clone(field.Exclusive)
+		for i := range field.Exclusive {
+			field.Exclusive[i].Required = false
+		}
+	}
+	if field.AdditionalPropertiesSchema != nil {
+		relaxed := relaxFieldRequired(*field.AdditionalPropertiesSchema)
+		field.AdditionalPropertiesSchema = &relaxed
+	}
+	return field
 }
 
 // engineTraitProperties are properties the TRANSFORM ENGINE reads off an authored
