@@ -22,7 +22,8 @@ const (
 // the downstream runtime can validate a component/trait's user-facing properties before invoking
 // the handler.
 //
-// The rich fields (Enum, Properties, Items, AdditionalProperties) express nested
+// The rich fields (Enum, Properties, Items, AdditionalProperties,
+// AdditionalPropertiesSchema) express nested
 // and constrained schemas. They are only meaningful for handler properties: the
 // two flat call sites (kurel parameters, capability rendering) reject them at
 // decode time so unifying the type does not silently widen accepted behavior

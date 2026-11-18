@@ -13,10 +13,37 @@ to declare a constrained schema for their user-facing properties. `PropertySchem
 single schema vocabulary — the same type also backs `kurel.yaml` parameters (`ParameterDecl`) and
 `CapabilityDefinition` rendering properties. It has `Type` (string/integer/boolean/number/array/object),
 `Types`, `Description`, `Required`, `Default`, `Enum`, nested `Properties`, `Items`, `AdditionalProperties`
-(default false; escape-hatch fields set it true), and `Exclusive`. The rich fields (`Types`, `Enum`, `Properties`, `Items`,
-`AdditionalProperties`, `Exclusive`) are meaningful only for handler properties: the two flat call sites (kurel
+(default false; escape-hatch fields set it true), `AdditionalPropertiesSchema`, and `Exclusive`. The rich fields
+(`Types`, `Enum`, `Properties`, `Items`, `AdditionalProperties`, `AdditionalPropertiesSchema`, `Exclusive`) are
+meaningful only for handler properties: the two flat call sites (kurel
 parameters, capability rendering) reject them at decode time, so unifying the type does not widen
 their accepted behavior.
+
+`AdditionalPropertiesSchema` (published as `additionalPropertiesSchema`) types the values of the keys
+an object leaves open. It describes a map from a free key to a typed value, such as
+`{"<group>": ["name", ...]}`, which `AdditionalProperties` alone can only call "an object". The
+rules:
+
+- A non-nil value schema opens the object, whatever `AdditionalProperties` says. The boolean stays
+  the shorthand for "any value", and a node that sets neither refuses an undeclared key as before.
+- `Properties` and a value schema may sit on one node: a declared key keeps its own schema and every
+  other key takes the value schema.
+- An authored value under an open key is checked against the value schema as an array's element is
+  checked against `Items`: the same type, `Enum` and nested `Required` rules apply, and the refusal
+  names the value's path (`properties.groups.web`, `properties.groups.web[1]`).
+- A null under a key the value schema types is stripped, as a declared optional key's null is, and
+  the Enum null rule treats such a key as declared. Under a key a bare `AdditionalProperties: true`
+  leaves open, a null is left alone as before.
+- Only an object may carry it. A value schema on any other node is a schema error, in validation
+  and in the model loader.
+- The walks that follow `Items` follow it too: nested `Required`, exclusive groups, the
+  platform-reserved check, feature gates, and the static Enum null check, which names a member of
+  the value schema at the path `*`. The authored check of a trait a capability binds relaxes `Required`
+  inside the value schema, as inside a declared object, because the rendering merges into the object an
+  open key holds.
+- Not read, as before for an open object: `DeclareBounds` has no path token for it (state a bound on
+  the open node itself, which covers a value below it), CEL types the value as `dyn`, and the probe's
+  declared defaults have no notion of an open key.
 
 A kurel parameter's `Type` is `string`, `integer`, `boolean`, `array` or `object`. `ResolveParameters` replaces a whole-value `${name}` for an `array` or
 `object` parameter with the value's YAML list or map. With no `items` or `properties` to declare,
@@ -163,7 +190,7 @@ component model (`pkg/oam/model`) may not write it on an input.
 Separately, `validateProperties` (`property_validate.go`) checks an EMITTED
 component/trait/policy's properties against its TARGET handler's declared schema —
 enforcing `Required`, `Type`/`Types`, `Enum`, and nested `Properties`/`Items`/
-`AdditionalProperties` — immediately after a lowering rule returns it, so a rule
+`AdditionalProperties`/`AdditionalPropertiesSchema` — immediately after a lowering rule returns it, so a rule
 cannot silently produce properties its own target handler would reject.
 
 Both this check and the authored one below write a normalised value back where the
@@ -425,7 +452,9 @@ Applied in two places, because a key and an array element are not the same kind
 of thing:
 
 - **A declared, optional object key holding a null is DELETED** before its value
-  is checked. `Required` already classifies a null as absent, so materialising it
+  is checked, and so is a key an `AdditionalPropertiesSchema` types: it is treated
+  as a declared optional key. A key a bare `AdditionalProperties: true` leaves open
+  keeps its null. `Required` already classifies a null as absent, so materialising it
   as a present key contradicted the classification the file had already made — and
   a handler parser decides presence with a bare two-value map lookup, so it saw a
   key the validator had decided was not there.
@@ -450,7 +479,8 @@ of thing:
   The member is walked alongside its schema, because normalisation does not reach
   everywhere: a key an object leaves to `AdditionalProperties: true`, anything inside
   an array element with no `Items` schema, and anything below a schema with no
-  declared `Type` pass through as written. A value can hold a null there, so a member
+  declared `Type` pass through as written. A key an `AdditionalPropertiesSchema`
+  types is walked against that schema, as a declared key is. A value can hold a null there, so a member
   holding the same null matches it and is accepted — `{opaque: null}` against
   `Enum: [{opaque: null}]` on an open object. A member's null compares equal only to
   a null value, whatever either side's Go type, and never to an empty collection. The
@@ -472,8 +502,8 @@ of thing:
   The walk of every schema that ships for an `Enum` member holding a null is exported as `CheckEnumMembersHoldNoNull(schema PropertySchema) error`,
   so a handler outside this package can assert the same of its own schemas. It
   reports every `Enum` member — on the schema and on every schema nested under its
-  `Properties` (in sorted key order) or `Items` — that holds a null anywhere, named
-  by schema path and member index, and returns `nil` when none does. It is
+  `Properties` (in sorted key order), `Items` or `AdditionalPropertiesSchema` (path
+  `*`) — that holds a null anywhere, named by schema path and member index, and returns `nil` when none does. It is
   deliberately **stricter** than the runtime arm: it does not read the schema around
   a member, so it also reports the matchable nulls described above (under an
   `AdditionalProperties` key, inside an array element with no `Items`, below a schema
@@ -498,8 +528,8 @@ Two things this deliberately does not do:
   traits are checked as they are emitted, before the strip (see the rule-output
   contract in [Lowering](transform-and-lowering.md#lowering)).
 - **A key the schema does not declare is untouched**, including inside an object
-  that sets `AdditionalProperties`. Nothing describes such a value, so nothing
-  here can normalise it, and a null inside an opaque object still reaches the
+  that sets `AdditionalProperties` without a value schema. Nothing describes such
+  a value, so nothing here can normalise it, and a null inside an opaque object still reaches the
   handler parser. This is the same horizon as validation itself.
 
 Scope, because this contract is not settled repository-wide: `ValidateAuthoredProperties`

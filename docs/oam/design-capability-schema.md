@@ -303,7 +303,7 @@ parameters (`type`, `required`, `default`, `description`).
 
 > **Schema vocabulary.** Internally that vocabulary is the shared `PropertySchema`
 > type, restricted here to its flat subset: the rich fields (`enum`, nested `properties`,
-> `items`, `additionalProperties`) are rejected at decode time, so capability rendering does
+> `items`, `additionalProperties`, `additionalPropertiesSchema`) are rejected at decode time, so capability rendering does
 > not silently gain nested or enum semantics. The accepted wire format below is unchanged.
 
 ```yaml

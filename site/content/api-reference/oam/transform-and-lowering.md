@@ -620,7 +620,7 @@ emission validation makes of it under the key's own schema, compared Go type for
 type and a floating-point number bit for bit. So the record survives validation's
 normalization exactly where validation performs it (a `[]byte` or `[]int32` under a declared array becoming `[]any`, a named
 integer under a declared integer becoming `int`), and nowhere else: below a key an
-object leaves to `AdditionalProperties`, or under a schema with no `Type`, the
+object leaves to `AdditionalProperties` without a value schema, or under a schema with no `Type`, the
 handler receives what the rule wrote, so a rendered `[]byte` there is not matched by
 an authored list of the same integers. A value the rule copied into the key from a
 trait, a policy, metadata or another component, or changed after recording it, is

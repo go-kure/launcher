@@ -66,11 +66,12 @@ import (
 
 // validateProperties checks props against schema — a handler's top-level declared
 // property set — enforcing every Required field's presence and every present
-// field's Type/Enum/nested Properties/Items/AdditionalProperties.
+// field's Type/Enum/nested Properties/Items/AdditionalProperties/AdditionalPropertiesSchema.
 //
 // The top level never tolerates an undeclared key: a handler declares its complete
-// accepted property set, so there is no top-level AdditionalProperties escape —
-// that applies only within a nested object field that declares it.
+// accepted property set, so there is no top-level AdditionalProperties or
+// AdditionalPropertiesSchema escape — those apply only within a nested object field
+// that declares them.
 //
 // It checks no top-level exclusive groups; validateTopLevelProperties takes them.
 func validateProperties(schema map[string]PropertySchema, props map[string]any, path string) error {
@@ -89,9 +90,10 @@ func validateTopLevelProperties(schema map[string]PropertySchema, exclusive []Ex
 	return validateObjectProperties(schema, exclusive, false, nil, props, path)
 }
 
-// validateObjectProperties is validateProperties widened with additionalAllowed, for
-// recursing into a nested object field whose schema sets
-// PropertySchema.AdditionalProperties.
+// validateObjectProperties is validateProperties widened with additionalAllowed and
+// valueSchema, for recursing into a nested object field whose schema sets
+// PropertySchema.AdditionalProperties or PropertySchema.AdditionalPropertiesSchema.
+// A non-nil valueSchema opens the object and types every key it leaves open.
 //
 // Keys are visited in sorted order at both stages so a props map with several
 // problems always reports the same one, rather than a different error per run. A
@@ -613,7 +615,8 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// Run unconditionally, even when schema.Properties is nil: a nil map has no
 		// declared keys, so every key in obj is "not declared" by definition, and
 		// validateObjectProperties/AdditionalProperties (defaulting to false, i.e.
-		// closed) is exactly what decides whether that is accepted. Skipping the call
+		// closed, and opened by a non-nil AdditionalPropertiesSchema) is exactly what
+		// decides whether that is accepted. Skipping the call
 		// here previously let AdditionalProperties:false silently accept anything when
 		// a handler declared an object-typed field with no sub-schema at all.
 		if err := validateObjectProperties(schema.Properties, schema.Exclusive, schema.AdditionalProperties, schema.AdditionalPropertiesSchema, obj, path); err != nil {
@@ -642,8 +645,8 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// the strip existed.
 		//
 		// Only THERE, though. The strip reaches exactly the keys a schema declares:
-		// a key an object leaves to AdditionalProperties: true is skipped by
-		// validateObjectProperties untouched, as is everything inside an array element
+		// a key an object leaves to AdditionalProperties: true, with no value schema, is
+		// skipped by validateObjectProperties untouched, as is everything inside an array element
 		// with no Items schema and everything below a schema with no declared Type. A
 		// value holding a null in one of those places reaches the comparison as
 		// written, so a member holding the same null is matchable and refusing it
