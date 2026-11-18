@@ -812,7 +812,7 @@ func joinPropertyTypes(types []PropertyType) string {
 // element passes the zero value, and its refusal carries the kind and no position,
 // as every emission refusal does (go-kure/launcher#1469).
 func enforcePlatformReserved(schema map[string]PropertySchema, props map[string]any, rendered renderedValues, path string, where PropertyError) error {
-	err := enforceReservedObject(schema, props, rendered, "", path)
+	err := enforceReservedObject(schema, nil, props, rendered, "", path)
 	if err != nil && where.Position != "" {
 		return locate(err, path, where)
 	}
@@ -823,8 +823,11 @@ func enforcePlatformReserved(schema map[string]PropertySchema, props map[string]
 // the object's own RenderReserved path below the properties map ("" at the top),
 // tracked apart from path, which is the human-readable prefix a caller passes; a
 // reserved key is exempt only while it holds the value rendered records at its path.
-func enforceReservedObject(schema map[string]PropertySchema, props map[string]any, rendered renderedValues, at, path string) error {
-	if len(schema) == 0 || len(props) == 0 {
+// valueSchema is the object's AdditionalPropertiesSchema, nil when it has none: a key
+// the object leaves open is walked against it, and an undeclared key is otherwise
+// validateProperties' business.
+func enforceReservedObject(schema map[string]PropertySchema, valueSchema *PropertySchema, props map[string]any, rendered renderedValues, at, path string) error {
+	if (len(schema) == 0 && valueSchema == nil) || len(props) == 0 {
 		return nil
 	}
 	// Sorted, like validateObjectProperties: a props map with several violations must
@@ -832,7 +835,10 @@ func enforceReservedObject(schema map[string]PropertySchema, props map[string]an
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		field, ok := schema[key]
 		if !ok {
-			continue
+			if valueSchema == nil {
+				continue
+			}
+			field = *valueSchema
 		}
 		keyRendered, keyAt := rendered.child(at, key)
 		if field.PlatformReserved {
@@ -860,7 +866,7 @@ func enforceReservedObject(schema map[string]PropertySchema, props map[string]an
 func enforceReservedValue(field PropertySchema, value any, rendered renderedValues, at, path string) error {
 	switch field.Type {
 	case PropertyTypeObject:
-		if len(field.Properties) == 0 {
+		if len(field.Properties) == 0 && field.AdditionalPropertiesSchema == nil {
 			return nil
 		}
 		obj, ok := asObjectValue(value)
@@ -868,7 +874,7 @@ func enforceReservedValue(field PropertySchema, value any, rendered renderedValu
 			// Not an object: validatePropertyValue reports the type mismatch.
 			return nil
 		}
-		return enforceReservedObject(field.Properties, obj, rendered, at, path)
+		return enforceReservedObject(field.Properties, field.AdditionalPropertiesSchema, obj, rendered, at, path)
 	case PropertyTypeArray:
 		if field.Items == nil {
 			return nil

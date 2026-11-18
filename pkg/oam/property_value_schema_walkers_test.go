@@ -98,3 +98,47 @@ func TestCheckFieldGroups_ReachesTheValueSchema(t *testing.T) {
 }
 
 func ptrSchema(s PropertySchema) *PropertySchema { return &s }
+
+func reservedValue() PropertySchema {
+	return PropertySchema{
+		Type: PropertyTypeObject,
+		Properties: map[string]PropertySchema{
+			"name":   {Type: PropertyTypeString},
+			"locked": {Type: PropertyTypeString, PlatformReserved: true},
+		},
+	}
+}
+
+func TestEnforcePlatformReserved_ReachesTheValueOfAnOpenKey(t *testing.T) {
+	schema := appsOf(reservedValue())
+
+	err := enforcePlatformReserved(schema, map[string]any{"apps": map[string]any{"web": map[string]any{"locked": "x"}}}, nil, "properties", PropertyError{})
+	pe := propertyErrorOf(t, err)
+	if pe.Kind != PropertyErrorPlatformReserved {
+		t.Fatalf("kind = %q, want %q: %v", pe.Kind, PropertyErrorPlatformReserved, err)
+	}
+	if !strings.Contains(err.Error(), "properties.apps.web") {
+		t.Errorf("the refusal must name the value's path, got: %v", err)
+	}
+
+	// A null authored under the reserved key is refused too, as for a declared object.
+	err = enforcePlatformReserved(schema, map[string]any{"apps": map[string]any{"web": map[string]any{"locked": nil}}}, nil, "properties", PropertyError{})
+	if pe := propertyErrorOf(t, err); pe.Kind != PropertyErrorPlatformReserved {
+		t.Fatalf("a null under a reserved key: kind = %q, want %q: %v", pe.Kind, PropertyErrorPlatformReserved, err)
+	}
+
+	ok := map[string]any{"apps": map[string]any{"web": map[string]any{"name": "x"}}}
+	if err := enforcePlatformReserved(schema, ok, nil, "properties", PropertyError{}); err != nil {
+		t.Errorf("a value that leaves the reserved key alone must pass, got: %v", err)
+	}
+}
+
+// A value schema with no declared Properties of its own still opens its object to the walk.
+func TestEnforcePlatformReserved_ValueSchemaOnAnObjectWithNoProperties(t *testing.T) {
+	schema := appsOf(PropertySchema{Type: PropertyTypeObject, AdditionalPropertiesSchema: ptrSchema(reservedValue())})
+	value := map[string]any{"apps": map[string]any{"web": map[string]any{"blue": map[string]any{"locked": "x"}}}}
+	err := enforcePlatformReserved(schema, value, nil, "properties", PropertyError{})
+	if pe := propertyErrorOf(t, err); pe.Kind != PropertyErrorPlatformReserved {
+		t.Fatalf("kind = %q, want %q: %v", pe.Kind, PropertyErrorPlatformReserved, err)
+	}
+}
