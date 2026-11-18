@@ -86,7 +86,7 @@ func validateTopLevelProperties(schema map[string]PropertySchema, exclusive []Ex
 	if err := checkObjectGroups(schema, exclusive, path); err != nil {
 		return err
 	}
-	return validateObjectProperties(schema, exclusive, false, props, path)
+	return validateObjectProperties(schema, exclusive, false, nil, props, path)
 }
 
 // validateObjectProperties is validateProperties widened with additionalAllowed, for
@@ -98,7 +98,7 @@ func validateTopLevelProperties(schema map[string]PropertySchema, exclusive []Ex
 // malformed exclusive group is reported first, as the schema's error rather than the
 // document's; the groups are then checked with Required, before any value: both are
 // rules of which keys are present.
-func validateObjectProperties(schema map[string]PropertySchema, exclusive []ExclusiveGroup, additionalAllowed bool, props map[string]any, path string) error {
+func validateObjectProperties(schema map[string]PropertySchema, exclusive []ExclusiveGroup, additionalAllowed bool, valueSchema *PropertySchema, props map[string]any, path string) error {
 	if err := checkExclusiveGroups(exclusive, schema, path); err != nil {
 		return err
 	}
@@ -124,10 +124,17 @@ func validateObjectProperties(schema map[string]PropertySchema, exclusive []Excl
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		field, ok := schema[key]
 		if !ok {
-			if additionalAllowed {
+			switch {
+			case valueSchema != nil:
+				// A key the object leaves open but types (go-kure/launcher#1615) is
+				// handled as a declared optional key from here: its null is stripped
+				// and its value validated against the value schema.
+				field = *valueSchema
+			case additionalAllowed:
 				continue
+			default:
+				return newUnsupportedField(path, key, schema)
 			}
-			return newUnsupportedField(path, key, schema)
 		}
 		// Normalize an explicit null under an optional declared key to absence, so
 		// the classification the Required loop above already makes is what a
@@ -499,6 +506,9 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 	if len(schema.Exclusive) > 0 && schema.Type != PropertyTypeObject {
 		return value, propertyErrorf(PropertyErrorSchema, path, "schema declares exclusive groups on a non-object node; they name keys of an object")
 	}
+	if schema.AdditionalPropertiesSchema != nil && schema.Type != PropertyTypeObject {
+		return value, propertyErrorf(PropertyErrorSchema, path, "schema declares a value schema for open keys on a non-object node; it types the keys of an object")
+	}
 
 	switch schema.Type {
 	case "":
@@ -583,7 +593,7 @@ func validatePropertyValue(schema PropertySchema, value any, path string) (any, 
 		// closed) is exactly what decides whether that is accepted. Skipping the call
 		// here previously let AdditionalProperties:false silently accept anything when
 		// a handler declared an object-typed field with no sub-schema at all.
-		if err := validateObjectProperties(schema.Properties, schema.Exclusive, schema.AdditionalProperties, obj, path); err != nil {
+		if err := validateObjectProperties(schema.Properties, schema.Exclusive, schema.AdditionalProperties, schema.AdditionalPropertiesSchema, obj, path); err != nil {
 			return value, err
 		}
 		value = obj
