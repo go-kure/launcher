@@ -69,6 +69,21 @@ type PropertySchema struct {
 	// AdditionalProperties allows keys beyond those in Properties (object types).
 	// Defaults to false.
 	AdditionalProperties bool `json:"additionalProperties,omitempty" yaml:"additionalProperties,omitempty"`
+	// AdditionalPropertiesSchema types the values of the keys a Type==object node
+	// leaves open: every key not named in Properties holds a value of this schema,
+	// the way Items types the elements of an array. A non-nil schema opens the object
+	// (undeclared keys are accepted) whatever AdditionalProperties says, so the bool
+	// stays the shorthand for "any value" and this field is the typed form. Properties
+	// and a value schema together are legal: a declared key uses its own schema, every
+	// other key this one. A null under such a key is stripped, as a declared optional
+	// key's null is, and the value that remains is validated. Meaningful only on a
+	// Type==object node: elsewhere it is a schema error, as Exclusive is. Like
+	// Enum/Properties/Items, only meaningful for handler properties — the two flat call
+	// sites reject the key at decode time (flatschema.go's key allow-sets).
+	//
+	// A consumer that predates it reads the key as an object that accepts any value,
+	// as it did before the field existed; the field is additive for it.
+	AdditionalPropertiesSchema *PropertySchema `json:"additionalPropertiesSchema,omitempty" yaml:"additionalPropertiesSchema,omitempty"`
 	// PlatformReserved marks a property as platform-supplied only (D3): its value
 	// may arrive solely via ClusterProfile capability rendering, never authored
 	// inline. enforcePlatformReserved (property_validate.go) rejects an authored
