@@ -249,7 +249,9 @@ func validateInputs(inputs map[string]oam.PropertySchema) error {
 }
 
 // validateSchema checks that a declared schema names a known type. It looks at
-// the type vocabulary only. The value rules stay with pkg/oam.
+// the type vocabulary only. The value rules stay with pkg/oam. It walks the
+// properties, the items and the value schema of an open object
+// (additionalPropertiesSchema), which only an object may carry.
 //
 // It refuses boundedBy, an empty list included: a bound is published where a
 // test holds it (oam.PropertySchema.BoundedBy), and nothing holds one a model
@@ -287,6 +289,10 @@ func validateSchema(path string, s oam.PropertySchema) error {
 	if err := oam.CheckSchemaNodeGroups(s, path); err != nil {
 		return errors.Errorf("%w: %s", ErrInvalid, err.Error())
 	}
+	// A value schema types the keys an object leaves open, so it needs an object.
+	if s.AdditionalPropertiesSchema != nil && s.Type != oam.PropertyTypeObject {
+		return invalid(path, "additionalPropertiesSchema is set on a node that is not an object; it types the keys of an object")
+	}
 	keys := make([]string, 0, len(s.Properties))
 	for k := range s.Properties {
 		keys = append(keys, k)
@@ -294,6 +300,11 @@ func validateSchema(path string, s oam.PropertySchema) error {
 	sort.Strings(keys)
 	for _, k := range keys {
 		if err := validateSchema(path+".properties."+k, s.Properties[k]); err != nil {
+			return err
+		}
+	}
+	if s.AdditionalPropertiesSchema != nil {
+		if err := validateSchema(path+".additionalPropertiesSchema", *s.AdditionalPropertiesSchema); err != nil {
 			return err
 		}
 	}
