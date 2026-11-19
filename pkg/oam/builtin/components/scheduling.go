@@ -15,10 +15,13 @@ import (
 
 // This file projects the three raw corev1 pod-level scheduling shapes —
 // `affinity`, `topologySpreadConstraints` and (via the pre-existing
-// parseTolerations) `tolerations` — for the kind-named `deployment` component
-// (go-kure/launcher#412). Other workload kinds publish the ones their
-// PropertySchema names, through the same parsers (go-kure/launcher#790):
-// `statefulset`, `daemonset`, `job` and `cronjob` take all three.
+// parseTolerations) `tolerations` — for the `role-deployment` member of
+// `webservice` and `worker` (go-kure/launcher#412). Other workload kinds publish
+// the ones their PropertySchema names, through the same parsers
+// (go-kure/launcher#790): `statefulset`, `daemonset`, `job` and `cronjob` take
+// all three. The kind-named `deployment` calls none of them: since
+// go-kure/launcher#1629 it decodes the whole DeploymentSpec, the pod spec
+// included.
 //
 // These are NOT alternatives to the four-key `affinity` shorthand that
 // webservice and worker publish (schemaAffinity/parseAffinity in
@@ -28,12 +31,11 @@ import (
 //   - The shorthand is one of launcher's own opinions. It takes four keys and
 //     evaluates them into a corev1.Affinity whose pod selector is the
 //     component's own app label, which is a decision launcher makes on the
-//     author's behalf (buildAffinity, common.go). `deployment` deliberately
-//     does not carry it — see that kind's doc comment.
+//     author's behalf (buildAffinity, common.go). The raw `deployment` does not
+//     carry it — see that kind's doc comment.
 //   - What this file publishes is the corev1 field itself, unopinionated and
-//     complete. `deployment` is the kind-named projection of appsv1.Deployment,
-//     so projecting a PodSpec field as its own API shape is exactly what that
-//     kind is for.
+//     complete. The role member and the controller kinds above take it as its
+//     own API shape beside their other properties.
 //
 // The two therefore compose rather than compete: a component-position lowering
 // rule evaluates the shorthand and emits a `role-deployment` member carrying the
