@@ -28,7 +28,7 @@ import (
 // generation (builtin_defaults_generate.go), which it reads from its own state.
 
 var (
-	_ oam.BuiltinDefaultReporter = (*DeploymentConfig)(nil)
+	_ oam.BuiltinDefaultReporter = (*RoleDeploymentConfig)(nil)
 	_ oam.BuiltinDefaultReporter = (*StatefulsetConfig)(nil)
 	_ oam.BuiltinDefaultReporter = (*DaemonsetConfig)(nil)
 	_ oam.BuiltinDefaultReporter = (*JobConfig)(nil)
@@ -97,7 +97,7 @@ func withoutReplicasUnderScaler(paths []string, scaled bool) []string {
 }
 
 // BuiltinDefaults implements oam.BuiltinDefaultReporter.
-func (c *DeploymentConfig) BuiltinDefaults() []oam.BuiltinDefault {
+func (c *RoleDeploymentConfig) BuiltinDefaults() []oam.BuiltinDefault {
 	paths := withoutReplicasUnderScaler(c.parseFills, c.scaled)
 	paths = append(slices.Clone(paths), containerFills(c.InitContainers, c.Sidecars)...)
 	paths = append(paths, claimFills(c.PVCs)...)

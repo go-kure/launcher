@@ -125,7 +125,7 @@ func roleOutputs(comp *oam.Component, lctx oam.LoweringContext, service bool) ([
 	if err != nil {
 		return nil, err
 	}
-	deployment, err := memberOutput(comp, lctx, outputKeyDeployment, "deployment", &DeploymentHandler{}, oam.NameRoleWorkloadDeployment, deploymentObjectNameProperty, "Deployment")
+	deployment, err := memberOutput(comp, lctx, outputKeyDeployment, roleDeploymentMember, &RoleDeploymentHandler{}, oam.NameRoleWorkloadDeployment, deploymentObjectNameProperty, "Deployment")
 	if err != nil {
 		return nil, err
 	}

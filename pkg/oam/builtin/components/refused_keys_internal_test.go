@@ -13,6 +13,7 @@ import (
 // both paths accept: the control every refusal below is measured against.
 var refusedKeyBase = map[string]map[string]any{
 	"deployment":            {"image": "ghcr.io/org/app:v1"},
+	"role-deployment":       {"image": "ghcr.io/org/app:v1"},
 	"webservice":            {"image": "ghcr.io/org/app:v1"},
 	"worker":                {"image": "ghcr.io/org/app:v1"},
 	"statefulset":           {"image": "ghcr.io/org/app:v1"},
@@ -30,6 +31,7 @@ var refusedKeyBase = map[string]map[string]any{
 func refusedKeyTransformer() *oam.Transformer {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
 		"deployment":            &DeploymentHandler{},
+		"role-deployment":       &RoleDeploymentHandler{},
 		"statefulset":           &StatefulsetHandler{},
 		"daemonset":             &DaemonsetHandler{},
 		"job":                   &JobHandler{},
@@ -60,6 +62,7 @@ func refusedKeyPaths(t *testing.T, tr *oam.Transformer, componentType string, pr
 	default:
 		handlers := map[string]oam.ComponentHandler{
 			"deployment":            &DeploymentHandler{},
+			"role-deployment":       &RoleDeploymentHandler{},
 			"statefulset":           &StatefulsetHandler{},
 			"daemonset":             &DaemonsetHandler{},
 			"job":                   &JobHandler{},
@@ -89,7 +92,7 @@ func nullIsUnauthoredToParser(componentType, key string) bool {
 	switch componentType {
 	case "service", "persistentvolumeclaim":
 		return true
-	case "deployment":
+	case "deployment", "role-deployment":
 		_, specKey := deploymentSpecRejectedKeys[key]
 		return !specKey
 	}
@@ -297,7 +300,7 @@ func TestRefusedKeys_OneLevelDown(t *testing.T) {
 	entry := func(resources map[string]any) []any {
 		return []any{map[string]any{"name": "extra", "image": "busybox:1", "resources": resources}}
 	}
-	for _, componentType := range []string{"deployment", "webservice", "worker", "statefulset", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{"deployment", "role-deployment", "webservice", "worker", "statefulset", "daemonset", "job", "cronjob"} {
 		// A job's pod runs to completion, so `job` and `cronjob` have no
 		// `sidecars` property.
 		lists := []string{"initContainers", "sidecars"}
@@ -366,7 +369,7 @@ func TestRefusedKeys_InAnEntry(t *testing.T) {
 	initEntry := func(key string) []any {
 		return []any{map[string]any{"name": "init", "image": "busybox:1", key: map[string]any{}}}
 	}
-	for _, componentType := range []string{"deployment", "webservice", "worker", "statefulset", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{"deployment", "role-deployment", "webservice", "worker", "statefulset", "daemonset", "job", "cronjob"} {
 		if refusedKeyHint(componentType, "livenessProbe") == "" {
 			t.Fatalf("type %q has no top-level refusal of livenessProbe; pick another key for the control below", componentType)
 		}

@@ -261,7 +261,7 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 func TestEndpoints_TypesWithAnEntry(t *testing.T) {
 	withEntry := map[string]bool{
 		"webservice": true, "service": true, "postgresql": true, "cnpg-cluster": true, "cnpg-pooler": true,
-		"deployment": true, "statefulset": true, "daemonset": true,
+		"deployment": true, "role-deployment": true, "statefulset": true, "daemonset": true,
 		"helm": true, "helmrelease": true, "helmtemplate": true,
 	}
 	registered := map[string]any{}

@@ -202,6 +202,7 @@ func TestDeliveryIntent_SiblingGroupTakesAnyMembersIntent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tr := oam.NewTransformer(nil, nil)
 			tr.RegisterComponent("deployment", &components.DeploymentHandler{})
+			tr.RegisterComponent("role-deployment", &components.RoleDeploymentHandler{})
 			tr.RegisterComponent("service", &components.ServiceHandler{})
 			tr.RegisterBuiltinTrait("prune-protection", &traits.PruneProtectionHandler{})
 			tr.RegisterBuiltinTrait("force-replace", &traits.ForceReplaceHandler{})

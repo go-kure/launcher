@@ -237,11 +237,11 @@ func TestScalerStatefulSet_UnknownTypeInATransformIsAnError(t *testing.T) {
 }
 
 // TestScalerStatefulSet_KindTableAgreesWithAdmission: of the terminal kinds with a
-// registered handler, exactly deployment and statefulset take a scaler (webservice
+// registered handler, exactly deployment, role-deployment (the member webservice and worker lower into) and statefulset take a scaler (webservice
 // and worker are lowering rules, checked below), and the HPA each builds targets
 // its own kind.
 func TestScalerStatefulSet_KindTableAgreesWithAdmission(t *testing.T) {
-	want := map[string]string{"deployment": "Deployment", "statefulset": "StatefulSet"}
+	want := map[string]string{"deployment": "Deployment", "role-deployment": "Deployment", "statefulset": "StatefulSet"}
 	for typ := range registry.ComponentHandlers() {
 		t.Run(typ, func(t *testing.T) {
 			comp := sssComponent("x", typ, nil, sssScaler())

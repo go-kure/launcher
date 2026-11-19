@@ -538,7 +538,7 @@ func TestDeploymentHandler_ServiceAccountName_Authored(t *testing.T) {
 	}
 	namer, ok := cfg.(oam.ServiceAccountNamer)
 	if !ok {
-		t.Fatal("DeploymentConfig does not implement oam.ServiceAccountNamer")
+		t.Fatal("RoleDeploymentConfig does not implement oam.ServiceAccountNamer")
 	}
 	if got, _ := namer.ServiceAccountName(); got != "existing-sa" {
 		t.Errorf("ServiceAccountName() = %q, want %q", got, "existing-sa")

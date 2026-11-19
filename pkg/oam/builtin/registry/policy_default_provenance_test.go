@@ -308,8 +308,8 @@ func TestPolicyDefaults_WebserviceAndWorkerOwnerShapes(t *testing.T) {
 		extra map[string]any
 		owner owner
 	}{
-		{"webservice", "webservice", map[string]any{"port": 8080}, owner{component: "app", member: "deployment"}},
-		{"worker", "worker", nil, owner{component: "app", member: "deployment"}},
+		{"webservice", "webservice", map[string]any{"port": 8080}, owner{component: "app", member: "role-deployment"}},
+		{"worker", "worker", nil, owner{component: "app", member: "role-deployment"}},
 		{"worker_with_authored_service_account", "worker", map[string]any{"serviceAccountName": "existing"}, owner{component: "app"}},
 	}
 	for _, tc := range cases {
@@ -378,8 +378,8 @@ func extraContainerCases() []struct {
 		{"daemonset", nil, true, owner{component: "app"}},
 		{"job", nil, false, owner{component: "app"}},
 		{"cronjob", map[string]any{"schedule": "0 2 * * *"}, false, owner{component: "app"}},
-		{"webservice", map[string]any{"port": 8080}, true, owner{component: "app", member: "deployment"}},
-		{"worker", nil, true, owner{component: "app", member: "deployment"}},
+		{"webservice", map[string]any{"port": 8080}, true, owner{component: "app", member: "role-deployment"}},
+		{"worker", nil, true, owner{component: "app", member: "role-deployment"}},
 	}
 }
 

@@ -178,7 +178,7 @@ func TestProbes_FaultB_AWrongMember(t *testing.T) {
 	fills[i].Member = "statefulset"
 	p.Fills = fills
 	got := strings.Join(probe.CheckReportedFillsAreReal(newTransformer(), []probe.Probe{p}), "\n")
-	for _, want := range []string{"app/statefulset replicas", "app/deployment replicas"} {
+	for _, want := range []string{"app/statefulset replicas", "app/role-deployment replicas"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("finding lacks %q: %s", want, got)
 		}

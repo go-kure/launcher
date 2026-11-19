@@ -14,10 +14,10 @@ import (
 // former WorkerHandler was, so the handler-shaped tests pinning worker's
 // behaviour keep running against the production path, one step at a time
 // exactly as the engine takes them: the rule's LowerComponent, then
-// DeploymentHandler for the component it emits, then the synthesized
+// RoleDeploymentHandler for the component it emits, then the synthesized
 // topology-spread trait (traits.TopologySpreadHandler) when the rule attached
 // one. The config it returns is the deployment component's own, so
-// ApplyPolicy, ServiceAccountName and NonRWXClaim are DeploymentConfig's; only Generate is wrapped, to apply that trait.
+// ApplyPolicy, ServiceAccountName and NonRWXClaim are RoleDeploymentConfig's; only Generate is wrapped, to apply that trait.
 //
 // components_test carries the same adapter (worker_rule_adapter_test.go there):
 // the two external test packages cannot share a test file.
@@ -35,17 +35,17 @@ func (workerViaRule) ToApplicationConfig(comp *oam.Component, namespace string) 
 		return nil, err
 	}
 	n := len(res.Components)
-	if n < 1 || n > 2 || res.Components[0].Type != "deployment" || (n == 2 && res.Components[1].Type != "serviceaccount") {
+	if n < 1 || n > 2 || res.Components[0].Type != "role-deployment" || (n == 2 && res.Components[1].Type != "serviceaccount") {
 		return nil, errors.Errorf("worker rule emitted %d components, want a deployment and at most a serviceaccount", n)
 	}
 	emitted := res.Components[0]
-	cfg, err := (&components.DeploymentHandler{}).ToApplicationConfig(&emitted, namespace)
+	cfg, err := (&components.RoleDeploymentHandler{}).ToApplicationConfig(&emitted, namespace)
 	if err != nil {
 		return nil, err
 	}
-	dep, ok := cfg.(*components.DeploymentConfig)
+	dep, ok := cfg.(*components.RoleDeploymentConfig)
 	if !ok {
-		return nil, errors.Errorf("deployment handler returned %T, want *components.DeploymentConfig", cfg)
+		return nil, errors.Errorf("deployment handler returned %T, want *components.RoleDeploymentConfig", cfg)
 	}
 	var sa stack.ApplicationConfig
 	if n == 2 {
@@ -54,7 +54,7 @@ func (workerViaRule) ToApplicationConfig(comp *oam.Component, namespace string) 
 		}
 	}
 	synthesized := emitted.Traits[:len(emitted.Traits)-len(comp.Traits)]
-	return &workerViaRuleConfig{DeploymentConfig: dep, serviceAccount: sa, synthesized: synthesized}, nil
+	return &workerViaRuleConfig{RoleDeploymentConfig: dep, serviceAccount: sa, synthesized: synthesized}, nil
 }
 
 // workerViaRuleConfig is the deployment component's config, the serviceaccount
@@ -63,7 +63,7 @@ func (workerViaRule) ToApplicationConfig(comp *oam.Component, namespace string) 
 // trait per claim its pvc volumes describe), applied at Generate as the engine
 // applies them.
 type workerViaRuleConfig struct {
-	*components.DeploymentConfig
+	*components.RoleDeploymentConfig
 	serviceAccount stack.ApplicationConfig
 	synthesized    []oam.Trait
 }
@@ -73,7 +73,7 @@ type workerViaRuleConfig struct {
 // the deployment member's objects, then the claims of the synthesized `pvc`
 // traits, which follow their component.
 func (c *workerViaRuleConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	inner := stack.NewApplication(app.Name, app.Namespace, c.DeploymentConfig)
+	inner := stack.NewApplication(app.Name, app.Namespace, c.RoleDeploymentConfig)
 	subApps, err := applySynthesizedTraits("worker", c.synthesized, inner)
 	if err != nil {
 		return nil, err

@@ -204,7 +204,7 @@ number of kinds emitted does not decide the axis; whether the type projects the 
 role does. Nothing checks this axis; it binds naming choices, like the covenant above.
 
 The axes are orthogonal. `deployment` is terminal and kind-named. `webservice` is lowerable and
-role-named: its rule lowers it into the terminal `deployment`, `service` and (unless
+role-named: its rule lowers it into the terminal `role-deployment`, `service` and (unless
 `serviceAccountName` is authored) `serviceaccount` components. `expose` is lowerable and
 role-named too. The layering the Helm-family redesign uses
 (go-kure/launcher#336) is a role-named lowerable upper tier (`helm`) over kind-named terminals

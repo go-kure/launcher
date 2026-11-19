@@ -2467,9 +2467,9 @@ list and the disposition of every item:
     Service's `type` (`site/content/api-reference/oam-components/kinds-core-workloads.md`, the `service` and
     `serviceaccount` entries).
 - **Pod-template labels (item 3): documented, no change.** `PodTemplateLabels` is
-  implemented by `DeploymentConfig` only (`deployment.go`), not by `statefulset`,
+  implemented by `RoleDeploymentConfig` only (`role_deployment.go`), not by `statefulset`,
   `daemonset`, `cronjob` or `job`. Its one reader is the sibling-group check
-  (`podTemplateLabeler`, `pkg/oam/sibling_group.go`), and `deployment` is the only pod kind
+  (`podTemplateLabeler`, `pkg/oam/sibling_group.go`), and `role-deployment` is the only pod kind
   a lowering rule emits into a group. A rule that emits another pod kind into a group must
   add the method to that kind's config (`site/content/api-reference/oam/transform-and-lowering.md` "Same-name sibling groups").
   The component label of go-kure/launcher#788 (§3.4) is stamped on the pod template of

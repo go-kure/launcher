@@ -38,8 +38,8 @@ func TestWebserviceRule_OriginRule(t *testing.T) {
 	if !stderrors.Is(err, errOriginSeen) {
 		t.Fatalf("expected the probe to run, got: %v", err)
 	}
-	if seen.Name != "web" || seen.Type != "deployment" {
-		t.Fatalf("probe saw component %q (type %q), want web (type deployment)", seen.Name, seen.Type)
+	if seen.Name != "web" || seen.Type != "role-deployment" {
+		t.Fatalf("probe saw component %q (type %q), want web (type role-deployment)", seen.Name, seen.Type)
 	}
 	got, ok := seen.Origin()
 	if !ok {

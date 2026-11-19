@@ -52,8 +52,8 @@ The transform runs in four steps.
    type declares an object). It rejects a property that none of them lists. A type that
    declares no schema keeps its own properties unchecked; a trait's `scope` is still checked.
 3. **Lower.** *Lowering rules* expand a high-level type into the lower-level types that have
-   a handler. A `webservice` lowers into a `deployment` and a `service`; a `worker` into a
-   `deployment`; `postgresql` into the CloudNativePG kinds; an `expose` trait into an
+   a handler. A `webservice` lowers into a `role-deployment` and a `service`; a `worker` into a
+   `role-deployment`; `postgresql` into the CloudNativePG kinds; an `expose` trait into an
    `ingress` or an `httproute` trait, which one the profile's `expose` capability selects.
    Rules run until nothing is left to expand, and a lowered type may itself be lowered
    again. Four positions have rules: the document, a component, a trait and a policy.
@@ -107,7 +107,7 @@ spec:
 | Step | What happens to `web` |
 |---|---|
 | Authored | Component type `webservice`, trait `expose` |
-| Lowered | `webservice` becomes a `deployment` and a `service`, both named `web`; `expose` becomes an `ingress` trait, because the profile says `controllerType: ingress` |
+| Lowered | `webservice` becomes a `role-deployment` and a `service`, both named `web`; `expose` becomes an `ingress` trait, because the profile says `controllerType: ingress` |
 | Generated | A `Deployment` and a `Service` named `web`, a `ServiceAccount` named `web`, and an `Ingress` named `web-ingress` |
 
 A cluster that routes through a Gateway says so in its profile instead:

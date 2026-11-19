@@ -13,7 +13,7 @@ import (
 // PodTemplateLabels is what a sibling's selector is checked against: it holds
 // the authored labels beside the component's own (go-kure/launcher#1178).
 func TestDeploymentConfig_PodTemplateLabelsHoldTheAuthoredOnes(t *testing.T) {
-	cfg := &components.DeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
+	cfg := &components.RoleDeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
 		PodMetadata: components.PodMetadata{Labels: map[string]string{"example.com/team": "payments"}}}
 	got := cfg.PodTemplateLabels()
 	if got["example.com/team"] != "payments" || got["app"] != "web" {
@@ -25,7 +25,7 @@ func TestDeploymentConfig_PodTemplateLabelsHoldTheAuthoredOnes(t *testing.T) {
 // key the kind set to another value refuses to generate, and nothing is written
 // to the Deployment.
 func TestDeploymentConfig_PodMetadataCannotReplaceTheAppLabel(t *testing.T) {
-	cfg := &components.DeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
+	cfg := &components.RoleDeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
 		PodMetadata: components.PodMetadata{Labels: map[string]string{"app": "other"}}}
 	_, err := cfg.Generate(stack.NewApplication("web", "default", cfg))
 	if err == nil || !strings.Contains(err.Error(), `podMetadata.labels["app"]: "other" is not the value the component sets on its pod template ("web")`) {
@@ -37,7 +37,7 @@ func TestDeploymentConfig_PodMetadataCannotReplaceTheAppLabel(t *testing.T) {
 // authored pod template label reaches neither, and generating twice from one
 // config gives the same objects.
 func TestDeploymentConfig_PodMetadataKeepsTheMapsApart(t *testing.T) {
-	cfg := &components.DeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
+	cfg := &components.RoleDeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
 		PodMetadata: components.PodMetadata{
 			Labels:      map[string]string{"example.com/team": "payments"},
 			Annotations: map[string]string{"example.com/owner": "x"},

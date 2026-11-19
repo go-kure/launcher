@@ -27,10 +27,11 @@ import (
 // handler registered for "topology-spread".
 func spreadScalerTransformer(spread oam.TraitHandler) *oam.Transformer {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
-		"deployment":     &components.DeploymentHandler{},
-		"service":        &components.ServiceHandler{},
-		"serviceaccount": &components.ServiceAccountHandler{},
-		"manifests":      &components.ManifestsHandler{},
+		"deployment":      &components.DeploymentHandler{},
+		"role-deployment": &components.RoleDeploymentHandler{},
+		"service":         &components.ServiceHandler{},
+		"serviceaccount":  &components.ServiceAccountHandler{},
+		"manifests":       &components.ManifestsHandler{},
 	}, nil)
 	tr.RegisterBuiltinComponentLowering(components.WebserviceRule{})
 	tr.RegisterBuiltinComponentLowering(components.WorkerRule{})

@@ -7,8 +7,10 @@ import (
 )
 
 // roleDeploymentMember is the component type of the member a role rule
-// (webservice, worker) hands its workload properties to.
-const roleDeploymentMember = "deployment"
+// (webservice, worker) hands its workload properties to: a type of its own, so
+// that the kind-named `deployment` is free to take the upstream spec
+// (go-kure/launcher#1629).
+const roleDeploymentMember = "role-deployment"
 
 // roleKeys is how a role rule treats the keys of its own schema, held once: the
 // rule forwards with it (forward) and publishes it (loweringKeys,
@@ -17,12 +19,12 @@ const roleDeploymentMember = "deployment"
 type roleKeys struct {
 	schema map[string]oam.PropertySchema
 	// evaluated holds the keys the rule reads itself instead of handing them to
-	// its deployment member, each with the places what the rule builds from it
+	// its role-deployment member, each with the places what the rule builds from it
 	// lands. A key that reaches no property of a member maps to none.
 	evaluated map[string][]oam.LoweredKey
 }
 
-// forwards reports whether the rule hands key to its deployment member as
+// forwards reports whether the rule hands key to its role-deployment member as
 // written: a key of its schema that it does not evaluate itself.
 func (k roleKeys) forwards(key string) bool {
 	_, declared := k.schema[key]
@@ -30,7 +32,7 @@ func (k roleKeys) forwards(key string) bool {
 	return declared && !own
 }
 
-// forward returns the properties of props the rule hands its deployment member
+// forward returns the properties of props the rule hands its role-deployment member
 // as written, in a map of the rule's own.
 func (k roleKeys) forward(props map[string]any) map[string]any {
 	out := make(map[string]any, len(props))
@@ -44,7 +46,7 @@ func (k roleKeys) forward(props map[string]any) map[string]any {
 
 // loweringKeys is the key map the rule publishes: for every key of its schema,
 // the places its value lands. A forwarded key lands at the same key of the
-// deployment member, unchanged, except one roleRewrittenKeys names; an
+// role-deployment member, unchanged, except one roleRewrittenKeys names; an
 // evaluated key lands where evaluated says.
 func (k roleKeys) loweringKeys() map[string][]oam.LoweredKey {
 	out := make(map[string][]oam.LoweredKey, len(k.schema))
@@ -62,7 +64,7 @@ func (k roleKeys) loweringKeys() map[string][]oam.LoweredKey {
 }
 
 // roleRewrittenKeys holds the keys a role rule forwards and then rewrites in
-// the deployment member's properties, with the places the result lands.
+// the role-deployment member's properties, with the places the result lands.
 // `volumes` is the one: roleClaims replaces each `pvc` volume that generates a
 // claim by a reference to it and moves the claim into a `pvc` trait, so the
 // list is no longer the authored one.
@@ -119,5 +121,5 @@ func (r WorkerRule) keys() roleKeys {
 func (r WebserviceRule) LoweringKeys() map[string][]oam.LoweredKey { return r.keys().loweringKeys() }
 
 // LoweringKeys implements oam.LoweringKeyDeclarer: where each property of a
-// worker lands in its deployment member.
+// worker lands in its role-deployment member.
 func (r WorkerRule) LoweringKeys() map[string][]oam.LoweredKey { return r.keys().loweringKeys() }

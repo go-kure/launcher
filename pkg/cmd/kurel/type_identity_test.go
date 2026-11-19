@@ -23,8 +23,8 @@ func TestBuiltinTransformer_AuthoredTypeIdentity(t *testing.T) {
 			if !stderrors.Is(err, errOriginSeen) {
 				t.Fatalf("expected the probe to run, got: %v", err)
 			}
-			if seen.Type != "deployment" {
-				t.Errorf("the lowered component has type %q, want deployment", seen.Type)
+			if seen.Type != "role-deployment" {
+				t.Errorf("the lowered component has type %q, want role-deployment", seen.Type)
 			}
 			if got, ok := seen.Origin(); !ok || got.ComponentType != "webservice" {
 				t.Errorf("Origin = %+v, %v; want ComponentType webservice", got, ok)

@@ -87,6 +87,9 @@ func TestObjectName_RenamesTheObjectAlone(t *testing.T) {
 	const component, renamed = "widget", "renamed-widget"
 	handlers := builtinComponentHandlers()
 	for _, typ := range slices.Sorted(maps.Keys(handlers)) {
+		if loweringOnlyTypes[typ] {
+			continue
+		}
 		provider, declares := handlers[typ].(oam.ComponentObjectProvider)
 		if !declares {
 			continue

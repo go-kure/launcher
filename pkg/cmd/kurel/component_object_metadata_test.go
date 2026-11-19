@@ -73,6 +73,9 @@ func TestObjectMetadata_EveryKindComponentTakesIt(t *testing.T) {
 	handlers := builtinComponentHandlers()
 	kinds := 0
 	for _, typ := range slices.Sorted(maps.Keys(handlers)) {
+		if loweringOnlyTypes[typ] {
+			continue
+		}
 		provider, declares := handlers[typ].(oam.ComponentObjectProvider)
 		if !declares {
 			continue

@@ -152,6 +152,7 @@ func ComponentHandlers() map[string]oam.ComponentHandler {
 		"resourcequota":                    &components.ResourceQuotaHandler{},
 		"resourcesetinputprovider":         &components.ResourceSetInputProviderHandler{},
 		"role":                             &components.RoleHandler{},
+		"role-deployment":                  &components.RoleDeploymentHandler{},
 		"rolebinding":                      &components.RoleBindingHandler{},
 		"runtimeclass":                     &components.RuntimeClassHandler{},
 		"secret":                           &components.SecretHandler{},

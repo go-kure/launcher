@@ -141,7 +141,7 @@ func loweringKeySamples() map[string]loweringKeySample {
 	return map[string]loweringKeySample{
 		// Not the default topology key, so a rule that ignored it would show.
 		"affinity": {value: map[string]any{"enablePodAntiAffinity": true, "topologyKey": "topology.kubernetes.io/zone"}, lands: map[reportedAt]any{
-			{"deployment", "", "affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.topologyKey"}: "topology.kubernetes.io/zone",
+			{"role-deployment", "", "affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.topologyKey"}: "topology.kubernetes.io/zone",
 		}},
 		"args":                         {value: []any{"--verbose"}},
 		"automountServiceAccountToken": {value: true},
@@ -175,8 +175,8 @@ func loweringKeySamples() map[string]loweringKeySample {
 		"podResources":       {value: map[string]any{"requests": map[string]any{"cpu": "1"}}},
 		"podSecurityContext": {value: map[string]any{"runAsNonRoot": true}},
 		"port": {value: 8080, lands: map[reportedAt]any{
-			{"deployment", "", "ports[0].containerPort"}: 8080,
-			{"service", "", "ports[0].port"}:             8080,
+			{"role-deployment", "", "ports[0].containerPort"}: 8080,
+			{"service", "", "ports[0].port"}:                  8080,
 		}},
 		"preemptionPolicy":        {value: "Never"},
 		"priorityClassName":       {value: "high"},
@@ -186,7 +186,7 @@ func loweringKeySamples() map[string]loweringKeySample {
 		// Three replicas make the topology-spread trait the rule attaches write
 		// constraints, which the report holds under the trait.
 		"replicas": {value: 3, alsoFills: map[reportedAt]oam.SourceKind{
-			{"deployment", "topology-spread", "topologySpreadConstraints"}: oam.SourceBuiltin,
+			{"role-deployment", "topology-spread", "topologySpreadConstraints"}: oam.SourceBuiltin,
 		}},
 		"resizePolicy":         {value: []any{map[string]any{"resourceName": "cpu", "restartPolicy": "NotRequired"}}},
 		"resourceClaims":       {value: []any{map[string]any{"name": "gpu", "resourceClaimName": "gpu-claim"}}},
@@ -201,7 +201,7 @@ func loweringKeySamples() map[string]loweringKeySample {
 		"serviceAccountName": {value: "existing", removesMember: "serviceaccount"},
 		// The deployment's pods run as the account under the name it was given.
 		"serviceAccountObjectName": {value: "account", lands: map[reportedAt]any{
-			{"deployment", "", "serviceAccountName"}: "account",
+			{"role-deployment", "", "serviceAccountName"}: "account",
 		}},
 		"serviceObjectName":             {value: "svc", noEntry: nameOnly},
 		"setHostnameAsFQDN":             {value: true},
@@ -221,13 +221,13 @@ func loweringKeySamples() map[string]loweringKeySample {
 			with: map[string]any{"topologySpread": false}},
 		"tty": {value: true, with: stdin},
 		"volumes": {value: []any{map[string]any{"name": "data", "type": "pvc", "size": "1Gi", "mountPath": "/data"}}, lands: map[reportedAt]any{
-			{"deployment", "", "volumes[0].claimName"}: "app-data",
-			{"deployment", "pvc", "size"}:              "1Gi",
+			{"role-deployment", "", "volumes[0].claimName"}: "app-data",
+			{"role-deployment", "pvc", "size"}:              "1Gi",
 		}, alsoFills: map[reportedAt]oam.SourceKind{
 			// The claim names no access mode, so it is ReadWriteOnce, and no strategy
 			// is authored: the deployment is given Recreate, at the place of the
 			// `strategy` key.
-			{"deployment", "", "strategy.type"}: oam.SourceBuiltin,
+			{"role-deployment", "", "strategy.type"}: oam.SourceBuiltin,
 		}},
 		"workingDir": {value: "/srv"},
 	}
@@ -258,7 +258,7 @@ func reportOf(t *testing.T, p *oam.Provenance, alone bool) map[reportedAt]oam.So
 		case alone && member != "":
 			t.Errorf("entry at %q is under member %q; a rule that emits one component leaves no member", e.Path, member)
 		case alone:
-			member = "deployment"
+			member = "role-deployment"
 		case member == "":
 			t.Errorf("entry at %q (trait %q) names no member; every entry of a sibling group names its member", e.Path, e.Trait)
 		}
@@ -570,7 +570,7 @@ func TestLoweringKeys_SingleMemberWorkerIsReadUnderThePlainOwner(t *testing.T) {
 	}
 	plain := entriesOf(prov, owner{component: "app"})
 	for _, key := range []string{"image", "replicas", "serviceAccountName"} {
-		want := []oam.LoweredKey{{Member: "deployment", Path: key, Unchanged: true}}
+		want := []oam.LoweredKey{{Member: "role-deployment", Path: key, Unchanged: true}}
 		if got := d.LoweringKeys()[key]; !slices.Equal(got, want) {
 			t.Errorf("LoweringKeys()[%q] = %v, want %v", key, got, want)
 		}

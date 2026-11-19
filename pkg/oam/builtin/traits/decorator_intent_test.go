@@ -147,6 +147,7 @@ func TestPruneProtection_SubApplicationKeepsLayoutIntent(t *testing.T) {
 		"prune-protection": &traits.PruneProtectionHandler{},
 	})
 	tr.RegisterComponent("deployment", &components.DeploymentHandler{})
+	tr.RegisterComponent("role-deployment", &components.RoleDeploymentHandler{})
 	cluster, err := tr.Transform(&oam.Application{
 		APIVersion: oam.SupportedAPIVersion,
 		Kind:       "Application",

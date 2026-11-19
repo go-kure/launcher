@@ -12,13 +12,14 @@ import (
 
 // registerWebservice registers "webservice" on tr as kurel build does: the
 // components.WebserviceRule lowering rule, plus the three terminal kinds it
-// emits ("deployment", "service", "serviceaccount") and the "topology-spread"
+// emits ("role-deployment", "service", "serviceaccount") and the "topology-spread"
 // and "pvc" traits it synthesizes. Tests that build a webservice through a Transformer use
 // it, so they run the production path — the same-name sibling group, its trait
 // routing and its NetworkPolicy synthesis — rather than a handler stand-in.
 func registerWebservice(tr *oam.Transformer) {
 	tr.RegisterBuiltinComponentLowering(components.WebserviceRule{})
-	tr.RegisterComponent("deployment", &components.DeploymentHandler{})
+	tr.RegisterComponent("role-deployment", &components.RoleDeploymentHandler{})
+	tr.RegisterComponent("deployment", &components.DeploymentHandler{}) // for the tests that author one
 	tr.RegisterComponent("service", &components.ServiceHandler{})
 	tr.RegisterComponent("serviceaccount", &components.ServiceAccountHandler{})
 	tr.RegisterBuiltinTrait("topology-spread", &traits.TopologySpreadHandler{})
@@ -28,11 +29,11 @@ func registerWebservice(tr *oam.Transformer) {
 // webserviceViaRule presents components.WebserviceRule as the
 // oam.ComponentHandler the former WebserviceHandler was, for the tests that
 // call a handler directly rather than through a Transformer: the rule's
-// LowerComponent, then DeploymentHandler and ServiceHandler for the two
+// LowerComponent, then RoleDeploymentHandler and ServiceHandler for the two
 // components it emits, then the synthesized topology-spread and pvc traits on
 // the deployment member when the rule attached them. The config it returns is the
 // deployment member's own, so ServiceAccountName and NonRWXClaim are
-// DeploymentConfig's; ServicePort and ServicePortName
+// RoleDeploymentConfig's; ServicePort and ServicePortName
 // are the service member's, as the sibling group answers them.
 //
 // components_test carries the same adapter (webservice_rule_adapter_test.go
@@ -51,7 +52,7 @@ func (webserviceViaRule) ToApplicationConfig(comp *oam.Component, namespace stri
 		return nil, err
 	}
 	n := len(res.Components)
-	if n < 2 || n > 3 || res.Components[0].Type != "deployment" || res.Components[1].Type != "service" || (n == 3 && res.Components[2].Type != "serviceaccount") {
+	if n < 2 || n > 3 || res.Components[0].Type != "role-deployment" || res.Components[1].Type != "service" || (n == 3 && res.Components[2].Type != "serviceaccount") {
 		return nil, errors.Errorf("webservice rule emitted %d components, want a deployment, a service and at most a serviceaccount", n)
 	}
 	var sa stack.ApplicationConfig
@@ -61,13 +62,13 @@ func (webserviceViaRule) ToApplicationConfig(comp *oam.Component, namespace stri
 		}
 	}
 	emitted := res.Components[0]
-	cfg, err := (&components.DeploymentHandler{}).ToApplicationConfig(&emitted, namespace)
+	cfg, err := (&components.RoleDeploymentHandler{}).ToApplicationConfig(&emitted, namespace)
 	if err != nil {
 		return nil, err
 	}
-	dep, ok := cfg.(*components.DeploymentConfig)
+	dep, ok := cfg.(*components.RoleDeploymentConfig)
 	if !ok {
-		return nil, errors.Errorf("deployment handler returned %T, want *components.DeploymentConfig", cfg)
+		return nil, errors.Errorf("deployment handler returned %T, want *components.RoleDeploymentConfig", cfg)
 	}
 	svcComp := res.Components[1]
 	cfg, err = (&components.ServiceHandler{}).ToApplicationConfig(&svcComp, namespace)
@@ -84,7 +85,7 @@ func (webserviceViaRule) ToApplicationConfig(comp *oam.Component, namespace stri
 			synthesized = append(synthesized, t)
 		}
 	}
-	return &webserviceViaRuleConfig{DeploymentConfig: dep, service: svc, serviceAccount: sa, synthesized: synthesized}, nil
+	return &webserviceViaRuleConfig{RoleDeploymentConfig: dep, service: svc, serviceAccount: sa, synthesized: synthesized}, nil
 }
 
 // webserviceViaRuleConfig is the deployment member's config, the service
@@ -92,7 +93,7 @@ func (webserviceViaRule) ToApplicationConfig(comp *oam.Component, namespace stri
 // traits the rule synthesized in front of the deployment member's
 // (topology-spread, and one `pvc` trait per claim its pvc volumes describe).
 type webserviceViaRuleConfig struct {
-	*components.DeploymentConfig
+	*components.RoleDeploymentConfig
 	service        *components.ServiceConfig
 	serviceAccount stack.ApplicationConfig
 	synthesized    []oam.Trait
@@ -109,7 +110,7 @@ func (c *webserviceViaRuleConfig) ServicePortName() (string, bool) {
 // rest of each member's objects, then the claims of the synthesized `pvc`
 // traits, which follow their component.
 func (c *webserviceViaRuleConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	inner := stack.NewApplication(app.Name, app.Namespace, c.DeploymentConfig)
+	inner := stack.NewApplication(app.Name, app.Namespace, c.RoleDeploymentConfig)
 	subApps, err := applySynthesizedTraits("webservice", c.synthesized, inner)
 	if err != nil {
 		return nil, err

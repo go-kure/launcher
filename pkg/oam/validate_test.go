@@ -134,10 +134,10 @@ func TestValidate_ScalerTraitOnPostgresql(t *testing.T) {
 }
 
 // TestValidate_ScalerTraitOnDeployment pins that "scaler" is admitted on
-// deployment (go-kure/launcher#513). DeploymentConfig.applyNonRWXConstraint
+// deployment (go-kure/launcher#513). RoleDeploymentConfig.applyNonRWXConstraint
 // (builtin/components/deployment.go) checks only the component's effective
 // replica count, so it cannot see an HPA that scales past 1. Admission is
-// safe because DeploymentConfig reports its claim through NonRWXClaim, exactly as
+// safe because RoleDeploymentConfig reports its claim through NonRWXClaim, exactly as
 // webservice and worker do, and the scaler itself refuses an effective
 // maxReplicas > 1 beside a non-RWX claim (builtin/traits/scaler_nonrwx_test.go).
 func TestValidate_ScalerTraitOnDeployment(t *testing.T) {
@@ -213,7 +213,7 @@ func TestValidate_ScalerTraitRefusedOnKindsWithNoScaleTarget(t *testing.T) {
 			if !strings.Contains(err.Error(), "not supported on component type") {
 				t.Errorf("error = %q, want to contain 'not supported on component type'", err.Error())
 			}
-			const wantList = "supported types: deployment, statefulset, webservice, worker"
+			const wantList = "supported types: deployment, role-deployment, statefulset, webservice, worker"
 			if !strings.Contains(err.Error(), wantList) {
 				t.Errorf("error = %q, want to contain the sorted list %q", err.Error(), wantList)
 			}

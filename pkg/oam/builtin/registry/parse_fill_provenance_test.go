@@ -73,7 +73,7 @@ func TestParseFills_WebserviceReportsOnItsDeploymentMember(t *testing.T) {
 	comp := oam.Component{Name: "app", Type: "webservice", Properties: map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}}
 	prov, _ := policyProvenanceFor(t, &defaultsPolicy{}, comp)
 
-	member := entriesOf(prov, owner{component: "app", member: "deployment"})
+	member := entriesOf(prov, owner{component: "app", member: "role-deployment"})
 	if got, want := member["replicas"], (oam.Source{Kind: oam.SourceBuiltin, Ref: "deployment.replicas"}); got != want {
 		t.Errorf("member replicas = %+v, want %+v\nentries: %v", got, want, member)
 	}

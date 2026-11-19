@@ -209,7 +209,7 @@ func overSizedClaim() map[string]any {
 	}}}
 }
 
-// sharedKind is one of the seven types built from the shared container and pod
+// sharedKind is one of the eight types built from the shared container and pod
 // fragments. sizedVolumes says that a `pvc` volume of the type takes a `size`
 // and generates its claim.
 type sharedKind struct {
@@ -221,6 +221,7 @@ type sharedKind struct {
 
 var sharedKinds = []sharedKind{
 	{typ: "deployment", sidecars: true, replicas: true},
+	{typ: "role-deployment", sidecars: true, replicas: true},
 	{typ: "webservice", sidecars: true, replicas: true, sizedVolumes: true},
 	{typ: "worker", sidecars: true, replicas: true, sizedVolumes: true},
 	{typ: "statefulset", sidecars: true, replicas: true, claims: true},

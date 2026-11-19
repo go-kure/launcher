@@ -38,13 +38,13 @@ pins the set, `TestBuiltinRegistries_TypesUnchanged`), alongside the built-in lo
 `RegisterBuiltinTraitLowering` rather than `RegisterBuiltinTrait`) and the
 component-position ones (`builtinComponentLoweringRules()` — `worker`,
 `webservice`, `postgresql`, `helm` and `oci`, registered via `RegisterBuiltinComponentLowering`).
-`worker` lowers to a `deployment` component plus, unless `topologySpread: false`, a
-synthesized `topology-spread` trait. `webservice` lowers to a same-name `deployment`
+`worker` lowers to a `role-deployment` component plus, unless `topologySpread: false`, a
+synthesized `topology-spread` trait. `webservice` lowers to a same-name `role-deployment`
 and `service` pair, deployed as one component, with the same `topology-spread`
-treatment on the `deployment`. Unless `serviceAccountName` is authored, both also
+treatment on the `role-deployment`. Unless `serviceAccountName` is authored, both also
 emit a same-name `serviceaccount` member for the component's ServiceAccount, and
 turn each claim a `pvc` volume describes into a synthesized `pvc` trait on the
-`deployment` member (go-kure/launcher#702), so `builtinComponentHandlers()` must
+`role-deployment` member (go-kure/launcher#702), so `builtinComponentHandlers()` must
 register `serviceaccount` and the `pvc` trait handler must be registered. `postgresql` lowers to a `cnpg-cluster`
 (plus `cnpg-objectstore` for a backup and for an inline recovery source, `cnpg-pooler`, one `cnpg-database` per database
 and one `cnpg-scheduledbackup` per backup schedule when authored), with a post-policy step on the `cnpg-cluster` for the values

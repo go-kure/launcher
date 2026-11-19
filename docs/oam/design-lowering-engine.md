@@ -375,7 +375,7 @@ profile builds byte-identically without `UPDATE_GOLDEN`, and worker's published
 property schema is pinned byte for byte against a capture of the former handler's
 (`testdata/worker-property-schema.json`). The handler-shaped worker tests are
 re-pointed through a `workerViaRule` adapter that runs `WorkerRule.LowerComponent`,
-the real `DeploymentHandler` and, when synthesized, the real `TopologySpreadHandler`.
+the real `RoleDeploymentHandler` and, when synthesized, the real `TopologySpreadHandler`.
 Two differences are deliberate and pinned. A worker refused by its own parse now
 carries the lowering engine's prefix (`component "w" (type "worker") in document …`)
 instead of the former `component "w":`, with the cause text unchanged. A
@@ -388,17 +388,17 @@ raw `affinity` is forwarded, with the same text.
 
 The webservice-as-a-rule migration (`WebserviceRule`,
 `pkg/oam/builtin/components/webservice.go`; go-kure/launcher#280) is the first rule
-that lowers one component into a same-name sibling group: a `deployment` and a
+that lowers one component into a same-name sibling group: a `role-deployment` and a
 `service`, deployed as one component (`pkg/oam` "Same-name sibling groups"). Each
 authored trait goes to the member it acts on: the routing traits to the `service`,
-the object decorators to both, and everything else, to the `deployment`: that
+the object decorators to both, and everything else, to the `role-deployment`: that
 includes an extension's traits and the delivery traits `fluxcd-patches` and
 `fluxcd-postbuild`, which are not built in (a consumer that delivers through Flux
 registers its own handlers). Webservice's published property
 schema is pinned byte for byte against a capture of the former handler's
 (`testdata/webservice-property-schema.json`), and the handler-shaped tests are
 re-pointed through a `webserviceViaRule` adapter that runs
-`WebserviceRule.LowerComponent`, the real `DeploymentHandler` and `ServiceHandler`,
+`WebserviceRule.LowerComponent`, the real `RoleDeploymentHandler` and `ServiceHandler`,
 and, when synthesized, the real `TopologySpreadHandler`. Every golden fixture and
 example builds byte-identically except one, `webservice-ingress-portname`: an ingress
 `portName: http` now opens the Service port's number on the synthesized inbound
@@ -575,13 +575,13 @@ A component lowering rule can place each object it emits in one of three shapes.
 Pick the shape by asking these questions in order (go-kure/launcher#741):
 
 1. **Is the object one of the role's own objects, named after the component?** Emit it
-   as a **same-name sibling member**. `webservice` emits a `deployment`, a `service` and
+   as a **same-name sibling member**. `webservice` emits a `role-deployment`, a `service` and
    a `serviceaccount`; `postgresql` emits a `cnpg-cluster` and a `cnpg-objectstore`.
 2. **Is the object differently named and owned by exactly one member?** That means it
    shares the member's lifecycle, namespace, tier and decorators, or the member is
    wired to it by name (a mount, `envFrom`, `valuesFrom`). Emit it as a **trait on that
    member**. Example: the claims `webservice` and `worker` synthesize from their `pvc`
-   volumes as `pvc` traits on the `deployment` member (`roleClaims`). `helm`'s values
+   volumes as `pvc` traits on the `role-deployment` member (`roleClaims`). `helm`'s values
    ConfigMap takes this shape: a `configmap` trait on the release (go-kure/launcher#759).
 3. **Otherwise**, emit it as a **separately named kind component**. That covers an
    object that is shared or adopted across components, authored directly, or ordered

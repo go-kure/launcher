@@ -16,7 +16,7 @@ key the parser never looks at. The rule that closes that gap:
 > name or in another shape, is an entry of one of the kind's refusal maps with
 > its reason. No upstream field is dropped in silence.
 
-`webservice` and `worker` lower to a `deployment` and refuse what it refuses;
+`webservice` and `worker` lower to a `role-deployment` and refuse what it refuses;
 the `pvc` trait reads a claim through the `persistentvolumeclaim` kind's
 parser and refuses what that kind refuses, and the `secret` trait reads its
 Secret through the `secret` kind's parser.

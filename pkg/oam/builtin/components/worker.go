@@ -10,11 +10,11 @@ import (
 )
 
 // WorkerRule lowers a "worker" component (D1 component position,
-// oam.ComponentLoweringRule) into a terminal "deployment" component carrying
+// oam.ComponentLoweringRule) into a terminal "role-deployment" component carrying
 // the same name and, unless `serviceAccountName` is authored, a same-name
 // "serviceaccount" sibling (roleServiceAccount): the component's own
 // ServiceAccount, with `automountServiceAccountToken: false` as the handler
-// generated it, while the deployment member is handed the account's object name
+// generated it, while the role-deployment member is handed the account's object name
 // as `serviceAccountName` so it generates none of its own. The objects of both
 // members are named as WebserviceRule names its members' (go-kure/launcher#787):
 // by `deploymentObjectName` and `serviceAccountObjectName`, else by the Naming
@@ -72,7 +72,7 @@ import (
 //
 // Everything past the parse is the deployment component's: ApplyPolicy,
 // NonRWXClaim, ServiceAccountName, labels and the
-// generated objects are the ones DeploymentConfig implements, which worker's
+// generated objects are the ones RoleDeploymentConfig implements, which worker's
 // implementations matched line for line. A parse error surfaces through the
 // lowering engine, so it names the component's type and document
 // (`component "w" (type "worker") in document …: <cause>`) instead of the
@@ -118,10 +118,10 @@ func (WorkerRule) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDeploymentSpec())
 	maps.Copy(m, schemaRoleObjectNames(false))
-	// The deployment member takes it as the deployment component does
+	// The role-deployment member takes it as the deployment component does
 	// (go-kure/launcher#1216).
 	m[podMetadataProperty] = schemaPodMetadata("Deployment")
-	// The deployment member and each generated claim are what the policy judges.
+	// The role-deployment member and each generated claim are what the policy judges.
 	return oam.DeclareBounds(m, roleBounds())
 }
 
@@ -169,7 +169,7 @@ func (r WorkerRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext
 
 	members := []oam.Component{{
 		Name:        comp.Name,
-		Type:        "deployment",
+		Type:        roleDeploymentMember,
 		Properties:  props,
 		Traits:      traits,
 		Annotations: comp.Annotations,
@@ -177,7 +177,7 @@ func (r WorkerRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext
 	// Each member's object is named in emission order, as WebserviceRule names
 	// its members': the member keeps the component's name, and the pods'
 	// serviceAccountName reads the account's object name.
-	if err := nameRoleMember(comp, lctx, &members[0], &DeploymentHandler{}, oam.NameRoleWorkloadDeployment, deploymentObjectNameProperty, "Deployment"); err != nil {
+	if err := nameRoleMember(comp, lctx, &members[0], &RoleDeploymentHandler{}, oam.NameRoleWorkloadDeployment, deploymentObjectNameProperty, "Deployment"); err != nil {
 		return oam.LoweringResult{}, err
 	}
 	sa, err := roleServiceAccount(comp, props, comp.Traits, lctx)
@@ -306,7 +306,7 @@ func parseWorker(name string, props map[string]any) (workerOpinions, error) {
 	if _, err := parseDeploymentSpec(props); err != nil {
 		return out, err
 	}
-	// The deployment member parses podMetadata again; reading it here keeps the
+	// The role-deployment member parses podMetadata again; reading it here keeps the
 	// refusal the rule's, in the order of the rest (go-kure/launcher#1216).
 	if _, err := parsePodMetadata(props, false); err != nil {
 		return out, err

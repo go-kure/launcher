@@ -68,7 +68,7 @@ func TestRoleRules_AuthoredObjectNames(t *testing.T) {
 				if err != nil {
 					t.Fatalf("LowerComponent: %v", err)
 				}
-				want := map[string]string{"deployment": tt.wantDeployment, "serviceaccount": tt.wantAccount}
+				want := map[string]string{"role-deployment": tt.wantDeployment, "serviceaccount": tt.wantAccount}
 				if typ == "webservice" {
 					want["service"] = tt.wantService
 				}
@@ -86,7 +86,7 @@ func TestRoleRules_AuthoredObjectNames(t *testing.T) {
 				// The pods run as the account by its object's name, and no name
 				// property reaches the deployment member.
 				dep := members[0]
-				if dep.Type != "deployment" {
+				if dep.Type != "role-deployment" {
 					t.Fatalf("the first member is a %s, want the deployment", dep.Type)
 				}
 				if got := dep.Properties["serviceAccountName"]; got != tt.wantAccount {
