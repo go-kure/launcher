@@ -200,7 +200,7 @@ var validPolicyTypes = map[string]bool{
 // (scalerTargets), so the two cannot disagree.
 var traitComponentRestrictions = map[string]map[string]bool{
 	"scaler":     scalerAdmittedTypes(),
-	"disruption": {"webservice": true, "worker": true, "deployment": true, "statefulset": true},
+	"disruption": {"webservice": true, "worker": true, "deployment": true, "role-deployment": true, "statefulset": true},
 }
 
 // validate performs semantic validation on a parsed Application.

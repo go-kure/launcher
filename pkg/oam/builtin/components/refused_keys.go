@@ -110,6 +110,7 @@ var affinityShorthandKeys = []string{"enablePodAntiAffinity", "topologyKey", "po
 // it field by field, and holds the two paths above to the same text.
 var refusedKeys = map[string][]map[string]string{
 	"deployment":            {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
+	"role-deployment":       {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"webservice":            {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"worker":                {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"statefulset":           {statefulSetSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
@@ -164,9 +165,10 @@ var containerNestedRefusals = map[string]nestedRefusal{
 // `affinity` shorthand of webservice and worker, and a statefulset's
 // `volumeClaimTemplates` entry, besides the container ones.
 var nestedRefusedKeys = map[string]map[string]nestedRefusal{
-	"deployment": containerNestedRefusals,
-	"webservice": withNestedRefusals(containerNestedRefusals, "affinity", nestedRefusal{affinityShorthandRejectedKeys, reasonOnly}),
-	"worker":     withNestedRefusals(containerNestedRefusals, "affinity", nestedRefusal{affinityShorthandRejectedKeys, reasonOnly}),
+	"deployment":      containerNestedRefusals,
+	"role-deployment": containerNestedRefusals,
+	"webservice":      withNestedRefusals(containerNestedRefusals, "affinity", nestedRefusal{affinityShorthandRejectedKeys, reasonOnly}),
+	"worker":          withNestedRefusals(containerNestedRefusals, "affinity", nestedRefusal{affinityShorthandRejectedKeys, reasonOnly}),
 	"statefulset": withNestedRefusals(containerNestedRefusals, "volumeClaimTemplates", nestedRefusal{volumeClaimTemplateRejectedKeys, func(key, reason string) string {
 		return key + ": not authorable — " + reason
 	}}),
@@ -205,8 +207,8 @@ func refusedNestedKeyHint(componentType string, parents []string, key string) st
 // parsers its own parser runs.
 
 // NestedUnsupportedFieldHint is the deployment's refusedNestedKeyHint.
-func (h *DeploymentHandler) NestedUnsupportedFieldHint(parents []string, key string) string {
-	return refusedNestedKeyHint("deployment", parents, key)
+func (h *RoleDeploymentHandler) NestedUnsupportedFieldHint(parents []string, key string) string {
+	return refusedNestedKeyHint("role-deployment", parents, key)
 }
 
 // NestedUnsupportedFieldHint is the webservice's refusedNestedKeyHint.
@@ -240,8 +242,8 @@ func (h *CronjobHandler) NestedUnsupportedFieldHint(parents []string, key string
 }
 
 // UnsupportedFieldHint is the deployment's refusedKeyHint.
-func (h *DeploymentHandler) UnsupportedFieldHint(key string) string {
-	return refusedKeyHint("deployment", key)
+func (h *RoleDeploymentHandler) UnsupportedFieldHint(key string) string {
+	return refusedKeyHint("role-deployment", key)
 }
 
 // UnsupportedFieldHint is the webservice's refusedKeyHint.

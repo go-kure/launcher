@@ -311,6 +311,9 @@ func TestServiceNameGate_EveryBuiltinKindIsCovered(t *testing.T) {
 	handlers := builtinComponentHandlers()
 	types := map[string]bool{}
 	for typ := range handlers {
+		if loweringOnlyTypes[typ] {
+			continue
+		}
 		types[typ] = true
 	}
 	for typ := range builtinComponentLoweringRules() { // webservice, worker, helm, postgresql and oci are rules, not handlers

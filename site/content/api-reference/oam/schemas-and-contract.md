@@ -746,8 +746,8 @@ type. The built-in rules declare:
 
 | Rule | Components | Traits | Policies |
 |------|------------|--------|----------|
-| `webservice` | `deployment`, `service`, `serviceaccount` | `topology-spread`, `pvc` | |
-| `worker` | `deployment`, `serviceaccount` | `topology-spread`, `pvc` | |
+| `webservice` | `role-deployment`, `service`, `serviceaccount` | `topology-spread`, `pvc` | |
+| `worker` | `role-deployment`, `serviceaccount` | `topology-spread`, `pvc` | |
 | `helm` | `helmrelease`, `helmtemplate`, `helmrepository`, `ocirepository`, `gitrepository`, `bucket` | `configmap`, `secret` | |
 | `postgresql` | `cnpg-cluster`, `cnpg-objectstore`, `cnpg-pooler`, `cnpg-database`, `cnpg-scheduledbackup` | | `dependency`, `placement` |
 | `oci` | `ocirepository`, `fluxcd-kustomization` | | |
@@ -781,15 +781,15 @@ component type; a rule that declares none is left out.
 `webservice` and `worker` publish a map. Which keys are forwarded comes from the
 function the rule forwards its properties with, so the two cannot disagree on it; the
 places of the keys the rule evaluates itself are declared beside it. Every key not listed below
-lands unchanged at the same key of the `deployment` member:
+lands unchanged at the same key of the `role-deployment` member:
 
 | Key | Lands at | Unchanged |
 |-----|----------|-----------|
-| `port` (`webservice`) | `deployment` `ports[0].containerPort`, `service` `ports[0].port` | no |
-| `affinity` | `deployment` `affinity`, as a Kubernetes affinity | no |
-| `volumes` | `deployment` `volumes`, and a `pvc` trait on it for each claim a volume generates | no |
-| `topologySpread` | the `topology-spread` trait on `deployment` | no |
-| `serviceAccountObjectName` | `deployment` `serviceAccountName` | no |
+| `port` (`webservice`) | `role-deployment` `ports[0].containerPort`, `service` `ports[0].port` | no |
+| `affinity` | `role-deployment` `affinity`, as a Kubernetes affinity | no |
+| `volumes` | `role-deployment` `volumes`, and a `pvc` trait on it for each claim a volume generates | no |
+| `topologySpread` | the `topology-spread` trait on `role-deployment` | no |
+| `serviceAccountObjectName` | `role-deployment` `serviceAccountName` | no |
 | `deploymentObjectName`, `serviceObjectName` (`webservice`) | no place: they name objects | |
 
 The `topology-spread` trait the rule attaches holds no property, so the report has

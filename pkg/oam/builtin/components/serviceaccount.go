@@ -109,7 +109,7 @@ func (c *ServiceAccountConfig) ServiceAccountName() (name string, runsPods bool)
 
 // Generate creates the ServiceAccount.
 func (c *ServiceAccountConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	// Named from the component, so a role rule's deployment member, which is
+	// Named from the component, so a role rule's role-deployment member, which is
 	// handed that same name as its serviceAccountName, runs as exactly this
 	// account; the Application's name is the fallback for a config built
 	// without one. An authored component's `objectName` names it instead.

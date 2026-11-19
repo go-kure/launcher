@@ -344,11 +344,11 @@ func builtinPolicyHandlers() map[string]oam.PolicyHandler {
 func newBuiltinTransformer() *oam.Transformer {
 	t := oam.NewTransformer(builtinComponentHandlers(), nil)
 	// "worker" is a component-position lowering rule, not a dispatchable handler:
-	// it lowers into a terminal "deployment" component (plus a synthesized
-	// "topology-spread" trait) for DeploymentHandler/TopologySpreadHandler to
+	// it lowers into a terminal "role-deployment" component (plus a synthesized
+	// "topology-spread" trait) for RoleDeploymentHandler/TopologySpreadHandler to
 	// dispatch on the next fixpoint round. "webservice" lowers into a same-name
-	// "deployment" and "service" pair, with the same synthesized trait on the
-	// "deployment". "helm" likewise lowers into the
+	// "role-deployment" and "service" pair, with the same synthesized trait on the
+	// "role-deployment". "helm" likewise lowers into the
 	// "helmrelease" or "helmtemplate" terminal, plus a generated Flux source for
 	// an inline URL, and "postgresql" into the CNPG kinds ("cnpg-cluster" with a
 	// post-policy step for its policy-dependent defaults, "cnpg-objectstore",

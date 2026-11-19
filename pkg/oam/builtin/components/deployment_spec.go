@@ -466,7 +466,7 @@ func applyNonRWXConstraint(dep *appsv1.Deployment, name string, pvcs []PVCConfig
 // nonRWXFillsStrategy decides whether the library, and not the author, sets the
 // Deployment's strategy to Recreate: a non-RWX claim is attached and the author
 // wrote no `strategy`. applyNonRWXConstraint takes this decision when it builds the
-// object, and DeploymentConfig.BuiltinDefaults reports the same one at
+// object, and RoleDeploymentConfig.BuiltinDefaults reports the same one at
 // `strategy.type`, so the two cannot drift (go-kure/launcher#1580).
 func nonRWXFillsStrategy(pvcs []PVCConfig, strategy *appsv1.DeploymentStrategy) bool {
 	return hasNonRWXPVC(pvcs) && strategy == nil

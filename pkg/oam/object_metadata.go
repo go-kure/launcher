@@ -24,7 +24,7 @@ import (
 // object holds keeps the labels its kind gives it. The metadata of that pod
 // template is a handler's own property where it takes one (`podMetadata`, on
 // deployment, statefulset, daemonset, job and cronjob; go-kure/launcher#1178;
-// and on webservice and worker, whose deployment member takes it;
+// and on webservice and worker, whose role-deployment member takes it;
 // go-kure/launcher#1216).
 
 const (

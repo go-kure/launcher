@@ -14,7 +14,7 @@ import (
 
 // WebserviceRule lowers a "webservice" component (D1 component position,
 // oam.ComponentLoweringRule) into a same-name sibling group of terminal
-// components: a "deployment", a "service" and, unless `serviceAccountName` is
+// components: a "role-deployment", a "service" and, unless `serviceAccountName` is
 // authored, a "serviceaccount", in that order, all carrying the component's
 // name. It is the re-expression of the former
 // WebserviceHandler: webservice was a Deployment, a ClusterIP Service in front
@@ -30,18 +30,18 @@ import (
 // input the handler refused is still refused, first failure first, with the
 // same cause text. It then emits:
 //
-//   - the deployment member, with the authored properties webservice declares
+//   - the role-deployment member, with the authored properties webservice declares
 //     except `port`, `topologySpread` and `affinity`, plus the main
 //     container's one port, `{name: http, containerPort: <port>}`. The four-key
 //     `affinity` shorthand is evaluated as worker evaluates it (buildAffinity,
 //     over the component's own app label) and emitted as the raw corev1 shape
 //     `deployment` publishes; `topologySpread` becomes a synthesized
-//     `topology-spread` trait in front of the deployment member's traits (none
+//     `topology-spread` trait in front of the role-deployment member's traits (none
 //     when it is false), the innermost decorator, where the handler applied its
 //     constraints;
 //   - the service member, with one port `{name: http, port: <port>}` (its
 //     `targetPort` defaults to the same number, its protocol to TCP) and the
-//     default selector `app: <component name>`, the deployment member's pod
+//     default selector `app: <component name>`, the role-deployment member's pod
 //     labels;
 //   - unless `serviceAccountName` is authored, the serviceaccount member
 //     (roleServiceAccount): the component's own ServiceAccount, with
@@ -77,17 +77,17 @@ import (
 //     every object a component generates, by a delivery intent on the
 //     application, and the group's one application takes the intent any member
 //     has;
-//   - every other trait to the deployment member: the workload traits read the
+//   - every other trait to the role-deployment member: the workload traits read the
 //     pods, the ServiceAccount or the claims, and the delivery traits
 //     (`fluxcd-patches`, `fluxcd-postbuild`) configure how the group's one
 //     bundle is delivered. Launcher has no handler for those two: a consumer
 //     that delivers through Flux registers its own, and it then sees each
 //     trait once, on one member, instead of once per member. A trait type this
 //     rule does not know — one an extension registered — goes to the
-//     deployment member too, the side that holds the pods.
+//     role-deployment member too, the side that holds the pods.
 //
 // Everything past the parse is the members' own: ApplyPolicy, NonRWXClaim,
-// and ServiceAccountName are DeploymentConfig's, and the
+// and ServiceAccountName are RoleDeploymentConfig's, and the
 // Service port, port name and routing target are ServiceConfig's; the group
 // answers each from the one member that has a value. The synthesized inbound
 // NetworkPolicy keeps the component label as its pod selector, because the
@@ -161,10 +161,10 @@ func (WebserviceRule) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDeploymentSpec())
 	maps.Copy(m, schemaRoleObjectNames(true))
-	// The deployment member takes it as the deployment component does
+	// The role-deployment member takes it as the deployment component does
 	// (go-kure/launcher#1216).
 	m[podMetadataProperty] = schemaPodMetadata("Deployment")
-	// The deployment member and each generated claim are what the policy judges.
+	// The role-deployment member and each generated claim are what the policy judges.
 	return oam.DeclareBounds(m, roleBounds())
 }
 
@@ -234,7 +234,7 @@ func (r WebserviceRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 	members := []oam.Component{
 		{
 			Name:        comp.Name,
-			Type:        "deployment",
+			Type:        roleDeploymentMember,
 			Properties:  depProps,
 			Traits:      depTraits,
 			Annotations: maps.Clone(comp.Annotations),
@@ -255,7 +255,7 @@ func (r WebserviceRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 	// what is written as a reference to a renamed object reads the member's
 	// object name (the pods' serviceAccountName here, and in the members' own
 	// configs the routing backend and the scale target).
-	if err := nameRoleMember(comp, lctx, &members[0], &DeploymentHandler{}, oam.NameRoleWorkloadDeployment, deploymentObjectNameProperty, "Deployment"); err != nil {
+	if err := nameRoleMember(comp, lctx, &members[0], &RoleDeploymentHandler{}, oam.NameRoleWorkloadDeployment, deploymentObjectNameProperty, "Deployment"); err != nil {
 		return oam.LoweringResult{}, err
 	}
 	if err := nameRoleMember(comp, lctx, &members[1], &ServiceHandler{}, oam.NameRoleWorkloadService, serviceObjectNameProperty, "Service"); err != nil {
@@ -328,7 +328,7 @@ func parseWebservice(comp *oam.Component) (webserviceOpinions, error) {
 		return out, err
 	}
 	// namedPortsAllowed=true, matchName="http": the main container always
-	// declares the one port named "http" (the deployment member's `ports`,
+	// declares the one port named "http" (the role-deployment member's `ports`,
 	// unconditional — port defaults to 80), so a probe/lifecycle port resolves
 	// only when it names that same "http" port.
 	if _, err := parseProbes(props, true, webservicePortName); err != nil {
@@ -398,7 +398,7 @@ func parseWebservice(comp *oam.Component) (webserviceOpinions, error) {
 	if _, err := parseDeploymentSpec(props); err != nil {
 		return out, err
 	}
-	// The deployment member parses podMetadata again; reading it here keeps the
+	// The role-deployment member parses podMetadata again; reading it here keeps the
 	// refusal the rule's, in the order of the rest (go-kure/launcher#1216).
 	if _, err := parsePodMetadata(props, false); err != nil {
 		return out, err

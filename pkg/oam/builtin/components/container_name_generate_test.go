@@ -21,7 +21,7 @@ import (
 func setContainerName(t *testing.T, cfg stack.ApplicationConfig, list string, i int, name string) {
 	t.Helper()
 	switch c := cfg.(type) {
-	case *components.DeploymentConfig:
+	case *components.RoleDeploymentConfig:
 		if list == "sidecars" {
 			c.Sidecars[i].Name = name
 		} else {

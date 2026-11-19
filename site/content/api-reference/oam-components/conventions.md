@@ -602,7 +602,7 @@ Deployment, StatefulSet and DaemonSet all require `spec.selector` and get no
 server-side default for it, so each handler assigns
 `&metav1.LabelSelector{MatchLabels: …}` from the same helper that produced
 `spec.template.metadata.labels` — `deploymentComponentLabels` for `deployment`
-and for `worker`, which lowers to a `deployment` component (its affinity selector
+and for `worker`, which lowers to a `role-deployment` component (its affinity selector
 uses `appLabels`), and `appLabels` for `webservice`, `statefulset` and `daemonset` (both
 return a fresh `{"app": <label value>}` map, per the ownership rule above, valued
 as [The `app` label](#the-app-label) describes). This is

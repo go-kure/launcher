@@ -143,8 +143,8 @@ func TestWorkerRule_EmitsDeployment(t *testing.T) {
 	}
 	got := lowerWorker(t, comp)
 
-	if got.Name != "app" || got.Type != "deployment" {
-		t.Errorf("emitted %q (type %q), want app (type deployment)", got.Name, got.Type)
+	if got.Name != "app" || got.Type != "role-deployment" {
+		t.Errorf("emitted %q (type %q), want app (type role-deployment)", got.Name, got.Type)
 	}
 	if !reflect.DeepEqual(got.Annotations, comp.Annotations) {
 		t.Errorf("annotations = %v, want the authored %v", got.Annotations, comp.Annotations)
@@ -568,7 +568,7 @@ func TestWorker_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
 // worker's sibling of the two webservice
 // TestWebserviceConfig_ApplyPolicy_Max{CPU,Memory}_AgainstIntrinsicDefault
 // cases (go-kure/launcher#251) — proving enforceMaxResources is actually wired into
-// the ApplyPolicy a worker gets (DeploymentConfig's, since worker lowers into a
+// the ApplyPolicy a worker gets (RoleDeploymentConfig's, since worker lowers into a
 // deployment component), not just added to enforce.go.
 func TestWorker_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *testing.T) {
 	cases := []struct {

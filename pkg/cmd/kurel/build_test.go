@@ -629,7 +629,16 @@ spec:
     - name: c1
       type: %s
 `, name)
-			if _, err := oam.ParseWithExtraTypes([]byte(doc), nil, transformer.LowerableTypes()); err != nil {
+			_, err := oam.ParseWithExtraTypes([]byte(doc), nil, transformer.LowerableTypes())
+			if loweringOnlyTypes[name] {
+				// A lowering target no document authors: the parser refuses it
+				// on purpose (go-kure/launcher#1629).
+				if err == nil {
+					t.Errorf("component type %q is lowering-only, but the parser admits it", name)
+				}
+				return
+			}
+			if err != nil {
 				t.Errorf("component type %q is registered as a built-in handler but the parser rejects it: %v", name, err)
 			}
 		})
@@ -746,6 +755,7 @@ func TestBuiltinComponentHandlers_RegisteredTypes(t *testing.T) {
 		"resourcequota",
 		"resourcesetinputprovider",
 		"role",
+		"role-deployment",
 		"rolebinding",
 		"runtimeclass",
 		"secret",

@@ -53,7 +53,7 @@ probe lists it in `LeftToCluster`. It is the one place check A disagrees with a 
 The probes cover the handler-built workload types: deployment, statefulset, daemonset,
 job and cronjob, with their init containers, sidecars, claim templates and pod failure
 policy. It also probes the types that lower to other components: `webservice` and `worker`,
-whose entries the report names at the place of their `deployment` member (`Fill.Member`),
+whose entries the report names at the place of their `role-deployment` member (`Fill.Member`),
 and `postgresql`, which the report names at the cluster it builds. For a type that
 publishes a lowering key map check A reads the places of a declared default from it. For
 `postgresql`, which publishes none, the probe's `DefaultPlaces` names them. A default that lands in several

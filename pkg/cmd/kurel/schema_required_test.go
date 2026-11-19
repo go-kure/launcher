@@ -130,6 +130,9 @@ func TestComponentSchemas_RequiredIsWhatTheTypeRefusesAbsent(t *testing.T) {
 	}
 	types := map[string]registered{}
 	for typ, h := range builtinComponentHandlers() {
+		if loweringOnlyTypes[typ] {
+			continue
+		}
 		r := registered{handler: h}
 		if p, ok := h.(oam.PropertySchemaProvider); ok {
 			r.schema, r.hasOne = p.PropertySchema(), true

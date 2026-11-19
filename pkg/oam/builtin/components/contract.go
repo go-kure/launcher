@@ -45,7 +45,9 @@ func contract(typ string) oam.ContractMetadata {
 }
 
 // ContractMetadata implements oam.ContractDescriber.
-func (h *DeploymentHandler) ContractMetadata() oam.ContractMetadata { return contract("deployment") }
+func (h *RoleDeploymentHandler) ContractMetadata() oam.ContractMetadata {
+	return contract(roleDeploymentMember)
+}
 
 // ContractMetadata implements oam.ContractDescriber.
 func (h *CronjobHandler) ContractMetadata() oam.ContractMetadata { return contract("cronjob") }
@@ -411,12 +413,12 @@ func (h *TLSRouteHandler) ContractMetadata() oam.ContractMetadata {
 func (WebserviceRule) ContractMetadata() oam.ContractMetadata { return contract("webservice") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the
-// component's name (a "deployment", a "service" and the component's own
-// "serviceaccount"), the spread the rule adds to the "deployment" when the
+// component's name (a "role-deployment", a "service" and the component's own
+// "serviceaccount"), the spread the rule adds to the "role-deployment" when the
 // author set none, and the "pvc" trait of each claim a volume generates.
 func (WebserviceRule) LoweringTargets() oam.LoweringTargets {
 	return oam.LoweringTargets{
-		ComponentTypes: []string{"deployment", "service", "serviceaccount"},
+		ComponentTypes: []string{roleDeploymentMember, "service", "serviceaccount"},
 		TraitTypes:     []string{"topology-spread", "pvc"},
 	}
 }
@@ -425,12 +427,12 @@ func (WebserviceRule) LoweringTargets() oam.LoweringTargets {
 func (WorkerRule) ContractMetadata() oam.ContractMetadata { return contract("worker") }
 
 // LoweringTargets implements oam.LoweringTargetDeclarer: the members under the
-// component's name (a "deployment" and the component's own "serviceaccount"),
-// the spread the rule adds to the "deployment" when the author set none, and
+// component's name (a "role-deployment" and the component's own "serviceaccount"),
+// the spread the rule adds to the "role-deployment" when the author set none, and
 // the "pvc" trait of each claim a volume generates.
 func (WorkerRule) LoweringTargets() oam.LoweringTargets {
 	return oam.LoweringTargets{
-		ComponentTypes: []string{"deployment", "serviceaccount"},
+		ComponentTypes: []string{roleDeploymentMember, "serviceaccount"},
 		TraitTypes:     []string{"topology-spread", "pvc"},
 	}
 }

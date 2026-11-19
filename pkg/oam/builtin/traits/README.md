@@ -774,7 +774,7 @@ this trait the only way to spread a `deployment` was to author the raw
 definition, `components.BuildTopologySpreadConstraints`, so the output is
 identical. `worker` and `webservice` go further and apply their opinion through
 this very trait: their component lowering rules (`components.WorkerRule` and
-`components.WebserviceRule`, go-kure/launcher#280) emit a `deployment` and,
+`components.WebserviceRule`, go-kure/launcher#280) emit a `role-deployment` and,
 unless `topologySpread: false`, attach a synthesized `topology-spread` in front
 of its authored traits, so it is the innermost decorator — where the former
 handlers applied the constraints. An authored `topology-spread` on either
@@ -953,7 +953,7 @@ decorating trait declared before `scaler` must not hide the claim that caps
 `maxReplicas` at 1. The `serviceRoutingTargeter` forward keeps a decorated `service`
 component's synthesized ingress allow on its `selector` pods rather than on the component
 label, which none of its pods carry. The `podTemplateLabeler` and `identityPortMapper` forwards
-keep a sibling group able to tell a `service` member routing to its own `deployment` member's pods
+keep a sibling group able to tell a `service` member routing to its own `role-deployment` member's pods
 (see the sibling group section of `site/content/api-reference/oam/transform-and-lowering.md`) when a trait wraps either member. The `servicePortNamer` forward keeps an `ingress` path's
 `portName` on a decorated component held to its Service port's name (the first port, on a
 `service` component), the same rule a port number is held to. A config that implements none of them gets the zero

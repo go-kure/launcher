@@ -85,7 +85,7 @@ Only a config that reports its fills has `policy` and `builtin` entries. These d
   what their parse fills, and what they fill for each container when they generate their
   object. The list is under
   [policy defaults](../oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
-- `webservice` and `worker`, through the `deployment` they lower to.
+- `webservice` and `worker`, through the `role-deployment` they lower to.
 - The Cluster a `postgresql` component builds.
 - The `persistentvolumeclaim` component: the policy's default `size`.
 - The traits in the table under "Property provenance", each with the paths it reports.

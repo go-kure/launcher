@@ -13,11 +13,11 @@ func inMember(member string, fills []Fill) []Fill {
 }
 
 // loweredProbes are the probes of the types that lower to other components:
-// webservice and worker speak at the place of their deployment member, and
+// webservice and worker speak at the place of their role-deployment member, and
 // postgresql at the cluster it builds.
 func loweredProbes() []Probe {
 	deployment := func(comp string, extra ...Fill) []Fill {
-		return inMember("deployment", join([]Fill{replicas(comp)}, extra, resourceFills(comp, "")))
+		return inMember("role-deployment", join([]Fill{replicas(comp)}, extra, resourceFills(comp, "")))
 	}
 	return []Probe{
 		{Name: "webservice", Components: component("app", "webservice", nil),
@@ -65,7 +65,7 @@ const spreadPath = "topologySpreadConstraints"
 // the document with no policy runs one, so only the document with the policy
 // (two replicas) holds it.
 func topologyFill() Fill {
-	return Fill{Component: "app", Member: "deployment", Trait: "topology-spread", Path: spreadPath, WithPolicy: oam.SourceBuiltin}
+	return Fill{Component: "app", Member: "role-deployment", Trait: "topology-spread", Path: spreadPath, WithPolicy: oam.SourceBuiltin}
 }
 
 // topologyGap is the one declared default of webservice and worker that check A

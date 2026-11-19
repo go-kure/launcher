@@ -52,9 +52,10 @@ func (r namedScalarRule) LowerComponent(comp *oam.Component, _ oam.LoweringConte
 func transformNamedScalars(t *testing.T, rule namedScalarRule) []client.Object {
 	t.Helper()
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
-		"deployment":     &components.DeploymentHandler{},
-		"service":        &components.ServiceHandler{},
-		"serviceaccount": &components.ServiceAccountHandler{},
+		"deployment":      &components.DeploymentHandler{},
+		"role-deployment": &components.RoleDeploymentHandler{},
+		"service":         &components.ServiceHandler{},
+		"serviceaccount":  &components.ServiceAccountHandler{},
 	}, nil)
 	tr.RegisterBuiltinComponentLowering(components.WebserviceRule{})
 	tr.RegisterBuiltinComponentLowering(components.WorkerRule{})

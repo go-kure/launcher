@@ -94,6 +94,7 @@ component replicationsource *components.ReplicationSourceHandler
 component resourcequota *components.ResourceQuotaHandler
 component resourcesetinputprovider *components.ResourceSetInputProviderHandler
 component role *components.RoleHandler
+component role-deployment *components.RoleDeploymentHandler
 component rolebinding *components.RoleBindingHandler
 component runtimeclass *components.RuntimeClassHandler
 component secret *components.SecretHandler

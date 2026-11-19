@@ -388,7 +388,7 @@ name collision: HorizontalPodAutoscaler.autoscaling "default/web-hpa" is named b
 Every trait the transform applies is its own owner, whatever its place: two traits a trait
 rule lowered one authored trait to collide like two authored ones. The error tells the two
 apart in the fewest words that do. A trait a rule gave a sibling group member is named with
-the member (`component "web" member "deployment" traits[0] "scaler"`), and so is one authored
+the member (`component "web" member "role-deployment" traits[0] "scaler"`), and so is one authored
 trait forwarded to two members; a trait a rule added, where its place among the lowered
 traits is the place an authored one holds in the document, is named `… traits[0] "scaler"
 after lowering`; two traits a trait rule lowered one trait to are named

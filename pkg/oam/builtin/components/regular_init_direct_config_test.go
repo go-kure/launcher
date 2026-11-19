@@ -38,7 +38,7 @@ func TestDeploymentConfig_RegularInitLifecycleOrProbeRefusedOnADirectConfig(t *t
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.init.Name, tc.init.Image = "i", "ghcr.io/example/init:v1.0.0"
-			cfg := &components.DeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
+			cfg := &components.RoleDeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
 				InitContainers: []components.InitContainerConfig{tc.init}}
 			_, err := cfg.Generate(stack.NewApplication("web", "default", cfg))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -49,7 +49,7 @@ func TestDeploymentConfig_RegularInitLifecycleOrProbeRefusedOnADirectConfig(t *t
 
 	t.Run("a restartable init container keeps its lifecycle", func(t *testing.T) {
 		always := corev1.ContainerRestartPolicyAlways
-		cfg := &components.DeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
+		cfg := &components.RoleDeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
 			InitContainers: []components.InitContainerConfig{{
 				Name: "nat", Image: "ghcr.io/example/nat:v1.0.0", RestartPolicy: &always, Lifecycle: sleep(30),
 			}}}
@@ -60,7 +60,7 @@ func TestDeploymentConfig_RegularInitLifecycleOrProbeRefusedOnADirectConfig(t *t
 
 	t.Run("a restartable init container above the grace period is still refused", func(t *testing.T) {
 		always := corev1.ContainerRestartPolicyAlways
-		cfg := &components.DeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
+		cfg := &components.RoleDeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
 			InitContainers: []components.InitContainerConfig{{
 				Name: "nat", Image: "ghcr.io/example/nat:v1.0.0", RestartPolicy: &always, Lifecycle: sleep(31),
 			}}}

@@ -33,7 +33,7 @@ app→app connections targeting a webservice. `worker` declares no in-cluster po
 Service, so it deliberately advertises no endpoint (not an `EndpointProvider`).
 
 **`worker` is a component lowering rule, not a handler** (`WorkerRule`). It runs worker's own parse, then re-expresses the
-component as a `deployment` of the same name: the authored properties are
+component as a `role-deployment` of the same name: the authored properties are
 forwarded, the four-key `affinity` shorthand is evaluated exactly as before
 and forwarded as the raw `corev1` `affinity` (omitted when it evaluates to
 nothing), and `topologySpread` becomes a synthesized `topology-spread`
@@ -58,11 +58,11 @@ lowering anyway.
 
 **Both rules emit the component's ServiceAccount as a `serviceaccount`
 member** unless `serviceAccountName` is authored. A
-`worker` therefore lowers to a same-name sibling group of a `deployment` and
-a `serviceaccount`; a `webservice` to a `deployment`, a `service` and a
+`worker` therefore lowers to a same-name sibling group of a `role-deployment` and
+a `serviceaccount`; a `webservice` to a `role-deployment`, a `service` and a
 `serviceaccount`. The member carries `automountServiceAccountToken: false`,
 the component's annotations, and the authored `prune-protection` and
-`force-replace` traits. The `deployment` member is handed the account's
+`force-replace` traits. The `role-deployment` member is handed the account's
 object name as `serviceAccountName` (the component name, unless
 `serviceAccountObjectName` or the `Naming` hook names the account, below),
 so it runs as that account and generates none of its own. The output is unchanged: the same ServiceAccount,
@@ -72,7 +72,7 @@ register a `serviceaccount` component handler too, or the build fails with
 `member type "serviceaccount" has no component handler`.
 
 **Both rules turn each claim a `pvc` volume describes into a synthesized
-`pvc` trait** on the `deployment` member, named
+`pvc` trait** on the `role-deployment` member, named
 `<component>-<volume>` as before unless the volume's `claimObjectName` or
 the `Naming` hook names it (below), and rewrite the volume to reference it
 by `claimName`, keeping `accessModes` so the non-RWX constraints still see it.
@@ -83,9 +83,9 @@ handler too.
 **`webservice` is a component lowering rule, not a handler**
 (`WebserviceRule`). It runs webservice's own parse,
 then re-expresses the component as a same-name sibling group (see `pkg/oam`
-"Same-name sibling groups"): a `deployment` and then a `service`, both named
+"Same-name sibling groups"): a `role-deployment` and then a `service`, both named
 after the component, deployed as one component — one tier, one
-bundle. The `deployment` member gets the authored properties
+bundle. The `role-deployment` member gets the authored properties
 webservice declares except `port`, `topologySpread` and `affinity`, plus
 the main container's one port `{name: http, containerPort: <port>}`; the
 `affinity` shorthand and `topologySpread` are handled as on `worker`. The
@@ -94,9 +94,9 @@ selector `app: <component-name>`. Annotations go to both members. Each
 authored trait is forwarded unchanged, in authored order, to the member it
 acts on: `expose`, `ingress` and `httproute` go to the `service`;
 `prune-protection` and `force-replace` go to both; every other trait goes
-to the `deployment`. That includes `fluxcd-patches` and `fluxcd-postbuild`
+to the `role-deployment`. That includes `fluxcd-patches` and `fluxcd-postbuild`
 (not built in; a consumer that delivers through Flux registers them) and any
-trait type an extension registered, since the `deployment` member holds the
+trait type an extension registered, since the `role-deployment` member holds the
 pods. Webservice's published schema and its generated objects are
 unchanged, in the handler's order (Deployment, Service, ServiceAccount,
 claims). Each emitted component carries `Origin.Rule`

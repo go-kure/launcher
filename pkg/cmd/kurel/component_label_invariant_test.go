@@ -689,6 +689,11 @@ spec:
 		"url":  "https://github.example.com/org/app"}},
 	"role": {props: map[string]any{"rules": []any{
 		map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}}}}},
+	// The member webservice and worker lower into. The parser refuses it, so no
+	// document authors it; the fixture is for the tests that drive the handler.
+	"role-deployment": {
+		props: workloadProps(map[string]any{"replicas": 3}), longRefusal: containerNameRefusal, labelled: true, selectors: 1,
+	},
 	"rolebinding": {props: map[string]any{
 		"subjects": []any{map[string]any{"kind": "ServiceAccount", "name": "web"}},
 		"roleRef":  map[string]any{"kind": "Role", "name": "reader"}}},
@@ -902,6 +907,9 @@ func TestComponentLabelInvariant_FixturesCoverRegistry(t *testing.T) {
 func TestComponentLabelInvariant_ComponentTypes(t *testing.T) {
 	boundary, long := boundaryLabelComponentName(t), longLabelComponentName(t)
 	for _, typ := range slices.Sorted(maps.Keys(componentLabelFixtures)) {
+		if loweringOnlyTypes[typ] {
+			continue
+		}
 		fx := componentLabelFixtures[typ]
 		t.Run(typ, func(t *testing.T) {
 			props := fx.props

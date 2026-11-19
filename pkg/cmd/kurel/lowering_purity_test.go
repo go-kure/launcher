@@ -1245,6 +1245,9 @@ func TestLoweringPurity_FixtureBuildsAreRepeatable(t *testing.T) {
 		}
 	}
 	for _, typ := range slices.Sorted(maps.Keys(componentLabelFixtures)) {
+		if loweringOnlyTypes[typ] {
+			continue
+		}
 		t.Run("component/"+typ, func(t *testing.T) {
 			name, props := componentLabelFixtures[typ].directly(t, "purity")
 			check(t, labelInvariantApp(name, typ, props, "", nil))

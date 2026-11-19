@@ -61,8 +61,8 @@ The five rules (`webservice`, `worker`, `helm`, `postgresql`, `oci`) also implem
 
 | Rule | Components | Traits | Policies |
 |------|------------|--------|----------|
-| `webservice` | `deployment`, `service`, `serviceaccount` | `topology-spread`, `pvc` | |
-| `worker` | `deployment`, `serviceaccount` | `topology-spread`, `pvc` | |
+| `webservice` | `role-deployment`, `service`, `serviceaccount` | `topology-spread`, `pvc` | |
+| `worker` | `role-deployment`, `serviceaccount` | `topology-spread`, `pvc` | |
 | `helm` | `helmrelease`, `helmtemplate`, `helmrepository`, `ocirepository`, `gitrepository`, `bucket` | `configmap`, `secret` | |
 | `postgresql` | `cnpg-cluster`, `cnpg-objectstore`, `cnpg-pooler`, `cnpg-database`, `cnpg-scheduledbackup` | | `dependency`, `placement` |
 | `oci` | `ocirepository`, `fluxcd-kustomization` | | |
@@ -80,18 +80,18 @@ schema, where its value lands in the members, which is where the provenance repo
 Which keys the rule forwards is one decision the map and the rule share (`roleKeys` in
 `role_keys.go`), so they cannot disagree on it. The places of the keys the rule evaluates
 itself are a table beside it, held to the rule by tests. Every key not listed lands unchanged at the same key of the
-`deployment` member:
+`role-deployment` member (the type `webservice` and `worker` lower into, go-kure/launcher#1629):
 
 | Key | Lands at | Unchanged |
 |-----|----------|-----------|
-| `port` (`webservice`) | `deployment` `ports[0].containerPort`, `service` `ports[0].port` | no |
-| `affinity` | `deployment` `affinity`, as a Kubernetes affinity | no |
-| `volumes` | `deployment` `volumes`, and a `pvc` trait on it for each claim a volume generates | no |
-| `topologySpread` | the `topology-spread` trait on `deployment`, which holds no property | no |
-| `serviceAccountObjectName` | `deployment` `serviceAccountName`: the pods run as the account under the name it was given | no |
+| `port` (`webservice`) | `role-deployment` `ports[0].containerPort`, `service` `ports[0].port` | no |
+| `affinity` | `role-deployment` `affinity`, as a Kubernetes affinity | no |
+| `volumes` | `role-deployment` `volumes`, and a `pvc` trait on it for each claim a volume generates | no |
+| `topologySpread` | the `topology-spread` trait on `role-deployment`, which holds no property | no |
+| `serviceAccountObjectName` | `role-deployment` `serviceAccountName`: the pods run as the account under the name it was given | no |
 | `deploymentObjectName`, `serviceObjectName` (`webservice`) | no place: they name objects | |
 
-A `worker` with an authored `serviceAccountName` emits its deployment alone, and the report
+A `worker` with an authored `serviceAccountName` emits its `role-deployment` alone, and the report
 then names no member: the same places are read under the plain owner. `helm`, `postgresql`
 and `oci` publish no map. `postgresql` and `oci` build their members from moved and
 re-shaped keys. `helm` hands some keys on as written, a set that depends on the delivery
@@ -118,7 +118,7 @@ member's group is applied in. The rules of this package forward by what a trait 
   `fluxcd-postbuild`: not built in; a consumer that delivers through Flux registers
   them) goes to one member per bundle, never to two members of one group, so its
   handler sees it once per bundle. `webservice`, `worker` and an `oci` with its own
-  source emit one same-name sibling group, which is one bundle: the `deployment` member
+  source emit one same-name sibling group, which is one bundle: the `role-deployment` member
   carries the trait for the first two, the Kustomization for the third. `helm`, and an
   `oci` on a shared source, emit one component beside the source, and that component
   carries it.
@@ -292,8 +292,8 @@ reads it.
 | `validatingadmissionpolicybinding` | ValidatingAdmissionPolicyBinding | Kind-named ValidatingAdmissionPolicyBinding: its `ValidatingAdmissionPolicyBindingSpec`, strictly decoded; `policyName` and at least one of `validationActions` are required, and a `paramRef` as on a `mutatingadmissionpolicybinding`. Neither the policy nor the parameter is resolved at build. Served from Kubernetes 1.30. Cluster-scoped; only the environment policy's object kind rules apply — see below. |
 | `validatingwebhookconfiguration` | ValidatingWebhookConfiguration | Kind-named ValidatingWebhookConfiguration: its `webhooks`, strictly decoded, required as on a `mutatingwebhookconfiguration`. The API server calls it to admit or deny the requests of any namespace its rules match. Cluster-scoped; only the environment policy's object kind rules apply — see below. |
 | `volumeattributesclass` | VolumeAttributesClass | Kind-named VolumeAttributesClass: `driverName` and `parameters` (both required, `parameters` with at least one entry), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
-| `webservice` | Deployment, Service, ServiceAccount (+PVC) | HTTP service with replicas, probes, env, volumes. Lowered to a same-name `deployment`, `service` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WebserviceRule`) — see below. |
-| `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). Lowered to a same-name `deployment` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WorkerRule`) — see below. |
+| `webservice` | Deployment, Service, ServiceAccount (+PVC) | HTTP service with replicas, probes, env, volumes. Lowered to a same-name `role-deployment`, `service` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WebserviceRule`) — see below. |
+| `worker` | Deployment, ServiceAccount (+PVC) | Background workload (no Service/port). Lowered to a same-name `role-deployment` and (unless `serviceAccountName` is authored) `serviceaccount` group plus a `topology-spread` trait (`WorkerRule`) — see below. |
 
 Only the two role kinds, `webservice` and `worker`, emit a per-component
 ServiceAccount, and only when the component does not author
@@ -394,7 +394,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateCronJob` | batch/v1 CronJob | kind | `cronjob` | hand-written parser | - |
 | `kubernetes.CreateCustomResourceDefinition` | apiextensions.k8s.io/v1 CustomResourceDefinition (cluster-scoped) | component | `crd` | the manifest parser, CustomResourceDefinition documents only | The stated exception: an application takes its CRDs from upstream files (`inline` or `url`), so no kind component projects the spec. |
 | `kubernetes.CreateDaemonSet` | apps/v1 DaemonSet | kind | `daemonset` | hand-written parser | - |
-| `kubernetes.CreateDeployment` | apps/v1 Deployment | kind | `deployment` | hand-written parser | `webservice` and `worker` lower onto it. |
+| `kubernetes.CreateDeployment` | apps/v1 Deployment | kind | `deployment` | hand-written parser | `webservice` and `worker` lower onto the same parser, as the member `role-deployment`. |
 | `kubernetes.CreateEndpointSlice` | discovery.k8s.io/v1 EndpointSlice | kind | `endpointslice` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | A slice belongs to a Service only through its `kubernetes.io/service-name` label, authored under `labels` as a literal that does not follow the Service's `objectName`. `addressType` and an endpoint's `addresses` must be written. The addresses and FQDNs of its endpoints are not artifact sources. No environment policy applies. |
 | `kubernetes.CreateEndpoints` | v1 Endpoints | not authorable | - | - | Not offered: deprecated upstream in favour of EndpointSlice. |
 | `kubernetes.CreateEvent` | v1 Event | not authorable | - | - | A record the system writes at run time. |

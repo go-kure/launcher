@@ -51,7 +51,7 @@ func TestFluxSourceConfigs_LongTimeoutKeepsObjectMetadata(t *testing.T) {
 // template keep the label map the kind built, which the Deployment no longer
 // shares with them.
 func TestDeploymentConfig_ObjectMetadataStaysOffThePodTemplate(t *testing.T) {
-	cfg := &components.DeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
+	cfg := &components.RoleDeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
 		Metadata: oam.ObjectMetadata{
 			Labels:      map[string]string{"example.com/team": "payments", "app": "web"},
 			Annotations: map[string]string{"example.com/owner": "x"},
@@ -79,7 +79,7 @@ func TestDeploymentConfig_ObjectMetadataStaysOffThePodTemplate(t *testing.T) {
 // writes refuses to generate: the engine refuses it first on a component, and
 // a config built directly is held to the same.
 func TestDeploymentConfig_ObjectMetadataCannotReplaceTheAppLabel(t *testing.T) {
-	cfg := &components.DeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
+	cfg := &components.RoleDeploymentConfig{Name: "web", Image: "ghcr.io/example/web:v1.0.0", Replicas: 1,
 		Metadata: oam.ObjectMetadata{Labels: map[string]string{"app": "other"}}}
 	_, err := cfg.Generate(stack.NewApplication("web", "default", cfg))
 	if err == nil || !strings.Contains(err.Error(), `labels["app"]: "other" is not the value the component sets on its object ("web")`) {

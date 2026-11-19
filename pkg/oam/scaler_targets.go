@@ -23,10 +23,11 @@ var DefaultScaleTarget = ScaleTarget{APIVersion: "apps/v1", Kind: "Deployment"}
 // the type the engine stamps on a trait is the one the component settled to, and
 // those two stay in the table because they are admitted as authored.
 var scalerTargets = map[string]ScaleTarget{
-	"webservice":  DefaultScaleTarget,
-	"worker":      DefaultScaleTarget,
-	"deployment":  DefaultScaleTarget,
-	"statefulset": {APIVersion: "apps/v1", Kind: "StatefulSet"},
+	"webservice":      DefaultScaleTarget,
+	"worker":          DefaultScaleTarget,
+	"deployment":      DefaultScaleTarget,
+	"role-deployment": DefaultScaleTarget,
+	"statefulset":     {APIVersion: "apps/v1", Kind: "StatefulSet"},
 }
 
 // ScalerTargetFor returns the workload a scaler on a component of the given

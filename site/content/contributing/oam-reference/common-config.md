@@ -181,7 +181,7 @@ Text in square brackets is added here to say what a moved sentence refers to.
     `scaleTargetRef` naming a `StatefulSet`).
   - go-kure/launcher#1178 (`deployment` reports its pod template labels, its own and the ones
     `podMetadata.labels` adds).
-  - go-kure/launcher#1216 (the `deployment` member of a `webservice` or `worker` reports the
+  - go-kure/launcher#1216 (the `role-deployment` member of a `webservice` or `worker` reports the
     same, authored `podMetadata.labels` included).
   - go-kure/launcher#794 (`statefulset`, `daemonset`, `job` and `cronjob` have no
     `PodTemplateLabels` method, deliberately (item 3 of that issue)).

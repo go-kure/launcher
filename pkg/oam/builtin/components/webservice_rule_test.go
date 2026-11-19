@@ -136,8 +136,8 @@ func TestWebserviceRule_EmitsDeploymentAndService(t *testing.T) {
 	}
 	dep, svc := lowerWebservice(t, comp)
 
-	if dep.Name != "web" || dep.Type != "deployment" || svc.Name != "web" || svc.Type != "service" {
-		t.Fatalf("emitted %s/%s and %s/%s, want web/deployment and web/service", dep.Name, dep.Type, svc.Name, svc.Type)
+	if dep.Name != "web" || dep.Type != "role-deployment" || svc.Name != "web" || svc.Type != "service" {
+		t.Fatalf("emitted %s/%s and %s/%s, want web/role-deployment and web/service", dep.Name, dep.Type, svc.Name, svc.Type)
 	}
 	for _, m := range []oam.Component{dep, svc} {
 		if !reflect.DeepEqual(m.Annotations, comp.Annotations) {

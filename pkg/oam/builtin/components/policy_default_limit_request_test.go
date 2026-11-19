@@ -183,9 +183,9 @@ func TestPolicyDefaultLimit_ALimitThePolicyDidNotFillIsNotBlamedOnIt(t *testing.
 		"image":     "ghcr.io/org/app:v1",
 		"resources": map[string]any{"requests": map[string]any{"cpu": "100m"}, "limits": map[string]any{"cpu": "500m"}},
 	})
-	dc, ok := cfg.(*components.DeploymentConfig)
+	dc, ok := cfg.(*components.RoleDeploymentConfig)
 	if !ok {
-		t.Fatalf("config is %T, want *components.DeploymentConfig", cfg)
+		t.Fatalf("config is %T, want *components.RoleDeploymentConfig", cfg)
 	}
 	dc.Resources.Requests[corev1.ResourceCPU] = resource.MustParse("1")
 	err := dc.ApplyPolicy(&stubPolicy{defaultCPULimit: "250m"})

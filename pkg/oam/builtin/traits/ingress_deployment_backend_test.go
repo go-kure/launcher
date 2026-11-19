@@ -12,7 +12,7 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/traits"
 )
 
-// deploymentApp builds a stack.Application backed by a real DeploymentConfig,
+// deploymentApp builds a stack.Application backed by a real RoleDeploymentConfig,
 // through the handler the CLI dispatches. The existing no-service-port tests in
 // traits_test.go use a bare nil config, which proves the trait's behaviour but
 // says nothing about this component kind — and the kind is the point: unlike

@@ -75,7 +75,7 @@ func nameRoleMemberAt(comp *oam.Component, lctx oam.LoweringContext, member *oam
 }
 
 // roleServiceAccount moves a role component's per-component ServiceAccount out
-// of its deployment member into a `serviceaccount` sibling member
+// of its role-deployment member into a `serviceaccount` sibling member
 // (go-kure/launcher#702). When serviceAccountName is authored, the pod runs as
 // that existing account and nothing is emitted, as before; a
 // serviceAccountObjectName beside it would name an account the component does
@@ -117,7 +117,7 @@ func roleServiceAccount(comp *oam.Component, depProps map[string]any, traits []o
 }
 
 // roleClaims moves the claims a role component's `pvc` volumes generate out of
-// its deployment member into synthesized `pvc` traits (go-kure/launcher#702),
+// its role-deployment member into synthesized `pvc` traits (go-kure/launcher#702),
 // one per volume that does not reference an existing claim, in volume order.
 // Each trait carries the claim the deployment kind built before it stopped
 // generating claims — size, storageClassName (an authored "" included),

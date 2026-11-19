@@ -827,7 +827,7 @@ there, before this check.
 Seven `corev1.Container` fields are read on every container of a hand-parsed
 workload kind: as top-level keys for the main container
 of `deployment`, `statefulset`, `daemonset`, `job` and `cronjob` — and of
-`webservice` and `worker`, which forward them to their `deployment` member — and
+`webservice` and `worker`, which forward them to their `role-deployment` member — and
 as keys of each `initContainers` and `sidecars` entry.
 
 | Property | Type | Effect |
@@ -946,7 +946,7 @@ limit and default now apply to that claim, not to the volume.
 
 `webservice` and `worker` still accept a `pvc` volume that describes its
 claim. The rule turns each one into a synthesized `pvc` trait on its
-`deployment` member, named `<component>-<volume>` as before, and rewrites the
+`role-deployment` member, named `<component>-<volume>` as before, and rewrites the
 volume to reference it by `claimName`. The output is unchanged. The volume's
 `claimObjectName` names that claim instead (role
 `workload-volume-claim`; see the `deploymentObjectName` entry of
@@ -1124,7 +1124,7 @@ has them).
 
 Every pod kind config implements `oam.ServiceAccountNamer` (`pkg/oam/handler.go`),
 returning `(name, runsPods)`: the authored `serviceAccountName` (or `""`) and
-`true`. A role rule hands its `deployment` member the name of the account its
+`true`. A role rule hands its `role-deployment` member the name of the account its
 `serviceaccount` member generates (the component name, or the one
 `serviceAccountObjectName` or the `Naming` hook gave that object) unless
 `serviceAccountName` is authored, so a `webservice` or `worker` answers the
@@ -1307,7 +1307,7 @@ as ["The `app` label"](conventions.md#the-app-label) derives it (a name over 63 
 `objectName` or a Naming hook names the object. The type's own parse runs first, so a component it
 refuses has no endpoint and is refused in the parse's words. Sidecar ports are
 not the component's service surface and declare none. `job` and `cronjob`
-publish `ports` but report no endpoint, and `worker` lowers into a `deployment`
+publish `ports` but report no endpoint, and `worker` lowers into a `role-deployment`
 without ports, so it reports none. Only TCP endpoints
 synthesize a NetworkPolicy allow; a UDP or SCTP endpoint is collected and
 validated, and synthesizes nothing.
