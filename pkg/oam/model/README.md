@@ -76,7 +76,13 @@ So `types: [string]`, `types: [string, string]` and `types: [string, object]` ar
 are the union rules of the shared validator in `pkg/oam`. A malformed exclusive group on any node of an
 input schema is refused too, with the path of that node: a group of fewer than two keys, a key the
 node does not declare, a key in two groups, a `Required` key, or groups on a node that is not an
-object. These are the group rules of the same validator.
+object. These are the group rules of the same validator. A schema may set `requiredWhen` on a
+property of an object: `{key, equals}`, the property being required while the sibling `key` is set,
+or set to `equals` (a string or a boolean). The loader refuses a malformed rule with the path of the
+object: a key the object does not declare, the property itself, a `required` property, or an `equals`
+of another type than the key's or outside its `enum`. It refuses a `requiredWhen` on a node that is
+no property of an object (an input itself, an array's `items`, an `additionalPropertiesSchema`), which
+has no sibling to name.
 A null entry in a list of strings or of objects with fixed fields is refused with its path,
 because YAML would drop it. Examples are `types`, `values`, `parts`, `traits`, `exclusive` and the
 `keys` of an exclusive group. A list of free-form items keeps its nulls. Examples are `enum` and
