@@ -176,6 +176,47 @@ func TestStatefulsetHandler_FillCapabilityDefaults_AnySpelling(t *testing.T) {
 	}
 }
 
+// A null spelling beside a set one is accepted by the strict decode, which
+// skips the null. The fill must read the set spelling as the authored value and
+// leave the entry as it is, never write the platform class under the null one:
+// that would set the field twice and the decode would refuse the author for a
+// value the fill wrote.
+func TestStatefulsetHandler_FillCapabilityDefaults_NullBesideASetSpelling(t *testing.T) {
+	caps := pvcBinding(map[string]any{"storageClassName": "platform-ssd"})
+	for name, tc := range map[string]struct {
+		spec     map[string]any
+		wantFill bool
+	}{
+		"exact name null, other spelling set": {map[string]any{"storageClassName": nil, "STORAGECLASSNAME": "fast"}, false},
+		"capitalised null, lowercase set":     {map[string]any{"StorageClassName": nil, "storageclassname": "fast"}, false},
+		"other spelling null, exact name set": {map[string]any{"StorageClassName": nil, "storageClassName": "fast"}, false},
+		"both spellings null":                 {map[string]any{"StorageClassName": nil, "storageclassname": nil}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			props := map[string]any{"volumeClaimTemplates": []any{map[string]any{
+				"metadata": map[string]any{"name": "data"}, "spec": tc.spec,
+			}}}
+			got, err := (&components.StatefulsetHandler{}).FillCapabilityDefaults(props, oam.LoweringContext{}.WithCapabilities(caps))
+			if err != nil {
+				t.Fatalf("FillCapabilityDefaults: %v", err)
+			}
+			out := got["volumeClaimTemplates"].([]any)[0].(map[string]any)["spec"].(map[string]any)
+			var set []string
+			for k, v := range out {
+				if strings.EqualFold(k, "storageClassName") && v != nil {
+					set = append(set, k)
+				}
+			}
+			if len(set) != 1 {
+				t.Fatalf("spec sets storageClassName under %v, want exactly one spelling: %#v", set, out)
+			}
+			if filled := out[set[0]] == "platform-ssd"; filled != tc.wantFill {
+				t.Errorf("platform class written = %v, want %v: %#v", filled, tc.wantFill, out)
+			}
+		})
+	}
+}
+
 func TestStatefulsetHandler_FillCapabilityDefaults_ClassMustBeAString(t *testing.T) {
 	props := map[string]any{"volumeClaimTemplates": []any{map[string]any{"metadata": map[string]any{"name": "data"}}}}
 	_, err := (&components.StatefulsetHandler{}).FillCapabilityDefaults(props, oam.LoweringContext{}.WithCapabilities(pvcBinding(map[string]any{"storageClassName": 3})))
