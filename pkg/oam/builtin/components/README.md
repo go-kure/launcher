@@ -960,10 +960,6 @@ See [Upstream fields a hand-parsed kind does not read](/site/content/api-referen
 
 See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#one-level-down).
 
-### Not authorable, and not refusable by name
-
-See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#not-authorable-and-not-refusable-by-name).
-
 ### Outside the properties
 
 See [Upstream fields a hand-parsed kind does not read](/site/content/api-reference/oam-components/upstream-fields-not-read.md#outside-the-properties).

@@ -68,7 +68,6 @@ api-reference/oam-components/ below-the-top-level
 api-reference/oam-components/ refused-with-the-reason
 api-reference/oam-components/ read-in-another-shape
 api-reference/oam-components/ one-level-down
-api-reference/oam-components/ not-authorable-and-not-refusable-by-name
 api-reference/oam-components/ outside-the-properties
 api-reference/oam-components/ an-explicit-null-on-a-refused-key
 api-reference/oam-components/ what-holds-this
