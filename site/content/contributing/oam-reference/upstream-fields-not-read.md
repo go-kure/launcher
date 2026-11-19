@@ -38,13 +38,13 @@ Text in square brackets is added here to say what a moved sentence refers to.
 
 - **Tests:**
   - `TestHandParsedKinds_CoverEveryUpstreamField` walks the upstream type of
-    each of the ten kinds, from the object down every level whose fields are
+    each of the seven kinds (the six hand-parsed ones and the `role-deployment` member), from the object down every level whose fields are
     the component's properties, and fails on a field that is neither read, nor
     refused, nor placed in one of the classes above — so a field a later
     `k8s.io/api` adds cannot be dropped in silence. It stops at the properties:
     what a property holds inside is held to the upstream type only for a
     container's `resources` and the pod's `podResources`.
-    ["the classes above" are the reference's sections "Refused, with the reason", "Read in another shape", "One level down", "Not authorable, and not refusable by name" and "Outside the properties".]
+    ["the classes above" are the reference's sections "Refused, with the reason", "Read in another shape", "One level down" and "Outside the properties".]
   - `TestRefusedKeys_BothPathsGiveTheReason` holds every entry of every refusal
     map to the two texts above; `TestRefusedKeys_OneLevelDown` holds the two
     refusals inside a declared property.
