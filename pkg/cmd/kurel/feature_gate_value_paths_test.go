@@ -46,7 +46,7 @@ func valuesOutside(gates map[string]string, enum []string) []string {
 // TestFeatureGates_ValueGatedPathsNameRealFieldsAndValues holds every ValueGatedPaths path
 // to a field of the Kubernetes type its open node is decoded into, every value to that
 // type's enum, and every gate to a row of the lifecycle table, and holds the set of nodes
-// that carry one to the six listed in holders. It holds the raw table to the reshaped
+// that carry one to the seven listed in holders. It holds the raw table to the reshaped
 // kinds' shorthand table, so the two cannot diverge.
 func TestFeatureGates_ValueGatedPathsNameRealFieldsAndValues(t *testing.T) {
 	// The controls: a wrong path does not resolve, a mistyped value is reported, and a
@@ -85,7 +85,7 @@ func TestFeatureGates_ValueGatedPathsNameRealFieldsAndValues(t *testing.T) {
 	}
 	pod := schemaOf("pod")
 	holders := []holder{{"pod initContainers[]", *pod["initContainers"].Items, container}}
-	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment"} {
+	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset"} {
 		holders = append(holders, holder{kind + " template", schemaOf(kind)["template"], reflect.TypeOf(corev1.PodTemplateSpec{})})
 	}
 	holders = append(holders, holder{"cnpg-pooler template", schemaOf("cnpg-pooler")["template"], reflect.TypeOf(cnpgv1.PodTemplateSpec{})})

@@ -28,12 +28,12 @@ var podMetadataKinds = []struct {
 	job       bool
 }{
 	// The webservice and worker lower to the role-deployment member, which takes
-	// the property (go-kure/launcher#1216). The raw deployment kind takes none: its
-	// pod template metadata is template.metadata (TestPodMetadata_RawDeploymentRefusesIt).
+	// the property (go-kure/launcher#1216). The raw deployment and daemonset kinds take
+	// none: their pod template metadata is template.metadata
+	// (TestPodMetadata_RawKindsRefuseIt). The statefulset row stands for the Set kinds.
 	{typ: "webservice", kind: "Deployment", template: []string{"spec", "template"}, selector: true},
 	{typ: "worker", kind: "Deployment", template: []string{"spec", "template"}, selector: true},
 	{typ: "statefulset", kind: "StatefulSet", template: []string{"spec", "template"}, selector: true},
-	{typ: "daemonset", kind: "DaemonSet", template: []string{"spec", "template"}, selector: true},
 	{typ: "job", kind: "Job", template: []string{"spec", "template"}, job: true},
 	{typ: "cronjob", kind: "CronJob", template: []string{"spec", "jobTemplate", "spec", "template"}, job: true},
 }
@@ -170,15 +170,21 @@ func TestPodMetadata_JobKeysAreOrdinaryElsewhere(t *testing.T) {
 	}
 }
 
-// The raw deployment kind has no `podMetadata`: its pod template metadata is the
-// upstream template.metadata, so the reshaped property is an unsupported field
-// (go-kure/launcher#1629).
-func TestPodMetadata_RawDeploymentRefusesIt(t *testing.T) {
-	props := rawDeploymentProps("ghcr.io/example/app:v1.0.0")
-	props["podMetadata"] = map[string]any{"labels": map[string]any{podMetadataLabelKey: podMetadataLabelValue}}
-	_, err := renderLabelInvariantErr(t, labelInvariantApp("widget", "deployment", props, "", nil))
-	if err == nil || !strings.Contains(err.Error(), `unsupported field "podMetadata"`) {
-		t.Fatalf("err = %v\nwant a refusal naming unsupported field \"podMetadata\"", err)
+// The raw deployment and daemonset kinds have no `podMetadata`: their pod template
+// metadata is the upstream template.metadata, so the reshaped property is an
+// unsupported field (go-kure/launcher#1629).
+func TestPodMetadata_RawKindsRefuseIt(t *testing.T) {
+	for typ, props := range map[string]map[string]any{
+		"deployment": rawDeploymentProps("ghcr.io/example/app:v1.0.0"),
+		"daemonset":  rawDaemonsetProps("ghcr.io/example/app:v1.0.0"),
+	} {
+		t.Run(typ, func(t *testing.T) {
+			props["podMetadata"] = map[string]any{"labels": map[string]any{podMetadataLabelKey: podMetadataLabelValue}}
+			_, err := renderLabelInvariantErr(t, labelInvariantApp("widget", typ, props, "", nil))
+			if err == nil || !strings.Contains(err.Error(), `unsupported field "podMetadata"`) {
+				t.Fatalf("err = %v\nwant a refusal naming unsupported field \"podMetadata\"", err)
+			}
+		})
 	}
 }
 

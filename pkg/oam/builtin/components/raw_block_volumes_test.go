@@ -40,7 +40,6 @@ func blockKinds() []blockKind {
 		{"worker", workerViaRule{}, map[string]any{}, true},
 		{roleMemberType, &components.RoleDeploymentHandler{}, map[string]any{}, true},
 		{"statefulset", &components.StatefulsetHandler{}, map[string]any{}, true},
-		{"daemonset", &components.DaemonsetHandler{}, map[string]any{}, true},
 		{"job", &components.JobHandler{}, map[string]any{}, false},
 		{"cronjob", &components.CronjobHandler{}, map[string]any{"schedule": "0 2 * * *"}, false},
 	}

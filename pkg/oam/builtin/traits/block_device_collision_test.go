@@ -75,8 +75,8 @@ func TestMountDecorators_RefuseANameTakenByABlockDevice(t *testing.T) {
 		}
 		props map[string]any
 		// exact says props are the whole properties, with no image added: the
-		// raw deployment takes the upstream pod template, whose block device is a
-		// claim volume of the pod.
+		// raw deployment and daemonset take the upstream pod template, whose block
+		// device is a claim volume of the pod.
 		exact bool
 	}
 	rawBlock := rawDeploymentProps("app", "ghcr.io/org/app:v1", rawPod(map[string]any{
@@ -94,7 +94,7 @@ func TestMountDecorators_RefuseANameTakenByABlockDevice(t *testing.T) {
 		{"role-deployment", &components.RoleDeploymentHandler{}, blockPVC, false},
 		{"deployment", &components.DeploymentHandler{}, rawBlock, true},
 		{"statefulset", &components.StatefulsetHandler{}, blockPVC, false},
-		{"daemonset", &components.DaemonsetHandler{}, blockPVC, false},
+		{"daemonset", &components.DaemonsetHandler{}, rawBlock, true},
 		{"job", &components.JobHandler{}, blockPVC, false},
 		{"cronjob", &components.CronjobHandler{}, mergeBlockProps(blockPVC, map[string]any{"schedule": "0 2 * * *"}), false},
 		{"statefulset claim template", &components.StatefulsetHandler{}, map[string]any{"volumeClaimTemplates": []any{map[string]any{

@@ -1,902 +1,385 @@
 package components_test
 
 import (
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
+// The daemonset kind takes the upstream appsv1.DaemonSetSpec, as deployment and
+// replicaset take theirs (go-kure/launcher#1629). The reshaped form belongs to
+// webservice, worker and their member type role-deployment, and to the kinds that
+// have not moved yet.
+
 func TestDaemonsetHandler_CanHandle(t *testing.T) {
 	h := &components.DaemonsetHandler{}
 	if !h.CanHandle("daemonset") {
-		t.Error("expected true for daemonset")
+		t.Error("CanHandle(daemonset) = false")
 	}
-	if h.CanHandle("worker") {
-		t.Error("expected false for worker")
-	}
-}
-
-func TestDaemonsetHandler_RequiredImage_Missing(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name:       "agent",
-		Type:       "daemonset",
-		Properties: map[string]any{},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for missing image")
+	for _, other := range []string{"deployment", "role-deployment", "webservice", "statefulset", ""} {
+		if h.CanHandle(other) {
+			t.Errorf("CanHandle(%q) = true", other)
+		}
 	}
 }
 
-func TestDaemonsetHandler_Generate_ResourceTypes(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-		},
-	}, "default")
+// dsRich is a DaemonSet spec that sets every top-level field and a pod spec with
+// an init container, two containers and a probe.
+const dsRich = `minReadySeconds: 5
+revisionHistoryLimit: 4
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+selector:
+  matchLabels:
+    tier: agent
+template:
+  metadata:
+    labels:
+      tier: agent
+    annotations:
+      example.com/scrape: "true"
+  spec:
+    serviceAccountName: agent
+    tolerations:
+      - operator: Exists
+    initContainers:
+      - name: init
+        image: registry.example/team/init:1.0.0
+    containers:
+      - name: app
+        image: registry.example/team/app:1.2.3
+        ports:
+          - name: http
+            containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 2
+          successThreshold: 1
+          failureThreshold: 4
+      - name: proxy
+        image: registry.example/team/proxy:2.0.0
+        ports:
+          - name: metrics
+            containerPort: 9090
+`
+
+// dsPlain is the smallest daemonset component: a selector, and a template whose
+// labels it matches, running the given pod spec.
+func dsPlain(podSpec string) string {
+	return "selector:\n  matchLabels:\n    tier: agent\ntemplate:\n  metadata:\n    labels:\n      tier: agent\n  spec:\n" + htIndent(podSpec, "    ")
+}
+
+// dsGenerate generates a daemonset component under the given policies and
+// returns the DaemonSet.
+func dsGenerate(t *testing.T, name string, props map[string]any, policies ...oam.Policy) *appsv1.DaemonSet {
+	t.Helper()
+	return generateCoreKindUnder(t, &components.DaemonsetHandler{}, "daemonset", name, props, policies...).(*appsv1.DaemonSet)
+}
+
+// TestDaemonsetHandler_EmitsAuthoredSpec: the DaemonSet is named after the
+// component in the build namespace, unlabelled, and its spec is the authored
+// one, field for field, with one thing added: the `app` label on the pod
+// template, beside the authored labels.
+func TestDaemonsetHandler_EmitsAuthoredSpec(t *testing.T) {
+	var want appsv1.DaemonSetSpec
+	if err := yaml.UnmarshalStrict([]byte(dsRich), &want); err != nil {
+		t.Fatalf("decoding the test spec: %v", err)
+	}
+	want.Template.Labels["app"] = "agent"
+	ds := dsGenerate(t, "agent", ptObject(t, dsRich), ptStrictPolicy(), nil)
+	if ds.APIVersion != "apps/v1" || ds.Kind != "DaemonSet" {
+		t.Errorf("GVK = %s %s, want apps/v1 DaemonSet", ds.APIVersion, ds.Kind)
+	}
+	if ds.Name != "agent" || ds.Namespace != coreKindNamespace {
+		t.Errorf("name/namespace = %q/%q, want agent/%q", ds.Name, ds.Namespace, coreKindNamespace)
+	}
+	if !reflect.DeepEqual(ds.Spec, want) {
+		t.Errorf("spec differs from the authored one plus the app label:\n got %+v\nwant %+v", ds.Spec, want)
+	}
+}
+
+// TestDaemonsetHandler_FillsNothing: the kind adds no default of launcher's: a
+// policy that carries resource defaults fills none of them, and the pod keeps
+// the API's own posture on the service account token and on the protocol of a
+// port.
+func TestDaemonsetHandler_FillsNothing(t *testing.T) {
+	defaults := &stubPolicy{
+		defaultCPURequest: "100m", defaultMemoryRequest: "128Mi",
+		defaultCPULimit: "500m", defaultMemoryLimit: "256Mi",
+		defaultReplicas: int32ptr(2), defaultStorageSize: "1Gi",
+	}
+	pod := htPlainPod + "    ports:\n      - containerPort: 8080\n"
+	ds := dsGenerate(t, "agent", ptObject(t, dsPlain(pod)), defaults)
+	ps := ds.Spec.Template.Spec
+	if res := ps.Containers[0].Resources; len(res.Requests) != 0 || len(res.Limits) != 0 {
+		t.Errorf("resources = %+v, want none: the daemonset kind fills no policy default", res)
+	}
+	if ps.AutomountServiceAccountToken != nil {
+		t.Errorf("automountServiceAccountToken = %v, want it unset: the kind fills no value", *ps.AutomountServiceAccountToken)
+	}
+	if got := ps.Containers[0].Ports[0].Protocol; got != "" {
+		t.Errorf("port protocol = %q, want it unset as authored", got)
+	}
+	if len(ds.Labels) != 0 || len(ds.Annotations) != 0 {
+		t.Errorf("the DaemonSet carries labels %v and annotations %v, want none", ds.Labels, ds.Annotations)
+	}
+	if ds.Spec.UpdateStrategy.Type != "" || ds.Spec.MinReadySeconds != 0 || ds.Spec.RevisionHistoryLimit != nil {
+		t.Errorf("spec fields were filled: %+v", ds.Spec)
+	}
+}
+
+// TestDaemonsetHandler_ReportsNoBuiltinDefault: no config of the kind reports a
+// fill, since there is none to report.
+func TestDaemonsetHandler_ReportsNoBuiltinDefault(t *testing.T) {
+	cfg, err := (&components.DaemonsetHandler{}).ToApplicationConfig(
+		&oam.Component{Name: "agent", Type: "daemonset", Properties: ptObject(t, dsPlain(htPlainPod))}, coreKindNamespace)
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}
-
-	app := stack.NewApplication("agent", "default", cfg)
-	objects, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	var foundDS, foundSA bool
-	for _, obj := range objects {
-		switch (*obj).(type) {
-		case *appsv1.DaemonSet:
-			foundDS = true
-		case *corev1.ServiceAccount:
-			foundSA = true
-		}
-	}
-	if !foundDS {
-		t.Error("expected DaemonSet")
-	}
-	if foundSA {
-		t.Error("generated a ServiceAccount; a pod kind generates none (go-kure/launcher#702)")
+	if _, ok := cfg.(oam.BuiltinDefaultReporter); ok {
+		t.Error("the daemonset config reports builtin defaults, though the kind fills none")
 	}
 }
 
-func TestDaemonsetHandler_NoReplicas(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	// DaemonsetConfig must not implement MaxReplicas enforcement (no replicas field)
-	if _, ok := cfg.(interface{ Replicas() int32 }); ok {
-		t.Error("DaemonsetConfig should not expose Replicas()")
-	}
-}
-
-func TestDaemonsetConfig_ApplyPolicy_NilPolicy(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	enforceable := cfg.(oam.Enforceable)
-	if err := enforceable.ApplyPolicy(nil); err != nil {
-		t.Errorf("nil policy should be a no-op, got: %v", err)
-	}
-}
-
-func TestDaemonsetConfig_ApplyPolicy_AllowedRegistries(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "docker.io/library/agent:v1.0.0",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	enforceable := cfg.(oam.Enforceable)
-	p := &stubPolicy{allowedRegistries: []string{"ghcr.io"}}
-	if err := enforceable.ApplyPolicy(p); err == nil {
-		t.Error("expected error for disallowed registry")
-	}
-}
-
-func TestDaemonsetHandler_Tolerations_NonStringKey_Rejected(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"tolerations": []any{
-				map[string]any{
-					"key":    123,
-					"effect": "NoSchedule",
-				},
-			},
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for non-string toleration key")
-	}
-}
-
-func TestDaemonsetHandler_Tolerations_InvalidOperator_Rejected(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"tolerations": []any{
-				map[string]any{
-					"key":      "node-role.kubernetes.io/control-plane",
-					"operator": "Contains",
-				},
-			},
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for invalid toleration operator")
-	}
-}
-
-func TestDaemonsetHandler_Tolerations_InvalidEffect_Rejected(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"tolerations": []any{
-				map[string]any{
-					"key":    "node-role.kubernetes.io/control-plane",
-					"effect": "NoRun",
-				},
-			},
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for invalid toleration effect")
-	}
-}
-
-func TestDaemonsetHandler_WithTolerations(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"tolerations": []any{
-				map[string]any{
-					"key":      "node-role.kubernetes.io/control-plane",
-					"operator": "Exists",
-					"effect":   "NoSchedule",
-				},
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	app := stack.NewApplication("agent", "default", cfg)
-	objects, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	for _, obj := range objects {
-		if ds, ok := (*obj).(*appsv1.DaemonSet); ok {
-			if len(ds.Spec.Template.Spec.Tolerations) != 1 {
-				t.Errorf("expected 1 toleration, got %d", len(ds.Spec.Template.Spec.Tolerations))
-			}
-			return
+// TestDaemonsetHandler_Refusals: what the component refuses when it is read,
+// with no policy involved: the reshaped form (the main container's fields at the
+// top level, `sidecars`, `podMetadata`), a key that is no DaemonSetSpec field at
+// any depth, an unauthored selector or template, and what the pod kind refuses
+// of a pod spec, by its path under the template.
+func TestDaemonsetHandler_Refusals(t *testing.T) {
+	const notASpec = "properties do not decode into a apps/v1 DaemonSetSpec"
+	app := map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3"}
+	selector := map[string]any{"matchLabels": map[string]any{"tier": "agent"}}
+	with := func(extra map[string]any) map[string]any {
+		spec := map[string]any{"containers": []any{app}}
+		maps.Copy(spec, extra)
+		return map[string]any{
+			"selector": selector,
+			"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{"tier": "agent"}}, "spec": spec},
 		}
 	}
-	t.Error("DaemonSet not found")
-}
-
-// TestDaemonsetHandler_SharedTolerationParserReachesDaemonset pins the one part
-// of go-kure/launcher#412 that is NOT additive. parseTolerations and
-// schemaTolerations have exactly two callers — daemonset and deployment — so
-// completing the corev1.Toleration projection for the new kind also changed the
-// old one, and the README's compatibility section says so. This is that claim as
-// an executable oracle rather than prose: without it, no fixture and no test in
-// the repo authors a toleration on daemonset beyond the three-key happy path, so
-// a green suite says nothing about what daemonset now accepts.
-//
-// The split matters and is asserted per rule, and "per rule" means one subtest
-// for every row of README.md's "What `tolerations` changed for `daemonset`"
-// table, not for the ones that were convenient. Deliberately no count here: the
-// README's own summary of this table went stale twice on a count and a third
-// time on a partition claim, and a number in this comment is one more copy to
-// drift. Add a row there, add a subtest here, in the same change.
-//
-// Rows that are gains carry their own subtests: a rejection-only
-// oracle proves the shared parser is reached but not that daemonset still
-// accepts what the table promises it accepts, so a daemonset-only narrowing
-// would pass it. The rejection rows are NOT uniformly free — most cost
-// daemonset only documents the apiserver would have refused anyway (README
-// reason 1), but `tolerations` authored as a mapping and a `tolerationSeconds`
-// on any effect other than NoExecute were both being discarded unread, so a
-// document hitting either built and applied cleanly before (reason 2). The
-// oracle proves the shared parser is reached but not that daemonset still
-// accepts what the table promises it accepts, so a daemonset-only narrowing
-// would pass it.
-func TestDaemonsetHandler_SharedTolerationParserReachesDaemonset(t *testing.T) {
-	t.Run("tolerationSeconds is now honoured", func(t *testing.T) {
-		ds := generateDaemonSet(t, map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"tolerations": []any{
-				map[string]any{
-					"key":               "node.kubernetes.io/unreachable",
-					"operator":          "Exists",
-					"effect":            "NoExecute",
-					"tolerationSeconds": 300,
-				},
-			},
-		})
-		tols := ds.Spec.Template.Spec.Tolerations
-		if len(tols) != 1 {
-			t.Fatalf("Tolerations = %d, want 1", len(tols))
-		}
-		if tols[0].TolerationSeconds == nil {
-			t.Fatal("daemonset dropped an authored tolerationSeconds")
-		}
-		if got := *tols[0].TolerationSeconds; got != 300 {
-			t.Errorf("TolerationSeconds = %d, want 300", got)
-		}
-	})
-
-	// The second gain row. Lt and Gt were previously refused outright as
-	// unknown operators, so this is the one place the shared parser WIDENED
-	// what daemonset takes. Asserted through the handler rather than inferred
-	// from the deployment tests, which cannot see a daemonset-only narrowing:
-	// a guard added in daemonset.go that refused comparison operators before
-	// delegating would leave every other assertion in this package satisfied.
-	t.Run("Lt and Gt are now accepted", func(t *testing.T) {
-		ds := generateDaemonSet(t, map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"tolerations": []any{
-				map[string]any{"key": "capacity", "operator": "Gt", "value": "5"},
-				map[string]any{"key": "capacity", "operator": "Lt", "value": "20"},
-			},
-		})
-		tols := ds.Spec.Template.Spec.Tolerations
-		if len(tols) != 2 {
-			t.Fatalf("Tolerations = %d, want 2", len(tols))
-		}
-		if tols[0].Operator != corev1.TolerationOpGt || tols[0].Value != "5" {
-			t.Errorf("tolerations[0] = %+v, want operator Gt value 5", tols[0])
-		}
-		if tols[1].Operator != corev1.TolerationOpLt || tols[1].Value != "20" {
-			t.Errorf("tolerations[1] = %+v, want operator Lt value 20", tols[1])
-		}
-	})
-
-	// The third gain row: an explicit null on a toleration's scalar now reads as
-	// omission rather than failing conversion with "must be a string, got
-	// <nil>". Asserted on daemonset because the null arrives here intact —
-	// withoutExplicitNulls strips only top-level properties — so this is a
-	// document the schema declares valid that the parser used to refuse.
-	t.Run("an explicit null on a scalar reads as omission", func(t *testing.T) {
-		ds := generateDaemonSet(t, map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"tolerations": []any{
-				map[string]any{"key": nil, "operator": "Exists", "value": nil, "effect": nil},
-			},
-		})
-		tols := ds.Spec.Template.Spec.Tolerations
-		if len(tols) != 1 {
-			t.Fatalf("Tolerations = %d, want 1", len(tols))
-		}
-		if tols[0].Key != "" || tols[0].Value != "" || tols[0].Effect != "" {
-			t.Errorf("tolerations[0] = %+v, want the nulled scalars to read as empty", tols[0])
-		}
-		if tols[0].Operator != corev1.TolerationOpExists {
-			t.Errorf("Operator = %q, want Exists", tols[0].Operator)
-		}
-	})
-
-	// The mapping row does not fit the entry-shaped table below: it is the whole
-	// `tolerations` property that carries the wrong container type, not one
-	// entry. This is a reason-2 rejection — the mistyped block was previously
-	// discarded without a word and the workload built and applied without any
-	// tolerations at all.
-	t.Run("now rejected: tolerations authored as a mapping", func(t *testing.T) {
-		h := &components.DaemonsetHandler{}
-		_, err := h.ToApplicationConfig(&oam.Component{
-			Name: "agent",
-			Type: "daemonset",
-			Properties: map[string]any{
-				"image":       "ghcr.io/org/agent:v1.0.0",
-				"tolerations": map[string]any{"key": "dedicated", "operator": "Exists"},
-			},
-		}, "default")
-		if err == nil {
-			t.Fatal("got nil error, want one containing \"must be an array\"")
-		}
-		if !strings.Contains(err.Error(), "tolerations: must be an array") {
-			t.Errorf("error = %q, want it to contain %q", err.Error(), "tolerations: must be an array")
-		}
-	})
-
-	// Each of these is a document daemonset accepted before this work. All but
-	// the last are reason-1 rows — nothing appliable is lost, because the
-	// apiserver refused them anyway. The tolerationSeconds/NoExecute row is
-	// reason 2: the key was never read, so no such pair ever reached a cluster
-	// and the document applied cleanly. See the README table for the per-rule
-	// argument and the upstream citations.
-	rejections := []struct {
-		name       string
-		toleration map[string]any
-		want       string
+	top := func(extra map[string]any) map[string]any {
+		props := with(nil)
+		maps.Copy(props, extra)
+		return props
+	}
+	for name, tc := range map[string]struct {
+		props map[string]any
+		want  string
 	}{
-		{
-			"unrecognised key inside a toleration entry",
-			map[string]any{"key": "dedicated", "operator": "Exists", "tolerationSecond": 30},
-			`unrecognized key "tolerationSecond"`,
-		},
-		{
-			"empty key with a non-Exists operator",
-			map[string]any{"operator": "Equal", "value": "batch", "effect": "NoSchedule"},
-			"must be 'Exists' when key is empty",
-		},
-		{
-			"value under Exists",
-			map[string]any{"key": "dedicated", "operator": "Exists", "value": "batch"},
-			"must be empty when operator is 'Exists'",
-		},
-		{
-			// The counterpart of the gain above: the key was previously
-			// dropped whatever it held, so a malformed one was ignored along
-			// with the rest. Reading the key and type-checking it are the same
-			// change, and this is the half that costs daemonset a document.
-			"malformed tolerationSeconds",
-			map[string]any{"key": "dedicated", "operator": "Exists", "effect": "NoExecute", "tolerationSeconds": "300"},
-			"must be an integer",
-		},
-		{
-			"a non-empty key that is not a qualified name",
-			map[string]any{"key": "not a key!", "operator": "Exists"},
-			`invalid label key "not a key!"`,
-		},
-		{
-			"an invalid label value under Equal",
-			map[string]any{"key": "dedicated", "operator": "Equal", "value": "not a value!"},
-			`invalid label value "not a value!"`,
-		},
-		{
-			// The reason-2 row. The key was previously dropped whatever it
-			// held, so the emitted toleration carried no deadline and the
-			// apiserver accepted it — this costs daemonset a document that
-			// built and applied, unlike every row above it.
-			"tolerationSeconds without effect NoExecute",
-			map[string]any{"key": "dedicated", "operator": "Exists", "effect": "NoSchedule", "tolerationSeconds": 30},
-			"must be 'NoExecute' when tolerationSeconds is set",
-		},
-	}
-	for _, tc := range rejections {
-		t.Run("now rejected: "+tc.name, func(t *testing.T) {
-			h := &components.DaemonsetHandler{}
-			_, err := h.ToApplicationConfig(&oam.Component{
-				Name: "agent",
-				Type: "daemonset",
-				Properties: map[string]any{
-					"image":       "ghcr.io/org/agent:v1.0.0",
-					"tolerations": []any{tc.toleration},
-				},
-			}, "default")
-			if err == nil {
-				t.Fatalf("got nil error, want one containing %q", tc.want)
-			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("error = %q, want it to contain %q", err.Error(), tc.want)
+		"no properties":                  {nil, "selector: required"},
+		"no selector":                    {map[string]any{"template": with(nil)["template"]}, "selector: required"},
+		"no template":                    {map[string]any{"selector": selector}, "template.spec.containers: required"},
+		"the reshaped image":             {top(map[string]any{"image": "registry.example/team/app:1.2.3"}), notASpec},
+		"the reshaped sidecars":          {top(map[string]any{"sidecars": []any{}}), notASpec},
+		"the reshaped podMetadata":       {top(map[string]any{"podMetadata": map[string]any{}}), notASpec},
+		"the reshaped tolerations":       {top(map[string]any{"tolerations": []any{}}), notASpec},
+		"a deployment's field":           {top(map[string]any{"replicas": 2}), notASpec},
+		"a statefulset's field":          {top(map[string]any{"serviceName": "agent"}), notASpec},
+		"minReadySeconds a string":       {top(map[string]any{"minReadySeconds": "five"}), notASpec},
+		"unknown key in a container":     {with(map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3", "bogus": 1}}}), notASpec},
+		"the reshaped volume mountPath":  {with(map[string]any{"volumes": []any{map[string]any{"name": "d", "emptyDir": map[string]any{}, "mountPath": "/d"}}}), notASpec},
+		"the reshaped container probes":  {with(map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3", "probes": map[string]any{}}}}), notASpec},
+		"two spellings":                  {top(map[string]any{"minReadySeconds": 1, "MinReadySeconds": 2}), "sets the same field as"},
+		"active deadline":                {with(map[string]any{"activeDeadlineSeconds": 600}), "template.spec.activeDeadlineSeconds: not supported"},
+		"ephemeral containers":           {with(map[string]any{"ephemeralContainers": []any{map[string]any{"name": "debug", "image": "registry.example/debug:1"}}}), "template.spec.ephemeralContainers: not supported"},
+		"priority":                       {with(map[string]any{"priority": 1000}), "template.spec.priority: not authorable"},
+		"overhead":                       {with(map[string]any{"overhead": map[string]any{"cpu": "100m"}}), "template.spec.overhead: not authorable"},
+		"untagged image":                 {with(map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/app"}}}), `template.spec.containers[0] "app": image "registry.example/team/app" rejected: no tag or digest specified`},
+		"latest init image":              {with(map[string]any{"initContainers": []any{map[string]any{"name": "init", "image": "busybox:latest"}}}), `template.spec.initContainers[0] "init": image "busybox:latest" rejected: :latest tag not allowed`},
+		"duplicate container names":      {with(map[string]any{"containers": []any{app, app}}), `container name "app" is also used by template.spec.containers[0]`},
+		"a selector with a bad operator": {top(map[string]any{"selector": map[string]any{"matchExpressions": []any{map[string]any{"key": "tier", "operator": "Bogus"}}}}), `selector: "Bogus" is not a valid label selector operator`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := coreKindErr(&components.DaemonsetHandler{}, "daemonset", "agent", tc.props)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
 			}
 		})
 	}
 }
 
-// TestDaemonsetConfig_PortsEmitNoService pins go-kure/launcher#690: the
-// migration of a removed `port: N` is `ports: [{name: http, containerPort: N}]`,
-// which declares the container port and emits no Service.
-func TestDaemonsetConfig_PortsEmitNoService(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"ports": []any{map[string]any{"name": "http", "containerPort": 9090}},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	app := stack.NewApplication("agent", "default", cfg)
-	objects, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	if len(objects) != 1 {
-		t.Fatalf("expected 1 object (the DaemonSet), got %d", len(objects))
-	}
-	ds, ok := (*objects[0]).(*appsv1.DaemonSet)
-	if !ok {
-		t.Fatalf("objects[0] = %T, want *DaemonSet", *objects[0])
-	}
-	want := []corev1.ContainerPort{{Name: "http", ContainerPort: 9090, Protocol: corev1.ProtocolTCP}}
-	if got := ds.Spec.Template.Spec.Containers[0].Ports; !reflect.DeepEqual(got, want) {
-		t.Errorf("container ports = %#v, want %#v", got, want)
+// TestDaemonsetHandler_ActiveDeadlineReasonNamesTheKind: the API server forbids
+// template.spec.activeDeadlineSeconds on a DaemonSet, and the refusal says so.
+func TestDaemonsetHandler_ActiveDeadlineReasonNamesTheKind(t *testing.T) {
+	props := ptObject(t, dsPlain(htPlainPod+"activeDeadlineSeconds: 600\n"))
+	err := coreKindErr(&components.DaemonsetHandler{}, "daemonset", "agent", props)
+	if err == nil || !strings.Contains(err.Error(), "DaemonSet") {
+		t.Fatalf("err = %v, want a refusal that names DaemonSet", err)
 	}
 }
 
-func TestDaemonsetConfig_WithoutPort(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	app := stack.NewApplication("agent", "default", cfg)
-	objects, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	for _, obj := range objects {
-		if _, ok := (*obj).(*corev1.Service); ok {
-			t.Error("expected no Service")
+// TestDaemonsetHandler_SelectorAndTheAppLabel: a selector that matches the
+// authored template labels and stops matching once the `app` label is on them is
+// refused, and an authored `app` label with another value is refused too.
+func TestDaemonsetHandler_SelectorAndTheAppLabel(t *testing.T) {
+	rules := func(op string) map[string]any {
+		return map[string]any{
+			"selector": map[string]any{"matchExpressions": []any{map[string]any{"key": "app", "operator": op}}},
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"tier": "agent"}},
+				"spec":     map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3"}}},
+			},
 		}
 	}
-	if len(objects) != 1 {
-		t.Errorf("expected 1 object (the DaemonSet), got %d", len(objects))
+	err := coreKindErr(&components.DaemonsetHandler{}, "daemonset", "agent", rules("DoesNotExist"))
+	if err == nil || !strings.Contains(err.Error(), "selector: rules out the label `app: agent`") {
+		t.Errorf("DoesNotExist: err = %v, want the app-label refusal", err)
+	}
+	if err := coreKindErr(&components.DaemonsetHandler{}, "daemonset", "agent", rules("Exists")); err != nil {
+		t.Errorf("Exists: refused: %v", err)
+	}
+	other := ptObject(t, dsPlain(htPlainPod))
+	other["template"].(map[string]any)["metadata"].(map[string]any)["labels"].(map[string]any)["app"] = "frontend"
+	err = coreKindErr(&components.DaemonsetHandler{}, "daemonset", "agent", other)
+	if err == nil || !strings.Contains(err.Error(), "template.metadata.labels.app: \"frontend\" is not the `app` label of component \"agent\"") {
+		t.Errorf("another app label: err = %v, want the refusal", err)
+	}
+	if ds := dsGenerate(t, "agent", ptObject(t, dsPlain(htPlainPod))); ds.Spec.Template.Labels["app"] != "agent" {
+		t.Errorf("template labels = %v, want the app label", ds.Spec.Template.Labels)
 	}
 }
 
-// TestDaemonsetHandler_NamedProbePort_WithoutPort_Error: without `ports` the
-// main container declares no port, so a named probe port has nothing to
-// resolve against (go-kure/launcher#278 wave-11 finding 5).
-func TestDaemonsetHandler_NamedProbePort_WithoutPort_Error(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"probes": map[string]any{
-				"liveness": map[string]any{
-					"httpGet": map[string]any{"port": "http", "path": "/healthz"},
-				},
-			},
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for a named probe port when no port is configured")
-	}
-}
-
-func TestDaemonsetHandler_WithSharedPodFields(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image":      "ghcr.io/org/agent:v1.0.0",
-			"workingDir": "/agent",
-			"envFrom": []any{
-				map[string]any{"configMapRef": map[string]any{"name": "agent-cfg"}},
-			},
-			"lifecycle": map[string]any{
-				"postStart": map[string]any{
-					"httpGet": map[string]any{"path": "/started", "port": 8080},
-				},
-			},
-			"securityContext": map[string]any{
-				"privileged": true,
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	app := stack.NewApplication("agent", "default", cfg)
-	objects, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	for _, obj := range objects {
-		if ds, ok := (*obj).(*appsv1.DaemonSet); ok {
-			c := ds.Spec.Template.Spec.Containers[0]
-			if c.WorkingDir != "/agent" {
-				t.Errorf("expected workingDir, got %q", c.WorkingDir)
-			}
-			if len(c.EnvFrom) != 1 {
-				t.Errorf("expected 1 envFrom entry, got %d", len(c.EnvFrom))
-			}
-			if c.Lifecycle == nil || c.Lifecycle.PostStart == nil || c.Lifecycle.PostStart.HTTPGet == nil {
-				t.Error("expected postStart.httpGet lifecycle hook")
-			}
-			if c.SecurityContext == nil || c.SecurityContext.Privileged == nil || !*c.SecurityContext.Privileged {
-				t.Error("expected privileged=true")
-			}
-			return
-		}
-	}
-	t.Error("DaemonSet not found in output")
-}
-
-func TestDaemonsetConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"securityContext": map[string]any{
-				"privileged": true,
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
-		t.Error("expected error when privileged=true and policy disallows it")
-	}
-	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: true}); err != nil {
-		t.Errorf("expected no error when policy allows privileged, got %v", err)
-	}
-}
-
-// TestDaemonsetConfig_ApplyPolicy_HostPathDenied is daemonset's sibling of
-// TestWebserviceConfig_ApplyPolicy_HostPathDenied (go-kure/launcher#284, P1) — the
-// same shared ApplyPolicy gap, same shared enforceHostPathVolumes fix.
-func TestDaemonsetConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"volumes": []any{
-				map[string]any{
-					"name":      "logs",
-					"type":      "hostPath",
-					"mountPath": "/var/log",
-					"path":      "/var/log/app",
-				},
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-	if err := enforceable.ApplyPolicy(&stubPolicy{allowHostPathVols: false}); err == nil {
-		t.Error("expected error when a hostPath volume is authored and policy disallows it")
-	}
-}
-
-// TestDaemonsetConfig_ApplyPolicy_CapabilityAddDenied is daemonset's sibling
-// of TestWebserviceConfig_ApplyPolicy_CapabilityAddDenied
-// (go-kure/launcher#305) — the same shared ApplyPolicy gap, same shared
-// enforceContainerCapabilities fix.
-func TestDaemonsetConfig_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/agent:v1.0.0",
-			"securityContext": map[string]any{
-				"capabilities": map[string]any{
-					"add": []any{"NET_ADMIN"},
-				},
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-	if err := enforceable.ApplyPolicy(&stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}}); err == nil {
-		t.Error("expected error when capabilities.add includes a forbidden capability")
-	}
-}
-
-// TestDaemonsetConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault is
-// daemonset's sibling of the two webservice
-// TestWebserviceConfig_ApplyPolicy_Max{CPU,Memory}_AgainstIntrinsicDefault
-// cases (go-kure/launcher#251) — proving enforceMaxResources is actually wired into
-// DaemonsetConfig.ApplyPolicy, not just added to enforce.go.
-func TestDaemonsetConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *testing.T) {
-	cases := []struct {
-		name   string
-		policy stubPolicy
+// TestDaemonsetPolicy_PodTemplate: the pod template is held to the environment
+// policy for every container, the init containers included, and a violation names
+// its path under the template.
+func TestDaemonsetPolicy_PodTemplate(t *testing.T) {
+	const image = "image: registry.example/team/app:1.2.3\n"
+	pods := map[string]struct {
+		pod  string
+		want string
 	}{
-		{"cpu", stubPolicy{maxCPU: "50m"}},
-		{"memory", stubPolicy{maxMemory: "64Mi"}},
+		"a privileged second container": {
+			"containers:\n  - name: app\n    " + image + "  - name: side\n    " + image + "    securityContext:\n      privileged: true\n",
+			"template.spec.containers[1]"},
+		"a privileged init container": {
+			"initContainers:\n  - name: setup\n    " + image + "    securityContext:\n      privileged: true\ncontainers:\n  - name: app\n    " + image,
+			"template.spec.initContainers[0]"},
+		"a cpu limit over the maximum": {
+			"containers:\n  - name: app\n    " + image + "    resources:\n      limits:\n        cpu: \"8\"\n",
+			"template.spec.containers[0]"},
+		"an image outside the allowlist": {
+			"containers:\n  - name: app\n    " + image + "  - name: side\n    image: other.example/team/side:1.0.0\n",
+			"template.spec.containers[1]"},
+		"host networking": {
+			htPlainPod + "hostNetwork: true\n",
+			"template.spec"},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := &components.DaemonsetHandler{}
-			cfg, err := h.ToApplicationConfig(&oam.Component{
-				Name: "agent",
-				Type: "daemonset",
-				Properties: map[string]any{
-					"image": "ghcr.io/org/agent:v1.0.0",
-				},
-			}, "default")
+	for name, tc := range pods {
+		t.Run(name, func(t *testing.T) {
+			_, err := pvTransform("daemonset", &components.DaemonsetHandler{}, ptObject(t, dsPlain(tc.pod)), pvPolicy(ptStrictPolicy()))
+			htWantViolation(t, err, tc.want)
+		})
+	}
+	// The same pod spec with nothing the policy forbids builds.
+	if _, err := pvTransform("daemonset", &components.DaemonsetHandler{}, ptObject(t, dsPlain(htPlainPod)), pvPolicy(ptStrictPolicy())); err != nil {
+		t.Errorf("a plain pod: %v", err)
+	}
+}
+
+// TestDaemonsetHandler_EndpointsComeFromTheFirstContainer: the endpoints are the
+// ports of the first container of the template, in the authored order; the ports
+// of a later container are not the component's service surface.
+func TestDaemonsetHandler_EndpointsComeFromTheFirstContainer(t *testing.T) {
+	h := &components.DaemonsetHandler{}
+	eps, err := h.Endpoints(&oam.Component{Name: "agent", Type: "daemonset", Properties: ptObject(t, dsRich)})
+	if err != nil {
+		t.Fatalf("Endpoints: %v", err)
+	}
+	if len(eps) != 1 || eps[0].Name != "http" || eps[0].Ports[0].IntValue() != 8080 {
+		t.Errorf("endpoints = %+v, want the one http:8080 of the first container", eps)
+	}
+	eps, err = h.Endpoints(&oam.Component{Name: "agent", Type: "daemonset", Properties: ptObject(t, dsPlain(htPlainPod))})
+	if err != nil || len(eps) != 0 {
+		t.Errorf("a component with no ports: endpoints = %+v, err = %v; want none", eps, err)
+	}
+	if _, err := h.Endpoints(&oam.Component{Name: "agent", Type: "daemonset", Properties: map[string]any{"image": "x"}}); err == nil {
+		t.Error("Endpoints of a refused component returned no error")
+	}
+}
+
+// TestDaemonsetConfig_ServiceAccountName: the DaemonSet reports the account its
+// pods run as to the traits that bind identity to it: the template's
+// serviceAccountName, the deprecated serviceAccount where that one is unset, and
+// "" for the namespace's default account. It always runs pods.
+func TestDaemonsetConfig_ServiceAccountName(t *testing.T) {
+	for name, tc := range map[string]struct {
+		podSpec string
+		want    string
+	}{
+		"none authored":      {htPlainPod, ""},
+		"serviceAccountName": {htPlainPod + "serviceAccountName: agent\n", "agent"},
+		"deprecated alias":   {htPlainPod + "serviceAccount: legacy\n", "legacy"},
+		"both":               {htPlainPod + "serviceAccountName: agent\nserviceAccount: legacy\n", "agent"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := (&components.DaemonsetHandler{}).ToApplicationConfig(
+				&oam.Component{Name: "agent", Type: "daemonset", Properties: ptObject(t, dsPlain(tc.podSpec))}, coreKindNamespace)
 			if err != nil {
 				t.Fatalf("ToApplicationConfig: %v", err)
 			}
-			enforceable := cfg.(oam.Enforceable)
-			err = enforceable.ApplyPolicy(&tc.policy)
-			if err == nil {
-				t.Fatal("expected error when the intrinsic default exceeds the enforced maximum")
+			namer, ok := cfg.(oam.ServiceAccountNamer)
+			if !ok {
+				t.Fatal("the daemonset config does not implement oam.ServiceAccountNamer")
 			}
-			if !strings.Contains(err.Error(), "generated default") {
-				t.Errorf("expected error to mark the value as a generated default, got %q", err.Error())
-			}
-		})
-	}
-}
-
-// The four tests below are daemonset's siblings of the
-// TestWebserviceConfig_ApplyPolicy_InitContainer* tests (go-kure/launcher#312)
-// — same shared ApplyPolicy gap, same enforceExtraContainer fix. daemonset
-// had no sidecars schema key then, so these cover the init container loop;
-// TestDaemonsetConfig_ApplyPolicy_Sidecars below covers the sidecar loop it
-// gained with the key (go-kure/launcher#790).
-
-func TestDaemonsetConfig_ApplyPolicy_InitContainerResourcesDenied(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	component := &oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image":     "ghcr.io/org/agent:v1.0.0",
-			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
-			"initContainers": []any{
-				map[string]any{"name": "init", "image": "ghcr.io/org/init:v1"},
-			},
-		},
-	}
-	cfg, err := h.ToApplicationConfig(component, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-
-	err = enforceable.ApplyPolicy(&stubPolicy{maxCPU: "50m"})
-	if err == nil {
-		t.Fatal("expected error when the init container's intrinsic default CPU request exceeds the enforced maximum")
-	}
-	if !strings.Contains(err.Error(), "initContainers[0]") {
-		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
-	}
-	if !strings.Contains(err.Error(), "generated default") {
-		t.Errorf("expected error to mark the value as a generated default, got %q", err.Error())
-	}
-	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
-		t.Errorf("expected no error under a permissive policy, got %v", err)
-	}
-}
-
-func TestDaemonsetConfig_ApplyPolicy_InitContainerRegistryDenied(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	component := &oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image":     "ghcr.io/org/agent:v1.0.0",
-			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
-			"initContainers": []any{
-				map[string]any{"name": "init", "image": "docker.io/x/y:v1"},
-			},
-		},
-	}
-	cfg, err := h.ToApplicationConfig(component, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-
-	err = enforceable.ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}})
-	if err == nil {
-		t.Fatal("expected error when the init container's image is not from an allowed registry")
-	}
-	if !strings.Contains(err.Error(), "initContainers[0]") {
-		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
-	}
-	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
-		t.Errorf("expected no error under a permissive policy, got %v", err)
-	}
-}
-
-func TestDaemonsetConfig_ApplyPolicy_InitContainerPrivilegedDenied(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	component := &oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image":     "ghcr.io/org/agent:v1.0.0",
-			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
-			"initContainers": []any{
-				map[string]any{
-					"name": "init", "image": "ghcr.io/org/init:v1",
-					"securityContext": map[string]any{"privileged": true},
-				},
-			},
-		},
-	}
-	cfg, err := h.ToApplicationConfig(component, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-
-	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
-		t.Error("expected error when the init container is privileged and policy disallows it")
-	} else if !strings.Contains(err.Error(), "initContainers[0]") {
-		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
-	}
-	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: true}); err != nil {
-		t.Errorf("expected no error when policy allows privileged, got %v", err)
-	}
-}
-
-func TestDaemonsetConfig_ApplyPolicy_InitContainerCapabilitiesDenied(t *testing.T) {
-	h := &components.DaemonsetHandler{}
-	component := &oam.Component{
-		Name: "agent",
-		Type: "daemonset",
-		Properties: map[string]any{
-			"image":     "ghcr.io/org/agent:v1.0.0",
-			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
-			"initContainers": []any{
-				map[string]any{
-					"name": "init", "image": "ghcr.io/org/init:v1",
-					"securityContext": map[string]any{
-						"capabilities": map[string]any{"add": []any{"NET_ADMIN"}},
-					},
-				},
-			},
-		},
-	}
-	cfg, err := h.ToApplicationConfig(component, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-
-	if err := enforceable.ApplyPolicy(&stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}}); err == nil {
-		t.Error("expected error when the init container adds a forbidden capability")
-	} else if !strings.Contains(err.Error(), "initContainers[0]") {
-		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
-	}
-	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
-		t.Errorf("expected no error under the default-allow NoopPolicy-equivalent stub, got %v", err)
-	}
-}
-
-// TestDaemonsetConfig_ApplyPolicy_Sidecars: a daemonset sidecar is held to the
-// four checks an init container is (resources, registry, privileged,
-// capabilities), each refusal naming the sidecar, and passes a policy that
-// allows it. A sidecar on a DaemonSet runs on every node, so an unenforced one
-// would be the widest hole of any kind.
-func TestDaemonsetConfig_ApplyPolicy_Sidecars(t *testing.T) {
-	cases := []struct {
-		name    string
-		sidecar map[string]any
-		deny    *stubPolicy
-		allow   *stubPolicy
-		want    string
-	}{
-		{
-			name:    "generated default resources over the maximum",
-			sidecar: map[string]any{"name": "proxy", "image": "ghcr.io/org/proxy:v1"},
-			deny:    &stubPolicy{maxCPU: "50m"},
-			allow:   &stubPolicy{},
-			want:    "generated default",
-		},
-		{
-			name:    "registry not allowed",
-			sidecar: map[string]any{"name": "proxy", "image": "docker.io/x/y:v1"},
-			deny:    &stubPolicy{allowedRegistries: []string{"ghcr.io"}},
-			allow:   &stubPolicy{},
-			want:    "not from an allowed registry",
-		},
-		{
-			name: "privileged",
-			sidecar: map[string]any{
-				"name": "proxy", "image": "ghcr.io/org/proxy:v1",
-				"securityContext": map[string]any{"privileged": true},
-			},
-			deny:  &stubPolicy{allowPrivileged: false},
-			allow: &stubPolicy{allowPrivileged: true},
-			want:  "privileged",
-		},
-		{
-			name: "forbidden capability",
-			sidecar: map[string]any{
-				"name": "proxy", "image": "ghcr.io/org/proxy:v1",
-				"securityContext": map[string]any{"capabilities": map[string]any{"add": []any{"NET_ADMIN"}}},
-			},
-			deny:  &stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}},
-			allow: &stubPolicy{},
-			want:  "NET_ADMIN",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			build := func() oam.Enforceable {
-				cfg, err := (&components.DaemonsetHandler{}).ToApplicationConfig(&oam.Component{
-					Name: "agent",
-					Type: "daemonset",
-					Properties: map[string]any{
-						"image":     "ghcr.io/org/agent:v1.0.0",
-						"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
-						"sidecars":  []any{tc.sidecar},
-					},
-				}, "default")
-				if err != nil {
-					t.Fatalf("ToApplicationConfig: %v", err)
-				}
-				return cfg.(oam.Enforceable)
-			}
-			err := build().ApplyPolicy(tc.deny)
-			if err == nil {
-				t.Fatal("expected the policy to refuse the sidecar, got no error")
-			}
-			for _, want := range []string{`sidecars[0] "proxy"`, tc.want} {
-				if !strings.Contains(err.Error(), want) {
-					t.Errorf("error %q does not contain %q", err.Error(), want)
-				}
-			}
-			if err := build().ApplyPolicy(tc.allow); err != nil {
-				t.Errorf("expected no error under a policy that allows the sidecar, got %v", err)
+			if got, runsPods := namer.ServiceAccountName(); got != tc.want || !runsPods {
+				t.Errorf("ServiceAccountName() = %q, %v; want %q, true", got, runsPods, tc.want)
 			}
 		})
+	}
+}
+
+// TestDaemonsetConfig_GenerateRepeatsTheParseRefusals: the config is exported, so
+// a caller can build one without a parse. Generate then refuses what the parse
+// refuses (a duplicate container name here, and a missing selector) instead of
+// emitting a DaemonSet the API server would reject, and it does not write the
+// `app` label into the config's own template labels.
+func TestDaemonsetConfig_GenerateRepeatsTheParseRefusals(t *testing.T) {
+	var spec appsv1.DaemonSetSpec
+	if err := yaml.UnmarshalStrict([]byte(dsPlain(htPlainPod)), &spec); err != nil {
+		t.Fatalf("decoding the test spec: %v", err)
+	}
+	cfg := &components.DaemonsetConfig{Name: "agent", Namespace: coreKindNamespace, Spec: spec}
+	if _, err := cfg.Generate(stack.NewApplication("agent", coreKindNamespace, cfg)); err != nil {
+		t.Fatalf("Generate of a valid config: %v", err)
+	}
+	if _, ok := cfg.Spec.Template.Labels["app"]; ok {
+		t.Errorf("Generate wrote the app label into the config's template labels: %v", cfg.Spec.Template.Labels)
+	}
+
+	dup := cfg.Spec.DeepCopy()
+	dup.Template.Spec.Containers = append(dup.Template.Spec.Containers, dup.Template.Spec.Containers[0])
+	bad := &components.DaemonsetConfig{Name: "agent", Namespace: coreKindNamespace, Spec: *dup}
+	if _, err := bad.Generate(stack.NewApplication("agent", coreKindNamespace, bad)); err == nil || !strings.Contains(err.Error(), "is also used by") {
+		t.Errorf("duplicate container name: err = %v, want the container-name refusal", err)
+	}
+
+	noSelector := &components.DaemonsetConfig{Name: "agent", Namespace: coreKindNamespace, Spec: *cfg.Spec.DeepCopy()}
+	noSelector.Spec.Selector = nil
+	if _, err := noSelector.Generate(stack.NewApplication("agent", coreKindNamespace, noSelector)); err == nil || !strings.Contains(err.Error(), "selector: required") {
+		t.Errorf("no selector: err = %v, want the selector refusal", err)
+	}
+}
+
+// TestDaemonsetConfig_ApplyPolicy_NilIsANoOp: a nil policy checks nothing, as on
+// every other config.
+func TestDaemonsetConfig_ApplyPolicy_NilIsANoOp(t *testing.T) {
+	cfg := &components.DaemonsetConfig{Name: "agent", Namespace: coreKindNamespace}
+	if err := cfg.ApplyPolicy(nil); err != nil {
+		t.Errorf("ApplyPolicy(nil) = %v, want nil", err)
 	}
 }

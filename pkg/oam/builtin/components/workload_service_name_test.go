@@ -159,8 +159,8 @@ func TestWorkloadKinds_NoService_AcceptsNonServiceName(t *testing.T) {
 		handler oam.ComponentHandler
 		props   map[string]any
 	}{
-		{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-		{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "ports": ports}},
+		{"daemonset", &components.DaemonsetHandler{}, rawDaemonsetProps("ghcr.io/org/app:v1")},
+		{"daemonset", &components.DaemonsetHandler{}, rawDaemonsetPropsWithPorts("ghcr.io/org/app:v1", ports)},
 		{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 		{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "ports": ports}},
 	} {

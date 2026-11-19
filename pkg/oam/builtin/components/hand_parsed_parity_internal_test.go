@@ -30,11 +30,10 @@ type parityKind struct {
 
 var parityKinds = []parityKind{
 	// The reshaped deployment parser is the role member; the kind-named
-	// `deployment` decodes the upstream spec (go-kure/launcher#1629) and is held
-	// to it by TestCoreKindSchemas_CoverSpec.
+	// `deployment` and `daemonset` decode the upstream spec
+	// (go-kure/launcher#1629) and are held to it by TestCoreKindSchemas_CoverSpec.
 	{"role-deployment", (&RoleDeploymentHandler{}).PropertySchema, reflect.TypeFor[appsv1.Deployment]()},
 	{"statefulset", (&StatefulsetHandler{}).PropertySchema, reflect.TypeFor[appsv1.StatefulSet]()},
-	{"daemonset", (&DaemonsetHandler{}).PropertySchema, reflect.TypeFor[appsv1.DaemonSet]()},
 	{"job", (&JobHandler{}).PropertySchema, reflect.TypeFor[batchv1.Job]()},
 	{"cronjob", (&CronjobHandler{}).PropertySchema, reflect.TypeFor[batchv1.CronJob]()},
 	{"service", (&ServiceHandler{}).PropertySchema, reflect.TypeFor[corev1.Service]()},
@@ -117,7 +116,6 @@ var parityRules = map[string][]parityRule{
 	// the reason, and its fields are the component's own properties.
 	"DeploymentSpec.template":  {{class: parityOtherShape, descend: true}},
 	"StatefulSetSpec.template": {{class: parityOtherShape, descend: true}},
-	"DaemonSetSpec.template":   {{class: parityOtherShape, descend: true}},
 	"JobSpec.template":         {{class: parityOtherShape, descend: true}},
 	"CronJobSpec.jobTemplate":  {{class: parityOtherShape, descend: true}},
 	// A template's metadata is the builder's: the `app` label, and nothing an

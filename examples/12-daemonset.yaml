@@ -10,22 +10,34 @@ spec:
   components:
   - name: agent
     type: daemonset
+    # A daemonset takes the upstream DaemonSetSpec: `selector` and `template` are
+    # required, and the pod is written as Kubernetes shapes it, under
+    # `template.spec`. Launcher adds the `app: agent` label to the pod template
+    # (it is written here to match the selector) and fills no default.
     properties:
-      image: myregistry/node-agent:v1.0.0
-      resources:
-        requests:
-          cpu: "50m"
-          memory: "64Mi"
-        limits:
-          cpu: "200m"
-          memory: "128Mi"
-      # A launcher volume entry is flat and carries its own mount: the source is
-      # named by `type` with its fields alongside (`path` here, not nested under a
-      # `hostPath:` block), and `mountPath`/`readOnly` sit on the volume rather than
-      # in a separate component-level `volumeMounts` list.
-      volumes:
-      - name: host-proc
-        type: hostPath
-        path: /proc
-        mountPath: /host/proc
-        readOnly: true
+      selector:
+        matchLabels:
+          app: agent
+      template:
+        metadata:
+          labels:
+            app: agent
+        spec:
+          containers:
+          - name: agent
+            image: myregistry/node-agent:v1.0.0
+            resources:
+              requests:
+                cpu: "50m"
+                memory: "64Mi"
+              limits:
+                cpu: "200m"
+                memory: "128Mi"
+            volumeMounts:
+            - name: host-proc
+              mountPath: /host/proc
+              readOnly: true
+          volumes:
+          - name: host-proc
+            hostPath:
+              path: /proc

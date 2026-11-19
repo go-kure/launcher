@@ -21,10 +21,10 @@ Container projection shared by every kind). Only genuine escape-hatch fields (`p
 closed, and so is the four-key `affinity` shorthand: its schema declares the four keys and
 no other, and since go-kure/launcher#790 its parser refuses any other key too. The
 `initContainers`/`sidecars` entries themselves are closed (go-kure/launcher#321, see "Common
-config"). The raw `corev1` `affinity` that `statefulset`, `daemonset`, `job` and `cronjob` publish is
+config"). The raw `corev1` `affinity` that `statefulset`, `job` and `cronjob` publish is
 a different schema and is not part of that gap — it is modeled field-by-field. (The `deployment`
-kind carries no such schema: it decodes its whole spec into the upstream type, which the four
-kinds above do not.) `helmrelease`
+and `daemonset` kinds carry no such schema: each decodes its whole spec into the upstream type,
+which the kinds above do not.) `helmrelease`
 takes the other route to the same strictness: its schema declares exactly the top-level
 `HelmReleaseSpec` keys and leaves the nested Flux blocks open, and its handler decodes the
 whole property map strictly into `HelmReleaseSpec`, refusing an unknown or wrongly typed key at
@@ -214,7 +214,7 @@ reads it.
 | `crd` | CustomResourceDefinition(s) | CRDs from `inline`/`url`; rejects non-CRD docs. |
 | `cronjob` | CronJob | Scheduled job; cron `schedule` + history limits + CronJobSpec/JobSpec fields, plus the raw `affinity`/`tolerations`/`topologySpreadConstraints` (see below). |
 | `csidriver` | CSIDriver | Kind-named CSIDriver: the whole `CSIDriverSpec`, strictly decoded. Cluster-scoped, and the object's name (the component's, or its `objectName`) is the driver's name; no environment policy applies — see below. |
-| `daemonset` | DaemonSet | Per-node daemon; honors `tolerations`, the raw `affinity` and `topologySpreadConstraints`, and takes `sidecars`. Emits no Service (go-kure/launcher#690). Declares one endpoint per main-container port. |
+| `daemonset` | DaemonSet | Kind-named DaemonSet: the whole `DaemonSetSpec`, strictly decoded; `selector` and `template` are required. The pod template is held to what the `pod` kind holds its spec to, less `activeDeadlineSeconds`, and it gains the `app` label; the template is held to environment policy, no default filled (go-kure/launcher#1629). Emits no Service. Declares one endpoint per port of `template.spec.containers[0]`. Breaking: the reshaped form is gone from the kind — see below. |
 | `deployment` | Deployment | Kind-named Deployment: the whole `DeploymentSpec`, strictly decoded; `selector` and `template` are required. The pod template is held to what the `pod` kind holds its spec to, less `activeDeadlineSeconds`, and it gains the `app` label; `replicas` and the template are held to environment policy, no default filled (go-kure/launcher#1629). A `scaler` builds it without `spec.replicas`. Declares one endpoint per port of `template.spec.containers[0]`. Breaking: the reshaped form moved to `webservice` and `worker` — see below. |
 | `endpointslice` | EndpointSlice | Kind-named EndpointSlice: the object's own fields (`addressType`, required; `endpoints`; `ports`), strictly decoded; an endpoint's `addresses` are required. It belongs to a Service through the `kubernetes.io/service-name` label, authored under `labels` as a literal that does not follow a Service's `objectName`. Namespaced; no environment policy applies and no capability is required — see below. |
 | `externalsecret` | ExternalSecret | Kind-named External Secrets Operator ExternalSecret: the whole `ExternalSecretSpec` (`secretStoreRef`, `target`, `refreshPolicy`, `refreshInterval`, `syncWindows`, `data`, `dataFrom`), strictly decoded; no top-level field is required. The store is the author's. The environment policy reaches one field: a `target.manifest` of a kind the policy checks is refused. No capability is required. Under a delivery whose groups wait for their Flux objects, an ExternalSecret in a later group than a Flux object requiring its target Secret is refused, unless `creationPolicy` is `Merge` or `None`, a `target.manifest` is set, or the document holds that Secret by the Flux object's group (go-kure/launcher#1086). Beside the `external-secret` trait — see below. |
@@ -299,9 +299,9 @@ reads it.
 
 Only the two role kinds, `webservice` and `worker`, emit a per-component
 ServiceAccount, and only when the component does not author
-`serviceAccountName`. The five pod kinds (`deployment`, `statefulset`,
+`serviceAccountName`. The pod kinds (`deployment`, `statefulset`,
 `daemonset`, `job`, `cronjob`) emit no ServiceAccount and no claim of their own
-(go-kure/launcher#702). The raw `deployment` also sets no
+(go-kure/launcher#702). The raw `deployment` and `daemonset` also set no
 `automountServiceAccountToken`, so a pod with no account mounts the default account's
 token, as the `pod` and `replicaset` kinds do; `webservice` and `worker` still switch it
 off. See "Pod-level properties" and "Referencing an existing
@@ -398,7 +398,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateControllerRevision` | apps/v1 ControllerRevision | not authorable | - | - | Written by the StatefulSet and DaemonSet controllers. |
 | `kubernetes.CreateCronJob` | batch/v1 CronJob | kind | `cronjob` | hand-written parser | - |
 | `kubernetes.CreateCustomResourceDefinition` | apiextensions.k8s.io/v1 CustomResourceDefinition (cluster-scoped) | component | `crd` | the manifest parser, CustomResourceDefinition documents only | The stated exception: an application takes its CRDs from upstream files (`inline` or `url`), so no kind component projects the spec. |
-| `kubernetes.CreateDaemonSet` | apps/v1 DaemonSet | kind | `daemonset` | hand-written parser | - |
+| `kubernetes.CreateDaemonSet` | apps/v1 DaemonSet | kind | `daemonset` | strict decode of `DaemonSetSpec`, as `replicaset` | - |
 | `kubernetes.CreateDeployment` | apps/v1 Deployment | kind | `deployment` | strict decode of `DeploymentSpec`, as `replicaset` | `webservice` and `worker` build theirs through a hand-written parser of their own, as the member `role-deployment`, which no document authors. |
 | `kubernetes.CreateEndpointSlice` | discovery.k8s.io/v1 EndpointSlice | kind | `endpointslice` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | A slice belongs to a Service only through its `kubernetes.io/service-name` label, authored under `labels` as a literal that does not follow the Service's `objectName`. `addressType` and an endpoint's `addresses` must be written. The addresses and FQDNs of its endpoints are not artifact sources. No environment policy applies. |
 | `kubernetes.CreateEndpoints` | v1 Endpoints | not authorable | - | - | Not offered: deprecated upstream in favour of EndpointSlice. |
@@ -595,12 +595,12 @@ The published schema marks `volumeMode` required (`requiredWhen`) when a `volume
 
 ### Pod-level properties
 
-The six reshaped kind components (`webservice`, `worker`, `statefulset`, `daemonset`,
+The reshaped kind components (`webservice`, `worker`, `statefulset`,
 `job`, `cronjob`) also share one pod-level property surface
 (go-kure/launcher#342, ADR-036 L1), parsed by `parsePodSpec` (`podspec.go`)
 straight into a `corev1.PodSpec` and rendered by the shared `buildPodSpec`,
-which each of them assigns to its pod template. The raw `deployment` takes its pod spec as
-`template.spec` instead (go-kure/launcher#1629). Property names are the
+which each of them assigns to its pod template. The raw `deployment` and `daemonset` take
+their pod spec as `template.spec` instead (go-kure/launcher#1629). Property names are the
 `corev1.PodSpec` JSON names, except three that carry a `pod` prefix because
 the bare name is already a property at some kind: `podSecurityContext`
 (container `securityContext` exists everywhere), `podResources` (container
@@ -659,10 +659,6 @@ See [Common config](/site/content/api-reference/oam-components/common-config.md#
 
 See [Common config](/site/content/api-reference/oam-components/common-config.md#raw-scheduling-properties).
 
-##### What `tolerations` changed for `daemonset`
-
-See [Common config](/site/content/api-reference/oam-components/common-config.md#what-tolerations-changed-for-daemonset).
-
 ## Policy defaults & enforcement ordering
 
 A container's effective cpu/memory requests and limits are assembled in three
@@ -673,8 +669,8 @@ tiers, in precedence order:
    opt-out (go-kure/launcher#1181): the container gets no limit for that
    resource, because neither a policy default limit (tier 2) nor, for memory,
    the limit mirror (tier 3) is applied to it. It is accepted where a built-in
-   default exists to opt out of: the main container of the four controller
-   kinds (`statefulset`, `daemonset`, `job`, `cronjob`), `webservice` and `worker`, and their `initContainers` and `sidecars`
+   default exists to opt out of: the main container of `statefulset`, `job`,
+   `cronjob`, `webservice` and `worker`, and their `initContainers` and `sidecars`
    entries. It is refused by name under `requests`, under `podResources` and on
    `postgresql` ("no intrinsic default to opt out of"), under any resource name
    other than cpu and memory, and, with the `resource-maximum` refusal class,
@@ -683,8 +679,8 @@ tiers, in precedence order:
    absence, not an opt-out. A policy sub-option to accept `unlimited` as a
    policy default is not provided.
 
-The policy defaults (tier 2) reach every container of those six kinds (the raw
-`deployment` takes none): the
+The policy defaults (tier 2) reach every container of those kinds (the raw
+`deployment` and `daemonset` take none): the
 main container and each `initContainers` and `sidecars` entry, reported at the
 entry's own path (go-kure/launcher#1581). A default limit that lands under the
 container's request fails the build, naming the container and the remedy
@@ -696,12 +692,12 @@ requests and the mirrored memory limit of every container, and the token
 automount it switches off) is reported to the provenance report as `builtin`
 entries (go-kure/launcher#1580).
 
-The parser of `webservice`, `worker`, `statefulset`, `daemonset`, `job` and `cronjob` fills a few
+The parser of `webservice`, `worker`, `statefulset`, `job` and `cronjob` fills a few
 values when the author wrote none (`replicas`, `restartPolicy`, the `cronjob` history
 limits, a port's `protocol`, the `status` of a pod failure policy condition, the
 `accessModes` of a claim). Each config reports them through `BuiltinDefaults()` as
 `builtin`, at the path the author would have written, and never at a path where the policy
-default stands. The raw `deployment` fills none of them and reports none. A `webservice`
+default stands. The raw `deployment` and `daemonset` fill none of them and report none. A `webservice`
 or `worker` with a non-RWX claim and no authored `strategy` also reports
 `strategy.type`: the `Recreate` strategy is decided when the object is generated, by the
 predicate the report shares with the generator. `ClaimAccessModesOmitted` is the test of a
@@ -714,7 +710,7 @@ Full text: [Policy defaults, endpoints and outputs](/site/content/api-reference/
 
 See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-refusal-classes).
 
-The six workload types and the five kinds that take a pod as the API type publish, in
+The workload types that keep the reshaped form and the kinds that take a pod as the API type publish, in
 `boundedBy`, which classes an authored value at a property can cause (`bounds.go`,
 go-kure/launcher#1580). No schema fragment carries a bound: each type states its own.
 

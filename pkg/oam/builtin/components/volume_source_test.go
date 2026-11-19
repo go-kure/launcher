@@ -10,10 +10,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // These tests cover go-kure/launcher#1177: the nested form of a `volumes`
-// entry on the seven controller kinds, and the volume-source policy gates
+// entry on the controller kinds, and the volume-source policy gates
 // those kinds now share with the operator pod templates.
 
 func nested(typ, name string, source props) props {
@@ -288,7 +289,7 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 		{"image volume outside the registry allowlist", image, &stubPolicy{allowedRegistries: []string{"ghcr.io"}}, "assets"},
 	}
 	// worker stands for the reshaped deployment parser (go-kure/launcher#1629).
-	for _, kind := range []string{"worker", "statefulset", "daemonset", "job", "cronjob"} {
+	for _, kind := range []string{"worker", "statefulset", "job", "cronjob"} {
 		for _, c := range cases {
 			t.Run(c.name+"/"+kind, func(t *testing.T) {
 				err := volumePolicyConfig(t, kind, c.entry).ApplyPolicy(c.policy)
@@ -297,6 +298,29 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 				}
 			})
 		}
+	}
+	// The raw `daemonset` kind (go-kure/launcher#1629) takes the upstream
+	// volume under `template.spec.volumes`, and the same two gates apply to it.
+	rawVolumes := map[string][]any{
+		"ephemeral claim over the storage cap": {map[string]any{"name": "scratch", "ephemeral": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
+			"accessModes": []any{"ReadWriteOnce"},
+			"resources":   map[string]any{"requests": map[string]any{"storage": "50Gi"}},
+		}}}}},
+		"image volume outside the registry allowlist": {map[string]any{"name": "assets", "image": map[string]any{"reference": "evil.example.com/assets:v1"}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name+"/daemonset", func(t *testing.T) {
+			p := rawDaemonsetProps("ghcr.io/org/app:v1")
+			p["template"].(map[string]any)["spec"].(map[string]any)["volumes"] = rawVolumes[c.name]
+			cfg, err := (&components.DaemonsetHandler{}).ToApplicationConfig(&oam.Component{Name: "app", Type: "daemonset", Properties: p}, "default")
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
+			}
+			err = cfg.(oam.Enforceable).ApplyPolicy(c.policy)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("ApplyPolicy = %v, want an error naming %q", err, c.want)
+			}
+		})
 	}
 	t.Run("within the policy", func(t *testing.T) {
 		if err := volumePolicyConfig(t, "worker", ephemeral("5Gi")).ApplyPolicy(&stubPolicy{maxStorageSize: "10Gi"}); err != nil {

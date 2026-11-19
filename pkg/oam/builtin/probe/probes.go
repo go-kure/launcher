@@ -16,13 +16,13 @@ func component(name, typ string, props map[string]any) []oam.Component {
 	return []oam.Component{{Name: name, Type: typ, Properties: p}}
 }
 
-// rawDeployment is a deployment component as the kind takes it since it took the
-// upstream spec (go-kure/launcher#1629): a selector and a pod template whose
-// first container is the one container adds fields to, and whose pod spec pod
-// adds fields to (a key of pod replaces the one of the same name, `containers`
-// included). The kind fills nothing, so a probe built on it holds no fill of
-// the kind's own.
-func rawDeployment(name string, container, pod map[string]any) []oam.Component {
+// rawWorkload is a component of the type typ ("deployment" or "daemonset") as
+// the kind takes it since it took the upstream spec (go-kure/launcher#1629): a
+// selector and a pod template whose first container is the one container adds
+// fields to, and whose pod spec pod adds fields to (a key of pod replaces the
+// one of the same name, `containers` included). The kind fills nothing, so a
+// probe built on it holds no fill of the kind's own.
+func rawWorkload(typ, name string, container, pod map[string]any) []oam.Component {
 	main := map[string]any{"name": "app", "image": image}
 	for k, v := range container {
 		main[k] = v
@@ -31,10 +31,22 @@ func rawDeployment(name string, container, pod map[string]any) []oam.Component {
 	for k, v := range pod {
 		spec[k] = v
 	}
-	return []oam.Component{{Name: name, Type: "deployment", Properties: map[string]any{
+	return []oam.Component{{Name: name, Type: typ, Properties: map[string]any{
 		"selector": map[string]any{"matchLabels": map[string]any{"app": name}},
 		"template": map[string]any{"spec": spec},
 	}}}
+}
+
+// rawContainersAndInit is the pod spec part of a raw workload probe with an
+// init container and a second container, each declaring the ports ports builds.
+func rawContainersAndInit(ports func() []any) map[string]any {
+	return map[string]any{
+		"initContainers": []any{map[string]any{"name": "setup", "image": image, "restartPolicy": "Always", "ports": ports()}},
+		"containers": []any{
+			map[string]any{"name": "app", "image": image, "ports": ports()},
+			map[string]any{"name": "proxy", "image": image, "ports": ports()},
+		},
+	}
 }
 
 // resourceFills are the generation-time fills of one container: the requests,
@@ -152,19 +164,15 @@ func Probes() []Probe {
 	}
 
 	return withOthers(append([]Probe{
-		// The raw deployment fills nothing (go-kure/launcher#1629): the report of
-		// these two documents holds no entry, and a fill that came back would show
-		// as a change of that report.
-		{Name: "deployment", Components: rawDeployment("app", nil, nil)},
-		{Name: "deployment with an init container, a second container and ports", Components: rawDeployment("app",
-			nil,
-			map[string]any{
-				"initContainers": []any{map[string]any{"name": "setup", "image": image, "restartPolicy": "Always", "ports": ports()}},
-				"containers": []any{
-					map[string]any{"name": "app", "image": image, "ports": ports()},
-					map[string]any{"name": "proxy", "image": image, "ports": ports()},
-				},
-			})},
+		// The raw deployment and daemonset fill nothing (go-kure/launcher#1629):
+		// the report of these documents holds no entry, and a fill that came back
+		// would show as a change of that report.
+		{Name: "deployment", Components: rawWorkload("deployment", "app", nil, nil)},
+		{Name: "deployment with an init container, a second container and ports", Components: rawWorkload("deployment", "app",
+			nil, rawContainersAndInit(ports))},
+		{Name: "daemonset", Components: rawWorkload("daemonset", "app", nil, nil)},
+		{Name: "daemonset with an init container, a second container and ports", Components: rawWorkload("daemonset", "app",
+			nil, rawContainersAndInit(ports))},
 		{Name: "statefulset", Components: component("app", "statefulset", map[string]any{"serviceName": "app-headless"}),
 			Fills: join([]Fill{replicas("app"), automount("app")}, resourceFills("app", ""))},
 		{Name: "statefulset with containers and claim templates", Components: component("app", "statefulset", map[string]any{
@@ -172,10 +180,6 @@ func Probes() []Probe {
 			"volumeClaimTemplates": []any{map[string]any{"name": "data", "size": "1Gi", "mountPath": "/data"}},
 		}), Fills: join([]Fill{replicas("app"), automount("app"), accessModes("app", "volumeClaimTemplates[0].accessModes")},
 			resourceFills("app", ""), containerFills("app", true))},
-		{Name: "daemonset", Components: component("app", "daemonset", nil),
-			Fills: join([]Fill{automount("app")}, resourceFills("app", ""))},
-		{Name: "daemonset with containers", Components: component("app", "daemonset", containers),
-			Fills: join([]Fill{automount("app")}, resourceFills("app", ""), containerFills("app", true))},
 		{Name: "job", Components: component("app", "job", nil),
 			Fills: join([]Fill{restart("app"), automount("app")}, resourceFills("app", ""))},
 		{Name: "job with a pod failure policy", Components: component("app", "job", map[string]any{"restartPolicy": "Never", "podFailurePolicy": failurePolicy}),

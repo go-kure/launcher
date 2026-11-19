@@ -26,7 +26,8 @@ type sidecarKind struct {
 // properties, keyed by kind. The role member `role-deployment` is one: it is
 // the reshaped parser the kind-named `deployment` was before it became raw
 // (go-kure/launcher#1629), and the only handler that reads a main-container
-// `ports` list besides statefulset and daemonset.
+// `ports` list besides statefulset. The raw `daemonset` kind is not one: its
+// containers, sidecars included, are `template.spec` entries.
 func sidecarKindProps() map[string]sidecarKind {
 	out := map[string]sidecarKind{
 		roleMemberType: {&components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
@@ -144,9 +145,6 @@ func TestPodPortNames_MainVsSidecar(t *testing.T) {
 		{"role-deployment ports list", roleMemberType, map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{
 			map[string]any{"name": "grpc", "containerPort": 9000},
 		}}, "grpc"},
-		{"daemonset ports list", "daemonset", map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{
-			map[string]any{"name": "metrics", "containerPort": 9100},
-		}}, "metrics"},
 	}
 	kinds := sidecarKindProps()
 	for _, tc := range cases {

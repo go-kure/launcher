@@ -1,13 +1,9 @@
 package components
 
 import (
-	"maps"
-
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -15,7 +11,20 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
-// DaemonsetHandler handles OAM daemonset components.
+// DaemonsetHandler handles OAM daemonset components: the kind-named projection
+// of an apps/v1 DaemonSet (go-kure/launcher#1629).
+//
+// Its properties are the top-level json fields of appsv1.DaemonSetSpec,
+// decoded strictly (decodeKindSpec), as the deployment kind's are. It emits the
+// DaemonSet, named after the component in the build namespace, with the
+// authored spec. One thing is added: the `app` label on the pod template,
+// beside the authored labels, which every workload kind gives its pods and
+// launcher's traits and Services select on (podTemplateAppLabels). The selector
+// stays as authored, and the object itself gets no label, no annotation and no
+// default of launcher's. The reshaped form, with the main container at the top
+// level, belongs to `webservice` and `worker`.
+// TestCoreKindSchemas_CoverSpec keeps the published key set equal to the
+// upstream json tags.
 type DaemonsetHandler struct{}
 
 // CanHandle returns true for daemonset component type.
@@ -23,366 +32,141 @@ func (h *DaemonsetHandler) CanHandle(componentType string) bool {
 	return componentType == "daemonset"
 }
 
-// PropertySchema declares the daemonset component's user-facing properties.
+// PropertySchema declares every top-level appsv1.DaemonSetSpec field by its
+// json name. Structured fields are open objects whose content is checked by
+// the strict decode, not by this schema.
 func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
-	m := map[string]oam.PropertySchema{
-		"image":           {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
-		"ports":           schemaMainContainerPorts(),
-		"env":             schemaEnv(false),
-		"envFrom":         schemaEnvFrom(false),
-		"resources":       schemaResources(false),
-		"command":         schemaStringArray(),
-		"args":            schemaStringArray(),
-		"probes":          schemaProbes(false),
-		"lifecycle":       schemaLifecycle(false),
-		"securityContext": schemaSecurityContext(false),
-		"workingDir":      schemaWorkingDir(false),
-		"tolerations":     schemaTolerations(),
-		"volumes":         schemaVolumes(),
-		"initContainers":  schemaInitContainers(),
-		"sidecars":        schemaSidecars(),
-		// The other two raw scheduling shapes scheduling.go projects, beside
-		// `tolerations` above.
-		"affinity":                  schemaRawAffinity(),
-		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
-		podMetadataProperty:         schemaPodMetadata("DaemonSet"),
-	}
-	maps.Copy(m, schemaContainerFields())
-	maps.Copy(m, schemaPodSpec(false, false))
-	maps.Copy(m, schemaDaemonSetSpec())
-	return oam.DeclareBounds(m, workloadBounds(true, false, false))
+	selector := podObjectSchema("Required. DaemonSet spec.selector: the label selector over the pods the DaemonSet owns. It must match the template's labels, and it is immutable once the object exists. A selector that rules out the `app` label launcher adds to the template is refused.", "LabelSelector")
+	selector.Required = true
+	template := podTemplateSchema("Required. DaemonSet spec.template: the pods the DaemonSet runs, one per node it schedules to. Its spec is held to what the pod kind holds its own to (containers required, the image rule, ephemeralContainers, priority and overhead refused) and to the environment policy; activeDeadlineSeconds is refused. metadata.labels gains the `app` label; an authored `app` with another value is refused.")
+	template.Required = true
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
+		"selector":             selector,
+		"template":             template,
+		"updateStrategy":       podObjectSchema("DaemonSet spec.updateStrategy: `type` (RollingUpdate or OnDelete) and `rollingUpdate` (`maxUnavailable`, `maxSurge`). The API server defaults it to RollingUpdate.", "DaemonSetUpdateStrategy"),
+		"minReadySeconds":      {Type: oam.PropertyTypeInteger, Description: "DaemonSet spec.minReadySeconds: seconds a new pod must be ready, without a container crashing, to count as available. The API server defaults it to 0."},
+		"revisionHistoryLimit": {Type: oam.PropertyTypeInteger, Description: "DaemonSet spec.revisionHistoryLimit: the number of old ControllerRevisions kept for rollback. The API server defaults it to 10."},
+	}, podTemplateBounds(false))
 }
 
-// Endpoints implements oam.EndpointProvider: one endpoint per port the main
-// container declares (containerPortEndpoints). The handler's own parse runs
-// first, so a component it refuses has no endpoint, in the parse's words.
+// Endpoints implements oam.EndpointProvider: one endpoint per port the first
+// container of the template declares (containerPortEndpoints). Endpoints are
+// collected apart from the build, so the handler's own parse runs here too: a
+// component it refuses has no endpoint, in the parse's words.
 func (h *DaemonsetHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
 	cfg, err := h.ToApplicationConfig(component, "")
 	if err != nil {
 		return nil, err
 	}
-	return containerPortEndpoints(component.Name, cfg.(*DaemonsetConfig).Ports), nil
+	containers := cfg.(*DaemonsetConfig).Spec.Template.Spec.Containers
+	if len(containers) == 0 {
+		return nil, nil
+	}
+	return containerPortEndpoints(component.Name, containers[0].Ports), nil
 }
 
-// ToApplicationConfig converts an OAM daemonset component to a DaemonsetConfig.
+// ToApplicationConfig decodes an OAM daemonset component into a
+// DaemonsetConfig, under the package's null contract and the strict decode
+// every spec-projecting kind uses. What the DaemonSet may not hold is refused
+// here, whatever the environment policy: see DaemonsetConfig.validate,
+// podTemplateDefaultedZeros and podTemplateLabelSelectorRequired.
 func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	config := &DaemonsetConfig{
+	spec, props, err := decodeKindSpec[appsv1.DaemonSetSpec](component.Properties, "apps/v1 DaemonSetSpec")
+	if err != nil {
+		return nil, err
+	}
+	if err := refuseUncarriedSpecValues(props, spec, podTemplateDefaultedZeros(&spec.Template)); err != nil {
+		return nil, err
+	}
+	if err := refuseUnauthoredRequired(props, podTemplateLabelSelectorRequired()); err != nil {
+		return nil, err
+	}
+	cfg := &DaemonsetConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
 		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
+		Spec:       *spec,
 	}
-
-	props := component.Properties
-
-	image, ok := props["image"].(string)
-	if !ok {
-		return nil, errors.New("required property 'image' missing or not a string")
-	}
-	if err := ValidateImageRef(image); err != nil {
+	if _, err := cfg.validate(component.Name); err != nil {
 		return nil, err
 	}
-	config.Image = image
-
-	env, err := parseEnv(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Env = env
-	envFrom, err := parseEnvFrom(props)
-	if err != nil {
-		return nil, err
-	}
-	config.EnvFrom = envFrom
-	if resources, present, err := parseObjectField(props, "resources", "resources"); err != nil {
-		return nil, err
-	} else if present {
-		r, err := parseResources(resources)
-		if err != nil {
-			return nil, errors.Wrap(err, "invalid resources configuration")
-		}
-		config.Resources = r
-	}
-	command, err := parseCommand(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Command = command
-	args, err := parseArgs(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Args = args
-	ports, portFills, err := parseContainerPorts(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Ports = ports
-	config.parseFills = append(config.parseFills, portFills...)
-	probes, lifecycle, err := parseMainContainerHandlers(props, ports)
-	if err != nil {
-		return nil, err
-	}
-	config.Probes = probes
-	config.Lifecycle = lifecycle
-	securityContext, err := parseSecurityContext(props)
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid securityContext configuration")
-	}
-	config.SecurityContext = securityContext
-	if workingDir, present, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
-		return nil, err
-	} else if present {
-		config.WorkingDir = workingDir
-	}
-	if config.ContainerFields, err = parseMainContainerFields(props); err != nil {
-		return nil, err
-	}
-
-	tolerations, err := parseTolerations(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Tolerations = tolerations
-	affinity, err := parseRawAffinity(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Affinity = affinity
-	tscs, err := parseTopologySpreadConstraints(props)
-	if err != nil {
-		return nil, err
-	}
-	config.TopologySpreadConstraints = tscs
-	parsed, err := parsePodVolumes(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Volumes = parsed.Volumes
-	config.VolumeMounts = parsed.Mounts
-	if err := checkMainContainerMountPropagation(parsed.Mounts, securityContext); err != nil {
-		return nil, err
-	}
-	config.VolumeDevices = parsed.Devices
-	config.PVCs = parsed.PVCs
-
-	initContainers, err := parseInitContainers(props)
-	if err != nil {
-		return nil, err
-	}
-	config.InitContainers = initContainers
-	sidecars, err := parseSidecars(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Sidecars = sidecars
-	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
-		return nil, err
-	}
-	if err := checkPodContainerNames(component.Name, initContainers, sidecars); err != nil {
-		return nil, err
-	}
-	if err := checkPodPortNames(config.Ports, initContainers, sidecars); err != nil {
-		return nil, err
-	}
-	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, sidecars); err != nil {
-		return nil, err
-	}
-
-	podSpec, err := parsePodSpec(props, false)
-	if err != nil {
-		return nil, err
-	}
-	config.PodSpec = podSpec
-
-	podMetadata, err := parsePodMetadata(props, false)
-	if err != nil {
-		return nil, err
-	}
-	config.PodMetadata = podMetadata
-
-	dsSpec, err := parseDaemonSetSpec(props)
-	if err != nil {
-		return nil, err
-	}
-	config.DaemonSetSpec = dsSpec
-
-	return config, nil
+	return cfg, nil
 }
 
 // DaemonsetConfig implements stack.ApplicationConfig for daemonset components.
+// Spec is the decoded DaemonSetSpec exactly as authored.
 type DaemonsetConfig struct {
 	Name string
-	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
-	oam.PolicyDefaultLog
-	// parseFills are the property paths the parser filled because the author wrote
-	// no value (BuiltinDefaults reads them).
-	parseFills []string
-	// ObjectName names the DaemonSet (oam.Component.ObjectName); its labels,
-	// selector and main container keep Name. Empty for the application's name.
+	// ObjectName names the DaemonSet (oam.Component.ObjectName); its labels
+	// keep Name. Empty for the application's name.
 	ObjectName string
 	// Metadata is the labels and annotations authored for the DaemonSet
-	// (oam.Component.ObjectMetadata). They go on the DaemonSet's own
-	// metadata: its pod template keeps the labels of the kind, with the ones
-	// PodMetadata adds.
-	Metadata oam.ObjectMetadata
-	// PodMetadata is the labels and annotations authored for the pod template
-	// (`podMetadata`). They never reach the selector.
-	PodMetadata     PodMetadata
-	Namespace       string
-	Image           string
-	Ports           []corev1.ContainerPort // the main container's ports; no Service
-	Env             []corev1.EnvVar
-	EnvFrom         []corev1.EnvFromSource
-	Resources       ResourceRequirements
-	Command         []string
-	Args            []string
-	Probes          ProbeConfig
-	Lifecycle       *corev1.Lifecycle
-	SecurityContext *corev1.SecurityContext
-	WorkingDir      string
-	// ContainerFields are the main container's fields every container of the
-	// pod accepts (see parseContainerFields).
-	ContainerFields ContainerFields
-	Tolerations     []corev1.Toleration
-	Volumes         []corev1.Volume
-	VolumeMounts    []corev1.VolumeMount
-	VolumeDevices   []corev1.VolumeDevice
-	InitContainers  []InitContainerConfig
-	PVCs            []PVCConfig
-	// Sidecars run beside the main container on every node the DaemonSet
-	// schedules to (see parseSidecars).
-	Sidecars []SidecarContainerConfig
-	// Affinity and TopologySpreadConstraints are, with Tolerations above, the
-	// raw corev1 scheduling shapes (see scheduling.go), carried as the API
-	// types because nothing is inferred from them.
-	Affinity                  *corev1.Affinity
-	TopologySpreadConstraints []corev1.TopologySpreadConstraint
-	// PodSpec holds the shared pod-level properties (see parsePodSpec).
-	PodSpec PodSpecConfig
-	// DaemonSetSpec holds the DaemonSetSpec-level properties that are neither
-	// the pod template nor the builder-managed selector (see
-	// parseDaemonSetSpec).
-	DaemonSetSpec DaemonSetSpecConfig
+	// (oam.Component.ObjectMetadata). They go on the DaemonSet's own metadata:
+	// its pod template keeps the labels of the kind.
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      appsv1.DaemonSetSpec
 }
 
-// ServiceAccountName implements oam.ServiceAccountNamer: the authored
-// serviceAccountName, or "" when the pods run as no named account.
+// validate refuses a spec the DaemonSet cannot be emitted from and returns the
+// labels of its pod template. selector must be authored: the Go type cannot
+// omit it, so an unset one would be written as null, and launcher derives none.
+// The template is held to validateControllerPodTemplate, its labels to
+// podTemplateAppLabels, and the selector must keep matching the template once
+// the `app` label is on it (refuseSelectorAgainstAppLabel). The API's other
+// value rules are left to the API server.
+func (c *DaemonsetConfig) validate(component string) (map[string]string, error) {
+	if c.Spec.Selector == nil {
+		return nil, errors.New("selector: required (the label selector over the pods the DaemonSet owns; it must match the template's labels)")
+	}
+	if err := validateControllerPodTemplate(&c.Spec.Template); err != nil {
+		return nil, err
+	}
+	labelled, err := podTemplateAppLabels(component, c.Spec.Template.Labels)
+	if err != nil {
+		return nil, err
+	}
+	if err := refuseSelectorAgainstAppLabel(component, c.Spec.Selector, c.Spec.Template.Labels, labelled); err != nil {
+		return nil, err
+	}
+	return labelled, nil
+}
+
+// ServiceAccountName implements oam.ServiceAccountNamer: the account the
+// DaemonSet's pods run as, read from the template as the pod kind reads its
+// spec. No account is generated, so "" means the namespace's default account.
 func (c *DaemonsetConfig) ServiceAccountName() (string, bool) {
-	return c.PodSpec.ServiceAccountName, true
+	if name := c.Spec.Template.Spec.ServiceAccountName; name != "" {
+		return name, true
+	}
+	return c.Spec.Template.Spec.DeprecatedServiceAccount, true
 }
 
-// ApplyPolicy applies defaults then enforces limits from the policy.
-// DaemonSets don't have replicas, so only resource and registry limits apply.
+// ApplyPolicy holds the pod template to the environment policy
+// (enforcePodTemplatePolicy), as the rendered-object check holds one a chart
+// renders. A DaemonSet has no replica count, and no default is filled. A nil
+// policy checks nothing.
 func (c *DaemonsetConfig) ApplyPolicy(p oam.Policy) error {
 	if p == nil {
 		return nil
 	}
-
-	if err := applyContainerPolicyDefaults(p, &c.PolicyDefaultLog, &c.Resources, c.InitContainers, c.Sidecars); err != nil {
-		return err
-	}
-
-	if err := enforceMaxResources(c.Resources, p.MaxCPU(), p.MaxMemory()); err != nil {
-		return err
-	}
-	if err := enforceAllowedRegistries(c.Image, p.AllowedRegistries()); err != nil {
-		return err
-	}
-	if err := enforcePrivileged(c.SecurityContext, p.AllowPrivileged()); err != nil {
-		return err
-	}
-	if err := enforceVolumeSourcePolicy("", c.Volumes, p); err != nil {
-		return err
-	}
-	if err := enforceHostNamespaces(c.PodSpec, p); err != nil {
-		return err
-	}
-	if err := enforcePodResources(c.PodSpec, p.MaxCPU(), p.MaxMemory()); err != nil {
-		return err
-	}
-	if err := enforcePodHostProcess(c.PodSpec, p.AllowPrivileged()); err != nil {
-		return err
-	}
-	if err := enforceContainerCapabilities(c.SecurityContext, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
-		return err
-	}
-	for i, ic := range c.InitContainers {
-		if err := enforceExtraContainer("initContainers", i, ic.Name, ic.Image,
-			ic.Resources, ic.SecurityContext, p); err != nil {
-			return err
-		}
-	}
-	for i, sc := range c.Sidecars {
-		if err := enforceExtraContainer("sidecars", i, sc.Name, sc.Image,
-			sc.Resources, sc.SecurityContext, p); err != nil {
-			return err
-		}
-	}
-	return nil
+	return enforcePodTemplatePolicy("template.spec", &c.Spec.Template.Spec, p)
 }
 
-// Generate creates a Kubernetes DaemonSet, and nothing beside it: no
-// ServiceAccount and no claim (go-kure/launcher#702). It emits no Service
-// either: an authored `service` component exposes the pods.
+// Generate emits the DaemonSet: kure's identity-only constructor, a deep copy
+// of the spec, and the `app` label on the pod template. The parse-time
+// refusals the typed spec can show are repeated, since the config is exported
+// and the label is valued from app.Name. No ServiceAccount, claim or Service is
+// emitted beside it (go-kure/launcher#702): an authored `service` component
+// exposes the pods.
 func (c *DaemonsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	ds, err := c.createDaemonSet(app)
+	labelled, err := c.validate(app.Name)
 	if err != nil {
 		return nil, err
 	}
-	return kindObject(ds, c.Metadata)
-}
-
-func (c *DaemonsetConfig) createDaemonSet(app *stack.Application) (*appsv1.DaemonSet, error) {
-	container, err := buildMainContainer(app.Name, mainContainerInput{
-		Image:           c.Image,
-		Command:         c.Command,
-		Args:            c.Args,
-		Resources:       c.Resources,
-		Ports:           c.Ports,
-		Env:             c.Env,
-		EnvFrom:         c.EnvFrom,
-		Probes:          c.Probes,
-		WorkingDir:      c.WorkingDir,
-		Lifecycle:       c.Lifecycle,
-		SecurityContext: c.SecurityContext,
-		VolumeMounts:    c.VolumeMounts,
-		VolumeDevices:   c.VolumeDevices,
-		Fields:          c.ContainerFields,
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	ds := kubernetes.CreateDaemonSet(kindObjectName(c.ObjectName, app.Name), app.Namespace)
-	ds.Labels = appLabels(app.Name)
-	ds.Annotations = nil
-	// kure's constructor no longer injects spec.selector (removed default,
-	// go-kure/kure builder-contract-release-1.md) — required by the API
-	// server with no server-side default, so it must match the template
-	// labels explicitly.
-	ds.Spec.Selector = &metav1.LabelSelector{MatchLabels: appLabels(app.Name)}
-	ds.Spec.Template.Labels = appLabels(app.Name)
-	if err := c.PodMetadata.applyTo(&ds.Spec.Template); err != nil {
-		return nil, err
-	}
-
-	podSpec, err := buildPodSpec(podSpecInput{
-		Config:         c.PodSpec,
-		MainContainer:  container,
-		InitContainers: c.InitContainers,
-		Volumes:        c.Volumes,
-		Tolerations:    c.Tolerations,
-
-		Sidecars:                  c.Sidecars,
-		Affinity:                  c.Affinity,
-		TopologySpreadConstraints: c.TopologySpreadConstraints,
-	})
-	if err != nil {
-		return nil, err
-	}
-	ds.Spec.Template.Spec = podSpec
-	c.DaemonSetSpec.apply(ds)
-
-	return ds, nil
+	c.Spec.DeepCopyInto(&ds.Spec)
+	ds.Spec.Template.Labels = labelled
+	return kindObject(ds, c.Metadata)
 }

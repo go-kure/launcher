@@ -14,10 +14,10 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// workloadKinds enumerates the six reshaped kinds that share the pod-level
+// workloadKinds enumerates the five reshaped kinds that share the pod-level
 // property surface, with the minimum properties each needs to generate. The
-// kind-named `deployment` takes the upstream DeploymentSpec since
-// go-kure/launcher#1629 and is not in it; webservice and worker reach the
+// kind-named `deployment` and `daemonset` take the upstream spec since
+// go-kure/launcher#1629 and are not in it; webservice and worker reach the
 // reshaped deployment parser through the role member `role-deployment`, which
 // has tests of its own (role_deployment_*_test.go).
 var workloadKinds = []struct {
@@ -28,7 +28,6 @@ var workloadKinds = []struct {
 	{"webservice", webserviceViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}},
 	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}},
 	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 }

@@ -8,9 +8,9 @@ import (
 )
 
 // A volume's `type` is required (go-kure/launcher#1626): parseVolumes refuses an
-// entry without one, so the published schema says so, for each of the six kinds
-// that share the volumes declaration (the `deployment` kind takes the upstream
-// `volumes` since go-kure/launcher#1629, and the declaration its reshaped form
+// entry without one, so the published schema says so, for each of the five kinds
+// that share the volumes declaration (the `deployment` and `daemonset` kinds take
+// the upstream `volumes` since go-kure/launcher#1629, and the declaration their reshaped form
 // had is the role member's, which `worker` and `webservice` publish: the member
 // itself is read from the schema, as no document can author it). The cases go through the property
 // validation that runs before any handler, which is what a consumer of the
@@ -22,7 +22,6 @@ func TestVolumeTypeIsRequired(t *testing.T) {
 		"webservice":  {"image": "ghcr.io/org/app:v1"},
 		"statefulset": {"image": "ghcr.io/org/app:v1"},
 		"job":         {"image": "ghcr.io/org/app:v1"},
-		"daemonset":   {"image": "ghcr.io/org/app:v1"},
 		"cronjob":     {"image": "ghcr.io/org/app:v1", "schedule": "0 * * * *"},
 	}
 	tr := newTransformer()

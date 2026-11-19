@@ -305,7 +305,14 @@ func TestHelmNames_SourceCannotTakeAComponentName(t *testing.T) {
 	const agent = `    - name: charts
       type: daemonset
       properties:
-        image: ghcr.io/example/agent:v1.0.0
+        selector:
+          matchLabels:
+            app: charts
+        template:
+          spec:
+            containers:
+              - name: agent
+                image: ghcr.io/example/agent:v1.0.0
 `
 	sourceHook := func(name string) oam.TransformContext {
 		return oam.TransformContext{Naming: func(req oam.NameRequest) (string, bool) {

@@ -151,11 +151,21 @@ spec:
   - name: log-collector
     type: daemonset
     properties:
-      image: myregistry/log-collector:v1.0.0
-      resources:
-        requests:
-          cpu: "50m"
-          memory: "64Mi"
+      selector:
+        matchLabels:
+          app: log-collector
+      template:
+        metadata:
+          labels:
+            app: log-collector
+        spec:
+          containers:
+          - name: log-collector
+            image: myregistry/log-collector:v1.0.0
+            resources:
+              requests:
+                cpu: "50m"
+                memory: "64Mi"
 
   # --- statefulset ---
   - name: session-store

@@ -212,14 +212,13 @@ func TestStatefulset_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testin
 // shapes — an update strategy holding a pointer, and a bare *int32 — so it
 // needs the same guarantee and the same guard.
 func TestDaemonset_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
-	props := map[string]any{
-		"image":                "ghcr.io/org/app:v1",
+	props := withProps(rawDaemonsetProps("ghcr.io/org/app:v1"), map[string]any{
 		"revisionHistoryLimit": 4,
 		"updateStrategy": map[string]any{
 			"type":          "RollingUpdate",
 			"rollingUpdate": map[string]any{"maxUnavailable": 1},
 		},
-	}
+	})
 
 	second := renderTwice(t, &components.DaemonsetHandler{}, "daemonset", props, func(objects []*client.Object) {
 		ds, ok := (*objects[0]).(*appsv1.DaemonSet)

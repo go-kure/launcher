@@ -9,7 +9,7 @@ import (
 )
 
 // containerPortEndpoints is the endpoints of a workload component (deployment,
-// statefulset, daemonset): one per port its main container declares, in the
+// daemonset, statefulset): one per port its main container declares, in the
 // authored order. The selector is the one the workload's pods carry,
 // `app: oam.ComponentLabelValue(name)` (appLabels), never the object name. Name
 // is the container port's name, empty for an unnamed port; Ports holds the
@@ -33,10 +33,11 @@ func containerPortEndpoints(componentName string, ports []corev1.ContainerPort) 
 	return eps
 }
 
-// The kind-named workload components other than deployment — daemonset,
-// statefulset, job and cronjob — publish the main container's `ports` list as
-// deployment does (go-kure/launcher#334): container ports are a PodSpec field,
-// and a kind component projects its API kind's fields. Declaring them emits no
+// The kind-named workload components that keep the reshaped form — statefulset,
+// job and cronjob — publish the main container's `ports` list at the top level
+// (go-kure/launcher#334): container ports are a PodSpec field, and a kind
+// component projects its API kind's fields. The raw kinds, deployment and
+// daemonset, take them under `template.spec.containers` (go-kure/launcher#1629). Declaring them emits no
 // Service; an authored `service` component exposes the pods.
 
 // parseMainContainerHandlers parses the main container's `probes` and

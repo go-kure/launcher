@@ -8,19 +8,25 @@ spec:
     - name: agent
       type: daemonset
       properties:
-        image: ghcr.io/example/agent:v1.0.0
-        ports:
-          - name: http
-            containerPort: 8080
-          - name: metrics
-            containerPort: 9090
-          - containerPort: 8125
-            protocol: UDP
-        probes:
-          readiness:
-            httpGet:
-              path: /healthz
-              port: http
-          liveness:
-            tcpSocket:
-              port: metrics
+        selector:
+          matchLabels:
+            app: agent
+        template:
+          spec:
+            containers:
+              - name: agent
+                image: ghcr.io/example/agent:v1.0.0
+                ports:
+                  - name: http
+                    containerPort: 8080
+                  - name: metrics
+                    containerPort: 9090
+                  - containerPort: 8125
+                    protocol: UDP
+                readinessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: http
+                livenessProbe:
+                  tcpSocket:
+                    port: metrics

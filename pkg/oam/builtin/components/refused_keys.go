@@ -113,7 +113,6 @@ var refusedKeys = map[string][]map[string]string{
 	"webservice":            {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"worker":                {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"statefulset":           {statefulSetSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
-	"daemonset":             {daemonSetSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"job":                   {jobSpecRejectedKeys, jobCronOnlyRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"cronjob":               {cronJobSpecRejectedKeys, jobSpecRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"service":               {serviceRejectedKeys},
@@ -170,9 +169,8 @@ var nestedRefusedKeys = map[string]map[string]nestedRefusal{
 	"statefulset": withNestedRefusals(containerNestedRefusals, "volumeClaimTemplates", nestedRefusal{volumeClaimTemplateRejectedKeys, func(key, reason string) string {
 		return key + ": not authorable — " + reason
 	}}),
-	"daemonset": containerNestedRefusals,
-	"job":       containerNestedRefusals,
-	"cronjob":   containerNestedRefusals,
+	"job":     containerNestedRefusals,
+	"cronjob": containerNestedRefusals,
 }
 
 // withNestedRefusals returns a copy of refusals with r added under path.
@@ -224,11 +222,6 @@ func (h *StatefulsetHandler) NestedUnsupportedFieldHint(parents []string, key st
 	return refusedNestedKeyHint("statefulset", parents, key)
 }
 
-// NestedUnsupportedFieldHint is the daemonset's refusedNestedKeyHint.
-func (h *DaemonsetHandler) NestedUnsupportedFieldHint(parents []string, key string) string {
-	return refusedNestedKeyHint("daemonset", parents, key)
-}
-
 // NestedUnsupportedFieldHint is the job's refusedNestedKeyHint.
 func (h *JobHandler) NestedUnsupportedFieldHint(parents []string, key string) string {
 	return refusedNestedKeyHint("job", parents, key)
@@ -257,11 +250,6 @@ func (WorkerRule) UnsupportedFieldHint(key string) string {
 // UnsupportedFieldHint is the statefulset's refusedKeyHint.
 func (h *StatefulsetHandler) UnsupportedFieldHint(key string) string {
 	return refusedKeyHint("statefulset", key)
-}
-
-// UnsupportedFieldHint is the daemonset's refusedKeyHint.
-func (h *DaemonsetHandler) UnsupportedFieldHint(key string) string {
-	return refusedKeyHint("daemonset", key)
 }
 
 // UnsupportedFieldHint is the job's refusedKeyHint.

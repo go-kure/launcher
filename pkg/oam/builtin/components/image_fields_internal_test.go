@@ -698,12 +698,13 @@ func TestImageFields_HeldOrListed(t *testing.T) {
 }
 
 // TestImageFields_WorkloadKindsTakeImageVolumeNested: the components with a
-// volume schema of their own (webservice, worker, deployment, statefulset,
-// daemonset, job, cronjob) take their volumes through one parser. It reads an
-// image volume only in its nested form (go-kure/launcher#1177), where the
-// reference is held to ValidateImageRef as the pod kind holds it
-// (validateImageVolumeRefs); the policy gates run in ApplyPolicy
-// (enforceVolumeSourcePolicy).
+// volume schema of their own (webservice, worker, statefulset, job, cronjob)
+// take their volumes through one parser. It reads an image volume only in its
+// nested form (go-kure/launcher#1177), where the reference is held to
+// ValidateImageRef as the pod kind holds it (validateImageVolumeRefs); the policy
+// gates run in ApplyPolicy (enforceVolumeSourcePolicy). The raw deployment and
+// daemonset decode the upstream volume instead, and their template is held to
+// the pod kind's rules (validateControllerPodTemplate).
 func TestImageFields_WorkloadKindsTakeImageVolumeNested(t *testing.T) {
 	volume := func(source map[string]any) map[string]any {
 		return map[string]any{"volumes": []any{map[string]any{"name": "ext", "type": "image", "mountPath": "/ext", "image": source}}}

@@ -123,7 +123,7 @@ func TestProbes_FaultA_AProbeItCouldNotCheck(t *testing.T) {
 // not it is applied, so a probe row also carries an Other value that must change
 // them. A negative path index in a row is a diagnostic, not a panic.
 func TestProbes_FaultB_ANegativeIndexIsADiagnostic(t *testing.T) {
-	p := probeNamed(t, "daemonset with containers")
+	p := probeNamed(t, "statefulset with containers and claim templates")
 	fills := slices.Clone(p.Fills)
 	i := slices.IndexFunc(fills, func(f probe.Fill) bool { return f.Path == "ports[0].protocol" })
 	fills[i].Path = "ports[-1].protocol"

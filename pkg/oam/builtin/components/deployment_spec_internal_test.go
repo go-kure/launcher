@@ -239,7 +239,7 @@ func TestParseDeploymentSpec_SingleAuthoredZeroIsAccepted(t *testing.T) {
 }
 
 // TestParseDeploymentSpec_MaxSurgeIsNotCappedAt100 pins the asymmetry against
-// the DaemonSet kind: ValidateRollingUpdateDeployment calls
+// Kubernetes' DaemonSet rule: ValidateRollingUpdateDeployment calls
 // IsNotMoreThan100Percent on maxUnavailable only, so a surge above 100% is a
 // legal Deployment and must not be refused here.
 func TestParseDeploymentSpec_MaxSurgeIsNotCappedAt100(t *testing.T) {

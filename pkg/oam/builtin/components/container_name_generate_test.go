@@ -33,12 +33,6 @@ func setContainerName(t *testing.T, cfg stack.ApplicationConfig, list string, i 
 		} else {
 			c.InitContainers[i].Name = name
 		}
-	case *components.DaemonsetConfig:
-		if list == "sidecars" {
-			c.Sidecars[i].Name = name
-		} else {
-			c.InitContainers[i].Name = name
-		}
 	case *components.JobConfig:
 		c.InitContainers[i].Name = name
 	case *components.CronjobConfig:
@@ -49,7 +43,7 @@ func setContainerName(t *testing.T, cfg stack.ApplicationConfig, list string, i 
 }
 
 func TestContainerNameLabel_RefusedAtGenerate(t *testing.T) {
-	for _, k := range []string{roleMemberType, "statefulset", "daemonset", "job", "cronjob"} {
+	for _, k := range []string{roleMemberType, "statefulset", "job", "cronjob"} {
 		var kind struct {
 			name    string
 			handler oam.ComponentHandler

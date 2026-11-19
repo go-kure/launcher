@@ -594,6 +594,18 @@ func TestTopologySpread_NoDeploymentFails(t *testing.T) {
 	}
 }
 
+// reshapedProps returns a builder of the properties of a reshaped kind, with
+// the constraints at the top level when authored is set.
+func reshapedProps(base map[string]any, constraints []any) func(authored bool) map[string]any {
+	return func(authored bool) map[string]any {
+		props := maps.Clone(base)
+		if authored {
+			props["topologySpreadConstraints"] = constraints
+		}
+		return props
+	}
+}
+
 // TestTopologySpread_OtherWorkloadKindsAreRefused pins the trait to
 // Deployments. A workload kind that publishes raw `topologySpreadConstraints`
 // of its own (go-kure/launcher#790) is still not a target: the trait is
@@ -606,20 +618,24 @@ func TestTopologySpread_OtherWorkloadKindsAreRefused(t *testing.T) {
 	for _, tc := range []struct {
 		kind    string
 		handler oam.ComponentHandler
-		props   map[string]any
+		// props builds the properties afresh, with the constraints authored where
+		// the kind takes them: at the top level of a reshaped kind, in the pod spec
+		// of the raw daemonset.
+		props func(authored bool) map[string]any
 	}{
-		{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3}},
-		{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/api:v1"}},
-		{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/api:v1"}},
-		{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/api:v1", "schedule": "0 2 * * *"}},
+		{"statefulset", &components.StatefulsetHandler{}, reshapedProps(map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3}, constraints)},
+		{"daemonset", &components.DaemonsetHandler{}, func(authored bool) map[string]any {
+			if !authored {
+				return rawDaemonsetProps("api", "ghcr.io/org/api:v1")
+			}
+			return rawDaemonsetProps("api", "ghcr.io/org/api:v1", rawPod(map[string]any{"topologySpreadConstraints": constraints}))
+		}},
+		{"job", &components.JobHandler{}, reshapedProps(map[string]any{"image": "ghcr.io/org/api:v1"}, constraints)},
+		{"cronjob", &components.CronjobHandler{}, reshapedProps(map[string]any{"image": "ghcr.io/org/api:v1", "schedule": "0 2 * * *"}, constraints)},
 	} {
-		for name, extra := range map[string]map[string]any{
-			"no constraints":       nil,
-			"authored constraints": {"topologySpreadConstraints": constraints},
-		} {
+		for name, authored := range map[string]bool{"no constraints": false, "authored constraints": true} {
 			t.Run(tc.kind+"/"+name, func(t *testing.T) {
-				props := maps.Clone(tc.props)
-				maps.Copy(props, extra)
+				props := tc.props(authored)
 				_, err := generateWithTopologySpread(t, tc.handler,
 					&oam.Component{Name: "api", Type: tc.kind, Properties: props}, nil)
 				if err == nil {

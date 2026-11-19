@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   labels:
-    app: agent
     launcher.gokure.dev/component: agent
   name: agent
   namespace: default
@@ -16,7 +15,6 @@ spec:
         app: agent
         launcher.gokure.dev/component: agent
     spec:
-      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/agent:v1.0.0
         livenessProbe:
@@ -26,20 +24,13 @@ spec:
         ports:
         - containerPort: 8080
           name: http
-          protocol: TCP
         - containerPort: 9090
           name: metrics
-          protocol: TCP
         - containerPort: 8125
           protocol: UDP
         readinessProbe:
           httpGet:
             path: /healthz
             port: http
-        resources:
-          limits:
-            memory: 128Mi
-          requests:
-            cpu: 100m
-            memory: 128Mi
+        resources: {}
   updateStrategy: {}

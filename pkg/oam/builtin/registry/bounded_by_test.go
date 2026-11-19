@@ -209,10 +209,11 @@ func overSizedClaim() map[string]any {
 	}}}
 }
 
-// sharedKind is one of the seven types built from the shared container and pod
-// fragments (the `deployment` kind is not one since go-kure/launcher#1629: it
-// holds the upstream pod template, and its rows are podRows on `template`). sizedVolumes says that a `pvc` volume of the type takes a `size`
-// and generates its claim.
+// sharedKind is one of the six types built from the shared container and pod
+// fragments (the `deployment` and `daemonset` kinds are not among them since
+// go-kure/launcher#1629: they hold the upstream pod template, and their rows
+// are podRows on `template`). sizedVolumes says that a `pvc` volume of the type
+// takes a `size` and generates its claim.
 type sharedKind struct {
 	typ                        string
 	sidecars, replicas, claims bool
@@ -225,7 +226,6 @@ var sharedKinds = []sharedKind{
 	{typ: "webservice", sidecars: true, replicas: true, sizedVolumes: true},
 	{typ: "worker", sidecars: true, replicas: true, sizedVolumes: true},
 	{typ: "statefulset", sidecars: true, replicas: true, claims: true},
-	{typ: "daemonset", sidecars: true},
 	{typ: "job"},
 	{typ: "cronjob", extra: map[string]any{"schedule": "0 2 * * *"}},
 }
@@ -291,8 +291,9 @@ func sharedKindRows(k sharedKind) []boundRow {
 }
 
 // podRows are the bounds of a pod written as the API type: at the top of a pod
-// component with prefix "", and below the open template of the four kinds
-// that hold one (podtemplate, replicaset, replicationcontroller and deployment), where every class is declared on that one node.
+// component with prefix "", and below the open template of the five kinds
+// that hold one (podtemplate, replicaset, replicationcontroller, deployment and
+// daemonset), where every class is declared on that one node.
 func podRows(typ, node, prefix string) []boundRow {
 	row := func(declared string, class oam.RefusalClass, relax knob, change ...set) boundRow {
 		for i := range change {
@@ -337,7 +338,7 @@ func boundRows() []boundRow {
 		rows = append(rows, sharedKindRows(k)...)
 	}
 	rows = append(rows, podRows("pod", "", "")...)
-	for _, typ := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment"} {
+	for _, typ := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset"} {
 		rows = append(rows, podRows(typ, "template", "template.spec.")...)
 	}
 	for _, typ := range []string{"replicaset", "replicationcontroller", "deployment"} {
@@ -384,7 +385,7 @@ func boundDocument(t *testing.T, trait bool, typ string) (oam.Component, map[str
 		props = pod()
 	case "podtemplate":
 		props = map[string]any{"template": template()}
-	case "replicaset", "deployment":
+	case "replicaset", "deployment", "daemonset":
 		props = map[string]any{"selector": map[string]any{"matchLabels": map[string]any{"tier": "web"}}, "template": template()}
 	case "replicationcontroller":
 		props = map[string]any{"selector": map[string]any{"tier": "web"}, "template": template()}

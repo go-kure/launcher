@@ -124,6 +124,7 @@ var coreKindSchemas = []struct {
 	{"cnpg-scheduledbackup", reflect.TypeFor[cnpgv1.ScheduledBackupSpec](), &components.CnpgScheduledBackupHandler{}, nil},
 	{"cnpg-subscription", reflect.TypeFor[cnpgv1.SubscriptionSpec](), &components.CnpgSubscriptionHandler{}, nil},
 	{"csidriver", reflect.TypeFor[storagev1.CSIDriverSpec](), &components.CSIDriverHandler{}, nil},
+	{"daemonset", reflect.TypeFor[appsv1.DaemonSetSpec](), &components.DaemonsetHandler{}, nil},
 	{"deployment", reflect.TypeFor[appsv1.DeploymentSpec](), &components.DeploymentHandler{}, nil},
 	// An EndpointSlice has no spec type either: the component projects the
 	// object, less its identity.

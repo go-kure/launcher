@@ -30,7 +30,6 @@ type portKind struct {
 }
 
 var portKinds = []portKind{
-	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "nginx:1.27"}},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "nginx:1.27"}},
 	{"job", &components.JobHandler{}, map[string]any{"image": "busybox:1.36"}},
 	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "busybox:1.36", "schedule": "0 2 * * *"}},
@@ -64,8 +63,6 @@ func (k portKind) generate(t *testing.T, props map[string]any) (corev1.PodSpec, 
 	var svcs []*corev1.Service
 	for _, o := range objs {
 		switch v := (*o).(type) {
-		case *appsv1.DaemonSet:
-			spec = &v.Spec.Template.Spec
 		case *appsv1.StatefulSet:
 			spec = &v.Spec.Template.Spec
 		case *batchv1.Job:
@@ -111,8 +108,8 @@ func TestKindPorts_Projected(t *testing.T) {
 	}
 }
 
-// TestKindPorts_NoPortProperty pins `port`'s removal from daemonset and
-// statefulset (go-kure/launcher#690), as deployment dropped it
+// TestKindPorts_NoPortProperty pins `port`'s removal from statefulset
+// (go-kure/launcher#690), as deployment dropped it
 // (go-kure/launcher#343): no kind publishes it, and an authored `port` is
 // refused as an unknown property.
 func TestKindPorts_NoPortProperty(t *testing.T) {
@@ -207,10 +204,11 @@ func TestKindPorts_NamedProbePorts(t *testing.T) {
 					`lifecycle.preStop: httpGet handler: named port "admin" does not match any port the main container declares (metrics)`},
 				{"no ports at all", k.props(map[string]any{"probes": readiness("metrics")}),
 					`named port "metrics" is not supported here: this component declares no container ports for the kubelet to resolve the name against — use a numeric port instead`},
-				// The names `port` once gave daemonset ("http") and statefulset
-				// ("tcp") are no longer declared implicitly.
-				{"former port name", k.props(map[string]any{"probes": readiness("http")}),
-					`named port "http" is not supported here`},
+				// The name `port` once gave statefulset ("tcp") is no longer
+				// declared implicitly (daemonset's "http" went with the kind's
+				// reshaped form, go-kure/launcher#1629).
+				{"former port name", k.props(map[string]any{"probes": readiness("tcp")}),
+					`named port "tcp" is not supported here`},
 			}
 			for _, tc := range refusals {
 				t.Run(tc.name, func(t *testing.T) {
@@ -226,11 +224,11 @@ func TestKindPorts_NamedProbePorts(t *testing.T) {
 
 // TestKindPorts_SidecarNameCollision refuses a sidecar port named like one of
 // the main container's `ports` (checkPodPortNames sees the whole list), on the
-// two of these kinds with sidecars: statefulset and, since
-// go-kure/launcher#790, daemonset.
+// one of these kinds with sidecars: statefulset. (The raw `daemonset` kind has
+// no `sidecars` key since go-kure/launcher#1629.)
 func TestKindPorts_SidecarNameCollision(t *testing.T) {
 	want := `sidecars[0] "exporter": ports[0].name: port name "metrics" is also declared by the main container`
-	for _, k := range portKinds[:2] {
+	for _, k := range portKinds[:1] {
 		t.Run(k.typ, func(t *testing.T) {
 			props := k.props(map[string]any{
 				"ports": extraPorts(),

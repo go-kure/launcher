@@ -248,8 +248,8 @@ func parseDeploymentStrategy(raw map[string]any) (*appsv1.DeploymentStrategy, er
 	// ValidateRollingUpdateDeployment calls IsNotMoreThan100Percent on
 	// maxUnavailable only; surging past the desired count is meaningful
 	// ("maxSurge: 200%" triples the pods mid-update) while making more than
-	// 100% of them unavailable is not. This is the reverse of the DaemonSet
-	// kind, which caps both — do not unify the two parsers.
+	// 100% of them unavailable is not. This is the reverse of Kubernetes' rule
+	// for a DaemonSet, which caps both knobs.
 	maxUnavailable, unavailableAuthored, err := parseDeploymentIntOrPercent(ru, "maxUnavailable", "strategy.rollingUpdate.maxUnavailable", true)
 	if err != nil {
 		return nil, err
@@ -275,8 +275,8 @@ func parseDeploymentStrategy(raw map[string]any) (*appsv1.DeploymentStrategy, er
 	// other's default. That is why a single authored zero is always fine and
 	// only two authored zeroes can trip this. Counting the defaults keeps the
 	// rule stated the way upstream states it rather than as a special case of
-	// "both authored" — the two happen to coincide here, but they do not on
-	// the DaemonSet kind, whose rule this must not be conflated with.
+	// "both authored" — the two happen to coincide here, but they do not in
+	// Kubernetes' DaemonSet rule, which this must not be conflated with.
 	unavailableZero := unavailableAuthored && intOrPercentIsZero(maxUnavailable)
 	surgeZero := surgeAuthored && intOrPercentIsZero(maxSurge)
 	if unavailableZero && surgeZero {
@@ -336,10 +336,9 @@ func withoutExplicitNulls(raw map[string]any) map[string]any {
 // both, since a percentage nothing can convert is unusable whether or not it
 // has a ceiling.
 //
-// This deliberately does not reuse the DaemonSet kind's parseDaemonSetIntOrPercent:
-// that one caps both knobs, because ValidateRollingUpdateDaemonSet calls
-// IsNotMoreThan100Percent on both. Sharing one helper would silently import
-// the wrong ceiling into whichever kind lost the argument.
+// This is not the rule Kubernetes applies to a DaemonSet:
+// ValidateRollingUpdateDaemonSet calls IsNotMoreThan100Percent on both knobs,
+// so a ceiling copied from there would wrongly cap maxSurge.
 func parseDeploymentIntOrPercent(raw map[string]any, key, label string, capPercent bool) (intstr.IntOrString, bool, error) {
 	v, present := raw[key]
 	if !present {

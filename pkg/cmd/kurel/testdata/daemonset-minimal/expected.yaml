@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   labels:
-    app: agent
     launcher.gokure.dev/component: agent
   name: agent
   namespace: default
@@ -16,14 +15,8 @@ spec:
         app: agent
         launcher.gokure.dev/component: agent
     spec:
-      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/agent:v1.0.0
         name: agent
-        resources:
-          limits:
-            memory: 128Mi
-          requests:
-            cpu: 100m
-            memory: 128Mi
+        resources: {}
   updateStrategy: {}

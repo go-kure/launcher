@@ -978,10 +978,10 @@ registry. The one check holds it on every path by which a document brings
 a pod spec: this kind, the pod template of `replicaset`, `replicationcontroller`,
 `podtemplate` and `cnpg-pooler`, and the pod spec of a workload that
 template delivery (`helmtemplate`), `passthrough` or a `manifests` source
-carries. The `deployment` kind holds its `template.spec.volumes` to the same
+carries. The `deployment` and `daemonset` kinds hold their `template.spec.volumes` to the same
 checks, as the upstream `image` volume source. The components with a volume
 schema of their own (`webservice`,
-`worker`, `statefulset`, `daemonset`, `job`, `cronjob`) take
+`worker`, `statefulset`, `job`, `cronjob`) take
 an image volume only in the nested form of a `volumes` entry (`type: image`,
 `image: {reference: ...}`), where the registry allowlist
 holds it (`enforceVolumeSourcePolicy`) and `ValidateImageRef` holds its
@@ -1511,106 +1511,145 @@ two.
 
 ## daemonset
 
-**daemonset** — `tolerations` (`key`/`operator`/`value`/`effect`/`tolerationSeconds`;
-`tolerationSeconds` and the toleration cross-field rules arrived via the shared parser — see ["What `tolerations` changed
-for `daemonset`"](common-config.md#what-tolerations-changed-for-daemonset), which is the only place in this work that is not
-additive); `ports` declares the main container's ports (see ["Main container
-ports"](common-config.md#main-container-ports)). It emits no Service: author a `service`
-component selecting `app: <component>` to expose the pods, and put routing
-traits on it. It also publishes the raw `affinity`
-and `topologySpreadConstraints` (see ["Raw scheduling properties"](common-config.md#raw-scheduling-properties)) and
-`sidecars`, read, checked and enforced exactly as on `statefulset`: the same
-closed entry, the same pod-wide port-name check against the main container's
-`ports`, and the same `ApplyPolicy` loop. A sidecar here runs on every node
-the DaemonSet schedules to.
-DaemonSetSpec-level (`daemonset_spec.go`): `updateStrategy`,
-`minReadySeconds`, `revisionHistoryLimit`. `appsv1.DaemonSetSpec` has five
-fields; `template` is the pod projection above and `selector` is
-builder-managed, which leaves these three.
-
 ### Properties
 
-Previously `port > 0` added a ClusterIP Service named after
-the component, which held the component name to the Service-name rule and an
-ingress `portName` to `http`.
-With no Service, only the container-name rule applies (see
-**webservice / worker**).
+**daemonset** is the kind-named projection of an apps/v1 DaemonSet, on the
+same recipe as `deployment` and `replicaset`: one schema key per json field of
+`appsv1.DaemonSetSpec`, the property map decoded strictly into that type, and
+one DaemonSet named after the component in the build namespace, with the
+authored spec. The keys are `selector` (required), `template` (required; its
+pod spec is `template.spec`, with `containers` required), `updateStrategy`,
+`minReadySeconds` and `revisionHistoryLimit`. A key that is not one of them, at
+any depth, is refused (`properties do not decode into a apps/v1 DaemonSetSpec: …`).
+Under this kind the API server's own rules apply to `updateStrategy` and to the
+other values; launcher adds none of its own to them.
 
-| Property | Type | Effect | Compatibility |
-|----------|------|--------|---------------|
-| `updateStrategy` | object | `type` (**required**, `RollingUpdate`\|`OnDelete`) and `rollingUpdate` (`maxUnavailable`, `maxSurge`), only accepted under `type: RollingUpdate`. `type: RollingUpdate` alone is accepted — the apiserver defaults the `rollingUpdate` object that upstream validation then requires. | additive |
-| `minReadySeconds` | int ≥ 0 | Seconds a new pod must stay ready before it counts as available. | additive |
-| `revisionHistoryLimit` | int ≥ 0 | Superseded ControllerRevisions kept for rollback. | additive |
-| `selector` | — | **Rejected outright**, not silently dropped: the selector is builder-managed (`app: <component>`), must equal the generated template labels, and is immutable once created. | **Behavior-changing** |
-| `template` | — | **Rejected outright**, as on `webservice` and `worker`: the pod template is projected from the component's own container and pod-level properties. A document was refused already, by the authored-property check; the parser now refuses it too, where a caller that skips that check had it dropped. | **Behavior-changing** for such a caller |
+**Breaking change (pre-GA, `v1alpha1`).** The kind used to take the reshaped
+form that `webservice` and `worker` still take (see ["Deployment-level
+properties"](common-config.md#deployment-level-properties-webservice-worker)).
+That form is gone from `daemonset`, and a document that authors it is refused.
+Move each field as follows:
+
+| Was (reshaped `daemonset`) | Is now |
+|---|---|
+| `image`, `command`, `args`, `env`, `envFrom`, `ports`, `workingDir`, `lifecycle` and the other main-container fields | `template.spec.containers[0].<field>`, in the upstream spelling |
+| `resources`, `securityContext` | `template.spec.containers[0].resources` and `.securityContext` (`unlimited` has no upstream form) |
+| `probes.readiness`, `probes.liveness`, `probes.startup` | `readinessProbe`, `livenessProbe`, `startupProbe` of the container |
+| `sidecars[]` | further entries of `template.spec.containers`; `initContainers[]` move to `template.spec.initContainers` |
+| `podMetadata` | `template.metadata` |
+| `podSecurityContext` | `template.spec.securityContext` |
+| `volumes[]` | `template.spec.volumes[]` as upstream `Volume` objects; `mountPath` moves to each container's `volumeMounts` |
+| `affinity`, `tolerations`, `topologySpreadConstraints` | the same names under `template.spec` |
+| `updateStrategy`, `minReadySeconds`, `revisionHistoryLimit` | unchanged, at the top level of `properties` |
+
+The selector was once builder-managed; it is now authored and required.
+
+**No launcher default.** The kind adds no default: no resource requests or
+limits, no port `protocol`, and no labels or annotations on the DaemonSet
+object itself (the `labels` and `annotations` properties every kind accepts are
+the way to add them). It also does not set
+`automountServiceAccountToken: false`, which `webservice` and `worker` still
+set: **a pod with no `serviceAccountName` now mounts the namespace's default
+account's token**, as pods of the `pod`, `replicaset` and `deployment` kinds
+do. Set `template.spec.automountServiceAccountToken: false` to keep the old
+posture. A launcher default for it is tracked in go-kure/launcher#1631. The
+fill report of the kind is empty.
 
 ### Outputs
 
-Every accepted property is presence-gated: a document authoring none of them
-produces byte-identical output to before, because `DaemonSetSpecConfig.apply`
-writes only the fields that were authored. The one behavior change is
-`selector`: a `selector:` on a daemonset used to be silently ignored — authored-document validation checked type
-names and identity, not property shape — and now fails the build, both
-because `daemonset` does not declare the key and because `ValidateAuthoredProperties`
-(`pkg/cmd/kurel/build.go:149`) now rejects an undeclared authored key on its
-own. That is the point — a silently dropped selector reads as applied.
+**The `app` label.** The handler adds one thing: `app: <component>` on the
+pod template's labels, beside the authored ones (see ["The `app` label"](conventions.md#the-app-label)).
+It is the label launcher's traits and Services select on. The selector is
+emitted as authored, and the DaemonSet itself gets no label of the handler's;
+the transform then sets the component label on the object and its template, as
+on every object a component owns.
+- An authored `template.metadata.labels.app` with the component's own label
+  value is kept. Any other value is refused, naming the component.
+- A selector that matches the authored template labels and would stop
+  matching once the label is added (`app` under `DoesNotExist`, or `NotIn` the
+  label value) is refused (``selector: rules out the label `app: agent` …``). A
+  selector that cannot be read as one is refused with apimachinery's reason
+  (`selector: …`), as on `replicaset`.
+
+**Endpoints.** The kind declares one endpoint per port of
+`template.spec.containers[0]`, in the authored order (see ["Main container
+ports"](common-config.md#main-container-ports)). Containers after the first
+declare none. It emits no Service: author a `service` component selecting
+`app: <component>` to expose the pods, and put routing traits on it.
+
+**Traits.** `scaler` and `disruption` are not available: the kind has no scale
+subresource for an autoscaler, and the `disruption` trait refuses it. The
+pod-spec traits (`security-context`, a `configmap` trait's `mountPath`, an
+`external-secret` trait's `envFrom` and `mountPath`) change the DaemonSet's pod
+template as they do on the other kinds. The `topology-spread` trait is
+Deployment-only and refuses a component whose output holds none.
+
+The config implements `oam.ServiceAccountNamer`, reading the template's
+`serviceAccountName` as the `pod` kind reads its own. No account is generated,
+so a pod without one runs as the namespace's default account.
 
 ### Validation
 
-`maxUnavailable` and `maxSurge` each accept a non-negative integer or a `"N%"`
-string with N ≤ 100 (the integer form is a pod count and is deliberately
-uncapped, matching upstream's `IsNotMoreThan100Percent`, which inspects only
-percentages). A leading sign (`"+50%"`) is rejected — upstream's own
-`IsValidPercent` form check is used rather than a `TrimSuffix`/`Atoi` pair,
-which would accept it. Unlike the statefulset kind, whose `maxUnavailable`
-"cannot be 0", either DaemonSet knob may be zero on its own; it is the
-**pair** that must have exactly one non-zero member. That rule is enforced
-against the *effective* pair, counting the API defaults for whichever half the
-document leaves out — `maxUnavailable` 1, `maxSurge` 0
-(`k8s.io/api/apps/v1/types.go`, the `RollingUpdateDaemonSet` field docs). So
-`maxSurge: 2` on its own is rejected here rather than at apply time (the
-defaulted `maxUnavailable: 1` makes both non-zero), and using surge means
-writing `maxUnavailable: 0` alongside it. The error names which half was
-defaulted, since that is the half absent from the author's YAML.
+**Refused when the component is read**, with or without a policy:
+- An unauthored `selector` or `template`. The Go type cannot omit the
+  selector, and launcher derives none.
+- Under `template.spec`, what the `pod` kind refuses of its own spec, by the
+  same checks and named by path (`template.spec.containers: required`,
+  `template.spec.priority: not authorable …`, `template.spec.ephemeralContainers`,
+  the image rule, duplicate container names).
+- `template.spec.activeDeadlineSeconds`. The API server forbids it on the pod
+  template of a DaemonSet.
+- A key that is not a field of the upstream type, a reshaped key such as
+  `image` or `sidecars` included.
 
-Both knobs are published as the `Types: [integer, string]` union, so the integer and the percentage form both pass
-property validation on the authored and the emitted path alike, and a value of
-any other type is rejected there before the parser sees it. The union leaves
-`Type` empty, so a schema consumer that does not read `Types` still accepts
-both forms.
+The API's other value rules (a `rollingUpdate` under `type: OnDelete`, both
+`maxUnavailable` and `maxSurge` at zero, a `restartPolicy` other than
+`Always`) are left to the API server.
 
-**Two rules here are deliberately stricter than upstream.** The API accepts
-both shapes; what it does with them differs. `updateStrategy.type` is required
-here, where the API defaults it to `RollingUpdate` and acts on that — so a bare
-`updateStrategy: {}` is a legal document whose entire meaning comes from
-defaulting rather than from anything written. `updateStrategy.rollingUpdate` is
-refused under `type: OnDelete`, where `ValidateDaemonSetUpdateStrategy`'s
-`OnDelete` branch is empty and the field is accepted and never read — the
-silently-ignored knob this projection exists to remove. Both are still
-*additive*: `updateStrategy` is a new
-property, so no document that built before this change can carry either shape.
-In the other direction the parser is laxer in exactly one place — upstream
-requires a non-nil `rollingUpdate` under `RollingUpdate`, but apiserver
-defaulting satisfies that, not the author, so `type: RollingUpdate` alone is
-accepted (the same reasoning the statefulset kind applies to its own optional
-`rollingUpdate`).
-
-It is a behavior change against what the code did, not against what the format
-promised. `docs/oam/design-gvk.md` § Parser Strictness already states the
-contract — "Launcher rejects unknown fields in all launcher-native documents.
-An `app.yaml`, `kurel.yaml`, or `cluster.yaml` with unrecognised keys is a
-build error" — so a daemonset carrying `selector:` was never a valid
-`launcher.gokure.dev/v1alpha1` document, and the same-version stability promise
-("every document that was **valid** under it remains valid") never covered it.
-The authored path simply had not implemented that strictness for this key; the
-rejection implements it, with a message that says why rather than the generic
-unknown-key error.
+**Policy.** `ApplyPolicy` holds the pod template to the check the `pod` kind
+runs (`enforcePodTemplatePolicy`): the registry allowlist, the cpu and memory
+maxima, `privileged`, capabilities, host namespaces and volume sources, for
+every container and init container, named by its path in the properties
+(`template.spec.containers[0] "agent": …`). A DaemonSet has no replica count,
+so no replica maximum applies. The policy fills no default: a container
+without resources stays without. A limit the policy would have filled is not
+bounded where the author omits it, as on `pod`.
 
 ### Example
 
-The component in `pkg/cmd/kurel/testdata/daemonset-ports/app.yaml`, built against the
-`cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares the
-two.
+The component in `pkg/cmd/kurel/testdata/daemonset-ports/app.yaml` authors
+the spec as the API shapes it:
+
+```yaml
+- name: agent
+  type: daemonset
+  properties:
+    selector:
+      matchLabels:
+        app: agent
+    template:
+      spec:
+        containers:
+          - name: agent
+            image: ghcr.io/example/agent:v1.0.0
+            ports:
+              - name: http
+                containerPort: 8080
+              - name: metrics
+                containerPort: 9090
+              - containerPort: 8125
+                protocol: UDP
+            readinessProbe:
+              httpGet:
+                path: /healthz
+                port: http
+            livenessProbe:
+              tcpSocket:
+                port: metrics
+```
+
+Built against the `cluster.yaml` beside it, it gives the `expected.yaml` beside
+it. The fixture test compares the two.
 
 ## cronjob
 
@@ -1810,8 +1849,8 @@ field doc says per-index backoff only applies when the pod restart policy is
 `Never`, but `ValidateJobSpec` does not check it and neither does this parser
 — the schema description carries the constraint instead. Refusing a
 combination the API server accepts would be this projection inventing a rule,
-which is a different thing from the daemonset kind's `updateStrategy`
-strictness, where upstream accepts a field and then provably never reads it.
+which is a different thing from a refusal of a field that upstream accepts and
+then provably never reads.
 
 Two rejections go the other way — stricter than `ValidateJobSpec`, because the
 field's own documented contract in `k8s.io/api/batch/v1` is stricter than the
@@ -1882,8 +1921,8 @@ change, and is fixed: `kurel build` now
 calls `ValidateAuthoredProperties` (`pkg/cmd/kurel/build.go:149`), which
 checks declared keys and shapes on the authored document directly.
 
-The `selector`/`manualSelector` rejection is the same class of change the
-daemonset kind's `selector` rejection is, and rests on the same reasoning:
+The `selector`/`manualSelector` rejection is a change of the same class as
+the earlier rejection of an authored `selector` on a workload kind, and rests on the same reasoning:
 `docs/oam/design-gvk.md` § Parser Strictness already promises that unknown
 fields in a launcher-native document are a build error, so neither key was
 ever part of a valid `launcher.gokure.dev/v1alpha1` job. Here it is not even a

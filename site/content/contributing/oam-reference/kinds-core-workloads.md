@@ -265,6 +265,12 @@ Text in square brackets is added here to say what a moved sentence refers to.
 ## daemonset
 
 - **History:**
+  - go-kure/launcher#1629 (the kind takes the upstream `DaemonSetSpec`, strictly decoded, on the
+    `replicaset` recipe: a breaking pre-GA change with no launcher default, no
+    `automountServiceAccountToken: false` fill and an empty fill report. The reshaped form is
+    gone from the kind; the entries below describe the kind as it was before, and the
+    `updateStrategy` strictness they mention is no longer launcher's: the API server's own rules
+    apply).
   - go-kure/launcher#340 (`updateStrategy`, `minReadySeconds` and `revisionHistoryLimit` as
     the DaemonSetSpec-level properties).
   - go-kure/launcher#412 (`tolerationSeconds` and the toleration cross-field rules came with
@@ -281,7 +287,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - `6aed090` (`feat(format): enforce policy and support securityContext on init/sidecar
     containers`) is the in-repo precedent for shipping this class of tightening under an
     unchanged version string. ["this class of tightening" is the rejection of an undeclared
-    `selector` that the paragraph before it describes on the reference page]
+    `selector` that the paragraph before it described on the reference page, which no longer
+    carries it: since go-kure/launcher#1629 `selector` is a required property of the kind]
 
 ## cronjob
 

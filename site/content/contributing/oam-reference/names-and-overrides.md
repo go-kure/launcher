@@ -53,6 +53,6 @@ Text in square brackets is added here to say what a moved sentence refers to.
     `labels` and `annotations`, each a map of strings).
   - go-kure/launcher#1178 (the pod template's labels and annotations are a handler's own
     property, `podMetadata`, on `deployment`, `statefulset`, `daemonset`, `job` and
-    `cronjob` [`deployment` has since become a raw kind with `template.metadata`, go-kure/launcher#1629]).
+    `cronjob` [`deployment` and `daemonset` have since become raw kinds with `template.metadata`, go-kure/launcher#1629]).
   - go-kure/launcher#1216 (`webservice` and `worker` take `podMetadata` and hand it to their
     deployment member [the `role-deployment` member]).

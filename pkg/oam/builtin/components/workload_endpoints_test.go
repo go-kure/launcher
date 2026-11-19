@@ -24,7 +24,45 @@ func endpointWorkloads() []endpointWorkload {
 	return []endpointWorkload{
 		{roleMemberType, &components.RoleDeploymentHandler{}},
 		{"statefulset", &components.StatefulsetHandler{}},
-		{"daemonset", &components.DaemonsetHandler{}},
+	}
+}
+
+// The raw `daemonset` kind reports its endpoints the way the raw `deployment`
+// kind does: one per port of the first template container, in the authored
+// order, none without ports, and the pods' `app` label as the selector
+// (go-kure/launcher#1629).
+func TestWorkloadEndpoints_RawDaemonsetReadsTheFirstContainer(t *testing.T) {
+	h := &components.DaemonsetHandler{}
+	props := rawDaemonsetProps("ghcr.io/example/app:1.0")
+	eps, err := h.Endpoints(&oam.Component{Name: "shop", Type: "daemonset", Properties: props})
+	if err != nil || len(eps) != 0 {
+		t.Fatalf("no ports: endpoints = %+v, err = %v; want none", eps, err)
+	}
+	container := props["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)
+	container["ports"] = []any{portEntry(8080, "http", ""), portEntry(53, "dns", "UDP")}
+	eps, err = h.Endpoints(&oam.Component{Name: "shop", Type: "daemonset", Properties: props})
+	if err != nil || len(eps) != 2 {
+		t.Fatalf("endpoints = %+v, err = %v; want two", eps, err)
+	}
+	// A raw port keeps the protocol as authored: empty, which Endpoint reads as TCP.
+	if eps[0].Name != "http" || eps[0].Protocol != "" || eps[0].Ports[0].IntVal != 8080 {
+		t.Errorf("endpoint[0] = %+v, want http, protocol as authored (empty), 8080", eps[0])
+	}
+	if eps[1].Name != "dns" || eps[1].Protocol != corev1.ProtocolUDP || eps[1].Ports[0].IntVal != 53 {
+		t.Errorf("endpoint[1] = %+v, want dns UDP 53", eps[1])
+	}
+	for i, ep := range eps {
+		if sel := ep.PodSelector; sel == nil || len(sel.MatchLabels) != 1 || sel.MatchLabels["app"] != "shop" || len(sel.MatchExpressions) != 0 {
+			t.Errorf("endpoint[%d] selector = %v, want app=shop only", i, sel)
+		}
+	}
+	// A sidecar-style second container declares no service surface.
+	containers := props["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)
+	props["template"].(map[string]any)["spec"].(map[string]any)["containers"] = append(containers,
+		map[string]any{"name": "proxy", "image": "ghcr.io/example/proxy:1.0", "ports": []any{portEntry(15001, "admin", "")}})
+	eps, err = h.Endpoints(&oam.Component{Name: "shop", Type: "daemonset", Properties: props})
+	if err != nil || len(eps) != 2 {
+		t.Errorf("with a second container: endpoints = %+v, err = %v; want the first container's two", eps, err)
 	}
 }
 
