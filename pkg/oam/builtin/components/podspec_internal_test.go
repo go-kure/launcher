@@ -2,7 +2,6 @@ package components
 
 import (
 	"fmt"
-	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -15,30 +14,20 @@ import (
 
 // TestPodSpecSchemaMatchesParser pins schemaPodSpec's key set to
 // podSpecPropertyKeys: every key the parser reads is published, nothing the
-// parser ignores is published, and the job-only gate applies to both.
+// parser ignores is published, and no rejected key is.
 func TestPodSpecSchemaMatchesParser(t *testing.T) {
-	jobKeys := make([]string, 0, len(podSpecPropertyKeys))
-	for k := range schemaPodSpec(false, true) {
-		jobKeys = append(jobKeys, k)
+	keys := make([]string, 0, len(podSpecPropertyKeys))
+	for k := range schemaPodSpec(false) {
+		keys = append(keys, k)
 	}
-	slices.Sort(jobKeys)
+	slices.Sort(keys)
 	want := slices.Clone(podSpecPropertyKeys)
 	slices.Sort(want)
-	if !slices.Equal(jobKeys, want) {
-		t.Fatalf("schemaPodSpec(false, true) keys = %v\nwant %v", jobKeys, want)
-	}
-
-	nonJob := schemaPodSpec(false, false)
-	for _, k := range podSpecJobOnlyKeys {
-		if _, ok := nonJob[k]; ok {
-			t.Errorf("schemaPodSpec(false, false) publishes job-only key %q", k)
-		}
-	}
-	if got, want := len(nonJob), len(podSpecPropertyKeys)-len(podSpecJobOnlyKeys); got != want {
-		t.Errorf("schemaPodSpec(false, false) has %d keys, want %d", got, want)
+	if !slices.Equal(keys, want) {
+		t.Fatalf("schemaPodSpec(false) keys = %v\nwant %v", keys, want)
 	}
 	for k := range podSpecRejectedKeys {
-		if _, ok := schemaPodSpec(false, true)[k]; ok {
+		if _, ok := schemaPodSpec(false)[k]; ok {
 			t.Errorf("schemaPodSpec publishes rejected key %q", k)
 		}
 	}
@@ -59,7 +48,7 @@ func TestPodSpecSchema_EveryKeyDescribed(t *testing.T) {
 			walk(path+"[]", *s.Items)
 		}
 	}
-	for k, s := range schemaPodSpec(false, true) {
+	for k, s := range schemaPodSpec(false) {
 		walk(k, s)
 	}
 }
@@ -68,14 +57,14 @@ func TestPodSpecSchema_EveryKeyDescribed(t *testing.T) {
 // variant marks every top-level key, so a reserved-composition caller cannot
 // leak an authorable key by accident.
 func TestPodSpecSchema_ReservedFlagPropagates(t *testing.T) {
-	for k, s := range schemaPodSpec(true, true) {
+	for k, s := range schemaPodSpec(true) {
 		if !s.PlatformReserved {
-			t.Errorf("schemaPodSpec(true, true)[%q].PlatformReserved = false", k)
+			t.Errorf("schemaPodSpec(true)[%q].PlatformReserved = false", k)
 		}
 	}
-	for k, s := range schemaPodSpec(false, true) {
+	for k, s := range schemaPodSpec(false) {
 		if s.PlatformReserved {
-			t.Errorf("schemaPodSpec(false, true)[%q].PlatformReserved = true", k)
+			t.Errorf("schemaPodSpec(false)[%q].PlatformReserved = true", k)
 		}
 	}
 }
@@ -85,7 +74,6 @@ func TestPodSpecSchema_ReservedFlagPropagates(t *testing.T) {
 // handler's own keys would silently overwrite it, so the merged size must be
 // exactly own + pod-level + kind-level.
 func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
-	nonJobPodKeys := len(podSpecPropertyKeys) - len(podSpecJobOnlyKeys)
 	cases := []struct {
 		name    string
 		schema  map[string]oam.PropertySchema
@@ -96,7 +84,6 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		// not require editing a magic number here — which would turn this
 		// collision guard into a number the author reconciles by bumping.
 		specKeys []string
-		jobPods  bool
 	}{
 		// 20 and 18, not 17 and 16: go-kure/launcher#787 added the object name
 		// properties as own keys (deploymentObjectName and
@@ -105,8 +92,8 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		// as many. 21 and 19 since go-kure/launcher#1216 gave both `podMetadata`,
 		// in no shared list. 23 and 21 since go-kure/launcher#1473 gave both
 		// `tolerations` and `topologySpreadConstraints`, in neither shared list.
-		{"webservice", WebserviceRule{}.PropertySchema(), 23, deploymentSpecPropertyKeys, false},
-		{"worker", WorkerRule{}.PropertySchema(), 21, deploymentSpecPropertyKeys, false},
+		{"webservice", WebserviceRule{}.PropertySchema(), 23, deploymentSpecPropertyKeys},
+		{"worker", WorkerRule{}.PropertySchema(), 21, deploymentSpecPropertyKeys},
 		// The reshaped deployment parser is the role member, which keeps this
 		// count (go-kure/launcher#1629). The kind-named `deployment`, `daemonset`,
 		// `statefulset`, `job` and `cronjob` take the upstream spec and are not
@@ -118,14 +105,11 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		// deploymentSpecPropertyKeys, which is exactly why the merged count
 		// rises by three rather than staying flat. 18 since go-kure/launcher#280
 		// added the main container's `ports`, likewise in neither shared list.
-		{roleDeploymentMember, (&RoleDeploymentHandler{}).PropertySchema(), 19, deploymentSpecPropertyKeys, false},
+		{roleDeploymentMember, (&RoleDeploymentHandler{}).PropertySchema(), 19, deploymentSpecPropertyKeys},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			podKeys := nonJobPodKeys
-			if tc.jobPods {
-				podKeys = len(podSpecPropertyKeys)
-			}
+			podKeys := len(podSpecPropertyKeys)
 			// containerFieldKeys is the fourth fragment every kind copies in
 			// (schemaContainerFields, go-kure/launcher#790), held as the
 			// parser's list for the same reason specKeys is.
@@ -138,8 +122,7 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 				}
 			}
 			for _, k := range podSpecPropertyKeys {
-				jobOnly := slices.Contains(podSpecJobOnlyKeys, k)
-				if _, ok := tc.schema[k]; !ok && (tc.jobPods || !jobOnly) {
+				if _, ok := tc.schema[k]; !ok {
 					t.Errorf("PropertySchema() lacks pod-level key %q", k)
 				}
 			}
@@ -160,7 +143,6 @@ func boolp(v bool) *bool { return &v }
 func TestParsePodSpec_RoundTrip(t *testing.T) {
 	props := map[string]any{
 		"terminationGracePeriodSeconds": 45,
-		"podActiveDeadlineSeconds":      600,
 		"dnsPolicy":                     "None",
 		"nodeSelector":                  map[string]any{"kubernetes.io/os": "linux", "tier": "batch"},
 		"serviceAccountName":            "custom-sa",
@@ -223,19 +205,19 @@ func TestParsePodSpec_RoundTrip(t *testing.T) {
 			t.Fatalf("round-trip fixture lacks key %q", k)
 		}
 	}
-	if pinned, err := parsePodSpec(map[string]any{"nodeName": "node-a"}, false); err != nil || pinned.NodeName != "node-a" {
+	if pinned, err := parsePodSpec(map[string]any{"nodeName": "node-a"}); err != nil || pinned.NodeName != "node-a" {
 		t.Fatalf("nodeName round-trip = %q, %v; want node-a", pinned.NodeName, err)
 	}
 	// hostUsers: false round-trips on its own — it is only the combination with
 	// hostPID/hostIPC that validateHostUsers forbids. hostNetwork stays
 	// authorable alongside it: upstream forbids that pair only on a cluster
 	// without user-namespace host-network support.
-	if pinned, err := parsePodSpec(map[string]any{"hostUsers": false, "hostNetwork": true}, false); err != nil ||
+	if pinned, err := parsePodSpec(map[string]any{"hostUsers": false, "hostNetwork": true}); err != nil ||
 		pinned.HostUsers == nil || *pinned.HostUsers || !pinned.HostNetwork {
 		t.Fatalf("hostUsers round-trip = %v/%v, %v; want false/true", pinned.HostUsers, pinned.HostNetwork, err)
 	}
 
-	cfg, err := parsePodSpec(props, true)
+	cfg, err := parsePodSpec(props)
 	if err != nil {
 		t.Fatalf("parsePodSpec: %v", err)
 	}
@@ -248,7 +230,6 @@ func TestParsePodSpec_RoundTrip(t *testing.T) {
 		}
 	}
 	check("TerminationGracePeriodSeconds", ps.TerminationGracePeriodSeconds, i64(45))
-	check("ActiveDeadlineSeconds", ps.ActiveDeadlineSeconds, i64(600))
 	check("DNSPolicy", ps.DNSPolicy, corev1.DNSNone)
 	check("NodeSelector", ps.NodeSelector, map[string]string{"kubernetes.io/os": "linux", "tier": "batch"})
 	check("ServiceAccountName", ps.ServiceAccountName, "custom-sa")
@@ -341,7 +322,7 @@ func TestParsePodSpec_RoundTrip(t *testing.T) {
 // TestParsePodSpec_Empty: no pod-level keys leaves the zero PodSpec, so the
 // handlers' goldens stay byte-identical for documents that author none.
 func TestParsePodSpec_Empty(t *testing.T) {
-	cfg, err := parsePodSpec(map[string]any{"image": "ghcr.io/org/app:v1"}, false)
+	cfg, err := parsePodSpec(map[string]any{"image": "ghcr.io/org/app:v1"})
 	if err != nil {
 		t.Fatalf("parsePodSpec: %v", err)
 	}
@@ -354,105 +335,101 @@ func TestParsePodSpec_Errors(t *testing.T) {
 	cases := []struct {
 		name    string
 		props   map[string]any
-		jobPods bool
 		wantErr string
 	}{
-		{"ephemeralContainers rejected", map[string]any{"ephemeralContainers": []any{}}, true, "ephemeralContainers: not supported"},
+		{"ephemeralContainers rejected", map[string]any{"ephemeralContainers": []any{}}, "ephemeralContainers: not supported"},
 		// The reason is pinned too: admission refuses only a value that differs
 		// from the derived one, not every authored value (go-kure/launcher#658).
-		{"priority rejected", map[string]any{"priority": 1000}, true, "priority: not authorable — the Priority admission controller (enabled by default) derives it from priorityClassName and rejects a pod whose value differs"},
-		{"overhead rejected", map[string]any{"overhead": map[string]any{}}, true, "overhead: not authorable — the RuntimeClass admission controller (enabled by default) derives it from the RuntimeClass and rejects a pod whose value differs"},
-		{"serviceAccount alias rejected", map[string]any{"serviceAccount": "x"}, true, "serviceAccount: deprecated alias"},
-		{"podActiveDeadlineSeconds on non-Job pods", map[string]any{"podActiveDeadlineSeconds": 10}, false, "only Job pods may set activeDeadlineSeconds"},
-		{"podActiveDeadlineSeconds zero", map[string]any{"podActiveDeadlineSeconds": 0}, true, "must be between 1 and"},
-		{"podActiveDeadlineSeconds over MaxInt32", map[string]any{"podActiveDeadlineSeconds": int64(math.MaxInt32) + 1}, true, "must be between 1 and"},
-		{"terminationGracePeriodSeconds negative", map[string]any{"terminationGracePeriodSeconds": -1}, false, "must not be negative"},
-		{"terminationGracePeriodSeconds not integer", map[string]any{"terminationGracePeriodSeconds": "30"}, false, "terminationGracePeriodSeconds"},
-		{"dnsPolicy enum", map[string]any{"dnsPolicy": "Sometimes"}, false, "dnsPolicy: invalid value"},
-		{"dnsPolicy None without nameservers", map[string]any{"dnsPolicy": "None"}, false, "None requires dnsConfig.nameservers"},
-		{"dnsPolicy None with empty nameservers", map[string]any{"dnsPolicy": "None", "dnsConfig": map[string]any{"searches": []any{"a.b"}}}, false, "None requires dnsConfig.nameservers"},
-		{"dnsConfig too many nameservers", map[string]any{"dnsConfig": map[string]any{"nameservers": []any{"1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4"}}}, false, "at most 3 nameservers"},
-		{"dnsConfig bad nameserver", map[string]any{"dnsConfig": map[string]any{"nameservers": []any{"not-an-ip"}}}, false, "invalid IP address"},
-		{"dnsConfig unknown key", map[string]any{"dnsConfig": map[string]any{"servers": []any{}}}, false, `dnsConfig: unrecognized key "servers"`},
-		{"nodeSelector bad value", map[string]any{"nodeSelector": map[string]any{"tier": "has space"}}, false, "invalid label value"},
-		{"nodeSelector non-string value", map[string]any{"nodeSelector": map[string]any{"tier": 1}}, false, "must be a string"},
-		{"serviceAccountName invalid", map[string]any{"serviceAccountName": "Not_Valid"}, false, "serviceAccountName: invalid name"},
-		{"hostNetwork not bool", map[string]any{"hostNetwork": "yes"}, false, "hostNetwork: must be a boolean"},
-		{"shareProcessNamespace with hostPID", map[string]any{"shareProcessNamespace": true, "hostPID": true}, false, "shareProcessNamespace and hostPID cannot both be true"},
-		{"podSecurityContext unknown key", map[string]any{"podSecurityContext": map[string]any{"privileged": true}}, false, `podSecurityContext: unrecognized key "privileged"`},
-		{"hostPID with hostUsers false", map[string]any{"hostUsers": false, "hostPID": true}, false, "hostPID: must not be true when hostUsers is false"},
-		{"hostIPC with hostUsers false", map[string]any{"hostUsers": false, "hostIPC": true}, false, "hostIPC: must not be true when hostUsers is false"},
+		{"priority rejected", map[string]any{"priority": 1000}, "priority: not authorable — the Priority admission controller (enabled by default) derives it from priorityClassName and rejects a pod whose value differs"},
+		{"overhead rejected", map[string]any{"overhead": map[string]any{}}, "overhead: not authorable — the RuntimeClass admission controller (enabled by default) derives it from the RuntimeClass and rejects a pod whose value differs"},
+		{"serviceAccount alias rejected", map[string]any{"serviceAccount": "x"}, "serviceAccount: deprecated alias"},
+		// The key is refused whatever its value, so no range is read.
+		{"podActiveDeadlineSeconds refused", map[string]any{"podActiveDeadlineSeconds": 10}, "only Job pods may set activeDeadlineSeconds"},
+		{"podActiveDeadlineSeconds zero refused", map[string]any{"podActiveDeadlineSeconds": 0}, "only Job pods may set activeDeadlineSeconds"},
+		{"terminationGracePeriodSeconds negative", map[string]any{"terminationGracePeriodSeconds": -1}, "must not be negative"},
+		{"terminationGracePeriodSeconds not integer", map[string]any{"terminationGracePeriodSeconds": "30"}, "terminationGracePeriodSeconds"},
+		{"dnsPolicy enum", map[string]any{"dnsPolicy": "Sometimes"}, "dnsPolicy: invalid value"},
+		{"dnsPolicy None without nameservers", map[string]any{"dnsPolicy": "None"}, "None requires dnsConfig.nameservers"},
+		{"dnsPolicy None with empty nameservers", map[string]any{"dnsPolicy": "None", "dnsConfig": map[string]any{"searches": []any{"a.b"}}}, "None requires dnsConfig.nameservers"},
+		{"dnsConfig too many nameservers", map[string]any{"dnsConfig": map[string]any{"nameservers": []any{"1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4"}}}, "at most 3 nameservers"},
+		{"dnsConfig bad nameserver", map[string]any{"dnsConfig": map[string]any{"nameservers": []any{"not-an-ip"}}}, "invalid IP address"},
+		{"dnsConfig unknown key", map[string]any{"dnsConfig": map[string]any{"servers": []any{}}}, `dnsConfig: unrecognized key "servers"`},
+		{"nodeSelector bad value", map[string]any{"nodeSelector": map[string]any{"tier": "has space"}}, "invalid label value"},
+		{"nodeSelector non-string value", map[string]any{"nodeSelector": map[string]any{"tier": 1}}, "must be a string"},
+		{"serviceAccountName invalid", map[string]any{"serviceAccountName": "Not_Valid"}, "serviceAccountName: invalid name"},
+		{"hostNetwork not bool", map[string]any{"hostNetwork": "yes"}, "hostNetwork: must be a boolean"},
+		{"shareProcessNamespace with hostPID", map[string]any{"shareProcessNamespace": true, "hostPID": true}, "shareProcessNamespace and hostPID cannot both be true"},
+		{"podSecurityContext unknown key", map[string]any{"podSecurityContext": map[string]any{"privileged": true}}, `podSecurityContext: unrecognized key "privileged"`},
+		{"hostPID with hostUsers false", map[string]any{"hostUsers": false, "hostPID": true}, "hostPID: must not be true when hostUsers is false"},
+		{"hostIPC with hostUsers false", map[string]any{"hostUsers": false, "hostIPC": true}, "hostIPC: must not be true when hostUsers is false"},
 		{
 			"hostProcess without hostNetwork",
 			map[string]any{"podSecurityContext": map[string]any{"windowsOptions": map[string]any{"hostProcess": true}}},
-			false,
 			"hostNetwork must be true when hostProcess is true",
 		},
 		{
 			"hostAlias zone-scoped IPv6",
 			map[string]any{"hostAliases": []any{map[string]any{"ip": "fe80::1%eth0", "hostnames": []any{"db.local"}}}},
-			false,
 			"zone-scoped address is not accepted",
 		},
 		{
 			"nameserver zone-scoped IPv6",
 			map[string]any{"dnsConfig": map[string]any{"nameservers": []any{"fe80::1%eth0"}}},
-			false,
 			"zone-scoped address is not accepted",
 		},
-		{"podSecurityContext negative fsGroup", map[string]any{"podSecurityContext": map[string]any{"fsGroup": -1}}, false, "must not be negative"},
-		{"imagePullSecrets missing name", map[string]any{"imagePullSecrets": []any{map[string]any{}}}, false, "imagePullSecrets[0].name: required"},
-		{"imagePullSecrets not array", map[string]any{"imagePullSecrets": "regcred"}, false, "must be an array"},
-		{"hostname not a label", map[string]any{"hostname": "web.0"}, false, "hostname: invalid value"},
-		{"subdomain not a label", map[string]any{"subdomain": "Web"}, false, "subdomain: invalid value"},
-		{"hostAliases missing ip", map[string]any{"hostAliases": []any{map[string]any{"hostnames": []any{"a"}}}}, false, "hostAliases[0].ip: required"},
-		{"hostAliases bad ip", map[string]any{"hostAliases": []any{map[string]any{"ip": "300.1.1.1", "hostnames": []any{"a"}}}}, false, "invalid IP address"},
-		{"hostAliases no hostnames", map[string]any{"hostAliases": []any{map[string]any{"ip": "10.0.0.1"}}}, false, "at least one hostname"},
-		{"priorityClassName invalid", map[string]any{"priorityClassName": "High"}, false, "priorityClassName: invalid name"},
-		{"readinessGates unknown key", map[string]any{"readinessGates": []any{map[string]any{"type": "x"}}}, false, `readinessGates[0]: unrecognized key "type"`},
-		{"readinessGates bad conditionType", map[string]any{"readinessGates": []any{map[string]any{"conditionType": "bad value"}}}, false, "conditionType: invalid value"},
-		{"runtimeClassName invalid", map[string]any{"runtimeClassName": "gVisor"}, false, "runtimeClassName: invalid name"},
-		{"preemptionPolicy enum", map[string]any{"preemptionPolicy": "Always"}, false, "preemptionPolicy: invalid value"},
-		{"os enum", map[string]any{"os": map[string]any{"name": "darwin"}}, false, "os.name: invalid value"},
-		{"os unknown key", map[string]any{"os": map[string]any{"name": "linux", "version": "6"}}, false, `os: unrecognized key "version"`},
-		{"os name missing", map[string]any{"os": map[string]any{}}, false, "os.name: required"},
-		{"os name not string", map[string]any{"os": map[string]any{"name": 123}}, false, "os.name: must be a string"},
-		{"nodeName with schedulingGates", map[string]any{"nodeName": "n1", "schedulingGates": []any{map[string]any{"name": "g"}}}, false, "nodeName: cannot be set together with schedulingGates"},
-		{"several rejected keys report the first alphabetically", map[string]any{"serviceAccount": "x", "priority": 1, "overhead": map[string]any{}}, true, "overhead: not authorable"},
-		{"schedulingGates duplicate", map[string]any{"schedulingGates": []any{map[string]any{"name": "g"}, map[string]any{"name": "g"}}}, false, "duplicate scheduling gate"},
-		{"resourceClaims duplicate", map[string]any{"resourceClaims": []any{map[string]any{"name": "c", "resourceClaimName": "x"}, map[string]any{"name": "c", "resourceClaimName": "y"}}}, false, "duplicate resource claim"},
-		{"resourceClaims neither source", map[string]any{"resourceClaims": []any{map[string]any{"name": "c"}}}, false, "exactly one of resourceClaimName or resourceClaimTemplateName"},
-		{"resourceClaims both sources", map[string]any{"resourceClaims": []any{map[string]any{"name": "c", "resourceClaimName": "x", "resourceClaimTemplateName": "y"}}}, false, "exactly one of resourceClaimName or resourceClaimTemplateName"},
-		{"podResources ephemeral-storage", map[string]any{"podResources": map[string]any{"requests": map[string]any{"ephemeral-storage": "1Gi"}}}, false, "pod-level resources support only cpu, memory, and hugepages"},
-		{"podResources extended resource", map[string]any{"podResources": map[string]any{"limits": map[string]any{"nvidia.com/gpu": "1"}}}, false, "pod-level resources support only cpu, memory, and hugepages"},
-		{"podResources hugepages without cpu or memory", map[string]any{"podResources": map[string]any{"limits": map[string]any{"hugepages-2Mi": "4Mi"}}}, false, "podResources: hugepages require cpu or memory"},
-		{"podResources bad quantity", map[string]any{"podResources": map[string]any{"limits": map[string]any{"cpu": "lots"}}}, false, "invalid podResources configuration"},
-		{"podResources unknown key", map[string]any{"podResources": map[string]any{"requestz": map[string]any{"cpu": "1"}}}, false, `podResources: unrecognized key "requestz"`},
-		{"podResources requests not object", map[string]any{"podResources": map[string]any{"requests": "1"}}, false, "podResources.requests: must be an object"},
-		{"os windows with hostPID", map[string]any{"os": map[string]any{"name": "windows"}, "hostPID": true}, false, "os.name windows: hostPID must be unset"},
-		{"os windows with hostUsers false", map[string]any{"os": map[string]any{"name": "windows"}, "hostUsers": false}, false, "os.name windows: hostUsers must be unset"},
-		{"os windows with shareProcessNamespace", map[string]any{"os": map[string]any{"name": "windows"}, "shareProcessNamespace": false}, false, "os.name windows: shareProcessNamespace must be unset"},
-		{"os windows with podResources", map[string]any{"os": map[string]any{"name": "windows"}, "podResources": map[string]any{"requests": map[string]any{"cpu": "1"}}}, false, "os.name windows: podResources must be unset"},
-		{"os windows with fsGroup", map[string]any{"os": map[string]any{"name": "windows"}, "podSecurityContext": map[string]any{"fsGroup": 1}}, false, "os.name windows: podSecurityContext.fsGroup must be unset"},
-		{"os windows with seccompProfile", map[string]any{"os": map[string]any{"name": "windows"}, "podSecurityContext": map[string]any{"seccompProfile": map[string]any{"type": "RuntimeDefault"}}}, false, "os.name windows: podSecurityContext.seccompProfile must be unset"},
-		{"os linux with windowsOptions", map[string]any{"os": map[string]any{"name": "linux"}, "podSecurityContext": map[string]any{"windowsOptions": map[string]any{"runAsUserName": "ContainerUser"}}}, false, "os.name linux: podSecurityContext.windowsOptions must be unset"},
-		{"hostnameOverride with hostNetwork", map[string]any{"hostnameOverride": "h.example", "hostNetwork": true}, false, "cannot be set when hostNetwork is true"},
-		{"hostnameOverride with setHostnameAsFQDN", map[string]any{"hostnameOverride": "h.example", "setHostnameAsFQDN": true}, false, "cannot be set when setHostnameAsFQDN is true"},
-		{"hostnameOverride too long", map[string]any{"hostnameOverride": strings.Repeat("a", 65)}, false, "at most 64 characters"},
-		{"hostnameOverride uppercase", map[string]any{"hostnameOverride": "Host.Example"}, false, "hostnameOverride: invalid value"},
-		{"schedulingGroup unknown key", map[string]any{"schedulingGroup": map[string]any{"name": "g"}}, false, `schedulingGroup: unrecognized key "name"`},
-		{"schedulingGroup missing podGroupName", map[string]any{"schedulingGroup": map[string]any{}}, false, "schedulingGroup.podGroupName: required"},
-		{"nodeName not a DNS subdomain", map[string]any{"nodeName": "Node_1"}, false, `nodeName: invalid name "Node_1"`},
-		{"nodeName too long", map[string]any{"nodeName": strings.Repeat("a", 254)}, false, "nodeName: invalid name"},
-		{"dnsConfig too many searches", map[string]any{"dnsConfig": map[string]any{"searches": manySearches(33, "a")}}, false, "at most 32 search paths"},
-		{"dnsConfig searches over the 2048-character list limit", map[string]any{"dnsConfig": map[string]any{"searches": manySearches(32, strings.Repeat("b", 60))}}, false, "at most 2048 characters"},
-		{"sysctls invalid name", map[string]any{"podSecurityContext": map[string]any{"sysctls": []any{map[string]any{"name": "Net.Core.Somaxconn", "value": "1024"}}}}, false, `invalid sysctl name "Net.Core.Somaxconn"`},
-		{"sysctls name too long", map[string]any{"podSecurityContext": map[string]any{"sysctls": []any{map[string]any{"name": strings.Repeat("a", 254), "value": "1"}}}}, false, "invalid sysctl name"},
-		{"sysctls duplicate name", map[string]any{"podSecurityContext": map[string]any{"sysctls": []any{map[string]any{"name": "net.core.somaxconn", "value": "1024"}, map[string]any{"name": "net.core.somaxconn", "value": "2048"}}}}, false, `duplicate sysctl "net.core.somaxconn"`},
+		{"podSecurityContext negative fsGroup", map[string]any{"podSecurityContext": map[string]any{"fsGroup": -1}}, "must not be negative"},
+		{"imagePullSecrets missing name", map[string]any{"imagePullSecrets": []any{map[string]any{}}}, "imagePullSecrets[0].name: required"},
+		{"imagePullSecrets not array", map[string]any{"imagePullSecrets": "regcred"}, "must be an array"},
+		{"hostname not a label", map[string]any{"hostname": "web.0"}, "hostname: invalid value"},
+		{"subdomain not a label", map[string]any{"subdomain": "Web"}, "subdomain: invalid value"},
+		{"hostAliases missing ip", map[string]any{"hostAliases": []any{map[string]any{"hostnames": []any{"a"}}}}, "hostAliases[0].ip: required"},
+		{"hostAliases bad ip", map[string]any{"hostAliases": []any{map[string]any{"ip": "300.1.1.1", "hostnames": []any{"a"}}}}, "invalid IP address"},
+		{"hostAliases no hostnames", map[string]any{"hostAliases": []any{map[string]any{"ip": "10.0.0.1"}}}, "at least one hostname"},
+		{"priorityClassName invalid", map[string]any{"priorityClassName": "High"}, "priorityClassName: invalid name"},
+		{"readinessGates unknown key", map[string]any{"readinessGates": []any{map[string]any{"type": "x"}}}, `readinessGates[0]: unrecognized key "type"`},
+		{"readinessGates bad conditionType", map[string]any{"readinessGates": []any{map[string]any{"conditionType": "bad value"}}}, "conditionType: invalid value"},
+		{"runtimeClassName invalid", map[string]any{"runtimeClassName": "gVisor"}, "runtimeClassName: invalid name"},
+		{"preemptionPolicy enum", map[string]any{"preemptionPolicy": "Always"}, "preemptionPolicy: invalid value"},
+		{"os enum", map[string]any{"os": map[string]any{"name": "darwin"}}, "os.name: invalid value"},
+		{"os unknown key", map[string]any{"os": map[string]any{"name": "linux", "version": "6"}}, `os: unrecognized key "version"`},
+		{"os name missing", map[string]any{"os": map[string]any{}}, "os.name: required"},
+		{"os name not string", map[string]any{"os": map[string]any{"name": 123}}, "os.name: must be a string"},
+		{"nodeName with schedulingGates", map[string]any{"nodeName": "n1", "schedulingGates": []any{map[string]any{"name": "g"}}}, "nodeName: cannot be set together with schedulingGates"},
+		{"several rejected keys report the first alphabetically", map[string]any{"serviceAccount": "x", "priority": 1, "overhead": map[string]any{}}, "overhead: not authorable"},
+		{"schedulingGates duplicate", map[string]any{"schedulingGates": []any{map[string]any{"name": "g"}, map[string]any{"name": "g"}}}, "duplicate scheduling gate"},
+		{"resourceClaims duplicate", map[string]any{"resourceClaims": []any{map[string]any{"name": "c", "resourceClaimName": "x"}, map[string]any{"name": "c", "resourceClaimName": "y"}}}, "duplicate resource claim"},
+		{"resourceClaims neither source", map[string]any{"resourceClaims": []any{map[string]any{"name": "c"}}}, "exactly one of resourceClaimName or resourceClaimTemplateName"},
+		{"resourceClaims both sources", map[string]any{"resourceClaims": []any{map[string]any{"name": "c", "resourceClaimName": "x", "resourceClaimTemplateName": "y"}}}, "exactly one of resourceClaimName or resourceClaimTemplateName"},
+		{"podResources ephemeral-storage", map[string]any{"podResources": map[string]any{"requests": map[string]any{"ephemeral-storage": "1Gi"}}}, "pod-level resources support only cpu, memory, and hugepages"},
+		{"podResources extended resource", map[string]any{"podResources": map[string]any{"limits": map[string]any{"nvidia.com/gpu": "1"}}}, "pod-level resources support only cpu, memory, and hugepages"},
+		{"podResources hugepages without cpu or memory", map[string]any{"podResources": map[string]any{"limits": map[string]any{"hugepages-2Mi": "4Mi"}}}, "podResources: hugepages require cpu or memory"},
+		{"podResources bad quantity", map[string]any{"podResources": map[string]any{"limits": map[string]any{"cpu": "lots"}}}, "invalid podResources configuration"},
+		{"podResources unknown key", map[string]any{"podResources": map[string]any{"requestz": map[string]any{"cpu": "1"}}}, `podResources: unrecognized key "requestz"`},
+		{"podResources requests not object", map[string]any{"podResources": map[string]any{"requests": "1"}}, "podResources.requests: must be an object"},
+		{"os windows with hostPID", map[string]any{"os": map[string]any{"name": "windows"}, "hostPID": true}, "os.name windows: hostPID must be unset"},
+		{"os windows with hostUsers false", map[string]any{"os": map[string]any{"name": "windows"}, "hostUsers": false}, "os.name windows: hostUsers must be unset"},
+		{"os windows with shareProcessNamespace", map[string]any{"os": map[string]any{"name": "windows"}, "shareProcessNamespace": false}, "os.name windows: shareProcessNamespace must be unset"},
+		{"os windows with podResources", map[string]any{"os": map[string]any{"name": "windows"}, "podResources": map[string]any{"requests": map[string]any{"cpu": "1"}}}, "os.name windows: podResources must be unset"},
+		{"os windows with fsGroup", map[string]any{"os": map[string]any{"name": "windows"}, "podSecurityContext": map[string]any{"fsGroup": 1}}, "os.name windows: podSecurityContext.fsGroup must be unset"},
+		{"os windows with seccompProfile", map[string]any{"os": map[string]any{"name": "windows"}, "podSecurityContext": map[string]any{"seccompProfile": map[string]any{"type": "RuntimeDefault"}}}, "os.name windows: podSecurityContext.seccompProfile must be unset"},
+		{"os linux with windowsOptions", map[string]any{"os": map[string]any{"name": "linux"}, "podSecurityContext": map[string]any{"windowsOptions": map[string]any{"runAsUserName": "ContainerUser"}}}, "os.name linux: podSecurityContext.windowsOptions must be unset"},
+		{"hostnameOverride with hostNetwork", map[string]any{"hostnameOverride": "h.example", "hostNetwork": true}, "cannot be set when hostNetwork is true"},
+		{"hostnameOverride with setHostnameAsFQDN", map[string]any{"hostnameOverride": "h.example", "setHostnameAsFQDN": true}, "cannot be set when setHostnameAsFQDN is true"},
+		{"hostnameOverride too long", map[string]any{"hostnameOverride": strings.Repeat("a", 65)}, "at most 64 characters"},
+		{"hostnameOverride uppercase", map[string]any{"hostnameOverride": "Host.Example"}, "hostnameOverride: invalid value"},
+		{"schedulingGroup unknown key", map[string]any{"schedulingGroup": map[string]any{"name": "g"}}, `schedulingGroup: unrecognized key "name"`},
+		{"schedulingGroup missing podGroupName", map[string]any{"schedulingGroup": map[string]any{}}, "schedulingGroup.podGroupName: required"},
+		{"nodeName not a DNS subdomain", map[string]any{"nodeName": "Node_1"}, `nodeName: invalid name "Node_1"`},
+		{"nodeName too long", map[string]any{"nodeName": strings.Repeat("a", 254)}, "nodeName: invalid name"},
+		{"dnsConfig too many searches", map[string]any{"dnsConfig": map[string]any{"searches": manySearches(33, "a")}}, "at most 32 search paths"},
+		{"dnsConfig searches over the 2048-character list limit", map[string]any{"dnsConfig": map[string]any{"searches": manySearches(32, strings.Repeat("b", 60))}}, "at most 2048 characters"},
+		{"sysctls invalid name", map[string]any{"podSecurityContext": map[string]any{"sysctls": []any{map[string]any{"name": "Net.Core.Somaxconn", "value": "1024"}}}}, `invalid sysctl name "Net.Core.Somaxconn"`},
+		{"sysctls name too long", map[string]any{"podSecurityContext": map[string]any{"sysctls": []any{map[string]any{"name": strings.Repeat("a", 254), "value": "1"}}}}, "invalid sysctl name"},
+		{"sysctls duplicate name", map[string]any{"podSecurityContext": map[string]any{"sysctls": []any{map[string]any{"name": "net.core.somaxconn", "value": "1024"}, map[string]any{"name": "net.core.somaxconn", "value": "2048"}}}}, `duplicate sysctl "net.core.somaxconn"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := parsePodSpec(tc.props, tc.jobPods)
+			_, err := parsePodSpec(tc.props)
 			if err == nil {
 				t.Fatalf("parsePodSpec(%v) succeeded, want error containing %q", tc.props, tc.wantErr)
 			}
@@ -482,7 +459,7 @@ func TestParsePodSpec_HostnameOverrideAllowed(t *testing.T) {
 		"hostnameOverride":  "h.example",
 		"hostNetwork":       false,
 		"setHostnameAsFQDN": false,
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("parsePodSpec: %v", err)
 	}
@@ -500,7 +477,7 @@ func TestBuildPodSpec_LayersOnAuthoredFields(t *testing.T) {
 		"serviceAccountName":            "custom-sa",
 		"terminationGracePeriodSeconds": 5,
 		"nodeSelector":                  map[string]any{"tier": "web"},
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("parsePodSpec: %v", err)
 	}
@@ -564,7 +541,7 @@ func TestBuildPodSpec_AutomountDefault(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := parsePodSpec(tc.props, false)
+			cfg, err := parsePodSpec(tc.props)
 			if err != nil {
 				t.Fatalf("parsePodSpec: %v", err)
 			}
@@ -603,7 +580,7 @@ func TestBuildPodSpec_ContainerOSFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := parsePodSpec(map[string]any{"os": map[string]any{"name": tc.os}}, false)
+			cfg, err := parsePodSpec(map[string]any{"os": map[string]any{"name": tc.os}})
 			if err != nil {
 				t.Fatalf("parsePodSpec: %v", err)
 			}
@@ -652,7 +629,7 @@ func TestEnforceHostNamespaces(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := parsePodSpec(tc.props, false)
+			cfg, err := parsePodSpec(tc.props)
 			if err != nil {
 				t.Fatalf("parsePodSpec: %v", err)
 			}

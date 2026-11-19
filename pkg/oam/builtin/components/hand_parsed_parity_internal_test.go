@@ -138,7 +138,15 @@ var parityRules = map[string][]parityRule{
 // parityRefusedBeyondUpstream are the keys of a kind's refusal maps that are no
 // field of the type the kind projects, each with why the kind refuses it
 // nevertheless.
-var parityRefusedBeyondUpstream = map[string]map[string]string{}
+var parityRefusedBeyondUpstream = map[string]map[string]string{
+	// The pod deadline of the retired reshaped job and cronjob (go-kure/launcher#1629).
+	// Upstream names it activeDeadlineSeconds, refused by appsPodTemplateRejectedKeys;
+	// the old name is refused too, so a document written for the reshaped kinds is
+	// told why rather than dropped.
+	"role-deployment": {
+		"podActiveDeadlineSeconds": "the property name of the reshaped job and cronjob for the pod's activeDeadlineSeconds, refused with the same reason as the upstream name",
+	},
+}
 
 // parityFields returns the JSON fields of a Kubernetes API struct by name, an
 // inlined struct's among them.
