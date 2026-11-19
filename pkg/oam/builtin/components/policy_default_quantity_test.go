@@ -28,8 +28,6 @@ func TestApplyPolicy_NegativeResourceDefaultRefused(t *testing.T) {
 		{roleMemberType, &components.RoleDeploymentHandler{}, image},
 		{"statefulset", &components.StatefulsetHandler{}, image},
 		{"daemonset", &components.DaemonsetHandler{}, image},
-		{"job", &components.JobHandler{}, image},
-		{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "0 2 * * *"}},
 		{"webservice", webserviceViaRule{}, image},
 		{"postgresql", postgresqlViaRule{}, map[string]any{}},
 	}

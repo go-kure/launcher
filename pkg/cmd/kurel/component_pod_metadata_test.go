@@ -25,17 +25,15 @@ var podMetadataKinds = []struct {
 	typ, kind string
 	template  []string
 	selector  bool
-	job       bool
 }{
 	// The webservice and worker lower to the role-deployment member, which takes
-	// the property (go-kure/launcher#1216). The raw deployment kind takes none: its
-	// pod template metadata is template.metadata (TestPodMetadata_RawDeploymentRefusesIt).
+	// the property (go-kure/launcher#1216). The raw deployment, job and cronjob
+	// kinds take none: their pod template metadata is the upstream template.metadata
+	// (TestPodMetadata_RawKindsRefuseIt).
 	{typ: "webservice", kind: "Deployment", template: []string{"spec", "template"}, selector: true},
 	{typ: "worker", kind: "Deployment", template: []string{"spec", "template"}, selector: true},
 	{typ: "statefulset", kind: "StatefulSet", template: []string{"spec", "template"}, selector: true},
 	{typ: "daemonset", kind: "DaemonSet", template: []string{"spec", "template"}, selector: true},
-	{typ: "job", kind: "Job", template: []string{"spec", "template"}, job: true},
-	{typ: "cronjob", kind: "CronJob", template: []string{"spec", "jobTemplate", "spec", "template"}, job: true},
 }
 
 func podMetadataProps(typ string, podMetadata any) map[string]any {
@@ -117,30 +115,24 @@ func TestPodMetadata_ReachesThePodTemplateOnly(t *testing.T) {
 	}
 }
 
-// A document that writes a key the kind sets to another value, a key the Job
-// controller owns, or a shape the property does not take is refused with a reason.
+// A document that writes a key the kind sets to another value, or a shape the
+// property does not take, is refused with a reason.
 func TestPodMetadata_Refusals(t *testing.T) {
 	cases := []struct {
 		name        string
 		podMetadata any
-		jobOnly     bool
 		want        string
 	}{
-		{"app label with another value", map[string]any{"labels": map[string]any{"app": "other"}}, false, `podMetadata.labels["app"]`},
-		{"unknown key beside labels", map[string]any{"selector": map[string]any{}}, false, `unsupported field "selector"`},
-		{"label value not a string", map[string]any{"labels": map[string]any{"example.com/n": 3}}, false, "podMetadata.labels"},
-		{"invalid label key", map[string]any{"labels": map[string]any{"-bad": "x"}}, false, "podMetadata.labels"},
-		{"invalid annotation key", map[string]any{"annotations": map[string]any{"bad key": "x"}}, false, "podMetadata.annotations"},
-		{"annotations over the size limit", map[string]any{"annotations": map[string]any{"example.com/big": strings.Repeat("x", 256*1024+1)}}, false, "limit"},
-		{"job-name", map[string]any{"labels": map[string]any{"job-name": "x"}}, true, "Job controller"},
-		{"batch.kubernetes.io/controller-uid", map[string]any{"labels": map[string]any{"batch.kubernetes.io/controller-uid": "x"}}, true, "Job controller"},
-		{"not an object", "labels", false, "podMetadata"},
+		{"app label with another value", map[string]any{"labels": map[string]any{"app": "other"}}, `podMetadata.labels["app"]`},
+		{"unknown key beside labels", map[string]any{"selector": map[string]any{}}, `unsupported field "selector"`},
+		{"label value not a string", map[string]any{"labels": map[string]any{"example.com/n": 3}}, "podMetadata.labels"},
+		{"invalid label key", map[string]any{"labels": map[string]any{"-bad": "x"}}, "podMetadata.labels"},
+		{"invalid annotation key", map[string]any{"annotations": map[string]any{"bad key": "x"}}, "podMetadata.annotations"},
+		{"annotations over the size limit", map[string]any{"annotations": map[string]any{"example.com/big": strings.Repeat("x", 256*1024+1)}}, "limit"},
+		{"not an object", "labels", "podMetadata"},
 	}
 	for _, k := range podMetadataKinds {
 		for _, c := range cases {
-			if c.jobOnly && !k.job {
-				continue
-			}
 			t.Run(k.typ+"/"+c.name, func(t *testing.T) {
 				_, err := renderLabelInvariantErr(t, labelInvariantApp("widget", k.typ, podMetadataProps(k.typ, c.podMetadata), "", nil))
 				if err == nil || !strings.Contains(err.Error(), c.want) {
@@ -151,34 +143,22 @@ func TestPodMetadata_Refusals(t *testing.T) {
 	}
 }
 
-// The Job controller keys are refused on a Job and a CronJob only: on the
-// others they are ordinary labels.
-func TestPodMetadata_JobKeysAreOrdinaryElsewhere(t *testing.T) {
-	for _, k := range podMetadataKinds {
-		if k.job {
-			continue
-		}
-		t.Run(k.typ, func(t *testing.T) {
-			docs := renderLabelInvariant(t, labelInvariantApp("widget", k.typ, podMetadataProps(k.typ, map[string]any{
-				"labels": map[string]any{"job-name": "nightly"},
-			}), "", nil))
-			tmpl := nestedMap(kindDoc(t, docs, k.kind), append(k.template, "metadata", "labels")...)
-			if tmpl["job-name"] != "nightly" {
-				t.Errorf("the pod template carries labels %v, want job-name=nightly", tmpl)
+// The raw deployment, job and cronjob kinds have no `podMetadata`: their pod
+// template metadata is the upstream template.metadata, so the reshaped property
+// is an unsupported field (go-kure/launcher#1629).
+func TestPodMetadata_RawKindsRefuseIt(t *testing.T) {
+	for typ, props := range map[string]map[string]any{
+		"deployment": rawDeploymentProps("ghcr.io/example/app:v1.0.0"),
+		"job":        rawJobProps("ghcr.io/example/app:v1.0.0"),
+		"cronjob":    rawCronjobProps("ghcr.io/example/app:v1.0.0"),
+	} {
+		t.Run(typ, func(t *testing.T) {
+			props["podMetadata"] = map[string]any{"labels": map[string]any{podMetadataLabelKey: podMetadataLabelValue}}
+			_, err := renderLabelInvariantErr(t, labelInvariantApp("widget", typ, props, "", nil))
+			if err == nil || !strings.Contains(err.Error(), `unsupported field "podMetadata"`) {
+				t.Fatalf("err = %v\nwant a refusal naming unsupported field \"podMetadata\"", err)
 			}
 		})
-	}
-}
-
-// The raw deployment kind has no `podMetadata`: its pod template metadata is the
-// upstream template.metadata, so the reshaped property is an unsupported field
-// (go-kure/launcher#1629).
-func TestPodMetadata_RawDeploymentRefusesIt(t *testing.T) {
-	props := rawDeploymentProps("ghcr.io/example/app:v1.0.0")
-	props["podMetadata"] = map[string]any{"labels": map[string]any{podMetadataLabelKey: podMetadataLabelValue}}
-	_, err := renderLabelInvariantErr(t, labelInvariantApp("widget", "deployment", props, "", nil))
-	if err == nil || !strings.Contains(err.Error(), `unsupported field "podMetadata"`) {
-		t.Fatalf("err = %v\nwant a refusal naming unsupported field \"podMetadata\"", err)
 	}
 }
 

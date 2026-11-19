@@ -50,8 +50,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - `enforce.go`
     ["the shared `enforceExtraContainer` helper", in the same paragraph.]
   - `common.go`
-    ["a dedicated `JobSpecConfig`/`parseJobSpec`/`applyJobSpec`", in the reference's paragraph on the twelve JobSpec-level properties.]
-  - `applyJobSpec` copies every value it writes rather than assigning the config's
+    ["a dedicated `JobSpecConfig`/`parseJobSpec`/`applyJobSpec`", in the reference's paragraph on the twelve JobSpec-level properties; all three are gone since go-kure/launcher#1629, and `job` and `cronjob` deep-copy their authored spec instead.]
+  - `applyJobSpec` (see the note above) copies every value it writes rather than assigning the config's
     own pointers (`copyPtr` for the scalars, `DeepCopy` for `successPolicy` and
     `podFailurePolicy`, which each own a slice of rules). A handler config outlives one `Generate` call and
     `Generate` may run more than once, so an aliased pointer would leave a mutable
@@ -71,7 +71,7 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - go-kure/launcher#312
     ["`ApplyPolicy` enforces them too", in the reference's paragraph on init containers and sidecars.]
   - go-kure/launcher#344
-    ["`job` onto its own `spec`", in the reference's paragraph on the twelve JobSpec-level properties.]
+    ["`job` onto its own `spec`", in the reference's paragraph on the twelve JobSpec-level properties; since go-kure/launcher#1629 that paragraph is gone, because `job` and `cronjob` decode the upstream spec whole.]
 - **Tests:**
   - `TestBuiltinDefaults_ResourceFillsAreWhatGenerationAdds` and
     `TestBuiltinDefaults_TokenAutomount` derive what generation added from the

@@ -45,10 +45,8 @@ the workload level `updateStrategy` (whose struct holds a pointer, so `*c.Update
 alone would not be enough), `revisionHistoryLimit`, `persistentVolumeClaimRetentionPolicy`
 and `ordinals`. The `webservice` and `worker` roles follow the same rule for the `DeploymentSpec`
 shapes they project: `strategy` (holding a `*RollingUpdateDeployment`), `revisionHistoryLimit` and
-`progressDeadlineSeconds`. The raw `deployment` kind deep-copies its whole authored spec onto the
-Deployment. `applyJobSpec` follows the same rule for the `job` and `cronjob`
-kinds: its ten scalar pointers go through the generic `copyPtr`, and `successPolicy` and
-`podFailurePolicy` — whose structs each own a slice of rules — through `DeepCopy`.
+`progressDeadlineSeconds`. The raw `deployment`, `job` and `cronjob` kinds deep-copy their whole
+authored spec onto the object.
 The pod template every workload kind shares follows it too: `buildPodSpec` starts from a
 `DeepCopy` of the authored pod-level fields (`nodeSelector`, `podSecurityContext`,
 `terminationGracePeriodSeconds`, `imagePullSecrets`, …) and deep-copies each volume,
@@ -187,18 +185,18 @@ it on the object through `kindObject`, the one helper every kind returns its obj
 
 ### The pod template's labels and annotations (`podMetadata`)
 
-`labels` and `annotations` above go on the object and never on a pod template. The four kinds
-whose spec holds a pod template the author does not write whole (`statefulset`,
-`daemonset`, `job` and `cronjob`) take a fourth property, `podMetadata`, for the pod template's
-own metadata. On a `cronjob` it is the pod template inside the job
-template, not the CronJob's or the job template's metadata. `webservice` and `worker` take it
+`labels` and `annotations` above go on the object and never on a pod template. The two kinds
+whose spec holds a pod template the author does not write whole (`statefulset` and
+`daemonset`) take a fourth property, `podMetadata`, for the pod template's
+own metadata. `webservice` and `worker` take it
 too, with the same name and shape as `statefulset`: the rule hands it to
 its `role-deployment` member, so it lands on that Deployment's pod template and nowhere else. The
 Service a `webservice` generates selects on the component's `app` label alone, so an authored
 label is on the pods and not in the Service's selector. A document moves a workload between
 `webservice` and `worker` without renaming it. The kinds that take a pod template whole
-(`deployment`, `replicaset`, `replicationcontroller`) have no `podMetadata`: the template's
-metadata is `template.metadata`, as authored.
+(`deployment`, `job`, `replicaset`, `replicationcontroller`) have no `podMetadata`: the template's
+metadata is `template.metadata`, as authored, and a `cronjob`'s is
+`jobTemplate.spec.template.metadata`.
 
 ```yaml
 properties:
@@ -213,25 +211,20 @@ properties:
 - **What it does.** The kind writes its pod template labels first and the authored ones are added
   beside them. A change to either map is a pod template change, so the controller's update
   strategy decides whether it reaches the pods that exist (a rolling update replaces them,
-  `OnDelete` waits for a deletion, and a `cronjob` only changes the Jobs it creates later). A
-  `job` has no strategy: the API server refuses a change to the pod template of a Job that is
-  not suspended.
+  `OnDelete` waits for a deletion).
 - **What it never does.** It does not reach the object's metadata, the selector or any other
   object. The selector is a map of its own (`appLabels`, `deploymentComponentLabels`), so an
   authored label cannot change which pods a workload owns.
 - **Refused where the component is read.** A key beside `labels` and `annotations`; a label key
   or value that is no valid label; a value that is no string; an annotation key that is no valid
   annotation key; annotations over the size the API server accepts (counted again with the
-  annotations the kind sets); and, on `job` and `cronjob` only, the four labels the Job controller
-  owns (`batch.kubernetes.io/controller-uid`, `batch.kubernetes.io/job-name`, `controller-uid`,
-  `job-name`), since the API server generates the selector of a Job from them. That last refusal
-  can be loosened later without invalidating a document.
+  annotations the kind sets).
 - **Refused where the object is generated.** `app`, or any other key the kind sets, with another
   value than the one the kind writes; writing the kind's own value is accepted.
 - **Checked as on any pod template.** A key the consumer reserves
   (`TransformContext.ReservedMetadataKeys`) is refused, and the component label is stamped and
   held, by the checks that already read every generated pod template. A kubernetes.io or
-  k8s.io key is not refused here: the API server and the Job controller own what they own.
+  k8s.io key is not refused here: the API server owns what it owns.
 - **Traits.** The traits written so far change the pod spec only, so they leave the authored keys
   as they are.
 
@@ -349,8 +342,8 @@ the kind emits for a whole expression is accepted, and the same object with the 
 type writes, the object is accepted again, which is why the omission is refused where the
 component is read.
 
-The walk covers the kinds that decode a type, the raw `deployment` among them. The hand-parsed kinds (`daemonset`,
-`job`, `cronjob`, `statefulset`, `persistentvolumeclaim`) hold their selectors through their own
+The walk covers the kinds that decode a type, the raw `deployment`, `job` and `cronjob` among them. The hand-parsed kinds (`daemonset`,
+`statefulset`, `persistentvolumeclaim`) hold their selectors through their own
 parser (`parseLabelSelectorOpts`), which refuses the same and more, so their absence from the
 test's list is not a gap.
 
@@ -614,9 +607,9 @@ the template and refuses a selector that the label would stop matching. This is
 the one field the compiler cannot check: a selector that disagrees with the
 template labels compiles and is refused by the apiserver at apply time. The labels an
 author adds with `podMetadata` go on the pod template only, so they cannot make the two
-disagree. `job` and
-`cronjob` are the deliberate exception — the Job controller fills `spec.selector`
-and its matching pod labels itself.
+disagree. A raw `job` takes its selector the same way, but may leave it out: the Job
+controller then fills `spec.selector` and its matching pod labels itself. A `cronjob`'s
+job template takes no selector at all, since the API server generates it.
 
 **Two injected defaults are gone from the emitted manifests.** The constructors
 used to write `imagePullPolicy: IfNotPresent` onto every container and

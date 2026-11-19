@@ -17,8 +17,7 @@ and nothing in the output said it had been seen. Closed by routing those six thr
 report presence separately from value, so each of the six now rejects a
 mistyped value by name instead of discarding it. Those helpers were already how several other properties on the
 same components are read — `updateStrategy` and `ordinals` on `statefulset`
-(`statefulset_spec.go`), `successPolicy` and `podFailurePolicy` on `job` and
-`cronjob` (`common.go`) — so the six behaved differently from properties an
+(`statefulset_spec.go`) — so the six behaved differently from properties an
 author writes beside them in the same document. This covers those six parsers;
 it is not a claim that every property in this package is read through the
 helpers.
@@ -75,11 +74,11 @@ characters where a subdomain allows 253. `batch.worker` would therefore build
 a workload the API server rejects at admission, naming
 `spec.template.spec.containers[0].name`, a field the author never wrote; an
 undotted name longer than 63 characters is refused by the same check. All
-six workload kinds that name their main container after the component
-(`webservice`, `worker`, `statefulset`, `daemonset`, `cronjob`, `job`) now
+four workload kinds that name their main container after the component
+(`webservice`, `worker`, `statefulset`, `daemonset`) now
 refuse such a name at generation, in the one builder they share. The
-`deployment` kind takes its containers as authored, so it names none after the
-component. The name is refused rather than rewritten to `batch-worker`:
+`deployment`, `job` and `cronjob` kinds take their containers as authored, so
+they name none after the component. The name is refused rather than rewritten to `batch-worker`:
 a derived name would silently rename the container and could collide with an
 init container or sidecar of that name. Component types that name no container
 after the component (`helmrelease`, `manifests`, `passthrough`, …) keep accepting
@@ -93,8 +92,7 @@ named one too until they stopped emitting a Service.
 too, at conversion: a CronJob's name is at most 52 characters, a Job's at most
 63 (see each kind in ["Per-type highlights"](/pkg/oam/builtin/components/README.md#per-type-highlights)).
 
-Most workload types (`webservice`, `worker`, `statefulset`, `daemonset`,
-`cronjob`, `job`)
+The reshaped workload types (`webservice`, `worker`, `statefulset`, `daemonset`)
 share these fields, projected directly onto real `corev1` types (same
 structural pattern as `ProbeConfig` holding `*corev1.Probe`) rather than a
 hand-rolled parallel schema: `image` (validated — no untagged/`latest`), `env`
@@ -191,8 +189,8 @@ an unprefixed import instead of the intended one),
 `resources` — a `corev1.ResourceRequirements` projection read with
 `parseObjectField`, as are its `requests` and `limits`: a present value of the
 wrong type (`resources: "big"`, `requests: 3`) is **rejected by name**
-(`resources: must be an object, got string`) by each of the seven kinds that accept `resources` (webservice, worker,
-statefulset, daemonset, cronjob, job, postgresql) and by each
+(`resources: must be an object, got string`) by each of the five kinds that accept `resources` (webservice, worker,
+statefulset, daemonset, postgresql) and by each
 `initContainers`/`sidecars` entry, and a null reads as absence. `requests`/`limits`
 accept `cpu`/`memory` (defaults 100m/128Mi — subject to the environment
 policy's `MaxCPU()`/`MaxMemory()` maxima the same as an authored value; see
@@ -294,8 +292,8 @@ just as real admission's `ValidatePortNumOrName` does: lowercase
 max 15 characters — a purely numeric string like `"8080"` is rejected, since
 it has no letter; beyond syntax, a named port is rejected outright on a
 component kind whose main container never declares any port for the kubelet
-to resolve the name against — `worker` and `cronjob` unconditionally (neither
-exposes a `port` property at all), `daemonset`/`statefulset` only when their
+to resolve the name against — `worker` unconditionally (it
+exposes no `port` property at all), `daemonset`/`statefulset` only when their
 own optional `port` was not set on that component instance (their main
 container is named `"http"`/`"tcp"` respectively, but only when `port > 0`),
 and `webservice` never (its `port` always defaults to 80, so the main
@@ -303,7 +301,7 @@ container is always named `"http"`) — a numeric port is unaffected either way,
 since it dials the kubelet directly rather than resolving a declared name.
 (Those rules predate `ports`, and the `port` they describe on `daemonset` and
 `statefulset` is gone. Today `daemonset`,
-`statefulset`, `job` and `cronjob` resolve a named port against the main
+`statefulset` resolves a named port against the main
 container's `ports` list, refusing a name that list does not declare and any
 named port when it is empty; see "Main container ports".)
 Where a named port is allowed at all, it is further checked against the
@@ -741,7 +739,7 @@ closed entries, an IANA service `name`, a `protocol` from `TCP`/`UDP`/`SCTP`
 (an empty string refused), and no repeated name or `containerPort`/`protocol`
 pair within the sidecar. A port name must also be unique across the
 pod: the main container's ports (webservice's `http`, the `ports` list of
-statefulset, daemonset, job and cronjob), every
+statefulset and daemonset), every
 sidecar's and every native sidecar's. The
 API server checks names only per container and merely warns across them,
 while a Service selecting the name reaches only the first container that
@@ -754,9 +752,7 @@ refused when it is read, naming both entries. A name in
 either list must also be a DNS-1123 label, as the main container's name is:
 lowercase alphanumerics and `-`, starting and ending with an alphanumeric, no
 dots, at most 63 characters. Any other is refused, naming the entry, and again when the pod is generated, so a config built
-by hand or changed after it was read cannot emit one. `job` and
-`cronjob` take no `sidecars`, so their pod holds the main container and the
-`initContainers` entries. Closing the entry is behavior-changing under an
+by hand or changed after it was read cannot emit one. Closing the entry is behavior-changing under an
 unchanged `launcher.gokure.dev/v1alpha1`: a document that authored any other
 key on an entry built before and errors now. It is taken on the same
 reasoning as the `volumeClaimTemplates` entry below — the key never reached
@@ -775,7 +771,8 @@ The key set is closed. The shorthand is not a
 Kubernetes `Affinity`: `nodeAffinity`, `podAffinity` and `podAntiAffinity`
 under it are each refused with what the shorthand has for the field and where
 an affinity in the Kubernetes shape is authored (`statefulset`,
-`daemonset`, `job`, `cronjob`, and `template.spec.affinity` of `deployment`), and any other key is refused as
+`daemonset`, and `template.spec.affinity` of `deployment` or `job`, and
+`jobTemplate.spec.template.spec.affinity` of `cronjob`), and any other key is refused as
 `affinity: unrecognized key "<key>"`, each whatever its value. The parser read
 none of them before, so a caller that skips the document check had them
 dropped; see
@@ -828,7 +825,7 @@ there, before this check.
 
 Seven `corev1.Container` fields are read on every container of a hand-parsed
 workload kind: as top-level keys for the main container
-of `statefulset`, `daemonset`, `job` and `cronjob` — and of
+of `statefulset` and `daemonset` — and of
 `webservice` and `worker`, which forward them to their `role-deployment` member — and
 as keys of each `initContainers` and `sidecars` entry.
 
@@ -866,8 +863,8 @@ as keys of each `initContainers` and `sidecars` entry.
   - `RestartContainer` is refused on an `initContainers` entry unless that
     entry has `restartPolicy: Always`, as Kubernetes allows it only on a
     restartable init container. `NotRequired` is accepted on any entry;
-  - on a pod whose `restartPolicy` is `Never` — which only `job` and `cronjob`
-    can author — every container's restart policy must be `NotRequired`. That
+  - on a pod whose `restartPolicy` is `Never` — which no reshaped kind can
+    author — every container's restart policy must be `NotRequired`. That
     check runs on the assembled pod spec (`checkResizePolicyRestart`), so it is
     reported at `Generate`, not at `ToApplicationConfig`.
 - On an `initContainers` or `sidecars` entry every message carries the entry
@@ -915,10 +912,8 @@ On a `sidecars` entry neither key is read, and both are refused as unknown
 keys. At the top level neither is a container key either.
 `restartPolicyRules` is refused there on every workload kind, with the reason
 that upstream accepts a container's rules only together with the container's
-own `restartPolicy`. `restartPolicy` there is the *pod's* restart policy: a
-key of `job` and `cronjob`, where the main container's own `restartPolicy`
-therefore has no name to be authored or refused under, and refused with its
-reason on the other kinds, whose pod template apps/v1 validation holds to
+own `restartPolicy`. `restartPolicy` there is refused with its
+reason on these kinds, whose pod template apps/v1 validation holds to
 `Always`. See
 [Upstream fields a hand-parsed kind does not read](upstream-fields-not-read.md#upstream-fields-a-hand-parsed-kind-does-not-read)
 for these and for the container fields read under another name (`name`, the
@@ -933,8 +928,8 @@ the namespace. The volume generates no object, and its claim name is used
 exactly as written: it is not qualified with the component name the way a
 role kind's claim is.
 
-**On the four pod kinds `claimName` is required.** `statefulset`,
-`daemonset`, `job` and `cronjob` generate no claim, so a `pvc`
+**On the two pod kinds `claimName` is required.** `statefulset` and
+`daemonset` generate no claim, so a `pvc`
 volume without `claimName` is refused (`volume "data": a pvc volume must set
 claimName to an existing claim; the component generates none, so declare it
 with a persistentvolumeclaim component or a pvc trait`). This is a breaking
@@ -996,8 +991,8 @@ through `volumeDevices` at a `devicePath`, never through `volumeMounts`. The cla
 separate objects, so the apiserver accepts a Block claim paired with a
 filesystem mount and the pods then fail at kubelet mount time; every rule
 below reports that mismatch at build time instead. The rules are the same on
-all six kinds (`webservice`, `worker`, `statefulset`, `daemonset`, `job`,
-`cronjob`), because they live in the shared parsers. The `deployment` kind
+all four kinds (`webservice`, `worker`, `statefulset`, `daemonset`), because
+they live in the shared parsers. The `deployment`, `job` and `cronjob` kinds
 takes upstream `volumes`, `volumeMounts` and `volumeDevices` as authored.
 
 - **`volumes[]` pvc entry.** Adds `volumeMode` (`Filesystem`|`Block`) and
@@ -1052,17 +1047,17 @@ claim templates; the parsers still require one of the two paths.
 
 ### Pod-level properties
 
-The six reshaped kind components (`webservice`, `worker`, `statefulset`,
-`daemonset`, `job`, `cronjob`) also share one pod-level property surface
+The four reshaped kind components (`webservice`, `worker`, `statefulset`,
+`daemonset`) also share one pod-level property surface
 (ADR-036 L1), parsed by `parsePodSpec` (`podspec.go`)
 straight into a `corev1.PodSpec` and rendered by the shared `buildPodSpec`,
-which each of them assigns to its pod template. The raw `deployment` has no such
-surface: its pod spec is `template.spec`, as the API shapes it. Property names are the
-`corev1.PodSpec` JSON names, except three that carry a `pod` prefix because
+which each of them assigns to its pod template. The raw `deployment`, `job` and
+`cronjob` have no such surface: their pod spec is `template.spec` (`jobTemplate.spec.template.spec`
+on a `cronjob`), as the API shapes it. Property names are the
+`corev1.PodSpec` JSON names, except two that carry a `pod` prefix because
 the bare name is already a property at some kind: `podSecurityContext`
-(container `securityContext` exists everywhere), `podResources` (container
-`resources`), and `podActiveDeadlineSeconds` (cronjob's job-level
-`activeDeadlineSeconds`). Each accepted value is validated the way real
+(container `securityContext` exists everywhere) and `podResources` (container
+`resources`). Each accepted value is validated the way real
 admission validates it when that check is deterministic from the document
 alone (DNS-1123 names, enums, IP literals, duplicate names, the cross-field
 exclusions listed below, and the `os.name` contract: a `windows` pod may not
@@ -1107,10 +1102,10 @@ the value. This check does not read whether a value such as
 | `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account; on `webservice` and `worker` the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). Unset on a pod kind, the pod names no account (the namespace's `default`), and the kind sets the pod-level `automountServiceAccountToken: false` unless that is authored; a role kind's generated account carries `automountServiceAccountToken: false` itself. An authored account is owned elsewhere and its own setting governs, so authors who want the pod not to mount a token set the pod-level `automountServiceAccountToken: false` explicitly — the handler does not inject it. | additive when unset |
 | `automountServiceAccountToken` | bool | Pod-level token automount override. | additive |
 | `terminationGracePeriodSeconds` | int ≥ 0 | Grace period before SIGKILL. A `lifecycle` `sleep` hook may not exceed it (30 when unset). | additive |
-| `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob and job only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it, and refuse the upstream name `activeDeadlineSeconds` with that reason (on `job` and `cronjob` that name is the JobSpec's). Distinct from the JobSpec-level `activeDeadlineSeconds` below: this one bounds a single pod, that one the whole job. | additive |
+| `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **No kind publishes it any more.** It was the pod's deadline on `job` and `cronjob`, which since go-kure/launcher#1629 take the pod as `template.spec.activeDeadlineSeconds`; apps/v1 rejects the deadline on Deployment/StatefulSet/DaemonSet templates, so the four reshaped kinds neither publish nor accept it, and refuse the upstream name `activeDeadlineSeconds` with that reason. | additive |
 | `dnsPolicy`, `dnsConfig` | enum, object | `ClusterFirstWithHostNet`/`ClusterFirst`/`Default`/`None`; `dnsConfig` = `nameservers` (≤3 plain IPv4/IPv6 literals — a zone-scoped address such as `fe80::1%eth0` is rejected, matching upstream's `net.ParseIP`-based check, which has no notion of a zone), `searches` (≤32 entries whose joined length, separators included, is ≤2048 characters — the `resolv.conf` search-line limit, so 32 individually valid domains can still be refused), `options[]{name,value}`. `None` requires at least one nameserver. | additive |
 | `nodeSelector`, `nodeName`, `schedulerName`, `priorityClassName`, `preemptionPolicy`, `runtimeClassName`, `schedulingGates[]{name}`, `schedulingGroup{podGroupName}` | scheduling | Placement fields; gate names must be unique. `nodeName` is a DNS-1123 subdomain (a Node is an ordinary object, so an invalid value is refused at admission, not merely unmatched). `schedulerName` is deliberately *not* validated: upstream constrains its form nowhere, so an arbitrary string is a legal document and rejecting one here would refuse work a cluster accepts. | additive |
-| `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from all six kinds; `NoopPolicy` denies all three). | additive |
+| `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from all four kinds; `NoopPolicy` denies all three). | additive |
 | `shareProcessNamespace` | bool | Mutually exclusive with `hostPID: true`. | additive |
 | `hostname`, `subdomain`, `setHostnameAsFQDN`, `hostnameOverride`, `hostAliases[]{ip,hostnames}` | naming | `hostname`/`subdomain` are DNS-1123 labels; `hostnameOverride` is a ≤64-char subdomain and cannot combine with `hostNetwork` or `setHostnameAsFQDN`. `hostAliases[].ip` is a plain IPv4/IPv6 literal, zone suffixes rejected as for `dnsConfig.nameservers`. | additive |
 | `podSecurityContext` | object | The full `corev1.PodSecurityContext` field set (`runAsUser`/`runAsGroup`/`runAsNonRoot`/`fsGroup`/`fsGroupChangePolicy`/`supplementalGroups`/`supplementalGroupsPolicy`/`sysctls`/`seLinuxOptions`/`seLinuxChangePolicy`/`seccompProfile`/`appArmorProfile`/`windowsOptions`), closed and validated like the container `securityContext`; the `windowsOptions` strings are held to upstream's rules as on a container (see "Container fields"). `sysctls[].name` must match the sysctl grammar (≤253 characters of dot- or slash-separated lowercase alphanumeric segments) and be unique within the list. `windowsOptions.hostProcess: true` additionally requires `hostNetwork: true`, which upstream demands of any pod containing HostProcess containers. The `runAsUser: 0` / `runAsNonRoot: true` contradiction is judged per container on the *effective* values once the containers are assembled, not on this object alone — a container-level `runAsUser` overrides the pod-level one, so the pair is a valid document when every container names a non-root UID, and the deferred check also catches a container-level `runAsUser: 0` under a pod-level `runAsNonRoot`. **Partly policy-gated**: `windowsOptions.hostProcess: true` is rejected unless `AllowPrivileged()` allows it (a HostProcess pod runs with the node's own privileges, and upstream forces every container in it to be HostProcess too); every other field has no policy hook. | additive |
@@ -1301,13 +1296,13 @@ selector made of `matchLabels` only.
 
 #### Main container ports
 
-`statefulset`, `daemonset`, `job` and `cronjob` publish `ports`, the main
-container's `corev1.ContainerPort` list. It declares container ports only: none
+`statefulset` and `daemonset` publish `ports`, the main
+container's `corev1.ContainerPort` list. It declares container ports only: neither
 of those kinds emits a Service from it (use `webservice`, or a `service`
 component, for one). `webservice` and `worker` publish no `ports` list
-(`webservice` declares its one container port from `port`). The `deployment` kind
-has no such property either: its ports are
-`template.spec.containers[0].ports`, as the API shapes them.
+(`webservice` declares its one container port from `port`). The `deployment`, `job`
+and `cronjob` kinds have no such property either: their ports are
+the `ports` of the pod spec's `containers[0]`, as the API shapes them.
 
 **Endpoints.** `deployment`, `statefulset` and
 `daemonset` implement `oam.EndpointProvider` from the main container's `ports`
@@ -1320,15 +1315,15 @@ as ["The `app` label"](conventions.md#the-app-label) derives it (a name over 63 
 `objectName` or a Naming hook names the object. The type's own parse runs first, so a component it
 refuses has no endpoint and is refused in the parse's words. Sidecar ports are
 not the component's service surface and declare none. `job` and `cronjob`
-publish `ports` but report no endpoint, and `worker` lowers into a `role-deployment`
+report no endpoint whatever their containers declare, and `worker` lowers into a `role-deployment`
 without ports, so it reports none. Only TCP endpoints
 synthesize a NetworkPolicy allow; a UDP or SCTP endpoint is collected and
 validated, and synthesizes nothing.
 
-`daemonset`, `statefulset`, `job` and `cronjob` publish one `ports` property,
+`daemonset` and `statefulset` publish one `ports` property,
 with the entry rules in the table below: container ports are a PodSpec
 field, so these kind-named workload components project them. `ports` emits no
-Service on any of them. A named probe or hook port resolves against the
+Service on either. A named probe or hook port resolves against the
 main container's `ports`; with none declared, it is refused.
 
 **Breaking: `daemonset` and `statefulset` dropped `port`
@@ -1371,15 +1366,16 @@ named `serviceName` (default: the component name) on `statefulset`. An authored
 
 #### Raw scheduling properties
 
-`statefulset`, `daemonset`, `job` and `cronjob` publish `affinity`,
+`statefulset` and `daemonset` publish `affinity`,
 `tolerations` and `topologySpreadConstraints` as their plain `corev1` shapes,
 parsed by `scheduling.go`. Nothing is inferred from the
 component: every selector, weight and topology key is authored. The `deployment`
-kind publishes none of the three as a top-level property: they are
+and `job` kinds publish none of the three as a top-level property: they are
 `template.spec.affinity`, `template.spec.tolerations` and
 `template.spec.topologySpreadConstraints`, strictly decoded as part of the pod
-spec and held to what the `pod` kind holds its own spec to. The parsers and
-rules below are not read for it.
+spec and held to what the `pod` kind holds its own spec to, and a `cronjob`'s are
+the same names under `jobTemplate.spec.template.spec`. The parsers and
+rules below are not read for them.
 
 The hand-parsed kind-named workloads publish the same shapes through the same
 parsers and schemas, so every rule in the table below holds wherever the key is
@@ -1389,8 +1385,6 @@ published:
 |---|---|---|---|
 | `statefulset` | raw | yes | yes |
 | `daemonset` | raw | yes | yes |
-| `job` | raw | yes | yes |
-| `cronjob` | raw | yes | yes |
 | `webservice`, `worker` | four-key shorthand | yes | yes |
 
 `webservice` and `worker` publish `tolerations` and `topologySpreadConstraints`
@@ -1424,9 +1418,6 @@ with one `In` requirement per label.
   `statefulset`, a `daemonset`, a `job` and a `cronjob`, with or without
   authored constraints (`component "<name>" generates no Deployment the trait
   can act on`).
-- On a `cronjob` the three keys are written onto the pod template of the Job
-  template (`spec.jobTemplate.spec.template.spec`), so they apply to the pods of
-  every Job the CronJob creates.
 - On a `daemonset` the three keys reach the DaemonSet's pod template as
   authored. The DaemonSet controller creates one pod for each node the
   template's node affinity, node selector and tolerations admit, and pins the
@@ -1447,7 +1438,7 @@ not have them, so they are additive outright. `tolerations` is not: `deployment`
 reached it (before it became a raw kind) through the *same* `parseTolerations`/`schemaTolerations` pair that
 `daemonset` has always used, and those two kinds were its only callers then, so
 completing the projection changed `daemonset` too. (A kind that gained
-`tolerations` later, `statefulset`, `job` and `cronjob`, had no earlier
+`tolerations` later, `statefulset`, had no earlier
 behaviour to change: for it the property is additive.) Stating that plainly, per
 rule, because "additive" on its own would be false:
 

@@ -113,13 +113,20 @@ spec:
   - name: cleanup
     type: cronjob
     properties:
-      image: myregistry/cleanup:v1.0.0
       schedule: "0 3 * * *"
       concurrencyPolicy: Forbid
-      resources:
-        requests:
-          cpu: "100m"
-          memory: "64Mi"
+      jobTemplate:
+        spec:
+          template:
+            spec:
+              restartPolicy: OnFailure
+              containers:
+              - name: cleanup
+                image: myregistry/cleanup:v1.0.0
+                resources:
+                  requests:
+                    cpu: "100m"
+                    memory: "64Mi"
 
   # --- postgresql ---
   - name: db

@@ -29,6 +29,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -522,6 +523,7 @@ var apiSetKinds = []apiSetKind{
 	{component: "cnpg-publication", typ: reflect.TypeFor[cnpgv1.PublicationSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"publications.yaml", "v1")},
 	{component: "cnpg-scheduledbackup", typ: reflect.TypeFor[cnpgv1.ScheduledBackupSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"scheduledbackups.yaml", "v1")},
 	{component: "cnpg-subscription", typ: reflect.TypeFor[cnpgv1.SubscriptionSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"subscriptions.yaml", "v1")},
+	{component: "cronjob", typ: reflect.TypeFor[batchv1.CronJobSpec](), source: markerAPISource, listed: podSpecOmitted("jobTemplate.spec.template.spec.")},
 	{component: "csidriver", typ: reflect.TypeFor[storagev1.CSIDriverSpec](), source: markerAPISource},
 	{component: "deployment", typ: reflect.TypeFor[appsv1.DeploymentSpec](), source: markerAPISource, listed: podSpecOmitted("template.spec.")},
 	{component: "endpointslice", typ: reflect.TypeFor[discoveryv1.EndpointSlice](), source: markerAPISource, skip: objectIdentity},
@@ -588,6 +590,7 @@ var apiSetKinds = []apiSetKind{
 	{component: "ingress", typ: reflect.TypeFor[networkingv1.IngressSpec](), source: markerAPISource},
 	{component: "ingressclass", typ: reflect.TypeFor[networkingv1.IngressClassSpec](), source: markerAPISource},
 	{component: "issuer", typ: reflect.TypeFor[certv1.IssuerSpec](), source: crdAPISource(certManagerModulePath, certManagerCRDs+"issuers.yaml", "v1")},
+	{component: "job", typ: reflect.TypeFor[batchv1.JobSpec](), source: markerAPISource, listed: podSpecOmitted("template.spec.")},
 	{component: "limitrange", typ: reflect.TypeFor[corev1.LimitRangeSpec](), source: markerAPISource},
 	{
 		component: "listenerset", typ: reflect.TypeFor[gatewayv1.ListenerSetSpec](),

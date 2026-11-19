@@ -29,8 +29,6 @@ import (
 var rawSchedulingByKind = map[string][]string{
 	"statefulset": {"affinity", "tolerations", "topologySpreadConstraints"},
 	"daemonset":   {"affinity", "tolerations", "topologySpreadConstraints"},
-	"job":         {"affinity", "tolerations", "topologySpreadConstraints"},
-	"cronjob":     {"affinity", "tolerations", "topologySpreadConstraints"},
 }
 
 var allRawSchedulingKeys = []string{"affinity", "tolerations", "topologySpreadConstraints"}

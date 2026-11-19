@@ -65,7 +65,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
     refuses both shapes identically (go-kure/launcher#465). The list readers that
     do not go through `parseObjectList` (`envFrom`, `httpHeaders`, `volumes`,
     `volumeMounts`, sidecar `ports`, the Job `successPolicy`/`podFailurePolicy` rules and
-    `onPodConditions`, `volumeClaimTemplates`, `valuesFrom`, `scopeOverrides`) pass each
+    `onPodConditions` [read by hand until go-kure/launcher#1629 made `job` and `cronjob`
+    decode the upstream spec], `volumeClaimTemplates`, `valuesFrom`, `scopeOverrides`) pass each
     element through `nullElem` first, for the same untyped refusal and message.
     ["The same typed-nil shape" is the one of the entry above.]
 - **Tests:**

@@ -45,16 +45,15 @@ from its own test and prints what it returns.
 - **E, the probe policy sets every `Default*` accessor.** An accessor added to
   `oam.Policy` and not to the probe policy is named.
 
-One exception is named and kept: the cronjob schema declares `concurrencyPolicy` with the
-default `Allow`, and the handler leaves the field unset for the cluster to apply. Writing
-`Allow` changes the generated manifest text and not the cluster's behaviour. The cronjob
-probe lists it in `LeftToCluster`. It is the one place check A disagrees with a schema.
+No shipped probe lists `LeftToCluster` any more: the one case, the cronjob schema's
+`concurrencyPolicy` default `Allow`, went when the kind became raw (go-kure/launcher#1629).
+The mechanism stays for a handler that declares a default it leaves to the cluster, and
+the tests keep it exercised with a probe built for the purpose.
 
-The probes cover the handler-built workload types: statefulset, daemonset,
-job and cronjob, with their init containers, sidecars, claim templates and pod failure
-policy. The raw `deployment` (go-kure/launcher#1629) fills nothing, so its probes are raw
-documents (a selector and a pod template, with an init container, a second container and
-ports) that list no fill. Check B fails on any `policy` or `builtin` entry a probe does not
+The probes cover the handler-built workload types: statefulset and daemonset, with their
+init containers, sidecars and claim templates. The raw `deployment`, `job` and `cronjob`
+(go-kure/launcher#1629) fill nothing, so their probes are raw documents (a pod template, with
+a restart policy where the kind needs one) that list no fill. Check B fails on any `policy` or `builtin` entry a probe does not
 list, so a fill that came back to the kind fails there. It also probes the types that lower to other components: `webservice` and `worker`,
 whose entries the report names at the place of their `role-deployment` member (`Fill.Member`),
 and `postgresql`, which the report names at the cluster it builds. For a type that

@@ -121,18 +121,6 @@ var reservedKeyCarriers = map[string]struct {
 `,
 		object: `Deployment "carrier"`, what: "pod template label",
 	},
-	"a cronjob's podMetadata annotation": {
-		component: `    - name: carrier
-      type: cronjob
-      properties:
-        image: ghcr.io/example/web:v1.0.0
-        schedule: "0 2 * * *"
-        podMetadata:
-          annotations:
-            %[1]s: a
-`,
-		object: `CronJob "carrier"`, what: "pod template annotation",
-	},
 	"a manifests object's annotation": {
 		component: `    - name: carrier
       type: manifests

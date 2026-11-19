@@ -5,12 +5,13 @@ weight: 13
 
 ## Upstream fields a hand-parsed kind does not read
 
-Nine kinds read their properties key by key instead of decoding them into the
-Kubernetes type: `statefulset`, `daemonset`, `job`, `cronjob`,
+Seven kinds read their properties key by key instead of decoding them into the
+Kubernetes type: `statefulset`, `daemonset`,
 `service`, `persistentvolumeclaim`, `configmap`, `secret` and `serviceaccount`. The first
-four build pods and are "the four pod-building kinds" below. (The `deployment` kind is
-not among them: it decodes its properties strictly into the upstream `DeploymentSpec`,
-so it has no refusal map and drops no field; see the `deployment` section of
+two build pods and are "the two pod-building kinds" below. (The `deployment`, `job` and
+`cronjob` kinds are not among them: each decodes its properties strictly into the upstream
+`DeploymentSpec`, `JobSpec` or `CronJobSpec`, so it has no refusal map and drops no
+field; see the `deployment`, `cronjob` and `job` sections of
 [Kinds: core workloads](kinds-core-workloads.md#deployment).) For such
 a kind an upstream field its parser does not know is no decode error; it is a
 key the parser never looks at. The rule that closes that gap:
@@ -30,12 +31,12 @@ An authored key reaches a kind on one of two paths, and both give the reason:
 
 - **A caller of the handler** (`ToApplicationConfig`, or `Transform` without
   the check below) gets the reason alone:
-  `scheduling: not read by this component — alpha upstream, behind the WorkloadWithJob feature gate`.
+  `selector: not authorable; the StatefulSet selector is builder-managed (app: <component>), must equal the generated template labels and is immutable once created`.
 - **A document** goes through the authored-property check first
   (`Transformer.ValidateAuthoredProperties`, which `kurel build` calls). The
   check refuses a key the kind does not declare before the parser runs, and
   appends the kind's reason to its own text:
-  `component "batch" (type "job"): properties: unsupported field "scheduling" (allowed: …); scheduling: not read by this component — …`.
+  `component "db" (type "statefulset"): properties: unsupported field "selector" (allowed: …); selector: not authorable; the StatefulSet selector is builder-managed …`.
   The kind gives the reason through `UnsupportedFieldHint`
   (`pkg/oam`'s README, "A reason on a refused key").
 
@@ -59,17 +60,14 @@ The positions are:
 A key that is **no field of the upstream type** is not in a refusal map. The
 check refuses it as it refuses any undeclared key, with nothing appended; a
 caller that skips the check has it dropped, as `pkg/oam`'s README states for
-every handler. The one exception is the six `CronJobSpec` keys `job` refuses by
-name, which a `cronjob` document retyped to `job` leaves behind.
+every handler.
 
 ### Refused, with the reason
 
 | Key | On | Why |
 |-----|----|-----|
 | `selector` | `statefulset`, `daemonset` (`webservice`, `worker`) | Builder-managed (`app: <component>`), equal to the template labels, immutable once created. |
-| `selector`, `manualSelector` | `job`, `cronjob` | The job controller generates the selector from a per-job label; a hand-written one adopts another job's pods. |
-| `scheduling` | `job`, `cronjob` | Alpha upstream, behind the `WorkloadWithJob` feature gate. |
-| `restartPolicy`, `activeDeadlineSeconds` (the pod's) | `statefulset`, `daemonset` (`webservice`, `worker`) | apps/v1 validation accepts only `Always`, and no deadline, on these pod templates. On `job` and `cronjob` both names are read: the pod's `restartPolicy`, and the JobSpec's `activeDeadlineSeconds`. |
+| `restartPolicy`, `activeDeadlineSeconds` (the pod's) | `statefulset`, `daemonset` (`webservice`, `worker`) | apps/v1 validation accepts only `Always`, and no deadline, on these pod templates. |
 | `ephemeralContainers`, `priority`, `overhead`, `serviceAccount` | every workload kind | See [Pod-level properties](common-config.md#pod-level-properties). |
 | `evictionResponders` | every workload kind | Alpha upstream, behind the `EvictionRequestAPI` feature gate. |
 | `restartPolicyRules` (the main container's) | every workload kind | Upstream accepts a container's restart rules only with the container's own `restartPolicy`, which no kind reads on the main container. An `initContainers` entry reads both (see [Container fields](common-config.md#container-fields)). |
@@ -86,19 +84,16 @@ that names the properties the field is authored as:
 
 | Upstream field | On | Authored as |
 |----------------|----|-------------|
-| the pod `template` | the four pod-building kinds | The component's own container and pod-level properties. Its metadata is not authored either: the kind's builder writes the `app: <component>` label and nothing else, the transform then adds the component label (`<domain>/component`, see [The `app` label](conventions.md#the-app-label)), and a trait may add more. |
-| `jobTemplate` | `cronjob` | The component's own job-level, pod-level and container properties. |
-| `containers` | the four pod-building kinds | The main container is the component's container properties; further ones are `sidecars` entries on the kinds that have them. |
-| the main container's `name` | the four pod-building kinds | Not authored: the container is named after the component. |
-| `livenessProbe`, `readinessProbe`, `startupProbe` | the four pod-building kinds | `probes.liveness`, `probes.readiness`, `probes.startup`. |
-| `volumeMounts`, `volumeDevices` | the four pod-building kinds | A `volumes` entry's `mountPath`, or its `devicePath` for a `volumeMode: Block` claim. |
+| the pod `template` | the two pod-building kinds | The component's own container and pod-level properties. Its metadata is not authored either: the kind's builder writes the `app: <component>` label and nothing else, the transform then adds the component label (`<domain>/component`, see [The `app` label](conventions.md#the-app-label)), and a trait may add more. |
+| `containers` | the two pod-building kinds | The main container is the component's container properties; further ones are `sidecars` entries on the kinds that have them. |
+| the main container's `name` | the two pod-building kinds | Not authored: the container is named after the component. |
+| `livenessProbe`, `readinessProbe`, `startupProbe` | the two pod-building kinds | `probes.liveness`, `probes.readiness`, `probes.startup`. |
+| `volumeMounts`, `volumeDevices` | the two pod-building kinds | A `volumes` entry's `mountPath`, or its `devicePath` for a `volumeMode: Block` claim. |
 | `resources` (the claim's) | `persistentvolumeclaim`, the `pvc` trait | `size`, the storage request. A claim's limits are not read. |
 
-Three pod fields are read under another name, because their upstream name is a
+Two pod fields are read under another name, because their upstream name is a
 property of the kind already: `securityContext` as `podSecurityContext` and
-`resources` as `podResources` (both names are the main container's), and on
-`job` and `cronjob` the pod's `activeDeadlineSeconds` as
-`podActiveDeadlineSeconds` (the name is the JobSpec's).
+`resources` as `podResources` (both names are the main container's).
 
 ### One level down
 
@@ -118,16 +113,6 @@ unknown key:
   the port is free is the scheduler's question, on cluster state. A `ports`
   entry reads `containerPort`, `name` and `protocol`.
 
-### Not authorable, and not refusable by name
-
-One case has no key a refusal could sit on: a name taken on this kind by
-another upstream field of the same name. On `job` and `cronjob`,
-`restartPolicy` is the pod's, so the main container's own `restartPolicy`
-cannot be authored and cannot be refused. On `cronjob`, `suspend` is the
-CronJob's, so the job template's `suspend` cannot either (see "One JobSpec
-field is deliberately not shared" in
-[Policy defaults, endpoints and outputs](policy-and-endpoints.md)).
-
 ### Outside the properties
 
 The object's envelope is not a property of the kind's own schema: its
@@ -144,7 +129,7 @@ go-kure/launcher#790, left as it was:
 
 - **Read as unauthored:** `service` and `persistentvolumeclaim` on every key
   they refuse.
-- **Refused, as any value is:** `statefulset`, `daemonset`, `job`, `cronjob`,
+- **Refused, as any value is:** `statefulset`, `daemonset`,
   `serviceaccount`, and `webservice` and `worker`; and every kind on
   `resources.claims`, on `podResources.claims` and on the keys refused under
   the `affinity` shorthand.

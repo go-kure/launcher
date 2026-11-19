@@ -181,7 +181,7 @@ func TestVolumeSource_FlatFormUnchanged(t *testing.T) {
 			}
 		})
 	}
-	for _, kind := range []string{"daemonset", "job", "cronjob"} {
+	for _, kind := range []string{"daemonset"} {
 		for _, k := range workloadKinds {
 			if k.name != kind {
 				continue
@@ -288,7 +288,7 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 		{"image volume outside the registry allowlist", image, &stubPolicy{allowedRegistries: []string{"ghcr.io"}}, "assets"},
 	}
 	// worker stands for the reshaped deployment parser (go-kure/launcher#1629).
-	for _, kind := range []string{"worker", "statefulset", "daemonset", "job", "cronjob"} {
+	for _, kind := range []string{"worker", "statefulset", "daemonset"} {
 		for _, c := range cases {
 			t.Run(c.name+"/"+kind, func(t *testing.T) {
 				err := volumePolicyConfig(t, kind, c.entry).ApplyPolicy(c.policy)
@@ -303,7 +303,7 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 			t.Errorf("ephemeral within the cap: %v", err)
 		}
 		ok := nested("image", "assets", props{"reference": "ghcr.io/org/assets:v1"})
-		if err := volumePolicyConfig(t, "job", ok).ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}}); err != nil {
+		if err := volumePolicyConfig(t, "statefulset", ok).ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}}); err != nil {
 			t.Errorf("image within the allowlist: %v", err)
 		}
 	})

@@ -31,8 +31,6 @@ var (
 	_ oam.BuiltinDefaultReporter = (*RoleDeploymentConfig)(nil)
 	_ oam.BuiltinDefaultReporter = (*StatefulsetConfig)(nil)
 	_ oam.BuiltinDefaultReporter = (*DaemonsetConfig)(nil)
-	_ oam.BuiltinDefaultReporter = (*JobConfig)(nil)
-	_ oam.BuiltinDefaultReporter = (*CronjobConfig)(nil)
 )
 
 // builtinRef names a fill by its kind and its path, as the generation-time fills
@@ -131,20 +129,4 @@ func (c *DaemonsetConfig) BuiltinDefaults() []oam.BuiltinDefault {
 	paths = append(paths, claimFills(c.PVCs)...)
 	paths = append(paths, generateFillPaths(c.Resources, c.InitContainers, c.Sidecars, c.PodSpec)...)
 	return builtinReport("daemonset", paths, c.PolicyDefaults())
-}
-
-// BuiltinDefaults implements oam.BuiltinDefaultReporter.
-func (c *JobConfig) BuiltinDefaults() []oam.BuiltinDefault {
-	paths := append(slices.Clone(c.parseFills), containerFills(c.InitContainers, nil)...)
-	paths = append(paths, claimFills(c.PVCs)...)
-	paths = append(paths, generateFillPaths(c.Resources, c.InitContainers, nil, c.PodSpec)...)
-	return builtinReport("job", paths, c.PolicyDefaults())
-}
-
-// BuiltinDefaults implements oam.BuiltinDefaultReporter.
-func (c *CronjobConfig) BuiltinDefaults() []oam.BuiltinDefault {
-	paths := append(slices.Clone(c.parseFills), containerFills(c.InitContainers, nil)...)
-	paths = append(paths, claimFills(c.PVCs)...)
-	paths = append(paths, generateFillPaths(c.Resources, c.InitContainers, nil, c.PodSpec)...)
-	return builtinReport("cronjob", paths, c.PolicyDefaults())
 }

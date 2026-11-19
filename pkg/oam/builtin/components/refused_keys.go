@@ -114,8 +114,6 @@ var refusedKeys = map[string][]map[string]string{
 	"worker":                {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"statefulset":           {statefulSetSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"daemonset":             {daemonSetSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
-	"job":                   {jobSpecRejectedKeys, jobCronOnlyRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
-	"cronjob":               {cronJobSpecRejectedKeys, jobSpecRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"service":               {serviceRejectedKeys},
 	"persistentvolumeclaim": {claimRejectedKeys},
 	"serviceaccount":        {serviceAccountRejectedKeys},

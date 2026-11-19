@@ -138,16 +138,19 @@ func TestWorkloadEndpoints_NoPortsNoEndpoint(t *testing.T) {
 	}
 }
 
-// A job and a cronjob accept `ports` but serve nothing: they report none.
+// A job and a cronjob may declare container ports but serve nothing: they report none.
 func TestWorkloadEndpoints_BatchKindsReportNone(t *testing.T) {
 	for _, typ := range []string{"job", "cronjob"} {
 		t.Run(typ, func(t *testing.T) {
 			tr := oam.NewTransformer(nil, nil)
 			tr.RegisterComponent("job", &components.JobHandler{})
 			tr.RegisterComponent("cronjob", &components.CronjobHandler{})
-			props := map[string]any{"ports": []any{portEntry(8080, "http", "")}}
+			template := map[string]any{"spec": map[string]any{"containers": []any{
+				map[string]any{"name": "main", "image": "ghcr.io/org/app:v1", "ports": []any{map[string]any{"containerPort": 8080, "name": "http"}}},
+			}}}
+			props := map[string]any{"template": template}
 			if typ == "cronjob" {
-				props["schedule"] = "0 * * * *"
+				props = map[string]any{"schedule": "0 * * * *", "jobTemplate": map[string]any{"spec": map[string]any{"template": template}}}
 			}
 			eps, err := tr.ComponentEndpoints(workloadComponent(typ, "batch", props))
 			if err != nil || len(eps) != 0 {

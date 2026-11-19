@@ -71,15 +71,6 @@ func exclusiveSites() []exclusiveSite {
 	envFrom := func(entry map[string]any) map[string]any {
 		return image(map[string]any{"envFrom": []any{entry}})
 	}
-	exitCodes := map[string]any{"operator": "In", "values": []any{1}}
-	conditions := []any{map[string]any{"type": "DisruptionTarget", "status": "True"}}
-	rule := func(extra map[string]any) map[string]any {
-		r := map[string]any{"action": "FailJob"}
-		for k, v := range extra {
-			r[k] = v
-		}
-		return podFailurePolicyProps([]any{r}, map[string]any{"image": "ghcr.io/org/app:v1"})
-	}
 
 	return []exclusiveSite{
 		{
@@ -130,13 +121,6 @@ func exclusiveSites() []exclusiveSite {
 			emptyBeside: claim(map[string]any{"resourceClaimName": "x", "resourceClaimTemplateName": ""}),
 			neither:     claim(nil),
 			handlerBoth: "exactly one of resourceClaimName or resourceClaimTemplateName must be set", handlerNeither: "exactly one of resourceClaimName or resourceClaimTemplateName must be set",
-		},
-		{
-			name: "podFailurePolicy rule", compType: "job", handler: &components.JobHandler{}, keys: `"onExitCodes" and "onPodConditions"`, nested: true,
-			both:        rule(map[string]any{"onExitCodes": exitCodes, "onPodConditions": conditions}),
-			emptyBeside: rule(map[string]any{"onExitCodes": exitCodes, "onPodConditions": []any{}}),
-			neither:     rule(nil),
-			handlerBoth: "onExitCodes and onPodConditions are mutually exclusive", handlerNeither: "exactly one of onExitCodes or onPodConditions is required",
 		},
 	}
 }

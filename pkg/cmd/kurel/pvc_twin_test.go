@@ -16,6 +16,9 @@ import (
 // path and the claim itself on the kind path — and the owner's delivery traits
 // cover the trait's claim as the kind's own cover its claim.
 
+// jobOwnerProps is the properties of the job component that owns a twin's claim.
+func jobOwnerProps() map[string]any { return rawJobProps("ghcr.io/example/job:v1.0.0") }
+
 // pvcTwinApp returns an Application holding the claim both ways: the kind
 // path as a persistentvolumeclaim component named name, or the trait path as a
 // pvc trait of that name on a job component named "owner". ownerTraits are
@@ -35,7 +38,7 @@ func pvcTwinApp(t *testing.T, viaTrait bool, name string, props map[string]any, 
 		comp = map[string]any{
 			"name":       "owner",
 			"type":       "job",
-			"properties": map[string]any{"image": "ghcr.io/example/job:v1.0.0"},
+			"properties": jobOwnerProps(),
 			"traits":     append([]any{map[string]any{"type": "pvc", "properties": traitProps}}, decs...),
 		}
 	} else {

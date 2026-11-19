@@ -2,7 +2,6 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   labels:
-    app: migrate
     launcher.gokure.dev/component: migrate
   name: migrate
   namespace: default
@@ -28,15 +27,9 @@ spec:
         app: migrate
         launcher.gokure.dev/component: migrate
     spec:
-      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/migrate:v1.0.0
         name: migrate
-        resources:
-          limits:
-            memory: 128Mi
-          requests:
-            cpu: 100m
-            memory: 128Mi
+        resources: {}
       restartPolicy: Never
   ttlSecondsAfterFinished: 3600

@@ -44,22 +44,6 @@ func TestBespokeListReaders_TypedNilElementRefusedLikeUntyped(t *testing.T) {
 			_, err := parseVolumeMountList(map[string]any{"volumeMounts": []any{v}}, "p")
 			return err
 		}},
-		{"successPolicy.rules", []any(nil), func(v any) error {
-			_, err := parseJobSuccessPolicy(map[string]any{"rules": v})
-			return err
-		}},
-		{"successPolicy.rules[0]", nil, func(v any) error {
-			_, err := parseJobSuccessPolicy(map[string]any{"rules": []any{v}})
-			return err
-		}},
-		{"podFailurePolicy.rules[0]", nil, func(v any) error {
-			_, err := parseJobPodFailurePolicy(map[string]any{"rules": []any{v}})
-			return err
-		}},
-		{"onPodConditions[0]", nil, func(v any) error {
-			_, err := parseJobPodFailurePolicyOnPodConditions([]any{v}, "c")
-			return err
-		}},
 		{"volumeClaimTemplates[0]", nil, func(v any) error {
 			_, err := parseVolumeClaimTemplates(map[string]any{"volumeClaimTemplates": []any{v}})
 			return err

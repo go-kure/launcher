@@ -126,8 +126,6 @@ func TestPVCVolume_ClaimName_OtherKindsGenerateNoClaim(t *testing.T) {
 	}{
 		{"statefulset", &components.StatefulsetHandler{}, nil},
 		{"daemonset", &components.DaemonsetHandler{}, nil},
-		{"job", &components.JobHandler{}, nil},
-		{"cronjob", &components.CronjobHandler{}, map[string]any{"schedule": "0 2 * * *"}},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			cfg, err := tc.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: tc.kind, Properties: claimRefProps(nil, tc.extra)}, "default")
@@ -185,8 +183,6 @@ func TestPVCVolume_PodKindsRequireClaimName(t *testing.T) {
 		{roleMemberType, &components.RoleDeploymentHandler{}, nil},
 		{"statefulset", &components.StatefulsetHandler{}, nil},
 		{"daemonset", &components.DaemonsetHandler{}, nil},
-		{"job", &components.JobHandler{}, nil},
-		{"cronjob", &components.CronjobHandler{}, map[string]any{"schedule": "0 2 * * *"}},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			props := claimRefProps(map[string]any{"size": "1Gi"}, tc.extra)

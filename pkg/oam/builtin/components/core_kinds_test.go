@@ -24,6 +24,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -123,6 +124,7 @@ var coreKindSchemas = []struct {
 	{"cnpg-publication", reflect.TypeFor[cnpgv1.PublicationSpec](), &components.CnpgPublicationHandler{}, nil},
 	{"cnpg-scheduledbackup", reflect.TypeFor[cnpgv1.ScheduledBackupSpec](), &components.CnpgScheduledBackupHandler{}, nil},
 	{"cnpg-subscription", reflect.TypeFor[cnpgv1.SubscriptionSpec](), &components.CnpgSubscriptionHandler{}, nil},
+	{"cronjob", reflect.TypeFor[batchv1.CronJobSpec](), &components.CronjobHandler{}, nil},
 	{"csidriver", reflect.TypeFor[storagev1.CSIDriverSpec](), &components.CSIDriverHandler{}, nil},
 	{"deployment", reflect.TypeFor[appsv1.DeploymentSpec](), &components.DeploymentHandler{}, nil},
 	// An EndpointSlice has no spec type either: the component projects the
@@ -143,6 +145,7 @@ var coreKindSchemas = []struct {
 	{"ingress", reflect.TypeFor[networkingv1.IngressSpec](), &components.IngressHandler{}, nil},
 	{"ingressclass", reflect.TypeFor[networkingv1.IngressClassSpec](), &components.IngressClassHandler{}, nil},
 	{"issuer", reflect.TypeFor[certv1.IssuerSpec](), &components.IssuerHandler{}, nil},
+	{"job", reflect.TypeFor[batchv1.JobSpec](), &components.JobHandler{}, nil},
 	{"limitrange", reflect.TypeFor[corev1.LimitRangeSpec](), &components.LimitRangeHandler{}, nil},
 	{"listenerset", reflect.TypeFor[gatewayv1.ListenerSetSpec](), &components.ListenerSetHandler{}, nil},
 	// And the kinds of MetalLB's API.

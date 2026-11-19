@@ -55,6 +55,20 @@ var podTemplatePolicyKinds = []podTemplatePolicyKind{
 		objectPath: "template.spec", propsPath: "template.spec",
 		props: podTemplatePlain,
 	},
+	// The Job and CronJob keep no pod running, so a template of either may set
+	// activeDeadlineSeconds (controller is false).
+	{
+		typ: "job", kind: "Job", apiVersion: "batch/v1",
+		handler:    &components.JobHandler{},
+		objectPath: "spec.template.spec", propsPath: "template.spec",
+		props: jobPlain,
+	},
+	{
+		typ: "cronjob", kind: "CronJob", apiVersion: "batch/v1",
+		handler:    &components.CronjobHandler{},
+		objectPath: "spec.jobTemplate.spec.template.spec", propsPath: "jobTemplate.spec.template.spec",
+		props: cronjobPlain,
+	},
 }
 
 // podTemplatePolicyPaths are the four ways a build produces an object of a

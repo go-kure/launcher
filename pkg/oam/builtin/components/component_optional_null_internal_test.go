@@ -28,7 +28,6 @@ func TestOptionalProperty_NullIsOmission(t *testing.T) {
 	}
 	const manifestYAML = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"
 	const sourceURL = "https://example.com/manifests.yaml"
-	cronjob := map[string]any{"image": "ghcr.io/org/job:v1.0.0", "schedule": "0 2 * * *"}
 	// typeErr is the key's own type refusal. A looser "any error" check would
 	// pass with the type check deleted: a map completionMode still meets the
 	// enum refusal, a map timeZone the empty-string one, a map inline the
@@ -40,11 +39,6 @@ func TestOptionalProperty_NullIsOmission(t *testing.T) {
 		key     string
 		typeErr string
 	}{
-		{"cronjob", &CronjobHandler{}, cronjob, "successfulJobsHistoryLimit", "successfulJobsHistoryLimit: must be an integer, got map"},
-		{"cronjob", &CronjobHandler{}, cronjob, "failedJobsHistoryLimit", "failedJobsHistoryLimit: must be an integer, got map"},
-		{"cronjob", &CronjobHandler{}, cronjob, "timeZone", "timeZone: must be a string, got map"},
-		{"cronjob", &CronjobHandler{}, cronjob, "completionMode", "completionMode: must be a string, got map"},
-		{"job", &JobHandler{}, map[string]any{"image": "ghcr.io/org/job:v1.0.0"}, "completionMode", "completionMode: must be a string, got map"},
 		{"passthrough", &PassthroughHandler{}, map[string]any{
 			"object": map[string]any{"apiVersion": "example.com/v1", "kind": "Widget", "metadata": map[string]any{"name": "w"}},
 		}, "clusterScoped", "'clusterScoped' must be a bool"},

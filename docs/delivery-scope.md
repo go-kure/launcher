@@ -2315,10 +2315,9 @@ and by scope, whatever component or trait emits it.
     and `topologySpreadConstraints` are read;
   - `daemonset`: no scheduling field is left; the raw `affinity`, `tolerations`,
     `topologySpreadConstraints` and `sidecars` are read;
-  - `job`, `cronjob`: the raw `affinity`, `tolerations` and `topologySpreadConstraints`
-    are read;
-  - `job`, `cronjob`: `sidecars` (a plain sidecar keeps the Job's pod from completing;
-    use an `initContainers` entry with `restartPolicy: Always` instead);
+  - `job`, `cronjob`: no field is left; each decodes the whole upstream spec
+    (go-kure/launcher#1629). A plain sidecar keeps the Job's pod from completing; the
+    pod's `initContainers` take an entry with `restartPolicy: Always` for that;
   - all workloads: the container fields `restartPolicy`
     and `restartPolicyRules` on the main container and on a sidecar, `lifecycle.stopSignal`
     (alpha upstream) and a port's `hostPort` and `hostIP`, and the pod field
@@ -2349,7 +2348,9 @@ and by scope, whatever component or trait emits it.
   whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
   ticket. (Since go-kure/launcher#1629 the `deployment` kind authors `selector` and
   `template` itself, as the raw `DeploymentSpec`; `deploymentSpecRejectedKeys` now binds only
-  the `role-deployment` member that `webservice` and `worker` lower into.)
+  the `role-deployment` member that `webservice` and `worker` lower into. `job` and
+  `cronjob` likewise decode their whole spec: `jobSpecRejectedKeys` is gone, and a
+  `cronjob` refuses `jobTemplate.spec.selector` and a true `manualSelector` itself.)
 - **Missing kinds:** the inventory's `missing` rows. The inventory has no `trait` row left: no kind is reachable only as a trait.
   The ticket adds the missing kinds group by group. A kind kure lacks is added to kure
   first.

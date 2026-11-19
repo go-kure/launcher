@@ -43,10 +43,6 @@ var containerNameCases = []struct {
 	{roleMemberType, &components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "db"}, false, ""},
 	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
-	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}, false,
-		"the component name is the CronJob's name, which must be at most 52 characters"},
-	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false,
-		"the component name is the Job's name, which must be at most 63 characters"},
 }
 
 // generateWorkload runs a component through ToApplicationConfig and Generate,

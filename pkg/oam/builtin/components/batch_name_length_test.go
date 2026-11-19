@@ -7,10 +7,24 @@ import (
 
 	"github.com/go-kure/kure/pkg/stack"
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
+
+// batchPodTemplate is the smallest pod template a batch kind takes: one
+// container, as the properties read.
+func batchPodTemplate() map[string]any {
+	return map[string]any{"spec": map[string]any{"containers": []any{
+		map[string]any{"name": "main", "image": "busybox:1"},
+	}}}
+}
+
+// batchPodSpec is batchPodTemplate as the API type, for a config built by hand.
+func batchPodSpec() corev1.PodTemplateSpec {
+	return corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main", Image: "busybox:1"}}}}
+}
 
 // batchNameLimits are the two batch kinds whose object the API server refuses
 // over a length no component name is held to: a CronJob over 52 characters, a
@@ -25,16 +39,19 @@ var batchNameLimits = []struct {
 }{
 	{
 		typ: "cronjob", kind: "CronJob", limit: 52, handler: &components.CronjobHandler{},
-		props: map[string]any{"image": "busybox:1", "schedule": "0 2 * * *"},
+		props: map[string]any{"schedule": "0 2 * * *", "jobTemplate": map[string]any{"spec": map[string]any{"template": batchPodTemplate()}}},
 		named: func(objectName string) stack.ApplicationConfig {
-			return &components.CronjobConfig{Name: "nightly", ObjectName: objectName, Image: "busybox:1", Schedule: "0 2 * * *"}
+			return &components.CronjobConfig{Name: "nightly", ObjectName: objectName, Spec: batchv1.CronJobSpec{
+				Schedule:    "0 2 * * *",
+				JobTemplate: batchv1.JobTemplateSpec{Spec: batchv1.JobSpec{Template: batchPodSpec()}},
+			}}
 		},
 	},
 	{
 		typ: "job", kind: "Job", limit: 63, handler: &components.JobHandler{},
-		props: map[string]any{"image": "busybox:1"},
+		props: map[string]any{"template": batchPodTemplate()},
 		named: func(objectName string) stack.ApplicationConfig {
-			return &components.JobConfig{Name: "nightly", ObjectName: objectName, Image: "busybox:1"}
+			return &components.JobConfig{Name: "nightly", ObjectName: objectName, Spec: batchv1.JobSpec{Template: batchPodSpec()}}
 		},
 	},
 }
@@ -74,7 +91,7 @@ func TestJob_NameAllowsCompletions(t *testing.T) {
 	h := &components.JobHandler{}
 	name := strings.Repeat("a", 61)
 	indexed := func(completions int) map[string]any {
-		return map[string]any{"image": "busybox:1", "completionMode": "Indexed", "completions": completions}
+		return map[string]any{"template": batchPodTemplate(), "completionMode": "Indexed", "completions": completions}
 	}
 	convert := func(props map[string]any) error {
 		_, err := h.ToApplicationConfig(&oam.Component{Name: name, Type: "job", Properties: props}, "default")
@@ -85,7 +102,7 @@ func TestJob_NameAllowsCompletions(t *testing.T) {
 	if err := convert(indexed(10)); err != nil {
 		t.Fatalf("completions 10: err = %v, want it accepted", err)
 	}
-	if err := convert(map[string]any{"image": "busybox:1", "completions": 11}); err != nil {
+	if err := convert(map[string]any{"template": batchPodTemplate(), "completions": 11}); err != nil {
 		t.Fatalf("completions 11 on a job that is not Indexed: err = %v, want it accepted", err)
 	}
 	want := `job "` + name + `": the component name is the Job's name, and with completionMode Indexed and completions 11 ` +
@@ -95,8 +112,8 @@ func TestJob_NameAllowsCompletions(t *testing.T) {
 	}
 
 	mode, completions := batchv1.IndexedCompletion, int32(2)
-	spec := components.JobSpecConfig{CompletionMode: &mode, Completions: &completions}
-	cfg := &components.JobConfig{Name: "migrate", ObjectName: "migrate.v2", Image: "busybox:1", JobSpec: spec}
+	spec := batchv1.JobSpec{Template: batchPodSpec(), CompletionMode: &mode, Completions: &completions}
+	cfg := &components.JobConfig{Name: "migrate", ObjectName: "migrate.v2", Spec: spec}
 	want = oam.ObjectNameProperty + ` (or the Naming hook's answer for role "object"): "migrate.v2" is not a valid name for this Job: ` +
 		`with completionMode Indexed and completions 2 the pod of the last index takes the hostname "migrate.v2-1", which must be a DNS-1123 label: `
 	if _, err := cfg.Generate(stack.NewApplication("migrate", "default", cfg)); err == nil || !strings.Contains(err.Error(), want) {
@@ -111,7 +128,7 @@ func TestJob_NameAllowsCompletions(t *testing.T) {
 	// built by hand can leave completions and parallelism unset. The API server
 	// then reads both as 1 and holds the name to "<job>-0": 61 characters fit,
 	// 62 do not.
-	unset := &components.JobConfig{Name: "migrate", Image: "busybox:1", JobSpec: components.JobSpecConfig{CompletionMode: &mode}}
+	unset := &components.JobConfig{Name: "migrate", Spec: batchv1.JobSpec{Template: batchPodSpec(), CompletionMode: &mode}}
 	unset.ObjectName = strings.Repeat("a", 61)
 	if _, err := unset.Generate(stack.NewApplication("migrate", "default", unset)); err != nil {
 		t.Fatalf("Generate with completions unset and a 61-character ObjectName: err = %v, want it accepted", err)

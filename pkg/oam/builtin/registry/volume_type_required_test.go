@@ -21,9 +21,7 @@ func TestVolumeTypeIsRequired(t *testing.T) {
 		"worker":      {"image": "ghcr.io/org/app:v1"},
 		"webservice":  {"image": "ghcr.io/org/app:v1"},
 		"statefulset": {"image": "ghcr.io/org/app:v1"},
-		"job":         {"image": "ghcr.io/org/app:v1"},
 		"daemonset":   {"image": "ghcr.io/org/app:v1"},
-		"cronjob":     {"image": "ghcr.io/org/app:v1", "schedule": "0 * * * *"},
 	}
 	tr := newTransformer()
 	published := tr.HandlerSchemas().Components

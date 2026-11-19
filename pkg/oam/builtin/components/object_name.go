@@ -143,13 +143,12 @@ func validateJobName(name, componentName string) error {
 // Job takes, and the refusal says where it came from, as validateKindNameLength
 // does.
 //
-// The conversion refuses an Indexed job without completions, but a JobConfig
-// built by hand can leave it unset. Where parallelism is unset too the API
-// server reads both as 1 (SetDefaults_Job, pkg/apis/batch/v1) before it
+// An Indexed job may leave completions unset. Where parallelism is unset too
+// the API server reads both as 1 (SetDefaults_Job, pkg/apis/batch/v1) before it
 // validates, so the rule is held on "<job>-0" there. Completions unset beside a
 // set parallelism is refused by the API server for the missing completions, not
 // for the name, and is not this rule's.
-func validateJobNameAllowsCompletions(name, componentName string, spec JobSpecConfig) error {
+func validateJobNameAllowsCompletions(name, componentName string, spec batchv1.JobSpec) error {
 	if spec.CompletionMode == nil || *spec.CompletionMode != batchv1.IndexedCompletion {
 		return nil
 	}

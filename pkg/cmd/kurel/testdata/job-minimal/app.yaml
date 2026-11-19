@@ -8,4 +8,9 @@ spec:
     - name: migrate
       type: job
       properties:
-        image: ghcr.io/example/migrate:v1.0.0
+        template:
+          spec:
+            restartPolicy: OnFailure
+            containers:
+              - name: migrate
+                image: ghcr.io/example/migrate:v1.0.0

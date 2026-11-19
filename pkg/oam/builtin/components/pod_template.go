@@ -3,6 +3,7 @@ package components
 import (
 	"maps"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -49,6 +50,46 @@ func podTemplateLabelSelectorRequired() map[string]string {
 	return labelSelectorRequired(podSpecLabelSelectors("template.spec.")...)
 }
 
+// validateBatchPodTemplate refuses what the pod template of a Job, or of a
+// CronJob's job template, may not hold: what a pod authored through a kind
+// component may not (validateAuthoredPodSpec). activeDeadlineSeconds is
+// allowed, as on a pod, since a Job's pods run to completion. prefix is the
+// path of the template in the component's properties, with its trailing dot.
+// The API's other value rules, restartPolicy among them, are left to the API
+// server.
+func validateBatchPodTemplate(prefix string, t *corev1.PodTemplateSpec) error {
+	return validateAuthoredPodSpec(prefix+"spec.", &t.Spec, false)
+}
+
+// jobTemplateSchema is the schema of a `jobTemplate` property: an open object
+// decoded strictly into batchv1.JobTemplateSpec. It names the gated paths of
+// the pod spec beneath its spec.template, which the open schema hides from the
+// gate check.
+func jobTemplateSchema(desc string) oam.PropertySchema {
+	s := podObjectSchema(desc, "JobTemplateSpec")
+	s.GatedPaths = podTemplateGatedPathsUnder("spec.template.")
+	s.ValueGatedPaths = podTemplateValueGatedPathsUnder("spec.template.")
+	return s
+}
+
+// jobTemplateDefaultedZeros is the defaulted-zero list of a spec whose pod
+// sits below a `jobTemplate` property: the pod spec's list
+// (podSpecDefaultedZeros) under jobTemplate.spec.template.spec, for jt, the
+// decoded job template. The map is the caller's own.
+func jobTemplateDefaultedZeros(jt *batchv1.JobTemplateSpec) defaultedZeroFields {
+	var ps *corev1.PodSpec
+	if jt != nil {
+		ps = &jt.Spec.Template.Spec
+	}
+	return podSpecDefaultedZeros("jobTemplate.spec.template.spec.", ps)
+}
+
+// jobTemplateLabelSelectorRequired is podTemplateLabelSelectorRequired for the
+// pod below a `jobTemplate` property.
+func jobTemplateLabelSelectorRequired() map[string]string {
+	return labelSelectorRequired(podSpecLabelSelectors("jobTemplate.spec.template.spec.")...)
+}
+
 // controllerActiveDeadlineReason is the error text, after the path of the pod
 // spec, for an activeDeadlineSeconds on the pod template of a controller that
 // keeps its pods running.
@@ -81,9 +122,16 @@ func validateControllerPodTemplate(t *corev1.PodTemplateSpec) error {
 // overwritten, an authored selector on that label would stop matching the
 // template. An authored `app` with the component's value is the label itself.
 func podTemplateAppLabels(component string, authored map[string]string) (map[string]string, error) {
+	return podTemplateAppLabelsAt("template", component, authored)
+}
+
+// podTemplateAppLabelsAt is podTemplateAppLabels for a pod template that sits
+// at the path template in the component's properties: the refusal names
+// template.metadata.labels.app under it.
+func podTemplateAppLabelsAt(template, component string, authored map[string]string) (map[string]string, error) {
 	want := appLabels(component)
 	if got, ok := authored["app"]; ok && got != want["app"] {
-		return nil, errors.Errorf("template.metadata.labels.app: %q is not the `app` label of component %q (%q): launcher sets that label on the component's pods, and its traits and Services select them by it; remove the label, or write that value", got, component, want["app"])
+		return nil, errors.Errorf("%s.metadata.labels.app: %q is not the `app` label of component %q (%q): launcher sets that label on the component's pods, and its traits and Services select them by it; remove the label, or write that value", template, got, component, want["app"])
 	}
 	maps.Copy(want, authored)
 	return want, nil

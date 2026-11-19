@@ -32,8 +32,6 @@ var builtinKinds = map[string]struct {
 	roleMemberType: {&components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	"statefulset":  {&components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "app-headless"}},
 	"daemonset":    {&components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	"job":          {&components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	"cronjob":      {&components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "0 2 * * *"}},
 }
 
 func newKindConfig(t *testing.T, kind string, props map[string]any, traits ...oam.Trait) stack.ApplicationConfig {
@@ -96,14 +94,6 @@ var (
 	side1 = func(ports []any) []any {
 		return []any{map[string]any{"name": "proxy", "image": "ghcr.io/org/proxy:v1", "ports": ports}}
 	}
-	failurePolicy = map[string]any{"rules": []any{map[string]any{
-		"action": "Ignore",
-		"onPodConditions": []any{
-			map[string]any{"type": "DisruptionTarget"},
-			map[string]any{"type": "Other", "status": "False"},
-			map[string]any{"type": "Nulled", "status": nil},
-		},
-	}}}
 )
 
 // builtinRow is one fill: the kinds that carry it, the properties that leave it to
@@ -120,23 +110,12 @@ type builtinRow struct {
 }
 
 func builtinRows() []builtinRow {
-	allPods := []string{roleMemberType, "statefulset", "daemonset", "job", "cronjob"}
+	allPods := []string{roleMemberType, "statefulset", "daemonset"}
 	return []builtinRow{
 		{name: "replicas", kinds: []string{roleMemberType, "statefulset"}, want: []string{"replicas"},
 			authored: map[string]any{"replicas": 1}, gone: []string{"replicas"}},
 		{name: "replicas null reads as omitted", kinds: []string{roleMemberType, "statefulset"},
 			props: map[string]any{"replicas": nil}, want: []string{"replicas"}},
-		{name: "restartPolicy", kinds: []string{"job", "cronjob"}, want: []string{"restartPolicy"},
-			authored: map[string]any{"restartPolicy": "OnFailure"}, gone: []string{"restartPolicy"}},
-		{name: "restartPolicy null reads as omitted", kinds: []string{"job", "cronjob"},
-			props: map[string]any{"restartPolicy": nil}, want: []string{"restartPolicy"}},
-		{name: "history limits", kinds: []string{"cronjob"},
-			want:     []string{"failedJobsHistoryLimit", "restartPolicy", "successfulJobsHistoryLimit"},
-			authored: map[string]any{"successfulJobsHistoryLimit": 3, "failedJobsHistoryLimit": 1},
-			gone:     []string{"failedJobsHistoryLimit", "successfulJobsHistoryLimit"}},
-		{name: "history limits null read as omitted", kinds: []string{"cronjob"},
-			props: map[string]any{"successfulJobsHistoryLimit": nil, "failedJobsHistoryLimit": nil},
-			want:  []string{"failedJobsHistoryLimit", "restartPolicy", "successfulJobsHistoryLimit"}},
 		{name: "main container port protocol", kinds: allPods, props: map[string]any{"ports": ctrPorts},
 			authored: map[string]any{"ports": []any{map[string]any{"containerPort": 8080, "protocol": "TCP"}, map[string]any{"containerPort": 9090, "protocol": "UDP"}}},
 			gone:     []string{"ports[0].protocol"}},
@@ -146,12 +125,6 @@ func builtinRows() []builtinRow {
 		{name: "sidecar port protocol", kinds: []string{roleMemberType, "statefulset", "daemonset"}, props: map[string]any{"sidecars": side1(ctrPorts)},
 			authored: map[string]any{"sidecars": side1([]any{map[string]any{"containerPort": 8080, "protocol": "TCP"}, map[string]any{"containerPort": 9090, "protocol": "UDP"}})},
 			gone:     []string{"sidecars[0].ports[0].protocol"}},
-		{name: "pod failure policy condition status", kinds: []string{"job", "cronjob"},
-			props: map[string]any{"restartPolicy": "Never", "podFailurePolicy": failurePolicy},
-			want: []string{
-				"podFailurePolicy.rules[0].onPodConditions[0].status",
-				"podFailurePolicy.rules[0].onPodConditions[2].status",
-			}},
 		{name: "pvc volume accessModes", kinds: allPods, props: map[string]any{"volumes": oneVolume},
 			authored: map[string]any{"volumes": []any{map[string]any{"name": "data", "type": "pvc", "claimName": "data-claim", "mountPath": "/data", "accessModes": []any{"ReadWriteOnce"}}}},
 			gone:     []string{"volumes[0].accessModes"}},
@@ -180,17 +153,6 @@ func expectedPaths(kind string, r builtinRow) []string {
 	switch kind {
 	case roleMemberType, "statefulset":
 		want = append(want, "replicas")
-	case "job":
-		want = append(want, "restartPolicy")
-	case "cronjob":
-		want = append(want, "restartPolicy", "successfulJobsHistoryLimit", "failedJobsHistoryLimit")
-	}
-	if r.name == "pod failure policy condition status" {
-		// restartPolicy is authored Never in this row.
-		want = slices.DeleteFunc(want, func(p string) bool { return p == "restartPolicy" })
-	}
-	if _, ok := r.props["restartPolicy"]; ok && r.props["restartPolicy"] != nil {
-		want = slices.DeleteFunc(want, func(p string) bool { return p == "restartPolicy" })
 	}
 	for k, v := range r.props {
 		if v == nil {

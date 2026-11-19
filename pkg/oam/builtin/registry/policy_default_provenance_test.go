@@ -144,8 +144,6 @@ func policyDefaultCases() []policyDefaultCase {
 		{"worker", nil, workerOwner},
 		{"statefulset", nil, owner{component: "app"}},
 		{"daemonset", nil, owner{component: "app"}},
-		{"cronjob", map[string]any{"schedule": "0 2 * * *"}, owner{component: "app"}},
-		{"job", nil, owner{component: "app"}},
 	}
 	for _, k := range kinds {
 		comp := workload("app", k.typ, k.extra)
@@ -390,8 +388,6 @@ func extraContainerCases() []struct {
 	}{
 		{"statefulset", nil, true, owner{component: "app"}},
 		{"daemonset", nil, true, owner{component: "app"}},
-		{"job", nil, false, owner{component: "app"}},
-		{"cronjob", map[string]any{"schedule": "0 2 * * *"}, false, owner{component: "app"}},
 		{"webservice", map[string]any{"port": 8080}, true, owner{component: "app", member: "role-deployment"}},
 		{"worker", nil, true, owner{component: "app", member: "role-deployment"}},
 	}

@@ -28,6 +28,24 @@ func rawDeploymentPropsWith(extra map[string]any) map[string]any {
 	return p
 }
 
+// rawJobProps is the smallest properties map the raw `job` kind takes: the upstream
+// JobSpec fields, a pod template with one container named "app" running image, and the
+// restartPolicy the API server requires of a Job's pod. rawCronjobProps is the same
+// under a cronjob's jobTemplate, with the schedule.
+func rawJobProps(image string) map[string]any {
+	return map[string]any{"template": map[string]any{"spec": map[string]any{
+		"restartPolicy": "Never",
+		"containers":    []any{map[string]any{"name": "app", "image": image}},
+	}}}
+}
+
+func rawCronjobProps(image string) map[string]any {
+	return map[string]any{
+		"schedule":    "0 2 * * *",
+		"jobTemplate": map[string]any{"spec": rawJobProps(image)},
+	}
+}
+
 // rawDeploymentYAML is rawDeploymentProps as a properties block for an app.yaml, with
 // its keys at indent spaces, ending in a newline. image names the one container.
 func rawDeploymentYAML(indent int, image string) string {

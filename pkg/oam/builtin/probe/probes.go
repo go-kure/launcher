@@ -22,6 +22,24 @@ func component(name, typ string, props map[string]any) []oam.Component {
 // adds fields to (a key of pod replaces the one of the same name, `containers`
 // included). The kind fills nothing, so a probe built on it holds no fill of
 // the kind's own.
+func rawBatch(name, typ string, props map[string]any) []oam.Component {
+	pod := map[string]any{
+		"restartPolicy": "OnFailure",
+		"containers":    []any{map[string]any{"name": "app", "image": image}},
+	}
+	tpl := map[string]any{"spec": pod}
+	p := map[string]any{}
+	if typ == "cronjob" {
+		p["jobTemplate"] = map[string]any{"spec": map[string]any{"template": tpl}}
+	} else {
+		p["template"] = tpl
+	}
+	for k, v := range props {
+		p[k] = v
+	}
+	return []oam.Component{{Name: name, Type: typ, Properties: p}}
+}
+
 func rawDeployment(name string, container, pod map[string]any) []oam.Component {
 	main := map[string]any{"name": "app", "image": image}
 	for k, v := range container {
@@ -114,7 +132,7 @@ func join(groups ...[]Fill) []Fill {
 }
 
 // Probes returns the probe documents of the handler-built workload kinds, the lowered types and the traits
-// (deployment, statefulset, daemonset, job and cronjob), with the fills observed when each runs with the probe policy and
+// (deployment, statefulset, daemonset, job and cronjob; the raw ones fill nothing), with the fills observed when each runs with the probe policy and
 // without one. What they show is what these documents trigger: a fill under a
 // condition no document meets is not in them.
 func Probes() []Probe {
@@ -137,18 +155,6 @@ func Probes() []Probe {
 	accessModes := func(comp, path string) Fill {
 		return Fill{Component: comp, Path: path, WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin,
 			ValueWithPolicy: []any{"ReadWriteOnce"}, ValueWithoutPolicy: []any{"ReadWriteOnce"}}
-	}
-	failurePolicy := map[string]any{"rules": []any{map[string]any{
-		"action":          "Ignore",
-		"onPodConditions": []any{map[string]any{"type": "DisruptionTarget"}},
-	}}}
-	status := func(comp string) Fill {
-		return Fill{Component: comp, Path: "podFailurePolicy.rules[0].onPodConditions[0].status", WithPolicy: oam.SourceBuiltin,
-			WithoutPolicy: oam.SourceBuiltin, ValueWithPolicy: "True", ValueWithoutPolicy: "True"}
-	}
-	restart := func(comp string) Fill {
-		return Fill{Component: comp, Path: "restartPolicy", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin,
-			ValueWithPolicy: "OnFailure", ValueWithoutPolicy: "OnFailure"}
 	}
 
 	return withOthers(append([]Probe{
@@ -176,15 +182,8 @@ func Probes() []Probe {
 			Fills: join([]Fill{automount("app")}, resourceFills("app", ""))},
 		{Name: "daemonset with containers", Components: component("app", "daemonset", containers),
 			Fills: join([]Fill{automount("app")}, resourceFills("app", ""), containerFills("app", true))},
-		{Name: "job", Components: component("app", "job", nil),
-			Fills: join([]Fill{restart("app"), automount("app")}, resourceFills("app", ""))},
-		{Name: "job with a pod failure policy", Components: component("app", "job", map[string]any{"restartPolicy": "Never", "podFailurePolicy": failurePolicy}),
-			Fills: join([]Fill{status("app"), automount("app")}, resourceFills("app", ""))},
-		{Name: "cronjob", Components: component("app", "cronjob", map[string]any{"schedule": "0 2 * * *"}),
-			Fills: join([]Fill{restart("app"), automount("app"),
-				{Component: "app", Path: "successfulJobsHistoryLimit", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin, ValueWithPolicy: 3, ValueWithoutPolicy: 3},
-				{Component: "app", Path: "failedJobsHistoryLimit", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin, ValueWithPolicy: 1, ValueWithoutPolicy: 1},
-			}, resourceFills("app", "")),
-			LeftToCluster: map[string]string{"concurrencyPolicy": "the handler omits it and the cluster applies Allow"}},
+		// The raw job and cronjob fill nothing either (go-kure/launcher#1629).
+		{Name: "job", Components: rawBatch("app", "job", nil)},
+		{Name: "cronjob", Components: rawBatch("app", "cronjob", map[string]any{"schedule": "0 2 * * *"})},
 	}, append(loweredProbes(), traitProbes()...)...))
 }

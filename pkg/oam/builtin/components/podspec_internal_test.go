@@ -112,8 +112,8 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		// go-kure/launcher#1178: `podMetadata`, in no shared list.
 		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 21, statefulSetSpecPropertyKeys, false},
 		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 18, daemonSetSpecPropertyKeys, false},
-		{"cronjob", (&CronjobHandler{}).PropertySchema(), 25, jobSpecPropertyKeys, true},
-		{"job", (&JobHandler{}).PropertySchema(), 19, jobSpecPropertyKeys, true},
+		// job and cronjob take the upstream spec since go-kure/launcher#1629 and
+		// are not merged from these fragments.
 		// The reshaped deployment parser is the role member, which keeps this
 		// count (go-kure/launcher#1629). The kind-named `deployment` takes the
 		// upstream spec and is not merged from these fragments.

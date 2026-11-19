@@ -62,7 +62,6 @@ var labelAliasingProps = map[string]map[string]any{
 		},
 	},
 	"daemonset": {},
-	"cronjob":   {},
 }
 
 // labelMap is one caller-reachable label map, named by where it lives so a
@@ -222,11 +221,6 @@ func TestCollectLabelMaps_ReachesEveryGuardedPosition(t *testing.T) {
 			"DaemonSet/app.spec.selector.matchLabels",
 			"DaemonSet/app.spec.template.labels",
 		},
-		"cronjob": {
-			"CronJob/app.metadata.labels",
-			"CronJob/app.spec.jobTemplate.labels",
-			"CronJob/app.spec.jobTemplate.spec.template.labels",
-		},
 	}
 
 	for _, k := range workloadKinds {
@@ -324,11 +318,8 @@ func TestWorkloadKinds_StampingPodTemplateLabelsLeavesSelectorsAlone(t *testing.
 					selectors = append(selectors, labelMap{where: lm.where, m: maps.Clone(lm.m)})
 				}
 			}
-			// Every kind but cronjob and job owns at least its workload's
-			// spec.selector; a cronjob's job template has none, and a job's
-			// own selector is refused at parse time and left to the Job
-			// controller to generate, so both contribute label maps only.
-			if k.name != "cronjob" && k.name != "job" && len(selectors) == 0 {
+			// Every kind here owns at least its workload's spec.selector.
+			if len(selectors) == 0 {
 				t.Fatalf("%s generated no selector to check", k.name)
 			}
 

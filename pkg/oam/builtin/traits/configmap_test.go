@@ -364,8 +364,8 @@ func TestConfigMapDecorator_MountsIntoJobPodKinds(t *testing.T) {
 		name  string
 		inner stack.ApplicationConfig
 	}{
-		{"job", &components.JobConfig{Image: "job:v1", RestartPolicy: corev1.RestartPolicyOnFailure}},
-		{"cronjob", &components.CronjobConfig{Image: "job:v1", Schedule: "0 2 * * *"}},
+		{"job", newJobStubConfig(t)},
+		{"cronjob", newCronJobStubConfig(t)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

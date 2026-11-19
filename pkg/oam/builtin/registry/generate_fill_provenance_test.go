@@ -40,8 +40,6 @@ var handlerBuiltKinds = []handlerBuiltKind{
 	{"worker", nil, owner{component: "web", member: "role-deployment"}, generateTimeFillPaths[:3]},
 	{"statefulset", nil, owner{component: "web"}, generateTimeFillPaths},
 	{"daemonset", nil, owner{component: "web"}, generateTimeFillPaths},
-	{"job", nil, owner{component: "web"}, generateTimeFillPaths},
-	{"cronjob", map[string]any{"schedule": "*/5 * * * *"}, owner{component: "web"}, generateTimeFillPaths},
 }
 
 // TestGenerateTimeFills_AreReported: a workload that authors none of them has

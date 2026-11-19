@@ -58,8 +58,9 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - `job` refused the name from its introduction; the other six gained the check in
     go-kure/launcher#407. [the name is a workload component name; `job` and the other six are
     the seven workload kinds `webservice`, `worker`, `deployment`, `statefulset`, `daemonset`,
-    `cronjob` and `job`; `deployment` has since become a raw kind with no main container named
-    after the component (go-kure/launcher#1629), so the reference page counts six]
+    `cronjob` and `job`; `deployment`, `job` and `cronjob` have since become raw kinds with no
+    main container named after the component (go-kure/launcher#1629), so the reference page
+    counts four]
   - Until go-kure/launcher#405 all three were read with a bare comma-ok assertion, so a
     handler called directly — without the schema validation an authored document gets first,
     which already refused these shapes — dropped the value and emitted a container with no
@@ -176,7 +177,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
     since go-kure/launcher#1629 they are `template.spec.*` and no longer read by that parser).
   - go-kure/launcher#790 (the other kind-named workloads (`statefulset`, `daemonset`, `job`,
     `cronjob`) publish the same shapes through the same parsers and schemas, and `statefulset`
-    dropped the four-key `affinity` shorthand (breaking)).
+    dropped the four-key `affinity` shorthand (breaking) [`job` and `cronjob` have since
+    become raw kinds, go-kure/launcher#1629]).
   - go-kure/launcher#1473 (`webservice` and `worker` publish `tolerations` and
     `topologySpreadConstraints` as the same shapes, from the same schemas and parsers).
 

@@ -29,8 +29,6 @@ var workloadKinds = []struct {
 	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}},
-	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 }
 
 func withProps(base map[string]any, extra map[string]any) map[string]any {
@@ -224,49 +222,19 @@ func TestWorkloadKinds_ApplyPolicy_HostNamespacesDenied(t *testing.T) {
 	}
 }
 
-// TestWorkloadKinds_PodActiveDeadlineSeconds: only the Job-pod kinds (cronjob
-// and job) accept and emit the pod-level activeDeadlineSeconds; apps/v1 kinds
-// reject it.
+// TestWorkloadKinds_PodActiveDeadlineSeconds: the apps/v1 kinds reject the
+// pod-level activeDeadlineSeconds. job and cronjob take it on their pod
+// template, which their own tests hold.
 func TestWorkloadKinds_PodActiveDeadlineSeconds(t *testing.T) {
-	jobPodKinds := map[string]bool{"cronjob": true, "job": true}
 	for _, k := range workloadKinds {
 		t.Run(k.name, func(t *testing.T) {
 			props := withProps(k.props, map[string]any{"podActiveDeadlineSeconds": 120})
-			cfg, err := k.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: k.name, Properties: props}, "default")
-			if !jobPodKinds[k.name] {
-				if err == nil || !strings.Contains(err.Error(), "only Job pods may set activeDeadlineSeconds") {
-					t.Fatalf("ToApplicationConfig error = %v, want the Job-only rejection", err)
-				}
-				if _, ok := k.handler.(oam.PropertySchemaProvider).PropertySchema()["podActiveDeadlineSeconds"]; ok {
-					t.Error("PropertySchema publishes podActiveDeadlineSeconds on a non-Job kind")
-				}
-				return
+			_, err := k.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: k.name, Properties: props}, "default")
+			if err == nil || !strings.Contains(err.Error(), "only Job pods may set activeDeadlineSeconds") {
+				t.Fatalf("ToApplicationConfig error = %v, want the Job-only rejection", err)
 			}
-			if err != nil {
-				t.Fatalf("ToApplicationConfig: %v", err)
-			}
-			app := stack.NewApplication("app", "default", cfg)
-			objects, err := cfg.Generate(app)
-			if err != nil {
-				t.Fatalf("Generate: %v", err)
-			}
-			ps := podTemplateSpec(t, objects)
-			if ps.ActiveDeadlineSeconds == nil || *ps.ActiveDeadlineSeconds != 120 {
-				t.Errorf("pod ActiveDeadlineSeconds = %v, want 120", ps.ActiveDeadlineSeconds)
-			}
-			// The job-level property keeps its own field: the pod-level key
-			// must not have written through to the JobSpec of either kind.
-			switch w := (*objects[0]).(type) {
-			case *batchv1.CronJob:
-				if w.Spec.JobTemplate.Spec.ActiveDeadlineSeconds != nil {
-					t.Errorf("job ActiveDeadlineSeconds = %v, want unset when only the pod-level key is authored", w.Spec.JobTemplate.Spec.ActiveDeadlineSeconds)
-				}
-			case *batchv1.Job:
-				if w.Spec.ActiveDeadlineSeconds != nil {
-					t.Errorf("job ActiveDeadlineSeconds = %v, want unset when only the pod-level key is authored", w.Spec.ActiveDeadlineSeconds)
-				}
-			default:
-				t.Fatalf("first object is %T, want a Job-pod workload", *objects[0])
+			if _, ok := k.handler.(oam.PropertySchemaProvider).PropertySchema()["podActiveDeadlineSeconds"]; ok {
+				t.Error("PropertySchema publishes podActiveDeadlineSeconds on a non-Job kind")
 			}
 		})
 	}

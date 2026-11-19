@@ -75,11 +75,11 @@ func TestMountDecorators_RefuseANameTakenByABlockDevice(t *testing.T) {
 		}
 		props map[string]any
 		// exact says props are the whole properties, with no image added: the
-		// raw deployment takes the upstream pod template, whose block device is a
-		// claim volume of the pod.
+		// raw deployment, job and cronjob take the upstream pod template, whose
+		// block device is a claim volume of the pod.
 		exact bool
 	}
-	rawBlock := rawDeploymentProps("app", "ghcr.io/org/app:v1", rawPod(map[string]any{
+	blockPod := map[string]any{
 		"containers": []any{map[string]any{
 			"name": "app", "image": "ghcr.io/org/app:v1",
 			"volumeDevices": []any{map[string]any{"name": "disk", "devicePath": "/dev/xvda"}},
@@ -87,7 +87,8 @@ func TestMountDecorators_RefuseANameTakenByABlockDevice(t *testing.T) {
 		"volumes": []any{
 			map[string]any{"name": "disk", "persistentVolumeClaim": map[string]any{"claimName": "disk"}},
 		},
-	}))
+	}
+	rawBlock := rawDeploymentProps("app", "ghcr.io/org/app:v1", rawPod(blockPod))
 	sources := []source{
 		{"webservice", webserviceViaRule{}, blockPVC, false},
 		{"worker", workerViaRule{}, blockPVC, false},
@@ -95,8 +96,8 @@ func TestMountDecorators_RefuseANameTakenByABlockDevice(t *testing.T) {
 		{"deployment", &components.DeploymentHandler{}, rawBlock, true},
 		{"statefulset", &components.StatefulsetHandler{}, blockPVC, false},
 		{"daemonset", &components.DaemonsetHandler{}, blockPVC, false},
-		{"job", &components.JobHandler{}, blockPVC, false},
-		{"cronjob", &components.CronjobHandler{}, mergeBlockProps(blockPVC, map[string]any{"schedule": "0 2 * * *"}), false},
+		{"job", &components.JobHandler{}, rawJobProps("ghcr.io/org/app:v1", rawPod(blockPod)), true},
+		{"cronjob", &components.CronjobHandler{}, rawCronjobProps("ghcr.io/org/app:v1", blockPod), true},
 		{"statefulset claim template", &components.StatefulsetHandler{}, map[string]any{"volumeClaimTemplates": []any{map[string]any{
 			"name": "disk", "size": "1Gi", "devicePath": "/dev/xvda", "volumeMode": "Block",
 		}}}, false},

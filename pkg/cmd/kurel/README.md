@@ -82,8 +82,8 @@ strictly decoded (the reshaped form belongs to the role-named `webservice` and
 `worker`) —
 the `service` component — the kind-named projection of `corev1.Service`,
 emitting only a Service in front of pods another component owns —
-the `job` component — a run-to-completion workload sharing the whole
-JobSpec-level surface with `cronjob`'s job template — and the
+the `job` component — a run-to-completion workload, since go-kure/launcher#1629 the
+whole `JobSpec` strictly decoded, as `cronjob` is the whole `CronJobSpec` — and the
 `security-context` trait were added in this release. The `topology-spread`
 trait (launcher's default spread constraints on any typed Deployment a
 component generates, from its post-policy replica count, or the matching

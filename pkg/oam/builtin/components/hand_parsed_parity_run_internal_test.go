@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -26,8 +25,6 @@ var parityHandlers = map[string]oam.ComponentHandler{
 	roleDeploymentMember:    &RoleDeploymentHandler{},
 	"statefulset":           &StatefulsetHandler{},
 	"daemonset":             &DaemonsetHandler{},
-	"job":                   &JobHandler{},
-	"cronjob":               &CronjobHandler{},
 	"service":               &ServiceHandler{},
 	"persistentvolumeclaim": &PersistentVolumeClaimHandler{},
 }
@@ -65,50 +62,40 @@ func parityObject[T client.Object](t *testing.T, objects []*client.Object) T {
 }
 
 // parityPodTemplate returns the pod template of the workload object among
-// objects, and for a CronJob its job template's metadata too.
-func parityPodTemplate(t *testing.T, objects []*client.Object) (pod corev1.PodTemplateSpec, jobTemplate *metav1.ObjectMeta) {
+// objects.
+func parityPodTemplate(t *testing.T, objects []*client.Object) corev1.PodTemplateSpec {
 	t.Helper()
 	for _, obj := range objects {
 		switch o := (*obj).(type) {
 		case *appsv1.Deployment:
-			return o.Spec.Template, nil
+			return o.Spec.Template
 		case *appsv1.StatefulSet:
-			return o.Spec.Template, nil
+			return o.Spec.Template
 		case *appsv1.DaemonSet:
-			return o.Spec.Template, nil
-		case *batchv1.Job:
-			return o.Spec.Template, nil
-		case *batchv1.CronJob:
-			return o.Spec.JobTemplate.Spec.Template, &o.Spec.JobTemplate.ObjectMeta
+			return o.Spec.Template
 		}
 	}
 	t.Fatal("no workload object in the output")
-	return corev1.PodTemplateSpec{}, nil
+	return corev1.PodTemplateSpec{}
 }
 
-// TestHandParsedKinds_TemplateMetadataAndContainerName runs the three places of
+// TestHandParsedKinds_TemplateMetadataAndContainerName runs the two places of
 // a workload kind's object that the parity walk classes as no property's: the
-// pod template's metadata and the job template's (parityLevel), and the main
-// container's name (parityOtherShape, refused with its reason). The builder
-// writes each: the `app` label and nothing else on a template, and the
-// component's name on the container.
+// pod template's metadata (parityLevel), and the main container's name
+// (parityOtherShape, refused with its reason). The builder writes each: the
+// `app` label and nothing else on the template, and the component's name on
+// the container.
 func TestHandParsedKinds_TemplateMetadataAndContainerName(t *testing.T) {
 	want := metav1.ObjectMeta{Labels: map[string]string{"app": "app"}}
-	for _, componentType := range []string{roleDeploymentMember, "statefulset", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{roleDeploymentMember, "statefulset", "daemonset"} {
 		t.Run(componentType, func(t *testing.T) {
 			objects, err := parityGenerate(t, componentType, nil)
 			if err != nil {
 				t.Fatalf("ToApplicationConfig: %v", err)
 			}
-			pod, jobTemplate := parityPodTemplate(t, objects)
+			pod := parityPodTemplate(t, objects)
 			if !reflect.DeepEqual(pod.ObjectMeta, want) {
 				t.Errorf("pod template metadata = %+v, want only the app label", pod.ObjectMeta)
-			}
-			if (jobTemplate != nil) != (componentType == "cronjob") {
-				t.Fatalf("job template present = %v on a %s", jobTemplate != nil, componentType)
-			}
-			if jobTemplate != nil && !reflect.DeepEqual(*jobTemplate, want) {
-				t.Errorf("job template metadata = %+v, want only the app label", *jobTemplate)
 			}
 			if len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Name != "app" {
 				t.Errorf("containers = %+v, want one, named after the component", pod.Spec.Containers)
@@ -172,15 +159,15 @@ type paritySelectorSite struct {
 	read func(t *testing.T, objects []*client.Object) *metav1.LabelSelector
 }
 
-// paritySelectorSites lists every label selector the ten hand-parsed kinds
-// parse: 47.
+// paritySelectorSites lists every label selector the hand-parsed kinds
+// parse: 29.
 //
-//   - role-deployment (the reshaped deployment parser), statefulset, daemonset,
-//     job and cronjob read the raw
+//   - role-deployment (the reshaped deployment parser), statefulset and
+//     daemonset read the raw
 //     `affinity`: two arms (podAffinity, podAntiAffinity), each with required
 //     and preferred terms, each term with a labelSelector and a
 //     namespaceSelector — eight selectors — and the labelSelector of a
-//     `topologySpreadConstraints` entry: nine a kind, 45;
+//     `topologySpreadConstraints` entry: nine a kind, 27;
 //   - statefulset also has the `selector` of a `volumeClaimTemplates` entry:
 //     one;
 //   - persistentvolumeclaim has its `selector`: one. The `pvc` trait reads a
@@ -194,8 +181,7 @@ func paritySelectorSites() []paritySelectorSite {
 	var sites []paritySelectorSite
 	podSpec := func(t *testing.T, objects []*client.Object) corev1.PodSpec {
 		t.Helper()
-		pod, _ := parityPodTemplate(t, objects)
-		return pod.Spec
+		return parityPodTemplate(t, objects).Spec
 	}
 	topologySpread := func(componentType string) paritySelectorSite {
 		return paritySelectorSite{
@@ -216,7 +202,7 @@ func paritySelectorSites() []paritySelectorSite {
 			},
 		}
 	}
-	for _, componentType := range []string{roleDeploymentMember, "statefulset", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{roleDeploymentMember, "statefulset", "daemonset"} {
 		for _, arm := range []string{"podAffinity", "podAntiAffinity"} {
 			for _, mode := range []string{required, preferred} {
 				for _, field := range []string{"labelSelector", "namespaceSelector"} {
@@ -306,8 +292,8 @@ func paritySelectorSites() []paritySelectorSite {
 // not write, or as an object the API server turns away.
 func TestHandParsedKinds_MatchExpressionsAtEverySelector(t *testing.T) {
 	sites := paritySelectorSites()
-	if len(sites) != 47 {
-		t.Fatalf("paritySelectorSites lists %d sites, want 47:a site was added or lost, so recount its comment", len(sites))
+	if len(sites) != 29 {
+		t.Fatalf("paritySelectorSites lists %d sites, want 29: a site was added or lost, so recount its comment", len(sites))
 	}
 	whole := map[string]any{"key": "tier", "operator": "In", "values": []any{"web"}}
 	wantWhole := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
