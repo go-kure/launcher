@@ -552,6 +552,7 @@ if authored, must be a boolean — a present-but-non-boolean value (e.g.
 `readOnly: "true"`) is rejected rather than silently defaulting to a
 writable mount (same fix applied to `initContainers`/`sidecars`' own
 `volumeMounts` entries below, which had the identical gap);
+`type` is required on every entry, and the published schema lists it as required;
 `name` and `mountPath` are both required on every entry — the one exception
 is a `pvc` entry with `volumeMode: Block`, which authors `devicePath` instead
 (see "Raw block volumes" below) — a present-but-

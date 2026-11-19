@@ -529,7 +529,9 @@ func schemaProbes(reserved bool) oam.PropertySchema {
 func schemaVolumes() oam.PropertySchema {
 	props := map[string]oam.PropertySchema{
 		"name": {Type: oam.PropertyTypeString, Required: true, Description: "Volume name."},
-		"type": {Type: oam.PropertyTypeString, Enum: []any{"hostPath", "emptyDir", "pvc", "configMap", "secret", "csi", "downwardAPI", "ephemeral", "image", "projected"}, Description: "Volume source type. csi, downwardAPI, ephemeral, image and projected take the source in the object of the same name. configMap, secret and emptyDir take it flat or in that object."},
+		// type is Required without a condition: parseVolumes refuses an entry that
+		// omits it (refusedVolumeSource).
+		"type": {Type: oam.PropertyTypeString, Required: true, Enum: []any{"hostPath", "emptyDir", "pvc", "configMap", "secret", "csi", "downwardAPI", "ephemeral", "image", "projected"}, Description: "Volume source type. csi, downwardAPI, ephemeral, image and projected take the source in the object of the same name. configMap, secret and emptyDir take it flat or in that object."},
 		// mountPath is not schema-Required: a volumeMode: Block pvc authors
 		// devicePath instead. The exclusive group below and parseVolumes
 		// both require exactly one.
