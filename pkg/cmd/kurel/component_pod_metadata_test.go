@@ -143,6 +143,23 @@ func TestPodMetadata_Refusals(t *testing.T) {
 	}
 }
 
+// The Job controller keys are ordinary labels on the kinds that take `podMetadata`:
+// they were refused only on the job and cronjob kinds, which no longer take it, and
+// that refusal is the API server's now.
+func TestPodMetadata_JobKeysAreOrdinaryElsewhere(t *testing.T) {
+	for _, k := range podMetadataKinds {
+		t.Run(k.typ, func(t *testing.T) {
+			docs := renderLabelInvariant(t, labelInvariantApp("widget", k.typ, podMetadataProps(k.typ, map[string]any{
+				"labels": map[string]any{"job-name": "nightly"},
+			}), "", nil))
+			tmpl := nestedMap(kindDoc(t, docs, k.kind), append(k.template, "metadata", "labels")...)
+			if tmpl["job-name"] != "nightly" {
+				t.Errorf("the pod template carries labels %v, want job-name=nightly", tmpl)
+			}
+		})
+	}
+}
+
 // The raw deployment, job and cronjob kinds have no `podMetadata`: their pod
 // template metadata is the upstream template.metadata, so the reshaped property
 // is an unsupported field (go-kure/launcher#1629).

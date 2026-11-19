@@ -24,7 +24,7 @@ no other, and since go-kure/launcher#790 its parser refuses any other key too. T
 config"). The raw `corev1` `affinity` that `statefulset` and `daemonset` publish is
 a different schema and is not part of that gap — it is modeled field-by-field. (The `deployment`,
 `job` and `cronjob` kinds carry no such schema: each decodes its whole spec into the upstream
-type, which the four kinds above do not.) `helmrelease`
+type, which the two kinds above do not.) `helmrelease`
 takes the other route to the same strictness: its schema declares exactly the top-level
 `HelmReleaseSpec` keys and leaves the nested Flux blocks open, and its handler decodes the
 whole property map strictly into `HelmReleaseSpec`, refusing an unknown or wrongly typed key at
