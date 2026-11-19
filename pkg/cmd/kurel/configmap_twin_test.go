@@ -47,7 +47,7 @@ func kindTraitTwinApp(t *testing.T, typ string, viaTrait bool, name string, prop
 		comp = map[string]any{
 			"name":       "owner",
 			"type":       "job",
-			"properties": map[string]any{"image": "ghcr.io/example/job:v1.0.0"},
+			"properties": jobOwnerProps(),
 			"traits":     append([]any{map[string]any{"type": typ, "properties": traitProps}}, decs...),
 		}
 	} else {

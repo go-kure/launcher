@@ -36,9 +36,8 @@ var aliasingPVCVolume = []any{
 // labelAliasingProps adds, per kind, whatever that kind needs to reach every
 // label map it can produce: replicas >= 3 so both topology spread constraints
 // are built, pod anti-affinity so an affinity selector exists, and, on a role
-// kind, a pvc volume so a claim is generated. cronjob takes neither replicas
-// nor affinity, so it contributes its object and template label maps only. The
-// raw `deployment` and `daemonset` kinds (go-kure/launcher#1629) are not in the
+// kind, a pvc volume so a claim is generated. The raw `deployment`,
+// `daemonset`, `job` and `cronjob` kinds (go-kure/launcher#1629) are not in the
 // loop: they read their labels from the authored template.
 var labelAliasingProps = map[string]map[string]any{
 	"webservice": {"replicas": 3, "affinity": map[string]any{"enablePodAntiAffinity": true}, "volumes": aliasingPVCVolume},
@@ -62,7 +61,6 @@ var labelAliasingProps = map[string]map[string]any{
 			map[string]any{"name": "state", "size": "1Gi", "mountPath": "/state"},
 		},
 	},
-	"cronjob": {},
 }
 
 // labelMap is one caller-reachable label map, named by where it lives so a
@@ -217,11 +215,6 @@ func TestCollectLabelMaps_ReachesEveryGuardedPosition(t *testing.T) {
 			"StatefulSet/app.spec.template.labels",
 			"StatefulSet/app.spec.template.spec.podAntiAffinity.preferred[0].labelSelector",
 		},
-		"cronjob": {
-			"CronJob/app.metadata.labels",
-			"CronJob/app.spec.jobTemplate.labels",
-			"CronJob/app.spec.jobTemplate.spec.template.labels",
-		},
 	}
 
 	for _, k := range workloadKinds {
@@ -319,11 +312,8 @@ func TestWorkloadKinds_StampingPodTemplateLabelsLeavesSelectorsAlone(t *testing.
 					selectors = append(selectors, labelMap{where: lm.where, m: maps.Clone(lm.m)})
 				}
 			}
-			// Every kind but cronjob and job owns at least its workload's
-			// spec.selector; a cronjob's job template has none, and a job's
-			// own selector is refused at parse time and left to the Job
-			// controller to generate, so both contribute label maps only.
-			if k.name != "cronjob" && k.name != "job" && len(selectors) == 0 {
+			// Every kind here owns at least its workload's spec.selector.
+			if len(selectors) == 0 {
 				t.Fatalf("%s generated no selector to check", k.name)
 			}
 

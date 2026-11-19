@@ -28,7 +28,12 @@ spec:
     - name: migrate
       type: job
       properties:
-        image: ghcr.io/example/migrate:v1.0.0
+        template:
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: main
+                image: ghcr.io/example/migrate:v1.0.0
 `
 
 // buildDocs runs `kurel build` on appYAML and returns its output split into

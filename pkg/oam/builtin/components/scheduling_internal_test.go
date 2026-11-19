@@ -25,8 +25,6 @@ var rawSchedulingKinds = []struct {
 }{
 	{roleDeploymentMember, (&RoleDeploymentHandler{}).PropertySchema, rawSchedulingKeys},
 	{"statefulset", (&StatefulsetHandler{}).PropertySchema, rawSchedulingKeys},
-	{"job", (&JobHandler{}).PropertySchema, rawSchedulingKeys},
-	{"cronjob", (&CronjobHandler{}).PropertySchema, rawSchedulingKeys},
 }
 
 // TestSchedulingKeysAbsentFromSharedFragments is the first half of the ordering
@@ -49,8 +47,6 @@ func TestSchedulingKeysAbsentFromSharedFragments(t *testing.T) {
 	fragments := map[string]map[string]oam.PropertySchema{
 		"schemaDeploymentSpec()":  schemaDeploymentSpec(),
 		"schemaStatefulSetSpec()": schemaStatefulSetSpec(),
-		"schemaJobSpec(false)":    schemaJobSpec(false),
-		"schemaJobSpec(true)":     schemaJobSpec(true),
 		"schemaContainerFields()": schemaContainerFields(),
 	}
 	for _, reserved := range []bool{false, true} {

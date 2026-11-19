@@ -8,15 +8,22 @@ spec:
     - name: cleanup
       type: cronjob
       properties:
-        image: ghcr.io/example/cleanup:v1.0.0
         schedule: "@every 1h30m"
         concurrencyPolicy: Forbid
         suspend: false
         startingDeadlineSeconds: 120
         timeZone: Europe/Brussels
-        backoffLimit: 4
-        completions: 3
-        parallelism: 2
-        activeDeadlineSeconds: 600
-        ttlSecondsAfterFinished: 3600
-        completionMode: Indexed
+        jobTemplate:
+          spec:
+            backoffLimit: 4
+            completions: 3
+            parallelism: 2
+            activeDeadlineSeconds: 600
+            ttlSecondsAfterFinished: 3600
+            completionMode: Indexed
+            template:
+              spec:
+                restartPolicy: OnFailure
+                containers:
+                  - name: cleanup
+                    image: ghcr.io/example/cleanup:v1.0.0

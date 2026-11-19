@@ -846,17 +846,20 @@ spec:
 %s`, name, typ, props)
 	}
 	const servicePorts = "        selector:\n          app: api\n        ports:\n          - port: 80\n"
+	// A job and a cronjob take the upstream spec: a pod template with one container.
+	const jobPodProps = "        template:\n          spec:\n            restartPolicy: Never\n            containers:\n              - name: main\n                image: busybox:1\n"
+	const cronjobPodProps = "        jobTemplate:\n          spec:\n            template:\n              spec:\n                restartPolicy: Never\n                containers:\n                  - name: main\n                    image: busybox:1\n"
 	over52, over63 := strings.Repeat("a", 53), strings.Repeat("a", 64)
 	for _, tc := range []struct {
 		name, component, typ, props, bad, want string
 	}{
 		{"service", "api", "service", servicePorts, "api.v1", `"api.v1" is not a valid Service name`},
 		{"namespace", "tenant", "namespace", "        finalizers: []\n", "tenant.a", `"tenant.a" is not a valid Namespace name`},
-		{"cronjob", "nightly", "cronjob", "        image: busybox:1\n        schedule: \"0 2 * * *\"\n", over52,
+		{"cronjob", "nightly", "cronjob", "        schedule: \"0 2 * * *\"\n" + cronjobPodProps, over52,
 			`"` + over52 + `" is not a valid CronJob name, which must be at most 52 characters`},
-		{"job", "migrate", "job", "        image: busybox:1\n", over63,
+		{"job", "migrate", "job", jobPodProps, over63,
 			`"` + over63 + `" is not a valid Job name, which must be at most 63 characters`},
-		{"indexed job", "migrate", "job", "        image: busybox:1\n        completionMode: Indexed\n        completions: 2\n", "migrate.v2",
+		{"indexed job", "migrate", "job", "        completionMode: Indexed\n        completions: 2\n" + jobPodProps, "migrate.v2",
 			`"migrate.v2" is not a valid name for this Job: with completionMode Indexed and completions 2`},
 	} {
 		t.Run(tc.name+" authored", func(t *testing.T) {

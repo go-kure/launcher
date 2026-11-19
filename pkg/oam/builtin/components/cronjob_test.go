@@ -1,1392 +1,390 @@
 package components_test
 
 import (
-	"slices"
+	"maps"
+	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/go-kure/kure/pkg/stack"
 	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// findCronJob returns the *batchv1.CronJob from objs, failing the test if none
-// is present. Shared by the JobSpecConfig / CronJobSpec-level projection tests
-// below to avoid repeating the same objects loop for each one.
-func findCronJob(t *testing.T, objs []*client.Object) *batchv1.CronJob {
-	t.Helper()
-	for _, obj := range objs {
-		if cj, ok := (*obj).(*batchv1.CronJob); ok {
-			return cj
-		}
-	}
-	t.Fatal("CronJob not found")
-	return nil
-}
-
 func TestCronjobHandler_CanHandle(t *testing.T) {
 	h := &components.CronjobHandler{}
 	if !h.CanHandle("cronjob") {
-		t.Error("expected true for cronjob")
+		t.Error("CanHandle(cronjob) = false")
 	}
-	if h.CanHandle("worker") {
-		t.Error("expected false for worker")
-	}
-}
-
-func TestCronjobHandler_RequiredImage_Missing(t *testing.T) {
-	h := &components.CronjobHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"schedule": "0 2 * * *",
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for missing image")
+	if h.CanHandle("job") {
+		t.Error("CanHandle(job) = true")
 	}
 }
 
-func TestCronjobHandler_RequiredSchedule_Missing(t *testing.T) {
-	h := &components.CronjobHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/job:v1.0.0",
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for missing schedule")
+// cronjobRich is a CronJob spec that sets every top-level field, a job
+// template with metadata beside the job's own spec fields, and a pod spec with
+// lists of objects, a map, pointers and a quantity written as a number.
+const cronjobRich = `schedule: "0 2 * * *"
+timeZone: Europe/Brussels
+concurrencyPolicy: Forbid
+startingDeadlineSeconds: 120
+suspend: true
+successfulJobsHistoryLimit: 5
+failedJobsHistoryLimit: 0
+jobTemplate:
+  metadata:
+    labels:
+      team: data
+    annotations:
+      example.com/owner: data
+  spec:
+    backoffLimit: 2
+    activeDeadlineSeconds: 3600
+    template:
+      metadata:
+        labels:
+          tier: batch
+      spec:
+        restartPolicy: OnFailure
+        terminationGracePeriodSeconds: 0
+        serviceAccountName: batch
+        volumes:
+          - name: scratch
+            emptyDir: {}
+        initContainers:
+          - name: init
+            image: registry.example/team/init:1.0.0
+        containers:
+          - name: app
+            image: registry.example/team/app:1.2.3
+            resources:
+              limits:
+                cpu: 1
+                memory: 512Mi
+            volumeMounts:
+              - name: scratch
+                mountPath: /scratch
+`
+
+// cronjobPlain is the smallest cronjob component: a nightly schedule and a job
+// template whose pod runs the given pod spec.
+func cronjobPlain(podSpec string) string {
+	return "schedule: \"0 2 * * *\"\njobTemplate:\n  spec:\n    template:\n      metadata:\n        labels:\n          tier: batch\n      spec:\n        restartPolicy: OnFailure\n" +
+		htIndent(podSpec, "        ")
+}
+
+// cronjobGenerate generates a cronjob component under the given policies and
+// returns the CronJob.
+func cronjobGenerate(t *testing.T, name string, props map[string]any, policies ...oam.Policy) *batchv1.CronJob {
+	t.Helper()
+	return generateCoreKindUnder(t, &components.CronjobHandler{}, "cronjob", name, props, policies...).(*batchv1.CronJob)
+}
+
+// TestCronjobHandler_EmitsAuthoredSpec: the CronJob is named after the
+// component in the build namespace, unlabelled, and its spec is the authored
+// one, field for field, with one thing added: the `app` label on the pod
+// template of the job template, beside the authored labels.
+func TestCronjobHandler_EmitsAuthoredSpec(t *testing.T) {
+	var want batchv1.CronJobSpec
+	if err := yaml.UnmarshalStrict([]byte(cronjobRich), &want); err != nil {
+		t.Fatalf("decoding the test spec: %v", err)
+	}
+	want.JobTemplate.Spec.Template.Labels["app"] = "nightly"
+	cj := cronjobGenerate(t, "nightly", ptObject(t, cronjobRich), ptStrictPolicy(), nil)
+	if cj.APIVersion != "batch/v1" || cj.Kind != "CronJob" {
+		t.Errorf("GVK = %s %s, want batch/v1 CronJob", cj.APIVersion, cj.Kind)
+	}
+	if cj.Namespace != coreKindNamespace {
+		t.Errorf("namespace = %q, want the build namespace %q", cj.Namespace, coreKindNamespace)
+	}
+	if !reflect.DeepEqual(cj.Spec, want) {
+		t.Errorf("spec differs from the authored one plus the app label:\n got %+v\nwant %+v", cj.Spec, want)
+	}
+	if got := cj.Spec.JobTemplate.Labels; !maps.Equal(got, map[string]string{"team": "data"}) {
+		t.Errorf("jobTemplate labels = %v, want the authored ones only", got)
 	}
 }
 
-// TestCronjobHandler_Schedule_Table covers the widened schedule grammar
-// (validateCronSchedule, cronjob.go): the pre-existing 5-field form (still
-// accepted, including the two nonsensical-but-syntactically-5-field cases the
-// plan's "What this does NOT solve" section discloses as a deliberate, not
-// tightened, gap — see plan-279-cronjob-jobspec.md), the fixed @-descriptor
-// set, and "@every <duration>" with the duration validated via
-// time.ParseDuration rather than a bare-suffix regex.
-func TestCronjobHandler_Schedule_Table(t *testing.T) {
-	cases := []struct {
-		name      string
-		schedule  string
-		wantError bool
-	}{
-		{"5field_standard", "0 2 * * *", false},
-		{"5field_nonsensical_out_of_range_still_accepted", "99 99 99 99 99", false},
-		{"5field_nonsensical_tokens_still_accepted", "nope nope nope nope nope", false},
-		{"descriptor_daily", "@daily", false},
-		{"descriptor_hourly", "@hourly", false},
-		{"descriptor_yearly", "@yearly", false},
-		{"every_valid_duration", "@every 1h30m", false},
-		{"reboot_rejected", "@reboot", true},
-		{"6field_rejected", "0 0 2 * * *", true},
-		{"garbage_rejected", "not a schedule", true},
-		{"empty_rejected", "", true},
-		{"every_malformed_duration_rejected", "@every nope", true},
+// TestCronjobHandler_AppLabel: the pod template of the job template carries
+// the `app` label every workload kind gives its pods, with the component's
+// label value: the name itself up to 63 characters, its projection beyond. The
+// authored labels stay, and no selector is made up.
+func TestCronjobHandler_AppLabel(t *testing.T) {
+	cj := cronjobGenerate(t, "nightly", ptObject(t, cronjobPlain(htPlainPod)), nil)
+	want := map[string]string{"tier": "batch", "app": oam.ComponentLabelValue("nightly")}
+	if got := cj.Spec.JobTemplate.Spec.Template.Labels; !maps.Equal(got, want) {
+		t.Errorf("template labels = %v, want %v", got, want)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := &components.CronjobHandler{}
-			_, err := h.ToApplicationConfig(&oam.Component{
-				Name: "job",
-				Type: "cronjob",
-				Properties: map[string]any{
-					"image":    "ghcr.io/org/job:v1.0.0",
-					"schedule": tc.schedule,
-				},
-			}, "default")
-			if tc.wantError && err == nil {
-				t.Fatalf("schedule %q: expected error, got nil", tc.schedule)
+	if len(cj.Spec.JobTemplate.Labels) != 0 {
+		t.Errorf("jobTemplate labels = %v, want none: only the pods carry the label", cj.Spec.JobTemplate.Labels)
+	}
+	if cj.Spec.JobTemplate.Spec.Selector != nil {
+		t.Errorf("selector = %+v, want none: the job controller generates it", cj.Spec.JobTemplate.Spec.Selector)
+	}
+}
+
+// cronjobLabelled is a cronjob component whose pod template carries the given
+// labels.
+func cronjobLabelled(labels map[string]any) map[string]any {
+	metadata := map[string]any{}
+	if labels != nil {
+		metadata["labels"] = labels
+	}
+	return map[string]any{
+		"schedule": "0 2 * * *",
+		"jobTemplate": map[string]any{"spec": map[string]any{"template": map[string]any{
+			"metadata": metadata,
+			"spec": map[string]any{
+				"restartPolicy": "OnFailure",
+				"containers":    []any{map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3"}},
+			},
+		}}},
+	}
+}
+
+// TestCronjobHandler_AuthoredAppLabel: an authored `app` label on the pod
+// template is kept when it is the component's own label value and refused,
+// naming the component and the path, when it is another. One on the job
+// template's own metadata labels the Job object, which nothing selects, and
+// stays as authored.
+func TestCronjobHandler_AuthoredAppLabel(t *testing.T) {
+	value := oam.ComponentLabelValue("nightly")
+	cj := cronjobGenerate(t, "nightly", cronjobLabelled(map[string]any{"app": value}), nil)
+	if want := map[string]string{"app": value}; !maps.Equal(cj.Spec.JobTemplate.Spec.Template.Labels, want) {
+		t.Errorf("template labels = %v, want %v", cj.Spec.JobTemplate.Spec.Template.Labels, want)
+	}
+	for name, authored := range map[string]string{"another value": "frontend", "empty": ""} {
+		t.Run(name, func(t *testing.T) {
+			err := coreKindErr(&components.CronjobHandler{}, "cronjob", "nightly", cronjobLabelled(map[string]any{"tier": "batch", "app": authored}))
+			want := "jobTemplate.spec.template.metadata.labels.app: " + `"` + authored + `"` + " is not the `app` label of component \"nightly\""
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, want)
 			}
-			if !tc.wantError && err != nil {
-				t.Fatalf("schedule %q: expected no error, got %v", tc.schedule, err)
+		})
+	}
+	props := cronjobLabelled(map[string]any{"tier": "batch"})
+	props["jobTemplate"].(map[string]any)["metadata"] = map[string]any{"labels": map[string]any{"app": "elsewhere"}}
+	cj = cronjobGenerate(t, "nightly", props, nil)
+	if got := cj.Spec.JobTemplate.Labels["app"]; got != "elsewhere" {
+		t.Errorf("jobTemplate app label = %q, want the authored one kept", got)
+	}
+}
+
+// TestCronjobHandler_SelectorRefused: the API server always refuses a selector
+// on the job template, which it generates, and manualSelector true. They are
+// refused here, naming the path; manualSelector false is what the API accepts.
+func TestCronjobHandler_SelectorRefused(t *testing.T) {
+	for name, tc := range map[string]struct {
+		extra map[string]any
+		want  string // "" when the component builds
+	}{
+		"selector":             {map[string]any{"selector": map[string]any{"matchLabels": map[string]any{"tier": "batch"}}}, "jobTemplate.spec.selector: not supported"},
+		"manualSelector true":  {map[string]any{"manualSelector": true}, "jobTemplate.spec.manualSelector: not supported"},
+		"manualSelector false": {map[string]any{"manualSelector": false}, ""},
+		"selector and manual":  {map[string]any{"manualSelector": true, "selector": map[string]any{"matchLabels": map[string]any{"tier": "batch"}}}, "jobTemplate.spec.selector: not supported"},
+		"another job field":    {map[string]any{"backoffLimit": 1}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			props := cronjobLabelled(map[string]any{"tier": "batch"})
+			maps.Copy(props["jobTemplate"].(map[string]any)["spec"].(map[string]any), tc.extra)
+			err := coreKindErr(&components.CronjobHandler{}, "cronjob", "nightly", props)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("refused: %v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
 			}
 		})
 	}
 }
 
-func TestCronjobHandler_InvalidRestartPolicy(t *testing.T) {
-	h := &components.CronjobHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":         "ghcr.io/org/job:v1.0.0",
-			"schedule":      "0 2 * * *",
-			"restartPolicy": "Always",
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for invalid restart policy")
+// TestCronjobHandler_FillsNothing: a policy that carries resource defaults
+// fills none of them, no history limit and no restart policy is made up, and a
+// pod with no service account keeps the cluster's default for the token mount.
+func TestCronjobHandler_FillsNothing(t *testing.T) {
+	defaults := &stubPolicy{
+		defaultCPURequest: "100m", defaultMemoryRequest: "128Mi",
+		defaultCPULimit: "500m", defaultMemoryLimit: "256Mi",
+		defaultStorageSize: "1Gi",
+	}
+	props := ptObject(t, "schedule: \"0 2 * * *\"\njobTemplate:\n  spec:\n    template:\n      spec:\n"+htIndent(htPlainPod, "        "))
+	cj := cronjobGenerate(t, "nightly", props, defaults)
+	if cj.Spec.SuccessfulJobsHistoryLimit != nil || cj.Spec.FailedJobsHistoryLimit != nil {
+		t.Errorf("history limits = %v, %v; want them unset as authored", cj.Spec.SuccessfulJobsHistoryLimit, cj.Spec.FailedJobsHistoryLimit)
+	}
+	spec := cj.Spec.JobTemplate.Spec.Template.Spec
+	if res := spec.Containers[0].Resources; len(res.Requests) != 0 || len(res.Limits) != 0 {
+		t.Errorf("resources = %+v, want none: the cronjob kind fills no policy default", res)
+	}
+	if spec.RestartPolicy != "" || spec.AutomountServiceAccountToken != nil {
+		t.Errorf("restartPolicy = %q, automountServiceAccountToken = %v; want both unset as authored", spec.RestartPolicy, spec.AutomountServiceAccountToken)
 	}
 }
 
-func TestCronjobHandler_Generate_ResourceTypes(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "cleanup",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/cleanup:v1.0.0",
+// TestCronjobHandler_Refusals: what the component refuses when it is read, with
+// no policy involved: a property that is not a CronJobSpec field, at any
+// depth; an unauthored schedule or job template; a schedule that is none; a
+// time zone the API server refuses; and what the pod kind refuses of a pod
+// spec, by its path under the job template.
+func TestCronjobHandler_Refusals(t *testing.T) {
+	const notASpec = "properties do not decode into a batch/v1 CronJobSpec"
+	const podPath = "jobTemplate.spec.template.spec."
+	app := map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3"}
+	// with returns a component whose pod spec is the plain one plus extra.
+	with := func(extra map[string]any) map[string]any {
+		spec := map[string]any{"restartPolicy": "OnFailure", "containers": []any{app}}
+		maps.Copy(spec, extra)
+		return map[string]any{
 			"schedule": "0 2 * * *",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	app := stack.NewApplication("cleanup", "default", cfg)
-	objects, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	var foundCronJob, foundSA bool
-	for _, obj := range objects {
-		switch (*obj).(type) {
-		case *batchv1.CronJob:
-			foundCronJob = true
-		case *corev1.ServiceAccount:
-			foundSA = true
+			"jobTemplate": map[string]any{"spec": map[string]any{"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"tier": "batch"}}, "spec": spec}}},
 		}
 	}
-	if !foundCronJob {
-		t.Error("expected CronJob")
+	top := func(extra map[string]any) map[string]any {
+		props := with(nil)
+		maps.Copy(props, extra)
+		return props
 	}
-	if foundSA {
-		t.Error("generated a ServiceAccount; a pod kind generates none (go-kure/launcher#702)")
-	}
-}
-
-func TestCronjobHandler_Generate_Defaults(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "cleanup",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/cleanup:v1.0.0",
-			"schedule": "0 2 * * *",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	app := stack.NewApplication("cleanup", "default", cfg)
-	objects, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	for _, obj := range objects {
-		if cj, ok := (*obj).(*batchv1.CronJob); ok {
-			if cj.Spec.JobTemplate.Spec.Template.Spec.RestartPolicy != corev1.RestartPolicyOnFailure {
-				t.Errorf("expected OnFailure restart policy, got %s", cj.Spec.JobTemplate.Spec.Template.Spec.RestartPolicy)
-			}
-			if cj.Spec.SuccessfulJobsHistoryLimit == nil || *cj.Spec.SuccessfulJobsHistoryLimit != 3 {
-				t.Errorf("expected successfulJobsHistoryLimit=3, got %v", cj.Spec.SuccessfulJobsHistoryLimit)
-			}
-			if cj.Spec.FailedJobsHistoryLimit == nil || *cj.Spec.FailedJobsHistoryLimit != 1 {
-				t.Errorf("expected failedJobsHistoryLimit=1, got %v", cj.Spec.FailedJobsHistoryLimit)
-			}
-			return
-		}
-	}
-	t.Error("CronJob not found")
-}
-
-func TestCronjobHandler_RestartPolicy_Never(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":         "ghcr.io/org/job:v1.0.0",
-			"schedule":      "0 2 * * *",
-			"restartPolicy": "Never",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	app := stack.NewApplication("job", "default", cfg)
-	objects, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	for _, obj := range objects {
-		if cj, ok := (*obj).(*batchv1.CronJob); ok {
-			if cj.Spec.JobTemplate.Spec.Template.Spec.RestartPolicy != corev1.RestartPolicyNever {
-				t.Errorf("expected Never restart policy, got %s", cj.Spec.JobTemplate.Spec.Template.Spec.RestartPolicy)
-			}
-			return
-		}
-	}
-	t.Error("CronJob not found")
-}
-
-func TestCronjobHandler_HistoryLimit_Overflow_Rejected(t *testing.T) {
-	h := &components.CronjobHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":                      "ghcr.io/org/job:v1.0.0",
-			"schedule":                   "0 2 * * *",
-			"successfulJobsHistoryLimit": 3_000_000_000,
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for out-of-int32-range successfulJobsHistoryLimit")
-	}
-}
-
-func TestCronjobHandler_HistoryLimit_Fractional_Rejected(t *testing.T) {
-	h := &components.CronjobHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":                      "ghcr.io/org/job:v1.0.0",
-			"schedule":                   "0 2 * * *",
-			"successfulJobsHistoryLimit": 1.5,
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for fractional successfulJobsHistoryLimit")
-	}
-}
-
-func TestCronjobHandler_HistoryLimit_Negative_Rejected(t *testing.T) {
-	h := &components.CronjobHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":                  "ghcr.io/org/job:v1.0.0",
-			"schedule":               "0 2 * * *",
-			"failedJobsHistoryLimit": -1,
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for negative failedJobsHistoryLimit")
-	}
-}
-
-func TestCronjobHandler_HistoryLimit_Custom_Valid(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":                      "ghcr.io/org/job:v1.0.0",
-			"schedule":                   "0 2 * * *",
-			"successfulJobsHistoryLimit": 5,
-			"failedJobsHistoryLimit":     2,
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	app := stack.NewApplication("job", "default", cfg)
-	objects, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	for _, obj := range objects {
-		if cj, ok := (*obj).(*batchv1.CronJob); ok {
-			if cj.Spec.SuccessfulJobsHistoryLimit == nil || *cj.Spec.SuccessfulJobsHistoryLimit != 5 {
-				t.Errorf("expected successfulJobsHistoryLimit=5, got %v", cj.Spec.SuccessfulJobsHistoryLimit)
-			}
-			if cj.Spec.FailedJobsHistoryLimit == nil || *cj.Spec.FailedJobsHistoryLimit != 2 {
-				t.Errorf("expected failedJobsHistoryLimit=2, got %v", cj.Spec.FailedJobsHistoryLimit)
-			}
-			return
-		}
-	}
-	t.Error("CronJob not found")
-}
-
-func TestCronjobConfig_ApplyPolicy_NilPolicy(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "0 2 * * *",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	enforceable := cfg.(oam.Enforceable)
-	if err := enforceable.ApplyPolicy(nil); err != nil {
-		t.Errorf("nil policy should be a no-op, got: %v", err)
-	}
-}
-
-func TestCronjobConfig_ApplyPolicy_AllowedRegistries(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "docker.io/library/job:v1.0.0",
-			"schedule": "0 2 * * *",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	enforceable := cfg.(oam.Enforceable)
-	p := &stubPolicy{allowedRegistries: []string{"ghcr.io"}}
-	if err := enforceable.ApplyPolicy(p); err == nil {
-		t.Error("expected error for disallowed registry")
-	}
-}
-
-func TestCronjobHandler_WithSharedPodFields(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":      "ghcr.io/org/job:v1.0.0",
-			"schedule":   "0 2 * * *",
-			"workingDir": "/job",
-			"envFrom": []any{
-				map[string]any{"configMapRef": map[string]any{"name": "job-cfg"}},
-			},
-			"lifecycle": map[string]any{
-				"preStop": map[string]any{
-					"exec": map[string]any{"command": []any{"/bin/sh", "-c", "cleanup"}},
-				},
-			},
-			"securityContext": map[string]any{
-				"readOnlyRootFilesystem": true,
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	app := stack.NewApplication("job", "default", cfg)
-	objects, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	for _, obj := range objects {
-		if cj, ok := (*obj).(*batchv1.CronJob); ok {
-			c := cj.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
-			if c.WorkingDir != "/job" {
-				t.Errorf("expected workingDir, got %q", c.WorkingDir)
-			}
-			if len(c.EnvFrom) != 1 {
-				t.Errorf("expected 1 envFrom entry, got %d", len(c.EnvFrom))
-			}
-			if c.Lifecycle == nil || c.Lifecycle.PreStop == nil {
-				t.Error("expected preStop lifecycle hook")
-			}
-			if c.SecurityContext == nil || c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem {
-				t.Error("expected readOnlyRootFilesystem=true")
-			}
-			return
-		}
-	}
-	t.Error("CronJob not found")
-}
-
-// TestCronjobHandler_NamedLifecyclePort_Error covers go-kure/launcher#278 wave-11
-// finding 5 — the literal example the finding cited: cronjob has no `port`
-// property at all, so a named lifecycle httpGet port (`port: http`) can
-// never resolve against the main container and is rejected at parse time.
-// See TestWorker_NamedLifecyclePort_Error for the fuller set of cases
-// (probes, numeric-still-accepted) — cronjob shares the identical portless
-// shape and the same shared parsing path, so it is not repeated here.
-func TestCronjobHandler_NamedLifecyclePort_Error(t *testing.T) {
-	h := &components.CronjobHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "0 2 * * *",
-			"lifecycle": map[string]any{
-				"preStop": map[string]any{
-					"httpGet": map[string]any{"port": "http", "path": "/shutdown"},
-				},
-			},
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for a named lifecycle port on a portless cronjob")
-	}
-}
-
-// TestCronjobHandler_WorkingDir_NonString_Error covers a bug pattern shared
-// identically across all five kind handlers (cronjob, job, statefulset,
-// worker, webservice): a mistyped workingDir value was previously
-// silently treated as absent instead of rejected. Exercised once here since
-// the fix is the same one-line change (routed through parseStringField) in
-// every handler.
-func TestCronjobHandler_WorkingDir_NonString_Error(t *testing.T) {
-	h := &components.CronjobHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":      "ghcr.io/org/job:v1.0.0",
-			"schedule":   "0 2 * * *",
-			"workingDir": 123,
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected error for non-string workingDir, got nil")
-	}
-}
-
-func TestCronjobHandler_WithProbes(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "0 2 * * *",
-			"probes": map[string]any{
-				"liveness": map[string]any{
-					"exec": map[string]any{"command": []any{"/bin/sh", "-c", "true"}},
-				},
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-
-	app := stack.NewApplication("job", "default", cfg)
-	objects, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	for _, obj := range objects {
-		if cj, ok := (*obj).(*batchv1.CronJob); ok {
-			c := cj.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
-			if c.LivenessProbe == nil || c.LivenessProbe.Exec == nil {
-				t.Error("expected liveness probe with exec handler")
-			}
-			return
-		}
-	}
-	t.Error("CronJob not found")
-}
-
-func TestCronjobConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "0 2 * * *",
-			"securityContext": map[string]any{
-				"privileged": true,
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
-		t.Error("expected error when privileged=true and policy disallows it")
-	}
-}
-
-// TestCronjobConfig_ApplyPolicy_HostPathDenied regression-tests the review
-// finding this fix was anchored at (go-kure/launcher#284, P1): ApplyPolicy never
-// checked a parsed hostPath volume against oam.Policy.AllowHostPathVolumes(),
-// so the default-deny policy (including NoopPolicy) did not actually stop a
-// hostPath volume from being authored on a CronJob.
-func TestCronjobConfig_ApplyPolicy_HostPathDenied(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "0 2 * * *",
-			"volumes": []any{
-				map[string]any{
-					"name":      "logs",
-					"type":      "hostPath",
-					"mountPath": "/var/log",
-					"path":      "/var/log/app",
-				},
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-	if err := enforceable.ApplyPolicy(&stubPolicy{allowHostPathVols: false}); err == nil {
-		t.Error("expected error when a hostPath volume is authored and policy disallows it")
-	}
-	if err := enforceable.ApplyPolicy(&stubPolicy{allowHostPathVols: true}); err != nil {
-		t.Errorf("expected no error when policy allows hostPath volumes, got %v", err)
-	}
-	// oam.NoopPolicy is the real default-deny policy (not just the test
-	// stub) — confirm the fix is actually reachable through it, not only
-	// through a test double that happens to agree with the real default.
-	if err := enforceable.ApplyPolicy(&oam.NoopPolicy{}); err == nil {
-		t.Error("expected error from the real NoopPolicy default-deny for hostPath volumes")
-	}
-}
-
-// TestCronjobConfig_ApplyPolicy_CapabilityAddDenied is cronjob's sibling of
-// TestWebserviceConfig_ApplyPolicy_CapabilityAddDenied (go-kure/launcher#305)
-// — the same shared ApplyPolicy gap, same shared enforceContainerCapabilities
-// fix. Also asserts against the real oam.NoopPolicy that capabilities.add
-// passes with no policy configured — the mirror image of NoopPolicy's
-// default-deny for privileged/hostPath, and the assertion that encodes this
-// field's default-allow decision.
-func TestCronjobConfig_ApplyPolicy_CapabilityAddDenied(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "0 2 * * *",
-			"securityContext": map[string]any{
-				"capabilities": map[string]any{
-					"add": []any{"NET_ADMIN"},
-				},
-			},
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-	if err := enforceable.ApplyPolicy(&stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}}); err == nil {
-		t.Error("expected error when capabilities.add includes a forbidden capability")
-	}
-	// oam.NoopPolicy is default-allow for container capabilities (unlike its
-	// default-deny for privileged/hostPath) — confirm the real NoopPolicy
-	// does not reject an authored capability with no policy configured.
-	if err := enforceable.ApplyPolicy(&oam.NoopPolicy{}); err != nil {
-		t.Errorf("expected no error from the real NoopPolicy default-allow for container capabilities, got %v", err)
-	}
-}
-
-func TestCronjobHandler_WithVolumes_EmptyDir(t *testing.T) {
-	h := &components.CronjobHandler{}
-	component := &oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "0 2 * * *",
-			"volumes": []any{
-				map[string]any{
-					"name":      "tmp",
-					"type":      "emptyDir",
-					"mountPath": "/tmp",
-				},
-			},
-		},
-	}
-	cfg, err := h.ToApplicationConfig(component, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("job", "default", cfg)
-	if _, err := cfg.Generate(app); err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-}
-
-// TestCronjobHandler_FileKeyRef_VolumeWiring regression-tests a review finding
-// (go-kure/launcher#284): the cronjob handler exposed env[].valueFrom.fileKeyRef
-// (shared via schemaEnv) without any way to declare the emptyDir volume its
-// volumeName must reference, so real Kubernetes admission's
-// validateFileKeyRefVolumes would reject every authored fileKeyRef with a
-// NotFound on volumeName. Confirms the volume the ref points at is actually
-// present in the generated CronJob's pod template.
-func TestCronjobHandler_FileKeyRef_VolumeWiring(t *testing.T) {
-	h := &components.CronjobHandler{}
-	component := &oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "0 2 * * *",
-			"volumes": []any{
-				map[string]any{
-					"name":      "envfiles",
-					"type":      "emptyDir",
-					"mountPath": "/etc/envfiles",
-				},
-			},
-			"env": []any{
-				map[string]any{
-					"name": "API_KEY",
-					"valueFrom": map[string]any{
-						"fileKeyRef": map[string]any{
-							"volumeName": "envfiles",
-							"path":       "api.env",
-							"key":        "API_KEY",
-						},
-					},
-				},
-			},
-		},
-	}
-	cfg, err := h.ToApplicationConfig(component, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("job", "default", cfg)
-	objs, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	for _, obj := range objs {
-		cj, ok := (*obj).(*batchv1.CronJob)
-		if !ok {
-			continue
-		}
-		spec := cj.Spec.JobTemplate.Spec.Template.Spec
-		found := false
-		for _, v := range spec.Volumes {
-			if v.Name == "envfiles" {
-				if v.EmptyDir == nil {
-					t.Error("expected envfiles volume to be emptyDir")
-				}
-				found = true
-			}
-		}
-		if !found {
-			t.Fatal("expected pod spec to declare the envfiles volume referenced by fileKeyRef")
-		}
-		return
-	}
-	t.Error("CronJob not found")
-}
-
-// TestCronjobConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault is
-// cronjob's sibling of the two webservice
-// TestWebserviceConfig_ApplyPolicy_Max{CPU,Memory}_AgainstIntrinsicDefault
-// cases (go-kure/launcher#251) — proving enforceMaxResources is actually wired into
-// CronjobConfig.ApplyPolicy, not just added to enforce.go.
-func TestCronjobConfig_ApplyPolicy_MaxResources_AgainstIntrinsicDefault(t *testing.T) {
-	cases := []struct {
-		name   string
-		policy stubPolicy
+	for name, tc := range map[string]struct {
+		props map[string]any
+		want  string
 	}{
-		{"cpu", stubPolicy{maxCPU: "50m"}},
-		{"memory", stubPolicy{maxMemory: "64Mi"}},
+		"no properties":      {nil, "schedule: required"},
+		"no schedule":        {map[string]any{"jobTemplate": with(nil)["jobTemplate"]}, "schedule: required"},
+		"no job template":    {map[string]any{"schedule": "0 2 * * *"}, podPath + "containers: required"},
+		"a job's field":      {top(map[string]any{"backoffLimit": 1}), notASpec},
+		"a workload's image": {top(map[string]any{"image": "registry.example/team/app:1.2.3"}), notASpec},
+		"restartPolicy":      {top(map[string]any{"restartPolicy": "Never"}), notASpec},
+		"a history limit":    {top(map[string]any{"successfulJobsHistoryLimit": "three"}), notASpec},
+		"template sub-key":   {with(map[string]any{"containerz": []any{}}), notASpec},
+		"two spellings":      {top(map[string]any{"suspend": true, "Suspend": false}), "sets the same field as"},
+		"an empty concurrencyPolicy": {top(map[string]any{"concurrencyPolicy": ""}),
+			"concurrencyPolicy: \"\" cannot be carried by the Kubernetes API types"},
+		"a bad schedule":    {top(map[string]any{"schedule": "nightly"}), `invalid cron schedule "nightly"`},
+		"time zone Local":   {top(map[string]any{"timeZone": "Local"}), "timeZone: \"Local\" is not a valid IANA time zone name"},
+		"time zone empty":   {top(map[string]any{"timeZone": ""}), "timeZone: must not be an empty string"},
+		"time zone unknown": {top(map[string]any{"timeZone": "Mars/Olympus"}), "timeZone: \"Mars/Olympus\" is not a valid IANA time zone name"},
+		"ephemeral containers": {with(map[string]any{"ephemeralContainers": []any{map[string]any{"name": "debug", "image": "registry.example/debug:1"}}}),
+			podPath + "ephemeralContainers: not supported"},
+		"priority": {with(map[string]any{"priority": 1000}), podPath + "priority: not authorable"},
+		"overhead": {with(map[string]any{"overhead": map[string]any{"cpu": "100m"}}), podPath + "overhead: not authorable"},
+		"untagged image": {with(map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/app"}}}),
+			podPath + `containers[0] "app": image "registry.example/team/app" rejected: no tag or digest specified`},
+		"probe timing of zero": {with(map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3",
+			"livenessProbe": map[string]any{"exec": map[string]any{"command": []any{"true"}}, "timeoutSeconds": 0}}}}),
+			podPath + "containers[0].livenessProbe.timeoutSeconds: 0 cannot be carried by the Kubernetes API types"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := coreKindErr(&components.CronjobHandler{}, "cronjob", "nightly", tc.props)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := &components.CronjobHandler{}
-			cfg, err := h.ToApplicationConfig(&oam.Component{
-				Name: "job",
-				Type: "cronjob",
-				Properties: map[string]any{
-					"image":    "ghcr.io/org/job:v1.0.0",
-					"schedule": "0 2 * * *",
-				},
-			}, "default")
+}
+
+// TestCronjobHandler_ScheduleForms: the forms of schedule the API server
+// reads are accepted: five fields, an @-descriptor, and @every with a duration.
+func TestCronjobHandler_ScheduleForms(t *testing.T) {
+	for _, schedule := range []string{"0 2 * * *", "@daily", "@hourly", "@every 1h30m"} {
+		props := cronjobLabelled(map[string]any{"tier": "batch"})
+		props["schedule"] = schedule
+		if err := coreKindErr(&components.CronjobHandler{}, "cronjob", "nightly", props); err != nil {
+			t.Errorf("schedule %q refused: %v", schedule, err)
+		}
+	}
+	props := cronjobLabelled(map[string]any{"tier": "batch"})
+	props["schedule"] = "@every nope"
+	if err := coreKindErr(&components.CronjobHandler{}, "cronjob", "nightly", props); err == nil || !strings.Contains(err.Error(), "invalid @every duration") {
+		t.Errorf("schedule \"@every nope\": err = %v, want the duration refusal", err)
+	}
+}
+
+// TestCronjobHandler_ZerosTheTypeCarries: a history limit of 0 is carried (the
+// limits are pointers), and suspend false is too.
+func TestCronjobHandler_ZerosTheTypeCarries(t *testing.T) {
+	props := ptObject(t, cronjobPlain(htPlainPod))
+	props["successfulJobsHistoryLimit"] = 0
+	props["failedJobsHistoryLimit"] = 0
+	props["suspend"] = false
+	cj := cronjobGenerate(t, "nightly", props, ptStrictPolicy())
+	for name, got := range map[string]*int32{"successful": cj.Spec.SuccessfulJobsHistoryLimit, "failed": cj.Spec.FailedJobsHistoryLimit} {
+		if got == nil || *got != 0 {
+			t.Errorf("%s history limit = %v, want an authored 0", name, got)
+		}
+	}
+	if cj.Spec.Suspend == nil || *cj.Spec.Suspend {
+		t.Errorf("suspend = %v, want an authored false", cj.Spec.Suspend)
+	}
+}
+
+// TestCronjobHandler_NameChecks: the CronJob's name is held to the length the
+// API server creates one under, at read time.
+func TestCronjobHandler_NameChecks(t *testing.T) {
+	props := ptObject(t, cronjobPlain(htPlainPod))
+	if err := coreKindErr(&components.CronjobHandler{}, "cronjob", strings.Repeat("a", 52), props); err != nil {
+		t.Errorf("a 52-character name: %v", err)
+	}
+	err := coreKindErr(&components.CronjobHandler{}, "cronjob", strings.Repeat("a", 53), props)
+	if err == nil || !strings.Contains(err.Error(), "at most 52 characters") {
+		t.Fatalf("a 53-character name: err = %v, want the name length refusal", err)
+	}
+}
+
+// TestCronjobHandler_Policy: a CronJob is held to the policy as every pod
+// template is, by the path of the field under the job template, and no replica
+// maximum applies to it.
+func TestCronjobHandler_Policy(t *testing.T) {
+	zero := ptStrictPolicy()
+	zero.maxReplicas = int32ptr(0)
+	if _, err := pvTransform("cronjob", &components.CronjobHandler{}, ptObject(t, cronjobPlain(htPlainPod)), pvPolicy(zero)); err != nil {
+		t.Errorf("a maximum of 0 replicas refused a CronJob: %v", err)
+	}
+	const podPath = "jobTemplate.spec.template.spec."
+	for name, tc := range map[string]struct{ spec, want string }{
+		"privileged": {htPlainPod + "    securityContext:\n      privileged: true\n",
+			podPath + `containers[0] "app": securityContext.privileged is not allowed by environment policy`},
+		"registry": {"containers:\n  - name: app\n    image: other.example/team/app:1.2.3\n",
+			podPath + `containers[0] "app": image "other.example/team/app:1.2.3" is not from an allowed registry`},
+		"cpu": {htPlainPod + "    resources:\n      limits:\n        cpu: 4\n",
+			podPath + `containers[0] "app": cpu limit "4" exceeds enforced maximum "2"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := pvTransform("cronjob", &components.CronjobHandler{}, ptObject(t, cronjobPlain(tc.spec)), pvPolicy(ptStrictPolicy()))
+			htWantViolation(t, err, `component "web": `+tc.want)
+		})
+	}
+}
+
+// TestCronjobConfig_ServiceAccountName: the CronJob reports the account its
+// pods run as to the traits that bind identity to it: the template's
+// serviceAccountName, the deprecated serviceAccount where that one is unset,
+// and "" for the namespace's default account. It always runs pods.
+func TestCronjobConfig_ServiceAccountName(t *testing.T) {
+	for name, tc := range map[string]struct {
+		podSpec string
+		want    string
+	}{
+		"none authored":      {htPlainPod, ""},
+		"serviceAccountName": {htPlainPod + "serviceAccountName: batch\n", "batch"},
+		"deprecated alias":   {htPlainPod + "serviceAccount: legacy\n", "legacy"},
+		"both":               {htPlainPod + "serviceAccountName: batch\nserviceAccount: legacy\n", "batch"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := (&components.CronjobHandler{}).ToApplicationConfig(
+				&oam.Component{Name: "nightly", Type: "cronjob", Properties: ptObject(t, cronjobPlain(tc.podSpec))}, coreKindNamespace)
 			if err != nil {
 				t.Fatalf("ToApplicationConfig: %v", err)
 			}
-			enforceable := cfg.(oam.Enforceable)
-			err = enforceable.ApplyPolicy(&tc.policy)
-			if err == nil {
-				t.Fatal("expected error when the intrinsic default exceeds the enforced maximum")
+			namer, ok := cfg.(oam.ServiceAccountNamer)
+			if !ok {
+				t.Fatal("the cronjob config does not implement oam.ServiceAccountNamer")
 			}
-			if !strings.Contains(err.Error(), "generated default") {
-				t.Errorf("expected error to mark the value as a generated default, got %q", err.Error())
-			}
-		})
-	}
-}
-
-// The four tests below are cronjob's siblings of the
-// TestWebserviceConfig_ApplyPolicy_InitContainer* tests (go-kure/launcher#312)
-// — same shared ApplyPolicy gap, same enforceExtraContainer fix. cronjob has
-// no sidecars schema key (see the field-coverage note in the plan), so only
-// the init container loop applies here.
-
-func TestCronjobConfig_ApplyPolicy_InitContainerResourcesDenied(t *testing.T) {
-	h := &components.CronjobHandler{}
-	component := &oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":     "ghcr.io/org/job:v1.0.0",
-			"schedule":  "0 2 * * *",
-			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
-			"initContainers": []any{
-				map[string]any{"name": "init", "image": "ghcr.io/org/init:v1"},
-			},
-		},
-	}
-	cfg, err := h.ToApplicationConfig(component, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-
-	err = enforceable.ApplyPolicy(&stubPolicy{maxCPU: "50m"})
-	if err == nil {
-		t.Fatal("expected error when the init container's intrinsic default CPU request exceeds the enforced maximum")
-	}
-	if !strings.Contains(err.Error(), "initContainers[0]") {
-		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
-	}
-	if !strings.Contains(err.Error(), "generated default") {
-		t.Errorf("expected error to mark the value as a generated default, got %q", err.Error())
-	}
-	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
-		t.Errorf("expected no error under a permissive policy, got %v", err)
-	}
-}
-
-func TestCronjobConfig_ApplyPolicy_InitContainerRegistryDenied(t *testing.T) {
-	h := &components.CronjobHandler{}
-	component := &oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":     "ghcr.io/org/job:v1.0.0",
-			"schedule":  "0 2 * * *",
-			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
-			"initContainers": []any{
-				map[string]any{"name": "init", "image": "docker.io/x/y:v1"},
-			},
-		},
-	}
-	cfg, err := h.ToApplicationConfig(component, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-
-	err = enforceable.ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}})
-	if err == nil {
-		t.Fatal("expected error when the init container's image is not from an allowed registry")
-	}
-	if !strings.Contains(err.Error(), "initContainers[0]") {
-		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
-	}
-	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
-		t.Errorf("expected no error under a permissive policy, got %v", err)
-	}
-}
-
-func TestCronjobConfig_ApplyPolicy_InitContainerPrivilegedDenied(t *testing.T) {
-	h := &components.CronjobHandler{}
-	component := &oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":     "ghcr.io/org/job:v1.0.0",
-			"schedule":  "0 2 * * *",
-			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
-			"initContainers": []any{
-				map[string]any{
-					"name": "init", "image": "ghcr.io/org/init:v1",
-					"securityContext": map[string]any{"privileged": true},
-				},
-			},
-		},
-	}
-	cfg, err := h.ToApplicationConfig(component, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-
-	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: false}); err == nil {
-		t.Error("expected error when the init container is privileged and policy disallows it")
-	} else if !strings.Contains(err.Error(), "initContainers[0]") {
-		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
-	}
-	if err := enforceable.ApplyPolicy(&stubPolicy{allowPrivileged: true}); err != nil {
-		t.Errorf("expected no error when policy allows privileged, got %v", err)
-	}
-}
-
-func TestCronjobConfig_ApplyPolicy_InitContainerCapabilitiesDenied(t *testing.T) {
-	h := &components.CronjobHandler{}
-	component := &oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":     "ghcr.io/org/job:v1.0.0",
-			"schedule":  "0 2 * * *",
-			"resources": map[string]any{"requests": map[string]any{"cpu": "10m", "memory": "16Mi"}},
-			"initContainers": []any{
-				map[string]any{
-					"name": "init", "image": "ghcr.io/org/init:v1",
-					"securityContext": map[string]any{
-						"capabilities": map[string]any{"add": []any{"NET_ADMIN"}},
-					},
-				},
-			},
-		},
-	}
-	cfg, err := h.ToApplicationConfig(component, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	enforceable := cfg.(oam.Enforceable)
-
-	if err := enforceable.ApplyPolicy(&stubPolicy{forbiddenContainerCaps: []string{"NET_ADMIN"}}); err == nil {
-		t.Error("expected error when the init container adds a forbidden capability")
-	} else if !strings.Contains(err.Error(), "initContainers[0]") {
-		t.Errorf("expected error to name initContainers[0], got %q", err.Error())
-	}
-	if err := enforceable.ApplyPolicy(&stubPolicy{}); err != nil {
-		t.Errorf("expected no error under the default-allow NoopPolicy-equivalent stub, got %v", err)
-	}
-}
-
-// --- go-kure/launcher#279 PR 1: CronJobSpec/JobSpec completion ---
-
-func TestCronjobHandler_ConcurrencyPolicy_Projected(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":             "ghcr.io/org/job:v1.0.0",
-			"schedule":          "0 2 * * *",
-			"concurrencyPolicy": "Forbid",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("job", "default", cfg)
-	objs, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	cj := findCronJob(t, objs)
-	if cj.Spec.ConcurrencyPolicy != batchv1.ForbidConcurrent {
-		t.Errorf("ConcurrencyPolicy = %q, want %q", cj.Spec.ConcurrencyPolicy, batchv1.ForbidConcurrent)
-	}
-}
-
-func TestCronjobHandler_Suspend_Projected(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "0 2 * * *",
-			"suspend":  true,
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("job", "default", cfg)
-	objs, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	cj := findCronJob(t, objs)
-	if cj.Spec.Suspend == nil || !*cj.Spec.Suspend {
-		t.Errorf("Suspend = %v, want true", cj.Spec.Suspend)
-	}
-}
-
-// TestCronjobHandler_SuspendWritesCronJobSpecOnly guards the one deliberate
-// asymmetry between the job and cronjob components. batchv1 carries two
-// distinct Suspend fields — CronJobSpec.Suspend (suspends future executions of
-// the schedule) and JobSpec.Suspend (creates a job with no pods) — and both
-// components publish a key named `suspend`. The cronjob component's is the
-// CronJobSpec one, so it must not reach the job template.
-//
-// Sharing `suspend` through schemaJobSpec/parseJobSpec would be the natural
-// thing to do when the two components' shared surface is next widened, and it
-// would silently write one authored value into two API fields. This test fails
-// the moment that happens; TestSchemaJobSpec_HasNoSuspendKey is its schema-side
-// half, and TestJobHandler_SuspendWritesJobSpec pins the job component's own.
-func TestCronjobHandler_SuspendWritesCronJobSpecOnly(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "0 2 * * *",
-			"suspend":  true,
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("job", "default", cfg)
-	objs, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	cj := findCronJob(t, objs)
-	if cj.Spec.Suspend == nil || !*cj.Spec.Suspend {
-		t.Fatalf("Spec.Suspend = %v, want true", cj.Spec.Suspend)
-	}
-	if got := cj.Spec.JobTemplate.Spec.Suspend; got != nil {
-		t.Errorf("Spec.JobTemplate.Spec.Suspend = %v, want nil — `suspend` on a cronjob is CronJobSpec.Suspend, not JobSpec.Suspend", got)
-	}
-}
-
-func TestCronjobHandler_StartingDeadlineSeconds_Projected(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":                   "ghcr.io/org/job:v1.0.0",
-			"schedule":                "0 2 * * *",
-			"startingDeadlineSeconds": 120,
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("job", "default", cfg)
-	objs, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	cj := findCronJob(t, objs)
-	if cj.Spec.StartingDeadlineSeconds == nil || *cj.Spec.StartingDeadlineSeconds != 120 {
-		t.Errorf("StartingDeadlineSeconds = %v, want 120", cj.Spec.StartingDeadlineSeconds)
-	}
-}
-
-func TestCronjobHandler_TimeZone_Projected(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "0 2 * * *",
-			"timeZone": "Europe/Brussels",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("job", "default", cfg)
-	objs, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	cj := findCronJob(t, objs)
-	if cj.Spec.TimeZone == nil || *cj.Spec.TimeZone != "Europe/Brussels" {
-		t.Errorf("TimeZone = %v, want \"Europe/Brussels\"", cj.Spec.TimeZone)
-	}
-}
-
-// TestCronjobHandler_JobSpec_Projected asserts all six JobSpec fields
-// individually (rather than diffing the whole batchv1.JobSpec, which also
-// carries Template and would need a much larger literal) — per the plan's
-// oracle guidance, deleting any one of applyJobSpec's six assignments must
-// fail this test, so each field gets its own explicit assertion.
-func TestCronjobHandler_JobSpec_Projected(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":                   "ghcr.io/org/job:v1.0.0",
-			"schedule":                "0 2 * * *",
-			"backoffLimit":            4,
-			"completions":             3,
-			"parallelism":             2,
-			"activeDeadlineSeconds":   600,
-			"ttlSecondsAfterFinished": 3600,
-			"completionMode":          "Indexed",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("job", "default", cfg)
-	objs, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	spec := findCronJob(t, objs).Spec.JobTemplate.Spec
-	if spec.BackoffLimit == nil || *spec.BackoffLimit != 4 {
-		t.Errorf("BackoffLimit = %v, want 4", spec.BackoffLimit)
-	}
-	if spec.Completions == nil || *spec.Completions != 3 {
-		t.Errorf("Completions = %v, want 3", spec.Completions)
-	}
-	if spec.Parallelism == nil || *spec.Parallelism != 2 {
-		t.Errorf("Parallelism = %v, want 2", spec.Parallelism)
-	}
-	if spec.ActiveDeadlineSeconds == nil || *spec.ActiveDeadlineSeconds != 600 {
-		t.Errorf("ActiveDeadlineSeconds = %v, want 600", spec.ActiveDeadlineSeconds)
-	}
-	if spec.TTLSecondsAfterFinished == nil || *spec.TTLSecondsAfterFinished != 3600 {
-		t.Errorf("TTLSecondsAfterFinished = %v, want 3600", spec.TTLSecondsAfterFinished)
-	}
-	if spec.CompletionMode == nil || *spec.CompletionMode != batchv1.IndexedCompletion {
-		t.Errorf("CompletionMode = %v, want %q", spec.CompletionMode, batchv1.IndexedCompletion)
-	}
-}
-
-// TestCronjobHandler_OptionalSpecFields_Unset_NotEmitted protects against the
-// "suspend: false"-on-every-CronJob regression class: every optional field
-// below must stay nil/empty when unauthored. Oracle: temporarily make one
-// guarded setter in createCronJob unconditional and confirm this test fails.
-func TestCronjobHandler_OptionalSpecFields_Unset_NotEmitted(t *testing.T) {
-	h := &components.CronjobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "job",
-		Type: "cronjob",
-		Properties: map[string]any{
-			"image":    "ghcr.io/org/job:v1.0.0",
-			"schedule": "0 2 * * *",
-		},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("job", "default", cfg)
-	objs, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	cj := findCronJob(t, objs)
-	if cj.Spec.Suspend != nil {
-		t.Errorf("Suspend = %v, want nil", cj.Spec.Suspend)
-	}
-	if cj.Spec.StartingDeadlineSeconds != nil {
-		t.Errorf("StartingDeadlineSeconds = %v, want nil", cj.Spec.StartingDeadlineSeconds)
-	}
-	if cj.Spec.TimeZone != nil {
-		t.Errorf("TimeZone = %v, want nil", cj.Spec.TimeZone)
-	}
-	if cj.Spec.ConcurrencyPolicy != "" {
-		t.Errorf("ConcurrencyPolicy = %q, want empty", cj.Spec.ConcurrencyPolicy)
-	}
-	spec := cj.Spec.JobTemplate.Spec
-	if spec.BackoffLimit != nil {
-		t.Errorf("BackoffLimit = %v, want nil", spec.BackoffLimit)
-	}
-	if spec.Completions != nil {
-		t.Errorf("Completions = %v, want nil", spec.Completions)
-	}
-	if spec.Parallelism != nil {
-		t.Errorf("Parallelism = %v, want nil", spec.Parallelism)
-	}
-	if spec.ActiveDeadlineSeconds != nil {
-		t.Errorf("ActiveDeadlineSeconds = %v, want nil", spec.ActiveDeadlineSeconds)
-	}
-	if spec.TTLSecondsAfterFinished != nil {
-		t.Errorf("TTLSecondsAfterFinished = %v, want nil", spec.TTLSecondsAfterFinished)
-	}
-	if spec.CompletionMode != nil {
-		t.Errorf("CompletionMode = %v, want nil", spec.CompletionMode)
-	}
-}
-
-// TestCronjobHandler_CronSpecAndJobSpec_Rejections covers the per-field bound
-// checks and the cross-field/boundary cases the per-field checks alone would
-// not catch (activeDeadlineSeconds==0, completionMode Indexed without
-// completions, completionMode Indexed with parallelism > 100000) plus the
-// timeZone guards (empty string, non-IANA name, case-insensitive "Local").
-// Each case asserts the field name appears in the error (strings.Contains),
-// not just err != nil, so a case rejected for the wrong reason still fails.
-func TestCronjobHandler_CronSpecAndJobSpec_Rejections(t *testing.T) {
-	cases := []struct {
-		name       string
-		props      map[string]any
-		wantSubstr string
-	}{
-		{"backoffLimit_negative", map[string]any{"backoffLimit": -1}, "backoffLimit"},
-		{"completions_negative", map[string]any{"completions": -1}, "completions"},
-		{"parallelism_negative", map[string]any{"parallelism": -1}, "parallelism"},
-		{"activeDeadlineSeconds_zero_rejected", map[string]any{"activeDeadlineSeconds": 0}, "activeDeadlineSeconds"},
-		{"activeDeadlineSeconds_negative", map[string]any{"activeDeadlineSeconds": -5}, "activeDeadlineSeconds"},
-		{"ttlSecondsAfterFinished_negative", map[string]any{"ttlSecondsAfterFinished": -1}, "ttlSecondsAfterFinished"},
-		{"completionMode_invalid_enum", map[string]any{"completionMode": "Bogus"}, "completionMode"},
-		{"completionMode_indexed_without_completions", map[string]any{"completionMode": "Indexed"}, "completionMode"},
-		{"completionMode_indexed_parallelism_over_max", map[string]any{"completionMode": "Indexed", "completions": 1, "parallelism": 100001}, "parallelism"},
-		{"concurrencyPolicy_invalid_enum", map[string]any{"concurrencyPolicy": "Bogus"}, "concurrencyPolicy"},
-		{"suspend_non_bool", map[string]any{"suspend": "yes"}, "suspend"},
-		{"startingDeadlineSeconds_negative", map[string]any{"startingDeadlineSeconds": -1}, "startingDeadlineSeconds"},
-		{"timeZone_empty_string_rejected", map[string]any{"timeZone": ""}, "timeZone"},
-		{"timeZone_not_a_real_zone_rejected", map[string]any{"timeZone": "Not/AZone"}, "timeZone"},
-		{"timeZone_local_rejected", map[string]any{"timeZone": "Local"}, "timeZone"},
-		{"timeZone_local_lowercase_rejected", map[string]any{"timeZone": "local"}, "timeZone"},
-		{"timeZone_non_string_rejected", map[string]any{"timeZone": 5}, "timeZone"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			props := map[string]any{
-				"image":    "ghcr.io/org/job:v1.0.0",
-				"schedule": "0 2 * * *",
-			}
-			for k, v := range tc.props {
-				props[k] = v
-			}
-			h := &components.CronjobHandler{}
-			_, err := h.ToApplicationConfig(&oam.Component{
-				Name: "job", Type: "cronjob", Properties: props,
-			}, "default")
-			if err == nil {
-				t.Fatalf("expected error, got nil")
-			}
-			if !strings.Contains(err.Error(), tc.wantSubstr) {
-				t.Errorf("expected error to contain %q, got %q", tc.wantSubstr, err.Error())
+			if got, runsPods := namer.ServiceAccountName(); got != tc.want || !runsPods {
+				t.Errorf("ServiceAccountName() = %q, %v; want %q, true", got, runsPods, tc.want)
 			}
 		})
 	}
-}
-
-// TestCronjobHandler_PropertySchema_JobSpecAndCronSpecKeys_Present is the
-// round-7 schema-shape completeness gate (see plan-279-cronjob-jobspec.md
-// "Tests" item 5): PropertySchema() is a published contract for an
-// out-of-process validator (property_validate.go:15) that none of the tests
-// above exercise directly, so a forgotten maps.Copy call or a mistyped
-// Enum/Default would pass every other test in this file silently. Asserts the
-// full map's cardinality so an omitted key is caught, and each JobSpec- and
-// CronJobSpec-level key's Type/Enum/Default/Description against a literal so a
-// mistyped one is too.
-// Oracle: delete one key from schemaJobSpec (or its maps.Copy call in
-// PropertySchema()) and confirm this test fails.
-func TestCronjobHandler_PropertySchema_JobSpecAndCronSpecKeys_Present(t *testing.T) {
-	h := &components.CronjobHandler{}
-	schema := h.PropertySchema()
-
-	// 25 cronjob-own keys (`ports` added in go-kure/launcher#334, the three raw
-	// scheduling keys in go-kure/launcher#790, `podMetadata` in go-kure/launcher#1178), the 12
-	// JobSpec-level keys from schemaJobSpec (six from the original cronjob
-	// work, five added with the job component in go-kure/launcher#344,
-	// podFailurePolicy added in go-kure/launcher#345),
-	// the 31 shared pod-level keys from schemaPodSpec
-	// (podActiveDeadlineSeconds included: cronjob pods are Job pods),
-	// and the 7 container fields from schemaContainerFields
-	// (go-kure/launcher#790).
-	const wantTotalKeys = 75
-	if len(schema) != wantTotalKeys {
-		t.Fatalf("PropertySchema() returned %d keys, want %d", len(schema), wantTotalKeys)
-	}
-
-	type want struct {
-		typ  oam.PropertyType
-		enum []any
-		def  any
-	}
-	cases := map[string]want{
-		"concurrencyPolicy":       {typ: oam.PropertyTypeString, enum: []any{"Allow", "Forbid", "Replace"}, def: "Allow"},
-		"suspend":                 {typ: oam.PropertyTypeBoolean},
-		"startingDeadlineSeconds": {typ: oam.PropertyTypeInteger},
-		"timeZone":                {typ: oam.PropertyTypeString},
-		"backoffLimit":            {typ: oam.PropertyTypeInteger},
-		"completions":             {typ: oam.PropertyTypeInteger},
-		"parallelism":             {typ: oam.PropertyTypeInteger},
-		"activeDeadlineSeconds":   {typ: oam.PropertyTypeInteger},
-		"ttlSecondsAfterFinished": {typ: oam.PropertyTypeInteger},
-		"completionMode":          {typ: oam.PropertyTypeString, enum: []any{"NonIndexed", "Indexed"}},
-		"backoffLimitPerIndex":    {typ: oam.PropertyTypeInteger},
-		"maxFailedIndexes":        {typ: oam.PropertyTypeInteger},
-		"podReplacementPolicy":    {typ: oam.PropertyTypeString, enum: []any{"Failed", "TerminatingOrFailed"}},
-		"managedBy":               {typ: oam.PropertyTypeString},
-		"successPolicy":           {typ: oam.PropertyTypeObject},
-	}
-
-	for key, w := range cases {
-		node, ok := schema[key]
-		if !ok {
-			t.Errorf("PropertySchema() missing key %q", key)
-			continue
-		}
-		if node.Type != w.typ {
-			t.Errorf("%s: Type = %q, want %q", key, node.Type, w.typ)
-		}
-		if node.Description == "" {
-			t.Errorf("%s: Description is empty", key)
-		}
-		if len(w.enum) > 0 && !slices.Equal(node.Enum, w.enum) {
-			t.Errorf("%s: Enum = %v, want %v", key, node.Enum, w.enum)
-		}
-		if w.def != nil && node.Default != w.def {
-			t.Errorf("%s: Default = %v, want %v", key, node.Default, w.def)
-		}
-	}
-}
-
-// cronjobPodFailurePolicy builds a cronjob carrying podFailurePolicy and returns
-// either the generated jobTemplate.spec or the error it was refused with. Both
-// outcomes are returned because the two checks under test sit on opposite sides
-// of Generate: the shape rules run in ToApplicationConfig, the template rules in
-// createCronJob.
-func cronjobPodFailurePolicy(t *testing.T, props map[string]any) (*batchv1.JobSpec, string) {
-	t.Helper()
-	full := map[string]any{
-		"image":    "ghcr.io/org/job:v1.0.0",
-		"schedule": "0 2 * * *",
-	}
-	for k, v := range props {
-		full[k] = v
-	}
-	cfg, err := (&components.CronjobHandler{}).ToApplicationConfig(&oam.Component{
-		Name: "job", Type: "cronjob", Properties: full,
-	}, "default")
-	if err != nil {
-		return nil, err.Error()
-	}
-	objs, err := cfg.Generate(stack.NewApplication("job", "default", cfg))
-	if err != nil {
-		return nil, err.Error()
-	}
-	return &findCronJob(t, objs).Spec.JobTemplate.Spec, ""
-}
-
-// TestCronjobHandler_PodFailurePolicy_Projected pins podFailurePolicy on the
-// cronjob component (go-kure/launcher#345). The key reaches the same
-// batchv1.JobSpec through the same shared parser as on the job component, and
-// upstream validates a cronjob's jobTemplate.spec with the same validateJobSpec
-// — so the same rules apply, including the restartPolicy one.
-//
-// This is a behaviour change for existing documents, not merely an addition:
-// before this, an authored podFailurePolicy on a cronjob was read by nothing and
-// dropped in silence (the accept-and-drop class tracked as
-// go-kure/launcher#408). Such a document now either compiles to a CronJob that
-// carries the policy, or fails the build.
-func TestCronjobHandler_PodFailurePolicy_Projected(t *testing.T) {
-	rules := []any{map[string]any{
-		"action":      "FailJob",
-		"onExitCodes": map[string]any{"operator": "In", "values": []any{1, 2}},
-	}}
-
-	t.Run("projected onto jobTemplate.spec", func(t *testing.T) {
-		spec, msg := cronjobPodFailurePolicy(t, map[string]any{
-			"restartPolicy":    "Never",
-			"podFailurePolicy": map[string]any{"rules": rules},
-		})
-		if msg != "" {
-			t.Fatalf("refused: %s", msg)
-		}
-		pfp := spec.PodFailurePolicy
-		if pfp == nil || len(pfp.Rules) != 1 || pfp.Rules[0].OnExitCodes == nil {
-			t.Fatalf("PodFailurePolicy = %+v, want one onExitCodes rule", pfp)
-		}
-		if pfp.Rules[0].Action != batchv1.PodFailurePolicyActionFailJob {
-			t.Errorf("Action = %q, want FailJob", pfp.Rules[0].Action)
-		}
-		if v := pfp.Rules[0].OnExitCodes.Values; len(v) != 2 || v[0] != 1 || v[1] != 2 {
-			t.Errorf("Values = %v, want [1 2]", v)
-		}
-	})
-
-	// go-kure/launcher#410, through the cronjob component's jobTemplate: an
-	// absent or null status defaults to True, an explicit one is kept. The
-	// handler is driven directly, so the null reaches the parser rather than
-	// being stripped by the authored-property check first.
-	statusCases := []struct {
-		name    string
-		pattern map[string]any
-		want    corev1.ConditionStatus
-	}{
-		{"absent", map[string]any{"type": "DisruptionTarget"}, corev1.ConditionTrue},
-		{"explicit null", map[string]any{"type": "DisruptionTarget", "status": nil}, corev1.ConditionTrue},
-		{"False", map[string]any{"type": "DisruptionTarget", "status": "False"}, corev1.ConditionFalse},
-		{"Unknown", map[string]any{"type": "DisruptionTarget", "status": "Unknown"}, corev1.ConditionUnknown},
-	}
-	for _, tc := range statusCases {
-		t.Run("onPodConditions status "+tc.name, func(t *testing.T) {
-			spec, msg := cronjobPodFailurePolicy(t, map[string]any{
-				"restartPolicy": "Never",
-				"podFailurePolicy": map[string]any{"rules": []any{map[string]any{
-					"action":          "Ignore",
-					"onPodConditions": []any{tc.pattern},
-				}}},
-			})
-			if msg != "" {
-				t.Fatalf("refused: %s", msg)
-			}
-			pfp := spec.PodFailurePolicy
-			if pfp == nil || len(pfp.Rules) != 1 || len(pfp.Rules[0].OnPodConditions) != 1 {
-				t.Fatalf("PodFailurePolicy = %+v, want one rule with one pattern", pfp)
-			}
-			if got := pfp.Rules[0].OnPodConditions[0].Status; got != tc.want {
-				t.Errorf("OnPodConditions[0].Status = %q, want %q", got, tc.want)
-			}
-		})
-	}
-
-	t.Run("restartPolicy rule applies to the jobTemplate too", func(t *testing.T) {
-		// No restartPolicy authored, so the cronjob component's own OnFailure
-		// default lands on the template.
-		_, msg := cronjobPodFailurePolicy(t, map[string]any{
-			"podFailurePolicy": map[string]any{"rules": rules},
-		})
-		if !strings.Contains(msg, `restartPolicy: must be "Never"`) {
-			t.Errorf("error = %q, want the restartPolicy refusal", msg)
-		}
-	})
-
-	t.Run("containerName is checked against the cronjob's own container", func(t *testing.T) {
-		_, msg := cronjobPodFailurePolicy(t, map[string]any{
-			"restartPolicy": "Never",
-			"podFailurePolicy": map[string]any{"rules": []any{map[string]any{
-				"action":      "FailJob",
-				"onExitCodes": map[string]any{"containerName": "nope", "operator": "In", "values": []any{1}},
-			}}},
-		})
-		if !strings.Contains(msg, "names no container in this component") {
-			t.Errorf("error = %q, want the containerName refusal", msg)
-		}
-	})
-
-	t.Run("unauthored and explicit null are both left unset", func(t *testing.T) {
-		// The shared field helpers read an explicit null as omission, so
-		// `podFailurePolicy:` with nothing after it must not become an empty
-		// policy — which would silently pin restartPolicy and
-		// podReplacementPolicy.
-		for name, props := range map[string]map[string]any{
-			"unauthored": nil,
-			"null":       {"podFailurePolicy": nil},
-		} {
-			spec, msg := cronjobPodFailurePolicy(t, props)
-			if msg != "" {
-				t.Fatalf("%s: refused: %s", name, msg)
-			}
-			if spec.PodFailurePolicy != nil {
-				t.Errorf("%s: PodFailurePolicy = %+v, want nil", name, spec.PodFailurePolicy)
-			}
-		}
-	})
 }

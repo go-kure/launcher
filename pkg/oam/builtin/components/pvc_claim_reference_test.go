@@ -125,8 +125,6 @@ func TestPVCVolume_ClaimName_OtherKindsGenerateNoClaim(t *testing.T) {
 		extra map[string]any
 	}{
 		{"statefulset", &components.StatefulsetHandler{}, nil},
-		{"job", &components.JobHandler{}, nil},
-		{"cronjob", &components.CronjobHandler{}, map[string]any{"schedule": "0 2 * * *"}},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			cfg, err := tc.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: tc.kind, Properties: claimRefProps(nil, tc.extra)}, "default")
@@ -170,9 +168,12 @@ func TestPVCVolume_ClaimName_Refusals(t *testing.T) {
 	}
 }
 
-// TestPVCVolume_PodKindsRequireClaimName: the five pod kinds generate no claim
+// TestPVCVolume_PodKindsRequireClaimName: the two pod kinds that read a flat
+// `volumes` entry (the role member and statefulset) generate no claim
 // (go-kure/launcher#702), so a pvc volume that describes one instead of
-// referencing it by claimName is refused, not silently left unmounted.
+// referencing it by claimName is refused, not silently left unmounted. The raw
+// `daemonset`, `job` and `cronjob` kinds (go-kure/launcher#1629) take the
+// upstream volume and have no such entry.
 func TestPVCVolume_PodKindsRequireClaimName(t *testing.T) {
 	for _, tc := range []struct {
 		kind    string
@@ -183,8 +184,6 @@ func TestPVCVolume_PodKindsRequireClaimName(t *testing.T) {
 	}{
 		{roleMemberType, &components.RoleDeploymentHandler{}, nil},
 		{"statefulset", &components.StatefulsetHandler{}, nil},
-		{"job", &components.JobHandler{}, nil},
-		{"cronjob", &components.CronjobHandler{}, map[string]any{"schedule": "0 2 * * *"}},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			props := claimRefProps(map[string]any{"size": "1Gi"}, tc.extra)

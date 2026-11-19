@@ -38,14 +38,11 @@ var containerNameCases = []struct {
 }{
 	{"webservice", webserviceViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, true, ""},
 	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
-	// The reshaped parser's own handler: the raw `deployment` and `daemonset`
-	// kinds name their containers as authored (go-kure/launcher#1629).
+	// The reshaped parser's own handler: the raw `deployment`, `daemonset`,
+	// `job` and `cronjob` kinds name their containers as authored
+	// (go-kure/launcher#1629).
 	{roleMemberType, &components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "db"}, false, ""},
-	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}, false,
-		"the component name is the CronJob's name, which must be at most 52 characters"},
-	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false,
-		"the component name is the Job's name, which must be at most 63 characters"},
 }
 
 // generateWorkload runs a component through ToApplicationConfig and Generate,

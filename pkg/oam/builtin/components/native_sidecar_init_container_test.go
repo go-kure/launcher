@@ -7,10 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	"github.com/go-kure/kure/pkg/stack"
-
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // These tests cover go-kure/launcher#1180: an `initContainers` entry with
@@ -96,11 +93,6 @@ func TestNativeSidecar_RendersInInitContainersInListOrder(t *testing.T) {
 			if sidecarKinds[k.name] {
 				if len(ps.Containers) < 2 || ps.Containers[len(ps.Containers)-1].Name != "side" {
 					t.Errorf("containers = %v, want the sidecars entry last, after the main container", containerNames(ps.Containers))
-				}
-			}
-			if k.name == "job" || k.name == "cronjob" {
-				if ps.RestartPolicy != corev1.RestartPolicyOnFailure {
-					t.Errorf("pod RestartPolicy = %q, want OnFailure unchanged by a native sidecar", ps.RestartPolicy)
 				}
 			}
 		})
@@ -226,22 +218,6 @@ func TestNativeSidecar_ResizeRestartContainer(t *testing.T) {
 			}
 		})
 	}
-	for _, k := range workloadKinds {
-		if k.name != "job" && k.name != "cronjob" {
-			continue
-		}
-		t.Run(k.name+"/pod restartPolicy Never", func(t *testing.T) {
-			props := withProps(k.props, map[string]any{
-				"restartPolicy":  "Never",
-				"initContainers": []any{entry()},
-			})
-			cfg, err := k.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: k.name, Properties: props}, "default")
-			if err == nil {
-				_, err = cfg.Generate(stack.NewApplication("app", "default", cfg))
-			}
-			assertErrorContains(t, err, "RestartContainer", "Never")
-		})
-	}
 }
 
 // TestNativeSidecar_PolicyAndResourceDefaults: a restartable entry is held to
@@ -274,23 +250,5 @@ func TestNativeSidecar_PolicyAndResourceDefaults(t *testing.T) {
 			_, err := generateKindWithPolicy(t, k, props, &stubPolicy{})
 			assertErrorContains(t, err, `initContainers[0] "proxy"`)
 		})
-	}
-}
-
-// TestNativeSidecar_PodFailurePolicyMayNameIt: a job's podFailurePolicy may
-// address a native sidecar by name, as it may any init container.
-func TestNativeSidecar_PodFailurePolicyMayNameIt(t *testing.T) {
-	props := map[string]any{
-		"image":          "ghcr.io/org/app:v1",
-		"restartPolicy":  "Never",
-		"initContainers": []any{nativeSidecarEntry()},
-		"podFailurePolicy": map[string]any{"rules": []any{map[string]any{
-			"action":      "Ignore",
-			"onExitCodes": map[string]any{"containerName": "proxy", "operator": "In", "values": []any{42}},
-		}}},
-	}
-	ps := podTemplateSpec(t, generateKind(t, &components.JobHandler{}, "job", props))
-	if len(ps.InitContainers) != 1 || ps.InitContainers[0].Name != "proxy" {
-		t.Errorf("initContainers = %v, want proxy", containerNames(ps.InitContainers))
 	}
 }

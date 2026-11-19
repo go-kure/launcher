@@ -8,12 +8,16 @@ spec:
     - name: migrate
       type: job
       properties:
-        image: ghcr.io/example/migrate:v1.0.0
-        ports:
-          - name: metrics
-            containerPort: 9090
-        probes:
-          liveness:
-            httpGet:
-              path: /healthz
-              port: metrics
+        template:
+          spec:
+            restartPolicy: OnFailure
+            containers:
+              - name: migrate
+                image: ghcr.io/example/migrate:v1.0.0
+                ports:
+                  - name: metrics
+                    containerPort: 9090
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: metrics

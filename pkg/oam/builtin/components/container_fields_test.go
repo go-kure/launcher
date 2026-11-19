@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -364,58 +363,6 @@ func TestInitContainer_ResizeRestartContainerRefused(t *testing.T) {
 		"sidecars":       []any{map[string]any{"name": "proxy", "image": "ghcr.io/org/proxy:v1", "resizePolicy": resize("RestartContainer")}},
 	}
 	generateKind(t, &components.RoleDeploymentHandler{}, roleMemberType, props)
-}
-
-// TestJobPods_ResizeRestartContainerNeedsARestartingPod: upstream requires
-// NotRequired when the pod's restartPolicy is Never (validateResizePolicy).
-// Only job and cronjob can author that pod policy; under their default,
-// OnFailure, RestartContainer is accepted.
-func TestJobPods_ResizeRestartContainerNeedsARestartingPod(t *testing.T) {
-	for _, k := range workloadKinds {
-		if k.name != "job" && k.name != "cronjob" {
-			continue
-		}
-		resize := func(restart string) []any {
-			return []any{map[string]any{"resourceName": "cpu", "restartPolicy": restart}}
-		}
-		// The rule is checked on the assembled pod spec, so the parse succeeds
-		// and Generate is what reports it.
-		generate := func(t *testing.T, props map[string]any) error {
-			t.Helper()
-			cfg, err := k.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: k.name, Properties: props}, "default")
-			if err != nil {
-				t.Fatalf("ToApplicationConfig: %v", err)
-			}
-			_, err = cfg.Generate(stack.NewApplication("app", "default", cfg))
-			return err
-		}
-		t.Run(k.name+"/Never refuses RestartContainer", func(t *testing.T) {
-			err := generate(t, withProps(k.props, map[string]any{"restartPolicy": "Never", "resizePolicy": resize("RestartContainer")}))
-			if err == nil {
-				t.Fatal("expected an error, got none")
-			}
-			for _, w := range []string{`containers "app"`, "resizePolicy[0].restartPolicy", "RestartContainer", "restartPolicy is Never", "NotRequired"} {
-				if !strings.Contains(err.Error(), w) {
-					t.Errorf("error %q does not contain %q", err.Error(), w)
-				}
-			}
-		})
-		t.Run(k.name+"/Never accepts NotRequired", func(t *testing.T) {
-			if err := generate(t, withProps(k.props, map[string]any{"restartPolicy": "Never", "resizePolicy": resize("NotRequired")})); err != nil {
-				t.Fatalf("NotRequired under restartPolicy Never must build, got: %v", err)
-			}
-		})
-		t.Run(k.name+"/OnFailure accepts RestartContainer", func(t *testing.T) {
-			for _, props := range []map[string]any{
-				{"resizePolicy": resize("RestartContainer")},
-				{"restartPolicy": "OnFailure", "resizePolicy": resize("RestartContainer")},
-			} {
-				if err := generate(t, withProps(k.props, props)); err != nil {
-					t.Fatalf("RestartContainer under restartPolicy OnFailure must build, got: %v", err)
-				}
-			}
-		})
-	}
 }
 
 // TestContainerFields_RenderingTwiceIsUnaffectedByEditingTheFirstRender: the

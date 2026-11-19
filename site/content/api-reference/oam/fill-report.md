@@ -81,8 +81,8 @@ names the place of each declared default itself (`Probe.DefaultPlaces`).
 
 Only a config that reports its fills has `policy` and `builtin` entries. These do:
 
-- The controller kinds `statefulset`, `job` and `cronjob`:
-  what their parse fills, and what they fill for each container when they generate their
+- The controller kind `statefulset`:
+  what its parse fills, and what it fills for each container when it generates its
   object. The list is under
   [policy defaults](../oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
 - `webservice` and `worker`, through the `role-deployment` they lower to.
@@ -90,8 +90,9 @@ Only a config that reports its fills has `policy` and `builtin` entries. These d
 - The `persistentvolumeclaim` component: the policy's default `size`.
 - The traits in the table under "Property provenance", each with the paths it reports.
 
-The raw `deployment` and `daemonset` kinds are not in the list: they fill no default, so
-their report is empty (see the `deployment` and `daemonset` sections of
+The raw `deployment`, `daemonset`, `job` and `cronjob` kinds are not in the list: they fill
+no default, so their reports are empty (see the `deployment`, `daemonset`, `cronjob` and
+`job` sections of
 [Kinds: core workloads](../oam-components/kinds-core-workloads.md#deployment)).
 
 A fill can depend on the document. The `topology-spread` trait reports

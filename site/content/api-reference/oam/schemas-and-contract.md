@@ -248,7 +248,7 @@ rule, a trait handler or a trait lowering rule that has the method
 non-empty answer is appended to the refusal after `"; "`:
 
 ```
-component "batch" (type "job"): properties: unsupported field "scheduling" (allowed: …); scheduling: not read by this component — alpha upstream, behind the WorkloadWithJob feature gate
+component "db" (type "statefulset"): properties: unsupported field "selector" (allowed: …); selector: not authorable; the StatefulSet selector is builder-managed (app: <component>), must equal the generated template labels and is immutable once created
 ```
 
 The built-in hand-parsed kinds answer with the reason they refuse a field of the

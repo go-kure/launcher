@@ -7,5 +7,12 @@ spec:
   - name: cleanup
     type: cronjob
     properties:
-      image: myregistry/my-cronjob:v1.2.3
       schedule: "0 2 * * *"
+      jobTemplate:
+        spec:
+          template:
+            spec:
+              restartPolicy: OnFailure
+              containers:
+              - name: cleanup
+                image: myregistry/my-cronjob:v1.2.3

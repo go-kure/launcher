@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -30,12 +29,10 @@ type parityKind struct {
 
 var parityKinds = []parityKind{
 	// The reshaped deployment parser is the role member; the kind-named
-	// `deployment` and `daemonset` decode the upstream spec
+	// `deployment`, `daemonset`, `job` and `cronjob` decode the upstream spec
 	// (go-kure/launcher#1629) and are held to it by TestCoreKindSchemas_CoverSpec.
 	{"role-deployment", (&RoleDeploymentHandler{}).PropertySchema, reflect.TypeFor[appsv1.Deployment]()},
 	{"statefulset", (&StatefulsetHandler{}).PropertySchema, reflect.TypeFor[appsv1.StatefulSet]()},
-	{"job", (&JobHandler{}).PropertySchema, reflect.TypeFor[batchv1.Job]()},
-	{"cronjob", (&CronjobHandler{}).PropertySchema, reflect.TypeFor[batchv1.CronJob]()},
 	{"service", (&ServiceHandler{}).PropertySchema, reflect.TypeFor[corev1.Service]()},
 	{"persistentvolumeclaim", (&PersistentVolumeClaimHandler{}).PropertySchema, reflect.TypeFor[corev1.PersistentVolumeClaim]()},
 	{"configmap", (&ConfigMapHandler{}).PropertySchema, reflect.TypeFor[corev1.ConfigMap]()},
@@ -69,8 +66,7 @@ const (
 	// upstream field of the same name, which is read as that property: `as`
 	// names that field. No refusal can sit on the name, so the README is where
 	// an author learns it: a container's own restartPolicy under the pod's on
-	// `job` and `cronjob`, and the job template's suspend under the CronJob's
-	// on `cronjob`.
+	// pod's.
 	parityNameTaken = "name taken on this kind by another upstream field of the same name"
 	// parityReadInPart: read under its name, and the fields of its type the
 	// property does not declare are keys of `nested`, the refusal map of the
@@ -112,18 +108,14 @@ var parityRules = map[string][]parityRule{
 	"status":     {{class: parityEnvelope}},
 	"spec":       {{class: parityLevel, descend: true}},
 
-	// The pod template and the job template: each is refused as a whole with
-	// the reason, and its fields are the component's own properties.
+	// The pod template: refused as a whole with the reason, and its fields are
+	// the component's own properties.
 	"DeploymentSpec.template":  {{class: parityOtherShape, descend: true}},
 	"StatefulSetSpec.template": {{class: parityOtherShape, descend: true}},
-	"JobSpec.template":         {{class: parityOtherShape, descend: true}},
-	"CronJobSpec.jobTemplate":  {{class: parityOtherShape, descend: true}},
 	// A template's metadata is the builder's: the `app` label, and nothing an
 	// author writes (TestHandParsedKinds_TemplateMetadataAndContainerName).
 	"PodTemplateSpec.metadata": {{class: parityLevel}},
 	"PodTemplateSpec.spec":     {{class: parityLevel, descend: true}},
-	"JobTemplateSpec.metadata": {{class: parityLevel}},
-	"JobTemplateSpec.spec":     {{class: parityLevel, descend: true}},
 
 	// The main container is the component's own container properties.
 	"PodSpec.containers":       {{class: parityOtherShape, descend: true}},
@@ -133,15 +125,10 @@ var parityRules = map[string][]parityRule{
 	"Container.startupProbe":   {{class: parityOtherShape, as: []string{"probes"}}},
 	"Container.volumeMounts":   {{class: parityOtherShape, as: []string{"volumes"}}},
 	"Container.volumeDevices":  {{class: parityOtherShape, as: []string{"volumes"}}},
-	"Container.restartPolicy":  {{class: parityNameTaken, as: []string{"PodSpec.restartPolicy"}, only: []string{"job", "cronjob"}}},
-	// The cronjob's `suspend` is the CronJob's; the job's own stays with `job`
-	// (JobSpecConfig, TestCronjobHandler_SuspendWritesCronJobSpecOnly).
-	"JobSpec.suspend": {{class: parityNameTaken, as: []string{"CronJobSpec.suspend"}, only: []string{"cronjob"}}},
 
-	// Pod fields whose name is the container's property, or the job's.
-	"PodSpec.securityContext":       {{class: parityRenamed, as: []string{"podSecurityContext"}}},
-	"PodSpec.resources":             {{class: parityRenamed, as: []string{"podResources"}, nested: podResourcesRejectedKeys}},
-	"PodSpec.activeDeadlineSeconds": {{class: parityRenamed, as: []string{"podActiveDeadlineSeconds"}, only: []string{"job", "cronjob"}}},
+	// Pod fields whose name is the container's property.
+	"PodSpec.securityContext": {{class: parityRenamed, as: []string{"podSecurityContext"}}},
+	"PodSpec.resources":       {{class: parityRenamed, as: []string{"podResources"}, nested: podResourcesRejectedKeys}},
 
 	// A container's `resources` are read without `claims` (parseResources).
 	"Container.resources": {{class: parityReadInPart, nested: resourcesRejectedKeys}},
@@ -152,18 +139,7 @@ var parityRules = map[string][]parityRule{
 // parityRefusedBeyondUpstream are the keys of a kind's refusal maps that are no
 // field of the type the kind projects, each with why the kind refuses it
 // nevertheless.
-var parityRefusedBeyondUpstream = map[string]map[string]string{
-	"job": {
-		// jobCronOnlyRejectedKeys: the CronJobSpec fields a document retyped
-		// from `cronjob` to `job` leaves behind.
-		"schedule":                   "a CronJobSpec field",
-		"timeZone":                   "a CronJobSpec field",
-		"concurrencyPolicy":          "a CronJobSpec field",
-		"startingDeadlineSeconds":    "a CronJobSpec field",
-		"successfulJobsHistoryLimit": "a CronJobSpec field",
-		"failedJobsHistoryLimit":     "a CronJobSpec field",
-	},
-}
+var parityRefusedBeyondUpstream = map[string]map[string]string{}
 
 // parityFields returns the JSON fields of a Kubernetes API struct by name, an
 // inlined struct's among them.

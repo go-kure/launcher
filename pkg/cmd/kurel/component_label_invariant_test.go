@@ -411,7 +411,7 @@ spec:
 `}},
 	// The two batch kinds refuse a long name by the length of their own object
 	// first: a CronJob's name is at most 52 characters, a Job's at most 63.
-	"cronjob": {props: workloadProps(map[string]any{"schedule": "0 2 * * *"}),
+	"cronjob": {props: rawCronjobProps("ghcr.io/example/app:v1.0.0"),
 		nameBound: 52, longRefusal: "the component name is the CronJob's name, which must be at most 52 characters", labelled: true},
 	// The six cluster-scoped kinds storageclass, volumeattributesclass,
 	// priorityclass, runtimeclass, ingressclass and csidriver emit identity and
@@ -529,7 +529,7 @@ spec:
 		props: map[string]any{"selfSigned": map[string]any{}},
 	},
 	"job": {
-		props: workloadProps(nil), longRefusal: "the component name is the Job's name, which must be at most 63 characters", labelled: true,
+		props: rawJobProps("ghcr.io/example/app:v1.0.0"), longRefusal: "the component name is the Job's name, which must be at most 63 characters", labelled: true,
 	},
 	"limitrange": {props: map[string]any{"limits": []any{map[string]any{"type": "Container",
 		"default": map[string]any{"cpu": "500m"}}}}},

@@ -24,8 +24,8 @@ var generateTimeFillPaths = []string{
 }
 
 // handlerBuiltKind is a kind whose handler builds the pod with launcher's fills,
-// the owner its report is under, and the fills it makes. The raw `deployment`
-// and `daemonset` fill nothing (go-kure/launcher#1629); the worker stands for
+// the owner its report is under, and the fills it makes. The raw `deployment`,
+// `daemonset`, `job` and `cronjob` fill nothing (go-kure/launcher#1629); the worker stands for
 // the reshaped deployment it lowers into, which reports on its role member. The worker
 // generates its own ServiceAccount and names it, so the pod never meets the
 // token automount fill and the worker's row leaves that path out.
@@ -39,8 +39,6 @@ type handlerBuiltKind struct {
 var handlerBuiltKinds = []handlerBuiltKind{
 	{"worker", nil, owner{component: "web", member: "role-deployment"}, generateTimeFillPaths[:3]},
 	{"statefulset", nil, owner{component: "web"}, generateTimeFillPaths},
-	{"job", nil, owner{component: "web"}, generateTimeFillPaths},
-	{"cronjob", map[string]any{"schedule": "*/5 * * * *"}, owner{component: "web"}, generateTimeFillPaths},
 }
 
 // TestGenerateTimeFills_AreReported: a workload that authors none of them has

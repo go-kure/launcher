@@ -978,10 +978,11 @@ registry. The one check holds it on every path by which a document brings
 a pod spec: this kind, the pod template of `replicaset`, `replicationcontroller`,
 `podtemplate` and `cnpg-pooler`, and the pod spec of a workload that
 template delivery (`helmtemplate`), `passthrough` or a `manifests` source
-carries. The `deployment` and `daemonset` kinds hold their `template.spec.volumes` to the same
+carries. The `deployment`, `daemonset`, `job` and `cronjob` kinds hold their `template.spec.volumes`
+(`jobTemplate.spec.template.spec.volumes` on a `cronjob`) to the same
 checks, as the upstream `image` volume source. The components with a volume
 schema of their own (`webservice`,
-`worker`, `statefulset`, `job`, `cronjob`) take
+`worker`, `statefulset`) take
 an image volume only in the nested form of a `volumes` entry (`type: image`,
 `image: {reference: ...}`), where the registry allowlist
 holds it (`enforceVolumeSourcePolicy`) and `ValidateImageRef` holds its
@@ -1655,121 +1656,171 @@ it. The fixture test compares the two.
 
 ### Properties
 
-**cronjob** — `schedule` accepts a standard 5-field cron expression (e.g.
-`0 2 * * *`; not 6-field — a seconds field is rejected), one of the fixed
-`@`-descriptors (`@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
-`@midnight`, `@hourly`; `@reboot` is rejected, meaningless for a CronJob),
-or `@every <duration>` (e.g. `@every 1h30m`, validated via Go's
-`time.ParseDuration` — a malformed duration is rejected, not merely
-regex-matched). `restartPolicy` (default `OnFailure`),
-`successfulJobsHistoryLimit`/`failedJobsHistoryLimit`. `ports` declares
-container ports, and emits no Service (see ["Main container ports"](common-config.md#main-container-ports)). No
-`sidecars` schema key (init containers only): a plain sidecar keeps running
-after the main container exits, so the Job's pod would never complete. The
-container that fits is the restartable init container, an `initContainers`
-entry with `restartPolicy: Always` (see ["Container fields"](common-config.md#container-fields)). It publishes the raw `affinity`, `tolerations` and `topologySpreadConstraints`
-(see ["Raw scheduling properties"](common-config.md#raw-scheduling-properties)), written onto the Job template's pod
-template.
-CronJobSpec-level: `concurrencyPolicy` (`Allow`|`Forbid`|`Replace`; the API's
-own default is `Allow`, but this is only ever written when authored —
-`ConcurrencyPolicy` has no `omitempty`, so writing it unconditionally would
-add the key to every generated CronJob), `suspend`, `startingDeadlineSeconds`
-(`>= 0`), `timeZone` (a real IANA zone name, e.g. `Europe/Brussels`; an
-authored empty string is rejected outright, `Local` is rejected
-case-insensitively even though Go's own `time.LoadLocation("Local")`
-succeeds — Kubernetes' CronJob validation rejects it as server-dependent —
-and any other value is checked via `time.LoadLocation`, which this binary
-resolves from an embedded IANA database rather than the host's zoneinfo).
-JobSpec-level (projected onto `spec.jobTemplate.spec`, shared with the `job`
-component — the full table is under **job**, and the shared trio is
-described in ["Common config"](common-config.md#common-config)): `backoffLimit`, `completions`,
-`parallelism`, `activeDeadlineSeconds`, `ttlSecondsAfterFinished`,
-`completionMode`, `backoffLimitPerIndex`, `maxFailedIndexes`,
-`podReplacementPolicy`, `managedBy`, `successPolicy`, `podFailurePolicy`.
-`suspend` on a cronjob
-is the **CronJobSpec** field, not the JobSpec one — see the `suspend` note in
-["Common config"](common-config.md#common-config).
+**cronjob** is the kind-named projection of a batch/v1 CronJob, on the same
+recipe as `deployment`: one schema key per json field of `batchv1.CronJobSpec`,
+the property map decoded strictly into that type, and one CronJob named after
+the component in the build namespace, with the authored spec. The keys are
+`schedule` (required), `jobTemplate` (required; the Job each run creates, its
+`metadata` and its `spec`, whose pod is `jobTemplate.spec.template.spec`, with
+`containers` required), `timeZone`, `startingDeadlineSeconds`,
+`concurrencyPolicy`, `suspend`, `successfulJobsHistoryLimit` and
+`failedJobsHistoryLimit`. A key that is not one of them, at any depth, is
+refused (`properties do not decode into a batch/v1 CronJobSpec: …`).
+
+**Breaking change (pre-GA, `v1alpha1`).** The kind used to take the reshaped
+form that `webservice` and `worker` still take. That form is gone, and a
+document that authors it is refused. Move each field as follows:
+
+| Was (reshaped `cronjob`) | Is now |
+|---|---|
+| `image`, `command`, `args`, `env`, `envFrom`, `ports`, `workingDir`, `lifecycle` and the other main-container fields | `jobTemplate.spec.template.spec.containers[0].<field>`, in the upstream spelling |
+| `resources`, `securityContext` | the same names on that container (`unlimited` has no upstream form) |
+| `probes.*`, `sidecars[]`, `initContainers[]` | `readinessProbe`, `livenessProbe`, `startupProbe` of the container; further entries of `containers`; `initContainers` under the pod spec |
+| `podMetadata`, `podSecurityContext`, `volumes[]`, `affinity`, `tolerations`, `topologySpreadConstraints` | `jobTemplate.spec.template.metadata`, and `securityContext`, `volumes`, `affinity`, `tolerations`, `topologySpreadConstraints` under the pod spec |
+| `restartPolicy` | `jobTemplate.spec.template.spec.restartPolicy`, now required in practice: no default is filled |
+| `backoffLimit`, `completions`, `parallelism`, `activeDeadlineSeconds`, `ttlSecondsAfterFinished`, `completionMode`, `backoffLimitPerIndex`, `maxFailedIndexes`, `podReplacementPolicy`, `managedBy`, `successPolicy`, `podFailurePolicy` | the same names under `jobTemplate.spec` |
+| `podActiveDeadlineSeconds` | `activeDeadlineSeconds` under the pod spec |
+| `schedule`, `timeZone`, `concurrencyPolicy`, `startingDeadlineSeconds`, `successfulJobsHistoryLimit`, `failedJobsHistoryLimit`, `suspend` | unchanged, at the top level of `properties` |
+
+**No launcher default.** The kind adds no default: no `restartPolicy`, no
+history limits (the API server defaults them to 3 and 1), no resource requests
+or limits, no port `protocol`, and no labels or annotations on the CronJob or
+on the job template (the `labels` and `annotations` properties every kind
+accepts are the way to add them to the CronJob). It does not set
+`automountServiceAccountToken: false`: **a pod with no `serviceAccountName` now
+mounts the namespace's default account's token**. Set
+`jobTemplate.spec.template.spec.automountServiceAccountToken: false` to keep
+the old posture. The fill report of the kind is empty.
 
 ### Outputs
 
-Every CronJobSpec-level and JobSpec-level field above except
-`restartPolicy` and the two history limits is presence-gated: omitting it
-never adds a key to the generated output, even where the corresponding
-Kubernetes default (e.g. `concurrencyPolicy: Allow`) would otherwise appear
-to have been authored. Those three are always written, taking `OnFailure`, 3
-and 1 when omitted.
+**The `app` label.** The handler adds one thing: `app: <component>` on the
+labels of `jobTemplate.spec.template`, beside the authored ones (see ["The `app`
+label"](conventions.md#the-app-label)). An authored `app` there with the
+component's own value is kept; any other value is refused. An authored `app` on
+`jobTemplate.metadata.labels` is kept as authored. The transform then sets the
+component label on the object and its templates, as on every object a
+component owns.
+
+**Endpoints.** None: a cronjob may declare container ports but serves nothing.
+It emits no Service.
+
+**Traits.** The pod-spec traits (`security-context`, a `configmap` trait's
+`mountPath`, an `external-secret` trait's `envFrom` and `mountPath`) change the
+pod template of the job template as they do on the other kinds. `topology-spread`
+is refused: the component generates no Deployment.
 
 ### Validation
+
+**Refused when the component is read**, with or without a policy:
+- An unauthored `schedule` or `jobTemplate`.
+- A `schedule` that is none of the standard 5-field cron expression, one of the
+  fixed `@`-descriptors (`@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
+  `@midnight`, `@hourly`), or `@every <duration>` with a duration Go's
+  `time.ParseDuration` reads. `@reboot` and a 6-field form are refused. The plain
+  5-field form accepts any 5 whitespace-separated tokens with no per-field check
+  (`99 99 99 99 99` builds here and is refused later by the API server): this
+  is deliberate, since tightening it would refuse documents that build today.
+- A `timeZone` that is the empty string, `Local` (case-insensitively) or not a
+  zone of the IANA database, which the binary embeds.
+- `jobTemplate.spec.selector` and `jobTemplate.spec.manualSelector: true`: the
+  API server generates the selector of a CronJob's Job and refuses an authored
+  one. Select the pods by the labels of `jobTemplate.spec.template.metadata`.
+- Under `jobTemplate.spec.template.spec`, what the `pod` kind refuses of its
+  own spec, by the same checks and named by path.
+- A key that is not a field of the upstream type, a reshaped key such as
+  `image` included.
 
 The CronJob's name is at most 52 characters, the longest the API server
 creates one under (`ValidateCronJobCreate`: the controller names each Job
 after the CronJob plus an 11-character suffix, and that Job's name is held to
-63). The rule is held on the name the CronJob takes, the component name or
-its `objectName` (or the `Naming` hook's answer), when the component is read
-and again at `Generate`: `cronjob "<name>": the component name is the
-CronJob's name, which must be at most 52 characters: it has 53`, or
-`objectName (or the Naming hook's answer for role "object"): "<name>" is not
-a valid CronJob name, which must be at most 52 characters: it has 53`. A
-component named with 53 to 63 characters built before this rule and is
-refused now; a longer one was already refused by the
-container-name rule. With an Indexed job template the name must also leave
-room for the index in each pod's hostname, a limit that applies when the
-controller creates the Job, not when the CronJob is admitted; the build does
-not check it.
-Known limitation: the plain 5-field `schedule` form accepts any 5
-whitespace-separated tokens with no per-field semantic check (e.g.
-`99 99 99 99 99` builds successfully here and is only rejected later, by
-Kubernetes' own API server) — this is deliberate, not an oversight: tightening
-it would reject documents that build successfully today, which is a breaking
-change under this project's additive-compatibility rule (see
-`docs/oam/design-gvk.md`).
+63). The rule is held on the name the CronJob takes, the component name or its
+`objectName` (or the `Naming` hook's answer), when the component is read and
+again at `Generate`. With an Indexed job template the name must also leave room
+for the index in each pod's hostname, a limit that applies when the controller
+creates the Job, not when the CronJob is admitted; the build does not check it.
+
+The API's other value rules (`concurrencyPolicy` values, `restartPolicy`
+other than `Never` or `OnFailure`, `completionMode` and its dependent fields,
+`successPolicy` and `podFailurePolicy` shapes, a negative count) are left to the
+API server. Every one used to be checked here by a hand port of the Job
+validation, which is gone.
+
+**Policy.** `ApplyPolicy` holds the pod template of the job template to the
+check the `pod` kind runs (`enforcePodTemplatePolicy`): the registry allowlist,
+the cpu and memory maxima, `privileged`, capabilities, host namespaces and
+volume sources, for every container and init container, named by its path in
+the properties (`jobTemplate.spec.template.spec.containers[0] "app": …`). No
+replica maximum applies, and no policy default is filled.
 
 ### Example
 
-The component in `pkg/cmd/kurel/testdata/cronjob-full/app.yaml`, built against the
-`cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares the
-two.
+```yaml
+- name: cleanup
+  type: cronjob
+  properties:
+    schedule: "0 2 * * *"
+    concurrencyPolicy: Forbid
+    jobTemplate:
+      spec:
+        template:
+          spec:
+            restartPolicy: OnFailure
+            containers:
+              - name: cleanup
+                image: ghcr.io/example/cleanup:v1.0.0
+```
+
+The component in `pkg/cmd/kurel/testdata/cronjob-full/app.yaml`, built against
+the `cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture
+test compares the two.
 
 ## job
 
-**job** (`job.go`) — a run-to-completion workload:
-`image`, `restartPolicy` (default `OnFailure`; the Job API rejects `Always`,
-which is what pod defaulting would otherwise supply, and a present-but-
-non-string or empty value is refused rather than read as an omission that
-would silently restore that default), and the shared container
-and pod-level surface above. No `port` and no Service; `ports` declares
-container ports (see ["Main container ports"](common-config.md#main-container-ports)), and only then may a probe or
-hook name a port; no `sidecars` schema key (init containers only), matching
-`cronjob` and for the reason given there. It publishes the raw `affinity`, `tolerations` and `topologySpreadConstraints`
-(see ["Raw scheduling properties"](common-config.md#raw-scheduling-properties)), written onto the Job's pod template.
-It emits a `Job` and nothing else.
-
 ### Properties
 
-The twelve JobSpec-level properties are the ones `cronjob` projects onto its
-job template, projected here onto `spec` directly. Every one is
-presence-gated, so a document authoring none of them emits no key for them.
+**job** is the kind-named projection of a batch/v1 Job, on the same recipe as
+`deployment`: one schema key per json field of `batchv1.JobSpec`, the property
+map decoded strictly into that type, and one Job named after the component in
+the build namespace, with the authored spec. The keys are `template` (required;
+its pod spec is `template.spec`, with `containers` required), `parallelism`,
+`completions`, `activeDeadlineSeconds`, `backoffLimit`, `backoffLimitPerIndex`,
+`maxFailedIndexes`, `ttlSecondsAfterFinished`, `completionMode`, `suspend`,
+`podReplacementPolicy`, `managedBy`, `selector`, `manualSelector`,
+`podFailurePolicy`, `successPolicy` and `scheduling`. A key that is not one of
+them, at any depth, is refused (`properties do not decode into a batch/v1
+JobSpec: …`). The six CronJobSpec-only keys (`schedule`, `timeZone`,
+`concurrencyPolicy`, `startingDeadlineSeconds`, `successfulJobsHistoryLimit`,
+`failedJobsHistoryLimit`) are such keys: a `cronjob` document retyped to `job`
+is refused, not run once at apply time.
 
-| Property | Type | Effect | Compatibility |
-|----------|------|--------|---------------|
-| `backoffLimit` | int ≥ 0 | Retries before the job is marked failed. API default 6, or 2147483647 when `backoffLimitPerIndex` is set. | additive |
-| `completions` | int ≥ 0 | Successful pods required. Required under `completionMode: Indexed`. | additive |
-| `parallelism` | int ≥ 0 | Pods running at once. ≤ 100000 under `Indexed`; ≤ 10000 when `completions` > 100000 and `backoffLimitPerIndex` is set. `0` runs no pods at all. | additive |
-| `activeDeadlineSeconds` | int > 0 | Seconds the job may run. Must be **positive** — `0` is rejected, not just negatives. Distinct from the pod-level `podActiveDeadlineSeconds`. | additive |
-| `ttlSecondsAfterFinished` | int ≥ 0 | Seconds after finishing before the job and its pods are deleted. | additive |
-| `completionMode` | `NonIndexed`\|`Indexed` | How completions are counted. `Indexed` requires `completions`. | additive |
-| `backoffLimitPerIndex` | int ≥ 0 | Retries within one index. Requires `Indexed`. | additive |
-| `maxFailedIndexes` | int ≥ 0 | Failed indexes tolerated before the whole job fails. Requires `backoffLimitPerIndex` (and so `Indexed`); ≤ `completions` and ≤ 100000, or ≤ 10000 (and required) when `completions` > 100000. | additive |
-| `podReplacementPolicy` | `Failed`\|`TerminatingOrFailed` | When a replacement pod is created. An empty string is rejected rather than treated as unset, for the same reason as `managedBy` below. | additive |
-| `managedBy` | string | Controller reconciling this job instead of the built-in one. A domain-prefixed path (`example.com/controller`), ≤ 63 characters. An empty string is rejected rather than treated as unset. | additive |
-| `successPolicy` | object | `rules[]` (1..20) of `succeededIndexes` (increasing comma-separated intervals, every index < `completions`) and/or `succeededCount` (≤ `completions`, and ≤ the number of indexes named alongside it). Requires `Indexed`. An empty `succeededIndexes` is rejected rather than treated as unset: it denotes no indexes at all, so it would otherwise satisfy the at-least-one-field rule while naming nothing. | additive |
-| `podFailurePolicy` | object | `rules[]` (0..20), each with an `action` (`FailJob`\|`FailIndex`\|`Ignore`\|`Count`) and **exactly one** of `onExitCodes` (`operator` `In`\|`NotIn`, `values[]` of 1..255 exit codes in increasing order without duplicates, optional `containerName`) or `onPodConditions[]` (up to 20 `type`/`status` patterns; an omitted or null `status` defaults to `True`, an empty one is rejected). An empty `onPodConditions: []` alone is neither; beside `onExitCodes` it is both, as the rule's published `exclusive` group counts it. Requires `restartPolicy: Never`, and pins `podReplacementPolicy` to `Failed` when that is also authored. `FailIndex` additionally requires `backoffLimitPerIndex`. | **Behavior-changing** on `cronjob` (see below); additive on `job` |
-| `suspend` | bool | **`JobSpec.Suspend`** — create the job with no pods. Not the same field as `cronjob`'s `suspend`; see the `suspend` note in ["Common config"](common-config.md#common-config). | additive |
-| `selector`, `manualSelector`, `template` | — | **Rejected outright**, not silently dropped: the Job selector is generated by the job controller from a unique per-job label, and a hand-written one adopts other jobs' pods. `manualSelector` only has meaning alongside one. `template` is replaced wholesale from the component's own container and pod-level properties, so an authored one is discarded rather than merged — the same rejection `webservice` and `worker` make. `cronjob` refuses the three as well: its job is the same JobSpec, and its parser read none of them and said nothing. | **Behavior-changing** (see below) |
-| `scheduling` | — | **Rejected outright** on `job` and `cronjob`: alpha upstream, behind the `WorkloadWithJob` feature gate, and read by neither. | **Behavior-changing** for a caller that skips the authored-property check |
-| `schedule`, `timeZone`, `concurrencyPolicy`, `startingDeadlineSeconds`, `successfulJobsHistoryLimit`, `failedJobsHistoryLimit` | — | **Rejected outright**: these are the CronJobSpec-only keys, and they are exactly what a `cronjob` document retyped to `job` leaves behind. Dropping them silently would run at apply time the work a schedule deferred (see below). | additive (no valid `job` document ever carried them) |
+**Breaking change (pre-GA, `v1alpha1`).** The kind used to take the reshaped
+form. That form is gone, and a document that authors it is refused. The
+main-container, probe, sidecar, volume and scheduling fields move under
+`template.spec` exactly as the `cronjob` table above moves them under
+`jobTemplate.spec.template.spec`; the JobSpec-level fields keep their names at
+the top level of `properties`; `restartPolicy` moves to
+`template.spec.restartPolicy` and is no longer defaulted to `OnFailure`;
+`podActiveDeadlineSeconds` becomes `template.spec.activeDeadlineSeconds`.
+
+**No launcher default.** As on `cronjob`: no `restartPolicy`, no resource
+requests or limits, no port `protocol`, no labels or annotations on the Job
+object, and no `automountServiceAccountToken: false` (a pod with no
+`serviceAccountName` now mounts the namespace's default account's token; set
+`template.spec.automountServiceAccountToken: false` to keep the old posture).
+The fill report of the kind is empty.
 
 ### Outputs
+
+**The `app` label.** The handler adds `app: <component>` on the labels of
+`template`, beside the authored ones; an authored `app` with another value is
+refused. The Job object carries no label of the handler's. A selector is the
+author's alone: left out, the job controller generates one and its matching
+pod labels, so writing one here would fight it. An authored `selector` that
+rules out the `app` label the handler adds is refused.
+
+**Endpoints.** None: a job may declare container ports but serves nothing. It
+emits a `Job` and nothing else.
 
 **Updating a `job` in place needs it force-replaced, which the `force-replace`
 trait asks for.** A Job's pod
@@ -1805,161 +1856,41 @@ before redelivering avoids the error without either. `cronjob` does not have
 this problem: a CronJob's `jobTemplate` is mutable, and each run creates a
 fresh Job.
 
-The generated `Job` carries `app: <component>` as its own labels and its pod
-template's, carries no annotations of the handler's, and leaves `spec.selector`
-unset for the job controller to fill. What the `labels` and `annotations`
-properties author is added to the Job's own metadata, not to its pod template.
-The empty selector is deliberate and is the one workload kind where it stays
-that way: the Job controller generates
-`spec.selector` plus its matching `controller-uid`/`job-name` pod labels
-server-side, so writing one here would fight it. Deployment, StatefulSet and
-DaemonSet get no such server-side defaulting and so are written explicitly —
-see [Conventions](conventions.md#conventions).
-
 ### Validation
+
+**Refused when the component is read**, with or without a policy:
+- An unauthored `template`.
+- Under `template.spec`, what the `pod` kind refuses of its own spec, by the
+  same checks and named by path.
+- A selector that matches the authored template labels and would stop matching
+  once the `app` label is added.
+- A key that is not a field of the upstream type, a reshaped key included.
 
 The Job's name is at most 63 characters: the API server writes it as the
 value of the pod template's `job-name` and `batch.kubernetes.io/job-name`
-labels (`generateSelector`), and a label value is at most 63. The rule is
-held on the name the Job takes, the component name or its `objectName` (or
-the `Naming` hook's answer), when the component is read and again at
-`Generate`, in the words the `cronjob` rule uses. A component name over 63
-characters was already refused at generation, by the container-name rule; it
-is now refused when the component is read, by this one.
+labels, and a label value is at most 63. The rule is held on the name the Job
+takes, the component name or its `objectName` (or the `Naming` hook's answer),
+when the component is read and again at `Generate`.
 
 On a job with `completionMode: Indexed` and `completions` above 0 the name is
 held to one more rule of the API server's (`validateNameAllowsCompletions`):
 the pod of each index takes the hostname `<name>-<index>`, so
 `<name>-<completions-1>` must be a DNS-1123 label, at most 63 characters and
-without a dot. It is held at the same two places, and refused as `job
-"<name>": the component name is the Job's name, and with completionMode
-Indexed and completions 11 the pod of the last index takes the hostname
-"<name>-10", which must be a DNS-1123 label: …`. An Indexed job whose name
-leaves no room for its last index built before this rule and is refused now.
-A document cannot leave `completions` unset on an Indexed job, but a
-`JobConfig` built in Go can: with `Parallelism` unset too the API server
+without a dot. A document cannot leave `completions` unset on an Indexed job,
+but a `JobConfig` built in Go can: with `Parallelism` unset too the API server
 reads both as 1, so `Generate` holds the name to `<name>-0` there.
 
-Every cross-field rule above is ported from `ValidateJobSpec`
-(`k8s.io/kubernetes/pkg/apis/batch/validation`) at the pinned
-`k8s.io/api` version, so a document this parser accepts is one the API server
-accepts too — the rejections move an apply-time failure to build time. One
-upstream constraint is deliberately **not** enforced: `BackoffLimitPerIndex`'s
-field doc says per-index backoff only applies when the pod restart policy is
-`Never`, but `ValidateJobSpec` does not check it and neither does this parser
-— the schema description carries the constraint instead. Refusing a
-combination the API server accepts would be this projection inventing a rule,
-which is a different thing from a refusal of a field that upstream accepts and
-then provably never reads.
+Every other value rule is left to the API server: `activeDeadlineSeconds`
+bounds, `completionMode` against `completions`, `backoffLimitPerIndex` and
+`maxFailedIndexes`, the shapes of `successPolicy` and `podFailurePolicy`
+(including its `restartPolicy: Never` requirement), `managedBy`, and
+`restartPolicy` other than `Never` or `OnFailure`. A document that breaks one
+builds, and the apply is refused where the API server is the authority. This
+moves those refusals from build time to apply time.
 
-Two rejections go the other way — stricter than `ValidateJobSpec`, because the
-field's own documented contract in `k8s.io/api/batch/v1` is stricter than the
-validator that is supposed to enforce it. `activeDeadlineSeconds: 0` is refused
-although the validator only requires non-negative, because the field doc says
-"value must be positive integer". An empty `successPolicy.rules[].succeededIndexes`
-is refused although the validator's index parser returns "no indexes, no error"
-for it, because the field doc says "At least one element is required". Both
-follow the documented contract rather than the gap in its enforcement. A third,
-`podFailurePolicy.rules[].onPodConditions[].status: ""`, is covered with
-`podFailurePolicy` below. These three are called out here because they are the
-only places a document this parser refuses would in fact have applied.
-
-`podFailurePolicy` is published by both `job` and
-`cronjob`, through the same shared parser as the rest of the table. Its rules
-are ported from `validatePodFailurePolicy` / `validatePodFailurePolicyRule`,
-with the differences below.
-
-**Two checks run at emission rather than at parse time**, in
-`validateJobPodFailurePolicyAgainstTemplate`, because both read the built pod
-template rather than the property map: upstream requires
-`restartPolicy: Never` alongside a `podFailurePolicy` (these components
-default it to `OnFailure`, so a document authoring only the policy is refused
-with a message naming the restart policy), and `onExitCodes.containerName`
-must name a container the template actually carries — the component's own
-container or one of its `initContainers`. Checking the emitted template rather
-than the config is what keeps the check from drifting from what is written,
-the same reason the component-name check in `createJob` reads the emitted
-name.
-
-**One place this parser is deliberately no stricter than upstream**: an empty
-`rules` list is accepted. `validatePodFailurePolicy` has no "at least one
-rule" check — unlike `validateSuccessPolicy`, which does — and
-`PodFailurePolicy.Rules`' own field doc states only the cap, so unlike
-`activeDeadlineSeconds` and `succeededIndexes` above there is no documented
-contract to follow past the validator. An empty list is not inert either: a
-non-nil policy pins `podReplacementPolicy` and `restartPolicy` whatever its
-rules say.
-
-**`onPodConditions[].status` defaults to `True`**: a
-pattern that omits the key, or sets it to null, compiles to an explicit
-`status: "True"`, the value upstream's
-`SetDefaults_PodFailurePolicyOnPodConditionsPattern` fills in before
-validation. It is written out rather than left to the API server because the
-field carries no `omitempty`, so an unset one would be emitted as
-`status: ""`. An authored empty string is still refused, which is
-deliberately **stricter than upstream** — its defaulter fills `""` too — on
-the reading that an empty value is more likely a templating slip than a
-request for `True`. The default is additive: it only makes previously
-refused documents valid, and every previously valid document compiles
-identically.
-
-**Compatibility.** On `job` this is additive — the component type is newer
-than the key. On `cronjob` it is **behavior-changing**, and the reason is
-worth stating precisely: before this change an authored `podFailurePolicy` on
-a cronjob was not refused, it was **ignored**. At the time, property-schema
-validation ran on emitted elements only, never on authored documents, so a
-key no handler read was dropped in silence. A cronjob document that was
-already authoring `podFailurePolicy` therefore either compiles to a CronJob
-that now carries the policy, or stops building — most likely on the
-`restartPolicy: Never` requirement, since the component defaults to
-`OnFailure`. Under the additive test in `docs/oam/design-gvk.md` ("every
-previously valid document remains valid *and* compiles to the same output")
-that was not additive. The gap that made this true of *every* property ever
-added to an existing kind — the authored path not enforcing the Parser
-Strictness that document promises — belonged to the repo rather than to this
-change, and is fixed: `kurel build` now
-calls `ValidateAuthoredProperties` (`pkg/cmd/kurel/build.go:149`), which
-checks declared keys and shapes on the authored document directly.
-
-The `selector`/`manualSelector` rejection is a change of the same class as
-the earlier rejection of an authored `selector` on a workload kind, and rests on the same reasoning:
-`docs/oam/design-gvk.md` § Parser Strictness already promises that unknown
-fields in a launcher-native document are a build error, so neither key was
-ever part of a valid `launcher.gokure.dev/v1alpha1` job. Here it is not even a
-tightening — `job` is a new component type, so no document that built before
-this change can carry either key. The explicit rejection exists so the
-message says *why*: to a caller of the handler, which gets the reason alone,
-and in a document too, where the authored-property
-check appends the reason to its refusal of the undeclared key.
-
-The six CronJobSpec-only keys — `schedule`, `timeZone`, `concurrencyPolicy`,
-`startingDeadlineSeconds`, `successfulJobsHistoryLimit` and
-`failedJobsHistoryLimit` — are rejected for the same reason `selector` is, but
-the case they guard is sharper. A `job` component and a `cronjob`
-component differ by exactly these six properties, so retyping an existing
-`cronjob` document to `job` leaves every one of them behind. Left undeclared
-each would be dropped in silence, turning a schedule into a Job that runs
-once, immediately, at apply time — not a missing field, but work executed at a
-time nobody asked for. Each message names the job-level property that does the
-nearest equivalent job where one exists (`activeDeadlineSeconds` for
-`startingDeadlineSeconds`, `ttlSecondsAfterFinished` for both history limits),
-so the refusal is a redirection rather than only a "no".
-
-The properties this component introduces read an **explicit `null` as an
-omission**: `backoffLimitPerIndex: null` means "leave this unset", not "this is
-a value of the wrong type". That matches `pkg/oam`'s own
-`validatePropertyValue`. This is not special to this component: every
-optional-field helper in `common.go` routes its presence check through
-`authoredValue`, so each JobSpec field shared with `cronjob` that is read
-through one of them reads a null the same way on both kinds, and so does a
-field any other kind reads through one. The change to read an explicit `null` as an omission was
-one-directional — a null that used to be refused is now absence, and nothing
-that parsed before parses differently — so no document that built before
-stopped building.
-
-**The component name must be a DNS-1123 *label*, not merely a subdomain** — a
-rule this component shares with every workload kind; see "The main container
-is named after the component" under ["Common config"](common-config.md#common-config).
+**Policy.** As on `cronjob`: the pod template is held to
+`enforcePodTemplatePolicy`, with paths such as `template.spec.containers[0]
+"app": …`. No replica maximum applies, and no policy default is filled.
 
 ### Example
 

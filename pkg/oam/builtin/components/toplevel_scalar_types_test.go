@@ -24,7 +24,6 @@ var (
 		"version": "1.2.3",
 	}
 	imageBase = map[string]any{"image": "ghcr.io/org/app:v1"}
-	cronBase  = map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "0 2 * * *"}
 )
 
 var wrongTopLevel = []struct {
@@ -38,7 +37,6 @@ var wrongTopLevel = []struct {
 	{"webservice", webserviceViaRule{}, imageBase, "port", "8080", "port: must be an integer, got string"},
 	{"webservice", webserviceViaRule{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
 	{"worker", workerViaRule{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
-	{"cronjob", &components.CronjobHandler{}, cronBase, "restartPolicy", 1, "restartPolicy: must be a string, got int"},
 	{"statefulset", &components.StatefulsetHandler{}, imageBase, "serviceName", 3, "serviceName: must be a string, got int"},
 	{"oci", ociViaRule{}, ociBase, "path", 3, "path: must be a string, got int"},
 	{"oci", ociViaRule{}, ociBase, "prune", "false", "prune: must be a boolean, got string"},
@@ -103,12 +101,6 @@ func TestTopLevelOptional_PreservedBehaviour(t *testing.T) {
 		}
 		if got := cfg.(*components.StatefulsetConfig).ServiceName; got != "" {
 			t.Errorf("ServiceName = %q, want empty", got)
-		}
-	})
-	t.Run("cronjob empty restartPolicy is still refused", func(t *testing.T) {
-		err := convert(&components.CronjobHandler{}, "cronjob", withProp(cronBase, "restartPolicy", ""))
-		if err == nil || !strings.Contains(err.Error(), "invalid restartPolicy") {
-			t.Fatalf("error = %v, want the invalid restartPolicy refusal", err)
 		}
 	})
 	t.Run("webservice topologySpread false disables spreading", func(t *testing.T) {
@@ -224,9 +216,5 @@ func TestIntegerReaders_OverflowIsARangeError(t *testing.T) {
 		if err := convert(webserviceViaRule{}, "webservice", props); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %v, want it to contain %q", err, want)
 		}
-	}
-	if err := convert(&components.CronjobHandler{}, "cronjob", withProp(cronBase, "successfulJobsHistoryLimit", 1e20)); err == nil ||
-		!strings.Contains(err.Error(), "successfulJobsHistoryLimit: must be an integer between 0 and 2147483647, got 100000000000000000000") {
-		t.Errorf("history limit 1e20: error = %v, want a range error", err)
 	}
 }
