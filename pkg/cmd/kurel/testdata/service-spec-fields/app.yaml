@@ -8,7 +8,14 @@ spec:
     - name: web
       type: deployment
       properties:
-        image: ghcr.io/example/web:v1.0
+        selector:
+          matchLabels:
+            app: web
+        template:
+          spec:
+            containers:
+              - name: web
+                image: ghcr.io/example/web:v1.0
     - name: web-lb
       type: service
       properties:

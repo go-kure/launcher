@@ -77,7 +77,9 @@ See
 [Component Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components)
 and [Trait Handlers](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits)
 for the full catalogue; the `deployment` component — the kind-named projection
-of `appsv1.Deployment`, alongside the role-named `webservice` and `worker` —
+of `appsv1.Deployment`, since go-kure/launcher#1629 the whole `DeploymentSpec`
+strictly decoded (the reshaped form belongs to the role-named `webservice` and
+`worker`) —
 the `service` component — the kind-named projection of `corev1.Service`,
 emitting only a Service in front of pods another component owns —
 the `job` component — a run-to-completion workload sharing the whole

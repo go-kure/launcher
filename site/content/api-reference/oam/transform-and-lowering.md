@@ -510,7 +510,7 @@ its number and a non-TCP port is dropped. A member that remaps a port or names a
 `targetPort` gets the Service `selector` policy, so it opens the port the pods
 listen on. A member reports its pod template labels through an optional method on
 its config, `PodTemplateLabels() map[string]string`; a member without it counts as
-running no pods. Of the built-in pod kinds only the reshaped Deployment config has it (the type `role-deployment`, which `deployment` shares for now), the one pod
+running no pods. Of the built-in pod kinds only the reshaped Deployment config has it (the type `role-deployment`, which only `webservice` and `worker` lower into; the raw `deployment` has none), the one pod
 kind a lowering rule emits into a group. A rule that
 emits another pod kind into a group must add the method to that kind's config, or
 a routing member selecting its pods gets the Service `selector` policy.

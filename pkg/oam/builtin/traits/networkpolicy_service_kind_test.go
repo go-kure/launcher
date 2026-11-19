@@ -58,7 +58,7 @@ func apiServerComponent() oam.Component {
 	return oam.Component{
 		Name:       "api-server",
 		Type:       "deployment",
-		Properties: map[string]any{"image": "ghcr.io/example/api:1.0"},
+		Properties: rawDeploymentProps("api-server", "ghcr.io/example/api:1.0"),
 	}
 }
 

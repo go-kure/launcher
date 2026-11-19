@@ -510,7 +510,7 @@ func TestWorkloadNames_Refusals(t *testing.T) {
 		{
 			name: "an authored Deployment named as the webservice's",
 			doc: helmNamesApp(workload("web", "webservice", "        deploymentObjectName: workload\n") +
-				kind("deployment", "workload", "        image: ghcr.io/example/app:v1.0.0\n")),
+				kind("deployment", "workload", rawDeploymentYAML(8, "ghcr.io/example/app:v1.0.0"))),
 			want: `component "other": name collision: Deployment.apps "default/workload" is named by ` +
 				`component "web" (role "workload-deployment", set by deploymentObjectName) and by ` +
 				`component "other" (role "object", set by properties.objectName); give one of them another name`,

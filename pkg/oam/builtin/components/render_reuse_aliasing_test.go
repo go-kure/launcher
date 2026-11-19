@@ -275,7 +275,7 @@ func TestDeployment_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing
 		},
 	}
 
-	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", props, func(objects []*client.Object) {
+	second := renderTwice(t, &components.RoleDeploymentHandler{}, roleMemberType, props, func(objects []*client.Object) {
 		dep, ok := (*objects[0]).(*appsv1.Deployment)
 		if !ok {
 			t.Fatalf("first object is %T, want *appsv1.Deployment", *objects[0])
@@ -473,7 +473,7 @@ func schedulingAliasProps() map[string]any {
 // above came to be added outside the boundary of the test directly above this
 // one.
 func TestDeployment_SchedulingRenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
-	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", schedulingAliasProps(),
+	second := renderTwice(t, &components.RoleDeploymentHandler{}, roleMemberType, schedulingAliasProps(),
 		func(objects []*client.Object) {
 			dep, ok := (*objects[0]).(*appsv1.Deployment)
 			if !ok {
@@ -533,7 +533,7 @@ func TestDeployment_SchedulingRenderingTwiceIsUnaffectedByEditingTheFirstRender(
 // It is still worth keeping: if it ever FAILS, the element slice itself is
 // aliased and the problem is broader than the pointer fields.
 func TestDeployment_SchedulingShallowMutationPassesEvenWhenAliased(t *testing.T) {
-	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", schedulingAliasProps(),
+	second := renderTwice(t, &components.RoleDeploymentHandler{}, roleMemberType, schedulingAliasProps(),
 		func(objects []*client.Object) {
 			dep, ok := (*objects[0]).(*appsv1.Deployment)
 			if !ok {

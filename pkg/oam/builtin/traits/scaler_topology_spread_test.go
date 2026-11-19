@@ -46,7 +46,7 @@ func spreadScalerTransformer(spread oam.TraitHandler) *oam.Transformer {
 
 func transformSpreadScaler(spread oam.TraitHandler, kind string, trs ...oam.Trait) (*stack.Cluster, error) {
 	return transformSpreadScalerIn(spread, nil, []oam.Component{{
-		Name: "app", Type: kind, Properties: map[string]any{"image": "ghcr.io/org/app:v1"}, Traits: trs,
+		Name: "app", Type: kind, Properties: appProps(kind), Traits: trs,
 	}})
 }
 
@@ -225,7 +225,7 @@ func TestScalerSpread_MinimumAndPolicy(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/min%d", policyName, minReplicas), func(t *testing.T) {
 				scaler := scalerTrait(map[string]any{"minReplicas": int(minReplicas), "maxReplicas": 5})
 				cluster, err := transformSpreadScalerIn(&traits.TopologySpreadHandler{}, policy, []oam.Component{{
-					Name: "app", Type: "deployment", Properties: map[string]any{"image": "ghcr.io/org/app:v1"},
+					Name: "app", Type: "deployment", Properties: appProps("deployment"),
 					Traits: []oam.Trait{scaler, spread},
 				}})
 				if err != nil {
@@ -245,18 +245,14 @@ func TestScalerSpread_MinimumAndPolicy(t *testing.T) {
 // is unchanged.
 func TestScalerSpread_AScalerScalesOnlyItsOwnDeployment(t *testing.T) {
 	spread := oam.Trait{Type: "topology-spread", Properties: map[string]any{}}
-	props := func(extra map[string]any) map[string]any {
-		out := map[string]any{"image": "ghcr.io/org/app:v1"}
-		for k, v := range extra {
-			out[k] = v
-		}
-		return out
+	props := func(name string, extra map[string]any) map[string]any {
+		return rawDeploymentProps(name, "ghcr.io/org/app:v1", extra)
 	}
 	cluster, err := transformSpreadScalerIn(&traits.TopologySpreadHandler{}, nil, []oam.Component{
-		{Name: "app", Type: "deployment", Properties: props(nil),
+		{Name: "app", Type: "deployment", Properties: props("app", nil),
 			Traits: []oam.Trait{scalerTrait(map[string]any{"minReplicas": 3, "maxReplicas": 5}), spread}},
-		{Name: "other", Type: "deployment", Properties: props(nil), Traits: []oam.Trait{spread}},
-		{Name: "plain", Type: "deployment", Properties: props(map[string]any{"replicas": 2}), Traits: []oam.Trait{spread}},
+		{Name: "other", Type: "deployment", Properties: props("other", nil), Traits: []oam.Trait{spread}},
+		{Name: "plain", Type: "deployment", Properties: props("plain", map[string]any{"replicas": 2}), Traits: []oam.Trait{spread}},
 	})
 	if err != nil {
 		t.Fatalf("transform: %v", err)
@@ -294,7 +290,7 @@ func TestScalerSpread_ASameNamedDeploymentInAnotherNamespaceIsNotScaled(t *testi
 		"  template:\n    metadata:\n      labels:\n        app: web\n" +
 		"    spec:\n      containers:\n      - name: web\n        image: ghcr.io/org/web:v1\n"
 	cluster, err := transformSpreadScalerIn(&traits.TopologySpreadHandler{}, nil, []oam.Component{
-		{Name: "web", Type: "deployment", Properties: map[string]any{"image": "ghcr.io/org/web:v1"},
+		{Name: "web", Type: "deployment", Properties: rawDeploymentProps("web", "ghcr.io/org/web:v1"),
 			Traits: []oam.Trait{scalerTrait(map[string]any{"minReplicas": 3, "maxReplicas": 5}), spread}},
 		{Name: "elsewhere", Type: "manifests", Properties: map[string]any{"inline": inline},
 			Traits: []oam.Trait{spread}},
@@ -342,7 +338,7 @@ func TestScalerSpread_RefusesNonMatchLabelsSelectorUnderAScalerAtMinOne(t *testi
 			"  template:\n    metadata:\n      labels:\n        app: web\n" +
 			"    spec:\n      containers:\n      - name: web\n        image: ghcr.io/org/web:v1\n"
 		cluster, err := transformSpreadScalerIn(&traits.TopologySpreadHandler{}, nil, []oam.Component{
-			{Name: "web", Type: "deployment", Properties: map[string]any{"image": "ghcr.io/org/web:v1"},
+			{Name: "web", Type: "deployment", Properties: rawDeploymentProps("web", "ghcr.io/org/web:v1"),
 				Traits: []oam.Trait{scalerTrait(map[string]any{"minReplicas": minReplicas, "maxReplicas": 5})}},
 			{Name: "adopted", Type: "manifests", Properties: map[string]any{"inline": inline},
 				Traits: []oam.Trait{spread}},

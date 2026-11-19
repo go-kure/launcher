@@ -153,12 +153,13 @@ func TestMountOptions_Refusals(t *testing.T) {
 func TestMountOptions_SubPathAndSubPathExprShareWording(t *testing.T) {
 	refusal := func(field, value string) string {
 		t.Helper()
-		h, base := kindProps(t, "deployment")
+		// worker stands for the reshaped deployment parser (go-kure/launcher#1629).
+		h, base := kindProps(t, "worker")
 		mount := map[string]any{"name": "data", "mountPath": "/data", field: value}
 		props := withProps(base, map[string]any{
 			"initContainers": []any{containerWithMount(mount, nil)},
 		})
-		_, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: "deployment", Properties: props}, "default")
+		_, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: "worker", Properties: props}, "default")
 		if err == nil {
 			t.Fatalf("%s %q: expected an error, got none", field, value)
 		}
@@ -195,7 +196,8 @@ func TestMountOptions_Accepts(t *testing.T) {
 	for _, listKey := range []string{"initContainers", "sidecars"} {
 		for _, tc := range cases {
 			t.Run(listKey+"/"+tc.name, func(t *testing.T) {
-				h, base := kindProps(t, "deployment")
+				// worker stands for the reshaped deployment parser (go-kure/launcher#1629).
+				h, base := kindProps(t, "worker")
 				mount := map[string]any{"name": "data", "mountPath": "/data"}
 				for k, v := range tc.mount {
 					mount[k] = v
@@ -203,7 +205,7 @@ func TestMountOptions_Accepts(t *testing.T) {
 				props := withProps(base, map[string]any{
 					listKey: []any{containerWithMount(mount, tc.sc)},
 				})
-				if _, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: "deployment", Properties: props}, "default"); err != nil {
+				if _, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: "worker", Properties: props}, "default"); err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
 			})

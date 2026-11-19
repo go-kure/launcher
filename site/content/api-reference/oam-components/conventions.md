@@ -43,9 +43,10 @@ generated object is deep-copied on the way out: the claim template's `selector`,
 `resources.limits`, `dataSourceRef`, `volumeMode` and `volumeAttributesClassName`, and at
 the workload level `updateStrategy` (whose struct holds a pointer, so `*c.UpdateStrategy`
 alone would not be enough), `revisionHistoryLimit`, `persistentVolumeClaimRetentionPolicy`
-and `ordinals`. The deployment kind projects the same two shapes and follows the same rule:
-`strategy` (holding a `*RollingUpdateDeployment`), `revisionHistoryLimit` and
-`progressDeadlineSeconds`. `applyJobSpec` follows the same rule for the `job` and `cronjob`
+and `ordinals`. The `webservice` and `worker` roles follow the same rule for the `DeploymentSpec`
+shapes they project: `strategy` (holding a `*RollingUpdateDeployment`), `revisionHistoryLimit` and
+`progressDeadlineSeconds`. The raw `deployment` kind deep-copies its whole authored spec onto the
+Deployment. `applyJobSpec` follows the same rule for the `job` and `cronjob`
 kinds: its ten scalar pointers go through the generic `copyPtr`, and `successPolicy` and
 `podFailurePolicy` — whose structs each own a slice of rules — through `DeepCopy`.
 The pod template every workload kind shares follows it too: `buildPodSpec` starts from a
@@ -68,7 +69,7 @@ valued at `oam.ComponentLabelValue(<component>)`, never the raw component name �
 Authored values are emitted as written: an authored `selector` on a `service` component
 replaces the generated one and is not projected, and a type that emits authored objects
 (`passthrough`, for one) adds no `app` label. The one authored value that is checked is
-an `app` label on the pod template of a `replicaset` or `replicationcontroller` component, which gets the generated
+an `app` label on the pod template of a `deployment`, `replicaset` or `replicationcontroller` component, which gets the generated
 label beside its authored ones: the component's own label value is kept, another is
 refused. A component name
 is a DNS-1123 subdomain (up to 253 characters), a label value at most 63: the function
@@ -140,7 +141,7 @@ spec's own `externalLabels` field, under its upstream name.
 
 ```yaml
 - name: web
-  type: deployment
+  type: webservice
   properties:
     image: ghcr.io/example/web:1.0.0
     labels:
@@ -186,16 +187,18 @@ it on the object through `kindObject`, the one helper every kind returns its obj
 
 ### The pod template's labels and annotations (`podMetadata`)
 
-`labels` and `annotations` above go on the object and never on a pod template. The five kinds
-whose spec holds a pod template the author does not write whole (`deployment`, `statefulset`,
+`labels` and `annotations` above go on the object and never on a pod template. The four kinds
+whose spec holds a pod template the author does not write whole (`statefulset`,
 `daemonset`, `job` and `cronjob`) take a fourth property, `podMetadata`, for the pod template's
 own metadata. On a `cronjob` it is the pod template inside the job
 template, not the CronJob's or the job template's metadata. `webservice` and `worker` take it
-too, with the same name and shape as `deployment`: the rule hands it to
-its deployment member, so it lands on that Deployment's pod template and nowhere else. The
+too, with the same name and shape as `statefulset`: the rule hands it to
+its `role-deployment` member, so it lands on that Deployment's pod template and nowhere else. The
 Service a `webservice` generates selects on the component's `app` label alone, so an authored
 label is on the pods and not in the Service's selector. A document moves a workload between
-`webservice`, `worker` and `deployment` without renaming it.
+`webservice` and `worker` without renaming it. The kinds that take a pod template whole
+(`deployment`, `replicaset`, `replicationcontroller`) have no `podMetadata`: the template's
+metadata is `template.metadata`, as authored.
 
 ```yaml
 properties:
@@ -346,7 +349,7 @@ the kind emits for a whole expression is accepted, and the same object with the 
 type writes, the object is accepted again, which is why the omission is refused where the
 component is read.
 
-The walk covers the kinds that decode a type. The hand-parsed kinds (`deployment`, `daemonset`,
+The walk covers the kinds that decode a type, the raw `deployment` among them. The hand-parsed kinds (`daemonset`,
 `job`, `cronjob`, `statefulset`, `persistentvolumeclaim`) hold their selectors through their own
 parser (`parseLabelSelectorOpts`), which refuses the same and more, so their absence from the
 test's list is not a gap.
@@ -601,11 +604,13 @@ an explicit field assignment. Two consequences a reader needs:
 Deployment, StatefulSet and DaemonSet all require `spec.selector` and get no
 server-side default for it, so each handler assigns
 `&metav1.LabelSelector{MatchLabels: …}` from the same helper that produced
-`spec.template.metadata.labels` — `deploymentComponentLabels` for `deployment`
-and for `worker`, which lowers to a `role-deployment` component (its affinity selector
+`spec.template.metadata.labels` — `deploymentComponentLabels` for `worker`,
+which lowers to a `role-deployment` component (its affinity selector
 uses `appLabels`), and `appLabels` for `webservice`, `statefulset` and `daemonset` (both
 return a fresh `{"app": <label value>}` map, per the ownership rule above, valued
-as [The `app` label](#the-app-label) describes). This is
+as [The `app` label](#the-app-label) describes). The raw `deployment` is the exception:
+its `selector` is authored and required, and the handler only adds the `app` label to
+the template and refuses a selector that the label would stop matching. This is
 the one field the compiler cannot check: a selector that disagrees with the
 template labels compiles and is refused by the apiserver at apply time. The labels an
 author adds with `podMetadata` go on the pod template only, so they cannot make the two

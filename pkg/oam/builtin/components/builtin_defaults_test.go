@@ -14,9 +14,12 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// The five handler-built workload kinds report the values their own parser fills
-// when the author wrote none (go-kure/launcher#1580). These tests read the
-// report through oam.BuiltinDefaultReporter, as the transform does.
+// The handler-built workload kinds with a reshaped parser report the values
+// their own parser fills when the author wrote none (go-kure/launcher#1580):
+// the role member `role-deployment` (the kind-named `deployment` is raw since
+// go-kure/launcher#1629 and fills nothing) and statefulset, daemonset, job and
+// cronjob. These tests read the report through oam.BuiltinDefaultReporter, as
+// the transform does.
 
 type configBuilder interface {
 	ToApplicationConfig(*oam.Component, string) (stack.ApplicationConfig, error)
@@ -26,11 +29,11 @@ var builtinKinds = map[string]struct {
 	handler configBuilder
 	base    map[string]any
 }{
-	"deployment":  {&components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	"statefulset": {&components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "app-headless"}},
-	"daemonset":   {&components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	"job":         {&components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	"cronjob":     {&components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "0 2 * * *"}},
+	roleMemberType: {&components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
+	"statefulset":  {&components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "app-headless"}},
+	"daemonset":    {&components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
+	"job":          {&components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
+	"cronjob":      {&components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "0 2 * * *"}},
 }
 
 func newKindConfig(t *testing.T, kind string, props map[string]any, traits ...oam.Trait) stack.ApplicationConfig {
@@ -117,11 +120,11 @@ type builtinRow struct {
 }
 
 func builtinRows() []builtinRow {
-	allPods := []string{"deployment", "statefulset", "daemonset", "job", "cronjob"}
+	allPods := []string{roleMemberType, "statefulset", "daemonset", "job", "cronjob"}
 	return []builtinRow{
-		{name: "replicas", kinds: []string{"deployment", "statefulset"}, want: []string{"replicas"},
+		{name: "replicas", kinds: []string{roleMemberType, "statefulset"}, want: []string{"replicas"},
 			authored: map[string]any{"replicas": 1}, gone: []string{"replicas"}},
-		{name: "replicas null reads as omitted", kinds: []string{"deployment", "statefulset"},
+		{name: "replicas null reads as omitted", kinds: []string{roleMemberType, "statefulset"},
 			props: map[string]any{"replicas": nil}, want: []string{"replicas"}},
 		{name: "restartPolicy", kinds: []string{"job", "cronjob"}, want: []string{"restartPolicy"},
 			authored: map[string]any{"restartPolicy": "OnFailure"}, gone: []string{"restartPolicy"}},
@@ -140,7 +143,7 @@ func builtinRows() []builtinRow {
 		{name: "init container port protocol", kinds: allPods, props: map[string]any{"initContainers": init1(ctrPorts)},
 			authored: map[string]any{"initContainers": init1([]any{map[string]any{"containerPort": 8080, "protocol": "TCP"}, map[string]any{"containerPort": 9090, "protocol": "UDP"}})},
 			gone:     []string{"initContainers[0].ports[0].protocol"}},
-		{name: "sidecar port protocol", kinds: []string{"deployment", "statefulset", "daemonset"}, props: map[string]any{"sidecars": side1(ctrPorts)},
+		{name: "sidecar port protocol", kinds: []string{roleMemberType, "statefulset", "daemonset"}, props: map[string]any{"sidecars": side1(ctrPorts)},
 			authored: map[string]any{"sidecars": side1([]any{map[string]any{"containerPort": 8080, "protocol": "TCP"}, map[string]any{"containerPort": 9090, "protocol": "UDP"}})},
 			gone:     []string{"sidecars[0].ports[0].protocol"}},
 		{name: "pod failure policy condition status", kinds: []string{"job", "cronjob"},
@@ -169,13 +172,13 @@ func expectedPaths(kind string, r builtinRow) []string {
 		want = append(want, "sidecars[0].ports[0].protocol")
 	case "pvc volume accessModes":
 		want = append(want, "volumes[0].accessModes")
-		if kind == "deployment" {
+		if kind == roleMemberType {
 			want = append(want, "strategy.type")
 		}
 	}
 	// What a bare kind always carries.
 	switch kind {
-	case "deployment", "statefulset":
+	case roleMemberType, "statefulset":
 		want = append(want, "replicas")
 	case "job":
 		want = append(want, "restartPolicy")
@@ -250,7 +253,7 @@ func TestBuiltinDefaults_ReportedFillsAreReal(t *testing.T) {
 // TestBuiltinDefaults_RefNamesTheKindAndTheFill: the ref is the kind and the path,
 // item indexes kept.
 func TestBuiltinDefaults_RefNamesTheKindAndTheFill(t *testing.T) {
-	cfg := newKindConfig(t, "deployment", map[string]any{"ports": ctrPorts})
+	cfg := newKindConfig(t, roleMemberType, map[string]any{"ports": ctrPorts})
 	got := reportedBuiltin(cfg)
 	if got["replicas"] != "deployment.replicas" || got["ports[0].protocol"] != "deployment.ports[0].protocol" {
 		t.Errorf("refs = %v", got)
@@ -262,7 +265,7 @@ func TestBuiltinDefaults_RefNamesTheKindAndTheFill(t *testing.T) {
 // as policy and never as builtin. A default equal to the built-in value is still
 // the policy's.
 func TestBuiltinDefaults_PolicyWinsTheReplicasPath(t *testing.T) {
-	for _, kind := range []string{"deployment", "statefulset"} {
+	for _, kind := range []string{roleMemberType, "statefulset"} {
 		for _, dflt := range []int32{1, 3} {
 			t.Run(kind, func(t *testing.T) {
 				cfg := newKindConfig(t, kind, nil)
@@ -288,7 +291,7 @@ func TestBuiltinDefaults_PolicyWinsTheReplicasPath(t *testing.T) {
 // without spec.replicas, so no fill happens and none is reported.
 func TestBuiltinDefaults_ScalerOwnsTheReplicaCount(t *testing.T) {
 	scaler := oam.Trait{Type: "scaler", Properties: map[string]any{"minReplicas": 1, "maxReplicas": 2}}
-	for _, kind := range []string{"deployment", "statefulset"} {
+	for _, kind := range []string{roleMemberType, "statefulset"} {
 		t.Run(kind, func(t *testing.T) {
 			cfg := newKindConfig(t, kind, nil, scaler)
 			if _, ok := reportedBuiltin(cfg)["replicas"]; ok {
@@ -351,7 +354,7 @@ func TestBuiltinDefaults_OnePathOneSource(t *testing.T) {
 	}
 }
 
-// TestBuiltinDefaults_RecreateStrategyForANonRWXClaim: a deployment with a claim
+// TestBuiltinDefaults_RecreateStrategyForANonRWXClaim: a role-deployment with a claim
 // that is not ReadWriteMany is built with the Recreate strategy unless the author
 // wrote one. The fill is reported at strategy.type from the same decision Generate
 // takes, over a matrix of authored and absent.
@@ -369,7 +372,7 @@ func TestBuiltinDefaults_RecreateStrategyForANonRWXClaim(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := newKindConfig(t, "deployment", tc.props)
+			cfg := newKindConfig(t, roleMemberType, tc.props)
 			_, reported := reportedBuiltin(cfg)["strategy.type"]
 			if reported != tc.wantFill {
 				t.Errorf("strategy.type reported = %v, want %v", reported, tc.wantFill)
@@ -378,7 +381,7 @@ func TestBuiltinDefaults_RecreateStrategyForANonRWXClaim(t *testing.T) {
 			if tc.wantFill {
 				written := maps.Clone(tc.props)
 				written["strategy"] = map[string]any{"type": "Recreate"}
-				if a, b := generatedJSON(t, cfg), generatedJSON(t, newKindConfig(t, "deployment", written)); a != b {
+				if a, b := generatedJSON(t, cfg), generatedJSON(t, newKindConfig(t, roleMemberType, written)); a != b {
 					t.Errorf("authoring strategy.type Recreate changed the objects:\n%s\n%s", a, b)
 				}
 			}
@@ -411,7 +414,7 @@ func TestBuiltinDefaults_StatefulSetClaimTemplateAccessModes(t *testing.T) {
 // the path with its indexes, for a parse-time fill and a generation-time fill of a
 // container list entry alike.
 func TestBuiltinDefaults_RefsAreKindAndFullPath(t *testing.T) {
-	cfg := newKindConfig(t, "deployment", map[string]any{"initContainers": init1(ctrPorts)})
+	cfg := newKindConfig(t, roleMemberType, map[string]any{"initContainers": init1(ctrPorts)})
 	r, ok := cfg.(oam.BuiltinDefaultReporter)
 	if !ok {
 		t.Fatalf("%T does not report built-in defaults", cfg)

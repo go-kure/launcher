@@ -422,12 +422,14 @@ spec:
 		props: map[string]any{"attachRequired": false},
 	},
 	// daemonset and statefulset emit no Service since go-kure/launcher#690, so
-	// their long-name refusal is the container name's, as deployment's.
+	// their long-name refusal is the container name's, as role-deployment's.
 	"daemonset": {
 		props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1,
 	},
+	// deployment is raw since go-kure/launcher#1629: its container is named by the
+	// author, not after the component, so it takes the long name as replicaset does.
 	"deployment": {
-		props: workloadProps(map[string]any{"replicas": 3}), longRefusal: containerNameRefusal, labelled: true, selectors: 1,
+		props: rawDeploymentPropsWith(map[string]any{"replicas": 3}), labelled: true, selectors: 1,
 	},
 	// An EndpointSlice is identity and the authored fields too. It selects no
 	// pod: it lists addresses, and belongs to a Service through a label the
@@ -878,7 +880,7 @@ var traitLabelFixtures = map[string]traitLabelFixture{
 	"prune-protection": {longHost: true},
 	"force-replace":    {longHost: true},
 	"security-context": {props: map[string]any{"psaLevel": "restricted"}},
-	"topology-spread":  {host: "deployment", hostProps: workloadProps(map[string]any{"replicas": 3}), selectors: 3},
+	"topology-spread":  {host: "deployment", hostProps: rawDeploymentPropsWith(map[string]any{"replicas": 3}), selectors: 3},
 	"disruption":       {props: map[string]any{"minAvailable": 1}, selectors: 3},
 }
 

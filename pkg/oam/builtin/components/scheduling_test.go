@@ -11,15 +11,16 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// schedulingError runs the deployment handler over props and returns the error,
-// for the rejection tables below.
+// schedulingError runs the role-deployment handler (the reshaped deployment
+// parser, go-kure/launcher#1629) over props and returns the error, for the
+// rejection tables below.
 func schedulingError(t *testing.T, props map[string]any) error {
 	t.Helper()
 	props["image"] = "nginx:1.27"
-	h := &components.DeploymentHandler{}
+	h := &components.RoleDeploymentHandler{}
 	_, err := h.ToApplicationConfig(&oam.Component{
 		Name:       "app",
-		Type:       "deployment",
+		Type:       roleMemberType,
 		Properties: props,
 	}, "default")
 	return err
@@ -843,7 +844,7 @@ func TestDeploymentScheduling_MatchFieldsSchemaMatchesParser(t *testing.T) {
 		}})
 	}
 
-	root := (&components.DeploymentHandler{}).PropertySchema()
+	root := (&components.RoleDeploymentHandler{}).PropertySchema()
 	affinity, ok := root["affinity"]
 	if !ok {
 		t.Fatal("PropertySchema has no affinity")

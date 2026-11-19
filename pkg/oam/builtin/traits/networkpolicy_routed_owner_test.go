@@ -40,7 +40,7 @@ func apiRouter(trait oam.Trait) oam.Component {
 	return oam.Component{
 		Name:       "api",
 		Type:       "deployment",
-		Properties: map[string]any{"image": "ghcr.io/example/api:1.0"},
+		Properties: rawDeploymentProps("api", "ghcr.io/example/api:1.0"),
 		Traits:     []oam.Trait{trait},
 	}
 }

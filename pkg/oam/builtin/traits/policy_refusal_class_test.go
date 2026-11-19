@@ -57,7 +57,7 @@ func TestPolicyRefusalClass_TraitSubApplication(t *testing.T) {
 				Metadata:   oam.Metadata{Name: "pkg", Namespace: "default"},
 				Spec: oam.ApplicationSpec{Components: []oam.Component{{
 					Name: "app", Type: "deployment",
-					Properties: map[string]any{"image": "ghcr.io/org/app:v1", "replicas": 1},
+					Properties: rawDeploymentProps("app", "ghcr.io/org/app:v1", map[string]any{"replicas": 1}),
 					Traits:     []oam.Trait{tc.trait},
 				}}},
 			}

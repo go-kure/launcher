@@ -179,7 +179,7 @@ func TestPolicyDefaultLimit_ARefusedConfigIsRefusedTheSameWayAgain(t *testing.T)
 // built through the Go API can hold a request above its limit without the
 // parser having seen it; it is refused with the parser's own words.
 func TestPolicyDefaultLimit_ALimitThePolicyDidNotFillIsNotBlamedOnIt(t *testing.T) {
-	cfg := objects2Config(t, &components.DeploymentHandler{}, "deployment", map[string]any{
+	cfg := objects2Config(t, &components.RoleDeploymentHandler{}, roleMemberType, map[string]any{
 		"image":     "ghcr.io/org/app:v1",
 		"resources": map[string]any{"requests": map[string]any{"cpu": "100m"}, "limits": map[string]any{"cpu": "500m"}},
 	})

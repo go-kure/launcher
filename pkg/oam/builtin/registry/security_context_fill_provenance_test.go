@@ -69,42 +69,45 @@ func securityCases() []securityCase {
 	allAuthored := map[string]any{"runAsNonRoot": true, "allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true}
 	podAuthored := map[string]any{"runAsNonRoot": true}
 	extra := []any{map[string]any{"name": "extra", "image": "registry.example/extra:1"}}
+	// The workload is the raw deployment (go-kure/launcher#1629): the pod's
+	// context is template.spec.securityContext, the main container's is the first
+	// container's, and a sidecar is a container after the first.
 	return []securityCase{
-		{"restricted on a workload that authors nothing", spreadDeployment(nil, securityTrait(restricted)), all},
-		{"baseline adds nothing", spreadDeployment(nil, securityTrait(map[string]any{"psaLevel": "baseline"})), nil},
-		{"privileged adds nothing", spreadDeployment(nil, securityTrait(map[string]any{"psaLevel": "privileged"})), nil},
+		{"restricted on a workload that authors nothing", rawWorkload(nil, nil, nil, securityTrait(restricted)), all},
+		{"baseline adds nothing", rawWorkload(nil, nil, nil, securityTrait(map[string]any{"psaLevel": "baseline"})), nil},
+		{"privileged adds nothing", rawWorkload(nil, nil, nil, securityTrait(map[string]any{"psaLevel": "privileged"})), nil},
 		// A Windows pod accepts runAsNonRoot alone, so that is all the profile fills.
-		{"a Windows pod", spreadDeployment(map[string]any{"os": map[string]any{"name": "windows"}}, securityTrait(restricted)),
+		{"a Windows pod", rawWorkload(nil, map[string]any{"os": map[string]any{"name": "windows"}}, nil, securityTrait(restricted)),
 			[]string{"runAsNonRoot"}},
 		// A property the trait sets is the trait's, not a fill.
-		{"the trait sets runAsNonRoot", spreadDeployment(nil, securityTrait(map[string]any{"psaLevel": "restricted", "runAsNonRoot": true})),
+		{"the trait sets runAsNonRoot", rawWorkload(nil, nil, nil, securityTrait(map[string]any{"psaLevel": "restricted", "runAsNonRoot": true})),
 			[]string{"allowPrivilegeEscalation", "readOnlyRootFilesystem"}},
-		{"the trait sets all three", spreadDeployment(nil, securityTrait(map[string]any{
+		{"the trait sets all three", rawWorkload(nil, nil, nil, securityTrait(map[string]any{
 			"psaLevel": "restricted", "runAsNonRoot": true, "allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true})), nil},
 		// A value the workload authored stays, and is no fill.
-		{"the workload authors allowPrivilegeEscalation", spreadDeployment(map[string]any{
-			"securityContext": map[string]any{"allowPrivilegeEscalation": false}}, securityTrait(restricted)),
+		{"the workload authors allowPrivilegeEscalation", rawWorkload(
+			map[string]any{"securityContext": map[string]any{"allowPrivilegeEscalation": false}}, nil, nil, securityTrait(restricted)),
 			[]string{"readOnlyRootFilesystem", "runAsNonRoot"}},
-		{"the workload authors readOnlyRootFilesystem false", spreadDeployment(map[string]any{
-			"securityContext": map[string]any{"readOnlyRootFilesystem": false}}, securityTrait(restricted)),
+		{"the workload authors readOnlyRootFilesystem false", rawWorkload(
+			map[string]any{"securityContext": map[string]any{"readOnlyRootFilesystem": false}}, nil, nil, securityTrait(restricted)),
 			[]string{"allowPrivilegeEscalation", "runAsNonRoot"}},
 		// runAsNonRoot is filled on the pod and on each container, so it is
 		// reported while any of them has none.
-		{"the pod and the container author runAsNonRoot", spreadDeployment(map[string]any{
-			"podSecurityContext": podAuthored, "securityContext": podAuthored}, securityTrait(restricted)),
+		{"the pod and the container author runAsNonRoot", rawWorkload(
+			map[string]any{"securityContext": podAuthored}, map[string]any{"securityContext": podAuthored}, nil, securityTrait(restricted)),
 			[]string{"allowPrivilegeEscalation", "readOnlyRootFilesystem"}},
-		{"only the container authors runAsNonRoot", spreadDeployment(map[string]any{
-			"securityContext": podAuthored}, securityTrait(restricted)), all},
-		{"only the pod authors runAsNonRoot", spreadDeployment(map[string]any{
-			"podSecurityContext": podAuthored}, securityTrait(restricted)), all},
+		{"only the container authors runAsNonRoot", rawWorkload(
+			map[string]any{"securityContext": podAuthored}, nil, nil, securityTrait(restricted)), all},
+		{"only the pod authors runAsNonRoot", rawWorkload(
+			nil, map[string]any{"securityContext": podAuthored}, nil, securityTrait(restricted)), all},
 		// Everything authored on the pod and the main container: nothing is filled
 		// until a container with no context of its own is added.
-		{"everything is authored", spreadDeployment(map[string]any{
-			"podSecurityContext": podAuthored, "securityContext": allAuthored}, securityTrait(restricted)), nil},
-		{"a sidecar authors nothing", spreadDeployment(map[string]any{
-			"podSecurityContext": podAuthored, "securityContext": allAuthored, "sidecars": extra}, securityTrait(restricted)), all},
-		{"an init container authors nothing", spreadDeployment(map[string]any{
-			"podSecurityContext": podAuthored, "securityContext": allAuthored, "initContainers": extra}, securityTrait(restricted)), all},
+		{"everything is authored", rawWorkload(
+			map[string]any{"securityContext": allAuthored}, map[string]any{"securityContext": podAuthored}, nil, securityTrait(restricted)), nil},
+		{"a sidecar authors nothing", rawWorkload(
+			map[string]any{"securityContext": allAuthored}, map[string]any{"securityContext": podAuthored}, extra, securityTrait(restricted)), all},
+		{"an init container authors nothing", rawWorkload(
+			map[string]any{"securityContext": allAuthored}, map[string]any{"securityContext": podAuthored, "initContainers": extra}, nil, securityTrait(restricted)), all},
 	}
 }
 

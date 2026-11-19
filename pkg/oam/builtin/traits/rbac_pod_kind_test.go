@@ -65,7 +65,7 @@ func rbacSubject(t *testing.T, bundle *stack.Bundle) string {
 func TestRBACHandler_Apply_PodKindWithoutServiceAccountIsRefused(t *testing.T) {
 	for _, decorate := range []bool{false, true} {
 		_, err := rbacApp(t, &components.DeploymentHandler{}, "deployment",
-			map[string]any{"image": "ghcr.io/org/api:v1"}, decorate)
+			rawDeploymentProps("api", "ghcr.io/org/api:v1"), decorate)
 		if err == nil || !strings.Contains(err.Error(), "runs as no ServiceAccount") {
 			t.Errorf("decorated=%v: err = %v, want a refusal naming the missing ServiceAccount", decorate, err)
 		}
@@ -78,7 +78,7 @@ func TestRBACHandler_Apply_PodKindWithoutServiceAccountIsRefused(t *testing.T) {
 func TestRBACHandler_Apply_PodKindBindsAuthoredServiceAccount(t *testing.T) {
 	for _, decorate := range []bool{false, true} {
 		bundle, err := rbacApp(t, &components.DeploymentHandler{}, "deployment",
-			map[string]any{"image": "ghcr.io/org/api:v1", "serviceAccountName": "api-sa"}, decorate)
+			rawDeploymentProps("api", "ghcr.io/org/api:v1", rawPod(map[string]any{"serviceAccountName": "api-sa"})), decorate)
 		if err != nil {
 			t.Fatalf("decorated=%v: Apply: %v", decorate, err)
 		}

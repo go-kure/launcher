@@ -98,7 +98,7 @@ func exclusiveSites() []exclusiveSite {
 			handlerBoth: "exactly one of chart and chartRef", handlerNeither: "exactly one of chart and chartRef",
 		},
 		{
-			name: "envFrom", compType: "deployment", handler: &components.DeploymentHandler{}, keys: `"configMapRef" and "secretRef"`, nested: true,
+			name: "envFrom", compType: roleMemberType, handler: &components.RoleDeploymentHandler{}, keys: `"configMapRef" and "secretRef"`, nested: true,
 			both:        envFrom(map[string]any{"configMapRef": map[string]any{"name": "a"}, "secretRef": map[string]any{"name": "b"}}),
 			neither:     envFrom(map[string]any{"prefix": "P_"}),
 			handlerBoth: "must specify exactly one of configMapRef or secretRef", handlerNeither: "must specify exactly one of configMapRef or secretRef",
@@ -111,7 +111,7 @@ func exclusiveSites() []exclusiveSite {
 			handlerBoth: "source.ref sets branch, tag; an inline GitRepository takes exactly one of", handlerNeither: "requires source.ref with exactly one of branch, tag, semver, name, commit",
 		},
 		{
-			name: "volumes", compType: "deployment", handler: &components.DeploymentHandler{}, keys: `"mountPath" and "devicePath"`, nested: true,
+			name: "volumes", compType: roleMemberType, handler: &components.RoleDeploymentHandler{}, keys: `"mountPath" and "devicePath"`, nested: true,
 			both:        pvc(map[string]any{"mountPath": "/data", "devicePath": "/dev/xvda", "volumeMode": "Block"}),
 			emptyBeside: pvc(map[string]any{"mountPath": "", "devicePath": "/dev/xvda", "volumeMode": "Block"}),
 			neither:     pvc(map[string]any{"volumeMode": "Block"}),
@@ -125,7 +125,7 @@ func exclusiveSites() []exclusiveSite {
 			handlerBoth: "mountPath and devicePath are mutually exclusive", handlerNeither: "missing required field 'mountPath' (or 'devicePath'",
 		},
 		{
-			name: "resourceClaims", compType: "deployment", handler: &components.DeploymentHandler{}, keys: `"resourceClaimName" and "resourceClaimTemplateName"`, nested: true,
+			name: "resourceClaims", compType: roleMemberType, handler: &components.RoleDeploymentHandler{}, keys: `"resourceClaimName" and "resourceClaimTemplateName"`, nested: true,
 			both:        claim(map[string]any{"resourceClaimName": "x", "resourceClaimTemplateName": "y"}),
 			emptyBeside: claim(map[string]any{"resourceClaimName": "x", "resourceClaimTemplateName": ""}),
 			neither:     claim(nil),

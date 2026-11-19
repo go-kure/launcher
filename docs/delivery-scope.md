@@ -2347,7 +2347,9 @@ and by scope, whatever component or trait emits it.
   `daemonSetSpecRejectedKeys`, `jobSpecRejectedKeys`, in `deployment_spec.go`,
   `statefulset_spec.go`, `daemonset_spec.go` and `job.go`); each kind's sub-task decides
   whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
-  ticket.
+  ticket. (Since go-kure/launcher#1629 the `deployment` kind authors `selector` and
+  `template` itself, as the raw `DeploymentSpec`; `deploymentSpecRejectedKeys` now binds only
+  the `role-deployment` member that `webservice` and `worker` lower into.)
 - **Missing kinds:** the inventory's `missing` rows. The inventory has no `trait` row left: no kind is reachable only as a trait.
   The ticket adds the missing kinds group by group. A kind kure lacks is added to kure
   first.

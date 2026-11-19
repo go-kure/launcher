@@ -114,6 +114,9 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 18, daemonSetSpecPropertyKeys, false},
 		{"cronjob", (&CronjobHandler{}).PropertySchema(), 25, jobSpecPropertyKeys, true},
 		{"job", (&JobHandler{}).PropertySchema(), 19, jobSpecPropertyKeys, true},
+		// The reshaped deployment parser is the role member, which keeps this
+		// count (go-kure/launcher#1629). The kind-named `deployment` takes the
+		// upstream spec and is not merged from these fragments.
 		// 17, not 14: go-kure/launcher#412 added affinity, tolerations and
 		// topologySpreadConstraints as own keys on this kind. Verified a real
 		// own-key increase and not the collision this guard exists to catch —
@@ -121,7 +124,7 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		// deploymentSpecPropertyKeys, which is exactly why the merged count
 		// rises by three rather than staying flat. 18 since go-kure/launcher#280
 		// added the main container's `ports`, likewise in neither shared list.
-		{"deployment", (&DeploymentHandler{}).PropertySchema(), 19, deploymentSpecPropertyKeys, false},
+		{roleDeploymentMember, (&RoleDeploymentHandler{}).PropertySchema(), 19, deploymentSpecPropertyKeys, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

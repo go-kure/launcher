@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// The pod template metadata an author sets with `podMetadata` on the five
+// The pod template metadata an author sets with `podMetadata` on the reshaped
 // controller kinds (go-kure/launcher#1178) and on the webservice and worker
 // (go-kure/launcher#1216). The properties `labels` and
 // `annotations` of the same component stay on the object (component_object_
@@ -27,9 +27,9 @@ var podMetadataKinds = []struct {
 	selector  bool
 	job       bool
 }{
-	{typ: "deployment", kind: "Deployment", template: []string{"spec", "template"}, selector: true},
-	// The webservice and worker lower to a deployment member and take the
-	// property as it does (go-kure/launcher#1216).
+	// The webservice and worker lower to the role-deployment member, which takes
+	// the property (go-kure/launcher#1216). The raw deployment kind takes none: its
+	// pod template metadata is template.metadata (TestPodMetadata_RawDeploymentRefusesIt).
 	{typ: "webservice", kind: "Deployment", template: []string{"spec", "template"}, selector: true},
 	{typ: "worker", kind: "Deployment", template: []string{"spec", "template"}, selector: true},
 	{typ: "statefulset", kind: "StatefulSet", template: []string{"spec", "template"}, selector: true},
@@ -167,6 +167,18 @@ func TestPodMetadata_JobKeysAreOrdinaryElsewhere(t *testing.T) {
 				t.Errorf("the pod template carries labels %v, want job-name=nightly", tmpl)
 			}
 		})
+	}
+}
+
+// The raw deployment kind has no `podMetadata`: its pod template metadata is the
+// upstream template.metadata, so the reshaped property is an unsupported field
+// (go-kure/launcher#1629).
+func TestPodMetadata_RawDeploymentRefusesIt(t *testing.T) {
+	props := rawDeploymentProps("ghcr.io/example/app:v1.0.0")
+	props["podMetadata"] = map[string]any{"labels": map[string]any{podMetadataLabelKey: podMetadataLabelValue}}
+	_, err := renderLabelInvariantErr(t, labelInvariantApp("widget", "deployment", props, "", nil))
+	if err == nil || !strings.Contains(err.Error(), `unsupported field "podMetadata"`) {
+		t.Fatalf("err = %v\nwant a refusal naming unsupported field \"podMetadata\"", err)
 	}
 }
 

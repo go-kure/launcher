@@ -14,18 +14,19 @@ import (
 )
 
 // rawSchedulingByKind names, per kind-named workload, the raw corev1 scheduling
-// properties it publishes (scheduling.go). `deployment` has had all three since
-// go-kure/launcher#412 and `daemonset` its `tolerations` from before that;
+// properties it publishes (scheduling.go). The reshaped deployment parser (the
+// role member `role-deployment` since go-kure/launcher#1629) has had all three
+// since go-kure/launcher#412 and `daemonset` its `tolerations` from before that;
 // go-kure/launcher#790 fills in the rest kind by kind. The role kinds
 // (webservice, worker) are not here: they publish the affinity shorthand and
-// their own topologySpread opinion instead.
+// their own topologySpread opinion instead, and the raw `deployment` kind takes
+// them under `template.spec`.
 //
-// The parsers themselves are covered on `deployment` (scheduling_test.go). The
+// The parsers themselves are covered on the role member (scheduling_test.go). The
 // tests below cover what differs per kind: that the key is published, parsed,
 // rendered onto the pod template and copied, and that a key a kind does not
 // publish is refused rather than dropped.
 var rawSchedulingByKind = map[string][]string{
-	"deployment":  {"affinity", "tolerations", "topologySpreadConstraints"},
 	"statefulset": {"affinity", "tolerations", "topologySpreadConstraints"},
 	"daemonset":   {"affinity", "tolerations", "topologySpreadConstraints"},
 	"job":         {"affinity", "tolerations", "topologySpreadConstraints"},

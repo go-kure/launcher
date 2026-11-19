@@ -12,15 +12,18 @@ Validation and Example. Its implementation, history and tests are on the
 ### Properties
 
 **webservice / worker** — `image`, `replicas` (default 1), `port` (webservice),
-plus the full `DeploymentSpec`-level surface they share with `deployment` —
+plus the `DeploymentSpec`-level surface the two share —
 `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
 `progressDeadlineSeconds` (see ["Deployment-level
-properties"](common-config.md#deployment-level-properties-deployment-webservice-worker)). What still separates them from `deployment` is launcher's
-own opinions, which these two keep: `topologySpread` and the four-key
+properties"](common-config.md#deployment-level-properties-webservice-worker)).
+These two kinds own the reshaped form of a Deployment alone: the main container
+at the top level (`image`, `env`, `resources`, `probes`, `sidecars`), `podMetadata`,
+`volumes[].mountPath` and launcher's builtin fills. The kind-named `deployment`
+does not take that form (see [deployment](#deployment)). The two keep launcher's
+own opinions: `topologySpread` and the four-key
 `affinity` shorthand, and on `webservice` the `port` that drives the Service.
-Note the shorthand is what they keep — neither publishes the raw `corev1`
-`affinity` that `deployment` does. Both publish `tolerations` and
-`topologySpreadConstraints` as `deployment` does (see
+Neither publishes the raw `corev1` `affinity`. Both publish `tolerations` and
+`topologySpreadConstraints` as the `corev1` shapes (see
 ["Raw scheduling properties"](common-config.md#raw-scheduling-properties)); authored constraints need
 `topologySpread: false`.
 
@@ -201,34 +204,151 @@ and that addresses it by any other `portName` is refused at build time
 
 ### Properties
 
-**deployment** — the kind-named Deployment (see ["Deployment-level
-properties"](common-config.md#deployment-level-properties-deployment-webservice-worker)): the shared container-level, pod-level and
-`DeploymentSpec`-level surface, the last of which it now shares with
-`webservice` and `worker` rather than owning. What distinguishes it is mostly
-what it leaves out: no `topologySpread`, no four-key `affinity` shorthand, no
-`port`. It is not `worker` minus
-a few things either — it reads nulls as omissions across its whole surface,
-which the role kinds do not. The one thing it
-adds is the raw `corev1` scheduling surface the role kinds lack: `affinity`,
-`tolerations` and `topologySpreadConstraints` as the API shapes
-(see ["Raw scheduling properties"](common-config.md#raw-scheduling-properties)). That is the
-same distinction in the other direction — the role kinds carry the opinion,
-this kind carries the API.
+**deployment** is the kind-named projection of an apps/v1 Deployment, on the
+same recipe as `replicaset`: one schema key per json field of
+`appsv1.DeploymentSpec`, the property map decoded strictly into that type, and
+one Deployment named after the component in the build namespace, with the
+authored spec. The keys are `replicas`, `selector` (required), `template`
+(required; its pod spec is `template.spec`, with `containers` required),
+`strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused` and
+`progressDeadlineSeconds`. A key that is not one of them, at any depth, is
+refused (`properties do not decode into a apps/v1 DeploymentSpec: …`).
+
+**Breaking change (pre-GA, `v1alpha1`).** The kind used to take the reshaped
+form that `webservice` and `worker` still take (see ["Deployment-level
+properties"](common-config.md#deployment-level-properties-webservice-worker)).
+That form is gone from `deployment`, and a document that authors it is refused.
+Move each field as follows:
+
+| Was (reshaped `deployment`) | Is now |
+|---|---|
+| `image`, `command`, `args`, `env`, `envFrom`, `ports`, `workingDir`, `lifecycle` and the other main-container fields | `template.spec.containers[0].<field>`, in the upstream spelling |
+| `resources`, `securityContext` | `template.spec.containers[0].resources` and `.securityContext` (`unlimited` has no upstream form) |
+| `probes.readiness`, `probes.liveness`, `probes.startup` | `readinessProbe`, `livenessProbe`, `startupProbe` of the container |
+| `sidecars[]` | further entries of `template.spec.containers`; `initContainers[]` move to `template.spec.initContainers` |
+| `podMetadata` | `template.metadata` |
+| `podSecurityContext` | `template.spec.securityContext` |
+| `volumes[]` | `template.spec.volumes[]` as upstream `Volume` objects; `mountPath` moves to each container's `volumeMounts` |
+| `affinity`, `tolerations`, `topologySpreadConstraints` | the same names under `template.spec` |
+| `strategy`, `minReadySeconds`, `revisionHistoryLimit`, `paused`, `progressDeadlineSeconds`, `replicas` | unchanged, at the top level of `properties` |
+
+The selector was once builder-managed; it is now authored and required.
+
+**No launcher default.** The kind adds no default: no `replicas`, no resource
+requests or limits, no port `protocol`, and no labels or annotations on the
+Deployment object itself (the `labels` and `annotations` properties every kind
+accepts are the way to add them). It also does not set
+`automountServiceAccountToken: false`, which `webservice` and `worker` still
+set: **a pod with no `serviceAccountName` now mounts the namespace's default
+account's token**, as pods of the `pod` and `replicaset` kinds do. Set
+`template.spec.automountServiceAccountToken: false` to keep the old posture.
+An unset `replicas` stays unset, and the API server defaults it to 1. The
+fill report of the kind is empty.
 
 ### Outputs
 
-It emits no Service, and declares one endpoint per main-container
-`ports` entry (see ["Main container ports"](common-config.md#main-container-ports)).
+**The `app` label.** The handler adds one thing: `app: <component>` on the
+pod template's labels, beside the authored ones (see ["The `app` label"](conventions.md#the-app-label)).
+It is the label launcher's traits and Services select on. The selector is
+emitted as authored, and the Deployment itself gets no label of the handler's;
+the transform then sets the component label on the object and its template, as
+on every object a component owns.
+- An authored `template.metadata.labels.app` with the component's own label
+  value is kept. Any other value is refused, naming the component.
+- A selector that matches the authored template labels and would stop
+  matching once the label is added (`app` under `DoesNotExist`, or `NotIn` the
+  label value) is refused (``selector: rules out the label `app: web` …``). A
+  selector that cannot be read as one is refused with apimachinery's reason
+  (`selector: …`), as on `replicaset`.
+
+**Endpoints.** The kind declares one endpoint per port of
+`template.spec.containers[0]`, in the authored order (see ["Main container
+ports"](common-config.md#main-container-ports)). Containers after the first
+declare none. It emits no Service.
+
+**Traits.** `scaler` is available: the HorizontalPodAutoscaler scales the
+Deployment, and the Deployment is built without `spec.replicas`. An authored
+`replicas` beside a `scaler` is refused, as on `webservice`. `disruption` is
+admitted. The pod-spec traits (`security-context`, a `configmap` trait's
+`mountPath`, an `external-secret` trait's `envFrom` and `mountPath`) change the
+Deployment's pod template as they do on the other kinds. The `topology-spread` trait works
+when the selector is made of `matchLabels` only, and is refused when the
+template already carries `topologySpreadConstraints`. A routing trait needs an
+explicit Service (see ["Deployment-level
+properties"](common-config.md#deployment-level-properties-webservice-worker)).
+The `scaler` trait's non-RWX check does not apply: the kind has no `pvc` volume
+type and reports no claim.
+
+The config implements `oam.ServiceAccountNamer`, reading the template's
+`serviceAccountName` as the `pod` kind reads its own. No account is generated.
 
 ### Validation
 
-None stated in this section.
+**Refused when the component is read**, with or without a policy:
+- An unauthored `selector` or `template`. The Go type cannot omit the
+  selector, and launcher derives none.
+- Under `template.spec`, what the `pod` kind refuses of its own spec, by the
+  same checks and named by path (`template.spec.containers: required`,
+  `template.spec.priority: not authorable …`, `template.spec.ephemeralContainers`,
+  the image rule, duplicate container names).
+- `template.spec.activeDeadlineSeconds`. The API server forbids it on the pod
+  template of a Deployment.
+- A key that is not a field of the upstream type, a reshaped key such as
+  `image` or `sidecars` included.
+
+The API's other value rules (an empty selector, `restartPolicy` other than
+`Always`, a negative `replicas`) are left to the API server.
+
+**Policy.** `ApplyPolicy` holds `replicas` to the replica maximum, an unset
+one as the 1 the API server defaults it to, unless a `scaler` owns the count.
+It holds the pod template to the check the `pod` kind runs
+(`enforcePodTemplatePolicy`): the registry allowlist, the cpu and memory
+maxima, `privileged`, capabilities, host namespaces and volume sources, for
+every container and init container, named by its path in the properties
+(`template.spec.containers[0] "app": …`). It fills no policy default: a
+container without resources stays without. A limit the policy would have
+filled is not bounded where the author omits it, as on `pod`.
 
 ### Example
 
-The component in `pkg/cmd/kurel/testdata/deployment-ports/app.yaml`, built against the
-`cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares the
-two.
+The component in `pkg/cmd/kurel/testdata/deployment-ports/app.yaml` authors
+the spec as the API shapes it:
+
+```yaml
+- name: api
+  type: deployment
+  properties:
+    selector:
+      matchLabels:
+        app: api
+    template:
+      spec:
+        containers:
+          - name: api
+            image: ghcr.io/example/api:v1.0.0
+            ports:
+              - name: http
+                containerPort: 8080
+              - name: metrics
+                containerPort: 9090
+              - containerPort: 5353
+                protocol: UDP
+            readinessProbe:
+              httpGet:
+                path: /healthz
+                port: http
+            livenessProbe:
+              tcpSocket:
+                port: metrics
+            lifecycle:
+              preStop:
+                httpGet:
+                  path: /drain
+                  port: http
+```
+
+Built against the `cluster.yaml` beside it, it gives the `expected.yaml` beside
+it. The fixture test compares the two.
 
 ## service
 
@@ -733,9 +853,10 @@ traits and Services select on: a `networkpolicy` trait's policy matches the
 Pod by it, and a `service` component reaches it with `selector: {app:
 <component>}`. The transform
 then sets the component label, as on every object a component owns. It is a bare Pod: no controller recreates it, and it
-is not the workload shape of `webservice`, `worker` or `deployment` — a
+is not the workload shape of `webservice` or `worker` — a
 property of those (`image`, `ports`, `env` at the top level) is refused as
-not a PodSpec field.
+not a PodSpec field. A `deployment` holds a pod spec as this kind does, under
+`template.spec`.
 
 ### Outputs
 
@@ -857,8 +978,10 @@ registry. The one check holds it on every path by which a document brings
 a pod spec: this kind, the pod template of `replicaset`, `replicationcontroller`,
 `podtemplate` and `cnpg-pooler`, and the pod spec of a workload that
 template delivery (`helmtemplate`), `passthrough` or a `manifests` source
-carries. The components with a volume schema of their own (`webservice`,
-`worker`, `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`) take
+carries. The `deployment` kind holds its `template.spec.volumes` to the same
+checks, as the upstream `image` volume source. The components with a volume
+schema of their own (`webservice`,
+`worker`, `statefulset`, `daemonset`, `job`, `cronjob`) take
 an image volume only in the nested form of a `volumes` entry (`type: image`,
 `image: {reference: ...}`), where the registry allowlist
 holds it (`enforceVolumeSourcePolicy`) and `ValidateImageRef` holds its
@@ -1319,7 +1442,7 @@ names an object by `kind`, `name` and `apiVersion`; launcher points it
 at no component and does not look for the object in the document. To
 scale a workload component, name its object: the component name, or its
 `objectName`. **The guards the `scaler` trait applies to its own
-workload do not see this kind:** a `deployment`, `webservice` or
+workload do not see this kind:** a `webservice` or
 `worker` with a claim that is not ReadWriteMany refuses a `scaler` trait
 whose `maxReplicas` is above 1, and builds beside a
 `horizontalpodautoscaler` component that scales it further. That is the
@@ -1419,7 +1542,7 @@ With no Service, only the container-name rule applies (see
 | `minReadySeconds` | int ≥ 0 | Seconds a new pod must stay ready before it counts as available. | additive |
 | `revisionHistoryLimit` | int ≥ 0 | Superseded ControllerRevisions kept for rollback. | additive |
 | `selector` | — | **Rejected outright**, not silently dropped: the selector is builder-managed (`app: <component>`), must equal the generated template labels, and is immutable once created. | **Behavior-changing** |
-| `template` | — | **Rejected outright**, as on `deployment`: the pod template is projected from the component's own container and pod-level properties. A document was refused already, by the authored-property check; the parser now refuses it too, where a caller that skips that check had it dropped. | **Behavior-changing** for such a caller |
+| `template` | — | **Rejected outright**, as on `webservice` and `worker`: the pod template is projected from the component's own container and pod-level properties. A document was refused already, by the authored-property check; the parser now refuses it too, where a caller that skips that check had it dropped. | **Behavior-changing** for such a caller |
 
 ### Outputs
 
@@ -1603,7 +1726,7 @@ presence-gated, so a document authoring none of them emits no key for them.
 | `successPolicy` | object | `rules[]` (1..20) of `succeededIndexes` (increasing comma-separated intervals, every index < `completions`) and/or `succeededCount` (≤ `completions`, and ≤ the number of indexes named alongside it). Requires `Indexed`. An empty `succeededIndexes` is rejected rather than treated as unset: it denotes no indexes at all, so it would otherwise satisfy the at-least-one-field rule while naming nothing. | additive |
 | `podFailurePolicy` | object | `rules[]` (0..20), each with an `action` (`FailJob`\|`FailIndex`\|`Ignore`\|`Count`) and **exactly one** of `onExitCodes` (`operator` `In`\|`NotIn`, `values[]` of 1..255 exit codes in increasing order without duplicates, optional `containerName`) or `onPodConditions[]` (up to 20 `type`/`status` patterns; an omitted or null `status` defaults to `True`, an empty one is rejected). An empty `onPodConditions: []` alone is neither; beside `onExitCodes` it is both, as the rule's published `exclusive` group counts it. Requires `restartPolicy: Never`, and pins `podReplacementPolicy` to `Failed` when that is also authored. `FailIndex` additionally requires `backoffLimitPerIndex`. | **Behavior-changing** on `cronjob` (see below); additive on `job` |
 | `suspend` | bool | **`JobSpec.Suspend`** — create the job with no pods. Not the same field as `cronjob`'s `suspend`; see the `suspend` note in ["Common config"](common-config.md#common-config). | additive |
-| `selector`, `manualSelector`, `template` | — | **Rejected outright**, not silently dropped: the Job selector is generated by the job controller from a unique per-job label, and a hand-written one adopts other jobs' pods. `manualSelector` only has meaning alongside one. `template` is replaced wholesale from the component's own container and pod-level properties, so an authored one is discarded rather than merged — the same rejection the deployment kind makes. `cronjob` refuses the three as well: its job is the same JobSpec, and its parser read none of them and said nothing. | **Behavior-changing** (see below) |
+| `selector`, `manualSelector`, `template` | — | **Rejected outright**, not silently dropped: the Job selector is generated by the job controller from a unique per-job label, and a hand-written one adopts other jobs' pods. `manualSelector` only has meaning alongside one. `template` is replaced wholesale from the component's own container and pod-level properties, so an authored one is discarded rather than merged — the same rejection `webservice` and `worker` make. `cronjob` refuses the three as well: its job is the same JobSpec, and its parser read none of them and said nothing. | **Behavior-changing** (see below) |
 | `scheduling` | — | **Rejected outright** on `job` and `cronjob`: alpha upstream, behind the `WorkloadWithJob` feature gate, and read by neither. | **Behavior-changing** for a caller that skips the authored-property check |
 | `schedule`, `timeZone`, `concurrencyPolicy`, `startingDeadlineSeconds`, `successfulJobsHistoryLimit`, `failedJobsHistoryLimit` | — | **Rejected outright**: these are the CronJobSpec-only keys, and they are exactly what a `cronjob` document retyped to `job` leaves behind. Dropping them silently would run at apply time the work a schedule deferred (see below). | additive (no valid `job` document ever carried them) |
 

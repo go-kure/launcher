@@ -11,7 +11,7 @@ Text in square brackets is added here to say what a moved sentence refers to.
 
 - **History:**
   - go-kure/launcher#341 (the `DeploymentSpec`-level surface that `webservice` and `worker`
-    share with `deployment`).
+    share with `deployment` [until go-kure/launcher#1629 made `deployment` a raw kind]).
   - go-kure/launcher#1473 (`webservice` and `worker` publish `tolerations` and
     `topologySpreadConstraints`).
   - go-kure/launcher#280 (`worker` and `webservice` are component lowering rules, not
@@ -30,8 +30,12 @@ Text in square brackets is added here to say what a moved sentence refers to.
 ## deployment
 
 - **History:**
+  - go-kure/launcher#1629 (the kind takes the upstream `DeploymentSpec`, strictly decoded, on the
+    `replicaset` recipe: a breaking pre-GA change with no launcher default, no
+    `automountServiceAccountToken: false` fill and an empty fill report. The reshaped form is the
+    `role-deployment` member of `webservice` and `worker`).
   - go-kure/launcher#412 (the raw `corev1` scheduling surface: `affinity`, `tolerations` and
-    `topologySpreadConstraints`).
+    `topologySpreadConstraints`; since go-kure/launcher#1629 they are `template.spec.*`).
 
 ## service
 

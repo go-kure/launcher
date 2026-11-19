@@ -39,7 +39,7 @@ func TestObjectKindPolicy_TraitObjects(t *testing.T) {
 			Metadata:   oam.Metadata{Name: "shop"},
 			Spec: oam.ApplicationSpec{Components: []oam.Component{{
 				Name: "web", Type: "deployment",
-				Properties: map[string]any{"image": "nginx:1.25", "serviceAccountName": "web-runner"},
+				Properties: rawDeploymentProps("web", "nginx:1.25", rawPod(map[string]any{"serviceAccountName": "web-runner"})),
 				Traits: []oam.Trait{{Type: "rbac", Properties: map[string]any{
 					"clusterWide": clusterWide,
 					"rules": []any{map[string]any{

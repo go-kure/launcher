@@ -247,7 +247,7 @@ func TestVolumeSourceKeys_MatchUpstream(t *testing.T) {
 			continue
 		}
 		t.Run(key, func(t *testing.T) {
-			refuses(t, "deployment", withProps(workloadKinds[5].props, props{"volumes": []any{props{"name": "v", "type": key, "mountPath": "/m"}}}), []string{`volume "v"`, "Pod Security restricted"})
+			refuses(t, "worker", withProps(workloadKinds[1].props, props{"volumes": []any{props{"name": "v", "type": key, "mountPath": "/m"}}}), []string{`volume "v"`, "Pod Security restricted"})
 		})
 	}
 }
@@ -287,7 +287,8 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 		{"ephemeral claim over the storage cap", ephemeral("50Gi"), &stubPolicy{maxStorageSize: "10Gi"}, "scratch"},
 		{"image volume outside the registry allowlist", image, &stubPolicy{allowedRegistries: []string{"ghcr.io"}}, "assets"},
 	}
-	for _, kind := range []string{"deployment", "statefulset", "daemonset", "job", "cronjob"} {
+	// worker stands for the reshaped deployment parser (go-kure/launcher#1629).
+	for _, kind := range []string{"worker", "statefulset", "daemonset", "job", "cronjob"} {
 		for _, c := range cases {
 			t.Run(c.name+"/"+kind, func(t *testing.T) {
 				err := volumePolicyConfig(t, kind, c.entry).ApplyPolicy(c.policy)
@@ -298,7 +299,7 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 		}
 	}
 	t.Run("within the policy", func(t *testing.T) {
-		if err := volumePolicyConfig(t, "deployment", ephemeral("5Gi")).ApplyPolicy(&stubPolicy{maxStorageSize: "10Gi"}); err != nil {
+		if err := volumePolicyConfig(t, "worker", ephemeral("5Gi")).ApplyPolicy(&stubPolicy{maxStorageSize: "10Gi"}); err != nil {
 			t.Errorf("ephemeral within the cap: %v", err)
 		}
 		ok := nested("image", "assets", props{"reference": "ghcr.io/org/assets:v1"})
@@ -308,7 +309,7 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 	})
 	t.Run("csi and projected have no gate", func(t *testing.T) {
 		for _, e := range []props{nested("csi", "c", props{"driver": "d"}), nested("projected", "p", props{"sources": []any{props{"configMap": props{"name": "x"}}}})} {
-			if err := volumePolicyConfig(t, "deployment", e).ApplyPolicy(&stubPolicy{maxStorageSize: "1Ki", allowedRegistries: []string{"ghcr.io"}}); err != nil {
+			if err := volumePolicyConfig(t, "worker", e).ApplyPolicy(&stubPolicy{maxStorageSize: "1Ki", allowedRegistries: []string{"ghcr.io"}}); err != nil {
 				t.Errorf("%v: %v", e["type"], err)
 			}
 		}

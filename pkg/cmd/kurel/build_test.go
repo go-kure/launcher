@@ -1628,8 +1628,15 @@ spec:
     - name: api
       type: deployment
       properties:
-        image: ghcr.io/example/api:v1.0.0
         replicas: 3
+        selector:
+          matchLabels:
+            app: api
+        template:
+          spec:
+            containers:
+              - name: api
+                image: ghcr.io/example/api:v1.0.0
       traits:
         - type: topology-spread%s
 `
@@ -1878,14 +1885,21 @@ spec:
     - name: web
       type: deployment
       properties:
-        image: ghcr.io/example/web:v1.0.0
-        securityContext:
-          capabilities:
-            add: [NET_BIND_SERVICE]
-            drop: [ALL]
-          seccompProfile:
-            type: Localhost
-            localhostProfile: profiles/app.json
+        selector:
+          matchLabels:
+            app: web
+        template:
+          spec:
+            containers:
+              - name: web
+                image: ghcr.io/example/web:v1.0.0
+                securityContext:
+                  capabilities:
+                    add: [NET_BIND_SERVICE]
+                    drop: [ALL]
+                  seccompProfile:
+                    type: Localhost
+                    localhostProfile: profiles/app.json
       traits:
         - type: security-context
           properties:

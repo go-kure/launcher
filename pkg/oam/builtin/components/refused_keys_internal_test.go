@@ -12,7 +12,7 @@ import (
 // refusedKeyBase is, per type of refusedKeys, a document of that type that
 // both paths accept: the control every refusal below is measured against.
 var refusedKeyBase = map[string]map[string]any{
-	"deployment":            {"image": "ghcr.io/org/app:v1"},
+	"deployment":            rawDeploymentInternalProps("ghcr.io/org/app:v1"),
 	"role-deployment":       {"image": "ghcr.io/org/app:v1"},
 	"webservice":            {"image": "ghcr.io/org/app:v1"},
 	"worker":                {"image": "ghcr.io/org/app:v1"},
@@ -84,7 +84,7 @@ func refusedKeyPaths(t *testing.T, tr *oam.Transformer, componentType string, pr
 
 // nullIsUnauthoredToParser reports the refusals a type's parser does not make
 // for an explicit null, which it reads as "not authored": the service's and
-// the claim's (authoredValue), and on a deployment every key below its spec
+// the claim's (authoredValue), and on a role-deployment every key below its spec
 // map, since the handler strips nulls before the pod and container parsers run
 // (withoutExplicitNulls). The document check refuses the null key on all of
 // them; that difference is older than refusedKeys and is pinned here as it is.
@@ -92,7 +92,7 @@ func nullIsUnauthoredToParser(componentType, key string) bool {
 	switch componentType {
 	case "service", "persistentvolumeclaim":
 		return true
-	case "deployment", "role-deployment":
+	case "role-deployment":
 		_, specKey := deploymentSpecRejectedKeys[key]
 		return !specKey
 	}
@@ -180,21 +180,21 @@ func TestRefusedKeys_NamedRefusals(t *testing.T) {
 		{"job", "scheduling"},
 		{"statefulset", "template"},
 		{"daemonset", "template"},
-		{"deployment", "restartPolicy"},
+		{"role-deployment", "restartPolicy"},
 		{"statefulset", "restartPolicy"},
 		{"daemonset", "restartPolicy"},
 		{"webservice", "restartPolicy"},
 		{"worker", "restartPolicy"},
-		{"deployment", "activeDeadlineSeconds"},
+		{"role-deployment", "activeDeadlineSeconds"},
 		{"statefulset", "activeDeadlineSeconds"},
 		{"daemonset", "activeDeadlineSeconds"},
-		{"deployment", "evictionResponders"},
+		{"role-deployment", "evictionResponders"},
 		{"job", "evictionResponders"},
-		{"deployment", "restartPolicyRules"},
+		{"role-deployment", "restartPolicyRules"},
 		{"cronjob", "restartPolicyRules"},
 		{"serviceaccount", "secrets"},
 		// Upstream names read in another shape.
-		{"deployment", "containers"},
+		{"role-deployment", "containers"},
 		{"job", "containers"},
 		{"webservice", "livenessProbe"},
 		{"statefulset", "readinessProbe"},
@@ -215,6 +215,13 @@ func TestRefusedKeys_NamedRefusals(t *testing.T) {
 	for _, tc := range []struct{ componentType, key string }{
 		{"job", "restartPolicy"},
 		{"cronjob", "restartPolicy"},
+		// The raw `deployment` kind takes the upstream spec, so it refuses
+		// none of what the reshaped parsers refuse (go-kure/launcher#1629).
+		{"deployment", "restartPolicy"},
+		{"deployment", "activeDeadlineSeconds"},
+		{"deployment", "containers"},
+		{"deployment", "evictionResponders"},
+		{"deployment", "restartPolicyRules"},
 		{"job", "activeDeadlineSeconds"},
 		{"cronjob", "schedule"},
 		{"job", "jobTemplate"},
@@ -300,7 +307,7 @@ func TestRefusedKeys_OneLevelDown(t *testing.T) {
 	entry := func(resources map[string]any) []any {
 		return []any{map[string]any{"name": "extra", "image": "busybox:1", "resources": resources}}
 	}
-	for _, componentType := range []string{"deployment", "role-deployment", "webservice", "worker", "statefulset", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{"role-deployment", "webservice", "worker", "statefulset", "daemonset", "job", "cronjob"} {
 		// A job's pod runs to completion, so `job` and `cronjob` have no
 		// `sidecars` property.
 		lists := []string{"initContainers", "sidecars"}
@@ -369,7 +376,7 @@ func TestRefusedKeys_InAnEntry(t *testing.T) {
 	initEntry := func(key string) []any {
 		return []any{map[string]any{"name": "init", "image": "busybox:1", key: map[string]any{}}}
 	}
-	for _, componentType := range []string{"deployment", "role-deployment", "webservice", "worker", "statefulset", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{"role-deployment", "webservice", "worker", "statefulset", "daemonset", "job", "cronjob"} {
 		if refusedKeyHint(componentType, "livenessProbe") == "" {
 			t.Fatalf("type %q has no top-level refusal of livenessProbe; pick another key for the control below", componentType)
 		}
@@ -415,6 +422,7 @@ func TestRefusedKeys_OtherKeysReadAsBefore(t *testing.T) {
 		base          map[string]any
 	}{
 		{"deployment", refusedKeyBase["deployment"]},
+		{"role-deployment", refusedKeyBase["role-deployment"]},
 		{"webservice", refusedKeyBase["webservice"]},
 		{"service", refusedKeyBase["service"]},
 		{"configmap", map[string]any{"data": map[string]any{"k": "v"}}},

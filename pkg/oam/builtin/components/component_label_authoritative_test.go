@@ -333,16 +333,24 @@ func clRefused(t *testing.T, err error, refused oam.ComponentLabelRefusal) *oam.
 	return got
 }
 
-// clRenameRule lowers a component to a deployment and a service entry, each
-// under a name of its own: the authored name plus a suffix.
-type clRenameRule struct{}
+// clRenameRule lowers a component to a workload and a service entry, each
+// under a name of its own: the authored name plus a suffix. The workload is the
+// role member `role-deployment`, which writes the `app` label on the Deployment
+// and its template as webservice and worker do, or with raw set the raw
+// `deployment` kind, which writes it on the template alone
+// (go-kure/launcher#1629).
+type clRenameRule struct{ raw bool }
 
 func (clRenameRule) ComponentType() string { return "renamed-pair" }
 
-func (clRenameRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
+func (r clRenameRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
 	name := comp.Name + "-renamed"
+	workload := oam.Component{Name: name, Type: roleMemberType, Properties: map[string]any{"image": "ghcr.io/org/app:v1"}}
+	if r.raw {
+		workload = oam.Component{Name: name, Type: "deployment", Properties: rawDeploymentProps("ghcr.io/org/app:v1")}
+	}
 	return oam.LoweringResult{Components: []oam.Component{
-		{Name: name, Type: "deployment", Properties: map[string]any{"image": "ghcr.io/org/app:v1"}},
+		workload,
 		{Name: name + "-svc", Type: "service", Properties: map[string]any{
 			"selector": map[string]any{"app": name},
 			"ports":    []any{map[string]any{"name": "http", "port": 80, "targetPort": 8080}},
@@ -366,8 +374,9 @@ func TestComponentLabel_UnderTheAppKey(t *testing.T) {
 
 	t.Run("an entry a rule renamed", func(t *testing.T) {
 		tr := oam.NewTransformer(map[string]oam.ComponentHandler{
-			"deployment": &components.DeploymentHandler{},
-			"service":    &components.ServiceHandler{},
+			"deployment":   &components.DeploymentHandler{},
+			roleMemberType: &components.RoleDeploymentHandler{},
+			"service":      &components.ServiceHandler{},
 		}, nil)
 		tr.RegisterComponentLowering(clRenameRule{})
 		objs, err := clGenerate(tr, mfApp("renamed-pair", map[string]any{}), ctx)
@@ -385,12 +394,31 @@ func TestComponentLabel_UnderTheAppKey(t *testing.T) {
 		}
 	})
 
+	// The raw deployment kind writes the `app` label on its pod template alone,
+	// valued with the entry's name, and the build accepts it.
+	t.Run("a raw deployment entry a rule renamed", func(t *testing.T) {
+		tr := oam.NewTransformer(map[string]oam.ComponentHandler{
+			"deployment": &components.DeploymentHandler{},
+			"service":    &components.ServiceHandler{},
+		}, nil)
+		tr.RegisterComponentLowering(clRenameRule{raw: true})
+		objs, err := clGenerate(tr, mfApp("renamed-pair", map[string]any{}), ctx)
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		d := clObject(t, objs, "Deployment", "web-renamed")
+		if got, _ := clLabelAt(t, d, "app", "spec", "template", "metadata"); got != "web-renamed" {
+			t.Errorf("Deployment pod template label app = %q, want the entry's web-renamed", got)
+		}
+	})
+
 	// Those pods carry the entry's value, so the policy synthesized for the entry
 	// selects them, and the owner's value as well (go-kure/launcher#790).
 	t.Run("the policy of an entry a rule renamed", func(t *testing.T) {
 		tr := oam.NewTransformer(map[string]oam.ComponentHandler{
-			"deployment": &components.DeploymentHandler{},
-			"service":    &components.ServiceHandler{},
+			"deployment":   &components.DeploymentHandler{},
+			roleMemberType: &components.RoleDeploymentHandler{},
+			"service":      &components.ServiceHandler{},
 		}, nil)
 		tr.RegisterComponentLowering(clRenameRule{})
 		egress := ctx
@@ -438,8 +466,9 @@ func TestComponentLabel_UnderTheAppKey(t *testing.T) {
 	// itself lowered to entries under other names, so no name collides.
 	t.Run("an entry a rule named as another component", func(t *testing.T) {
 		tr := oam.NewTransformer(map[string]oam.ComponentHandler{
-			"deployment": &components.DeploymentHandler{},
-			"service":    &components.ServiceHandler{},
+			"deployment":   &components.DeploymentHandler{},
+			roleMemberType: &components.RoleDeploymentHandler{},
+			"service":      &components.ServiceHandler{},
 		}, nil)
 		tr.RegisterComponentLowering(clRenameRule{})
 		app := mfApp("renamed-pair", map[string]any{})
@@ -473,7 +502,7 @@ func TestComponentLabel_UnderTheAppKey(t *testing.T) {
 			"deployment":  &components.DeploymentHandler{},
 		}, nil)
 		app := mfApp("passthrough", map[string]any{"object": ptObject(t, foreignDeployment("web"))})
-		app.Spec.Components = append(app.Spec.Components, oam.Component{Name: "db", Type: "deployment", Properties: map[string]any{"image": "ghcr.io/org/db:v1"}})
+		app.Spec.Components = append(app.Spec.Components, oam.Component{Name: "db", Type: "deployment", Properties: rawDeploymentProps("ghcr.io/org/db:v1")})
 		_, err := clGenerate(tr, app, ctx)
 		want := `Deployment "web": spec.template.metadata.labels["app"]: "db" is not the component label of component "web" ("web")`
 		if err == nil || !strings.Contains(err.Error(), want) {

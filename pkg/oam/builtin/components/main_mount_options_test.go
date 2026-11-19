@@ -189,8 +189,10 @@ func TestMainMount_Refusals(t *testing.T) {
 // one is absent, as upstream skips it (validation.go:3205). The refusals above
 // are the other half.
 func TestMainMount_SubPathShapesUpstreamAccepts(t *testing.T) {
-	dep, sts := workloadKinds[5], workloadKinds[2]
-	if dep.name != "deployment" || sts.name != "statefulset" {
+	// worker stands for the reshaped deployment parser: the raw `deployment`
+	// kind has no `volumes[].mountPath` (go-kure/launcher#1629).
+	dep, sts := workloadKinds[1], workloadKinds[2]
+	if dep.name != "worker" || sts.name != "statefulset" {
 		t.Fatalf("workloadKinds order changed: %q, %q", dep.name, sts.name)
 	}
 	for _, sp := range []string{"a/b", "./a", "a..b/..c", ""} {
@@ -212,7 +214,7 @@ func TestMainMount_SubPathShapesUpstreamAccepts(t *testing.T) {
 
 // TestMainMount_BidirectionalNeedsPrivilegedOnEveryKind fails if one kind does
 // not run the check: an unprivileged Bidirectional mount is refused and a
-// privileged one builds, on all seven kinds.
+// privileged one builds, on all six kinds.
 func TestMainMount_BidirectionalNeedsPrivilegedOnEveryKind(t *testing.T) {
 	vol := props{"volumes": []any{volumeEntry(props{"mountPropagation": "Bidirectional"})}}
 	for _, k := range workloadKinds {
@@ -233,7 +235,7 @@ func TestMainMount_BidirectionalNeedsPrivilegedOnEveryKind(t *testing.T) {
 
 // TestMainMount_RulesCheckBidirectionalThemselves: webservice and worker are
 // lowering rules, and the adapters in workloadKinds hand their emitted
-// deployment to DeploymentHandler, which runs its own check. Those cases
+// deployment to RoleDeploymentHandler, which runs its own check. Those cases
 // therefore cannot see a missing check in the rules. This test calls each
 // rule's LowerComponent, where only the rule's own check can refuse.
 func TestMainMount_RulesCheckBidirectionalThemselves(t *testing.T) {
@@ -281,7 +283,7 @@ func TestMainMount_BlockDeviceRefusesMountKeys(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			entry := props{"name": "raw", "type": "pvc", "claimName": "existing", "volumeMode": "Block", "devicePath": "/dev/xvda", key: values[key]}
 			for _, k := range workloadKinds {
-				if k.name != "deployment" {
+				if k.name != "worker" {
 					continue
 				}
 				refuses(t, k.name, withProps(k.props, props{"volumes": []any{entry}}),
@@ -298,8 +300,8 @@ func TestMainMount_BlockDeviceRefusesMountKeys(t *testing.T) {
 // refuse the key by presence alone.
 func TestMainMount_NullIsAbsent(t *testing.T) {
 	sts := workloadKinds[2]
-	dep := workloadKinds[5]
-	if sts.name != "statefulset" || dep.name != "deployment" {
+	dep := workloadKinds[1]
+	if sts.name != "statefulset" || dep.name != "worker" {
 		t.Fatalf("workloadKinds order changed: %q, %q", sts.name, dep.name)
 	}
 	for _, key := range mountKeys {

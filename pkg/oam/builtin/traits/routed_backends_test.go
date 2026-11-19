@@ -50,7 +50,7 @@ func routerTo(paths ...any) oam.Component {
 	return oam.Component{
 		Name:       "router",
 		Type:       "deployment",
-		Properties: map[string]any{"image": "ghcr.io/example/router:1.0"},
+		Properties: rawDeploymentProps("router", "ghcr.io/example/router:1.0"),
 		Traits: []oam.Trait{{Type: "ingress", Properties: map[string]any{
 			"rules": []any{map[string]any{"host": "api.example.com", "paths": paths}},
 		}}},
@@ -485,7 +485,7 @@ func TestRoutedBackends_SelfNamedRouteToAnotherComponentsService(t *testing.T) {
 			api := oam.Component{
 				Name:       "api",
 				Type:       "deployment",
-				Properties: map[string]any{"image": "ghcr.io/example/api:1.0"},
+				Properties: rawDeploymentProps("api", "ghcr.io/example/api:1.0"),
 				Traits:     []oam.Trait{trait},
 			}
 			front := oam.Component{

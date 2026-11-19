@@ -30,7 +30,7 @@ func (clusterRoleRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCont
 		return oam.LoweringResult{}, err
 	}
 	return oam.LoweringResult{Components: []oam.Component{{
-		Name: comp.Name, Type: "deployment", Properties: map[string]any{"image": "nginx:1.25"},
+		Name: comp.Name, Type: "deployment", Properties: rawDeploymentProps(comp.Name, "nginx:1.25"),
 	}}}, nil
 }
 
@@ -45,7 +45,7 @@ func TestRBAC_ClusterRoleAgainstALoweredOne(t *testing.T) {
 	web := func(name string) oam.Component {
 		return oam.Component{
 			Name: "web", Type: "deployment",
-			Properties: map[string]any{"image": "nginx:1.25", "serviceAccountName": "web-runner"},
+			Properties: rawDeploymentProps("web", "nginx:1.25", rawPod(map[string]any{"serviceAccountName": "web-runner"})),
 			Traits: []oam.Trait{{Type: "rbac", Properties: map[string]any{
 				"name":        name,
 				"clusterWide": true,

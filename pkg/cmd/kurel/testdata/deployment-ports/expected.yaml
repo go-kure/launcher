@@ -2,12 +2,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: api
     launcher.gokure.dev/component: api
   name: api
   namespace: default
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: api
@@ -18,7 +16,6 @@ spec:
         app: api
         launcher.gokure.dev/component: api
     spec:
-      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/api:v1.0.0
         lifecycle:
@@ -33,19 +30,12 @@ spec:
         ports:
         - containerPort: 8080
           name: http
-          protocol: TCP
         - containerPort: 9090
           name: metrics
-          protocol: TCP
         - containerPort: 5353
           protocol: UDP
         readinessProbe:
           httpGet:
             path: /healthz
             port: http
-        resources:
-          limits:
-            memory: 128Mi
-          requests:
-            cpu: 100m
-            memory: 128Mi
+        resources: {}

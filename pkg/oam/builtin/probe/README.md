@@ -50,9 +50,12 @@ default `Allow`, and the handler leaves the field unset for the cluster to apply
 `Allow` changes the generated manifest text and not the cluster's behaviour. The cronjob
 probe lists it in `LeftToCluster`. It is the one place check A disagrees with a schema.
 
-The probes cover the handler-built workload types: deployment, statefulset, daemonset,
+The probes cover the handler-built workload types: statefulset, daemonset,
 job and cronjob, with their init containers, sidecars, claim templates and pod failure
-policy. It also probes the types that lower to other components: `webservice` and `worker`,
+policy. The raw `deployment` (go-kure/launcher#1629) fills nothing, so its probes are raw
+documents (a selector and a pod template, with an init container, a second container and
+ports) that list no fill. Check B fails on any `policy` or `builtin` entry a probe does not
+list, so a fill that came back to the kind fails there. It also probes the types that lower to other components: `webservice` and `worker`,
 whose entries the report names at the place of their `role-deployment` member (`Fill.Member`),
 and `postgresql`, which the report names at the cluster it builds. For a type that
 publishes a lowering key map check A reads the places of a declared default from it. For
@@ -72,7 +75,7 @@ no constraints and the report holds no entry; the document with the policy runs 
 holds it), and `provider`, `version` and, without a policy default, `replicas` on
 `postgresql`.
 
-The trait probes put one trait on a deployment, with the capability bindings the transform
+The trait probes put one trait on a raw deployment, with the capability bindings the transform
 runs with (`Probe.Capabilities`), and name the fills the report holds under the trait
 (`Fill.Trait`): `certificate`, `external-secret`, `volsync`, `scaler`, `networkpolicy`,
 `ingress`, `httproute` (also the gateway namespace of a platform gateway), `pvc`,

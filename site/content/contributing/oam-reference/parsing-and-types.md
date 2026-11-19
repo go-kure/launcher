@@ -11,11 +11,12 @@ Text in square brackets is added here to say what a moved sentence refers to.
 
 - **Implementation:**
   - The `scaler` entry is derived from the one table that also gives the scaler its HPA target kind (`Deployment`
-    for the first three, `StatefulSet` for `statefulset`), so a type cannot be admitted without
+    for the first four, `StatefulSet` for `statefulset`), so a type cannot be admitted without
     a target kind. The engine stamps the settled component type on the trait it applies
     (`Trait.ComponentType()`, empty outside a transform), which is where the scaler reads it.
     ["The `scaler` entry" is the `scaler` entry of `traitComponentRestrictions`, the registry
-    the reference names; "the first three" are `webservice`, `worker` and `deployment`.]
+    the reference names; "the first four" are `webservice`, `worker`, `deployment` and the
+    `role-deployment` member the two roles lower into.]
 - **History:**
   - go-kure/launcher#1179 (a `scaler` refuses authored `replicas`).
   - go-kure/launcher#783 (tiers are declared, never derived from a type).

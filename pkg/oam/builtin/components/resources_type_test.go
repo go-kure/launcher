@@ -27,7 +27,7 @@ var resourceKinds = []struct {
 }{
 	{"webservice", webserviceViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}},
 	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
+	{roleMemberType, &components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "0 2 * * *"}},

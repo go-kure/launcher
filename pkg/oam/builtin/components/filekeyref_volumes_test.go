@@ -18,7 +18,7 @@ var fileKeyRefKinds = []struct {
 }{
 	{"webservice", webserviceViaRule{}, nil, true},
 	{"worker", workerViaRule{}, nil, true},
-	{"deployment", &components.DeploymentHandler{}, nil, true},
+	{roleMemberType, &components.RoleDeploymentHandler{}, nil, true},
 	{"statefulset", &components.StatefulsetHandler{}, nil, true},
 	{"daemonset", &components.DaemonsetHandler{}, nil, true},
 	{"job", &components.JobHandler{}, nil, false},

@@ -49,7 +49,7 @@ func setContainerName(t *testing.T, cfg stack.ApplicationConfig, list string, i 
 }
 
 func TestContainerNameLabel_RefusedAtGenerate(t *testing.T) {
-	for _, k := range []string{"deployment", "statefulset", "daemonset", "job", "cronjob"} {
+	for _, k := range []string{roleMemberType, "statefulset", "daemonset", "job", "cronjob"} {
 		var kind struct {
 			name    string
 			handler oam.ComponentHandler
@@ -60,8 +60,13 @@ func TestContainerNameLabel_RefusedAtGenerate(t *testing.T) {
 				kind.name, kind.handler, kind.props = w.name, w.handler, w.props
 			}
 		}
+		if k == roleMemberType {
+			// The config the role handler builds is the one setContainerName
+			// edits; the roles reach it through a lowering rule's wrapper.
+			kind.name, kind.handler, kind.props = k, &components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}
+		}
 		for _, list := range []string{"initContainers", "sidecars"} {
-			if list == "sidecars" && !sidecarKinds[k] {
+			if list == "sidecars" && !sidecarKinds[k] && k != roleMemberType {
 				continue
 			}
 			for _, c := range cnlBad {

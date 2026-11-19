@@ -162,8 +162,8 @@ func TestPVCVolume_ClaimName_Refusals(t *testing.T) {
 		{"bad accessModes", map[string]any{"accessModes": []any{"Sometimes"}}, "accessMode"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := &components.DeploymentHandler{}
-			_, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: "deployment", Properties: claimRefProps(tc.vol, nil)}, "default")
+			h := &components.RoleDeploymentHandler{}
+			_, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: roleMemberType, Properties: claimRefProps(tc.vol, nil)}, "default")
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want it to contain %q", err, tc.want)
 			}
@@ -182,7 +182,7 @@ func TestPVCVolume_PodKindsRequireClaimName(t *testing.T) {
 		}
 		extra map[string]any
 	}{
-		{"deployment", &components.DeploymentHandler{}, nil},
+		{roleMemberType, &components.RoleDeploymentHandler{}, nil},
 		{"statefulset", &components.StatefulsetHandler{}, nil},
 		{"daemonset", &components.DaemonsetHandler{}, nil},
 		{"job", &components.JobHandler{}, nil},

@@ -41,9 +41,9 @@ func TestWebserviceHandler_Endpoints(t *testing.T) {
 // TestWorker_NotEndpointProvider documents the go-kure/launcher#225 decision: worker declares no
 // in-cluster port and emits no Service, so it deliberately provides no endpoints
 // (ComponentEndpoints then returns (nil,nil) for a worker component). Worker is a
-// lowering rule, so the rule may not provide them. The deployment handler it lowers
-// into does provide endpoints, from the main container's `ports`; a worker declares
-// none, so what it lowers into reports none.
+// lowering rule, so the rule may not provide them. The role-deployment handler it
+// lowers into does provide endpoints, from the main container's `ports`; a worker
+// declares none, so what it lowers into reports none.
 func TestWorker_NotEndpointProvider(t *testing.T) {
 	for name, v := range map[string]any{
 		"WorkerRule": components.WorkerRule{},
@@ -52,14 +52,23 @@ func TestWorker_NotEndpointProvider(t *testing.T) {
 			t.Errorf("%s should not implement oam.EndpointProvider (worker has no in-cluster port)", name)
 		}
 	}
-	// A deployment with no main-container ports, which is what a worker lowers into,
-	// reports no endpoint.
-	eps, err := (&components.DeploymentHandler{}).Endpoints(&oam.Component{
-		Name: "jobs", Type: "deployment",
+	// A role-deployment with no main-container ports, which is what a worker lowers
+	// into, reports no endpoint.
+	eps, err := (&components.RoleDeploymentHandler{}).Endpoints(&oam.Component{
+		Name: "jobs", Type: roleMemberType,
 		Properties: map[string]any{"image": "ghcr.io/example/worker:1.0"},
 	})
 	if err != nil || len(eps) != 0 {
-		t.Errorf("a deployment without ports: endpoints = %v, err = %v; want none", eps, err)
+		t.Errorf("a role-deployment without ports: endpoints = %v, err = %v; want none", eps, err)
+	}
+	// The raw deployment kind reads the ports of its template's first container
+	// (go-kure/launcher#1629); with none it reports none.
+	eps, err = (&components.DeploymentHandler{}).Endpoints(&oam.Component{
+		Name: "jobs", Type: "deployment",
+		Properties: rawDeploymentProps("ghcr.io/example/worker:1.0"),
+	})
+	if err != nil || len(eps) != 0 {
+		t.Errorf("a raw deployment without ports: endpoints = %v, err = %v; want none", eps, err)
 	}
 }
 

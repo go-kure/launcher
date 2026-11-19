@@ -523,6 +523,7 @@ var apiSetKinds = []apiSetKind{
 	{component: "cnpg-scheduledbackup", typ: reflect.TypeFor[cnpgv1.ScheduledBackupSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"scheduledbackups.yaml", "v1")},
 	{component: "cnpg-subscription", typ: reflect.TypeFor[cnpgv1.SubscriptionSpec](), source: crdAPISource(cnpgModulePath, cnpgCRDs+"subscriptions.yaml", "v1")},
 	{component: "csidriver", typ: reflect.TypeFor[storagev1.CSIDriverSpec](), source: markerAPISource},
+	{component: "deployment", typ: reflect.TypeFor[appsv1.DeploymentSpec](), source: markerAPISource, listed: podSpecOmitted("template.spec.")},
 	{component: "endpointslice", typ: reflect.TypeFor[discoveryv1.EndpointSlice](), source: markerAPISource, skip: objectIdentity},
 	{component: "fluxcd-alert", typ: reflect.TypeFor[notificationv1.AlertSpec](), source: markerAPISource},
 	{component: "fluxcd-kustomization", typ: reflect.TypeFor[kustv1.KustomizationSpec](), source: markerAPISource},

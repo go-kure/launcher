@@ -67,7 +67,7 @@ func TestTransform_PortlessHeadlessService_IsNotAnExternalBackend(t *testing.T) 
 	web := oam.Component{
 		Name:       "web",
 		Type:       "deployment",
-		Properties: map[string]any{"image": "ghcr.io/example/web:1.0"},
+		Properties: rawDeploymentProps("web", "ghcr.io/example/web:1.0"),
 		Traits: []oam.Trait{ingressTrait(map[string]any{
 			"path":            "/",
 			"backend":         "db",

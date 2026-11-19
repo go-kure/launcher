@@ -38,7 +38,7 @@ type webPairRule struct {
 func (webPairRule) ComponentType() string { return "web-pair" }
 
 func (r webPairRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
-	workload, props := "deployment", webPairDeploymentProps(r.paused)
+	workload, props := roleMemberType, webPairDeploymentProps(r.paused)
 	if r.workload != "" {
 		workload, props = r.workload, map[string]any{"image": "ghcr.io/org/app:v1"}
 	}
@@ -93,9 +93,10 @@ type (
 
 func webPairTransformer(rule webPairRule) *oam.Transformer {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{
-		"deployment":  &components.DeploymentHandler{},
-		"service":     &components.ServiceHandler{},
-		"svc-emitter": svcEmitterHandler{},
+		"deployment":   &components.DeploymentHandler{},
+		roleMemberType: &components.RoleDeploymentHandler{},
+		"service":      &components.ServiceHandler{},
+		"svc-emitter":  svcEmitterHandler{},
 	}, map[string]oam.TraitHandler{"ingress": &traits.IngressHandler{}})
 	tr.RegisterComponentLowering(rule)
 	tr.RegisterPolicy("dependency", &policies.DependencyHandler{})
@@ -114,7 +115,7 @@ func webPairApp() *oam.Application {
 		Spec: oam.ApplicationSpec{
 			Components: []oam.Component{
 				{Name: "web", Type: "web-pair", Properties: map[string]any{}},
-				{Name: "db", Type: "deployment", Properties: map[string]any{"image": "ghcr.io/org/db:v1"}},
+				{Name: "db", Type: "deployment", Properties: rawDeploymentProps("ghcr.io/org/db:v1")},
 			},
 			Policies: []oam.ApplicationPolicy{{
 				Name: "order", Type: "dependency",
@@ -205,7 +206,7 @@ func TestSiblingGroup_ForwardsEachContractToItsMember(t *testing.T) {
 	app, _ := groupApp(t, cluster, "web")
 	cfg := app.Config
 
-	dep := memberConfig(t, &components.DeploymentHandler{}, "deployment", webPairDeploymentProps(false))
+	dep := memberConfig(t, &components.RoleDeploymentHandler{}, roleMemberType, webPairDeploymentProps(false))
 	svc := memberConfig(t, &components.ServiceHandler{}, "service", webPairServiceProps("web"))
 
 	wantSA, _ := dep.(saNamer).ServiceAccountName()
@@ -262,7 +263,7 @@ func TestSiblingGroup_DeploysAsOneUnit(t *testing.T) {
 		typ   string
 		props map[string]any
 	}{
-		{&components.DeploymentHandler{}, "deployment", webPairDeploymentProps(false)},
+		{&components.RoleDeploymentHandler{}, roleMemberType, webPairDeploymentProps(false)},
 		{&components.ServiceHandler{}, "service", webPairServiceProps("web")},
 	} {
 		alone, err := stack.NewApplication("web", "default", memberConfig(t, m.h, m.typ, m.props)).Generate()

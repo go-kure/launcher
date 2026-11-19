@@ -23,6 +23,12 @@ import (
 // checks that the model output carries `<component>-<part>` exactly where the Go output carries
 // `<component>`, and it counts those places. Every other leaf must be equal as it is.
 //
+// The model's Deployment parts are the raw `deployment` kind (go-kure/launcher#1629): the upstream
+// spec, with the labels, the selector, the container and its name written out, and no fill of
+// launcher's. The worker's builtin resource fallbacks (cpu request 100m, memory request and limit
+// 128Mi) are therefore the model's own `resources` input default, so the two agree for a worker
+// that authors no resources.
+//
 // The model writes the ServiceAccount name as `${self.name}-sa`: a kind part such as
 // `serviceaccount@v1` declares no output, so `parts.sa.<key>` cannot read it.
 
@@ -48,6 +54,9 @@ spec:
     args: {type: array, items: {type: string}}
     resources:
       type: object
+      default:
+        requests: {cpu: 100m, memory: 128Mi}
+        limits: {memory: 128Mi}
       properties:
         requests:
           type: object
@@ -68,26 +77,40 @@ spec:
       type: deployment.apps@v1
       when: "${inputs.topologySpread}"
       properties:
-        image: "${inputs.image}"
+        labels: {app: "${self.name}-spread"}
         replicas: "${inputs.replicas}"
-        env: "${inputs.env}"
-        command: "${inputs.command}"
-        args: "${inputs.args}"
-        resources: "${inputs.resources}"
-        serviceAccountName: "${self.name}-sa"
+        selector:
+          matchLabels: {app: "${self.name}-spread"}
+        template:
+          spec:
+            serviceAccountName: "${self.name}-sa"
+            containers:
+              - name: "${self.name}-spread"
+                image: "${inputs.image}"
+                env: "${inputs.env}"
+                command: "${inputs.command}"
+                args: "${inputs.args}"
+                resources: "${inputs.resources}"
       traits:
         - type: topology-spread.launcher.gokure.dev@v1
     - id: plain
       type: deployment.apps@v1
       when: "${!inputs.topologySpread}"
       properties:
-        image: "${inputs.image}"
+        labels: {app: "${self.name}-plain"}
         replicas: "${inputs.replicas}"
-        env: "${inputs.env}"
-        command: "${inputs.command}"
-        args: "${inputs.args}"
-        resources: "${inputs.resources}"
-        serviceAccountName: "${self.name}-sa"
+        selector:
+          matchLabels: {app: "${self.name}-plain"}
+        template:
+          spec:
+            serviceAccountName: "${self.name}-sa"
+            containers:
+              - name: "${self.name}-plain"
+                image: "${inputs.image}"
+                env: "${inputs.env}"
+                command: "${inputs.command}"
+                args: "${inputs.args}"
+                resources: "${inputs.resources}"
 `
 
 const parityComponent = "orders"

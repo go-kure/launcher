@@ -81,11 +81,15 @@ names the place of each declared default itself (`Probe.DefaultPlaces`).
 
 Only a config that reports its fills has `policy` and `builtin` entries. These do:
 
-- The five controller kinds, `deployment`, `statefulset`, `daemonset`, `job` and `cronjob`:
+- The four controller kinds, `statefulset`, `daemonset`, `job` and `cronjob`:
   what their parse fills, and what they fill for each container when they generate their
   object. The list is under
   [policy defaults](../oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
 - `webservice` and `worker`, through the `role-deployment` they lower to.
+
+The raw `deployment` kind reports no fill: it fills no default, so its report is empty
+(see the `deployment` section of
+[Kinds: core workloads](../oam-components/kinds-core-workloads.md#deployment)).
 - The Cluster a `postgresql` component builds.
 - The `persistentvolumeclaim` component: the policy's default `size`.
 - The traits in the table under "Property provenance", each with the paths it reports.

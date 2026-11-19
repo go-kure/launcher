@@ -115,7 +115,7 @@ func TestInteraction_SpreadFollowsTheScalersMinimumOnEveryEntryPoint(t *testing.
 							trs = append(trs, spread)
 						}
 						app := interactionApp([]oam.Component{{
-							Name: "app", Type: kind, Properties: map[string]any{"image": "ghcr.io/org/app:v1"}, Traits: trs,
+							Name: "app", Type: kind, Properties: appProps(kind), Traits: trs,
 						}})
 						cluster, err := entry.run(spreadScalerTransformer(&traits.TopologySpreadHandler{}), app, oam.TransformContext{})
 						if err != nil {
@@ -163,7 +163,7 @@ func TestInteraction_PolicyDefaultDoesNotReachAScaledDeployment(t *testing.T) {
 							trs = append(trs, spread)
 						}
 						app := interactionApp([]oam.Component{{
-							Name: "app", Type: kind, Properties: map[string]any{"image": "ghcr.io/org/app:v1"}, Traits: trs,
+							Name: "app", Type: kind, Properties: appProps(kind), Traits: trs,
 						}})
 						ctx := oam.TransformContext{Policy: &replicasPolicy{defaultReplicas: &three}}
 						cluster, err := entry.run(spreadScalerTransformer(&traits.TopologySpreadHandler{}), app, ctx)
@@ -218,7 +218,7 @@ func TestInteraction_PolicyScalerMinimumDecidesTheSpread(t *testing.T) {
 							trs = append(trs, spread)
 						}
 						app := interactionApp([]oam.Component{{
-							Name: "app", Type: kind, Properties: map[string]any{"image": "ghcr.io/org/app:v1"}, Traits: trs,
+							Name: "app", Type: kind, Properties: appProps(kind), Traits: trs,
 						}})
 						ctx := oam.TransformContext{Policy: &stubScalerPolicy{defaultScalerMin: int32ptr32(row.policyMin)}}
 						cluster, err := entry.run(spreadScalerTransformer(&traits.TopologySpreadHandler{}), app, ctx)
@@ -276,7 +276,7 @@ func runAdoptedRow(t *testing.T, entry spreadEntry, scaledKind, adoptedName stri
 		"  template:\n    metadata:\n      labels:\n        app: web\n" +
 		"    spec:\n      containers:\n      - name: web\n        image: ghcr.io/org/web:v1\n"
 	app := interactionApp([]oam.Component{
-		{Name: "app", Type: scaledKind, Properties: map[string]any{"image": "ghcr.io/org/app:v1"},
+		{Name: "app", Type: scaledKind, Properties: appProps(scaledKind),
 			Traits: []oam.Trait{scalerTrait(map[string]any{"minReplicas": int(minReplicas), "maxReplicas": 5})}},
 		{Name: "adopted", Type: "manifests", Properties: map[string]any{"inline": inline},
 			Traits: []oam.Trait{spread}},

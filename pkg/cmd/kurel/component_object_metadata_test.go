@@ -203,7 +203,7 @@ func TestObjectMetadata_Refusals(t *testing.T) {
 		annotations map[string]any
 		want        []string
 	}{
-		{name: "the app label with another value, on a workload", typ: "deployment", props: workloadProps(nil),
+		{name: "the app label with another value, on a workload", typ: "deployment", props: rawDeploymentPropsWith(nil),
 			labels: map[string]any{"app": "other"},
 			want:   []string{`component "widget"`, `labels["app"]`, `"other" is not the `}},
 		{name: "the app label with another value, on a kind that sets none", typ: "storageclass", props: storageClass,

@@ -39,7 +39,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
     converted the parsers they covered; the last of them are listed with the `null`
     row of the `deployment` table above. ["the parsers they covered" are the parsers that
     answer presence with a bare `v, ok := props[key]`, the first limit of the reference; "the
-    `deployment` table above" is on the reference page of the `deployment` kind.]
+    `deployment` table above" is the `DeploymentSpec` table under "Deployment-level properties" of
+    the reference page Common config, whose null row now names the `role-deployment` member.]
   - Both limits met on one key, and it was the second row of that table.
     `namespaceSelector` is parsed twice in this repository: here, for pod affinity,
     through `parseSchedulingSelector` (`parseObjectField`), where any null is

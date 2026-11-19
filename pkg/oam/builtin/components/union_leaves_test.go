@@ -30,11 +30,14 @@ func (r unionLeafRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext
 
 func unionLeafTransformer() *oam.Transformer {
 	return oam.NewTransformer(map[string]oam.ComponentHandler{
-		"deployment":  &components.DeploymentHandler{},
-		"daemonset":   &components.DaemonsetHandler{},
-		"statefulset": &components.StatefulsetHandler{},
-		"webservice":  webserviceViaRule{},
-		"service":     &components.ServiceHandler{},
+		// The reshaped deployment parser is the role member
+		// (go-kure/launcher#1629); the raw `deployment` kind's `strategy` is an
+		// open object the strict decode checks, not a published union leaf.
+		roleMemberType: &components.RoleDeploymentHandler{},
+		"daemonset":    &components.DaemonsetHandler{},
+		"statefulset":  &components.StatefulsetHandler{},
+		"webservice":   webserviceViaRule{},
+		"service":      &components.ServiceHandler{},
 	}, nil)
 }
 
@@ -141,14 +144,14 @@ func daemonSetRollingUpdate(knobs map[string]any) map[string]any {
 
 var unionLeaves = []unionLeaf{
 	{
-		name: "deployment strategy.rollingUpdate.maxUnavailable", compType: "deployment", strForm: "25%",
+		name: "role-deployment strategy.rollingUpdate.maxUnavailable", compType: roleMemberType, strForm: "25%",
 		props: func(v any) map[string]any { return deploymentRollingUpdate(map[string]any{"maxUnavailable": v}) },
 		rendered: func(objs []client.Object) string {
 			return firstOf[*appsv1.Deployment](objs).Spec.Strategy.RollingUpdate.MaxUnavailable.String()
 		},
 	},
 	{
-		name: "deployment strategy.rollingUpdate.maxSurge", compType: "deployment", strForm: "25%",
+		name: "role-deployment strategy.rollingUpdate.maxSurge", compType: roleMemberType, strForm: "25%",
 		props: func(v any) map[string]any { return deploymentRollingUpdate(map[string]any{"maxSurge": v}) },
 		rendered: func(objs []client.Object) string {
 			return firstOf[*appsv1.Deployment](objs).Spec.Strategy.RollingUpdate.MaxSurge.String()

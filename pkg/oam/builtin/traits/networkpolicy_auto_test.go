@@ -1215,7 +1215,7 @@ func externalBackendCollisionApp() *oam.Application {
 				{
 					Name:       "db",
 					Type:       "deployment",
-					Properties: map[string]any{"image": "postgres:16"},
+					Properties: rawDeploymentProps("db", "postgres:16"),
 					// db's own routing trait → emits db-allow-ingress-traffic.
 					Traits: []oam.Trait{{
 						Type: "httproute",

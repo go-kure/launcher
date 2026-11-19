@@ -109,7 +109,6 @@ var affinityShorthandKeys = []string{"enablePodAntiAffinity", "topologyKey", "po
 // to the reason. TestHandParsedKinds_CoverEveryUpstreamField holds each type to
 // it field by field, and holds the two paths above to the same text.
 var refusedKeys = map[string][]map[string]string{
-	"deployment":            {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"role-deployment":       {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"webservice":            {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"worker":                {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
@@ -165,7 +164,6 @@ var containerNestedRefusals = map[string]nestedRefusal{
 // `affinity` shorthand of webservice and worker, and a statefulset's
 // `volumeClaimTemplates` entry, besides the container ones.
 var nestedRefusedKeys = map[string]map[string]nestedRefusal{
-	"deployment":      containerNestedRefusals,
 	"role-deployment": containerNestedRefusals,
 	"webservice":      withNestedRefusals(containerNestedRefusals, "affinity", nestedRefusal{affinityShorthandRejectedKeys, reasonOnly}),
 	"worker":          withNestedRefusals(containerNestedRefusals, "affinity", nestedRefusal{affinityShorthandRejectedKeys, reasonOnly}),

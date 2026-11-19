@@ -22,7 +22,7 @@ import (
 // (go-kure/launcher#1179): the policy ceiling must not refuse a scaler-owned
 // Deployment over a count no object carries. This is the ceiling's own case:
 // the policy default is left out, so only the explicit count can trip it.
-func TestDeploymentConfig_ScaledExplicitReplicasAreNotCheckedAgainstTheCeiling(t *testing.T) {
+func TestRoleDeploymentConfig_ScaledExplicitReplicasAreNotCheckedAgainstTheCeiling(t *testing.T) {
 	two := int32(2)
 	policy := &workloadPolicy{maxReplicas: &two}
 	scaler := oam.Trait{Type: "scaler", Properties: map[string]any{"minReplicas": 1, "maxReplicas": 2}}
@@ -30,10 +30,10 @@ func TestDeploymentConfig_ScaledExplicitReplicasAreNotCheckedAgainstTheCeiling(t
 
 	build := func(t *testing.T, traits ...oam.Trait) (*appsv1.Deployment, error) {
 		t.Helper()
-		h := &DeploymentHandler{}
+		h := &RoleDeploymentHandler{}
 		cfg, err := h.ToApplicationConfig(&oam.Component{
 			Name:       "app",
-			Type:       "deployment",
+			Type:       roleDeploymentMember,
 			Properties: map[string]any{"image": "ghcr.io/org/app:v1", "replicas": 3},
 			Traits:     traits,
 		}, "default")

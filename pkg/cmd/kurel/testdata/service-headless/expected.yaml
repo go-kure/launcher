@@ -2,12 +2,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: db
     launcher.gokure.dev/component: db
   name: db
   namespace: default
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: db
@@ -18,16 +16,10 @@ spec:
         app: db
         launcher.gokure.dev/component: db
     spec:
-      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/db:v1.0
         name: db
-        resources:
-          limits:
-            memory: 128Mi
-          requests:
-            cpu: 100m
-            memory: 128Mi
+        resources: {}
 ---
 apiVersion: v1
 kind: Service

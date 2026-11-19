@@ -75,9 +75,11 @@ characters where a subdomain allows 253. `batch.worker` would therefore build
 a workload the API server rejects at admission, naming
 `spec.template.spec.containers[0].name`, a field the author never wrote; an
 undotted name longer than 63 characters is refused by the same check. All
-seven workload kinds (`webservice`, `worker`, `deployment`, `statefulset`,
-`daemonset`, `cronjob`, `job`) now refuse such a name at generation, in the one
-builder they share. The name is refused rather than rewritten to `batch-worker`:
+six workload kinds that name their main container after the component
+(`webservice`, `worker`, `statefulset`, `daemonset`, `cronjob`, `job`) now
+refuse such a name at generation, in the one builder they share. The
+`deployment` kind takes its containers as authored, so it names none after the
+component. The name is refused rather than rewritten to `batch-worker`:
 a derived name would silently rename the container and could collide with an
 init container or sidecar of that name. Component types that name no container
 after the component (`helmrelease`, `manifests`, `passthrough`, …) keep accepting
@@ -91,8 +93,8 @@ named one too until they stopped emitting a Service.
 too, at conversion: a CronJob's name is at most 52 characters, a Job's at most
 63 (see each kind in ["Per-type highlights"](/pkg/oam/builtin/components/README.md#per-type-highlights)).
 
-Most workload types (`webservice`, `worker`, `deployment`, `statefulset`,
-`daemonset`, `cronjob`, `job`)
+Most workload types (`webservice`, `worker`, `statefulset`, `daemonset`,
+`cronjob`, `job`)
 share these fields, projected directly onto real `corev1` types (same
 structural pattern as `ProbeConfig` holding `*corev1.Probe`) rather than a
 hand-rolled parallel schema: `image` (validated — no untagged/`latest`), `env`
@@ -189,8 +191,8 @@ an unprefixed import instead of the intended one),
 `resources` — a `corev1.ResourceRequirements` projection read with
 `parseObjectField`, as are its `requests` and `limits`: a present value of the
 wrong type (`resources: "big"`, `requests: 3`) is **rejected by name**
-(`resources: must be an object, got string`) by each of the eight kinds that accept `resources` (webservice, worker,
-deployment, statefulset, daemonset, cronjob, job, postgresql) and by each
+(`resources: must be an object, got string`) by each of the seven kinds that accept `resources` (webservice, worker,
+statefulset, daemonset, cronjob, job, postgresql) and by each
 `initContainers`/`sidecars` entry, and a null reads as absence. `requests`/`limits`
 accept `cpu`/`memory` (defaults 100m/128Mi — subject to the environment
 policy's `MaxCPU()`/`MaxMemory()` maxima the same as an authored value; see
@@ -300,7 +302,7 @@ and `webservice` never (its `port` always defaults to 80, so the main
 container is always named `"http"`) — a numeric port is unaffected either way,
 since it dials the kubelet directly rather than resolving a declared name.
 (Those rules predate `ports`, and the `port` they describe on `daemonset` and
-`statefulset` is gone. Today `deployment`, `daemonset`,
+`statefulset` is gone. Today `daemonset`,
 `statefulset`, `job` and `cronjob` resolve a named port against the main
 container's `ports` list, refusing a name that list does not declare and any
 named port when it is empty; see "Main container ports".)
@@ -528,7 +530,7 @@ doc comment states only that the container runtime's default applies when
 unset, and real admission enforces no path shape for it, so this schema does
 not invent a stricter constraint upstream itself does not have; a
 present-but-non-string value, e.g. `workingDir: 123`, is rejected rather than
-silently treated as absent, in all seven kind handlers — this is a type check,
+silently treated as absent, in all six reshaped kind handlers — this is a type check,
 distinct from the content-validation question the previous paragraph answers),
 `volumes` (the `volumes` property itself, if authored, must be an array — a
 present-but-non-array value, e.g. `volumes: {name: data}`, is rejected
@@ -734,12 +736,12 @@ the kubelet resolves a named port against the container's own ports, so an
 undeclared name would build and never resolve; unlike the main container,
 whose single named port is fixed by its kind, a sidecar may declare several
 and any of them is accepted. A sidecar's `ports` list is read exactly as
-`deployment` reads its main container's (see "Main container ports" below):
+`statefulset` reads its main container's (see "Main container ports" below):
 closed entries, an IANA service `name`, a `protocol` from `TCP`/`UDP`/`SCTP`
 (an empty string refused), and no repeated name or `containerPort`/`protocol`
 pair within the sidecar. A port name must also be unique across the
 pod: the main container's ports (webservice's `http`, the `ports` list of
-statefulset, daemonset, deployment, job and cronjob), every
+statefulset, daemonset, job and cronjob), every
 sidecar's and every native sidecar's. The
 API server checks names only per container and merely warns across them,
 while a Service selecting the name reaches only the first container that
@@ -772,8 +774,8 @@ are applied by `parseAffinity` only once the block is present, unlike the
 The key set is closed. The shorthand is not a
 Kubernetes `Affinity`: `nodeAffinity`, `podAffinity` and `podAntiAffinity`
 under it are each refused with what the shorthand has for the field and where
-an affinity in the Kubernetes shape is authored (`deployment`, `statefulset`,
-`daemonset`, `job`, `cronjob`), and any other key is refused as
+an affinity in the Kubernetes shape is authored (`statefulset`,
+`daemonset`, `job`, `cronjob`, and `template.spec.affinity` of `deployment`), and any other key is refused as
 `affinity: unrecognized key "<key>"`, each whatever its value. The parser read
 none of them before, so a caller that skips the document check had them
 dropped; see
@@ -804,7 +806,7 @@ which previously got the default. The out-of-enum error now reads
 `affinity.podAntiAffinityType: invalid value …` rather than
 `invalid podAntiAffinityType …`).
 On `worker`, the affinity the shorthand evaluates to is also validated the way the
-`deployment` component validates a raw `affinity`, so a `topologyKey`, or a
+other kind-named workloads validate a raw `affinity`, so a `topologyKey`, or a
 `nodeSelector` key or value, that is not valid label syntax is refused
 (`affinity: the shorthand evaluates to an affinity the API server would
 refuse: …`). **Behavior-changing** under `launcher.gokure.dev/v1alpha1`: such
@@ -826,7 +828,7 @@ there, before this check.
 
 Seven `corev1.Container` fields are read on every container of a hand-parsed
 workload kind: as top-level keys for the main container
-of `deployment`, `statefulset`, `daemonset`, `job` and `cronjob` — and of
+of `statefulset`, `daemonset`, `job` and `cronjob` — and of
 `webservice` and `worker`, which forward them to their `role-deployment` member — and
 as keys of each `initContainers` and `sidecars` entry.
 
@@ -931,8 +933,8 @@ the namespace. The volume generates no object, and its claim name is used
 exactly as written: it is not qualified with the component name the way a
 role kind's claim is.
 
-**On the five pod kinds `claimName` is required.** `deployment`,
-`statefulset`, `daemonset`, `job` and `cronjob` generate no claim, so a `pvc`
+**On the four pod kinds `claimName` is required.** `statefulset`,
+`daemonset`, `job` and `cronjob` generate no claim, so a `pvc`
 volume without `claimName` is refused (`volume "data": a pvc volume must set
 claimName to an existing claim; the component generates none, so declare it
 with a persistentvolumeclaim component or a pvc trait`). This is a breaking
@@ -942,7 +944,9 @@ pre-GA format change. To migrate, declare the claim with a
 `volumeMode`. Then reference it from the volume with `claimName`. Keep
 `accessModes` on the volume, and keep `volumeMode: Block` there too: a
 `devicePath` mount needs it on the volume. The environment's storage-size
-limit and default now apply to that claim, not to the volume.
+limit and default now apply to that claim, not to the volume. The `deployment`
+kind has no `pvc` volume type at all: its `template.spec.volumes` are upstream
+`Volume` objects, and a claim is referenced with `persistentVolumeClaim.claimName`.
 
 `webservice` and `worker` still accept a `pvc` volume that describes its
 claim. The rule turns each one into a synthesized `pvc` trait on its
@@ -992,8 +996,9 @@ through `volumeDevices` at a `devicePath`, never through `volumeMounts`. The cla
 separate objects, so the apiserver accepts a Block claim paired with a
 filesystem mount and the pods then fail at kubelet mount time; every rule
 below reports that mismatch at build time instead. The rules are the same on
-all seven kinds (`webservice`, `worker`, `deployment`, `statefulset`,
-`daemonset`, `job`, `cronjob`), because they live in the shared parsers.
+all six kinds (`webservice`, `worker`, `statefulset`, `daemonset`, `job`,
+`cronjob`), because they live in the shared parsers. The `deployment` kind
+takes upstream `volumes`, `volumeMounts` and `volumeDevices` as authored.
 
 - **`volumes[]` pvc entry.** Adds `volumeMode` (`Filesystem`|`Block`) and
   `devicePath`. The entry takes exactly one of `mountPath` and `devicePath`,
@@ -1047,10 +1052,12 @@ claim templates; the parsers still require one of the two paths.
 
 ### Pod-level properties
 
-The seven kind components also share one pod-level property surface
+The six reshaped kind components (`webservice`, `worker`, `statefulset`,
+`daemonset`, `job`, `cronjob`) also share one pod-level property surface
 (ADR-036 L1), parsed by `parsePodSpec` (`podspec.go`)
 straight into a `corev1.PodSpec` and rendered by the shared `buildPodSpec`,
-which every kind assigns to its pod template. Property names are the
+which each of them assigns to its pod template. The raw `deployment` has no such
+surface: its pod spec is `template.spec`, as the API shapes it. Property names are the
 `corev1.PodSpec` JSON names, except three that carry a `pod` prefix because
 the bare name is already a property at some kind: `podSecurityContext`
 (container `securityContext` exists everywhere), `podResources` (container
@@ -1103,7 +1110,7 @@ the value. This check does not read whether a value such as
 | `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **cronjob and job only** — apps/v1 rejects it on Deployment/StatefulSet/DaemonSet templates, so the other kinds neither publish nor accept it, and refuse the upstream name `activeDeadlineSeconds` with that reason (on `job` and `cronjob` that name is the JobSpec's). Distinct from the JobSpec-level `activeDeadlineSeconds` below: this one bounds a single pod, that one the whole job. | additive |
 | `dnsPolicy`, `dnsConfig` | enum, object | `ClusterFirstWithHostNet`/`ClusterFirst`/`Default`/`None`; `dnsConfig` = `nameservers` (≤3 plain IPv4/IPv6 literals — a zone-scoped address such as `fe80::1%eth0` is rejected, matching upstream's `net.ParseIP`-based check, which has no notion of a zone), `searches` (≤32 entries whose joined length, separators included, is ≤2048 characters — the `resolv.conf` search-line limit, so 32 individually valid domains can still be refused), `options[]{name,value}`. `None` requires at least one nameserver. | additive |
 | `nodeSelector`, `nodeName`, `schedulerName`, `priorityClassName`, `preemptionPolicy`, `runtimeClassName`, `schedulingGates[]{name}`, `schedulingGroup{podGroupName}` | scheduling | Placement fields; gate names must be unique. `nodeName` is a DNS-1123 subdomain (a Node is an ordinary object, so an invalid value is refused at admission, not merely unmatched). `schedulerName` is deliberately *not* validated: upstream constrains its form nowhere, so an arbitrary string is a legal document and rejecting one here would refuse work a cluster accepts. | additive |
-| `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from all seven kinds; `NoopPolicy` denies all three). | additive |
+| `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from all six kinds; `NoopPolicy` denies all three). | additive |
 | `shareProcessNamespace` | bool | Mutually exclusive with `hostPID: true`. | additive |
 | `hostname`, `subdomain`, `setHostnameAsFQDN`, `hostnameOverride`, `hostAliases[]{ip,hostnames}` | naming | `hostname`/`subdomain` are DNS-1123 labels; `hostnameOverride` is a ≤64-char subdomain and cannot combine with `hostNetwork` or `setHostnameAsFQDN`. `hostAliases[].ip` is a plain IPv4/IPv6 literal, zone suffixes rejected as for `dnsConfig.nameservers`. | additive |
 | `podSecurityContext` | object | The full `corev1.PodSecurityContext` field set (`runAsUser`/`runAsGroup`/`runAsNonRoot`/`fsGroup`/`fsGroupChangePolicy`/`supplementalGroups`/`supplementalGroupsPolicy`/`sysctls`/`seLinuxOptions`/`seLinuxChangePolicy`/`seccompProfile`/`appArmorProfile`/`windowsOptions`), closed and validated like the container `securityContext`; the `windowsOptions` strings are held to upstream's rules as on a container (see "Container fields"). `sysctls[].name` must match the sysctl grammar (≤253 characters of dot- or slash-separated lowercase alphanumeric segments) and be unique within the list. `windowsOptions.hostProcess: true` additionally requires `hostNetwork: true`, which upstream demands of any pod containing HostProcess containers. The `runAsUser: 0` / `runAsNonRoot: true` contradiction is judged per container on the *effective* values once the containers are assembled, not on this object alone — a container-level `runAsUser` overrides the pod-level one, so the pair is a valid document when every container names a non-root UID, and the deferred check also catches a container-level `runAsUser: 0` under a pod-level `runAsNonRoot`. **Partly policy-gated**: `windowsOptions.hostProcess: true` is rejected unless `AllowPrivileged()` allows it (a HostProcess pod runs with the node's own privileges, and upstream forces every container in it to be HostProcess too); every other field has no policy hook. | additive |
@@ -1170,7 +1177,9 @@ spellings are authorable — see the `podSecurityContext` row under "Pod-level
 properties".
 
 The pod-level surface carries two policy checks of its own, both called from
-all seven kinds' `ApplyPolicy` next to `enforceHostNamespaces`:
+all six reshaped kinds' `ApplyPolicy` next to `enforceHostNamespaces` (the raw
+`deployment` makes the same checks over `template.spec`, through
+`enforcePodTemplatePolicy`):
 `enforcePodResources` measures `podResources`' cpu and memory requests and
 limits against `MaxCPU()`/`MaxMemory()` — without it an author could keep the
 container under the maximum and put the oversized request on the pod, which
@@ -1187,7 +1196,8 @@ A `volumes` entry sourced from `hostPath` is rejected unless the environment
 policy's `AllowHostPathVolumes()` allows it (`enforce.go`'s
 `enforceHostPathVolumes`, the same reused-mechanism shape as
 `enforcePrivileged` above); like `enforcePrivileged`, it is called from all
-seven kind components' `ApplyPolicy`, not just one — a hostPath volume mounts
+six reshaped kind components' `ApplyPolicy`, and from the raw `deployment`'s
+through `enforcePodTemplatePolicy`, not just one — a hostPath volume mounts
 an arbitrary path from the node's own filesystem into the Pod, so an
 unenforced policy denial here is a container-escape-adjacent gap, not merely
 a style one. The same switch gates a PersistentVolume's `hostPath` and `local`
@@ -1248,58 +1258,61 @@ should be platform-reserved (rejecting any authored value via
 `PropertySchema.PlatformReserved`/`enforcePlatformReserved`) is a consumer-side
 policy choice, not something this shared schema hardcodes.
 
-### Deployment-level properties (`deployment`, `webservice`, `worker`)
+### Deployment-level properties (`webservice`, `worker`)
 
-Three components produce an `appsv1.Deployment`: the kind-named `deployment`
-(ADR-036 L1, the stratified-levels decision: one
-PodSpec/Container projection shared by every kind, with kind-named components
-projecting their own API kind), and the two role-named kinds `webservice`
-(Deployment + Service) and `worker` (Deployment, no Service). Everything above
-— the container-level surface and the pod-level surface — applies to all three
-unchanged, and so does the rest of `DeploymentSpec` below: it is parsed by
-`parseDeploymentSpec` (`deployment_spec.go`) into real `appsv1` types and
-written by its `apply` onto the built object, from one fragment all three
-handlers compose. The pod template's `podMetadata` is the
-same on all three (see ["The pod template's labels and
+Two components build their `appsv1.Deployment` from launcher's reshaped
+surface: the role-named kinds `webservice` (Deployment + Service) and `worker`
+(Deployment, no Service). They lower into a member of type `role-deployment`,
+which no document can author. Everything above — the container-level surface and
+the pod-level surface — applies to both unchanged, and so does the rest of
+`DeploymentSpec` below: it is parsed by `parseDeploymentSpec`
+(`deployment_spec.go`) into real `appsv1` types and written by its `apply` onto
+the built object, from one fragment both handlers compose. The pod template's
+`podMetadata` is the same on both (see ["The pod template's labels and
 annotations"](conventions.md#the-pod-templates-labels-and-annotations-podmetadata)).
+
+**The kind-named `deployment` is not part of this surface.** Since
+`go-kure/launcher#1629` it is a raw kind: its properties are the
+`DeploymentSpec` fields themselves, decoded strictly, as `replicaset`'s are (see
+the `deployment` section of [Kinds: core workloads](kinds-core-workloads.md#deployment)).
+Everything on this page that is written for a top-level `image`, `ports`, `env`,
+`resources`, `probes`, `sidecars`, `podMetadata`, `volumes[].mountPath` or a
+builtin fill holds for every other workload kind and not for `deployment`; the
+section on `deployment` says where each of those fields went.
 
 Sharing the fragment is the point rather than a convenience. These fields are
 properties of the API kind, not of the role a component plays, so a document
-that moves a workload from `webservice` to `deployment` — or the reverse —
-should not lose a `strategy` on the way. Every rule the table below states,
-including the refusals, therefore holds identically on all three.
+that moves a workload from `webservice` to `worker` should not lose a
+`strategy` on the way. Every rule the table below states, including the
+refusals, therefore holds identically on both.
 
-The three kinds are still not layered, and one is not a superset of the others.
-`deployment` deliberately publishes **no `port`** (and so emits no Service),
-**no `affinity` shorthand** and **no default topology-spread constraint** —
-none of those is a `DeploymentSpec` field, and a kind named after the API kind
-should project the API kind rather than launcher's opinions about it. A
-workload that wants launcher to create its Service uses `webservice`. This is
-the reversible direction: adding a property later is additive, removing one is
-breaking. Its `ports` list (below) is that kind of addition: container ports
-are a `PodSpec` field, and declaring them emits no Service.
+The two kinds are not layered: `worker` publishes **no `port`** (and so emits no
+Service), and a workload that wants launcher to create its Service uses
+`webservice`. Both keep launcher's own opinions: the four-key `affinity`
+shorthand and the default topology-spread constraint.
 
-What `deployment` *does* publish, and the role kinds do not, is the raw
-`corev1` form of the same three scheduling concerns — see "Raw scheduling
-properties" immediately below. The two are not alternatives: the shorthand is
-an opinion, the raw shapes are the API.
-
-The default topology-spread opinion is still available on `deployment`, as an
-explicit opt-in rather than a kind default: the `topology-spread` trait (see
-the trait handlers README) applies the same
+The `topology-spread` trait (see the trait handlers README) applies the same
 `BuildTopologySpreadConstraints` the role kinds use, exported for that reason,
 from the Deployment's post-policy replica count, or from the matching `scaler`'s
-`minReplicas` when the component carries one (see below). It refuses a Deployment that
-already carries raw `topologySpreadConstraints`, so the two never merge.
+`minReplicas` when the component carries one (see below). It refuses a Deployment
+that already carries `topologySpreadConstraints`, so the two never merge. The
+trait also acts on the Deployment of a `deployment` component, which needs a
+selector made of `matchLabels` only.
 
 #### Main container ports
 
-`deployment` publishes `ports`, the main container's `corev1.ContainerPort` list. It declares container ports only: the kind still emits
-no Service (use `webservice`, or a `service` component, for one).
+`statefulset`, `daemonset`, `job` and `cronjob` publish `ports`, the main
+container's `corev1.ContainerPort` list. It declares container ports only: none
+of those kinds emits a Service from it (use `webservice`, or a `service`
+component, for one). `webservice` and `worker` publish no `ports` list
+(`webservice` declares its one container port from `port`). The `deployment` kind
+has no such property either: its ports are
+`template.spec.containers[0].ports`, as the API shapes them.
 
 **Endpoints.** `deployment`, `statefulset` and
-`daemonset` implement `oam.EndpointProvider` from the main container's `ports`:
-one endpoint per entry, in the authored order. An endpoint's `Name` is the port's
+`daemonset` implement `oam.EndpointProvider` from the main container's `ports`
+(for `deployment`, the ports of `template.spec.containers[0]`; containers after
+the first are not read): one endpoint per entry, in the authored order. An endpoint's `Name` is the port's
 `name` (empty when unnamed), its `Ports` hold the numeric `containerPort` alone,
 and its `Protocol` is the entry's (`TCP` when unset). Its selector is
 `app: <value>`, the label the pods carry, where the value is the component name
@@ -1312,14 +1325,14 @@ without ports, so it reports none. Only TCP endpoints
 synthesize a NetworkPolicy allow; a UDP or SCTP endpoint is collected and
 validated, and synthesizes nothing.
 
-`daemonset`, `statefulset`, `job` and `cronjob` publish the same `ports`, with
-the same entry rules: container ports are a PodSpec
-field, so every kind-named workload component projects them. `ports` emits no
+`daemonset`, `statefulset`, `job` and `cronjob` publish one `ports` property,
+with the entry rules in the table below: container ports are a PodSpec
+field, so these kind-named workload components project them. `ports` emits no
 Service on any of them. A named probe or hook port resolves against the
 main container's `ports`; with none declared, it is refused.
 
 **Breaking: `daemonset` and `statefulset` dropped `port`
-and the Service it drove**, as `deployment` did. `port`
+and the Service it drove**, as `deployment` did before it became a raw kind. `port`
 declared the main container's first port and a Service in front of it: a
 ClusterIP Service named after the component on `daemonset`, a headless one
 named `serviceName` (default: the component name) on `statefulset`. An authored
@@ -1358,17 +1371,22 @@ named `serviceName` (default: the component name) on `statefulset`. An authored
 
 #### Raw scheduling properties
 
-`deployment` publishes `affinity`, `tolerations` and
-`topologySpreadConstraints` as their plain `corev1` shapes, parsed by `scheduling.go`. Nothing is inferred from the
-component: every selector, weight and topology key is authored.
+`statefulset`, `daemonset`, `job` and `cronjob` publish `affinity`,
+`tolerations` and `topologySpreadConstraints` as their plain `corev1` shapes,
+parsed by `scheduling.go`. Nothing is inferred from the
+component: every selector, weight and topology key is authored. The `deployment`
+kind publishes none of the three as a top-level property: they are
+`template.spec.affinity`, `template.spec.tolerations` and
+`template.spec.topologySpreadConstraints`, strictly decoded as part of the pod
+spec and held to what the `pod` kind holds its own spec to. The parsers and
+rules below are not read for it.
 
-The other kind-named workloads publish the same shapes through the same parsers
-and schemas, so every rule in the table below holds wherever the key is
+The hand-parsed kind-named workloads publish the same shapes through the same
+parsers and schemas, so every rule in the table below holds wherever the key is
 published:
 
 | kind | `affinity` | `tolerations` | `topologySpreadConstraints` |
 |---|---|---|---|
-| `deployment` | raw | yes | yes |
 | `statefulset` | raw | yes | yes |
 | `daemonset` | raw | yes | yes |
 | `job` | raw | yes | yes |
@@ -1426,7 +1444,7 @@ with one `In` requirement per label.
 
 `affinity` and `topologySpreadConstraints` are new properties on a kind that did
 not have them, so they are additive outright. `tolerations` is not: `deployment`
-reaches it through the *same* `parseTolerations`/`schemaTolerations` pair that
+reached it (before it became a raw kind) through the *same* `parseTolerations`/`schemaTolerations` pair that
 `daemonset` has always used, and those two kinds were its only callers then, so
 completing the projection changed `daemonset` too. (A kind that gained
 `tolerations` later, `statefulset`, `job` and `cronjob`, had no earlier
@@ -1516,7 +1534,7 @@ An **empty** `labelSelector: {}` is accepted here, unlike on a volume claim's
 matches every pod in scope. Refusing the empty form would make a real API shape
 unexpressible.
 
-These three keys live in the `deployment` handler's own property map, above the
+These three keys live in the `role-deployment` handler's own property map, above the
 `maps.Copy` calls that merge the shared pod-level and `DeploymentSpec`
 fragments, and they must stay there. `maps.Copy` overwrites the destination, and
 `worker` and `webservice` each set the four-key `affinity` shorthand in their
@@ -1552,9 +1570,11 @@ Service's selector.
 scales the Deployment past its replica count, and the non-RWX guard below checks
 only the component's effective replica count (authored, or the policy default),
 so it cannot account for later HPA scaling. The `scaler` trait covers
-that gap itself: `deployment` reports its first non-RWX claim to the trait
-(`NonRWXClaim`), and the trait refuses an effective `maxReplicas` above 1 when
-one is present (see "Non-RWX volumes"). `scaler` is available on `statefulset`
+that gap itself: `webservice` and `worker` report their first non-RWX claim to the
+trait (`NonRWXClaim`), and the trait refuses an effective `maxReplicas` above 1 when
+one is present (see "Non-RWX volumes"). The raw `deployment` reports no claim and
+the scaler adds no such check for it: it has no `pvc` volume type, so launcher
+reads no access mode from its volumes. `scaler` is available on `statefulset`
 too, with the HPA's `scaleTargetRef` naming a `StatefulSet`.
 That kind reports no non-RWX claim and the scaler adds no such check for it: its
 claims come from `volumeClaimTemplates`, one per pod, so scaling does not make pods
@@ -1562,13 +1582,13 @@ contend for them, and `statefulset` applies no non-RWX limit to an authored repl
 count either. A claim shared through `volumes` stays as unguarded under a scaler as
 it is under authored replicas.
 
-**`deployment` reports its pod template labels** (`PodTemplateLabels`), so a
+**The `role-deployment` member reports its pod template labels** (`PodTemplateLabels`), so a
 same-name sibling group can tell that a `service` member selects this
 Deployment's own pods, which the group's component-label policy already
 covers (see `pkg/oam` "Same-name sibling groups"). The labels it reports are the
-component's own and the ones `podMetadata.labels` adds, as the pod template carries them. The deployment member of a
-`webservice` or `worker` reports the same, authored `podMetadata.labels` included. `statefulset`, `daemonset`,
-`job` and `cronjob` do not have the method, deliberately: its one reader is that group check, and `deployment` is the only pod
+component's own and the ones `podMetadata.labels` adds, as the pod template carries them. The member of a
+`webservice` or `worker` reports them, authored `podMetadata.labels` included. `deployment`, `statefulset`, `daemonset`,
+`job` and `cronjob` do not have the method, deliberately: its one reader is that group check, and `role-deployment` is the only pod
 kind a lowering rule emits into a group (`webservice`, `worker`). A rule that
 emits another pod kind into a group must add the method to that kind.
 
@@ -1583,7 +1603,7 @@ emits another pod kind into a group must add the method to that kind.
 | `paused` | bool | Pauses rollouts of the Deployment. | additive |
 | `progressDeadlineSeconds` | int ≥ 0 | Must be **greater than** the effective `minReadySeconds`, the cross-field rule `ValidateDeploymentSpec` applies. Both halves are compared as *effective* values, because both have an API default a document may be leaving it to: `minReadySeconds` defaults to 0 (a non-pointer `int32`, so it has no unset state) and `progressDeadlineSeconds` defaults to 600. So the rule fires in both directions — `progressDeadlineSeconds: 0` alone is rejected against the defaulted 0, and `minReadySeconds: 600` alone is rejected against the defaulted 600 — and the error names, for each half, whether the value was authored or defaulted, since either can be a field the document never mentions. | additive |
 | `selector`, `template` | — | Not authorable, and rejected with a message saying so rather than silently ignored. The selector is builder-managed (`app: <component>`) and immutable once the object exists; the pod template is projected from the component's own container and pod-level properties. | additive |
-| any of the five `DeploymentSpec` properties above, authored as `null` (on `deployment`, `webservice` and `worker` alike); **and, on `deployment` only, any optional property of the kind** | — | Read as omission, not as a present-but-wrong type — including a typed nil, which is what a Go-constructed lowering rule produces when it assigns a nil map into an `any`. `pkg/oam`'s property validator already treats a null under an optional property as absent, so without this a component could satisfy the published schema and then fail during handler conversion. `parseDeploymentSpec` strips nulls itself, so the five fields above behave this way on `webservice` and `worker` too. The wider guarantee is the `deployment` kind's alone: there it covers the kind's whole **top-level** surface, so `replicas: null`, `workingDir: null`, `env: null` and the rest all read as unauthored and `replicas: null` takes the default 1. This is no longer specific to `deployment` for a property read through one of the shared field helpers in `common.go`, which test presence with `authoredValue`, nor for the six parsers that used to read their own property with a bare map lookup rather than a helper — `envFrom`, `probes`, `lifecycle`, `securityContext`, `volumes`, `accessModes` — which were converted to the same primitive. It also covers the top-level keys that were still answered with a bare lookup and then type-checked — `cronjob`'s `timeZone`, `successfulJobsHistoryLimit` and `failedJobsHistoryLimit`; `completionMode` on `job` and `cronjob`; `passthrough`'s `clusterScoped`; `inline` and `url` on `crd` and `manifests`; and `manifests`' `scopeOverrides` — so a null there, typed or untyped, now reads as omission instead of a wrong type. That mattered because `ValidateAuthoredProperties` does not strip a top-level null, so `kurel build` used to reach the refusal. **One deliberate exception, and it is not an oversight:** the `postStart`/`preStop` handler keys (`httpGet`, `exec`, `sleep`, `tcpSocket`) still answer presence with a bare lookup, because there the rule being enforced *is* presence — `lifecycle: {preStop: {tcpSocket: null}}` must stay a refusal, since reading it as absence would let an authored-but-empty `tcpSocket` vanish and a valid sibling handler win silently, which is the exact silent-drop the surrounding paragraph rejects. The exception covers a probe's handler keys (`httpGet`, `tcpSocket`, `exec`, `grpc`) as well: `countProbeHandlers` reads them the same way, for the same reason, so a null one is refused too. Absence and authored-null are genuinely different documents for those handler keys. A `null` on a field that is required once its parent is authored (`strategy.type`) surfaces as the requiredness error, not a type error; `selector`/`template` are not optional properties, so naming either as `null` still earns the refusal above. **It now reaches nested keys too** — `securityContext: {runAsUser: null}` builds as if `runAsUser` were omitted. That fix deliberately sits *inside* each nested parser, after its unknown-key rejection, rather than in a recursive pre-strip over the property map: a recursive strip would remove `securityContext: {bogusKey: null}` before `parseSecurityContext`'s own rejection ever saw it, turning a named refusal into silence — trading one silent-drop bug for another. So a recognized nested key read through the helpers treats a null as absence, and an unrecognized one is still named and refused; both sides of that `securityContext` boundary are pinned in `deployment_nested_null_test.go`. The two nested map readers that used to read each entry raw now skip a null entry too, as `stringMapStrict` already did: `parseResourceList` (a `resources.requests`/`limits` quantity, where property validation deletes a null first only under the declared `cpu` and `memory` keys) and `parseLabelMap` (a `nodeSelector`, `service` `selector` or `matchLabels` value). As with `securityContext`, the skip comes after the key check: an invalid resource name or label key is still refused whatever its value, and a wrongly typed entry is still refused. A map left empty by the skip meets the empty-map refusal where one exists — `service`'s `selector: {app: null}` is refused as `selector: {}` is, rather than emitting a selector-less Service. | additive |
+| any of the five `DeploymentSpec` properties above, authored as `null` (on `webservice` and `worker` alike); **and, on the `role-deployment` member only, any optional property of the kind** | — | Read as omission, not as a present-but-wrong type — including a typed nil, which is what a Go-constructed lowering rule produces when it assigns a nil map into an `any`. `pkg/oam`'s property validator already treats a null under an optional property as absent, so without this a component could satisfy the published schema and then fail during handler conversion. `parseDeploymentSpec` strips nulls itself, so the five fields above behave this way on `webservice` and `worker` too. The wider guarantee is the `role-deployment` member's alone (the reshaped handler that `deployment` was before it became a raw kind; no document authors it): there it covers the member's whole **top-level** surface, so `replicas: null`, `workingDir: null`, `env: null` and the rest all read as unauthored and `replicas: null` takes the default 1. This is no longer specific to that handler for a property read through one of the shared field helpers in `common.go`, which test presence with `authoredValue`, nor for the six parsers that used to read their own property with a bare map lookup rather than a helper — `envFrom`, `probes`, `lifecycle`, `securityContext`, `volumes`, `accessModes` — which were converted to the same primitive. It also covers the top-level keys that were still answered with a bare lookup and then type-checked — `cronjob`'s `timeZone`, `successfulJobsHistoryLimit` and `failedJobsHistoryLimit`; `completionMode` on `job` and `cronjob`; `passthrough`'s `clusterScoped`; `inline` and `url` on `crd` and `manifests`; and `manifests`' `scopeOverrides` — so a null there, typed or untyped, now reads as omission instead of a wrong type. That mattered because `ValidateAuthoredProperties` does not strip a top-level null, so `kurel build` used to reach the refusal. **One deliberate exception, and it is not an oversight:** the `postStart`/`preStop` handler keys (`httpGet`, `exec`, `sleep`, `tcpSocket`) still answer presence with a bare lookup, because there the rule being enforced *is* presence — `lifecycle: {preStop: {tcpSocket: null}}` must stay a refusal, since reading it as absence would let an authored-but-empty `tcpSocket` vanish and a valid sibling handler win silently, which is the exact silent-drop the surrounding paragraph rejects. The exception covers a probe's handler keys (`httpGet`, `tcpSocket`, `exec`, `grpc`) as well: `countProbeHandlers` reads them the same way, for the same reason, so a null one is refused too. Absence and authored-null are genuinely different documents for those handler keys. A `null` on a field that is required once its parent is authored (`strategy.type`) surfaces as the requiredness error, not a type error; `selector`/`template` are not optional properties, so naming either as `null` still earns the refusal above. **It now reaches nested keys too** — `securityContext: {runAsUser: null}` builds as if `runAsUser` were omitted. That fix deliberately sits *inside* each nested parser, after its unknown-key rejection, rather than in a recursive pre-strip over the property map: a recursive strip would remove `securityContext: {bogusKey: null}` before `parseSecurityContext`'s own rejection ever saw it, turning a named refusal into silence — trading one silent-drop bug for another. So a recognized nested key read through the helpers treats a null as absence, and an unrecognized one is still named and refused; both sides of that `securityContext` boundary are pinned in `role_deployment_nested_null_test.go`. The two nested map readers that used to read each entry raw now skip a null entry too, as `stringMapStrict` already did: `parseResourceList` (a `resources.requests`/`limits` quantity, where property validation deletes a null first only under the declared `cpu` and `memory` keys) and `parseLabelMap` (a `nodeSelector`, `service` `selector` or `matchLabels` value). As with `securityContext`, the skip comes after the key check: an invalid resource name or label key is still refused whatever its value, and a wrongly typed entry is still refused. A map left empty by the skip meets the empty-map refusal where one exists — `service`'s `selector: {app: null}` is refused as `selector: {}` is, rather than emitting a selector-less Service. | additive |
 
 Every field above is presence-gated: a document that authors none of them
 produces the same object the builder produced before, so the apiserver's own
@@ -1622,14 +1642,16 @@ document itself. An authored `strategy` malformed enough to fail that check now
 fails there, before the handler ever sees it.
 
 **`replicas` is validated the same way on every kind that reads it** —
-`deployment`, `webservice`, `worker`, `statefulset` and `postgresql` share one
-checked reading (`parseReplicas`, `common.go`). A value that is not an integer
+`webservice`, `worker`, `statefulset` and `postgresql` share one
+checked reading (`parseReplicas`, `common.go`). The raw `deployment` takes
+`replicas` as the strictly decoded `DeploymentSpec` integer, and its own value
+rules are the API server's, except for the policy maximum. A value that is not an integer
 is an error naming its type (`replicas: must be an integer, got string`), and a
 negative is an error naming the value (`replicas: must be >= 0, got -1`).
 Absent or `null` takes the default 1. `replicas: 0` is accepted everywhere.
 An authored count, including 0 and 1, wins over a policy `DefaultReplicas`;
 only an absent or `null` one takes it.
-Previously only the `deployment` handler did this. The
+Previously only the reshaped `deployment` handler did this. The
 other handlers fell back to the default when the value would not convert, and
 carried `replicas: -1` through to an object the apiserver then refused
 (`ValidateDeploymentSpec` and `ValidateStatefulSetSpec` run
@@ -1668,12 +1690,13 @@ this is a build-time guard, not a mirror of an apiserver rule. An authored
 overwritten, so a document never ships a strategy its author did not write.
 That refusal reaches `webservice` and `worker` only now that they publish
 `strategy` at all; previously those two substituted `Recreate`
-silently, because there was no authored value to contradict. `deployment`,
-`webservice` and `worker` all run the one `applyNonRWXConstraint`.
+silently, because there was no authored value to contradict. `webservice` and
+`worker` run the one `applyNonRWXConstraint`; the raw `deployment` has no `pvc`
+volume type, so it runs none.
 
 That guard checks the component's effective replica count, but a `scaler`
 trait's HPA scales the same Deployment up to `maxReplicas`, which the guard
-cannot see. So on `deployment`, `webservice` and
+cannot see. So on `webservice` and
 `worker` the trait is held to the same limit: with a non-RWX claim attached, an effective
 `maxReplicas` above 1 fails the build with an error naming the `scaler` trait
 and the claim's volume. "Effective" means after an EnvironmentPolicy
@@ -1683,7 +1706,8 @@ then left pods 2 and up unschedulable or stuck attaching; it is now refused
 as a pre-GA format change (`docs/oam/design-gvk.md` § Document-Format
 Lifecycle). On
 `deployment` the combination was never accepted, because `scaler` was not
-admitted there: the trait is newly admitted with this safeguard in place.
+admitted there: the trait was newly admitted with this safeguard in place, and
+the raw `deployment` has since dropped the safeguard with its `pvc` volume type.
 
 **Replicas under a `scaler`**. The HorizontalPodAutoscaler
 owns the replica count of the Deployment or StatefulSet it scales, so with a
@@ -1808,7 +1832,7 @@ reason rather than silently ignored:
   component name, and a StatefulSet's selector is immutable after creation.
 - `spec.template` (StatefulSet-level) — the pod template
   is projected from the component's own container and pod-level properties, as
-  on `deployment`. The parser dropped an authored one before.
+  on `webservice` and `worker`. The parser dropped an authored one before.
 - `volumeName` (claim) — pre-binding a claim *template* to one named
   PersistentVolume would point every replica at the same volume.
 - `volumeMount` (claim) — not a claim-spec field at all; the container mount

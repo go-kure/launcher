@@ -158,6 +158,9 @@ func (h *PersistentVolumeHandler) ContractMetadata() oam.ContractMetadata {
 func (h *PodHandler) ContractMetadata() oam.ContractMetadata { return contract("pod") }
 
 // ContractMetadata implements oam.ContractDescriber.
+func (h *DeploymentHandler) ContractMetadata() oam.ContractMetadata { return contract("deployment") }
+
+// ContractMetadata implements oam.ContractDescriber.
 func (h *ReplicaSetHandler) ContractMetadata() oam.ContractMetadata { return contract("replicaset") }
 
 // ContractMetadata implements oam.ContractDescriber.

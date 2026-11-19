@@ -186,8 +186,8 @@ func rejectListEnvelope(componentName, kind string, object map[string]any) error
 	// []interface{}, so a Go-assembled []map[string]any under `items` would slip past.
 	// NO IN-REPO PRODUCER CAN CONSTRUCT THAT TODAY — the authored path decodes through
 	// yaml.v3 into any, which yields []interface{}, and the one production
-	// ComponentLoweringRule, WorkerRule (worker.go), emits only `deployment`
-	// components, never a passthrough; every other LowerComponent implementation in
+	// ComponentLoweringRule, WorkerRule (worker.go), emits only `role-deployment`
+	// members, never a passthrough; every other LowerComponent implementation in
 	// this module is in a _test.go. Two events make it live, and the second is the
 	// smaller edit: a production ComponentLoweringRule that emits a passthrough
 	// component, OR any trait rule populating LoweringResult.Components, which

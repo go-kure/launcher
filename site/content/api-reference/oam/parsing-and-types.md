@@ -67,7 +67,8 @@ authored object, not the trait.
 One other per-type
 registry has the same shape and the same failure mode: `traitComponentRestrictions`
 (which traits a component type accepts; `scaler` is restricted to `webservice`, `worker`,
-`deployment` and `statefulset`, and `disruption` to the same four).
+`deployment`, `statefulset` and `role-deployment`, the member type the two roles lower into
+that no document authors, and `disruption` to the same five).
 
 **A `scaler` refuses authored `replicas`**. The
 HorizontalPodAutoscaler owns the replica count, so the scaler builds the Deployment or

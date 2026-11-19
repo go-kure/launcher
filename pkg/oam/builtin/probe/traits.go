@@ -1,21 +1,20 @@
 package probe
 
 import (
-	"slices"
-
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // withTrait is a deployment with one trait and the capability bindings the
-// transform runs with.
+// transform runs with. The deployment fills nothing of its own, so the probe
+// holds the fills of the trait only.
 func withTrait(name string, trait oam.Trait, caps map[string]oam.CapabilityBinding, fills []Fill) Probe {
-	comps := component("app", "deployment", nil)
+	comps := rawDeployment("app", nil, nil)
 	comps[0].Traits = []oam.Trait{trait}
 	return Probe{
 		Name:         name,
 		Components:   comps,
 		Capabilities: caps,
-		Fills:        join([]Fill{replicas("app"), automount("app")}, resourceFills("app", ""), fills),
+		Fills:        fills,
 	}
 }
 
@@ -50,20 +49,17 @@ func traitProbes() []Probe {
 			"rules":       []any{map[string]any{"matches": []any{match}}},
 		}
 	}
-	// The scaler owns the replica count, so the deployment reports no replicas
-	// and the document refuses an authored one.
+	// The scaler owns the replica count, so the Deployment is built without one.
+	// The raw deployment declares no replicas default, so nothing is left out here.
 	scaler := withTrait("deployment with a scaler", oam.Trait{Type: "scaler", Properties: map[string]any{
 		"minReplicas": 2, "maxReplicas": 5,
 	}}, nil, []Fill{tf("scaler", "cpuUtilization", 80, 70), derived("scaler", "hpaName")})
-	scaler.Fills = slices.DeleteFunc(scaler.Fills, func(f Fill) bool { return f.Trait == "" && f.Path == "replicas" })
-	scaler.NotAuthorable = map[string]string{"replicas": "owns the replica count"}
 	// The trait writes constraints from two replicas, so the document authors two
 	// and the deployment reports no replicas. It takes no property: the fill is a
 	// field of the Deployment, stated as a source only.
 	spread := withTrait("deployment with a topology spread", oam.Trait{Type: "topology-spread", Properties: map[string]any{}},
 		nil, []Fill{derived("topology-spread", spreadPath)})
 	spread.Components[0].Properties["replicas"] = 2
-	spread.Fills = slices.DeleteFunc(spread.Fills, func(f Fill) bool { return f.Trait == "" && f.Path == "replicas" })
 	// At restricted the profile fills three properties the workload did not author.
 	// readOnlyRootFilesystem can be written either way. The other two cannot be
 	// written the other way at restricted (the trait refuses runAsNonRoot: false
