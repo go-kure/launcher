@@ -438,7 +438,7 @@ func TestParsePodSpec_PodResources_NullIsOmission(t *testing.T) {
 			t.Run(key+"/"+tc.name, func(t *testing.T) {
 				cfg, err := parsePodSpec(map[string]any{
 					"podResources": map[string]any{key: tc.val},
-				}, false)
+				})
 				if err != nil {
 					t.Fatalf("parsePodSpec(podResources.%s: null) = error %v, want nil", key, err)
 				}
@@ -452,7 +452,7 @@ func TestParsePodSpec_PodResources_NullIsOmission(t *testing.T) {
 	t.Run("wrong type still errors", func(t *testing.T) {
 		_, err := parsePodSpec(map[string]any{
 			"podResources": map[string]any{"requests": "x"},
-		}, false)
+		})
 		if err == nil {
 			t.Fatal("parsePodSpec(podResources.requests: <string>) = nil error, want a type error")
 		}

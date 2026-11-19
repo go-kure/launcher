@@ -42,16 +42,13 @@ type PodSpecConfig struct {
 
 // podSpecPropertyKeys lists every top-level pod-level property parsePodSpec
 // reads, in the order corev1.PodSpec declares them. schemaPodSpec publishes
-// exactly this set (TestPodSpecSchemaMatchesParser pins the two together),
-// minus podSpecJobOnlyKeys for kinds whose pods are not Job pods.
+// exactly this set (TestPodSpecSchemaMatchesParser pins the two together).
 //
-// Three keys carry a `pod` prefix because the bare corev1 field name is
+// Two keys carry a `pod` prefix because the bare corev1 field name is
 // already a property at some kind: `podSecurityContext` and `podResources`
-// (container-level securityContext/resources exist on every kind) and
-// `podActiveDeadlineSeconds` (a Job pod's activeDeadlineSeconds, which no
-// shipped kind publishes now).
+// (container-level securityContext/resources exist on every kind).
 var podSpecPropertyKeys = []string{
-	"terminationGracePeriodSeconds", "podActiveDeadlineSeconds", "dnsPolicy", "nodeSelector",
+	"terminationGracePeriodSeconds", "dnsPolicy", "nodeSelector",
 	"serviceAccountName", "automountServiceAccountToken", "nodeName", "hostNetwork", "hostPID",
 	"hostIPC", "shareProcessNamespace", "podSecurityContext", "imagePullSecrets", "hostname",
 	"subdomain", "schedulerName", "hostAliases", "priorityClassName", "dnsConfig", "readinessGates",
@@ -59,13 +56,6 @@ var podSpecPropertyKeys = []string{
 	"hostUsers", "schedulingGates", "resourceClaims", "podResources", "hostnameOverride",
 	"schedulingGroup",
 }
-
-// podSpecJobOnlyKeys are the pod-level properties only Job pods may carry:
-// apps/v1 validation forbids activeDeadlineSeconds on Deployment, StatefulSet
-// and DaemonSet pod templates ("activeDeadlineSeconds in <Kind> is not
-// Supported"). No shipped kind exposes it now: the raw job and cronjob take
-// activeDeadlineSeconds in their upstream spec.
-var podSpecJobOnlyKeys = []string{"podActiveDeadlineSeconds"}
 
 // podSpecJobOnlyReason is the error text, after the key, for an
 // activeDeadlineSeconds on a non-Job pod template.
@@ -99,17 +89,20 @@ var podSpecRejectedKeys = map[string]string{
 	"evictionResponders": "evictionResponders: not read by this component — alpha upstream, behind the EvictionRequestAPI feature gate",
 	// Read in another shape: buildPodSpec assembles the list from the main
 	// container and the `sidecars` entries.
-	"containers": "containers: not authorable as a list — the main container is the component's own container properties, and a component that takes further containers takes them as sidecars entries",
+	// The pod's deadline was a Job-pod property of the reshaped job and cronjob;
+	// those kinds now take it as activeDeadlineSeconds in their upstream spec. No
+	// reshaped kind accepts it, so the key stays refused, with the reason.
+	"podActiveDeadlineSeconds": "podActiveDeadlineSeconds: " + podSpecJobOnlyReason,
+	"containers":               "containers: not authorable as a list — the main container is the component's own container properties, and a component that takes further containers takes them as sidecars entries",
 }
 
 // parsePodSpec parses the shared pod-level properties (see podSpecPropertyKeys)
-// into a PodSpecConfig. jobPods says whether the kind's pods are Job pods,
-// which gates podSpecJobOnlyKeys. Every accepted field is validated the way
+// into a PodSpecConfig. Every accepted field is validated the way
 // real admission validates it where that check is deterministic from the
 // authored document alone; cross-field admission rules that need cluster state
 // (host ports under hostNetwork, feature gates, RuntimeClass existence) are
 // left to the cluster.
-func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
+func parsePodSpec(props map[string]any) (PodSpecConfig, error) {
 	var cfg PodSpecConfig
 	ps := &cfg.PodSpec
 
@@ -118,15 +111,8 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 	if err := refusedProperty(props, podSpecRejectedKeys); err != nil {
 		return PodSpecConfig{}, err
 	}
-	if !jobPods {
-		if err := refusedProperty(props, appsPodTemplateRejectedKeys); err != nil {
-			return PodSpecConfig{}, err
-		}
-		for _, key := range podSpecJobOnlyKeys {
-			if _, present := props[key]; present {
-				return PodSpecConfig{}, errors.Errorf("%s: %s", key, podSpecJobOnlyReason)
-			}
-		}
+	if err := refusedProperty(props, appsPodTemplateRejectedKeys); err != nil {
+		return PodSpecConfig{}, err
 	}
 
 	if i, present, err := parseInt64Field(props, "terminationGracePeriodSeconds", "terminationGracePeriodSeconds"); err != nil {
@@ -136,15 +122,6 @@ func parsePodSpec(props map[string]any, jobPods bool) (PodSpecConfig, error) {
 			return PodSpecConfig{}, errors.Errorf("terminationGracePeriodSeconds: must not be negative, got %d", i)
 		}
 		ps.TerminationGracePeriodSeconds = &i
-	}
-	// ValidatePodSpec: activeDeadlineSeconds must be between 1 and math.MaxInt32.
-	if i, present, err := parseInt64Field(props, "podActiveDeadlineSeconds", "podActiveDeadlineSeconds"); err != nil {
-		return PodSpecConfig{}, err
-	} else if present {
-		if i < 1 || i > math.MaxInt32 {
-			return PodSpecConfig{}, errors.Errorf("podActiveDeadlineSeconds: must be between 1 and %d, got %d", math.MaxInt32, i)
-		}
-		ps.ActiveDeadlineSeconds = &i
 	}
 	if v, present, err := parseStringField(props, "dnsPolicy", "dnsPolicy"); err != nil {
 		return PodSpecConfig{}, err

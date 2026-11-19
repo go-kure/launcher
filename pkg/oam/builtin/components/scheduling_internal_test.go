@@ -33,25 +33,21 @@ var rawSchedulingKinds = []struct {
 // do not publish it — see TestDocumentsMapsCopyOverwriteMechanism for why a
 // migrated key would overwrite rather than collide.
 //
-// All four (reserved, jobPods) combinations are walked, not the two production
-// handlers actually pass. Today only jobPods can change the key set (schema.go:451
-// adds podActiveDeadlineSeconds; reserved only stamps PlatformReserved onto values,
-// and no production call site passes reserved=true at all), so the two extra
-// combinations cannot fail — but nothing structural holds that. `reserved` is a
-// plain bool parameter, and an `if reserved` branch adding a key later is exactly
-// the migration this guard exists to catch. Generating the matrix rather than
-// listing the reachable cases means the guard stays honest without anyone having to
-// re-derive that argument.
+// Both values of reserved are walked, not the one production handlers actually
+// pass. Today reserved only stamps PlatformReserved onto values, and no production
+// call site passes reserved=true at all, so the extra value cannot fail — but
+// nothing structural holds that. `reserved` is a plain bool parameter, and an
+// `if reserved` branch adding a key later is exactly the migration this guard
+// exists to catch. Walking both values rather than listing the reachable case
+// means the guard stays honest without anyone having to re-derive that argument.
 func TestSchedulingKeysAbsentFromSharedFragments(t *testing.T) {
 	fragments := map[string]map[string]oam.PropertySchema{
 		"schemaDeploymentSpec()":  schemaDeploymentSpec(),
 		"schemaContainerFields()": schemaContainerFields(),
 	}
 	for _, reserved := range []bool{false, true} {
-		for _, jobPods := range []bool{false, true} {
-			name := fmt.Sprintf("schemaPodSpec(%t, %t)", reserved, jobPods)
-			fragments[name] = schemaPodSpec(reserved, jobPods)
-		}
+		name := fmt.Sprintf("schemaPodSpec(%t)", reserved)
+		fragments[name] = schemaPodSpec(reserved)
 	}
 	for name, fragment := range fragments {
 		for _, key := range rawSchedulingKeys {

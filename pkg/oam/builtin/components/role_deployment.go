@@ -100,7 +100,7 @@ func (h *RoleDeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 		podMetadataProperty: schemaPodMetadata("Deployment"),
 	}
 	maps.Copy(m, schemaContainerFields())
-	maps.Copy(m, schemaPodSpec(false, false))
+	maps.Copy(m, schemaPodSpec(false))
 	maps.Copy(m, schemaDeploymentSpec())
 	return oam.DeclareBounds(m, workloadBounds(true, true))
 }
@@ -269,13 +269,13 @@ func (h *RoleDeploymentHandler) ToApplicationConfig(component *oam.Component, na
 		return nil, err
 	}
 
-	podSpec, err := parsePodSpec(props, false)
+	podSpec, err := parsePodSpec(props)
 	if err != nil {
 		return nil, err
 	}
 	config.PodSpec = podSpec
 
-	podMetadata, err := parsePodMetadata(props, false)
+	podMetadata, err := parsePodMetadata(props)
 	if err != nil {
 		return nil, err
 	}

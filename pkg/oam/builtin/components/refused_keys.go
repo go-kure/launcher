@@ -64,7 +64,7 @@ var mainContainerRejectedKeys = map[string]string{
 // container. The raw kinds read the pod's own inside their upstream spec: a
 // `job` at `template.spec.restartPolicy` and a `cronjob` at
 // `jobTemplate.spec.template.spec.restartPolicy` (go-kure/launcher#1629).
-// parsePodSpec refuses them on a pod that is no Job's.
+// parsePodSpec refuses them on every pod it parses.
 var appsPodTemplateRejectedKeys = map[string]string{
 	"restartPolicy":         "restartPolicy: not authorable — apps/v1 validation accepts only Always as the restart policy of a Deployment's, a StatefulSet's or a DaemonSet's pod template, which is the API's default; a container's own restartPolicy is not read",
 	"activeDeadlineSeconds": "activeDeadlineSeconds: " + podSpecJobOnlyReason,

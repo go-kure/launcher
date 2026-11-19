@@ -230,7 +230,7 @@ func (c *CnpgPoolerConfig) validate(name string) error {
 		return err
 	}
 	// As the workload kinds refuse them (podSpecRejectedKeys,
-	// podSpecJobOnlyKeys): the operator copies the template into its
+	// podSpecJobOnlyReason): the operator copies the template into its
 	// Deployment, whose pod template admission refuses ephemeral containers and
 	// activeDeadlineSeconds, and whose pods get priority and overhead from the
 	// default Priority and RuntimeClass admission controllers, which refuse a

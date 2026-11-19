@@ -46,18 +46,6 @@ type PodMetadata struct {
 	Annotations map[string]string
 }
 
-// jobControllerLabelKeys are the pod template labels the Job controller owns:
-// the API server generates the selector of a Job from them. parsePodMetadata
-// refuses them when its job flag is true, since a value authored here would
-// meet the generated selector at admission. No handler passes true now: the
-// raw job and cronjob take the pod template whole (go-kure/launcher#1629).
-var jobControllerLabelKeys = []string{
-	"batch.kubernetes.io/controller-uid",
-	"batch.kubernetes.io/job-name",
-	"controller-uid",
-	"job-name",
-}
-
 // schemaPodMetadata is the declaration of the `podMetadata` property. The two
 // maps are open (a label key is the author's), the object around them is not:
 // a key beside `labels` and `annotations` is refused.
@@ -76,12 +64,10 @@ func schemaPodMetadata(kind string) oam.PropertySchema {
 	}
 }
 
-// parsePodMetadata reads the `podMetadata` property off props. job says the
-// component's pods belong to a Job, whose controller owns four label keys
-// (jobControllerLabelKeys). An absent or null property, and a null entry, is
-// none. Keys are read in sorted order, so the one refused is the same on every
-// build.
-func parsePodMetadata(props map[string]any, job bool) (PodMetadata, error) {
+// parsePodMetadata reads the `podMetadata` property off props. An absent or
+// null property, and a null entry, is none. Keys are read in sorted order, so
+// the one refused is the same on every build.
+func parsePodMetadata(props map[string]any) (PodMetadata, error) {
 	raw, present, err := parseObjectField(props, podMetadataProperty, podMetadataProperty)
 	if err != nil || !present {
 		return PodMetadata{}, err
@@ -115,13 +101,6 @@ func parsePodMetadata(props map[string]any, job bool) (PodMetadata, error) {
 	}
 	if size := podAnnotationsSize(m.Annotations); size > apivalidation.TotalAnnotationSizeLimitB {
 		return PodMetadata{}, errors.Errorf("%s.annotations: the keys and values hold %d bytes, over the %d-byte limit of an object's annotations", podMetadataProperty, size, apivalidation.TotalAnnotationSizeLimitB)
-	}
-	if job {
-		for _, key := range jobControllerLabelKeys {
-			if _, has := m.Labels[key]; has {
-				return PodMetadata{}, errors.Errorf("%s.labels[%q]: the Job controller owns this label: the API server generates the selector of a Job from it; remove the label", podMetadataProperty, key)
-			}
-		}
 	}
 	return m, nil
 }

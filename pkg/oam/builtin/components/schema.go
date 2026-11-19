@@ -307,14 +307,12 @@ func schemaAppArmorProfile(scope string) oam.PropertySchema {
 // from priorityClassName / runtimeClassName, which reject a pod whose authored
 // value differs from the derived one), `serviceAccount` (deprecated alias of serviceAccountName).
 //
-// jobPods selects whether podSpecJobOnlyKeys (podActiveDeadlineSeconds) are
-// published: apps/v1 forbids activeDeadlineSeconds on Deployment, StatefulSet
-// and DaemonSet pod templates. No shipped kind passes true now: the raw job and
-// cronjob take activeDeadlineSeconds in their upstream spec, and removing the
-// switch is a later change of go-kure/launcher#1629.
+// `podActiveDeadlineSeconds` is not published either: apps/v1 forbids
+// activeDeadlineSeconds on Deployment, StatefulSet and DaemonSet pod templates,
+// and the raw job and cronjob take it in their upstream spec.
 //
 // reserved is a required argument (D3); see schemaEnv's doc comment above.
-func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
+func schemaPodSpec(reserved bool) map[string]oam.PropertySchema {
 	str := func(desc string) oam.PropertySchema {
 		return oam.PropertySchema{Type: oam.PropertyTypeString, PlatformReserved: reserved, Description: desc}
 	}
@@ -470,9 +468,6 @@ func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
 				"podGroupName": {Type: oam.PropertyTypeString, Required: true, Description: "Name of the PodGroup this pod is scheduled together with."},
 			},
 		},
-	}
-	if jobPods {
-		m["podActiveDeadlineSeconds"] = integer("Seconds the pod itself may be active before the system terminates it (corev1.PodSpec.activeDeadlineSeconds; distinct from the job-level activeDeadlineSeconds). Must be between 1 and 2147483647. Only Job pods may set it.")
 	}
 	return m
 }

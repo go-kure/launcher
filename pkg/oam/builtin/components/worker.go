@@ -115,7 +115,7 @@ func (WorkerRule) PropertySchema() map[string]oam.PropertySchema {
 		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
 	}
 	maps.Copy(m, schemaContainerFields())
-	maps.Copy(m, schemaPodSpec(false, false))
+	maps.Copy(m, schemaPodSpec(false))
 	maps.Copy(m, schemaDeploymentSpec())
 	maps.Copy(m, schemaRoleObjectNames(false))
 	// The role-deployment member takes it as the deployment component does
@@ -300,7 +300,7 @@ func parseWorker(name string, props map[string]any) (workerOpinions, error) {
 	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, sidecars); err != nil {
 		return out, err
 	}
-	if _, err := parsePodSpec(props, false); err != nil {
+	if _, err := parsePodSpec(props); err != nil {
 		return out, err
 	}
 	if _, err := parseDeploymentSpec(props); err != nil {
@@ -308,7 +308,7 @@ func parseWorker(name string, props map[string]any) (workerOpinions, error) {
 	}
 	// The role-deployment member parses podMetadata again; reading it here keeps the
 	// refusal the rule's, in the order of the rest (go-kure/launcher#1216).
-	if _, err := parsePodMetadata(props, false); err != nil {
+	if _, err := parsePodMetadata(props); err != nil {
 		return out, err
 	}
 	return out, nil
