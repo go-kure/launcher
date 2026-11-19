@@ -96,8 +96,8 @@ const objectNameField = oam.ObjectNameProperty + ` (or the Naming hook's answer 
 const cronJobNameMaxLength = validation.DNS1035LabelMaxLength - 11
 
 // jobNameMaxLength is the longest name the API server creates a Job under when
-// it generates the Job's selector, as it does for every job component
-// (`manualSelector` is refused): 63 characters. generateSelector
+// it generates the Job's selector, as it does unless the author sets
+// `manualSelector: true`; launcher holds every job name to it: 63 characters. generateSelector
 // (k8s.io/kubernetes, pkg/registry/batch/job) writes the Job's name as the
 // value of the pod template's `job-name` and `batch.kubernetes.io/job-name`
 // labels, and ValidateJobCreate (pkg/apis/batch/validation) refuses a template

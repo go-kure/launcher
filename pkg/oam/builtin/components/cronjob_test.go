@@ -285,20 +285,46 @@ func TestCronjobHandler_Refusals(t *testing.T) {
 	}
 }
 
-// TestCronjobHandler_ScheduleForms: the forms of schedule the API server
-// reads are accepted: five fields, an @-descriptor, and @every with a duration.
-func TestCronjobHandler_ScheduleForms(t *testing.T) {
-	for _, schedule := range []string{"0 2 * * *", "@daily", "@hourly", "@every 1h30m"} {
-		props := cronjobLabelled(map[string]any{"tier": "batch"})
-		props["schedule"] = schedule
-		if err := coreKindErr(&components.CronjobHandler{}, "cronjob", "nightly", props); err != nil {
-			t.Errorf("schedule %q refused: %v", schedule, err)
-		}
+// TestCronjobHandler_Schedule_Table covers the schedule grammar launcher reads
+// (validateCronSchedule, cronjob.go): the five-field form (accepted, including
+// the two nonsensical-but-syntactically-five-field cases, a deliberate and
+// untightened gap), the fixed @-descriptor set, and "@every <duration>" with the
+// duration read by time.ParseDuration. @reboot, six fields, garbage and an empty
+// schedule are refused.
+func TestCronjobHandler_Schedule_Table(t *testing.T) {
+	cases := []struct {
+		name      string
+		schedule  string
+		wantError bool
+	}{
+		{"5field_standard", "0 2 * * *", false},
+		{"5field_nonsensical_out_of_range_still_accepted", "99 99 99 99 99", false},
+		{"5field_nonsensical_tokens_still_accepted", "nope nope nope nope nope", false},
+		{"descriptor_daily", "@daily", false},
+		{"descriptor_hourly", "@hourly", false},
+		{"descriptor_yearly", "@yearly", false},
+		{"every_valid_duration", "@every 1h30m", false},
+		{"reboot_rejected", "@reboot", true},
+		{"6field_rejected", "0 0 2 * * *", true},
+		{"garbage_rejected", "not a schedule", true},
+		{"empty_rejected", "", true},
+		{"every_malformed_duration_rejected", "@every nope", true},
 	}
-	props := cronjobLabelled(map[string]any{"tier": "batch"})
-	props["schedule"] = "@every nope"
-	if err := coreKindErr(&components.CronjobHandler{}, "cronjob", "nightly", props); err == nil || !strings.Contains(err.Error(), "invalid @every duration") {
-		t.Errorf("schedule \"@every nope\": err = %v, want the duration refusal", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			props := cronjobLabelled(map[string]any{"tier": "batch"})
+			props["schedule"] = tc.schedule
+			err := coreKindErr(&components.CronjobHandler{}, "cronjob", "nightly", props)
+			if tc.wantError && err == nil {
+				t.Fatalf("schedule %q: expected error, got nil", tc.schedule)
+			}
+			if !tc.wantError && err != nil {
+				t.Fatalf("schedule %q: expected no error, got %v", tc.schedule, err)
+			}
+			if tc.schedule == "@every nope" && !strings.Contains(err.Error(), "invalid @every duration") {
+				t.Errorf("schedule %q: err = %v, want the duration refusal", tc.schedule, err)
+			}
+		})
 	}
 }
 
