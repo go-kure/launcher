@@ -24,8 +24,10 @@ Text in square brackets is added here to say what a moved sentence refers to.
     `accessModesFilled`) minus the paths the policy reported, so it is pure; the
     decision of `strategy.type` is `nonRWXFillsStrategy` in `deployment_spec.go`,
     which `applyNonRWXConstraint` takes too
-    ["So is what the parser of `webservice`, `worker`, `statefulset`, ... fills", in the reference's
-    tier 2. The raw `deployment` and `daemonset` of go-kure/launcher#1629 report no fill.]
+    ["So is what the parser of `webservice` and `worker` fills", in the reference's
+    tier 2; the sentence named `statefulset`, `job` and `cronjob` too until
+    go-kure/launcher#1629. The raw `deployment`, `daemonset`, `statefulset`, `job` and
+    `cronjob` report no fill.]
   - `common.go`
     ["`buildResourceRequirements`", in the reference's tier 3.]
   - `builtin_defaults_generate.go`: the generate-time fills, which

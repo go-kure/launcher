@@ -557,8 +557,8 @@ before. A workload's `pvc` volume does not take them.
 
 | Property | Rule |
 |----------|------|
-| `selector{matchLabels, matchExpressions[]}` | A label query over the PersistentVolumes that may back the claim, parsed as a `statefulset` claim template's is. A claim with a selector is never dynamically provisioned. An empty selector is refused: this is launcher's own rule, the API server reads it as "every volume". |
-| `dataSourceRef{apiGroup, kind, name, namespace}` | The object to populate the volume from, with the rules of upstream `validateDataSourceRef` (the `dataSourceRef` row under ["StatefulSet-level and claim-template properties"](common-config.md#statefulset-level-and-claim-template-properties)). |
+| `selector{matchLabels, matchExpressions[]}` | A label query over the PersistentVolumes that may back the claim, with the operator arity rule (`In`/`NotIn` need at least one value, `Exists`/`DoesNotExist` none) and every `values` entry validated as a label value, the check `ValidateLabelSelectorRequirement` runs on a newly created claim. A claim with a selector is never dynamically provisioned. An empty selector is refused: this is launcher's own rule, the API server reads it as "every volume". |
+| `dataSourceRef{apiGroup, kind, name, namespace}` | The object to populate the volume from, with the rules of upstream `validateDataSourceRef`: `kind` and `name` are required non-empty with no format rule, `apiGroup` must be a DNS-1123 subdomain when non-empty, an omitted or empty `apiGroup` pins `kind` to `PersistentVolumeClaim`, and `namespace`, when set, is a DNS-1123 label. |
 | `volumeName` | The name of the PersistentVolume to bind to. Must be a DNS-1123 subdomain: launcher's own rule, since `ValidatePersistentVolumeClaimSpec` does not read the field and a value that cannot name a PersistentVolume would leave the claim Pending for good. |
 | `volumeAttributesClassName` | A DNS-1123 subdomain (`ValidateClassName`). |
 
@@ -978,11 +978,11 @@ registry. The one check holds it on every path by which a document brings
 a pod spec: this kind, the pod template of `replicaset`, `replicationcontroller`,
 `podtemplate` and `cnpg-pooler`, and the pod spec of a workload that
 template delivery (`helmtemplate`), `passthrough` or a `manifests` source
-carries. The `deployment`, `daemonset`, `job` and `cronjob` kinds hold their `template.spec.volumes`
+carries. The `deployment`, `statefulset`, `daemonset`, `job` and `cronjob` kinds hold their `template.spec.volumes`
 (`jobTemplate.spec.template.spec.volumes` on a `cronjob`) to the same
 checks, as the upstream `image` volume source. The components with a volume
-schema of their own (`webservice`,
-`worker`, `statefulset`) take
+schema of their own (`webservice` and
+`worker`) take
 an image volume only in the nested form of a `volumes` entry (`type: image`,
 `image: {reference: ...}`), where the registry allowlist
 holds it (`enforceVolumeSourcePolicy`) and `ValidateImageRef` holds its
@@ -1463,17 +1463,21 @@ compares the two.
 
 ### Properties
 
-**statefulset** — `serviceName` and `volumeClaimTemplates`
-(`name`, `mountPath` or — for a `volumeMode: Block` claim — `devicePath`,
-`size`, `storageClass`, `accessModes`, plus the rest of
-`corev1.PersistentVolumeClaimSpec`; see ["Raw block volumes"](common-config.md#raw-block-volumes-volumemode-block)). The
-StatefulSetSpec-level and
-claim-template field sets are classified in ["StatefulSet-level and
-claim-template properties"](common-config.md#statefulset-level-and-claim-template-properties). `ports` declares the main container's
-ports (see ["Main container ports"](common-config.md#main-container-ports)). For scheduling it takes `affinity`, `tolerations`
-and `topologySpreadConstraints` as the raw `corev1` shapes
-(see ["Raw scheduling properties"](common-config.md#raw-scheduling-properties)); the four-key
-`affinity` shorthand is not published on this kind.
+**statefulset** is the kind-named projection of an apps/v1 StatefulSet, on the
+same recipe as `deployment` and `daemonset`: one schema key per json field of
+`appsv1.StatefulSetSpec`, the property map decoded strictly into that type, and
+one StatefulSet named after the component in the build namespace, with the
+authored spec. The keys are `replicas`, `selector` (required), `template`
+(required; its pod spec is `template.spec`, with `containers` required),
+`serviceName`, `volumeClaimTemplates`, `podManagementPolicy`, `updateStrategy`,
+`minReadySeconds`, `revisionHistoryLimit`, `persistentVolumeClaimRetentionPolicy`
+and `ordinals`. A key that is not one of them, at any depth, is refused
+(`properties do not decode into a apps/v1 StatefulSetSpec: …`). Each entry of
+`volumeClaimTemplates` is a raw PersistentVolumeClaim: `metadata.name` and a
+`spec` with `accessModes`, `resources.requests.storage`, `storageClassName`,
+`volumeMode` and the rest of the upstream claim spec. Under this kind the API
+server's own rules apply to the other values; launcher adds only the checks
+listed under Validation.
 
 **`serviceName` names the governing Service, which the component does
 not emit.** Author it as a headless `service` component (`clusterIP:
@@ -1487,16 +1491,115 @@ Service name, which must be a DNS-1123 label`);
 digit is accepted at every Kubernetes release: the API validates a StatefulSet's
 `serviceName` as a DNS-1123 label, not as a Service name, and the `statefulset` emits no
 Service, so `spec.kubernetesVersion` does not change it. The governing Service is a
-`service` component's, and that name is checked (`docs/delivery-scope.md` §3.5). Previously `serviceName` defaulted to the
-component name and the component emitted that headless Service itself;
-["Main container ports"](common-config.md#main-container-ports) has the migration, including why an existing
-StatefulSet must be recreated.
+`service` component's, and that name is checked (`docs/delivery-scope.md` §3.5).
+
+**Breaking change (pre-GA, `v1alpha1`).** The kind used to take the reshaped
+form that `webservice` and `worker` still take (see ["Deployment-level
+properties"](common-config.md#deployment-level-properties-webservice-worker)),
+with claim templates written as `{name, size, mountPath, storageClass,
+accessModes}`. That form is gone from `statefulset`, and a document that authors
+it is refused. Move each field as follows:
+
+| Was (reshaped `statefulset`) | Is now |
+|---|---|
+| `image`, `command`, `args`, `env`, `envFrom`, `ports`, `workingDir`, `lifecycle` and the other main-container fields | `template.spec.containers[0].<field>`, in the upstream spelling |
+| `resources`, `securityContext` | `template.spec.containers[0].resources` and `.securityContext` (`unlimited` has no upstream form) |
+| `probes.readiness`, `probes.liveness`, `probes.startup` | `readinessProbe`, `livenessProbe`, `startupProbe` of the container |
+| `sidecars[]` | further entries of `template.spec.containers`; `initContainers[]` move to `template.spec.initContainers` |
+| `podMetadata` | `template.metadata` |
+| `podSecurityContext` | `template.spec.securityContext` |
+| `volumes[]` | `template.spec.volumes[]` as upstream `Volume` objects; `mountPath` moves to each container's `volumeMounts` |
+| `affinity`, `tolerations`, `topologySpreadConstraints` | the same names under `template.spec` |
+| `volumeClaimTemplates[]` as `{name, size, mountPath, storageClass, accessModes}` | `{metadata: {name}, spec: {accessModes, resources: {requests: {storage}}, storageClassName}}`; the mount (`mountPath`) moves to a `volumeMounts` entry of the container, named like the claim template |
+| a `volumeMode: Block` claim template with `devicePath` | `spec.volumeMode: Block` on the claim, and a `volumeDevices` entry (`name`, `devicePath`) on the container |
+| `serviceName`, `podManagementPolicy`, `updateStrategy`, `minReadySeconds`, `revisionHistoryLimit`, `persistentVolumeClaimRetentionPolicy`, `ordinals`, `replicas` | unchanged, at the top level of `properties` |
+
+The selector was once builder-managed; it is now authored and required. The
+kind no longer defaults `replicas`: an unset one stays unset, and the API server
+defaults it to 1.
+
+**No launcher default.** The kind adds no default: no `replicas`, no resource
+requests or limits, no port `protocol`, no `accessModes` on a claim template, and
+no labels or annotations on the StatefulSet object itself (the `labels` and
+`annotations` properties every kind accepts are the way to add them). It also
+does not set `automountServiceAccountToken: false`, which `webservice` and
+`worker` still set: **a pod with no `serviceAccountName` now mounts the
+namespace's default account's token**, as pods of the `pod`, `replicaset`,
+`deployment` and `daemonset` kinds do. Set
+`template.spec.automountServiceAccountToken: false` to keep the old posture. A
+launcher default for it is tracked in go-kure/launcher#1631. The one value
+launcher still fills is the platform's storage class on a claim template (see
+Outputs). The kind's fill report holds that class and nothing else.
 
 ### Outputs
 
-It emits no Service.
+**The `app` label.** The handler adds one thing to the pod template: `app:
+<component>` on its labels, beside the authored ones (see ["The `app`
+label"](conventions.md#the-app-label)). It is the label launcher's traits and
+Services select on. The selector is emitted as authored, and the StatefulSet
+itself gets no label of the handler's; the transform then sets the component
+label on the object and its template, as on every object a component owns. The
+claim templates take no component label: the API server refuses a change to
+`volumeClaimTemplates` of a StatefulSet that exists, and the controller does not
+relabel a claim it created before.
+- An authored `template.metadata.labels.app` with the component's own label
+  value is kept. Any other value is refused, naming the component.
+- A selector that matches the authored template labels and would stop
+  matching once the label is added (`app` under `DoesNotExist`, or `NotIn` the
+  label value) is refused (``selector: rules out the label `app: db` …``). A
+  selector that cannot be read as one is refused with apimachinery's reason
+  (`selector: …`), as on `replicaset`.
+
+**The platform's storage class.** A claim template that authors no
+`spec.storageClassName` (absent or null) gets the `storageClassName` of the
+ClusterProfile's `pvc` capability. An authored class wins, `""` included. With no
+`pvc` capability, or a capability that binds no class, the claim template stays
+as authored. The capability is read, and recorded as consumed, only when the
+component has a claim template. The fill report names the class as the
+capability's, at `volumeClaimTemplates[<n>].spec.storageClassName`.
+
+**Endpoints.** The kind declares one endpoint per port of
+`template.spec.containers[0]`, in the authored order (see ["Main container
+ports"](common-config.md#main-container-ports)). Containers after the first
+declare none. It emits no Service: author a `service` component selecting
+`app: <component>`, headless for the governing Service, and put routing traits
+on it.
+
+**Traits.** `scaler` is available: the HorizontalPodAutoscaler scales the
+StatefulSet, and the StatefulSet is built without `spec.replicas`. An authored
+`replicas` beside a `scaler` is refused, as on `webservice`. `disruption` is
+admitted. The pod-spec traits (`security-context`, a `configmap` trait's
+`mountPath`, an `external-secret` trait's `envFrom` and `mountPath`) change the
+StatefulSet's pod template as they do on the other kinds. The `topology-spread`
+trait is Deployment-only and refuses a component whose output holds none.
+
+The config implements `oam.ServiceAccountNamer`, reading the template's
+`serviceAccountName` as the `pod` kind reads its own. No account is generated, so
+a pod without one runs as the namespace's default account.
 
 ### Validation
+
+**Refused when the component is read**, with or without a policy:
+- An unauthored `selector` or `template`. The Go type cannot omit the
+  selector, and launcher derives none.
+- Under `template.spec`, what the `pod` kind refuses of its own spec, by the
+  same checks and named by path (`template.spec.containers: required`,
+  `template.spec.priority: not authorable …`, `template.spec.ephemeralContainers`,
+  the image rule, duplicate container names).
+- `template.spec.activeDeadlineSeconds`. The API server forbids it on the pod
+  template of a StatefulSet.
+- A `serviceName` that is not a valid Service name.
+- A claim template name used twice in `volumeClaimTemplates`, or equal to the
+  name of an entry of `template.spec.volumes`. The API server does not catch
+  either: the controller creates one claim per template name, and replaces a pod
+  volume named like a claim template with the claim, so one claim, or the
+  authored volume, would never be used.
+- A key that is not a field of the upstream type, a reshaped key such as
+  `image`, `sidecars` or a claim template's `size` included.
+
+The API's other value rules (an empty selector, a `selector` that does not match
+the template, a `rollingUpdate` under `type: OnDelete`, a claim template with no
+`accessModes`, a negative `replicas`) are left to the API server.
 
 **A route to the pods names the authored Service.** With no Service of
 its own, the component is no implicit backend: an `ingress`, `httproute`
@@ -1504,11 +1607,63 @@ or `expose` without a `backend` on it is refused (`component "<name>"
 has no service port`). Put the trait on the authored `service`, or name
 that Service as the trait's `backend`.
 
+**Policy.** `ApplyPolicy` holds `replicas` to the replica maximum, an unset
+one as the 1 the API server defaults it to, unless a `scaler` owns the count.
+It holds the pod template to the check the `pod` kind runs
+(`enforcePodTemplatePolicy`): the registry allowlist, the cpu and memory
+maxima, `privileged`, capabilities, host namespaces and volume sources, for
+every container and init container, named by its path in the properties
+(`template.spec.containers[0] "db": …`). It holds the storage request of each
+claim template (`volumeClaimTemplates[<n>].spec.resources.requests.storage`) to
+the storage maximum. It fills no default: a container without resources stays
+without, and the policy's default replicas is not applied. A limit the policy
+would have filled is not bounded where the author omits it, as on `pod`.
+
 ### Example
 
-The component in `pkg/cmd/kurel/testdata/statefulset-ports/app.yaml`, built against the
-`cluster.yaml` beside it, gives the `expected.yaml` beside it. The fixture test compares the
-two.
+The component in `pkg/cmd/kurel/testdata/statefulset-ports/app.yaml` authors
+the spec as the API shapes it:
+
+```yaml
+- name: db
+  type: statefulset
+  properties:
+    selector:
+      matchLabels:
+        app: db
+    template:
+      spec:
+        containers:
+          - name: db
+            image: ghcr.io/example/postgres:v15.0
+            ports:
+              - name: tcp
+                containerPort: 5432
+              - name: metrics
+                containerPort: 9187
+            readinessProbe:
+              tcpSocket:
+                port: tcp
+            livenessProbe:
+              httpGet:
+                path: /metrics
+                port: metrics
+            volumeMounts:
+              - name: data
+                mountPath: /var/lib/postgresql/data
+    volumeClaimTemplates:
+      - metadata:
+          name: data
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi
+```
+
+Built against the `cluster.yaml` beside it, it gives the `expected.yaml` beside
+it. The fixture test compares the two.
 
 ## daemonset
 

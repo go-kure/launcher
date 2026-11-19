@@ -2311,11 +2311,9 @@ and by scope, whatever component or trait emits it.
 - **Not offered: Endpoints.** Deprecated upstream in favour of EndpointSlice; its
   inventory row is `not authorable` with that note.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
-  - `statefulset`: no scheduling field is left; the raw `affinity`, `tolerations`
-    and `topologySpreadConstraints` are read;
-  - `daemonset`, `job`, `cronjob`: none left, since each decodes the whole upstream spec
-    (go-kure/launcher#1629). A plain sidecar keeps a Job's pod from completing; the pod's
-    `initContainers` take an entry with `restartPolicy: Always` for that;
+  - `statefulset`, `daemonset`, `job`, `cronjob`: none left, since each decodes the whole
+    upstream spec (go-kure/launcher#1629). A plain sidecar keeps a Job's pod from completing;
+    the pod's `initContainers` take an entry with `restartPolicy: Always` for that;
   - all workloads: the container fields `restartPolicy`
     and `restartPolicyRules` on the main container and on a sidecar, `lifecycle.stopSignal`
     (alpha upstream) and a port's `hostPort` and `hostIP`, and the pod field
@@ -2338,17 +2336,17 @@ and by scope, whatever component or trait emits it.
     `persistentvolumeclaim` entry). `dataSource` is refused: `dataSourceRef` supersedes
     it.
 
-  `selector` is refused today with an explicit reason on `statefulset` and on the
-  `role-deployment` member that `webservice` and `worker` lower into, and `template` on the
-  `role-deployment` member (`statefulSetSpecRejectedKeys` and
-  `deploymentSpecRejectedKeys`, in `statefulset_spec.go` and `deployment_spec.go`); each
+  `selector` is refused today with an explicit reason on the `role-deployment` member that
+  `webservice` and `worker` lower into, and so is `template`
+  (`deploymentSpecRejectedKeys`, in `deployment_spec.go`); each
   kind's sub-task decides whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
-  ticket. (Since go-kure/launcher#1629 the `deployment`, `daemonset`, `job` and `cronjob`
-  kinds author `selector` and `template` themselves, as the raw `DeploymentSpec`,
-  `DaemonSetSpec`, `JobSpec` and `CronJobSpec`; `deploymentSpecRejectedKeys` now binds only
-  the `role-deployment` member that `webservice` and `worker` lower into,
-  `daemonSetSpecRejectedKeys` and `jobSpecRejectedKeys` are gone, and a `cronjob` refuses
-  `jobTemplate.spec.selector` and a true `manualSelector` itself.)
+  ticket. (Since go-kure/launcher#1629 the `deployment`, `statefulset`, `daemonset`, `job` and
+  `cronjob` kinds author `selector` and `template` themselves, as the raw `DeploymentSpec`,
+  `StatefulSetSpec`, `DaemonSetSpec`, `JobSpec` and `CronJobSpec`; `deploymentSpecRejectedKeys`
+  now binds only the `role-deployment` member that `webservice` and `worker` lower into,
+  `statefulSetSpecRejectedKeys`, `daemonSetSpecRejectedKeys` and `jobSpecRejectedKeys` are
+  gone, and a `cronjob` refuses `jobTemplate.spec.selector` and a true `manualSelector`
+  itself.)
 - **Missing kinds:** the inventory's `missing` rows. The inventory has no `trait` row left: no kind is reachable only as a trait.
   The ticket adds the missing kinds group by group. A kind kure lacks is added to kure
   first.

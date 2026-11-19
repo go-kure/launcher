@@ -27,7 +27,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
     pod-level value, and the closed key set of the `affinity` shorthand).
   - go-kure/launcher#384 (`pvc.size` must be a positive quantity).
   - go-kure/launcher#761 (`volumeClaimTemplates.storageClass` keeps the absent-versus-empty
-    distinction).
+    distinction [since go-kure/launcher#1629, as the `spec.storageClassName` of a raw claim
+    template]).
   - go-kure/launcher#793 (`oam.ShortenNameWithSuffix` shortens a qualified volume name over
     253 characters).
   - go-kure/launcher#1177 (a volume entry can author its source as the upstream object under a
@@ -58,9 +59,9 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - `job` refused the name from its introduction; the other six gained the check in
     go-kure/launcher#407. [the name is a workload component name; `job` and the other six are
     the seven workload kinds `webservice`, `worker`, `deployment`, `statefulset`, `daemonset`,
-    `cronjob` and `job`; `deployment`, `daemonset`, `job` and `cronjob` have since become raw
-    kinds with no main container named after the component (go-kure/launcher#1629), so the
-    reference page lists the kinds that keep the reshaped form]
+    `cronjob` and `job`; `deployment`, `statefulset`, `daemonset`, `job` and `cronjob` have
+    since become raw kinds with no main container named after the component
+    (go-kure/launcher#1629), so the reference page lists the kinds that keep the reshaped form]
   - Until go-kure/launcher#405 all three were read with a bare comma-ok assertion, so a
     handler called directly — without the schema validation an authored document gets first,
     which already refused these shapes — dropped the value and emitted a container with no
@@ -70,8 +71,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
     and `command: [ls, 3]` emitted `["ls"]` and said nothing about the `3`. Closing it changed
     their signature to return an error, which is why the fix touches all 9 call sites — the
     seven workload kinds' own main containers, plus `initContainers` and `sidecars` in
-    `common.go` [they: `command` and `args`; `deployment`, `daemonset`, `job` and `cronjob` have
-    no main container of their own since go-kure/launcher#1629]
+    `common.go` [they: `command` and `args`; `deployment`, `statefulset`, `daemonset`, `job` and
+    `cronjob` have no main container of their own since go-kure/launcher#1629]
   - go-kure/launcher#660; before that the name and protocol were taken unchecked, and a
     non-list `ports`, an unknown key, a non-string name or a non-string protocol, which then
     read as `TCP`, was dropped [the sentence is about the entries of a sidecar's `ports`]
@@ -115,14 +116,17 @@ Text in square brackets is added here to say what a moved sentence refers to.
     `devicePath`).
   - go-kure/launcher#790 (the published schema publishes `mountPath` and `devicePath` as two
     optional keys plus a required `exclusive` group).
+  - go-kure/launcher#1629 (a `statefulset` claim template is a raw PersistentVolumeClaim: the
+    `volumeMode: Block` claim and the `volumeDevices` entry that consumes it are authored as the
+    API shapes them, and the claim-template half of the rules above is gone).
 
 ### Pod-level properties
 
 - **History:**
   - go-kure/launcher#342 (the seven kind components share one pod-level property surface,
-    `parsePodSpec` [the reshaped ones only: `deployment`, `daemonset`, `job` and `cronjob` took the
-    upstream pod spec under `template.spec` (`jobTemplate.spec.template.spec` on a `cronjob`)
-    in go-kure/launcher#1629]).
+    `parsePodSpec` [the reshaped ones only: `deployment`, `statefulset`, `daemonset`, `job` and
+    `cronjob` took the upstream pod spec under `template.spec` (`jobTemplate.spec.template.spec`
+    on a `cronjob`) in go-kure/launcher#1629]).
   - go-kure/launcher#1183 (a property whose feature gate is off at the profile's
     `kubernetesVersion` refused).
   - go-kure/launcher#1231 (a profile's `spec.featureGates` replaces the release default for a
@@ -158,6 +162,12 @@ Text in square brackets is added here to say what a moved sentence refers to.
     and `CronJobSpec` fields, strictly decoded, with no launcher default and an empty fill
     report. A breaking pre-GA change; the reshaped form of both kinds is gone, and their
     reference pages are the `job` and `cronjob` entries of "Kinds: core workloads").
+  - go-kure/launcher#1629 (`statefulset` became a raw kind in the same way: the `StatefulSetSpec`
+    fields, strictly decoded, with no launcher default, and claim templates as raw
+    PersistentVolumeClaim objects. A breaking pre-GA change; the reshaped form of the kind is
+    gone, and its reference page is the `statefulset` entry of "Kinds: core workloads". What the
+    kind still does itself: the `app` label on the pod template, the `pvc` capability's storage
+    class on a claim template that authors none, and the policy's bounds).
   - go-kure/launcher#343 (the kind-named `deployment` component).
   - go-kure/launcher#341 (`DeploymentSpec` parsed by `parseDeploymentSpec` into real `appsv1`
     types, from one fragment all three handlers compose).
@@ -171,13 +181,14 @@ Text in square brackets is added here to say what a moved sentence refers to.
     `corev1.ContainerPort` list; since go-kure/launcher#1629 its ports are
     `template.spec.containers[0].ports`).
   - go-kure/launcher#1132 (`deployment`, `statefulset` and `daemonset` implement
-    `oam.EndpointProvider` from the main container's `ports` [for `deployment` and `daemonset`,
-    since go-kure/launcher#1629, those of `template.spec.containers[0]`]).
+    `oam.EndpointProvider` from the main container's `ports` [since go-kure/launcher#1629, those
+    of `template.spec.containers[0]` on all three]).
   - go-kure/launcher#225 (`job`, `cronjob` and `worker` report no endpoint).
   - go-kure/launcher#334 (`daemonset`, `statefulset`, `job` and `cronjob` publish one
-    `ports` property, with the same entry rules [`daemonset`, `job` and `cronjob` no longer: their ports
-    are `template.spec.containers[0].ports` (`jobTemplate.spec.template.spec.containers[0].ports`
-    on a `cronjob`), go-kure/launcher#1629]).
+    `ports` property, with the same entry rules [`daemonset`, `statefulset`, `job` and `cronjob`
+    no longer: their ports are `template.spec.containers[0].ports`
+    (`jobTemplate.spec.template.spec.containers[0].ports` on a `cronjob`),
+    go-kure/launcher#1629]).
   - go-kure/launcher#343 (`deployment` dropped `port` and the Service it drove).
   - go-kure/launcher#690 (`daemonset` and `statefulset` drop `port` and the Service it drove
     (breaking), and replace it with `ports`).
@@ -191,8 +202,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
     since go-kure/launcher#1629 they are `template.spec.*` and no longer read by that parser).
   - go-kure/launcher#790 (the other kind-named workloads (`statefulset`, `daemonset`, `job`,
     `cronjob`) publish the same shapes through the same parsers and schemas, and `statefulset`
-    dropped the four-key `affinity` shorthand (breaking) [`daemonset`, `job` and `cronjob`
-    stopped publishing them at the top level in go-kure/launcher#1629: they are
+    dropped the four-key `affinity` shorthand (breaking) [`daemonset`, `statefulset`, `job` and
+    `cronjob` stopped publishing them at the top level in go-kure/launcher#1629: they are
     `template.spec.*`, and `jobTemplate.spec.template.spec.*` on a `cronjob`]).
   - go-kure/launcher#1473 (`webservice` and `worker` publish `tolerations` and
     `topologySpreadConstraints` as the same shapes, from the same schemas and parsers).
@@ -241,6 +252,11 @@ strictly with the rest of the pod spec. The history below stays as it was.]
     `minReplicas` on a Deployment).
 
 ## StatefulSet-level and claim-template properties
+
+[The section of this name on the reference page now describes the raw `statefulset` kind of
+go-kure/launcher#1629: the properties are the `StatefulSetSpec` fields and the claim templates
+raw PersistentVolumeClaim objects, so the API server's own rules apply to them. The history
+below is of the reshaped form, which is gone.]
 
 - **History:**
   - go-kure/launcher#361 (kure's `CreateStatefulSet` no longer writes `podManagementPolicy:

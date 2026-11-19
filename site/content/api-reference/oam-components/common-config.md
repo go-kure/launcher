@@ -16,8 +16,8 @@ where it wants an object — built cleanly and emitted nothing for the property,
 and nothing in the output said it had been seen. Closed by routing those six through presence-reporting helpers (`common.go`), which
 report presence separately from value, so each of the six now rejects a
 mistyped value by name instead of discarding it. Those helpers were already how several other properties on the
-same components are read — `updateStrategy` and `ordinals` on `statefulset`
-(`statefulset_spec.go`) — so the six behaved differently from properties an
+same components are read — `resources`, `workingDir` and `topologySpread` on
+`webservice` and `worker` (`webservice.go`, `worker.go`) — so the six behaved differently from properties an
 author writes beside them in the same document. This covers those six parsers;
 it is not a claim that every property in this package is read through the
 helpers.
@@ -92,7 +92,7 @@ named one too until it stopped emitting a Service.
 too, at conversion: a CronJob's name is at most 52 characters, a Job's at most
 63 (see each kind in ["Per-type highlights"](/pkg/oam/builtin/components/README.md#per-type-highlights)).
 
-The reshaped workload types (`webservice`, `worker`, `statefulset`)
+The reshaped workload types (`webservice`, `worker`)
 share these fields, projected directly onto real `corev1` types (same
 structural pattern as `ProbeConfig` holding `*corev1.Probe`) rather than a
 hand-rolled parallel schema: `image` (validated — no untagged/`latest`), `env`
@@ -153,7 +153,7 @@ relative and must not contain a `..` backstep component, per this repo's own
 path-safety convention; once the component's `volumes` are parsed,
 `volumeName` must name one of them of type `emptyDir` — a `fileKeyRef` in
 the main container, an init container or a sidecar naming an undeclared
-volume (a statefulset claim template included) or a non-`emptyDir` one is
+volume or a non-`emptyDir` one is
 refused, as real admission's `validateFileKeyRefVolumes` refuses it (no
 trait the build evaluates adds an `emptyDir` volume; a patch a consumer
 applies at delivery is outside the build's view, so a volume only a patch supplies is not
@@ -190,7 +190,7 @@ an unprefixed import instead of the intended one),
 `parseObjectField`, as are its `requests` and `limits`: a present value of the
 wrong type (`resources: "big"`, `requests: 3`) is **rejected by name**
 (`resources: must be an object, got string`) by each kind that accepts `resources` in this form (webservice, worker,
-statefulset, postgresql) and by each
+postgresql) and by each
 `initContainers`/`sidecars` entry, and a null reads as absence. `requests`/`limits`
 accept `cpu`/`memory` (defaults 100m/128Mi — subject to the environment
 policy's `MaxCPU()`/`MaxMemory()` maxima the same as an authored value; see
@@ -293,20 +293,16 @@ max 15 characters — a purely numeric string like `"8080"` is rejected, since
 it has no letter; beyond syntax, a named port is rejected outright on a
 component kind whose main container never declares any port for the kubelet
 to resolve the name against — `worker` unconditionally (it
-exposes no `port` property at all), `statefulset` only when its
-own optional `port` was not set on that component instance (its main
-container is named `"tcp"`, but only when `port > 0`),
-and `webservice` never (its `port` always defaults to 80, so the main
+exposes no `port` property at all) and `webservice` never (its `port` always
+defaults to 80, so the main
 container is always named `"http"`) — a numeric port is unaffected either way,
 since it dials the kubelet directly rather than resolving a declared name.
-(Those rules predate `ports`, and the `port` they describe on `statefulset` is
-gone. Today
-`statefulset` resolves a named port against the main
-container's `ports` list, refusing a name that list does not declare and any
-named port when it is empty; see "Main container ports".)
+(The raw kinds author
+their probes on the container as the API shapes them, and launcher adds no
+check of a named port.)
 Where a named port is allowed at all, it is further checked against the
-exact names the main container actually declares — `"http"` for
-`webservice`, the authored `ports` names on the kinds above — not merely accepted as
+exact name the main container actually declares — `"http"` for
+`webservice` — not merely accepted as
 any syntactically valid name: a syntactically valid but different name (e.g.
 `httpGet.port: metrics` on a `webservice`, whose only declared container
 port is `"http"`) builds successfully but is exactly as unresolvable by the
@@ -586,7 +582,7 @@ explicitly authored `storageClass: ""` is preserved as an
 opt-out request (Kubernetes distinguishes a nil `StorageClassName` — use the
 cluster default — from a pointer to `""` — request no class) rather than
 being collapsed to "absent" and silently provisioned through the default
-class; `volumeClaimTemplates.storageClass` keeps the same distinction (see "StatefulSet-level and claim-template properties"
+class; the `storageClassName` of a `statefulset` claim template keeps the same distinction (see "StatefulSet-level and claim-template properties"
 below).
 `pvc.accessModes`, if authored, must be a non-empty array of non-empty
 strings, each one of the four real `corev1.PersistentVolumeAccessMode`
@@ -601,8 +597,7 @@ malformed input; an absent `accessModes` key still defaults to
 `ReadWriteOnce`, unchanged — only an authored-and-empty array is treated as
 malformed; `ReadWriteOncePod`
 combined with any other access mode is rejected outright — real Kubernetes
-requires it be the claim's only mode; the same parser
-backs `volumeClaimTemplates.accessModes` below; on `webservice` and
+requires it be the claim's only mode; on `webservice` and
 `worker`, the claim a `pvc` volume describes is named
 `<component name>-<pod-local volume name>`, not the bare pod-local name — two
 components in the same namespace that both author a `pvc` volume named
@@ -653,7 +648,7 @@ matches none of the recognized sources — including `type` omitted entirely —
 rejected outright rather than silently producing no volume or mount for an entry
 the author clearly intended to add. Every controller kind (`deployment`,
 `statefulset`, `daemonset`, `job`, `cronjob`, and so `webservice` and `worker`;
-`deployment`, `daemonset`, `job` and `cronjob` through the upstream `Volume` objects of the pod spec's `volumes`)
+`deployment`, `daemonset`, `statefulset`, `job` and `cronjob` through the upstream `Volume` objects of the pod spec's `volumes`)
 applies the volume-source policy gates that `enforcePodTemplatePolicy` applies to
 an operator pod template (`enforceVolumeSourcePolicy`): the hostPath gate, the
 storage maximum on an `ephemeral` claim, and the registry allowlist on an
@@ -681,19 +676,22 @@ is `None`, `HostToContainer` or `Bidirectional`, and `Bidirectional` needs
 and a `mountPropagation` of `None` or none at all; `subPath` and `subPathExpr`
 are mutually exclusive, and each is a relative path with no `..` element
 (an empty `subPath` is absent, as
-upstream skips it). The main container reads the same keys: a `volumes` entry of any type and a
-`volumeClaimTemplates` entry with a `mountPath` take `subPath`, `subPathExpr`, `mountPropagation` and `recursiveReadOnly`, and a
-claim template takes `readOnly` too. A `volumes` entry keeps its own per-type
+upstream skips it). The main container of a reshaped kind reads the same keys: a
+`volumes` entry of any type takes `subPath`, `subPathExpr`, `mountPropagation` and
+`recursiveReadOnly`. A `volumes` entry keeps its own per-type
 `readOnly`, and `recursiveReadOnly` is checked against it. A `devicePath` entry
-is a raw block device with no mount, so it refuses the four keys. The two
-places differ on `readOnly`: a `volumes` entry with `devicePath` still accepts
-it, because it sets the claim source and did so before, and a claim template
-with `devicePath` refuses it, because it never had that key. `Bidirectional` needs
-`securityContext.privileged: true` on the main container, and every workload
-kind checks it. A `subPath` that is absolute or holds a `..` element is refused
-in all four places (`initContainers`, `sidecars`, `volumes` and
-`volumeClaimTemplates`) by the helper that refuses it for `subPathExpr`, with
-the same wording, where the API server would refuse it later;
+is a raw block device with no mount, so it refuses the four keys; a `volumes`
+entry with `devicePath` still accepts `readOnly`, because it sets the claim
+source and did so before. `Bidirectional` needs
+`securityContext.privileged: true` on the main container, and every reshaped
+workload kind checks it. A `subPath` that is absolute or holds a `..` element is
+refused in all three places (`initContainers`, `sidecars` and `volumes`) by the
+helper that refuses it for `subPathExpr`, with the same wording, where the API
+server would refuse it later. The raw `deployment`, `statefulset` and
+`daemonset` kinds take their mounts as upstream `volumeMounts[]` of
+`template.spec.containers[]` and their block devices as `volumeDevices[]`, and
+a claim template of a raw `statefulset` is a PersistentVolumeClaim with no mount
+fields of its own;
 the `pod`, `podtemplate`, `replicaset` and `replicationcontroller` kinds, the
 workload objects of a `manifests` source (`inline` or `url`), the object of a
 `passthrough` component and the workloads a `helmtemplate` chart renders read
@@ -735,12 +733,11 @@ the kubelet resolves a named port against the container's own ports, so an
 undeclared name would build and never resolve; unlike the main container,
 whose single named port is fixed by its kind, a sidecar may declare several
 and any of them is accepted. A sidecar's `ports` list is read exactly as
-`statefulset` reads its main container's (see "Main container ports" below):
+the entry rules of the `ports` table under "Main container ports" below:
 closed entries, an IANA service `name`, a `protocol` from `TCP`/`UDP`/`SCTP`
 (an empty string refused), and no repeated name or `containerPort`/`protocol`
 pair within the sidecar. A port name must also be unique across the
-pod: the main container's ports (webservice's `http`, the `ports` list of
-statefulset), every
+pod: the main container's port (webservice's `http`), every
 sidecar's and every native sidecar's. The
 API server checks names only per container and merely warns across them,
 while a Service selecting the name reaches only the first container that
@@ -755,10 +752,9 @@ lowercase alphanumerics and `-`, starting and ending with an alphanumeric, no
 dots, at most 63 characters. Any other is refused, naming the entry, and again when the pod is generated, so a config built
 by hand or changed after it was read cannot emit one. Closing the entry is behavior-changing under an
 unchanged `launcher.gokure.dev/v1alpha1`: a document that authored any other
-key on an entry built before and errors now. It is taken on the same
-reasoning as the `volumeClaimTemplates` entry below — the key never reached
-the output its author intended — and is signalled by the `format` commit
-scope),
+key on an entry built before and errors now. It is taken on the reasoning
+that the key never reached the output its author intended, and is signalled by
+the `format` commit scope),
 and `affinity` (four keys, parsed by `parseAffinity`: `enablePodAntiAffinity`
 (boolean), `topologyKey` (string, default `kubernetes.io/hostname`),
 `podAntiAffinityType` (string, `preferred`|`required`, default `preferred`)
@@ -771,8 +767,8 @@ are applied by `parseAffinity` only once the block is present, unlike the
 The key set is closed. The shorthand is not a
 Kubernetes `Affinity`: `nodeAffinity`, `podAffinity` and `podAntiAffinity`
 under it are each refused with what the shorthand has for the field and where
-an affinity in the Kubernetes shape is authored (`statefulset`,
-and `template.spec.affinity` of `deployment`, `daemonset` and `job`, and
+an affinity in the Kubernetes shape is authored
+(`template.spec.affinity` of `deployment`, `daemonset`, `statefulset` and `job`, and
 `jobTemplate.spec.template.spec.affinity` of `cronjob`), and any other key is refused as
 `affinity: unrecognized key "<key>"`, each whatever its value. The parser read
 none of them before, so a caller that skips the document check had them
@@ -826,8 +822,7 @@ there, before this check.
 
 Seven `corev1.Container` fields are read on every container of a hand-parsed
 workload kind: as top-level keys for the main container
-of `statefulset` — and of
-`webservice` and `worker`, which forward them to their `role-deployment` member — and
+of `webservice` and `worker`, which forward them to their `role-deployment` member — and
 as keys of each `initContainers` and `sidecars` entry.
 
 | Property | Type | Effect |
@@ -929,21 +924,18 @@ the namespace. The volume generates no object, and its claim name is used
 exactly as written: it is not qualified with the component name the way a
 role kind's claim is.
 
-**On the pod kinds that generate no claim, `claimName` is required.** `statefulset`
-generates no claim, so a `pvc`
-volume without `claimName` is refused (`volume "data": a pvc volume must set
-claimName to an existing claim; the component generates none, so declare it
-with a persistentvolumeclaim component or a pvc trait`). This is a breaking
-pre-GA format change. To migrate, declare the claim with a
+**The raw kinds take no `pvc` volume that describes a claim.** The `deployment`,
+`daemonset`, `statefulset`, `job` and `cronjob` kinds have no `pvc` volume type at
+all: the volumes of their pod spec are upstream `Volume` objects, and a claim is
+referenced with `persistentVolumeClaim.claimName`. A `statefulset` also has its own
+claim templates (see "StatefulSet-level and claim-template properties"). This is a
+breaking pre-GA format change for a document that described a claim in a `pvc`
+volume on one of them. To migrate, declare the claim with a
 `persistentvolumeclaim` component (or a `pvc` trait) carrying the volume's
 `size`, its `storageClass` as `storageClassName`, and its `accessModes` and
-`volumeMode`. Then reference it from the volume with `claimName`. Keep
-`accessModes` on the volume, and keep `volumeMode: Block` there too: a
-`devicePath` mount needs it on the volume. The environment's storage-size
-limit and default now apply to that claim, not to the volume. The `deployment`,
-`daemonset`, `job` and `cronjob` kinds have no `pvc` volume type at all: the volumes of their
-pod spec are upstream `Volume` objects, and a claim is referenced with
-`persistentVolumeClaim.claimName`.
+`volumeMode`. Then reference it from the volume with `claimName`. The
+environment's storage-size limit and default apply to that claim, not to the
+volume.
 
 `webservice` and `worker` still accept a `pvc` volume that describes its
 claim. The rule turns each one into a synthesized `pvc` trait on its
@@ -966,8 +958,8 @@ assigned `storageClassName` cannot change: if the binding's class differs
 from it, the claim fails to apply until it is recreated or the volume
 authors the assigned class. A claim created with no class may take one
 later, so it applies. A `statefulset` `volumeClaimTemplates` entry takes the
-same default (see "StatefulSet-level and claim-template
-properties").
+same default when it leaves `spec.storageClassName` unauthored (see
+"StatefulSet-level and claim-template properties").
 
 - `claimName` must be a DNS-1123 subdomain.
 - `size` and `storageClass` are refused alongside it, because the referenced
@@ -993,16 +985,18 @@ through `volumeDevices` at a `devicePath`, never through `volumeMounts`. The cla
 separate objects, so the apiserver accepts a Block claim paired with a
 filesystem mount and the pods then fail at kubelet mount time; every rule
 below reports that mismatch at build time instead. The rules are the same on
-the reshaped kinds (`webservice`, `worker`, `statefulset`), because they live in the
-shared parsers. The `deployment`, `daemonset`, `job` and `cronjob` kinds
-take upstream `volumes`, `volumeMounts` and `volumeDevices` as authored.
+the reshaped kinds (`webservice`, `worker`), because they live in the
+shared parsers. The `deployment`, `daemonset`, `statefulset`, `job` and `cronjob`
+kinds take upstream `volumes`, `volumeMounts` and
+`volumeDevices` as authored, and a `statefulset`'s claim templates as raw
+PersistentVolumeClaim objects with `spec.volumeMode`.
 
 - **`volumes[]` pvc entry.** Adds `volumeMode` (`Filesystem`|`Block`) and
   `devicePath`. The entry takes exactly one of `mountPath` and `devicePath`,
   and `devicePath` is authored if and only if `volumeMode: Block` is (the
   published schema states the first half: `volumeMode` is required,
-  `requiredWhen`, when `devicePath` is set, on a `volumes[]` entry and on a
-  `volumeClaimTemplates[]` entry; the value `Block` is the handler's rule) — in both
+  `requiredWhen`, when `devicePath` is set, on a `volumes[]` entry; the value
+  `Block` is the handler's rule) — in both
   directions, with nothing inferred: `mountPath` with `Block`, `devicePath`
   with `Filesystem` or with no mode, and both paths at once are each an error.
   A Block entry reaches the main container as a `corev1.VolumeDevice` and has
@@ -1010,12 +1004,8 @@ take upstream `volumes`, `volumeMounts` and `volumeDevices` as authored.
   stays unset (the apiserver defaults it to `Filesystem`), so an existing
   document's claim is byte-identical. `devicePath` on any other volume type is
   an error.
-- **`volumeClaimTemplates[]` entry (`statefulset`).** The same exactly-one
-  rule with `devicePath`, and `volumeMode: Block` is now accepted (it was
-  rejected before). A Block template renders a claim template with
-  `volumeMode: Block` and a main-container `volumeDevices` entry.
-- **The published schema says "exactly one of".** A `volumes[]` entry and a
-  `volumeClaimTemplates[]` entry publish `mountPath` and `devicePath` as two
+- **The published schema says "exactly one of".** A `volumes[]` entry
+  publishes `mountPath` and `devicePath` as two
   optional keys plus a required `exclusive` group of the two, so a validator built from the schema refuses both
   and neither, as the build does. A key counts as authored when it is present
   and not null, an empty string included: `mountPath: ""` beside a
@@ -1024,36 +1014,33 @@ take upstream `volumes`, `volumeMounts` and `volumeDevices` as authored.
 - **`initContainers[]` / `sidecars[]` entry.** Adds `volumeDevices:
   [{name, devicePath}]`, a closed key set with both keys required. A
   `volumeDevices` name must be a Block volume this component declares (a
-  `volumes` pvc entry or a claim template); a `volumeMounts` name must **not**
+  `volumes` pvc entry); a `volumeMounts` name must **not**
   be one. A `volumeMounts` name the component does not declare at all stays
   accepted, because the `configmap` and `external-secret` traits add their
   volumes after the component is generated — and neither adds a Block volume.
 - **Name and path rules** mirror `ValidateVolumeDevices`, per container: a
   volume is named at most once in `volumeDevices` and not in both
   `volumeMounts` and `volumeDevices`; a `devicePath` is unique, contains no
-  `..` element, and is not also a `mountPath`. On `statefulset` this spans the
-  claim templates and `volumes` together, so a Block claim template cannot
-  share its name with a `volumes` entry or another claim template. The
+  `..` element, and is not also a `mountPath`. The
   `configmap` and `external-secret` traits likewise refuse a volume name the
-  main container already attaches as a device — including a Block claim
-  template, which has no pod volume of its own — and a mount at a path it
+  main container already attaches as a device, and a mount at a path it
   already uses as a `devicePath`.
 
 **Compatibility.** Additive: every new rejection concerns a Block volume,
 and no document could declare one before (a `volumes` pvc entry had no
-`volumeMode`, and a claim template's `Block` was rejected). The one new rule
+`volumeMode`). The one new rule
 that reads existing keys — a `volumeMounts` entry naming a Block volume is an
 error — can therefore only fire on a document that uses the new surface. The
-published schemas drop `Required` from `mountPath` on `volumes` items and
-claim templates; the parsers still require one of the two paths.
+published schemas drop `Required` from `mountPath` on `volumes` items; the
+parsers still require one of the two paths.
 
 ### Pod-level properties
 
-The three reshaped kind components (`webservice`, `worker`, `statefulset`)
+The two reshaped kind components (`webservice`, `worker`)
 also share one pod-level property surface
 (ADR-036 L1), parsed by `parsePodSpec` (`podspec.go`)
 straight into a `corev1.PodSpec` and rendered by the shared `buildPodSpec`,
-which each of them assigns to its pod template. The raw `deployment`, `daemonset`, `job` and
+which each of them assigns to its pod template. The raw `deployment`, `daemonset`, `statefulset`, `job` and
 `cronjob` have no such surface: their pod spec is `template.spec` (`jobTemplate.spec.template.spec`
 on a `cronjob`), as the API shapes it. Property names are the
 `corev1.PodSpec` JSON names, except two that carry a `pod` prefix because
@@ -1101,13 +1088,13 @@ the value. This check does not read whether a value such as
 
 | Property | Type | Effect | Kind |
 |----------|------|--------|------|
-| `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account; on `webservice` and `worker` the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). Unset on a reshaped pod kind (`statefulset`), the pod names no account (the namespace's `default`), and the kind sets the pod-level `automountServiceAccountToken: false` unless that is authored (the raw `deployment`, `daemonset`, `job` and `cronjob` set nothing: see ["Pod-level properties"](#pod-level-properties)); a role kind's generated account carries `automountServiceAccountToken: false` itself. An authored account is owned elsewhere and its own setting governs, so authors who want the pod not to mount a token set the pod-level `automountServiceAccountToken: false` explicitly — the handler does not inject it. | additive when unset |
+| `serviceAccountName` | string | **Behavior-changing.** Pods run as the named account; on `webservice` and `worker` the per-component ServiceAccount is *not* generated. The `rbac` trait binds its Role/ClusterRole to this account via `oam.ServiceAccountNamer` (see below). Unset on a raw pod kind (`deployment`, `daemonset`, `statefulset`, `job`, `cronjob`), the pod names no account (the namespace's `default`) and the kind sets nothing, `automountServiceAccountToken` included (see ["Pod-level properties"](#pod-level-properties)); a role kind's generated account carries `automountServiceAccountToken: false` itself. An authored account is owned elsewhere and its own setting governs, so authors who want the pod not to mount a token set the pod-level `automountServiceAccountToken: false` explicitly — the handler does not inject it. | additive when unset |
 | `automountServiceAccountToken` | bool | Pod-level token automount override. | additive |
 | `terminationGracePeriodSeconds` | int ≥ 0 | Grace period before SIGKILL. A `lifecycle` `sleep` hook may not exceed it (30 when unset). | additive |
-| `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **No kind publishes it any more.** It was the pod's deadline on `job` and `cronjob`, which since go-kure/launcher#1629 take the pod as `template.spec.activeDeadlineSeconds` (`job`) and `jobTemplate.spec.template.spec.activeDeadlineSeconds` (`cronjob`); apps/v1 rejects the deadline on Deployment/StatefulSet/DaemonSet templates, so the three reshaped kinds neither publish nor accept it, and refuse the upstream name `activeDeadlineSeconds` with that reason. | additive |
+| `podActiveDeadlineSeconds` | int 1..MaxInt32 | Pod-level `activeDeadlineSeconds`. **No kind publishes it any more.** It was the pod's deadline on `job` and `cronjob`, which since go-kure/launcher#1629 take the pod as `template.spec.activeDeadlineSeconds` (`job`) and `jobTemplate.spec.template.spec.activeDeadlineSeconds` (`cronjob`); apps/v1 rejects the deadline on Deployment/StatefulSet/DaemonSet templates, so the two reshaped kinds neither publish nor accept it, and refuse the upstream name `activeDeadlineSeconds` with that reason. | additive |
 | `dnsPolicy`, `dnsConfig` | enum, object | `ClusterFirstWithHostNet`/`ClusterFirst`/`Default`/`None`; `dnsConfig` = `nameservers` (≤3 plain IPv4/IPv6 literals — a zone-scoped address such as `fe80::1%eth0` is rejected, matching upstream's `net.ParseIP`-based check, which has no notion of a zone), `searches` (≤32 entries whose joined length, separators included, is ≤2048 characters — the `resolv.conf` search-line limit, so 32 individually valid domains can still be refused), `options[]{name,value}`. `None` requires at least one nameserver. | additive |
 | `nodeSelector`, `nodeName`, `schedulerName`, `priorityClassName`, `preemptionPolicy`, `runtimeClassName`, `schedulingGates[]{name}`, `schedulingGroup{podGroupName}` | scheduling | Placement fields; gate names must be unique. `nodeName` is a DNS-1123 subdomain (a Node is an ordinary object, so an invalid value is refused at admission, not merely unmatched). `schedulerName` is deliberately *not* validated: upstream constrains its form nowhere, so an arbitrary string is a legal document and rejecting one here would refuse work a cluster accepts. | additive |
-| `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from every reshaped kind, and over the pod spec of the raw `deployment`, `daemonset`, `job` and `cronjob`; `NoopPolicy` denies all three). | additive |
+| `hostNetwork`, `hostPID`, `hostIPC` | bool | Host namespaces. **Policy-gated**: rejected by `ApplyPolicy` unless `AllowHostNetwork()`/`AllowHostPID()`/`AllowHostIPC()` allow them (`enforce.go`'s `enforceHostNamespaces`, called from every reshaped kind, and over the pod spec of the raw `deployment`, `daemonset`, `statefulset`, `job` and `cronjob`; `NoopPolicy` denies all three). | additive |
 | `shareProcessNamespace` | bool | Mutually exclusive with `hostPID: true`. | additive |
 | `hostname`, `subdomain`, `setHostnameAsFQDN`, `hostnameOverride`, `hostAliases[]{ip,hostnames}` | naming | `hostname`/`subdomain` are DNS-1123 labels; `hostnameOverride` is a ≤64-char subdomain and cannot combine with `hostNetwork` or `setHostnameAsFQDN`. `hostAliases[].ip` is a plain IPv4/IPv6 literal, zone suffixes rejected as for `dnsConfig.nameservers`. | additive |
 | `podSecurityContext` | object | The full `corev1.PodSecurityContext` field set (`runAsUser`/`runAsGroup`/`runAsNonRoot`/`fsGroup`/`fsGroupChangePolicy`/`supplementalGroups`/`supplementalGroupsPolicy`/`sysctls`/`seLinuxOptions`/`seLinuxChangePolicy`/`seccompProfile`/`appArmorProfile`/`windowsOptions`), closed and validated like the container `securityContext`; the `windowsOptions` strings are held to upstream's rules as on a container (see "Container fields"). `sysctls[].name` must match the sysctl grammar (≤253 characters of dot- or slash-separated lowercase alphanumeric segments) and be unique within the list. `windowsOptions.hostProcess: true` additionally requires `hostNetwork: true`, which upstream demands of any pod containing HostProcess containers. The `runAsUser: 0` / `runAsNonRoot: true` contradiction is judged per container on the *effective* values once the containers are assembled, not on this object alone — a container-level `runAsUser` overrides the pod-level one, so the pair is a valid document when every container names a non-root UID, and the deferred check also catches a container-level `runAsUser: 0` under a pod-level `runAsNonRoot`. **Partly policy-gated**: `windowsOptions.hostProcess: true` is rejected unless `AllowPrivileged()` allows it (a HostProcess pod runs with the node's own privileges, and upstream forces every container in it to be HostProcess too); every other field has no policy hook. | additive |
@@ -1175,7 +1162,7 @@ properties".
 
 The pod-level surface carries two policy checks of its own, both called from
 every reshaped kind's `ApplyPolicy` next to `enforceHostNamespaces` (the raw
-`deployment`, `daemonset`, `job` and `cronjob` make the same checks over their pod spec, through
+`deployment`, `daemonset`, `statefulset`, `job` and `cronjob` make the same checks over their pod spec, through
 `enforcePodTemplatePolicy`):
 `enforcePodResources` measures `podResources`' cpu and memory requests and
 limits against `MaxCPU()`/`MaxMemory()` — without it an author could keep the
@@ -1193,7 +1180,7 @@ A `volumes` entry sourced from `hostPath` is rejected unless the environment
 policy's `AllowHostPathVolumes()` allows it (`enforce.go`'s
 `enforceHostPathVolumes`, the same reused-mechanism shape as
 `enforcePrivileged` above); like `enforcePrivileged`, it is called from all
-every reshaped kind component's `ApplyPolicy`, and from the pod spec of the raw `deployment`, `daemonset`, `job` and `cronjob`
+every reshaped kind component's `ApplyPolicy`, and from the pod spec of the raw `deployment`, `daemonset`, `statefulset`, `job` and `cronjob`
 through `enforcePodTemplatePolicy`, not just one — a hostPath volume mounts
 an arbitrary path from the node's own filesystem into the Pod, so an
 unenforced policy denial here is a container-escape-adjacent gap, not merely
@@ -1298,18 +1285,16 @@ selector made of `matchLabels` only.
 
 #### Main container ports
 
-`statefulset` publishes `ports`, the main
-container's `corev1.ContainerPort` list. It declares container ports only: the
-kind emits no Service from it (use `webservice`, or a `service`
-component, for one). `webservice` and `worker` publish no `ports` list
-(`webservice` declares its one container port from `port`). The `deployment`, `daemonset`,
-`job` and `cronjob` kinds have no such property either: their ports are
-`template.spec.containers[0].ports` (under `jobTemplate.spec` on a `cronjob`), as the API
-shapes them.
+No kind publishes a `ports` property for the main container. `webservice`
+declares its one container port from `port`, and `worker` declares none. The
+`deployment`, `daemonset`, `statefulset`, `job` and `cronjob` kinds have no such
+property either: their ports are `template.spec.containers[0].ports` (under
+`jobTemplate.spec` on a `cronjob`), as the API shapes them. None of them emits a
+Service from a port (use `webservice`, or a `service` component, for one).
 
 **Endpoints.** `deployment`, `statefulset` and
 `daemonset` implement `oam.EndpointProvider` from the main container's `ports`
-(for `deployment` and `daemonset`, the ports of `template.spec.containers[0]`; containers after
+(the ports of `template.spec.containers[0]`; containers after
 the first are not read): one endpoint per entry, in the authored order. An endpoint's `Name` is the port's
 `name` (empty when unnamed), its `Ports` hold the numeric `containerPort` alone,
 and its `Protocol` is the entry's (`TCP` when unset). Its selector is
@@ -1323,11 +1308,8 @@ without ports, so it reports none. Only TCP endpoints
 synthesize a NetworkPolicy allow; a UDP or SCTP endpoint is collected and
 validated, and synthesizes nothing.
 
-`statefulset` publishes one `ports` property,
-with the entry rules in the table below: container ports are a PodSpec
-field, so this kind-named workload component projects them. `ports` emits no
-Service. A named probe or hook port resolves against the
-main container's `ports`; with none declared, it is refused.
+The entry rules in the table below are those a `sidecars` entry's `ports` list
+follows (see the `sidecars` rules under "Common config" above).
 
 **Breaking: `statefulset` dropped `port`
 and the Service it drove**, as `deployment` and `daemonset` did before they became
@@ -1335,11 +1317,12 @@ raw kinds. `port`
 declared the main container's first port and a Service in front of it: a
 headless one
 named `serviceName` (default: the component name) on `statefulset`. An authored
-`port` is now refused as an unknown property. To migrate:
+`port` is now refused as an unknown property, and so is every other key of the
+reshaped form (see [statefulset](kinds-core-workloads.md#statefulset)). To migrate:
 
-- Move the number into `ports` under the name `port` gave it, so named probe
-  and hook ports keep resolving: `port: N` becomes
-  `ports: [{name: tcp, containerPort: N}]` on `statefulset`.
+- Move the number into the container's `ports` under the name `port` gave it:
+  `port: N` becomes
+  `template.spec.containers[0].ports: [{name: tcp, containerPort: N}]` on `statefulset`.
 - Author the Service as a `service` component that selects the pods
   (`selector: {app: <component>}`). For a `statefulset`'s governing Service,
   set `clusterIP: None` and name it in `serviceName`.
@@ -1365,28 +1348,25 @@ named `serviceName` (default: the component name) on `statefulset`. An authored
 
 | property | type | notes | compat |
 |---|---|---|---|
-| `ports` | array | Each entry is `containerPort` (required, 1–65535), `name` (an IANA service name, as the API server checks a container port name) and `protocol` (`TCP`/`UDP`/`SCTP`, default `TCP`; an empty string is refused, as the published enum refuses it); any other key, `hostPort` and `hostIP` included, is refused. Names must be unique, as the API server requires, and also unique across the pod: a sidecar port of the same name is refused. A repeated `containerPort`/`protocol` pair is refused too, which the API server only warns about: the second entry declares nothing new. The same number on two protocols is two ports. An absent, null or empty list declares no ports. A probe or lifecycle hook may address a declared port by name; a name the main container does not declare is refused, since the kubelet resolves it only against that container's own ports. Without `ports`, a named probe or hook port is refused. | additive (`statefulset`: replaces `port`) |
+| `ports` | array | Each entry is `containerPort` (required, 1–65535), `name` (an IANA service name, as the API server checks a container port name) and `protocol` (`TCP`/`UDP`/`SCTP`, default `TCP`; an empty string is refused, as the published enum refuses it); any other key, `hostPort` and `hostIP` included, is refused. Names must be unique, as the API server requires, and also unique across the pod: a sidecar port of the same name is refused. A repeated `containerPort`/`protocol` pair is refused too, which the API server only warns about: the second entry declares nothing new. The same number on two protocols is two ports. An absent, null or empty list declares no ports. A sidecar's probe or lifecycle hook may address a port it declares by name; a name its container does not declare is refused, since the kubelet resolves it only against that container's own ports. | additive |
 
 #### Raw scheduling properties
 
-`statefulset` publishes `affinity`,
-`tolerations` and `topologySpreadConstraints` as its plain `corev1` shapes,
-parsed by `scheduling.go`. Nothing is inferred from the
+`webservice` and `worker` publish `tolerations` and `topologySpreadConstraints`
+as their plain `corev1` shapes, parsed by `scheduling.go`. Nothing is inferred from the
 component: every selector, weight and topology key is authored. The `deployment`,
-`daemonset` and `job` kinds publish none of the three as a top-level property: they are
+`daemonset`, `statefulset` and `job` kinds publish none of the three as a top-level property: they are
 `template.spec.affinity`, `template.spec.tolerations` and
 `template.spec.topologySpreadConstraints`, strictly decoded as part of the pod
 spec and held to what the `pod` kind holds its own spec to, and a `cronjob`'s are
 the same names under `jobTemplate.spec.template.spec`. The parsers and
 rules below are not read for them.
 
-The hand-parsed kind-named workload, `statefulset`, publishes the same shapes through the
-same parsers and schemas as `webservice` and `worker` below, so every rule in the table
-below holds wherever the key is published:
+The kinds that publish the shapes, through the same parsers and schemas, so every
+rule in the table below holds wherever the key is published:
 
 | kind | `affinity` | `tolerations` | `topologySpreadConstraints` |
 |---|---|---|---|
-| `statefulset` | raw | yes | yes |
 | `webservice`, `worker` | four-key shorthand | yes | yes |
 
 `webservice` and `worker` publish `tolerations` and `topologySpreadConstraints`
@@ -1400,9 +1380,10 @@ property. Each role's own parse checks both keys, so a bad value is refused with
 the role's text before lowering.
 
 **Breaking: `statefulset` dropped the four-key `affinity`
-shorthand.** Its `affinity` is the raw `corev1` shape, as on `deployment`, `daemonset`, `job` and
-`cronjob` (at `template.spec.affinity`; on a `cronjob`, at `jobTemplate.spec.template.spec.affinity`), so `enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType` and
-`nodeSelector` under it are refused as unrecognized keys. To migrate, author
+shorthand.** Its `affinity` is `template.spec.affinity`, the raw `corev1` shape,
+as on `deployment`, `daemonset`, `job` and `cronjob`,
+so `enablePodAntiAffinity`, `topologyKey`, `podAntiAffinityType` and
+`nodeSelector` under it are refused as unknown keys. To migrate, author
 what the shorthand built: a `podAntiAffinity` term selecting `app: <component>`
 (see [The `app` label](conventions.md#the-app-label)) over the topology key, `preferred` with
 weight 100 or `required`; and, for `nodeSelector`, a required `nodeAffinity`
@@ -1423,6 +1404,9 @@ with one `In` requirement per label.
 - On a `cronjob` the three keys are `jobTemplate.spec.template.spec.affinity`,
   `.tolerations` and `.topologySpreadConstraints`, so they apply to the pods of
   every Job the CronJob creates.
+- On a `statefulset` the three keys are `template.spec.affinity`,
+  `template.spec.tolerations` and `template.spec.topologySpreadConstraints`, and
+  reach the StatefulSet's pod template as authored.
 - On a `daemonset` the three keys are `template.spec.affinity`,
   `template.spec.tolerations` and `template.spec.topologySpreadConstraints`, and
   reach the DaemonSet's pod template as authored. The DaemonSet controller creates one pod for each node the
@@ -1430,6 +1414,20 @@ with one `In` requirement per label.
   pod to that node; a pod affinity term or a `DoNotSchedule` spread constraint
   the node cannot satisfy leaves that pod pending instead of placing it
   elsewhere. Nothing here checks for that.
+
+The table below lists the rules that launcher's own parsers hold the three keys to. They
+apply to `tolerations` and `topologySpreadConstraints` on `webservice` and `worker`; their
+`affinity` is the four-key shorthand above, so the `nodeAffinity`, `podAffinity` and
+`podAntiAffinity` arms of the `affinity` row are refused there as unknown keys. The
+`deployment`, `daemonset`, `statefulset`, `job` and `cronjob` kinds do not run these parsers:
+the three keys sit in their pod spec, which is decoded as the upstream type and held only to the
+pod spec checks of the `pod` kind (the match expressions of every label selector, among others).
+The API server applies the value rules of the table that are upstream's own, so a document
+that breaks one is accepted by launcher and refused when applied. Two rules in the `affinity`
+row are launcher's own and have no upstream counterpart: that an `affinity` has an arm set, and
+that a node selector term has `matchExpressions` or `matchFields`. On these kinds an empty
+`affinity` is accepted as a no-op, and a required node selector term that is empty matches no
+nodes instead of being refused.
 
 | property | type | notes | compat |
 |---|---|---|---|
@@ -1512,8 +1510,8 @@ too, with the HPA's `scaleTargetRef` naming a `StatefulSet`.
 That kind reports no non-RWX claim and the scaler adds no such check for it: its
 claims come from `volumeClaimTemplates`, one per pod, so scaling does not make pods
 contend for them, and `statefulset` applies no non-RWX limit to an authored replica
-count either. A claim shared through `volumes` stays as unguarded under a scaler as
-it is under authored replicas.
+count either. A claim shared through `template.spec.volumes` stays as unguarded
+under a scaler as it is under authored replicas.
 
 **The `role-deployment` member reports its pod template labels** (`PodTemplateLabels`), so a
 same-name sibling group can tell that a `service` member selects this
@@ -1536,7 +1534,7 @@ emits another pod kind into a group must add the method to that kind.
 | `paused` | bool | Pauses rollouts of the Deployment. | additive |
 | `progressDeadlineSeconds` | int ≥ 0 | Must be **greater than** the effective `minReadySeconds`, the cross-field rule `ValidateDeploymentSpec` applies. Both halves are compared as *effective* values, because both have an API default a document may be leaving it to: `minReadySeconds` defaults to 0 (a non-pointer `int32`, so it has no unset state) and `progressDeadlineSeconds` defaults to 600. So the rule fires in both directions — `progressDeadlineSeconds: 0` alone is rejected against the defaulted 0, and `minReadySeconds: 600` alone is rejected against the defaulted 600 — and the error names, for each half, whether the value was authored or defaulted, since either can be a field the document never mentions. | additive |
 | `selector`, `template` | — | Not authorable, and rejected with a message saying so rather than silently ignored. The selector is builder-managed (`app: <component>`) and immutable once the object exists; the pod template is projected from the component's own container and pod-level properties. | additive |
-| any of the five `DeploymentSpec` properties above, authored as `null` (on `webservice` and `worker` alike); **and, on the `role-deployment` member only, any optional property of the kind** | — | Read as omission, not as a present-but-wrong type — including a typed nil, which is what a Go-constructed lowering rule produces when it assigns a nil map into an `any`. `pkg/oam`'s property validator already treats a null under an optional property as absent, so without this a component could satisfy the published schema and then fail during handler conversion. `parseDeploymentSpec` strips nulls itself, so the five fields above behave this way on `webservice` and `worker` too. The wider guarantee is the `role-deployment` member's alone (the reshaped handler that `deployment` was before it became a raw kind; no document authors it): there it covers the member's whole **top-level** surface, so `replicas: null`, `workingDir: null`, `env: null` and the rest all read as unauthored and `replicas: null` takes the default 1. This is no longer specific to that handler for a property read through one of the shared field helpers in `common.go`, which test presence with `authoredValue`, nor for the six parsers that used to read their own property with a bare map lookup rather than a helper — `envFrom`, `probes`, `lifecycle`, `securityContext`, `volumes`, `accessModes` — which were converted to the same primitive. It also covers the top-level keys that were still answered with a bare lookup and then type-checked — `cronjob`'s `timeZone`, `successfulJobsHistoryLimit` and `failedJobsHistoryLimit`; `completionMode` on `job` and `cronjob`; `passthrough`'s `clusterScoped`; `inline` and `url` on `crd` and `manifests`; and `manifests`' `scopeOverrides` — so a null there, typed or untyped, now reads as omission instead of a wrong type. That mattered because `ValidateAuthoredProperties` does not strip a top-level null, so `kurel build` used to reach the refusal. **One deliberate exception, and it is not an oversight:** the `postStart`/`preStop` handler keys (`httpGet`, `exec`, `sleep`, `tcpSocket`) still answer presence with a bare lookup, because there the rule being enforced *is* presence — `lifecycle: {preStop: {tcpSocket: null}}` must stay a refusal, since reading it as absence would let an authored-but-empty `tcpSocket` vanish and a valid sibling handler win silently, which is the exact silent-drop the surrounding paragraph rejects. The exception covers a probe's handler keys (`httpGet`, `tcpSocket`, `exec`, `grpc`) as well: `countProbeHandlers` reads them the same way, for the same reason, so a null one is refused too. Absence and authored-null are genuinely different documents for those handler keys. A `null` on a field that is required once its parent is authored (`strategy.type`) surfaces as the requiredness error, not a type error; `selector`/`template` are not optional properties, so naming either as `null` still earns the refusal above. **It now reaches nested keys too** — `securityContext: {runAsUser: null}` builds as if `runAsUser` were omitted. That fix deliberately sits *inside* each nested parser, after its unknown-key rejection, rather than in a recursive pre-strip over the property map: a recursive strip would remove `securityContext: {bogusKey: null}` before `parseSecurityContext`'s own rejection ever saw it, turning a named refusal into silence — trading one silent-drop bug for another. So a recognized nested key read through the helpers treats a null as absence, and an unrecognized one is still named and refused; both sides of that `securityContext` boundary are pinned in `role_deployment_nested_null_test.go`. The two nested map readers that used to read each entry raw now skip a null entry too, as `stringMapStrict` already did: `parseResourceList` (a `resources.requests`/`limits` quantity, where property validation deletes a null first only under the declared `cpu` and `memory` keys) and `parseLabelMap` (a `nodeSelector`, `service` `selector` or `matchLabels` value). As with `securityContext`, the skip comes after the key check: an invalid resource name or label key is still refused whatever its value, and a wrongly typed entry is still refused. A map left empty by the skip meets the empty-map refusal where one exists — `service`'s `selector: {app: null}` is refused as `selector: {}` is, rather than emitting a selector-less Service. | additive |
+| any of the five `DeploymentSpec` properties above, authored as `null` (on `webservice` and `worker` alike); **and, on the `role-deployment` member only, any optional property of the kind** | — | Read as omission, not as a present-but-wrong type — including a typed nil, which is what a Go-constructed lowering rule produces when it assigns a nil map into an `any`. `pkg/oam`'s property validator already treats a null under an optional property as absent, so without this a component could satisfy the published schema and then fail during handler conversion. `parseDeploymentSpec` strips nulls itself, so the five fields above behave this way on `webservice` and `worker` too. The wider guarantee is the `role-deployment` member's alone (the reshaped handler that `deployment` was before it became a raw kind; no document authors it): there it covers the member's whole **top-level** surface, so `replicas: null`, `workingDir: null`, `env: null` and the rest all read as unauthored and `replicas: null` takes the default 1. This is no longer specific to that handler for a property read through one of the shared field helpers in `common.go`, which test presence with `authoredValue`, nor for the six parsers that used to read their own property with a bare map lookup rather than a helper — `envFrom`, `probes`, `lifecycle`, `securityContext`, `volumes`, `accessModes` — which were converted to the same primitive. It also covers the top-level keys that were still answered with a bare lookup and then type-checked — `passthrough`'s `clusterScoped`; `inline` and `url` on `crd` and `manifests`; and `manifests`' `scopeOverrides` — so a null there, typed or untyped, now reads as omission instead of a wrong type. That mattered because `ValidateAuthoredProperties` does not strip a top-level null, so `kurel build` used to reach the refusal. **One deliberate exception, and it is not an oversight:** the `postStart`/`preStop` handler keys (`httpGet`, `exec`, `sleep`, `tcpSocket`) still answer presence with a bare lookup, because there the rule being enforced *is* presence — `lifecycle: {preStop: {tcpSocket: null}}` must stay a refusal, since reading it as absence would let an authored-but-empty `tcpSocket` vanish and a valid sibling handler win silently, which is the exact silent-drop the surrounding paragraph rejects. The exception covers a probe's handler keys (`httpGet`, `tcpSocket`, `exec`, `grpc`) as well: `countProbeHandlers` reads them the same way, for the same reason, so a null one is refused too. Absence and authored-null are genuinely different documents for those handler keys. A `null` on a field that is required once its parent is authored (`strategy.type`) surfaces as the requiredness error, not a type error; `selector`/`template` are not optional properties, so naming either as `null` still earns the refusal above. **It now reaches nested keys too** — `securityContext: {runAsUser: null}` builds as if `runAsUser` were omitted. That fix deliberately sits *inside* each nested parser, after its unknown-key rejection, rather than in a recursive pre-strip over the property map: a recursive strip would remove `securityContext: {bogusKey: null}` before `parseSecurityContext`'s own rejection ever saw it, turning a named refusal into silence — trading one silent-drop bug for another. So a recognized nested key read through the helpers treats a null as absence, and an unrecognized one is still named and refused; both sides of that `securityContext` boundary are pinned in `role_deployment_nested_null_test.go`. The two nested map readers that used to read each entry raw now skip a null entry too, as `stringMapStrict` already did: `parseResourceList` (a `resources.requests`/`limits` quantity, where property validation deletes a null first only under the declared `cpu` and `memory` keys) and `parseLabelMap` (a `nodeSelector`, `service` `selector` or `matchLabels` value). As with `securityContext`, the skip comes after the key check: an invalid resource name or label key is still refused whatever its value, and a wrongly typed entry is still refused. A map left empty by the skip meets the empty-map refusal where one exists — `service`'s `selector: {app: null}` is refused as `selector: {}` is, rather than emitting a selector-less Service. | additive |
 
 Every field above is presence-gated: a document that authors none of them
 produces the same object the builder produced before, so the apiserver's own
@@ -1574,14 +1572,16 @@ own bare-string type), which walks declared keys and shapes on the authored
 document itself. An authored `strategy` malformed enough to fail that check now
 fails there, before the handler ever sees it.
 
-**`replicas` is validated the same way on every kind that reads it** —
-`webservice`, `worker`, `statefulset` and `postgresql` share one
-checked reading (`parseReplicas`, `common.go`). The raw `deployment` takes
-`replicas` as the strictly decoded `DeploymentSpec` integer, and its own value
-rules are the API server's, except for the policy maximum. A value that is not an integer
+**`replicas` is validated the same way on every reshaped kind that reads it** —
+`webservice`, `worker` and `postgresql` share one
+checked reading (`parseReplicas`, `common.go`). The raw `deployment` and
+`statefulset` take `replicas` as the strictly decoded integer of their spec, and
+their own value rules are the API server's, except for the policy maximum. An
+unset `replicas` on them stays unset, and the API server defaults it to 1; the
+rest of this paragraph is about the reshaped kinds. A value that is not an integer
 is an error naming its type (`replicas: must be an integer, got string`), and a
 negative is an error naming the value (`replicas: must be >= 0, got -1`).
-Absent or `null` takes the default 1. `replicas: 0` is accepted everywhere.
+Absent or `null` takes the default 1. `replicas: 0` is accepted.
 An authored count, including 0 and 1, wins over a policy `DefaultReplicas`;
 only an absent or `null` one takes it.
 Previously only the reshaped `deployment` handler did this. The
@@ -1716,68 +1716,48 @@ kind (`rwx_shared_helper_test.go`).
 
 ## StatefulSet-level and claim-template properties
 
-The `statefulset` kind projects the whole `appsv1.StatefulSetSpec` field set it
-owns, and each `volumeClaimTemplates` entry projects the whole
-`corev1.PersistentVolumeClaimSpec`. Every field below is written only when
-authored, so an unauthored StatefulSet emits no `podManagementPolicy` at all and
-an empty `updateStrategy: {}` (a non-pointer struct, which `omitempty` does not
-suppress), leaving the apiserver to default both. Previously kure's `CreateStatefulSet` wrote `podManagementPolicy: OrderedReady` into the
-object itself; the release-1 builder contract makes that constructor
-identity-only, so the line is gone from the emitted manifest. The *effective*
-policy is unchanged — `OrderedReady` is also the API default — but the manifest
-text moved, which is why three goldens lost a `podManagementPolicy:
-OrderedReady` line. The claim entry's five
-pre-existing keys (`name`, `mountPath`, `size`, `storageClass`, `accessModes`)
-now sit inside a closed key set, so a typo in an entry is reported instead of
-being silently dropped. `devicePath` joined that set.
+The `statefulset` kind takes the `appsv1.StatefulSetSpec` field set as the API
+shapes it, and each `volumeClaimTemplates` entry as a raw PersistentVolumeClaim
+(`metadata.name` and a `corev1.PersistentVolumeClaimSpec`). The properties are
+strictly decoded: a key the upstream type does not declare is refused at any
+depth, so a typo in a claim template is reported instead of being silently
+dropped. Under this kind the API server's own rules apply to
+`podManagementPolicy`, `updateStrategy`, `revisionHistoryLimit`,
+`minReadySeconds`, `persistentVolumeClaimRetentionPolicy`, `ordinals` and to the
+claim spec (`accessModes`, `resources.requests.storage`, `selector`,
+`volumeMode`, `dataSourceRef`, `volumeAttributesClassName` and the rest);
+launcher adds no check of its own to them, bar the match expressions of a claim
+`selector` (see the table below), and an unauthored field stays
+unauthored, leaving the API server to default it; an explicit `null` reads as
+absent (see [The null contract](null-and-spellings.md#the-null-contract)). The
+table under "Behavior of the claim templates" below is what launcher itself adds
+or refuses.
 
-Columns match the pod-level table above: **additive** means no document that
-built before builds differently now; **behavior-changing** means an existing
-document's meaning or acceptance moved.
+Before this change the kind took each claim template as `{name, mountPath, size,
+storageClass, accessModes, ...}` and checked the fields above itself. That form
+is gone; [statefulset](kinds-core-workloads.md#statefulset) has the table that
+moves each field.
 
-| Property | Type | Effect | Kind |
-|----------|------|--------|------|
-| `podManagementPolicy` | enum | `OrderedReady` (also the apiserver's default for an unauthored StatefulSet, so authoring it is a no-op that only pins the value in the manifest) or `Parallel`. | additive |
-| `updateStrategy{type, rollingUpdate{partition, maxUnavailable}}` | object | `type` is `RollingUpdate` or `OnDelete`; `rollingUpdate` is rejected under `OnDelete`, mirroring `ValidateStatefulSetSpec`. `type` is required only for an otherwise empty `updateStrategy: {}`, whose whole meaning would come from apiserver defaulting; when `rollingUpdate` is authored, `RollingUpdate` is inferred, since it is both the API default and the only type that reads the field. `partition` is `>= 0`. `maxUnavailable` takes a positive integer or a 1–100% string; the schema leaf is the `Types: [integer, string]` union, so a schema-validating consumer accepts both forms. | additive |
-| `revisionHistoryLimit` | int ≥ 0 | Retained controller revisions. | additive |
-| `minReadySeconds` | int ≥ 0 | Readiness settling time before a pod counts as available. | additive |
-| `persistentVolumeClaimRetentionPolicy{whenDeleted, whenScaled}` | object | Each is `Retain` or `Delete`. | additive |
-| `ordinals{start}` | object | `start` shifts the replica ordinal range and is required once `ordinals` is authored; `>= 0`. | additive |
-| `selector` (claim) | object | `matchLabels`/`matchExpressions`, with the operator arity rule — `In`/`NotIn` need at least one value, `Exists`/`DoesNotExist` none — and every `values` entry validated as a label value, the check `ValidateLabelSelectorRequirement` runs on a newly created claim template. An entirely empty `selector` is rejected: the apiserver would accept it as matching every volume, which is never what an author who wrote the key meant. **Authoring a selector opts the claim out of dynamic provisioning**: a claim with a non-empty selector is never provisioned from its `StorageClass` and stays `Pending` until a pre-provisioned PV matches ([Kubernetes: persistent volumes — Selector](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#selector)). | additive |
-| `resources{requests,limits}` (claim) | object | `storage` is the only accepted resource name — `ValidatePersistentVolumeClaimSpec` reads `requests[storage]` and nothing else, so any other name would be silently ignored. Quantities must be positive. `apply` *merges* `requests` onto the claim-template literal `createStatefulSet` already built (`statefulset.go`, which writes `requests.storage` from `size`), so `size` survives when only `limits` is authored. `requests.storage` is the long spelling of `size`; authoring both is an error. | additive |
-| `volumeMode` (claim) | enum | `Filesystem` or `Block`. `Filesystem` pairs with `mountPath`; `Block` pairs with `devicePath` and renders a main-container `volumeDevices` entry instead of a `volumeMount` (see "Raw block volumes"). Previously `Block` was rejected, because every claim was mounted as a filesystem and the apiserver would have accepted the mismatched claim/pod pair. | additive |
-| `devicePath` (claim) | string | Where a `volumeMode: Block` claim appears in the main container as a raw block device. Not a claim-spec field. Exactly one of `mountPath` and `devicePath` is required, and `devicePath` only with `volumeMode: Block`. | additive |
-| `dataSourceRef{apiGroup,kind,name,namespace}` (claim) | object | Mirrors upstream `validateDataSourceRef`: `kind` and `name` are required non-empty with no format rule (a Kind is a CamelCase identifier, not a DNS name), `apiGroup` must be a DNS-1123 subdomain when non-empty, an omitted or empty `apiGroup` pins `kind` to `PersistentVolumeClaim` (the core group holds no other populator), and `namespace`, when set, is a DNS-1123 *label* (`ValidateNamespaceName`), not a subdomain. | additive |
-| `volumeAttributesClassName` (claim) | string | DNS-1123 subdomain naming a `VolumeAttributesClass`. | additive |
-| `storageClass` (claim) | string | **Behavior-changing.** A non-empty value is now validated as a DNS-1123 subdomain (`ValidateClassName`, the check `ValidatePersistentVolumeClaimSpec` runs and the one the `volumes[].pvc` path already applied). An invalid class name previously built a claim and was refused later by the apiserver; it is now refused here. A present-but-non-string value is likewise rejected rather than read as absent and provisioned through the cluster default class. | behavior-changing |
-| `storageClass` (claim) — `""` and the `pvc` capability | string | **Pre-GA output change**. An authored `storageClass: ""` now requests no class: the claim template carries `storageClassName: ""`, as a `volumes[].pvc` claim and the `persistentvolumeclaim` kind do. It used to read as absent, so the template carried no class and the cluster's default applied. An unauthored entry (absent or `null`) now takes the ClusterProfile `pvc` capability's `storageClassName`, as an authored `pvc` trait does: the handler implements `ComponentCapabilityFiller`, reads the binding through `LoweringContext.Capability` once the component has an entry, so `pvc` is in `ConsumedCapabilities` exactly then, and fills each unauthored entry. An authored class, `""` included, wins; a non-string rendering value is refused. Either change alters an existing StatefulSet's `volumeClaimTemplates`, which the apiserver refuses to update: the StatefulSet fails to apply until it is recreated (the `force-replace` trait recreates it on apply, restarting its pods). The claims it already made keep their class, unless the retention policy deletes them with it. | behavior-changing |
-| `size` (claim) | quantity | **Behavior-changing.** `size` is now the short spelling of `resources.requests.storage` rather than a key of its own, and it is no longer unconditionally required — either spelling satisfies the requirement, and authoring both is an error. It must also now be **positive**: `0` was accepted before and is rejected now, matching upstream's `ValidatePositiveQuantityValue` on `requests[storage]`. (The `volumes[].pvc.size` surface on every kind applies the same positivity rule.) Because "authored" is now read through `parseStringField`, an explicitly empty `size: ""` no longer counts as authoring the short spelling, so pairing it with `resources.requests.storage` is accepted rather than rejected as a double spelling. | behavior-changing |
-| any unrecognized key on a claim entry | — | **Behavior-changing.** A `volumeClaimTemplates` entry is now a closed key set. The previous parser called no `rejectUnknownKeys` at all on the entry map, so a misspelled `storageClassName` was dropped and the claim was provisioned through the cluster default class with nothing said. Such a document built before and errors now, which is a break of the additive test in `docs/oam/design-gvk.md` under an unchanged `launcher.gokure.dev/v1alpha1`. It is taken deliberately and on precedent: `6aed090` (`feat(format): enforce policy and support securityContext on init/sidecar containers`) shipped the same tightening on init/sidecar container entries. The `format` commit scope is what signals it — `cliff.toml` groups those commits under a **Document Format** changelog heading. | behavior-changing |
-| any optional field above, authored as null | — | **Not a wrong type — absence.** Every optional StatefulSet-level and claim-level field added here reads an explicit null as omission, so `updateStrategy:` with nothing after it builds exactly as omitting the key does. This matters beyond hand-written YAML: a lowering rule may emit a nil, `pkg/oam`'s emission validation accepts it ("a nil under an optional field constrains nothing"), and a parser that answered "must be an object, got `<nil>`" would let a component satisfy the published schema and then fail conversion. Where the null lands on a field that is *required* once its parent is authored (`ordinals.start`, a claim's `name`), it surfaces as the requiredness error, never as a type error. This covers the optional lists as well as the scalars and objects (`selector.matchExpressions`, a match expression's `values`), and it covers a **typed** nil — `map[string]any(nil)` or `[]any(nil)` inside an `any`, which is what a lowering rule assembled in Go produces for an unset optional and is not `== nil` — because `pkg/oam`'s `isNullValue` classifies those as null too. A key the schema rejects outright is unaffected: authoring it as null still earns the explanatory refusal rather than silence. The lifecycle and probe handler keys, where presence itself is the rule being enforced, refuse a null; a container's resource quantities under any name and the top-level keys once read with a bare lookup (listed with the `null` row of the `deployment` table above) read it as omission. | additive |
-| `volumeClaimTemplates` itself — wrong type | list | **Behavior-changing.** The previous parser answered "is it present" and "is it a list" with one type assertion, so `volumeClaimTemplates: {name: data}` or a stray scalar was indistinguishable from an absent key: the StatefulSet was built with no claim templates and nothing was reported. A present-but-non-list value is now rejected naming the type received. **An explicit null is absence, not a wrong type** — `volumeClaimTemplates:` with no value decodes to nil, the key is optional in the schema, and `pkg/oam`'s own requiredness check (`isNullValue`) already reads nil as absent, so a document written that way is valid `launcher.gokure.dev/v1alpha1` today and keeps building. | behavior-changing |
-| `name`, `mountPath` (claim) — collisions | string | **Behavior-changing.** A claim template's `name` must differ from every other claim template's and every `volumes` entry's, and its `mountPath` from every other main-container `mountPath`, claim templates and `volumes` together. Each parser used to check only its own entries, and the apiserver does not catch the overlap: StatefulSet validation skips the pod template's volumes. The controller keys claim templates by name, so of two sharing one only one claim was created, and it replaced a pod volume named like a template with that template's claim, so the authored volume was never mounted. A repeated `mountPath` built and then failed pod creation. Such documents now fail at build time. The `configmap` and `external-secret` traits refuse a volume named like a claim template for the same reason. | behavior-changing |
-| `name`, `mountPath`, `size` (claim) — wrong type | string | **Behavior-changing.** All three previously read through a bare type assertion, so a present-but-non-string value (YAML parses `size: 10e9` as a float and `mountPath: 7` as an int) collapsed to the empty string and was reported as the *requiredness* error — "missing required field 'size'" for a field the author had written. Each now rejects with an explicit type error naming the field and the type received. Acceptance does not widen: every one of these documents failed before and fails now, but with a message that points at the real defect. | behavior-changing |
+### Behavior of the claim templates
 
-Deliberately **not** accepted — each is rejected with an error naming the
-reason rather than silently ignored:
+| Case | Effect |
+|------|--------|
+| `spec.storageClassName` unauthored (absent or `null`) | The ClusterProfile `pvc` capability's `storageClassName` fills it, as it fills an authored `pvc` trait and the `persistentvolumeclaim` kind. The handler implements `ComponentCapabilityFiller` and reads the binding through `LoweringContext.Capability` once the component has a claim template, so `pvc` is in `ConsumedCapabilities` exactly then. A non-string rendering value is refused. The fill report names the capability as the source, at `volumeClaimTemplates[<n>].spec.storageClassName`. |
+| `spec.storageClassName` authored, `""` included | Wins over the capability. `""` requests no class, as on a `volumes[].pvc` claim and the `persistentvolumeclaim` kind. |
+| a claim template's name used twice, or equal to a `template.spec.volumes` name | Refused. The apiserver does not catch the overlap: StatefulSet validation skips the pod template's volumes. The controller keys claim templates by name, so of two sharing one only one claim is created, and it replaces a pod volume named like a template with that template's claim, so the authored volume would never be mounted. The `configmap` and `external-secret` traits refuse a volume named like a claim template for the same reason. |
+| `spec.resources.requests.storage` | Held to the EnvironmentPolicy's storage maximum, per claim template, named by its path (`volumeClaimTemplates[0].spec.resources.requests.storage`). A claim template with no storage request is not checked. |
+| `spec.selector.matchExpressions` | Each expression needs a `key` and an `operator`; the operator is one of `In`, `NotIn`, `Exists`, `DoesNotExist`; `In` and `NotIn` need at least one value, `Exists` and `DoesNotExist` none. These are the rules the API server applies to every label selector it validates; a malformed expression fails the build and not the apply. Whether a key or a value is a valid label name or value is left to the API server. |
+| `accessModes`, `volumeMode`, `dataSourceRef`, the rest of `selector` and any other claim field | Left to the API server. Launcher adds no `accessModes` default: a claim template with none is refused by the API server when applied. |
 
-- `spec.selector` (StatefulSet-level) — the builder derives it from the
-  component name, and a StatefulSet's selector is immutable after creation.
-- `spec.template` (StatefulSet-level) — the pod template
-  is projected from the component's own container and pod-level properties, as
-  on `webservice` and `worker`. The parser dropped an authored one before.
-- `volumeName` (claim) — pre-binding a claim *template* to one named
-  PersistentVolume would point every replica at the same volume.
-- `volumeMount` (claim) — not a claim-spec field at all; the container mount
-  is authored as `mountPath` (or, for a `volumeMode: Block` claim,
-  `devicePath`) on the same entry.
-- `dataSource` (claim) — when `dataSourceRef` carries no `namespace` the
-  apiserver mirrors it into the superseded `dataSource` field, so authoring
-  both is redundant; when it does carry a `namespace` the apiserver does not
-  mirror, and `dataSource` must stay empty. Either way the field is authored
-  through `dataSourceRef` alone.
+A change to the storage class a claim template carries alters the StatefulSet's
+`volumeClaimTemplates`, which the apiserver refuses to update: the StatefulSet
+fails to apply until it is recreated (the `force-replace` trait recreates it on
+apply, restarting its pods). The claims it already made keep their class, unless
+the retention policy deletes them with it. An authored `selector` on a claim opts
+it out of dynamic provisioning, as the Kubernetes documentation states for
+persistent volumes.
 
-The three claim-level refusals sit inside a `volumeClaimTemplates` entry, so
-their reason reaches a caller of the handler; in a document the
-authored-property check refuses the key first, with its own text and no reason
-(see ["Upstream fields a hand-parsed kind does not read"](upstream-fields-not-read.md#upstream-fields-a-hand-parsed-kind-does-not-read)).
+The mount of a claim template is not a property of the template. It is a
+`volumeMounts` entry of the container that uses it, named like the claim
+template (a `volumeMode: Block` claim uses a `volumeDevices` entry instead), and
+it is authored as the API shapes it.

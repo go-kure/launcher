@@ -614,7 +614,9 @@ through `ComponentCapabilityDefaults` (go-kure/launcher#742). A `webservice` or
 `worker` `pvc` volume takes it as well: the trait `roleClaims` synthesizes is sealed,
 so the rule reads the binding through `LoweringContext.Capability` and fills the
 value itself (go-kure/launcher#746). A `statefulset` `volumeClaimTemplates` entry takes
-it too, through the handler's `ComponentCapabilityFiller` (go-kure/launcher#761).
+it too, through the handler's `ComponentCapabilityFiller` (go-kure/launcher#761), into
+the `spec.storageClassName` of a claim template that authors none (the entry is a raw
+PersistentVolumeClaim since go-kure/launcher#1629).
 
 `pkg/cmd/kurel/pvc_twin_test.go` builds each intent both ways. It requires identical
 claims apart from the `app` label, the same capability default on both paths, on

@@ -38,7 +38,9 @@ Text in square brackets is added here to say what a moved sentence refers to.
 
 - **Tests:**
   - `TestHandParsedKinds_CoverEveryUpstreamField` walks the upstream type of
-    each of the seven kinds (the six hand-parsed ones and the `role-deployment` member), from the object down every level whose fields are
+    each of the six kinds (the five hand-parsed ones, `service`, `persistentvolumeclaim`,
+    `configmap`, `secret` and `serviceaccount`, and the `role-deployment` member; the raw
+    kinds are held to their upstream spec by `TestCoreKindSchemas_CoverSpec`), from the object down every level whose fields are
     the component's properties, and fails on a field that is neither read, nor
     refused, nor placed in one of the classes above — so a field a later
     `k8s.io/api` adds cannot be dropped in silence. It stops at the properties:
@@ -50,7 +52,7 @@ Text in square brackets is added here to say what a moved sentence refers to.
     refusals inside a declared property.
     ["the two texts above" are the two texts under the reference's "The two paths".]
   - `TestHandParsedKinds_MatchExpressionsAtEverySelector` runs a match
-    expression through each of the 47 label selectors these kinds read, to the
+    expression through each of the 10 label selector sites these kinds read, to the
     generated object, and five defective ones to their refusal.
   - `TestHandParsedKinds_TemplateMetadataAndContainerName` and
     `TestHandParsedKinds_ServicePortFieldsReachTheObject` pin the template's

@@ -185,17 +185,15 @@ it on the object through `kindObject`, the one helper every kind returns its obj
 
 ### The pod template's labels and annotations (`podMetadata`)
 
-`labels` and `annotations` above go on the object and never on a pod template. The one kind
-whose spec holds a pod template the author does not write whole (`statefulset`) takes a
-fourth property, `podMetadata`, for the pod template's own metadata. `webservice` and
-`worker` take it
-too, with the same name and shape as `statefulset`: the rule hands it to
+`labels` and `annotations` above go on the object and never on a pod template. The only
+kinds whose pod template the author does not write whole, `webservice` and `worker`, take a
+fourth property, `podMetadata`, for the pod template's own metadata: the rule hands it to
 its `role-deployment` member, so it lands on that Deployment's pod template and nowhere else. The
 Service a `webservice` generates selects on the component's `app` label alone, so an authored
 label is on the pods and not in the Service's selector. A document moves a workload between
 `webservice` and `worker` without renaming it. The kinds that take a pod template whole
-(`deployment`, `daemonset`, `job`, `replicaset`, `replicationcontroller`) have no
-`podMetadata`: the template's metadata is `template.metadata`, as authored, and a
+(`deployment`, `statefulset`, `daemonset`, `job`, `replicaset`, `replicationcontroller`) have
+no `podMetadata`: the template's metadata is `template.metadata`, as authored, and a
 `cronjob`'s is `jobTemplate.spec.template.metadata`.
 
 ```yaml
@@ -342,9 +340,9 @@ the kind emits for a whole expression is accepted, and the same object with the 
 type writes, the object is accepted again, which is why the omission is refused where the
 component is read.
 
-The walk covers the kinds that decode a type, the raw `deployment`, `daemonset`, `job` and
-`cronjob` among them. The hand-parsed kinds (`statefulset`, `persistentvolumeclaim`) hold
-their selectors through their own
+The walk covers the kinds that decode a type, the raw `deployment`, `statefulset`,
+`daemonset`, `job` and `cronjob` among them. The hand-parsed kind (`persistentvolumeclaim`)
+holds its selectors through its own
 parser (`parseLabelSelectorOpts`), which refuses the same and more, so their absence from the
 test's list is not a gap.
 
@@ -600,15 +598,17 @@ server-side default for it, so each handler assigns
 `&metav1.LabelSelector{MatchLabels: …}` from the same helper that produced
 `spec.template.metadata.labels` — `deploymentComponentLabels` for `worker`,
 which lowers to a `role-deployment` component (its affinity selector
-uses `appLabels`), and `appLabels` for `webservice` and `statefulset` (both
-return a fresh `{"app": <label value>}` map, per the ownership rule above, valued
-as [The `app` label](#the-app-label) describes). The raw `deployment` and `daemonset` are the exception:
+uses `appLabels`), and `appLabels` for `webservice` (it
+returns a fresh `{"app": <label value>}` map, per the ownership rule above, valued
+as [The `app` label](#the-app-label) describes). The raw `deployment`, `statefulset` and `daemonset` are the exception:
 their `selector` is authored and required, and the handler only adds the `app` label to
 the template and refuses a selector that the label would stop matching. This is
 the one field the compiler cannot check: a selector that disagrees with the
 template labels compiles and is refused by the apiserver at apply time. The labels an
-author adds with `podMetadata` go on the pod template only, so they cannot make the two
-disagree. A raw `job` takes its selector the same way, but may leave it out: the Job
+author adds with `podMetadata` go on the pod template only, so on `webservice` and `worker`
+they cannot make the two disagree. On the raw kinds the labels authored in `template.metadata`
+can: the handler refuses a selector the added `app` label would stop matching, and nothing
+else checks the two. A raw `job` takes its selector the same way, but may leave it out: the Job
 controller then fills `spec.selector` and its matching pod labels itself. A `cronjob`'s
 job template takes no selector at all, since the API server generates it.
 

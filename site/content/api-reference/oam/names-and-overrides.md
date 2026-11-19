@@ -856,10 +856,10 @@ declares no object refuses the two properties if its schema does not declare the
 them, unread by the engine, if it declares them or declares no schema.
 
 The two properties never reach a pod template. The pod template's labels and annotations are
-a handler's own property, `podMetadata`, on `statefulset` and on `webservice` and `worker`,
+a handler's own property, `podMetadata`, on `webservice` and `worker`,
 which hand it to their
 `role-deployment` member; the engine neither reads nor removes it. A `deployment`,
-a `daemonset` or a `job` has no such property: its template's metadata is
+a `statefulset`, a `daemonset` or a `job` has no such property: its template's metadata is
 `template.metadata`, and a `cronjob`'s is `jobTemplate.spec.template.metadata`. What it
 writes is
 checked as any pod template is: `ReservedMetadataKeys` and the component label.

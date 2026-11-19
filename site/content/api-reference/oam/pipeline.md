@@ -503,8 +503,8 @@ each a **separate** additive resource (the authored `networkpolicy` /
   Synthesis stays TCP-only: an `IngressPeer` whose endpoint is UDP or SCTP is skipped, never
   emitted as TCP, and neither field enters the grouping key, so no policy name depends on them.
   Where endpoints come from: `deployment`, `statefulset` and `daemonset` report one per
-  main-container port (the port's name, its number, its protocol; for `deployment` and
-  `daemonset` the main container is `template.spec.containers[0]`); `helm`, `helmrelease` and
+  main-container port (the port's name, its number, its protocol; the main container is
+  `template.spec.containers[0]`); `helm`, `helmrelease` and
   `helmtemplate` report what an `endpoints` property declares, since a chart's pods are not
   visible to launcher; the other providers are unchanged.
 
