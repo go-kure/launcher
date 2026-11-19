@@ -218,8 +218,21 @@ func TestDaemonsetHandler_Refusals(t *testing.T) {
 func TestDaemonsetHandler_ActiveDeadlineReasonNamesTheKind(t *testing.T) {
 	props := ptObject(t, dsPlain(htPlainPod+"activeDeadlineSeconds: 600\n"))
 	err := coreKindErr(&components.DaemonsetHandler{}, "daemonset", "agent", props)
-	if err == nil || !strings.Contains(err.Error(), "DaemonSet") {
-		t.Fatalf("err = %v, want a refusal that names DaemonSet", err)
+	if err == nil {
+		t.Fatal("activeDeadlineSeconds on the pod template was accepted")
+	}
+	// The generic decode refusal names DaemonSetSpec too, so pin the refusal
+	// itself: its path and its reason, which lists DaemonSet among the kinds.
+	for _, want := range []string{
+		"template.spec.activeDeadlineSeconds: not supported",
+		"Deployment, ReplicaSet, ReplicationController, DaemonSet or StatefulSet",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want one containing %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "do not decode") {
+		t.Errorf("err = %v, the generic decode refusal fired instead", err)
 	}
 }
 
