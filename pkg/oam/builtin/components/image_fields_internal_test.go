@@ -698,7 +698,7 @@ func TestImageFields_HeldOrListed(t *testing.T) {
 }
 
 // TestImageFields_WorkloadKindsTakeImageVolumeNested: the components with a
-// volume schema of their own (webservice, worker, statefulset, job, cronjob)
+// volume schema of their own (webservice, worker, statefulset)
 // take their volumes through one parser. It reads an image volume only in its
 // nested form (go-kure/launcher#1177), where the reference is held to
 // ValidateImageRef as the pod kind holds it (validateImageVolumeRefs); the policy

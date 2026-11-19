@@ -428,8 +428,9 @@ func (f ContainerFields) apply(container *corev1.Container) {
 // NotRequired on a pod whose restartPolicy is Never — upstream's "must be
 // 'NotRequired' when pod `restartPolicy` is 'Never'" (validateResizePolicy).
 // The kinds that could author that pod policy, job and cronjob, take the
-// upstream spec now (go-kure/launcher#1629) and no handler sets it, so this
-// reaches Never only if one does later. It runs on the assembled pod spec so
+// upstream spec now (go-kure/launcher#1629), so no property parser sets it and
+// this reaches Never only through a Go caller that sets
+// PodSpecConfig.PodSpec.RestartPolicy. It runs on the assembled pod spec so
 // every container list is covered by one check.
 func checkResizePolicyRestart(ps *corev1.PodSpec) error {
 	if ps.RestartPolicy != corev1.RestartPolicyNever {

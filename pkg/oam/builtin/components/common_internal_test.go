@@ -1944,7 +1944,7 @@ func TestParsePort_ValidName_Accepted(t *testing.T) {
 
 // TestParsePort_NamedPortsDisallowed_Error covers go-kure/launcher#278 wave-11
 // finding 5: a component kind whose main container never declares any port
-// (worker, cronjob) passes namedPortsAllowed=false, so even an otherwise
+// (worker) passes namedPortsAllowed=false, so even an otherwise
 // validly-formatted name like "http" is rejected — the kubelet has nothing
 // to resolve it against on that container.
 func TestParsePort_NamedPortsDisallowed_Error(t *testing.T) {

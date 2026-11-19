@@ -62,8 +62,9 @@ var mainContainerRejectedKeys = map[string]string{
 // pod template (ValidatePodTemplateSpecForReplicaSet, ValidateStatefulSetSpec
 // and ValidateDaemonSetSpec in pkg/apis/apps/validation). `restartPolicy` is
 // the container field of that name too, which no type reads for its main
-// container; on `job` and `cronjob` the key is the pod's, and read.
-// parsePodSpec refuses them on a pod that is no Job's.
+// container. The raw `job` and `cronjob` read the pod's own at
+// `template.spec.restartPolicy` and `jobTemplate.spec.template.spec.restartPolicy`
+// (go-kure/launcher#1629). parsePodSpec refuses them on a pod that is no Job's.
 var appsPodTemplateRejectedKeys = map[string]string{
 	"restartPolicy":         "restartPolicy: not authorable — apps/v1 validation accepts only Always as the restart policy of a Deployment's, a StatefulSet's or a DaemonSet's pod template, which is the API's default; a container's own restartPolicy is not read",
 	"activeDeadlineSeconds": "activeDeadlineSeconds: " + podSpecJobOnlyReason,
