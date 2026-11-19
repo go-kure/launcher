@@ -552,10 +552,11 @@ func schemaVolumes() oam.PropertySchema {
 			AdditionalProperties: true,
 			Description:          "The " + key + " volume source, as the Kubernetes VolumeSource field of that name. Read when type is " + key + "; an unknown field or a wrongly typed value is refused.",
 		}
-		// These five types have no flat form, so their object is required when the type
-		// names it (parseVolumes refuses the same case a second time, in the handler).
-		// configMap, secret and emptyDir are not here: each is also authored flat.
-		if slices.Contains([]string{"csi", "downwardAPI", "ephemeral", "image", "projected"}, key) {
+		// The types with no flat form (nestedOnlyVolumeSources, the handler's own list)
+		// require their object when the type names it; parseVolumes refuses the same
+		// case a second time. configMap, secret and emptyDir are not in it: each is also
+		// authored flat.
+		if slices.Contains(nestedOnlyVolumeSources, key) {
 			source.RequiredWhen = &oam.RequiredWhen{Key: "type", Equals: key}
 		}
 		props[key] = source
