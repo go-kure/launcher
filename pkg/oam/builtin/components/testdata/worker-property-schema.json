@@ -2697,6 +2697,7 @@
         "type": {
           "type": "string",
           "description": "Volume source type. csi, downwardAPI, ephemeral, image and projected take the source in the object of the same name. configMap, secret and emptyDir take it flat or in that object.",
+          "required": true,
           "enum": [
             "hostPath",
             "emptyDir",
