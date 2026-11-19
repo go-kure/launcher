@@ -137,14 +137,26 @@ func (h *StatefulsetHandler) FillCapabilityDefaults(props map[string]any, lctx o
 }
 
 // authoredSpelling returns the key of m that spells name, matching without
-// regard to case as the strict decode does: name itself when present, else the
-// first other spelling in sorted order, else name.
+// regard to case as the strict decode does. The spelling that holds a value
+// wins, because the decode skips a null and accepts a null beside a set
+// spelling: a fill written under the null one would then set the field twice.
+// Among equals, name itself comes first, then the others in sorted order; with
+// no spelling at all the answer is name.
 func authoredSpelling(m map[string]any, name string) string {
-	if _, ok := m[name]; ok {
-		return name
-	}
+	spellings := []string{name}
 	for _, k := range slices.Sorted(maps.Keys(m)) {
-		if strings.EqualFold(k, name) {
+		if k != name && strings.EqualFold(k, name) {
+			spellings = append(spellings, k)
+		}
+	}
+	for _, k := range spellings {
+		if _, set := authoredValue(m, k); set {
+			return k
+		}
+	}
+	// None holds a value: the first one present, else name.
+	for _, k := range spellings {
+		if _, present := m[k]; present {
 			return k
 		}
 	}

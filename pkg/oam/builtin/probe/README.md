@@ -50,11 +50,11 @@ No shipped probe lists `LeftToCluster` any more: the one case, the cronjob schem
 The mechanism stays for a handler that declares a default it leaves to the cluster, and
 the tests keep it exercised with a probe built for the purpose.
 
-The probes cover the handler-built workload type statefulset, with its init containers,
-sidecars and claim templates. The raw `deployment`, `daemonset`, `job` and `cronjob`
-(go-kure/launcher#1629) fill nothing, so their probes are raw documents (a pod template, with
-a selector where the kind needs one and a restart policy where the kind needs one) that list
-no fill. Check B fails on any `policy` or `builtin` entry a probe does not
+No handler-built workload type is left: the raw `deployment`, `statefulset`, `daemonset`,
+`job` and `cronjob` (go-kure/launcher#1629) fill nothing, so their probes are raw documents
+(a pod template, with a selector and a restart policy where the kind needs one; for
+`statefulset` also one with an init container, a second container and ports, and one with a
+claim template) that list no fill. Check B fails on any `policy` or `builtin` entry a probe does not
 list, so a fill that came back to the kind fails there. It also probes the types that lower to other components: `webservice` and `worker`,
 whose entries the report names at the place of their `role-deployment` member (`Fill.Member`),
 and `postgresql`, which the report names at the cluster it builds. For a type that
