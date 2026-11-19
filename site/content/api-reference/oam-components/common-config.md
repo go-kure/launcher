@@ -933,9 +933,10 @@ breaking pre-GA format change for a document that described a claim in a `pvc`
 volume on one of them. To migrate, declare the claim with a
 `persistentvolumeclaim` component (or a `pvc` trait) carrying the volume's
 `size`, its `storageClass` as `storageClassName`, and its `accessModes` and
-`volumeMode`. Then reference it from the volume with `claimName`. The
-environment's storage-size limit and default apply to that claim, not to the
-volume.
+`volumeMode`. Then reference it from an upstream pod-spec volume with
+`persistentVolumeClaim.claimName` (under `template.spec.volumes`, or
+`jobTemplate.spec.template.spec.volumes` on a `cronjob`). The environment's
+storage-size limit and default apply to that claim, not to the volume.
 
 `webservice` and `worker` still accept a `pvc` volume that describes its
 claim. The rule turns each one into a synthesized `pvc` trait on its
