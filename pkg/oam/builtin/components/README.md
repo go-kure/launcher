@@ -22,8 +22,9 @@ closed, and so is the four-key `affinity` shorthand: its schema declares the fou
 no other, and since go-kure/launcher#790 its parser refuses any other key too. The
 `initContainers`/`sidecars` entries themselves are closed (go-kure/launcher#321, see "Common
 config"). The raw `corev1` `affinity` that `statefulset`, `daemonset`, `job` and `cronjob` publish is
-a different schema and is not part of that gap — it is modeled field-by-field. (`deployment` is a
-raw kind too: it carries no such schema, because it decodes its whole spec into the upstream type.) `helmrelease`
+a different schema and is not part of that gap — it is modeled field-by-field. (The `deployment`
+kind carries no such schema: it decodes its whole spec into the upstream type, which the four
+kinds above do not.) `helmrelease`
 takes the other route to the same strictness: its schema declares exactly the top-level
 `HelmReleaseSpec` keys and leaves the nested Flux blocks open, and its handler decodes the
 whole property map strictly into `HelmReleaseSpec`, refusing an unknown or wrongly typed key at
