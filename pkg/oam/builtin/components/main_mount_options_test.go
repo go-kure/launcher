@@ -214,7 +214,7 @@ func TestMainMount_SubPathShapesUpstreamAccepts(t *testing.T) {
 
 // TestMainMount_BidirectionalNeedsPrivilegedOnEveryKind fails if one kind does
 // not run the check: an unprivileged Bidirectional mount is refused and a
-// privileged one builds, on all five kinds.
+// privileged one builds, on all three kinds.
 func TestMainMount_BidirectionalNeedsPrivilegedOnEveryKind(t *testing.T) {
 	vol := props{"volumes": []any{volumeEntry(props{"mountPropagation": "Bidirectional"})}}
 	for _, k := range workloadKinds {

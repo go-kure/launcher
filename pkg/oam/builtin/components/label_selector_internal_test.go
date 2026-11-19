@@ -37,6 +37,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -158,6 +159,8 @@ var strictlyDecodedTypes = typesByName([]namedType{
 	{"autov1.ImageUpdateAutomationSpec", reflect.TypeFor[autov1.ImageUpdateAutomationSpec]()},
 	{"barmanapi.BarmanObjectStoreConfiguration", reflect.TypeFor[barmanapi.BarmanObjectStoreConfiguration]()},
 	{"barmanv1.ObjectStoreSpec", reflect.TypeFor[barmanv1.ObjectStoreSpec]()},
+	{"batchv1.CronJobSpec", reflect.TypeFor[batchv1.CronJobSpec]()},
+	{"batchv1.JobSpec", reflect.TypeFor[batchv1.JobSpec]()},
 	{"certv1.CertificateSpec", reflect.TypeFor[certv1.CertificateSpec]()},
 	{"certv1.IssuerSpec", reflect.TypeFor[certv1.IssuerSpec]()},
 	{"ciliumNetworkPolicyProperties", reflect.TypeFor[ciliumNetworkPolicyProperties]()},
@@ -664,9 +667,9 @@ func nestedVolumeConfig(c *oam.Component) (stack.ApplicationConfig, error) {
 // reason. Cilium's API declares a copy of the selector type; the kinds that
 // decode it list key and operator already and are held to the CRDs of the
 // linked module (TestCiliumBGPKinds_RequiredMatchCRD and its siblings). The
-// reshaped workload kinds (the role member, statefulset, job and cronjob) and
-// the claim templates decode no type: they parse a selector
-// by hand and refuse key, operator and values there (parseLabelSelectorOpts).
+// reshaped workload kinds (the role member and statefulset) and the claim
+// templates decode no type: they parse a selector by hand and refuse key,
+// operator and values there (parseLabelSelectorOpts).
 // Their nested `volumes` entry is the exception, and its row decodes the volume
 // source itself (nestedVolumeConfig).
 // A node selector term (corev1.NodeSelectorTerm) and a quota's scope selector
@@ -720,6 +723,29 @@ var labelSelectorKinds = []labelSelectorKind{
 		expressions: true,
 		excluded: map[string]string{
 			"selector": "refused already, and wholly: the kind reads it as apimachinery does to compare it with the `app` label (refuseSelectorAgainstAppLabel), which refuses an expression without a key, with an operator that is none of the four or with the wrong number of values, in apimachinery's words (TestReplicaSetSelector_RefusedAsAPIMachineryReadsIt)",
+		},
+	},
+	{
+		component: "job", typ: "batchv1.JobSpec", config: kindConfig(&JobHandler{}),
+		base: map[string]any{
+			"template": map[string]any{"spec": map[string]any{"restartPolicy": "Never", "containers": labelSelectorTestContainers}},
+		},
+		expressions: true,
+		excluded: map[string]string{
+			"selector": "refused already, and wholly: the kind reads it as apimachinery does to compare it with the `app` label (refuseSelectorAgainstAppLabel), which refuses an expression without a key, with an operator that is none of the four or with the wrong number of values, in apimachinery's words (TestReplicaSetSelector_RefusedAsAPIMachineryReadsIt)",
+		},
+	},
+	{
+		component: "cronjob", typ: "batchv1.CronJobSpec", config: kindConfig(&CronjobHandler{}),
+		base: map[string]any{
+			"schedule": "0 2 * * *",
+			"jobTemplate": map[string]any{"spec": map[string]any{
+				"template": map[string]any{"spec": map[string]any{"restartPolicy": "Never", "containers": labelSelectorTestContainers}},
+			}},
+		},
+		expressions: true,
+		excluded: map[string]string{
+			"jobTemplate.spec.selector": "refused wholly: the API server generates the selector of a CronJob's Job, so the kind refuses an authored one (jobTemplate.spec.selector: not supported)",
 		},
 	},
 	{
@@ -1157,9 +1183,10 @@ func TestLabelSelectorKinds_CoverEverySelector(t *testing.T) {
 // selector a kind that checks expressions leaves out of the two checks: a
 // replicaset's `selector` is refused for each of the five defects all the
 // same, under its path, by the comparison with the `app` label. The raw
-// `deployment` kind (go-kure/launcher#1629) reads its selector the same way.
+// `deployment`, `daemonset` and `job` kinds (go-kure/launcher#1629) read theirs
+// the same way.
 func TestReplicaSetSelector_RefusedAsAPIMachineryReadsIt(t *testing.T) {
-	for _, component := range []string{"replicaset", "deployment", "daemonset"} {
+	for _, component := range []string{"replicaset", "deployment", "daemonset", "job"} {
 		var selectorKind labelSelectorKind
 		for _, kind := range labelSelectorKinds {
 			if kind.component == component {

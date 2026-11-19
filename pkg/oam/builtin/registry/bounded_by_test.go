@@ -209,11 +209,12 @@ func overSizedClaim() map[string]any {
 	}}}
 }
 
-// sharedKind is one of the six types built from the shared container and pod
-// fragments (the `deployment` and `daemonset` kinds are not among them since
-// go-kure/launcher#1629: they hold the upstream pod template, and their rows
-// are podRows on `template`). sizedVolumes says that a `pvc` volume of the type
-// takes a `size` and generates its claim.
+// sharedKind is one of the four types built from the shared container and pod
+// fragments (the `deployment`, `daemonset`, `job` and `cronjob` kinds are not
+// among them since go-kure/launcher#1629: they hold the upstream pod template,
+// and their rows are podRows on `template`, or on `jobTemplate` for a cronjob).
+// sizedVolumes says that a `pvc` volume of the type takes a `size` and
+// generates its claim.
 type sharedKind struct {
 	typ                        string
 	sidecars, replicas, claims bool
@@ -226,8 +227,6 @@ var sharedKinds = []sharedKind{
 	{typ: "webservice", sidecars: true, replicas: true, sizedVolumes: true},
 	{typ: "worker", sidecars: true, replicas: true, sizedVolumes: true},
 	{typ: "statefulset", sidecars: true, replicas: true, claims: true},
-	{typ: "job"},
-	{typ: "cronjob", extra: map[string]any{"schedule": "0 2 * * *"}},
 }
 
 func sharedKindRows(k sharedKind) []boundRow {
@@ -291,9 +290,9 @@ func sharedKindRows(k sharedKind) []boundRow {
 }
 
 // podRows are the bounds of a pod written as the API type: at the top of a pod
-// component with prefix "", and below the open template of the five kinds
-// that hold one (podtemplate, replicaset, replicationcontroller, deployment and
-// daemonset), where every class is declared on that one node.
+// component with prefix "", and below the open template of the seven kinds
+// that hold one (podtemplate, replicaset, replicationcontroller, deployment,
+// daemonset, job and cronjob), where every class is declared on that one node.
 func podRows(typ, node, prefix string) []boundRow {
 	row := func(declared string, class oam.RefusalClass, relax knob, change ...set) boundRow {
 		for i := range change {
@@ -338,9 +337,11 @@ func boundRows() []boundRow {
 		rows = append(rows, sharedKindRows(k)...)
 	}
 	rows = append(rows, podRows("pod", "", "")...)
-	for _, typ := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset"} {
+	for _, typ := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset", "job"} {
 		rows = append(rows, podRows(typ, "template", "template.spec.")...)
 	}
+	// A CronJob holds its pod below the job template.
+	rows = append(rows, podRows("cronjob", "jobTemplate", "jobTemplate.spec.template.spec.")...)
 	for _, typ := range []string{"replicaset", "replicationcontroller", "deployment"} {
 		rows = append(rows, boundRow{typ: typ, path: "replicas", class: oam.RefusalReplicaMaximum,
 			change: []set{{at: "replicas", value: 9}}, relax: anyReplicas})
@@ -383,8 +384,10 @@ func boundDocument(t *testing.T, trait bool, typ string) (oam.Component, map[str
 	switch typ {
 	case "pod":
 		props = pod()
-	case "podtemplate":
+	case "podtemplate", "job":
 		props = map[string]any{"template": template()}
+	case "cronjob":
+		props = map[string]any{"schedule": "0 2 * * *", "jobTemplate": map[string]any{"spec": map[string]any{"template": template()}}}
 	case "replicaset", "deployment", "daemonset":
 		props = map[string]any{"selector": map[string]any{"matchLabels": map[string]any{"tier": "web"}}, "template": template()}
 	case "replicationcontroller":

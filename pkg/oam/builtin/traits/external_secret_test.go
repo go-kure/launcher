@@ -34,9 +34,19 @@ func newWorkerStubConfig(t *testing.T) *components.RoleDeploymentConfig {
 func newCronJobStubConfig(t *testing.T) *components.CronjobConfig {
 	t.Helper()
 	return &components.CronjobConfig{
-		Image:    "job:v1",
-		Schedule: "0 2 * * *",
+		Spec: batchv1.CronJobSpec{
+			Schedule:    "0 2 * * *",
+			JobTemplate: batchv1.JobTemplateSpec{Spec: batchv1.JobSpec{Template: batchPodTemplate()}},
+		},
 	}
+}
+
+// batchPodTemplate is the one-container pod template the batch stubs carry.
+func batchPodTemplate() corev1.PodTemplateSpec {
+	return corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+		Containers:    []corev1.Container{{Name: "main", Image: "job:v1"}},
+		RestartPolicy: corev1.RestartPolicyOnFailure,
+	}}
 }
 
 // newJobStubConfig builds a real components.JobConfig whose Generate produces a
@@ -45,10 +55,7 @@ func newCronJobStubConfig(t *testing.T) *components.CronjobConfig {
 // that handles one does not thereby handle the other.
 func newJobStubConfig(t *testing.T) *components.JobConfig {
 	t.Helper()
-	return &components.JobConfig{
-		Image:         "job:v1",
-		RestartPolicy: corev1.RestartPolicyOnFailure,
-	}
+	return &components.JobConfig{Spec: batchv1.JobSpec{Template: batchPodTemplate()}}
 }
 
 // findDeployment pulls the first *appsv1.Deployment out of a generated object

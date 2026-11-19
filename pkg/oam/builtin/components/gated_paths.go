@@ -88,15 +88,22 @@ func withItemGatedPaths(s oam.PropertySchema, paths map[string]string, valuePath
 // podTemplateGatedPaths are the gated paths below a `template` property, a
 // corev1.PodTemplateSpec: the pod spec's fields under spec, and those of its containers.
 func podTemplateGatedPaths() map[string]string {
+	return podTemplateGatedPathsUnder("")
+}
+
+// podTemplateGatedPathsUnder is podTemplateGatedPaths for a pod template that sits
+// at under below the open node, as the template of a job template does
+// ("spec.template."); under is "" or ends in a dot.
+func podTemplateGatedPathsUnder(under string) map[string]string {
 	paths := map[string]string{}
 	for path, gate := range podSpecGatedPaths {
-		paths["spec."+path] = gate
+		paths[under+"spec."+path] = gate
 	}
 	for path, gate := range regularContainerPaths() {
-		paths["spec.containers[]."+path] = gate
+		paths[under+"spec.containers[]."+path] = gate
 	}
 	for path, gate := range containerGatedPaths {
-		paths["spec.initContainers[]."+path] = gate
+		paths[under+"spec.initContainers[]."+path] = gate
 	}
 	return paths
 }
@@ -104,9 +111,15 @@ func podTemplateGatedPaths() map[string]string {
 // podTemplateValueGatedPaths are the value-gated paths below a `template` property: those
 // of its init containers, under spec.
 func podTemplateValueGatedPaths() map[string]map[string]string {
+	return podTemplateValueGatedPathsUnder("")
+}
+
+// podTemplateValueGatedPathsUnder is podTemplateValueGatedPaths for a pod template at
+// under below the open node (see podTemplateGatedPathsUnder).
+func podTemplateValueGatedPathsUnder(under string) map[string]map[string]string {
 	paths := map[string]map[string]string{}
 	for path, gates := range initContainerValueGatedPaths {
-		paths["spec.initContainers[]."+path] = maps.Clone(gates)
+		paths[under+"spec.initContainers[]."+path] = maps.Clone(gates)
 	}
 	return paths
 }

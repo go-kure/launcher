@@ -615,29 +615,42 @@ func TestTopologySpread_OtherWorkloadKindsAreRefused(t *testing.T) {
 	constraints := []any{map[string]any{
 		"maxSkew": 1, "topologyKey": "topology.kubernetes.io/zone", "whenUnsatisfiable": "DoNotSchedule",
 	}}
+	// props builds a component's properties with or without authored constraints:
+	// a shorthand kind takes them at the top level, a kind that takes the upstream
+	// spec takes them in its pod spec.
+	podFields := map[string]any{"topologySpreadConstraints": constraints}
 	for _, tc := range []struct {
 		kind    string
 		handler oam.ComponentHandler
 		// props builds the properties afresh, with the constraints authored where
-		// the kind takes them: at the top level of a reshaped kind, in the pod spec
-		// of the raw daemonset.
+		// the kind takes them: at the top level of the reshaped statefulset, in the
+		// pod spec of the raw daemonset, job and cronjob.
 		props func(authored bool) map[string]any
 	}{
 		{"statefulset", &components.StatefulsetHandler{}, reshapedProps(map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3}, constraints)},
 		{"daemonset", &components.DaemonsetHandler{}, func(authored bool) map[string]any {
-			if !authored {
-				return rawDaemonsetProps("api", "ghcr.io/org/api:v1")
+			if authored {
+				return rawDaemonsetProps("api", "ghcr.io/org/api:v1", rawPod(podFields))
 			}
-			return rawDaemonsetProps("api", "ghcr.io/org/api:v1", rawPod(map[string]any{"topologySpreadConstraints": constraints}))
+			return rawDaemonsetProps("api", "ghcr.io/org/api:v1")
 		}},
-		{"job", &components.JobHandler{}, reshapedProps(map[string]any{"image": "ghcr.io/org/api:v1"}, constraints)},
-		{"cronjob", &components.CronjobHandler{}, reshapedProps(map[string]any{"image": "ghcr.io/org/api:v1", "schedule": "0 2 * * *"}, constraints)},
+		{"job", &components.JobHandler{}, func(authored bool) map[string]any {
+			if authored {
+				return rawJobProps("ghcr.io/org/api:v1", rawPod(podFields))
+			}
+			return rawJobProps("ghcr.io/org/api:v1")
+		}},
+		{"cronjob", &components.CronjobHandler{}, func(authored bool) map[string]any {
+			if authored {
+				return rawCronjobProps("ghcr.io/org/api:v1", podFields)
+			}
+			return rawCronjobProps("ghcr.io/org/api:v1", nil)
+		}},
 	} {
 		for name, authored := range map[string]bool{"no constraints": false, "authored constraints": true} {
 			t.Run(tc.kind+"/"+name, func(t *testing.T) {
-				props := tc.props(authored)
 				_, err := generateWithTopologySpread(t, tc.handler,
-					&oam.Component{Name: "api", Type: tc.kind, Properties: props}, nil)
+					&oam.Component{Name: "api", Type: tc.kind, Properties: tc.props(authored)}, nil)
 				if err == nil {
 					t.Fatalf("topology-spread on a %s must be refused, got no error", tc.kind)
 				}

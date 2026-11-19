@@ -27,6 +27,29 @@ func rawDeploymentProps(name, image string, overrides ...map[string]any) map[str
 	return props
 }
 
+// rawJobProps is the smallest `job` the raw kind takes: a pod template with one
+// container named app and the restartPolicy a Job's pod needs. overrides merge as
+// in rawDeploymentProps, and rawPod adds fields to the pod spec.
+func rawJobProps(image string, overrides ...map[string]any) map[string]any {
+	props := map[string]any{"template": map[string]any{"spec": map[string]any{
+		"restartPolicy": "Never",
+		"containers":    []any{map[string]any{"name": "app", "image": image}},
+	}}}
+	for _, o := range overrides {
+		props = mergeRaw(props, o)
+	}
+	return props
+}
+
+// rawCronjobProps is rawJobProps under a cronjob's jobTemplate, with a schedule;
+// podFields are added to the pod spec of the job template.
+func rawCronjobProps(image string, podFields map[string]any) map[string]any {
+	return map[string]any{
+		"schedule":    "0 2 * * *",
+		"jobTemplate": map[string]any{"spec": rawJobProps(image, rawPod(podFields))},
+	}
+}
+
 // rawPod is the override that adds fields to the pod spec of a raw deployment.
 func rawPod(fields map[string]any) map[string]any {
 	return map[string]any{"template": map[string]any{"spec": fields}}

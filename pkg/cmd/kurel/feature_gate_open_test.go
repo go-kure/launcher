@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -20,8 +21,8 @@ import (
 
 // openGateKinds are the component types whose containers or pod template are open
 // schemas. pod takes a PodSpec's fields at its top level; the others take them under
-// template.spec.
-var openGateKinds = []string{"pod", "podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset"}
+// template.spec, and a cronjob under jobTemplate.spec.template.spec.
+var openGateKinds = []string{"pod", "podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset", "job", "cronjob"}
 
 // The cnpg-pooler kind takes a pod template under `template` too, decoded into the
 // CloudNativePG pod template type (go-kure/launcher#1321). openGateCaseKinds adds it to
@@ -227,9 +228,12 @@ func openGateDoc(kind, spec string) (doc, prefix string) {
 	switch kind {
 	case "pod":
 		props = indentLines(spec, 8)
-	case "podtemplate":
+	case "podtemplate", "job":
 		props = "        template:\n          spec:\n" + indentLines(spec, 12)
 		prefix = "template.spec."
+	case "cronjob":
+		props = "        schedule: \"0 2 * * *\"\n        jobTemplate:\n          spec:\n            template:\n              spec:\n" + indentLines(spec, 16)
+		prefix = "jobTemplate.spec.template.spec."
 	case "replicaset", "deployment", "daemonset":
 		props = "        selector:\n          matchLabels:\n            tier: web\n" +
 			"        template:\n          metadata:\n            labels:\n              tier: web\n          spec:\n" + indentLines(spec, 12)
@@ -472,9 +476,10 @@ func TestFeatureGates_GatedPathsNameRealFields(t *testing.T) {
 		{"pod containers[]", *pod["containers"].Items, container},
 		{"pod initContainers[]", *pod["initContainers"].Items, container},
 	}
-	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset"} {
+	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset", "job"} {
 		holders = append(holders, holder{kind + " template", schemaOf(kind)["template"], reflect.TypeOf(corev1.PodTemplateSpec{})})
 	}
+	holders = append(holders, holder{"cronjob jobTemplate", schemaOf("cronjob")["jobTemplate"], reflect.TypeOf(batchv1.JobTemplateSpec{})})
 	// The pooler's template is the CloudNativePG pod template type, not corev1's.
 	holders = append(holders, holder{"cnpg-pooler template", schemaOf("cnpg-pooler")["template"], reflect.TypeOf(cnpgv1.PodTemplateSpec{})})
 	for _, h := range holders[:2] {
@@ -597,7 +602,7 @@ type casingCase struct {
 	kinds   []string
 }
 
-var templateKinds = []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset"}
+var templateKinds = []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset", "job"}
 
 const casingApp = `containers:
   - name: app

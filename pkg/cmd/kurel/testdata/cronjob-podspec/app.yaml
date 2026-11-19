@@ -8,19 +8,26 @@ spec:
     - name: cleanup
       type: cronjob
       properties:
-        image: ghcr.io/example/cleanup:v1.0.0
         schedule: "0 * * * *"
-        # Job-level deadline (JobSpec) and pod-level deadline (PodSpec) are
-        # distinct fields; only Job pods may carry the pod-level one
-        # (go-kure/launcher#342).
-        activeDeadlineSeconds: 900
-        podActiveDeadlineSeconds: 600
-        terminationGracePeriodSeconds: 10
-        nodeName: batch-node-a
-        hostnameOverride: cleanup.batch.example
-        schedulingGroup:
-          podGroupName: nightly-batch
-        podSecurityContext:
-          runAsNonRoot: true
-          seccompProfile:
-            type: RuntimeDefault
+        jobTemplate:
+          spec:
+            # Job-level deadline (JobSpec) and pod-level deadline (PodSpec) are
+            # distinct fields; only Job pods may carry the pod-level one
+            # (go-kure/launcher#342).
+            activeDeadlineSeconds: 900
+            template:
+              spec:
+                restartPolicy: OnFailure
+                activeDeadlineSeconds: 600
+                terminationGracePeriodSeconds: 10
+                nodeName: batch-node-a
+                hostnameOverride: cleanup.batch.example
+                schedulingGroup:
+                  podGroupName: nightly-batch
+                securityContext:
+                  runAsNonRoot: true
+                  seccompProfile:
+                    type: RuntimeDefault
+                containers:
+                  - name: cleanup
+                    image: ghcr.io/example/cleanup:v1.0.0

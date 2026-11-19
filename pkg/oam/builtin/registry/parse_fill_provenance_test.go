@@ -77,30 +77,6 @@ func TestParseFills_RawDeploymentReportsNone(t *testing.T) {
 	}
 }
 
-// A job reports its restart policy, and a cronjob that and its history limits.
-func TestParseFills_JobKinds(t *testing.T) {
-	cases := []struct {
-		name  string
-		comp  oam.Component
-		paths []string
-	}{
-		{"job", oam.Component{Name: "j", Type: "job", Properties: map[string]any{"image": "ghcr.io/org/app:v1"}}, []string{"restartPolicy"}},
-		{"cronjob", oam.Component{Name: "j", Type: "cronjob", Properties: map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "0 2 * * *"}},
-			[]string{"restartPolicy", "successfulJobsHistoryLimit", "failedJobsHistoryLimit"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			prov, _ := policyProvenanceFor(t, &defaultsPolicy{}, tc.comp)
-			got := entriesOf(prov, owner{component: "j"})
-			for _, p := range tc.paths {
-				if got[p].Kind != oam.SourceBuiltin {
-					t.Errorf("%s = %+v, want a built-in fill\nentries: %v", p, got[p], got)
-				}
-			}
-		})
-	}
-}
-
 // A lowered type reports on its member: the deployment the webservice rule emits
 // is a deployment the handler parsed, so its fills are the member's own, true at
 // the member's path. The type-level path is a separate question (go-kure/launcher#1580,

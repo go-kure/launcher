@@ -323,21 +323,20 @@ func TestDeployment_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing
 }
 
 // TestJob_RenderingTwiceIsUnaffectedByEditingTheFirstRender is the same property
-// on the kind added in go-kure/launcher#344. applyJobSpec projects ten scalar
-// pointers and one struct pointer whose value owns a slice, so it is the same
-// shape as the others even though nothing it projects is a map.
-// TestApplyJobSpec_CopiesRatherThanAliases checks every field at the pointer
-// level; this one checks the property a consumer actually meets, through the
-// rendering path, the way the statefulset, daemonset and deployment cases do.
+// on the job kind. The Job takes a deep copy of the decoded spec, whose scalar
+// pointers and slices a consumer could otherwise write through; this checks the
+// property a consumer actually meets, through the rendering path, the way the
+// statefulset, daemonset and deployment cases do.
 func TestJob_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
 	props := map[string]any{
-		"image":          "ghcr.io/org/app:v1",
+		"template": map[string]any{"spec": map[string]any{
+			"containers": []any{map[string]any{"name": "main", "image": "ghcr.io/org/app:v1"}},
+			// Never, which the podFailurePolicy below requires.
+			"restartPolicy": "Never",
+		}},
 		"backoffLimit":   4,
 		"completionMode": "Indexed",
 		"completions":    6,
-		// Never rather than the OnFailure default, which podFailurePolicy
-		// below requires (go-kure/launcher#345).
-		"restartPolicy": "Never",
 		"successPolicy": map[string]any{
 			"rules": []any{map[string]any{"succeededCount": 3}},
 		},

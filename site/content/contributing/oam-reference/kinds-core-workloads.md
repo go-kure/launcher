@@ -293,20 +293,27 @@ Text in square brackets is added here to say what a moved sentence refers to.
 ## cronjob
 
 - **History:**
+  - go-kure/launcher#1629 (the kind takes the upstream `CronJobSpec`, strictly decoded, on the
+    `deployment` recipe: a breaking pre-GA change with no launcher default, no
+    `automountServiceAccountToken: false` fill and an empty fill report. The hand-written
+    JobSpec validation, the reshaped pod surface and the unlabelled object and job template
+    are the differences from the entries below).
   - go-kure/launcher#790 (the raw `affinity`, `tolerations` and `topologySpreadConstraints` on
-    `cronjob`).
+    `cronjob` [since go-kure/launcher#1629 they are `jobTemplate.spec.template.spec.*`]).
   - go-kure/launcher#787 (the CronJob name held to 52 characters).
 
 ## job
 
-- **Implementation:** The workflow annotates the Job once it is generated, so the annotation
-  is not lost when `createJob` clears the generated Job's annotations wholesale
-  (`job.Annotations = nil` — a no-op since go-kure/launcher#361, because kure's `Create<Kind>`
-  constructors now return TypeMeta and identity only; the assignment is kept so the field
-  stays empty whatever a future constructor does). ["the annotation" is the Flux force
-  annotation that the `force-replace` trait asks for, in the sentence before it on the
-  reference page]
+- **Implementation:** The workflow annotates the Job once it is generated, and the handler
+  writes no annotation of its own: since go-kure/launcher#1629 the Job is kure's
+  identity-only constructor plus a deep copy of the authored spec, so the Flux force
+  annotation that the `force-replace` trait asks for is never cleared.
 - **History:**
+  - go-kure/launcher#1629 (the kind takes the upstream `JobSpec`, strictly decoded, on the
+    `deployment` recipe: a breaking pre-GA change with no launcher default, no
+    `automountServiceAccountToken: false` fill and an empty fill report. The entries below
+    that name `parseJobSpec`, its validators or a reshaped property describe the form the
+    kind had before).
   - go-kure/launcher#344 (the `job` component, in `job.go`).
   - go-kure/launcher#790 (the raw `affinity`, `tolerations` and `topologySpreadConstraints` on
     `job`; `cronjob` refuses `selector`, `manualSelector` and `template` as `job` does;

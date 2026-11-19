@@ -1,1235 +1,379 @@
 package components_test
 
 import (
-	"fmt"
+	"maps"
+	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/go-kure/kure/pkg/stack"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// findJob returns the *batchv1.Job from objs, failing the test if none is
-// present — the job counterpart of findCronJob above.
-func findJob(t *testing.T, objs []*client.Object) *batchv1.Job {
-	t.Helper()
-	for _, obj := range objs {
-		if j, ok := (*obj).(*batchv1.Job); ok {
-			return j
-		}
-	}
-	t.Fatal("Job not found")
-	return nil
-}
-
-// generateJob builds a job component from props and returns the generated Job
-// alongside every object generated with it.
-func generateJob(t *testing.T, props map[string]any) (*batchv1.Job, []*client.Object) {
-	t.Helper()
-	full := map[string]any{"image": "ghcr.io/org/batch:v1.0.0"}
-	for k, v := range props {
-		full[k] = v
-	}
-	h := &components.JobHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name: "batch", Type: "job", Properties: full,
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	app := stack.NewApplication("batch", "default", cfg)
-	objs, err := cfg.Generate(app)
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	return findJob(t, objs), objs
-}
-
-// jobError builds a job component from props and returns the error
-// ToApplicationConfig refused it with, failing the test if it accepted.
-func jobError(t *testing.T, props map[string]any) string {
-	t.Helper()
-	full := map[string]any{"image": "ghcr.io/org/batch:v1.0.0"}
-	for k, v := range props {
-		full[k] = v
-	}
-	h := &components.JobHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "batch", Type: "job", Properties: full,
-	}, "default")
-	if err == nil {
-		t.Fatalf("ToApplicationConfig accepted %v, want an error", props)
-	}
-	return err.Error()
-}
-
 func TestJobHandler_CanHandle(t *testing.T) {
 	h := &components.JobHandler{}
 	if !h.CanHandle("job") {
-		t.Error("expected true for job")
+		t.Error("CanHandle(job) = false")
 	}
 	if h.CanHandle("cronjob") {
-		t.Error("expected false for cronjob")
+		t.Error("CanHandle(cronjob) = true")
 	}
 }
 
-func TestJobHandler_RequiredImage_Missing(t *testing.T) {
-	h := &components.JobHandler{}
-	if _, err := h.ToApplicationConfig(&oam.Component{
-		Name: "batch", Type: "job", Properties: map[string]any{},
-	}, "default"); err == nil {
-		t.Fatal("expected error for missing image")
+// jobRich is a Job spec that sets the spec-level fields a Job carries, a
+// template with metadata beside the labels, and a pod spec with lists of
+// objects, a map, pointers, a quantity written as a number and a probe with
+// authored non-zero timings.
+const jobRich = `parallelism: 2
+completions: 4
+completionMode: Indexed
+backoffLimit: 3
+activeDeadlineSeconds: 3600
+ttlSecondsAfterFinished: 100
+suspend: true
+template:
+  metadata:
+    labels:
+      tier: batch
+    annotations:
+      example.com/scrape: "true"
+  spec:
+    restartPolicy: Never
+    terminationGracePeriodSeconds: 0
+    serviceAccountName: batch
+    nodeSelector:
+      disktype: ssd
+    volumes:
+      - name: scratch
+        emptyDir: {}
+    initContainers:
+      - name: init
+        image: registry.example/team/init:1.0.0
+    containers:
+      - name: app
+        image: registry.example/team/app:1.2.3
+        resources:
+          limits:
+            cpu: 1
+            memory: 512Mi
+        volumeMounts:
+          - name: scratch
+            mountPath: /scratch
+        readinessProbe:
+          exec:
+            command: ["true"]
+          initialDelaySeconds: 0
+          periodSeconds: 5
+          timeoutSeconds: 2
+          successThreshold: 1
+          failureThreshold: 4
+`
+
+// jobPlain is the smallest job component: a template whose pod runs the given
+// pod spec and never restarts a container in place.
+func jobPlain(podSpec string) string {
+	return "template:\n  metadata:\n    labels:\n      tier: batch\n  spec:\n    restartPolicy: Never\n" + htIndent(podSpec, "    ")
+}
+
+// jobGenerate generates a job component under the given policies and returns
+// the Job.
+func jobGenerate(t *testing.T, name string, props map[string]any, policies ...oam.Policy) *batchv1.Job {
+	t.Helper()
+	return generateCoreKindUnder(t, &components.JobHandler{}, "job", name, props, policies...).(*batchv1.Job)
+}
+
+// TestJobHandler_EmitsAuthoredSpec: the Job is named after the component in
+// the build namespace, unlabelled, and its spec is the authored one, field for
+// field, with one thing added: the `app` label on the pod template, beside the
+// authored labels.
+func TestJobHandler_EmitsAuthoredSpec(t *testing.T) {
+	var want batchv1.JobSpec
+	if err := yaml.UnmarshalStrict([]byte(jobRich), &want); err != nil {
+		t.Fatalf("decoding the test spec: %v", err)
+	}
+	want.Template.Labels["app"] = "batch"
+	job := jobGenerate(t, "batch", ptObject(t, jobRich), ptStrictPolicy(), nil)
+	if job.APIVersion != "batch/v1" || job.Kind != "Job" {
+		t.Errorf("GVK = %s %s, want batch/v1 Job", job.APIVersion, job.Kind)
+	}
+	if job.Namespace != coreKindNamespace {
+		t.Errorf("namespace = %q, want the build namespace %q", job.Namespace, coreKindNamespace)
+	}
+	if !reflect.DeepEqual(job.Spec, want) {
+		t.Errorf("spec differs from the authored one plus the app label:\n got %+v\nwant %+v", job.Spec, want)
+	}
+	if q := job.Spec.Template.Spec.Containers[0].Resources.Limits[corev1.ResourceCPU]; q.String() != "1" {
+		t.Errorf("cpu limit = %s, want 1", q.String())
 	}
 }
 
-// TestJobHandler_Generate_Shape pins what the generated Job looks like before
-// any JobSpec-level property is authored: the constructor's `app:` annotation is
-// dropped, both label maps are the component's own, the restart policy defaults
-// to OnFailure (the Job API rejects the Always that pod defaulting would
-// otherwise supply), and Spec.Selector is left unset for the job controller to
-// generate.
-func TestJobHandler_Generate_Shape(t *testing.T) {
-	job, objs := generateJob(t, nil)
-
-	if job.Annotations != nil {
-		t.Errorf("Annotations = %v, want nil", job.Annotations)
-	}
-	if got := job.Labels["app"]; got != "batch" {
-		t.Errorf("Labels[app] = %q, want %q", got, "batch")
-	}
-	if got := job.Spec.Template.Labels["app"]; got != "batch" {
-		t.Errorf("Spec.Template.Labels[app] = %q, want %q", got, "batch")
-	}
-	if job.Spec.Selector != nil {
-		t.Errorf("Spec.Selector = %v, want nil — the job controller generates it", job.Spec.Selector)
-	}
-	if job.Spec.ManualSelector != nil {
-		t.Errorf("Spec.ManualSelector = %v, want nil", job.Spec.ManualSelector)
-	}
-	if got := job.Spec.Template.Spec.RestartPolicy; got != corev1.RestartPolicyOnFailure {
-		t.Errorf("RestartPolicy = %q, want %q", got, corev1.RestartPolicyOnFailure)
-	}
-	if got := len(job.Spec.Template.Spec.Containers); got != 1 {
-		t.Fatalf("Containers = %d, want 1", got)
-	}
-	if got := job.Spec.Template.Spec.Containers[0].Image; got != "ghcr.io/org/batch:v1.0.0" {
-		t.Errorf("Image = %q, want the authored image", got)
-	}
-
-	for _, obj := range objs {
-		if _, ok := (*obj).(*corev1.ServiceAccount); ok {
-			t.Error("Generate emitted a ServiceAccount; a pod kind generates none (go-kure/launcher#702)")
+// TestJobHandler_AppLabel: the pod template carries the `app` label every
+// workload kind gives its pods, with the component's label value: the name
+// itself up to 63 characters, its projection beyond. The authored labels stay,
+// and no selector is made up.
+func TestJobHandler_AppLabel(t *testing.T) {
+	for _, name := range []string{"batch", "batch-" + strings.Repeat("a", 40)} {
+		job := jobGenerate(t, name, ptObject(t, jobPlain(htPlainPod)), nil)
+		want := map[string]string{"tier": "batch", "app": oam.ComponentLabelValue(name)}
+		if !maps.Equal(job.Spec.Template.Labels, want) {
+			t.Errorf("%s: template labels = %v, want %v", name, job.Spec.Template.Labels, want)
+		}
+		if job.Spec.Selector != nil || job.Spec.ManualSelector != nil {
+			t.Errorf("%s: selector = %+v, manualSelector = %v, want neither: the job controller generates them", name, job.Spec.Selector, job.Spec.ManualSelector)
 		}
 	}
-
-	// Nothing unauthored may reach the spec: every JobSpec-level pointer stays
-	// nil so the emitted YAML carries no key the author did not write.
-	if job.Spec.BackoffLimit != nil || job.Spec.Completions != nil || job.Spec.Parallelism != nil ||
-		job.Spec.CompletionMode != nil || job.Spec.Suspend != nil || job.Spec.ManagedBy != nil ||
-		job.Spec.SuccessPolicy != nil || job.Spec.PodReplacementPolicy != nil {
-		t.Errorf("unauthored JobSpec fields were written: %+v", job.Spec)
-	}
 }
 
-func TestJobHandler_RestartPolicy_Never(t *testing.T) {
-	job, _ := generateJob(t, map[string]any{"restartPolicy": "Never"})
-	if got := job.Spec.Template.Spec.RestartPolicy; got != corev1.RestartPolicyNever {
-		t.Errorf("RestartPolicy = %q, want %q", got, corev1.RestartPolicyNever)
+// jobLabelled is a job component whose template carries the given labels, with
+// the given selector when it is not nil.
+func jobLabelled(selector map[string]any, labels map[string]any) map[string]any {
+	metadata := map[string]any{}
+	if labels != nil {
+		metadata["labels"] = labels
 	}
-	if msg := jobError(t, map[string]any{"restartPolicy": "Always"}); !strings.Contains(msg, "restartPolicy") {
-		t.Errorf("error = %q, want it to name restartPolicy", msg)
-	}
-	// A mistyped or empty value must be refused, not read as an omission that
-	// silently builds the OnFailure default. Both were reachable while this key
-	// was read with a bare type assertion.
-	if msg := jobError(t, map[string]any{"restartPolicy": 3}); !strings.Contains(msg, "restartPolicy: must be a string") {
-		t.Errorf("error = %q, want it to reject a non-string restartPolicy", msg)
-	}
-	if msg := jobError(t, map[string]any{"restartPolicy": ""}); !strings.Contains(msg, "restartPolicy") {
-		t.Errorf("error = %q, want it to reject an empty restartPolicy", msg)
-	}
-}
-
-// TestJobHandler_SuspendWritesJobSpec is the job half of the `suspend` key
-// split: the job component's `suspend` is batchv1.JobSpec.Suspend, a different
-// API field from the CronJobSpec.Suspend the cronjob component publishes under
-// the same name. The cronjob half is
-// TestCronjobHandler_SuspendWritesCronJobSpecOnly.
-func TestJobHandler_SuspendWritesJobSpec(t *testing.T) {
-	job, _ := generateJob(t, map[string]any{"suspend": true})
-	if job.Spec.Suspend == nil {
-		t.Fatal("Spec.Suspend = nil, want true")
-	}
-	if !*job.Spec.Suspend {
-		t.Error("Spec.Suspend = false, want true")
-	}
-}
-
-// TestJobHandler_SharedJobSpecFields_Projected covers the six JobSpec-level
-// properties the job component shares with cronjob's jobTemplate, proving the
-// shared parser/applier reaches a Job spec directly and not only a
-// jobTemplate's.
-func TestJobHandler_SharedJobSpecFields_Projected(t *testing.T) {
-	job, _ := generateJob(t, map[string]any{
-		"backoffLimit":            2,
-		"completions":             4,
-		"parallelism":             3,
-		"activeDeadlineSeconds":   120,
-		"ttlSecondsAfterFinished": 30,
-		"completionMode":          "Indexed",
-	})
-	if got := job.Spec.BackoffLimit; got == nil || *got != 2 {
-		t.Errorf("BackoffLimit = %v, want 2", got)
-	}
-	if got := job.Spec.Completions; got == nil || *got != 4 {
-		t.Errorf("Completions = %v, want 4", got)
-	}
-	if got := job.Spec.Parallelism; got == nil || *got != 3 {
-		t.Errorf("Parallelism = %v, want 3", got)
-	}
-	if got := job.Spec.ActiveDeadlineSeconds; got == nil || *got != 120 {
-		t.Errorf("ActiveDeadlineSeconds = %v, want 120", got)
-	}
-	if got := job.Spec.TTLSecondsAfterFinished; got == nil || *got != 30 {
-		t.Errorf("TTLSecondsAfterFinished = %v, want 30", got)
-	}
-	if got := job.Spec.CompletionMode; got == nil || *got != batchv1.IndexedCompletion {
-		t.Errorf("CompletionMode = %v, want Indexed", got)
-	}
-}
-
-// TestJobHandler_IndexedJobSpecFields_Projected covers the five JobSpec-level
-// properties added with this component. All but managedBy and
-// podReplacementPolicy need completionMode: Indexed, so they are authored
-// together.
-func TestJobHandler_IndexedJobSpecFields_Projected(t *testing.T) {
-	job, _ := generateJob(t, map[string]any{
-		"completionMode":       "Indexed",
-		"completions":          10,
-		"backoffLimitPerIndex": 1,
-		"maxFailedIndexes":     3,
-		"podReplacementPolicy": "TerminatingOrFailed",
-		"managedBy":            "example.com/custom-controller",
-		"successPolicy": map[string]any{
-			"rules": []any{
-				map[string]any{"succeededIndexes": "0-4", "succeededCount": 3},
-				map[string]any{"succeededCount": 8},
+	props := map[string]any{
+		"template": map[string]any{
+			"metadata": metadata,
+			"spec": map[string]any{
+				"restartPolicy": "Never",
+				"containers": []any{
+					map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3"},
+				},
 			},
 		},
-	})
-	if got := job.Spec.BackoffLimitPerIndex; got == nil || *got != 1 {
-		t.Errorf("BackoffLimitPerIndex = %v, want 1", got)
 	}
-	if got := job.Spec.MaxFailedIndexes; got == nil || *got != 3 {
-		t.Errorf("MaxFailedIndexes = %v, want 3", got)
-	}
-	if got := job.Spec.PodReplacementPolicy; got == nil || *got != batchv1.TerminatingOrFailed {
-		t.Errorf("PodReplacementPolicy = %v, want TerminatingOrFailed", got)
-	}
-	if got := job.Spec.ManagedBy; got == nil || *got != "example.com/custom-controller" {
-		t.Errorf("ManagedBy = %v, want example.com/custom-controller", got)
-	}
-	sp := job.Spec.SuccessPolicy
-	if sp == nil {
-		t.Fatal("SuccessPolicy = nil, want two rules")
-	}
-	if len(sp.Rules) != 2 {
-		t.Fatalf("SuccessPolicy.Rules = %d, want 2", len(sp.Rules))
-	}
-	if got := sp.Rules[0].SucceededIndexes; got == nil || *got != "0-4" {
-		t.Errorf("Rules[0].SucceededIndexes = %v, want 0-4", got)
-	}
-	if got := sp.Rules[0].SucceededCount; got == nil || *got != 3 {
-		t.Errorf("Rules[0].SucceededCount = %v, want 3", got)
-	}
-	if sp.Rules[1].SucceededIndexes != nil {
-		t.Errorf("Rules[1].SucceededIndexes = %v, want nil", sp.Rules[1].SucceededIndexes)
-	}
-	if got := sp.Rules[1].SucceededCount; got == nil || *got != 8 {
-		t.Errorf("Rules[1].SucceededCount = %v, want 8", got)
-	}
-}
-
-// TestJobHandler_SelectorProperties_Rejected pins the two builder-managed
-// properties. The Job selector is generated by the job controller from a unique
-// per-job label; a hand-written one adopts other jobs' pods, which is why this
-// component refuses the key with an explaining message rather than leaving it
-// undeclared for a generic "unrecognized key".
-func TestJobHandler_SelectorProperties_Rejected(t *testing.T) {
-	cases := []struct {
-		key        string
-		value      any
-		wantSubstr string
-	}{
-		{"selector", map[string]any{"matchLabels": map[string]any{"app": "batch"}}, "not authorable"},
-		{"manualSelector", true, "not authorable"},
-		// createJob replaces the pod template wholesale from the component's
-		// own properties, so an authored one is not merged, it is discarded.
-		// The deployment kind rejects this key for the same reason.
-		{"template", map[string]any{"spec": map[string]any{}}, "not authorable"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.key, func(t *testing.T) {
-			msg := jobError(t, map[string]any{tc.key: tc.value})
-			if !strings.Contains(msg, tc.key) || !strings.Contains(msg, tc.wantSubstr) {
-				t.Errorf("error = %q, want it to name %q and %q", msg, tc.key, tc.wantSubstr)
-			}
-		})
-	}
-}
-
-// TestJobHandler_PropertySchema_Keys pins the published contract: every
-// JobSpec-level key is present and `suspend` is the job component's own.
-func TestJobHandler_PropertySchema_Keys(t *testing.T) {
-	schema := (&components.JobHandler{}).PropertySchema()
-
-	for _, key := range []string{
-		"image", "restartPolicy", "suspend",
-		"backoffLimit", "completions", "parallelism", "activeDeadlineSeconds",
-		"ttlSecondsAfterFinished", "completionMode", "backoffLimitPerIndex",
-		"maxFailedIndexes", "podReplacementPolicy", "managedBy", "successPolicy",
-		"podFailurePolicy",
-	} {
-		node, ok := schema[key]
-		if !ok {
-			t.Errorf("PropertySchema() missing key %q", key)
-			continue
-		}
-		if node.Description == "" {
-			t.Errorf("%s: Description is empty", key)
-		}
-	}
-	if _, ok := schema["selector"]; ok {
-		t.Error("PropertySchema() publishes selector; it is builder-managed")
-	}
-	if got := schema["suspend"].Type; got != oam.PropertyTypeBoolean {
-		t.Errorf("suspend: Type = %q, want boolean", got)
-	}
-	if got := schema["schedule"]; got.Type != "" {
-		t.Error("PropertySchema() publishes schedule; that is the cronjob component's key")
-	}
-}
-
-// TestJobHandler_JobSpecValidation_Table walks the cross-field and per-field
-// rules ported from ValidateJobSpec. Each case is a document Kubernetes' own API
-// server would reject at apply time, refused here at build time instead.
-func TestJobHandler_JobSpecValidation_Table(t *testing.T) {
-	cases := []struct {
-		name       string
-		props      map[string]any
-		wantSubstr string
-	}{
-		// Both substrings name their field. An unqualified "requires
-		// completionMode: Indexed" would be satisfied by either arm, so the
-		// maxFailedIndexes case would pass even with no maxFailedIndexes rule at
-		// all — it authors backoffLimitPerIndex too, because maxFailedIndexes
-		// without it is refused earlier by a different rule.
-		{
-			"backoffLimitPerIndex outside Indexed",
-			map[string]any{"backoffLimitPerIndex": 1},
-			"backoffLimitPerIndex: requires completionMode: Indexed",
-		},
-		{
-			"maxFailedIndexes outside Indexed",
-			map[string]any{"backoffLimitPerIndex": 1, "maxFailedIndexes": 1},
-			"maxFailedIndexes: requires completionMode: Indexed",
-		},
-		{
-			"successPolicy outside Indexed",
-			map[string]any{"successPolicy": map[string]any{"rules": []any{map[string]any{"succeededCount": 1}}}},
-			"successPolicy: requires completionMode: Indexed",
-		},
-		{
-			"maxFailedIndexes without backoffLimitPerIndex",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "maxFailedIndexes": 2},
-			"backoffLimitPerIndex: required when maxFailedIndexes is specified",
-		},
-		{
-			"maxFailedIndexes above completions",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "backoffLimitPerIndex": 1, "maxFailedIndexes": 6},
-			"must be <= completions (5)",
-		},
-		{
-			"negative backoffLimitPerIndex",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "backoffLimitPerIndex": -1},
-			"backoffLimitPerIndex: must be >= 0",
-		},
-		{
-			"negative maxFailedIndexes",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "backoffLimitPerIndex": 1, "maxFailedIndexes": -1},
-			"maxFailedIndexes: must be >= 0",
-		},
-		{
-			"unknown podReplacementPolicy",
-			map[string]any{"podReplacementPolicy": "Whenever"},
-			"podReplacementPolicy: invalid value",
-		},
-		{
-			// "" must be refused, not treated as an omission: parseStringField
-			// reports an authored empty string as absent, so reading this key
-			// through it would drop the authored value and emit a Job with no
-			// podReplacementPolicy at all. Upstream's supported set has no
-			// empty member, so the document would not have applied either.
-			"empty podReplacementPolicy",
-			map[string]any{"podReplacementPolicy": ""},
-			"podReplacementPolicy: invalid value",
-		},
-		{
-			"non-string podReplacementPolicy",
-			map[string]any{"podReplacementPolicy": 3},
-			"podReplacementPolicy: must be a string",
-		},
-		{
-			"managedBy without a domain prefix",
-			map[string]any{"managedBy": "controller"},
-			"must be a domain-prefixed path",
-		},
-		{
-			"managedBy empty",
-			map[string]any{"managedBy": ""},
-			"must be a domain-prefixed path",
-		},
-		{
-			"managedBy above 63 characters",
-			map[string]any{"managedBy": "example.com/" + strings.Repeat("a", 52)},
-			"at most 63 characters",
-		},
-		{
-			"successPolicy with no rules key",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "successPolicy": map[string]any{}},
-			"successPolicy.rules: required",
-		},
-		{
-			"successPolicy with an empty rules list",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "successPolicy": map[string]any{"rules": []any{}}},
-			"at least one rule",
-		},
-		{
-			"successPolicy rule with neither field",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "successPolicy": map[string]any{"rules": []any{map[string]any{}}}},
-			"at least one of succeededIndexes or succeededCount",
-		},
-		{
-			// "" denotes no indexes at all, so without an explicit refusal it
-			// would satisfy the "at least one of" check above while naming
-			// nothing, and validateJobIndexesFormat("") returns (0, nil) rather
-			// than an error — a rule that can never be satisfied, accepted.
-			"successPolicy rule with an empty succeededIndexes",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "successPolicy": map[string]any{"rules": []any{map[string]any{"succeededIndexes": ""}}}},
-			"succeededIndexes: must not be empty",
-		},
-		{
-			"successPolicy rule with an unknown key",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "successPolicy": map[string]any{"rules": []any{map[string]any{"succeededCount": 1, "bogus": 2}}}},
-			`unrecognized key "bogus"`,
-		},
-		{
-			"succeededCount above completions",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "successPolicy": map[string]any{"rules": []any{map[string]any{"succeededCount": 6}}}},
-			"must be <= completions (5)",
-		},
-		{
-			"succeededIndexes index at completions",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "successPolicy": map[string]any{"rules": []any{map[string]any{"succeededIndexes": "5"}}}},
-			"must be less than completions (5)",
-		},
-		{
-			"succeededIndexes out of order",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "successPolicy": map[string]any{"rules": []any{map[string]any{"succeededIndexes": "3,1"}}}},
-			"increasing order",
-		},
-		{
-			"succeededIndexes with a non-numeric fragment",
-			map[string]any{"completionMode": "Indexed", "completions": 5, "successPolicy": map[string]any{"rules": []any{map[string]any{"succeededIndexes": "a-b"}}}},
-			"is not a decimal index",
-		},
-		{
-			"succeededCount above the indexes it is scoped to",
-			map[string]any{"completionMode": "Indexed", "completions": 9, "successPolicy": map[string]any{"rules": []any{map[string]any{"succeededIndexes": "0-1", "succeededCount": 3}}}},
-			"indexes named by succeededIndexes",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if msg := jobError(t, tc.props); !strings.Contains(msg, tc.wantSubstr) {
-				t.Errorf("error = %q, want it to contain %q", msg, tc.wantSubstr)
-			}
-		})
-	}
-}
-
-// TestJobHandler_HighCompletionsRules covers the three bounds that only apply
-// above completionsSoftLimit (100000) with backoffLimitPerIndex set. They are
-// separated from the table above because each needs a six-figure completions
-// value, which would otherwise make every neighbouring case harder to read.
-func TestJobHandler_HighCompletionsRules(t *testing.T) {
-	base := map[string]any{"completionMode": "Indexed", "completions": 100001, "backoffLimitPerIndex": 1}
-	with := func(extra map[string]any) map[string]any {
-		props := map[string]any{}
-		for k, v := range base {
-			props[k] = v
-		}
-		for k, v := range extra {
-			props[k] = v
-		}
-		return props
-	}
-
-	if msg := jobError(t, with(nil)); !strings.Contains(msg, "maxFailedIndexes: required when completions is above 100000") {
-		t.Errorf("error = %q, want the required-maxFailedIndexes message", msg)
-	}
-	if msg := jobError(t, with(map[string]any{"maxFailedIndexes": 10001})); !strings.Contains(msg, "must be <= 10000 when completions is above 100000") {
-		t.Errorf("error = %q, want the maxFailedIndexes ceiling message", msg)
-	}
-	if msg := jobError(t, with(map[string]any{"maxFailedIndexes": 10000, "parallelism": 10001})); !strings.Contains(msg, "parallelism: must be <= 10000 when completions is above 100000") {
-		t.Errorf("error = %q, want the parallelism ceiling message", msg)
-	}
-
-	// The same document within the bounds must still build, so the three
-	// messages above are refusals of the value, not of the shape.
-	job, _ := generateJob(t, with(map[string]any{"maxFailedIndexes": 10000, "parallelism": 10000}))
-	if got := job.Spec.MaxFailedIndexes; got == nil || *got != 10000 {
-		t.Errorf("MaxFailedIndexes = %v, want 10000", got)
-	}
-}
-
-// TestJobHandler_DottedComponentName_Refused pins the one place the component
-// name's three destinations disagree. `metadata.name` and the `app:` label both
-// accept a dotted name — validateComponent enforces a DNS-1123 *subdomain* — but
-// corev1.Container.Name is a DNS-1123 *label*, which forbids dots. So a valid
-// component name used to build a valid-looking Job the API server refuses at
-// admission, naming a field the author never wrote.
-//
-// This test goes through Generate rather than ToApplicationConfig: the name
-// checked is the one actually emitted, not the one parsed.
-func TestJobHandler_DottedComponentName_Refused(t *testing.T) {
-	cfg, err := (&components.JobHandler{}).ToApplicationConfig(&oam.Component{
-		Name: "batch.worker", Type: "job",
-		Properties: map[string]any{"image": "ghcr.io/org/batch:v1.0.0"},
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	_, err = cfg.Generate(stack.NewApplication("batch.worker", "default", cfg))
-	if err == nil {
-		t.Fatal("Generate accepted the dotted component name 'batch.worker', want a refusal — " +
-			"the emitted container name would be rejected at admission")
-	}
-	for _, want := range []string{"batch.worker", "container name", "DNS-1123 label"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error = %q, want it to mention %q", err, want)
-		}
-	}
-
-	// The undotted name must still build, so the refusal is of the dot and not
-	// of every name that reaches this path. generateJob fails the test itself
-	// if Generate refuses "batch".
-	generateJob(t, nil)
-}
-
-// TestJobHandler_CronJobOnlyProperties_Rejected covers the retyped-cronjob case.
-// A job component and a cronjob component differ by exactly these six
-// properties, so changing `type: cronjob` to `type: job` on an existing document
-// leaves every one of them behind. Left undeclared they would each be dropped in
-// silence — validateProperties runs on emitted elements only, never on authored
-// documents — turning a schedule into a Job that runs once, immediately, at
-// apply time. That is the shape this test exists to prevent: not a missing
-// field, but work executed at a time nobody asked for.
-func TestJobHandler_CronJobOnlyProperties_Rejected(t *testing.T) {
-	cases := []struct {
-		key        string
-		value      any
-		wantSubstr string
-	}{
-		{"schedule", "*/5 * * * *", "cronjob component"},
-		{"timeZone", "Europe/Brussels", "cronjob"},
-		{"concurrencyPolicy", "Forbid", "cronjob"},
-		// Each of these three names the job-level property that does the
-		// nearest equivalent job, so the message is a redirection rather than
-		// only a refusal.
-		{"startingDeadlineSeconds", 30, "activeDeadlineSeconds"},
-		{"successfulJobsHistoryLimit", 3, "ttlSecondsAfterFinished"},
-		{"failedJobsHistoryLimit", 1, "ttlSecondsAfterFinished"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.key, func(t *testing.T) {
-			msg := jobError(t, map[string]any{tc.key: tc.value})
-			if !strings.Contains(msg, tc.key) || !strings.Contains(msg, tc.wantSubstr) {
-				t.Errorf("error = %q, want it to name %q and %q", msg, tc.key, tc.wantSubstr)
-			}
-		})
-	}
-}
-
-// TestJobHandler_ExplicitNullReadsAsOmission pins the null handling on the
-// properties go-kure/launcher#344 introduced. `key: null` in YAML is an author
-// writing "leave this unset" — pkg/oam's own validatePropertyValue reads it that
-// way, and the shared field helpers in common.go make the parsers agree
-// (authoredValue, since go-kure/launcher#394). Without that a null reaches a
-// typed helper and is refused as a type error, so a document that says nothing
-// is rejected while the same document with the key deleted builds.
-//
-// backoffLimitPerIndex and maxFailedIndexes carry the sharper half: both are
-// refused outright unless completionMode is Indexed, so reading a null as a
-// value rather than an omission would make `backoffLimitPerIndex: null` fail
-// with a cross-field message about a field the author explicitly declined to
-// set.
-func TestJobHandler_ExplicitNullReadsAsOmission(t *testing.T) {
-	props := map[string]any{
-		"restartPolicy":        nil,
-		"suspend":              nil,
-		"backoffLimitPerIndex": nil,
-		"maxFailedIndexes":     nil,
-		"podReplacementPolicy": nil,
-		"managedBy":            nil,
-		"successPolicy":        nil,
-	}
-	job, _ := generateJob(t, props)
-
-	if got := job.Spec.Template.Spec.RestartPolicy; got != corev1.RestartPolicyOnFailure {
-		t.Errorf("RestartPolicy = %q, want the OnFailure default a null must not disturb", got)
-	}
-	if got := job.Spec.Suspend; got != nil {
-		t.Errorf("Suspend = %v, want nil", *got)
-	}
-	if got := job.Spec.BackoffLimitPerIndex; got != nil {
-		t.Errorf("BackoffLimitPerIndex = %v, want nil", *got)
-	}
-	if got := job.Spec.MaxFailedIndexes; got != nil {
-		t.Errorf("MaxFailedIndexes = %v, want nil", *got)
-	}
-	if got := job.Spec.PodReplacementPolicy; got != nil {
-		t.Errorf("PodReplacementPolicy = %q, want nil", *got)
-	}
-	if got := job.Spec.ManagedBy; got != nil {
-		t.Errorf("ManagedBy = %q, want nil", *got)
-	}
-	if got := job.Spec.SuccessPolicy; got != nil {
-		t.Errorf("SuccessPolicy = %+v, want nil", got)
-	}
-}
-
-// TestJobHandler_SuccessPolicyMemberNullsReadAsOmission covers the two keys
-// nested inside a successPolicy rule, which the loop above cannot reach: a null
-// at the top level omits the whole policy, so the rule members are only
-// exercised by a policy that is authored. Each rule needs at least one of the
-// two, so the cases are one-sided rather than both-null.
-func TestJobHandler_SuccessPolicyMemberNullsReadAsOmission(t *testing.T) {
-	rule := func(members map[string]any) map[string]any {
-		return map[string]any{
-			"completionMode": "Indexed",
-			"completions":    4,
-			"successPolicy":  map[string]any{"rules": []any{members}},
-		}
-	}
-
-	t.Run("null succeededCount", func(t *testing.T) {
-		job, _ := generateJob(t, rule(map[string]any{"succeededIndexes": "0-1", "succeededCount": nil}))
-		got := job.Spec.SuccessPolicy
-		if got == nil || len(got.Rules) != 1 {
-			t.Fatalf("SuccessPolicy = %+v, want one rule", got)
-		}
-		if got.Rules[0].SucceededCount != nil {
-			t.Errorf("SucceededCount = %v, want nil", *got.Rules[0].SucceededCount)
-		}
-		if got.Rules[0].SucceededIndexes == nil || *got.Rules[0].SucceededIndexes != "0-1" {
-			t.Errorf("SucceededIndexes = %v, want 0-1", got.Rules[0].SucceededIndexes)
-		}
-	})
-
-	t.Run("null succeededIndexes", func(t *testing.T) {
-		job, _ := generateJob(t, rule(map[string]any{"succeededIndexes": nil, "succeededCount": 2}))
-		got := job.Spec.SuccessPolicy
-		if got == nil || len(got.Rules) != 1 {
-			t.Fatalf("SuccessPolicy = %+v, want one rule", got)
-		}
-		if got.Rules[0].SucceededIndexes != nil {
-			t.Errorf("SucceededIndexes = %q, want nil", *got.Rules[0].SucceededIndexes)
-		}
-		if got.Rules[0].SucceededCount == nil || *got.Rules[0].SucceededCount != 2 {
-			t.Errorf("SucceededCount = %v, want 2", got.Rules[0].SucceededCount)
-		}
-	})
-}
-
-// jobGenerateError builds a job component from props, generates it, and returns
-// the error Generate refused it with — failing the test if either step
-// unexpectedly succeeded. jobError above only exercises ToApplicationConfig, so
-// it cannot see the checks that run against the built pod template.
-func jobGenerateError(t *testing.T, props map[string]any) string {
-	t.Helper()
-	full := map[string]any{"image": "ghcr.io/org/batch:v1.0.0"}
-	for k, v := range props {
-		full[k] = v
-	}
-	cfg, err := (&components.JobHandler{}).ToApplicationConfig(&oam.Component{
-		Name: "batch", Type: "job", Properties: full,
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig refused the document before Generate could: %v", err)
-	}
-	if _, err := cfg.Generate(stack.NewApplication("batch", "default", cfg)); err != nil {
-		return err.Error()
-	}
-	t.Fatal("Generate accepted the document, want a refusal")
-	return ""
-}
-
-// podFailurePolicyProps wraps rules in the surrounding properties every accepted
-// podFailurePolicy document needs: restartPolicy: Never, which upstream requires
-// alongside the field and which this component would otherwise default to
-// OnFailure.
-func podFailurePolicyProps(rules []any, extra map[string]any) map[string]any {
-	props := map[string]any{
-		"restartPolicy":    "Never",
-		"podFailurePolicy": map[string]any{"rules": rules},
-	}
-	for k, v := range extra {
-		props[k] = v
+	if selector != nil {
+		props["selector"] = selector
+		props["manualSelector"] = true
 	}
 	return props
 }
 
-// TestJobHandler_PodFailurePolicy_RoundTrip pins what an accepted policy emits
-// (go-kure/launcher#345): both rule shapes, the containerName scoping, and the
-// per-field values reaching batchv1.PodFailurePolicy unchanged.
-func TestJobHandler_PodFailurePolicy_RoundTrip(t *testing.T) {
-	job, _ := generateJob(t, podFailurePolicyProps([]any{
-		map[string]any{
-			"action": "FailJob",
-			"onExitCodes": map[string]any{
-				"containerName": "batch",
-				"operator":      "In",
-				"values":        []any{1, 42, 137},
-			},
-		},
-		map[string]any{
-			"action": "Ignore",
-			"onPodConditions": []any{
-				map[string]any{"type": "DisruptionTarget", "status": "True"},
-			},
-		},
-	}, nil))
-
-	pfp := job.Spec.PodFailurePolicy
-	if pfp == nil || len(pfp.Rules) != 2 {
-		t.Fatalf("PodFailurePolicy = %+v, want two rules", pfp)
+// TestJobHandler_AuthoredAppLabel: an authored template label `app` is kept
+// when it is the component's own label value and refused, naming the component,
+// when it is another: traits and Services select the component's pods by that
+// label, so it cannot say something else.
+func TestJobHandler_AuthoredAppLabel(t *testing.T) {
+	value := oam.ComponentLabelValue("batch")
+	job := jobGenerate(t, "batch", jobLabelled(nil, map[string]any{"app": value}), nil)
+	if want := map[string]string{"app": value}; !maps.Equal(job.Spec.Template.Labels, want) {
+		t.Errorf("template labels = %v, want %v", job.Spec.Template.Labels, want)
 	}
-
-	first := pfp.Rules[0]
-	if first.Action != batchv1.PodFailurePolicyActionFailJob {
-		t.Errorf("Rules[0].Action = %q, want FailJob", first.Action)
-	}
-	if first.OnExitCodes == nil {
-		t.Fatal("Rules[0].OnExitCodes is nil, want the exit-code requirement")
-	}
-	if first.OnExitCodes.ContainerName == nil || *first.OnExitCodes.ContainerName != "batch" {
-		t.Errorf("Rules[0].OnExitCodes.ContainerName = %v, want \"batch\"", first.OnExitCodes.ContainerName)
-	}
-	if first.OnExitCodes.Operator != batchv1.PodFailurePolicyOnExitCodesOpIn {
-		t.Errorf("Rules[0].OnExitCodes.Operator = %q, want In", first.OnExitCodes.Operator)
-	}
-	if got := first.OnExitCodes.Values; len(got) != 3 || got[0] != 1 || got[1] != 42 || got[2] != 137 {
-		t.Errorf("Rules[0].OnExitCodes.Values = %v, want [1 42 137]", got)
-	}
-	if len(first.OnPodConditions) != 0 {
-		t.Errorf("Rules[0].OnPodConditions = %v, want none", first.OnPodConditions)
-	}
-
-	second := pfp.Rules[1]
-	if second.Action != batchv1.PodFailurePolicyActionIgnore {
-		t.Errorf("Rules[1].Action = %q, want Ignore", second.Action)
-	}
-	if second.OnExitCodes != nil {
-		t.Errorf("Rules[1].OnExitCodes = %+v, want nil", second.OnExitCodes)
-	}
-	if len(second.OnPodConditions) != 1 {
-		t.Fatalf("Rules[1].OnPodConditions = %v, want one pattern", second.OnPodConditions)
-	}
-	if got := second.OnPodConditions[0]; got.Type != corev1.DisruptionTarget || got.Status != corev1.ConditionTrue {
-		t.Errorf("Rules[1].OnPodConditions[0] = %+v, want DisruptionTarget/True", got)
-	}
-
-	// The policy is not written unless authored: an omitempty pointer field
-	// left non-nil unconditionally would add `podFailurePolicy: null` to every
-	// generated Job.
-	plain, _ := generateJob(t, nil)
-	if plain.Spec.PodFailurePolicy != nil {
-		t.Errorf("PodFailurePolicy = %+v on a document that never authored it, want nil", plain.Spec.PodFailurePolicy)
+	for name, authored := range map[string]string{"another value": "frontend", "empty": ""} {
+		t.Run(name, func(t *testing.T) {
+			err := coreKindErr(&components.JobHandler{}, "job", "batch", jobLabelled(nil, map[string]any{"tier": "batch", "app": authored}))
+			want := "template.metadata.labels.app: " + `"` + authored + `"` + " is not the `app` label of component \"batch\""
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, want)
+			}
+		})
 	}
 }
 
-// TestJobHandler_PodFailurePolicy_StatusDefaultsToTrue pins go-kure/launcher#410:
-// an onPodConditions pattern without a status matches status True, the value
-// upstream's SetDefaults_PodFailurePolicyOnPodConditionsPattern fills in. The
-// default is written out rather than left to the API server because
-// PodFailurePolicyOnPodConditionsPattern.Status carries no omitempty, so an
-// unset field would be emitted as `status: ""`.
-//
-// Each case runs the authored-property check first, as kurel build does, so a
-// schema that still marked status required fails here and not only at the
-// parser.
-func TestJobHandler_PodFailurePolicy_StatusDefaultsToTrue(t *testing.T) {
-	cases := []struct {
-		name    string
-		pattern map[string]any
-	}{
-		{"status absent", map[string]any{"type": "DisruptionTarget"}},
-		{"status explicit null", map[string]any{"type": "DisruptionTarget", "status": nil}},
+// TestJobHandler_SelectorAndTheAppLabel: a Job takes a selector only as the
+// author's own (manualSelector). One that matches the authored template labels
+// and stops matching once the `app` label is on them is refused. One on the
+// `app` label's own value is satisfied by the label launcher adds. One that
+// does not match the authored labels either is the API server's to refuse. One
+// that cannot be read as a selector is refused with apimachinery's reason.
+func TestJobHandler_SelectorAndTheAppLabel(t *testing.T) {
+	const rulesOut = "selector: rules out the label `app: batch`, which launcher sets on the pods of component \"batch\""
+	expr := func(op string, values ...any) map[string]any {
+		e := map[string]any{"key": "app", "operator": op}
+		if values != nil {
+			e["values"] = values
+		}
+		return map[string]any{"matchExpressions": []any{e}}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			props := podFailurePolicyProps([]any{map[string]any{
-				"action":          "Ignore",
-				"onPodConditions": []any{tc.pattern},
-			}}, map[string]any{"image": "ghcr.io/org/batch:v1.0.0"})
+	for name, tc := range map[string]struct {
+		selector map[string]any
+		labels   map[string]any
+		want     string // "" when the component builds
+	}{
+		"app must not exist":              {expr("DoesNotExist"), map[string]any{"tier": "batch"}, rulesOut},
+		"app not in the label value":      {expr("NotIn", "batch"), map[string]any{"tier": "batch"}, rulesOut},
+		"app not in another value":        {expr("NotIn", "db"), map[string]any{"tier": "batch"}, ""},
+		"app is the label value":          {map[string]any{"matchLabels": map[string]any{"app": "batch"}}, nil, ""},
+		"no match on the authored labels": {map[string]any{"matchLabels": map[string]any{"tier": "db"}}, map[string]any{"tier": "batch"}, ""},
+		"an unknown operator":             {expr("Bogus"), map[string]any{"tier": "batch"}, `selector: "Bogus" is not a valid label selector operator`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := coreKindErr(&components.JobHandler{}, "job", "batch", jobLabelled(tc.selector, tc.labels))
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("refused: %v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+}
 
-			tr := oam.NewTransformer(map[string]oam.ComponentHandler{"job": &components.JobHandler{}}, nil)
-			app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{
-				{Name: "batch", Type: "job", Properties: props},
-			}}}
-			validated, err := tr.ValidateAuthoredProperties(app)
+// TestJobHandler_FillsNothing: a policy that carries resource defaults fills
+// none of them, a pod with no service account keeps the cluster's default for
+// the token mount, and no restart policy is made up: the Job API refuses a
+// template without one when the object is applied.
+func TestJobHandler_FillsNothing(t *testing.T) {
+	defaults := &stubPolicy{
+		defaultCPURequest: "100m", defaultMemoryRequest: "128Mi",
+		defaultCPULimit: "500m", defaultMemoryLimit: "256Mi",
+		defaultStorageSize: "1Gi",
+	}
+	props := ptObject(t, "template:\n  metadata:\n    labels:\n      tier: batch\n  spec:\n"+htIndent(htPlainPod, "    "))
+	job := jobGenerate(t, "batch", props, defaults)
+	spec := job.Spec.Template.Spec
+	if res := spec.Containers[0].Resources; len(res.Requests) != 0 || len(res.Limits) != 0 {
+		t.Errorf("resources = %+v, want none: the job kind fills no policy default", res)
+	}
+	if spec.RestartPolicy != "" {
+		t.Errorf("restartPolicy = %q, want it unset as authored", spec.RestartPolicy)
+	}
+	if spec.AutomountServiceAccountToken != nil {
+		t.Errorf("automountServiceAccountToken = %v, want it unset as authored", *spec.AutomountServiceAccountToken)
+	}
+}
+
+// TestJobHandler_Refusals: what the component refuses when it is read, with no
+// policy involved: a property that is not a JobSpec field, at any depth; an
+// unauthored template; and what the pod kind refuses of a pod spec, by its
+// path under the template.
+func TestJobHandler_Refusals(t *testing.T) {
+	const notASpec = "properties do not decode into a batch/v1 JobSpec"
+	app := map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3"}
+	// with returns a component whose pod spec is the plain one plus extra.
+	with := func(extra map[string]any) map[string]any {
+		spec := map[string]any{"restartPolicy": "Never", "containers": []any{app}}
+		maps.Copy(spec, extra)
+		return map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{"tier": "batch"}}, "spec": spec}}
+	}
+	top := func(extra map[string]any) map[string]any {
+		props := with(nil)
+		maps.Copy(props, extra)
+		return props
+	}
+	for name, tc := range map[string]struct {
+		props map[string]any
+		want  string
+	}{
+		"no properties":        {nil, "template.spec.containers: required"},
+		"no template":          {map[string]any{"backoffLimit": 1}, "template.spec.containers: required"},
+		"a workload's image":   {top(map[string]any{"image": "registry.example/team/app:1.2.3"}), notASpec},
+		"a cronjob's field":    {top(map[string]any{"schedule": "0 2 * * *"}), notASpec},
+		"restartPolicy at top": {top(map[string]any{"restartPolicy": "Never"}), notASpec},
+		"backoffLimit string":  {top(map[string]any{"backoffLimit": "three"}), notASpec},
+		"template sub-key":     {with(map[string]any{"containerz": []any{}}), notASpec},
+		"two spellings":        {top(map[string]any{"backoffLimit": 1, "BackoffLimit": 2}), "sets the same field as"},
+		"ephemeral containers": {with(map[string]any{"ephemeralContainers": []any{map[string]any{"name": "debug", "image": "registry.example/debug:1"}}}),
+			"template.spec.ephemeralContainers: not supported"},
+		"priority": {with(map[string]any{"priority": 1000}), "template.spec.priority: not authorable"},
+		"overhead": {with(map[string]any{"overhead": map[string]any{"cpu": "100m"}}), "template.spec.overhead: not authorable"},
+		"untagged image": {with(map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/app"}}}),
+			`template.spec.containers[0] "app": image "registry.example/team/app" rejected: no tag or digest specified`},
+		"latest init image": {with(map[string]any{"initContainers": []any{map[string]any{"name": "init", "image": "busybox:latest"}}}),
+			`template.spec.initContainers[0] "init": image "busybox:latest" rejected: :latest tag not allowed`},
+		"probe timing of zero": {with(map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3",
+			"livenessProbe": map[string]any{"exec": map[string]any{"command": []any{"true"}}, "timeoutSeconds": 0}}}}),
+			"template.spec.containers[0].livenessProbe.timeoutSeconds: 0 cannot be carried by the Kubernetes API types"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := coreKindErr(&components.JobHandler{}, "job", "batch", tc.props)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestJobHandler_ActiveDeadlineSeconds: a Job may set it, on the spec and on
+// the pod template alike; only the controllers that keep their pods running
+// may not.
+func TestJobHandler_ActiveDeadlineSeconds(t *testing.T) {
+	props := ptObject(t, "activeDeadlineSeconds: 600\n"+jobPlain(htPlainPod+"activeDeadlineSeconds: 300\n"))
+	job := jobGenerate(t, "batch", props, ptStrictPolicy())
+	if got := job.Spec.ActiveDeadlineSeconds; got == nil || *got != 600 {
+		t.Errorf("spec.activeDeadlineSeconds = %v, want 600", got)
+	}
+	if got := job.Spec.Template.Spec.ActiveDeadlineSeconds; got == nil || *got != 300 {
+		t.Errorf("template.spec.activeDeadlineSeconds = %v, want 300", got)
+	}
+}
+
+// TestJobHandler_NameChecks: the Job's name is held to the length the API
+// server creates one under, and an Indexed job to the hostname its last pod
+// takes, at read time and again when the object is generated.
+func TestJobHandler_NameChecks(t *testing.T) {
+	long := strings.Repeat("a", 64)
+	err := coreKindErr(&components.JobHandler{}, "job", long, ptObject(t, jobPlain(htPlainPod)))
+	if err == nil || !strings.Contains(err.Error(), "at most 63 characters") {
+		t.Fatalf("a 64-character name: err = %v, want the name length refusal", err)
+	}
+	indexed := ptObject(t, "completionMode: Indexed\ncompletions: 100\n"+jobPlain(htPlainPod))
+	// 58 characters, so the hostname "<name>-99" is 61: a DNS-1123 label.
+	if err := coreKindErr(&components.JobHandler{}, "job", strings.Repeat("a", 58), indexed); err != nil {
+		t.Errorf("an Indexed job whose last pod hostname fits: %v", err)
+	}
+	// 61 characters, so the hostname "<name>-99" is 64: too long.
+	err = coreKindErr(&components.JobHandler{}, "job", strings.Repeat("a", 61), indexed)
+	if err == nil || !strings.Contains(err.Error(), "hostname") {
+		t.Fatalf("an Indexed job whose last pod hostname is too long: err = %v, want the hostname refusal", err)
+	}
+}
+
+// TestJobHandler_Policy: a Job is held to the policy as every pod template is,
+// by the path of the field under the template, and no replica maximum applies
+// to it.
+func TestJobHandler_Policy(t *testing.T) {
+	zero := ptStrictPolicy()
+	zero.maxReplicas = int32ptr(0)
+	if _, err := pvTransform("job", &components.JobHandler{}, ptObject(t, jobPlain(htPlainPod)), pvPolicy(zero)); err != nil {
+		t.Errorf("a maximum of 0 replicas refused a Job: %v", err)
+	}
+	for name, tc := range map[string]struct{ spec, want string }{
+		"privileged": {htPlainPod + "    securityContext:\n      privileged: true\n",
+			`template.spec.containers[0] "app": securityContext.privileged is not allowed by environment policy`},
+		"registry": {"containers:\n  - name: app\n    image: other.example/team/app:1.2.3\n",
+			`template.spec.containers[0] "app": image "other.example/team/app:1.2.3" is not from an allowed registry`},
+		"cpu": {htPlainPod + "    resources:\n      limits:\n        cpu: 4\n",
+			`template.spec.containers[0] "app": cpu limit "4" exceeds enforced maximum "2"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := pvTransform("job", &components.JobHandler{}, ptObject(t, jobPlain(tc.spec)), pvPolicy(ptStrictPolicy()))
+			htWantViolation(t, err, `component "web": `+tc.want)
+		})
+	}
+}
+
+// TestJobConfig_ServiceAccountName: the Job reports the account its pods run
+// as to the traits that bind identity to it: the template's serviceAccountName,
+// the deprecated serviceAccount where that one is unset, and "" for the
+// namespace's default account. It always runs pods.
+func TestJobConfig_ServiceAccountName(t *testing.T) {
+	for name, tc := range map[string]struct {
+		podSpec string
+		want    string
+	}{
+		"none authored":      {htPlainPod, ""},
+		"serviceAccountName": {htPlainPod + "serviceAccountName: batch\n", "batch"},
+		"deprecated alias":   {htPlainPod + "serviceAccount: legacy\n", "legacy"},
+		"both":               {htPlainPod + "serviceAccountName: batch\nserviceAccount: legacy\n", "batch"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := (&components.JobHandler{}).ToApplicationConfig(
+				&oam.Component{Name: "batch", Type: "job", Properties: ptObject(t, jobPlain(tc.podSpec))}, coreKindNamespace)
 			if err != nil {
-				t.Fatalf("ValidateAuthoredProperties refused a pattern without status: %v", err)
+				t.Fatalf("ToApplicationConfig: %v", err)
 			}
-
-			job, _ := generateJob(t, validated.Spec.Components[0].Properties)
-			pfp := job.Spec.PodFailurePolicy
-			if pfp == nil || len(pfp.Rules) != 1 || len(pfp.Rules[0].OnPodConditions) != 1 {
-				t.Fatalf("PodFailurePolicy = %+v, want one rule with one pattern", pfp)
+			namer, ok := cfg.(oam.ServiceAccountNamer)
+			if !ok {
+				t.Fatal("the job config does not implement oam.ServiceAccountNamer")
 			}
-			if got := pfp.Rules[0].OnPodConditions[0]; got.Type != corev1.DisruptionTarget || got.Status != corev1.ConditionTrue {
-				t.Errorf("OnPodConditions[0] = %+v, want DisruptionTarget/True", got)
-			}
-
-			out, err := yaml.Marshal(job)
-			if err != nil {
-				t.Fatalf("marshal Job: %v", err)
-			}
-			if !strings.Contains(string(out), `status: "True"`) {
-				t.Errorf("emitted Job does not carry status \"True\":\n%s", out)
+			if got, runsPods := namer.ServiceAccountName(); got != tc.want || !runsPods {
+				t.Errorf("ServiceAccountName() = %q, %v; want %q, true", got, runsPods, tc.want)
 			}
 		})
 	}
-}
-
-// TestJobHandler_PodFailurePolicy_StatusParsed drives the handler directly,
-// without the authored-property check. That check strips a declared key's
-// explicit null before the handler sees it, so only this path reaches the
-// parser's own null branch — the one a caller handing properties straight to
-// the handler depends on. It also pins that an explicit status is carried
-// through as written rather than overwritten by the default.
-func TestJobHandler_PodFailurePolicy_StatusParsed(t *testing.T) {
-	cases := []struct {
-		name    string
-		pattern map[string]any
-		want    corev1.ConditionStatus
-	}{
-		{"status absent", map[string]any{"type": "DisruptionTarget"}, corev1.ConditionTrue},
-		{"status explicit null", map[string]any{"type": "DisruptionTarget", "status": nil}, corev1.ConditionTrue},
-		{"status True", map[string]any{"type": "DisruptionTarget", "status": "True"}, corev1.ConditionTrue},
-		{"status False", map[string]any{"type": "DisruptionTarget", "status": "False"}, corev1.ConditionFalse},
-		{"status Unknown", map[string]any{"type": "DisruptionTarget", "status": "Unknown"}, corev1.ConditionUnknown},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			job, _ := generateJob(t, podFailurePolicyProps([]any{map[string]any{
-				"action":          "Ignore",
-				"onPodConditions": []any{tc.pattern},
-			}}, nil))
-			pfp := job.Spec.PodFailurePolicy
-			if pfp == nil || len(pfp.Rules) != 1 || len(pfp.Rules[0].OnPodConditions) != 1 {
-				t.Fatalf("PodFailurePolicy = %+v, want one rule with one pattern", pfp)
-			}
-			if got := pfp.Rules[0].OnPodConditions[0].Status; got != tc.want {
-				t.Errorf("OnPodConditions[0].Status = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// TestJobHandler_PodFailurePolicy_EmptyRules pins the one place this parser is
-// deliberately no stricter than upstream. validatePodFailurePolicy has no
-// "at least one rule" check — unlike validateSuccessPolicy, which does — and the
-// field's own doc states only the cap, so there is no documented contract to
-// follow past the API server the way succeededIndexes has one. An empty list is
-// also not inert: a non-nil policy pins podReplacementPolicy and restartPolicy
-// on its own.
-func TestJobHandler_PodFailurePolicy_EmptyRules(t *testing.T) {
-	job, _ := generateJob(t, podFailurePolicyProps([]any{}, nil))
-	pfp := job.Spec.PodFailurePolicy
-	if pfp == nil {
-		t.Fatal("PodFailurePolicy is nil, want an empty-ruled policy")
-	}
-	// Non-nil, not merely empty: batchv1.PodFailurePolicy.Rules carries no
-	// omitempty, so a nil slice would marshal as `rules: null` — a shape the
-	// author did not write.
-	if pfp.Rules == nil {
-		t.Error("PodFailurePolicy.Rules is nil, want an empty slice so it marshals as `rules: []`")
-	}
-	if len(pfp.Rules) != 0 {
-		t.Errorf("PodFailurePolicy.Rules = %v, want none", pfp.Rules)
-	}
-}
-
-// TestJobHandler_PodFailurePolicyValidation_Table walks the podFailurePolicy
-// rules ported from validatePodFailurePolicy / validatePodFailurePolicyRule.
-// Each case is a document Kubernetes' own API server would reject at apply
-// time, refused here at build time instead.
-func TestJobHandler_PodFailurePolicyValidation_Table(t *testing.T) {
-	exitCodes := func(extra map[string]any) []any {
-		req := map[string]any{"operator": "In", "values": []any{1}}
-		for k, v := range extra {
-			req[k] = v
-		}
-		return []any{map[string]any{"action": "FailJob", "onExitCodes": req}}
-	}
-
-	cases := []struct {
-		name       string
-		props      map[string]any
-		wantSubstr string
-	}{
-		{
-			"unknown top-level key",
-			map[string]any{"restartPolicy": "Never", "podFailurePolicy": map[string]any{"rules": []any{}, "bogus": 1}},
-			`podFailurePolicy: unrecognized key "bogus"`,
-		},
-		{
-			"missing rules key",
-			map[string]any{"restartPolicy": "Never", "podFailurePolicy": map[string]any{}},
-			"podFailurePolicy.rules: required",
-		},
-		{
-			"rules not an array",
-			map[string]any{"restartPolicy": "Never", "podFailurePolicy": map[string]any{"rules": map[string]any{}}},
-			"podFailurePolicy.rules: must be an array",
-		},
-		{
-			"rule not an object",
-			podFailurePolicyProps([]any{"FailJob"}, nil),
-			"podFailurePolicy.rules[0]: must be an object",
-		},
-		{
-			"rule with an unknown key",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "bogus": 1}}, nil),
-			`podFailurePolicy.rules[0]: unrecognized key "bogus"`,
-		},
-		{
-			"missing action",
-			podFailurePolicyProps([]any{map[string]any{"onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": "True"}}}}, nil),
-			"podFailurePolicy.rules[0].action: required",
-		},
-		{
-			// "" must be refused rather than defaulted: upstream reports an
-			// empty action as Required, and parseStringField would have
-			// reported it as absent.
-			"empty action",
-			podFailurePolicyProps([]any{map[string]any{"action": ""}}, nil),
-			"podFailurePolicy.rules[0].action: required",
-		},
-		{
-			"non-string action",
-			podFailurePolicyProps([]any{map[string]any{"action": 3}}, nil),
-			"podFailurePolicy.rules[0].action: must be a string",
-		},
-		{
-			"unknown action",
-			podFailurePolicyProps([]any{map[string]any{"action": "Retry"}}, nil),
-			"podFailurePolicy.rules[0].action: invalid value \"Retry\"",
-		},
-		{
-			"rule with neither onExitCodes nor onPodConditions",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob"}}, nil),
-			"exactly one of onExitCodes or onPodConditions is required",
-		},
-		{
-			// An authored empty list counts as neither, here and upstream:
-			// both test len(), not nil-ness.
-			"rule with an empty onPodConditions",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{}}}, nil),
-			"exactly one of onExitCodes or onPodConditions is required",
-		},
-		{
-			"rule with both",
-			podFailurePolicyProps([]any{map[string]any{
-				"action":          "FailJob",
-				"onExitCodes":     map[string]any{"operator": "In", "values": []any{1}},
-				"onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": "True"}},
-			}}, nil),
-			"mutually exclusive",
-		},
-		{
-			"FailIndex without backoffLimitPerIndex",
-			podFailurePolicyProps(
-				[]any{map[string]any{"action": "FailIndex", "onExitCodes": map[string]any{"operator": "In", "values": []any{1}}}},
-				map[string]any{"completionMode": "Indexed", "completions": 4},
-			),
-			"requires backoffLimitPerIndex",
-		},
-		{
-			"podReplacementPolicy other than Failed",
-			podFailurePolicyProps(exitCodes(nil), map[string]any{"podReplacementPolicy": "TerminatingOrFailed"}),
-			`podReplacementPolicy: must be "Failed" when podFailurePolicy is set`,
-		},
-		{
-			"onExitCodes with an unknown key",
-			podFailurePolicyProps(exitCodes(map[string]any{"bogus": 1}), nil),
-			`podFailurePolicy.rules[0].onExitCodes: unrecognized key "bogus"`,
-		},
-		{
-			"missing operator",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onExitCodes": map[string]any{"values": []any{1}}}}, nil),
-			"onExitCodes.operator: required",
-		},
-		{
-			"unknown operator",
-			podFailurePolicyProps(exitCodes(map[string]any{"operator": "OneOf"}), nil),
-			"onExitCodes.operator: invalid value \"OneOf\"",
-		},
-		{
-			// Reported as missing rather than invalid, the same split upstream
-			// makes: field.Required for "", field.NotSupported for the rest.
-			"empty operator",
-			podFailurePolicyProps(exitCodes(map[string]any{"operator": ""}), nil),
-			"onExitCodes.operator: required",
-		},
-		{
-			// "" would read as absent through parseStringField, leaving the
-			// rule scoped to every container instead of the one the author
-			// named — a widening, not a refusal.
-			"empty containerName",
-			podFailurePolicyProps(exitCodes(map[string]any{"containerName": ""}), nil),
-			"onExitCodes.containerName: must not be empty",
-		},
-		{
-			"missing values",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onExitCodes": map[string]any{"operator": "In"}}}, nil),
-			"onExitCodes.values: required",
-		},
-		{
-			"empty values",
-			podFailurePolicyProps(exitCodes(map[string]any{"values": []any{}}), nil),
-			"onExitCodes.values: at least one exit code is required",
-		},
-		{
-			"non-integer value",
-			podFailurePolicyProps(exitCodes(map[string]any{"values": []any{"1"}}), nil),
-			"onExitCodes.values[0]: must be an integer",
-		},
-		{
-			// A container that exits 0 succeeded and is excluded before the
-			// operator is applied, so 0 under In names a requirement nothing
-			// can satisfy. Legal under NotIn, covered below.
-			"zero under the In operator",
-			podFailurePolicyProps(exitCodes(map[string]any{"values": []any{0, 1}}), nil),
-			"0 must not be listed",
-		},
-		{
-			"duplicate values",
-			podFailurePolicyProps(exitCodes(map[string]any{"values": []any{1, 1}}), nil),
-			"duplicate exit code 1",
-		},
-		{
-			"unordered values",
-			podFailurePolicyProps(exitCodes(map[string]any{"values": []any{2, 1}}), nil),
-			"must be in increasing order",
-		},
-		{
-			"onPodConditions not an array",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": map[string]any{}}}, nil),
-			"onPodConditions: must be an array",
-		},
-		{
-			"onPodConditions entry with an unknown key",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": "True", "bogus": 1}}}}, nil),
-			`onPodConditions[0]: unrecognized key "bogus"`,
-		},
-		{
-			"onPodConditions entry missing type",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"status": "True"}}}}, nil),
-			"onPodConditions[0].type: required",
-		},
-		{
-			"onPodConditions entry with a malformed type",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "not a name", "status": "True"}}}}, nil),
-			"is not a qualified name",
-		},
-		{
-			"onPodConditions entry with an empty type",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "", "status": "True"}}}}, nil),
-			"onPodConditions[0].type: required",
-		},
-		// An absent status is no longer refused: it defaults to True, pinned
-		// in TestJobHandler_PodFailurePolicy_StatusDefaultsToTrue.
-		{
-			"onPodConditions entry with an unknown status",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": "Maybe"}}}}, nil),
-			"onPodConditions[0].status: invalid value \"Maybe\"",
-		},
-		{
-			// Stricter than upstream, whose defaulter fills an empty status
-			// too: only an absent or null key is defaulted here, and an authored
-			// empty string is refused as the likely mistake it is.
-			"onPodConditions entry with an empty status",
-			podFailurePolicyProps([]any{map[string]any{"action": "FailJob", "onPodConditions": []any{map[string]any{"type": "DisruptionTarget", "status": ""}}}}, nil),
-			"onPodConditions[0].status: must not be empty",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if msg := jobError(t, tc.props); !strings.Contains(msg, tc.wantSubstr) {
-				t.Errorf("error = %q, want it to contain %q", msg, tc.wantSubstr)
-			}
-		})
-	}
-}
-
-// TestJobHandler_PodFailurePolicy_Bounds covers the three caps, kept out of the
-// table above because each needs a generated list that would bury its
-// neighbours.
-func TestJobHandler_PodFailurePolicy_Bounds(t *testing.T) {
-	condition := func(i int) any {
-		return map[string]any{"type": fmt.Sprintf("Condition%d", i), "status": "True"}
-	}
-
-	t.Run("more than 20 rules", func(t *testing.T) {
-		rules := make([]any, 21)
-		for i := range rules {
-			rules[i] = map[string]any{"action": "Ignore", "onPodConditions": []any{condition(i)}}
-		}
-		if msg := jobError(t, podFailurePolicyProps(rules, nil)); !strings.Contains(msg, "at most 20 rules") {
-			t.Errorf("error = %q, want the rule-count cap", msg)
-		}
-	})
-
-	t.Run("more than 20 onPodConditions patterns", func(t *testing.T) {
-		patterns := make([]any, 21)
-		for i := range patterns {
-			patterns[i] = condition(i)
-		}
-		props := podFailurePolicyProps([]any{map[string]any{"action": "Ignore", "onPodConditions": patterns}}, nil)
-		if msg := jobError(t, props); !strings.Contains(msg, "at most 20 patterns") {
-			t.Errorf("error = %q, want the pattern-count cap", msg)
-		}
-	})
-
-	t.Run("more than 255 exit codes", func(t *testing.T) {
-		values := make([]any, 256)
-		for i := range values {
-			values[i] = i + 1
-		}
-		props := podFailurePolicyProps([]any{map[string]any{
-			"action":      "FailJob",
-			"onExitCodes": map[string]any{"operator": "In", "values": values},
-		}}, nil)
-		if msg := jobError(t, props); !strings.Contains(msg, "at most 255 exit codes") {
-			t.Errorf("error = %q, want the exit-code cap", msg)
-		}
-	})
-
-	// The same shape one under the cap must build, so the message above is a
-	// refusal of the size, not of the shape.
-	values := make([]any, 255)
-	for i := range values {
-		values[i] = i + 1
-	}
-	job, _ := generateJob(t, podFailurePolicyProps([]any{map[string]any{
-		"action":      "FailJob",
-		"onExitCodes": map[string]any{"operator": "In", "values": values},
-	}}, nil))
-	got := job.Spec.PodFailurePolicy
-	if got == nil || len(got.Rules) != 1 || got.Rules[0].OnExitCodes == nil {
-		t.Fatalf("PodFailurePolicy = %+v, want one onExitCodes rule", got)
-	}
-	if n := len(got.Rules[0].OnExitCodes.Values); n != 255 {
-		t.Errorf("len(Values) = %d, want 255", n)
-	}
-}
-
-// TestJobHandler_PodFailurePolicy_ZeroUnderNotIn is the counterpart to the
-// zero-under-In case in the table: upstream forbids 0 only for the In operator,
-// so refusing it under NotIn would be stricter than the API for no reason.
-func TestJobHandler_PodFailurePolicy_ZeroUnderNotIn(t *testing.T) {
-	job, _ := generateJob(t, podFailurePolicyProps([]any{map[string]any{
-		"action":      "FailJob",
-		"onExitCodes": map[string]any{"operator": "NotIn", "values": []any{0, 1}},
-	}}, nil))
-	got := job.Spec.PodFailurePolicy
-	if got == nil || len(got.Rules) != 1 || got.Rules[0].OnExitCodes == nil {
-		t.Fatalf("PodFailurePolicy = %+v, want one onExitCodes rule", got)
-	}
-	if v := got.Rules[0].OnExitCodes.Values; len(v) != 2 || v[0] != 0 || v[1] != 1 {
-		t.Errorf("Values = %v, want [0 1]", v)
-	}
-}
-
-// TestJobHandler_PodFailurePolicy_TemplateRules covers the two checks that need
-// the built pod template rather than the property map: the restart policy
-// upstream requires alongside a podFailurePolicy, and containerName naming a
-// container the template actually carries. Both run at Generate, against what is
-// emitted — which is why they are unreachable through jobError.
-func TestJobHandler_PodFailurePolicy_TemplateRules(t *testing.T) {
-	rules := []any{map[string]any{
-		"action":      "FailJob",
-		"onExitCodes": map[string]any{"operator": "In", "values": []any{1}},
-	}}
-
-	t.Run("default restartPolicy", func(t *testing.T) {
-		// No restartPolicy authored, so the component's own OnFailure default
-		// lands on the template — a Job the API server refuses.
-		props := map[string]any{"podFailurePolicy": map[string]any{"rules": rules}}
-		msg := jobGenerateError(t, props)
-		if !strings.Contains(msg, `restartPolicy: must be "Never"`) || !strings.Contains(msg, "OnFailure") {
-			t.Errorf("error = %q, want it to name the required Never and the OnFailure it got", msg)
-		}
-	})
-
-	t.Run("authored OnFailure", func(t *testing.T) {
-		props := map[string]any{"restartPolicy": "OnFailure", "podFailurePolicy": map[string]any{"rules": rules}}
-		if msg := jobGenerateError(t, props); !strings.Contains(msg, `restartPolicy: must be "Never"`) {
-			t.Errorf("error = %q, want the restartPolicy refusal", msg)
-		}
-	})
-
-	t.Run("containerName naming no container", func(t *testing.T) {
-		props := podFailurePolicyProps([]any{map[string]any{
-			"action":      "FailJob",
-			"onExitCodes": map[string]any{"containerName": "sidecar", "operator": "In", "values": []any{1}},
-		}}, nil)
-		msg := jobGenerateError(t, props)
-		if !strings.Contains(msg, "names no container in this component") {
-			t.Errorf("error = %q, want the containerName refusal", msg)
-		}
-		// The message lists what is available, so an author can see the name
-		// they meant. "batch" is this component's own container.
-		if !strings.Contains(msg, `"batch"`) {
-			t.Errorf("error = %q, want it to list the container names the template carries", msg)
-		}
-	})
-
-	t.Run("containerName naming an initContainer", func(t *testing.T) {
-		// Init containers count too, upstream and here: the exit-code check
-		// reads .status.initContainerStatuses alongside .status.containerStatuses.
-		props := podFailurePolicyProps([]any{map[string]any{
-			"action":      "FailJob",
-			"onExitCodes": map[string]any{"containerName": "setup", "operator": "In", "values": []any{1}},
-		}}, map[string]any{
-			"initContainers": []any{map[string]any{"name": "setup", "image": "ghcr.io/org/setup:v1.0.0"}},
-		})
-		job, _ := generateJob(t, props)
-		got := job.Spec.PodFailurePolicy
-		if got == nil || len(got.Rules) != 1 || got.Rules[0].OnExitCodes == nil {
-			t.Fatalf("PodFailurePolicy = %+v, want one onExitCodes rule", got)
-		}
-		if name := got.Rules[0].OnExitCodes.ContainerName; name == nil || *name != "setup" {
-			t.Errorf("ContainerName = %v, want \"setup\"", name)
-		}
-	})
 }

@@ -54,11 +54,10 @@ func probeNamed(t *testing.T, name string) probe.Probe {
 	return probe.Probes()[i]
 }
 
-// Fault B: the probe states a fill the library does not make. A job that authors
-// its restartPolicy is reported nothing, so a row stating one reports a fill that
-// does not happen.
+// Fault B: the probe states a fill the library does not make. A statefulset fills
+// no restartPolicy, so a row stating one reports a fill that does not happen.
 func TestProbes_FaultB_AFillThatDoesNotHappen(t *testing.T) {
-	p := probeNamed(t, "job with a pod failure policy")
+	p := probeNamed(t, "statefulset")
 	p.Fills = append(slices.Clone(p.Fills), probe.Fill{
 		Component: "app", Path: "restartPolicy",
 		WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin, ValueWithPolicy: "OnFailure", ValueWithoutPolicy: "OnFailure",
@@ -85,23 +84,12 @@ func TestProbes_FaultB_AnEntryNoRowLists(t *testing.T) {
 	}
 }
 
-// Fault A: a declared default the library applies and does not report. The
-// stand-in is a probe whose component is a handler of the same name as the
-// registry's, but the check is pointed at a transformer whose report is silent:
-// here, the cronjob row naming concurrencyPolicy as left to the cluster is
-// removed, so the declared default shows as applied differently.
-func TestProbes_FaultA_ADeclaredDefaultTheHandlerDoesNotApply(t *testing.T) {
-	p := probeNamed(t, "cronjob")
-	p.LeftToCluster = nil
-	got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{p}), "\n")
-	if !strings.Contains(got, "concurrencyPolicy") {
-		t.Fatalf("want a finding naming concurrencyPolicy, got %q", got)
-	}
-}
-
+// No shipped probe lists a default as left to the cluster any more (the raw
+// cronjob, which did, fills nothing: go-kure/launcher#1629), so the stale row is
+// shown on the worker's `replicas`, a default the handler applies.
 func TestProbes_FaultA_AStaleLeftToClusterRow(t *testing.T) {
-	p := probeNamed(t, "job")
-	p.LeftToCluster = map[string]string{"restartPolicy": "stale"}
+	p := probeNamed(t, "worker")
+	p.LeftToCluster = map[string]string{"replicas": "stale"}
 	got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{p}), "\n")
 	if !strings.Contains(got, "remove the entry from LeftToCluster") {
 		t.Fatalf("want the stale-row finding, got %q", got)
@@ -148,17 +136,6 @@ func TestProbes_FaultB_AValueWithNoSource(t *testing.T) {
 	}
 }
 
-// Check A reads an explicit null as omitted, as the pipeline does.
-func TestProbes_FaultA_ANullReadsAsOmitted(t *testing.T) {
-	p := probeNamed(t, "cronjob")
-	p.LeftToCluster = nil
-	p.Components[0].Properties["concurrencyPolicy"] = nil
-	got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{p}), "\n")
-	if !strings.Contains(got, "concurrencyPolicy") {
-		t.Fatalf("want a finding naming concurrencyPolicy, got %q", got)
-	}
-}
-
 // An explicit null on the way to a fill reads as omitted when the fill is authored,
 // as the pipeline reads it: the probe still renders and the fill is still compared.
 func TestProbes_FaultB_ANullOnTheWayToAFill(t *testing.T) {
@@ -196,8 +173,8 @@ func TestProbes_FaultA_LoweredTypes(t *testing.T) {
 	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{p}), "\n"); !strings.Contains(got, "topologySpread") {
 		t.Errorf("an unlisted gap: want a finding naming topologySpread, got %q", got)
 	}
-	q := probeNamed(t, "job")
-	q.Unreported = map[string]string{"restartPolicy": "stale"}
+	q := probeNamed(t, "statefulset")
+	q.Unreported = map[string]string{"replicas": "stale"}
 	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{q}), "\n"); !strings.Contains(got, "remove the entry from Unreported") {
 		t.Errorf("a stale Unreported row: want the finding, got %q", got)
 	}
@@ -225,8 +202,8 @@ func TestProbes_FaultA_AnEntryNamingNoDefault(t *testing.T) {
 	if !strings.Contains(got, `Unreported lists "provder"`) {
 		t.Errorf("want the finding naming provder, got %q", got)
 	}
-	q := probeNamed(t, "cronjob")
-	q.LeftToCluster = map[string]string{"concurrencyPolicy": "ok", "concurrencyPolcy": "misspelled"}
+	q := probeNamed(t, "worker")
+	q.LeftToCluster = map[string]string{"concurrencyPolcy": "misspelled"}
 	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{q}), "\n"); !strings.Contains(got, `LeftToCluster lists "concurrencyPolcy"`) {
 		t.Errorf("want the finding naming concurrencyPolcy, got %q", got)
 	}

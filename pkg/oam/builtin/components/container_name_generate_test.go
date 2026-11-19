@@ -33,17 +33,16 @@ func setContainerName(t *testing.T, cfg stack.ApplicationConfig, list string, i 
 		} else {
 			c.InitContainers[i].Name = name
 		}
-	case *components.JobConfig:
-		c.InitContainers[i].Name = name
-	case *components.CronjobConfig:
-		c.InitContainers[i].Name = name
 	default:
 		t.Fatalf("no container list known for config %T", cfg)
 	}
 }
 
 func TestContainerNameLabel_RefusedAtGenerate(t *testing.T) {
-	for _, k := range []string{roleMemberType, "statefulset", "job", "cronjob"} {
+	// daemonset, job and cronjob take the upstream pod spec since
+	// go-kure/launcher#1629: their containers are the API type's, with no
+	// shorthand list to rename.
+	for _, k := range []string{roleMemberType, "statefulset"} {
 		var kind struct {
 			name    string
 			handler oam.ComponentHandler

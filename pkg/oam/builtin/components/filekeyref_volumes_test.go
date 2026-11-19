@@ -20,8 +20,6 @@ var fileKeyRefKinds = []struct {
 	{"worker", workerViaRule{}, nil, true},
 	{roleMemberType, &components.RoleDeploymentHandler{}, nil, true},
 	{"statefulset", &components.StatefulsetHandler{}, nil, true},
-	{"job", &components.JobHandler{}, nil, false},
-	{"cronjob", &components.CronjobHandler{}, map[string]any{"schedule": "0 2 * * *"}, false},
 }
 
 func fileKeyRefEnv(volumeName string) []any {

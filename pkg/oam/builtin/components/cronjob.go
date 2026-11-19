@@ -1,7 +1,6 @@
 package components
 
 import (
-	"maps"
 	"regexp"
 	"strings"
 	"time"
@@ -15,7 +14,6 @@ import (
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -68,525 +66,195 @@ func validateCronSchedule(schedule string) error {
 	return errors.Errorf("invalid cron schedule %q: must be a 5-field cron expression (e.g. \"0 2 * * *\"), an @-descriptor (@yearly, @annually, @monthly, @weekly, @daily, @midnight, @hourly), or \"@every <duration>\" (e.g. \"@every 1h30m\")", schedule)
 }
 
-// CronjobHandler handles OAM cronjob components.
+// CronjobHandler handles OAM cronjob components: the kind-named projection of
+// a batch/v1 CronJob (go-kure/launcher#1629).
+//
+// Its properties are the top-level json fields of batchv1.CronJobSpec, decoded
+// strictly (decodeKindSpec). It emits the CronJob, named after the component
+// in the build namespace, with the authored spec. One thing is added: the
+// `app` label on the pod template of the job template, beside the authored
+// labels, which every workload kind gives its pods and launcher's traits and
+// Services select on (podTemplateAppLabelsAt). The object itself, and the job
+// template's metadata, get no label, no annotation and no default of
+// launcher's. The job template takes no selector: the API server generates
+// one. TestCoreKindSchemas_CoverSpec keeps the published key set equal to the
+// upstream json tags.
 type CronjobHandler struct{}
-
-// cronJobSpecRejectedKeys are the batchv1.CronJobSpec fields an author may not
-// set on a cronjob component; each maps to the error explaining why
-// (refusedKeys).
-var cronJobSpecRejectedKeys = map[string]string{
-	"jobTemplate": "jobTemplate: not authorable as a whole; the job is projected from the component's own job-level, pod-level and container properties",
-}
 
 // CanHandle returns true for cronjob component type.
 func (h *CronjobHandler) CanHandle(componentType string) bool {
 	return componentType == "cronjob"
 }
 
-// PropertySchema declares the cronjob component's user-facing properties.
+// PropertySchema declares every top-level batchv1.CronJobSpec field by its json
+// name. Structured fields are open objects whose content is checked by the
+// strict decode, not by this schema.
 func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
-	m := map[string]oam.PropertySchema{
-		"image":                      {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the job container."},
-		"schedule":                   {Type: oam.PropertyTypeString, Required: true, Description: "Cron schedule: a standard 5-field cron expression (e.g. \"0 2 * * *\"), an @-descriptor (@yearly, @annually, @monthly, @weekly, @daily, @midnight, @hourly), or \"@every <duration>\" (e.g. \"@every 1h30m\")."},
-		"restartPolicy":              {Type: oam.PropertyTypeString, Default: "OnFailure", Enum: []any{"Never", "OnFailure"}, Description: "Pod restart policy for the job's containers."},
-		"successfulJobsHistoryLimit": {Type: oam.PropertyTypeInteger, Default: 3, Description: "Number of successful finished jobs to retain."},
-		"failedJobsHistoryLimit":     {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of failed finished jobs to retain."},
-		"env":                        schemaEnv(false),
-		"envFrom":                    schemaEnvFrom(false),
-		"resources":                  schemaResources(false),
-		"command":                    schemaStringArray(),
-		"args":                       schemaStringArray(),
-		"ports":                      schemaMainContainerPorts(),
-		"probes":                     schemaProbes(false),
-		"lifecycle":                  schemaLifecycle(false),
-		"securityContext":            schemaSecurityContext(false),
-		"workingDir":                 schemaWorkingDir(false),
-		"volumes":                    schemaVolumes(),
-		"initContainers":             schemaInitContainers(),
-		"concurrencyPolicy":          schemaCronJobConcurrencyPolicy(),
-		"suspend":                    schemaCronJobSuspend(),
-		"startingDeadlineSeconds":    schemaCronJobStartingDeadlineSeconds(),
-		"timeZone":                   schemaCronJobTimeZone(),
-		// The three raw scheduling shapes scheduling.go projects.
-		"affinity":                  schemaRawAffinity(),
-		"tolerations":               schemaTolerations(),
-		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
-		podMetadataProperty:         schemaPodMetadata("CronJob's Job"),
-	}
-	maps.Copy(m, schemaContainerFields())
-	maps.Copy(m, schemaJobSpec(false))
-	maps.Copy(m, schemaPodSpec(false, true))
-	return oam.DeclareBounds(m, workloadBounds(false, false, false))
+	jobTemplate := jobTemplateSchema("Required. CronJob spec.jobTemplate: the Job each run creates, its `metadata` and its `spec`. The pod template under spec.template is held to what the pod kind holds its own to (containers required, the image rule, ephemeralContainers, priority and overhead refused) and to the environment policy; its metadata.labels gains the `app` label, and an authored `app` with another value is refused. The Job's spec.selector and spec.manualSelector true are refused: the API server generates the selector.")
+	jobTemplate.Required = true
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
+		"schedule":                   {Type: oam.PropertyTypeString, Required: true, Description: "Required. CronJob spec.schedule: a standard 5-field cron expression (e.g. \"0 2 * * *\"), an @-descriptor (@yearly, @annually, @monthly, @weekly, @daily, @midnight, @hourly), or \"@every <duration>\" (e.g. \"@every 1h30m\")."},
+		"jobTemplate":                jobTemplate,
+		"timeZone":                   {Type: oam.PropertyTypeString, Description: "CronJob spec.timeZone: an IANA time zone name the schedule is read in; \"Local\" and the empty string are refused. The API server reads the schedule in the controller's zone when it is unset."},
+		"startingDeadlineSeconds":    {Type: oam.PropertyTypeInteger, Description: "CronJob spec.startingDeadlineSeconds: seconds after a scheduled time within which a missed run may still start."},
+		"concurrencyPolicy":          {Type: oam.PropertyTypeString, Description: "CronJob spec.concurrencyPolicy: Allow, Forbid or Replace. The API server defaults it to Allow; an authored empty string is refused."},
+		"suspend":                    {Type: oam.PropertyTypeBoolean, Description: "CronJob spec.suspend: true stops the CronJob from creating Jobs."},
+		"successfulJobsHistoryLimit": {Type: oam.PropertyTypeInteger, Description: "CronJob spec.successfulJobsHistoryLimit: the number of finished successful Jobs kept. The API server defaults it to 3."},
+		"failedJobsHistoryLimit":     {Type: oam.PropertyTypeInteger, Description: "CronJob spec.failedJobsHistoryLimit: the number of finished failed Jobs kept. The API server defaults it to 1."},
+	}, podTemplateBoundsOn("jobTemplate", false))
 }
 
-// ToApplicationConfig converts an OAM cronjob component to a CronjobConfig. The
-// CronJob's name is held to the length the API server creates one under
-// (validateCronJobName).
+// ToApplicationConfig decodes an OAM cronjob component into a CronjobConfig,
+// under the package's null contract and the strict decode every
+// spec-projecting kind uses. What the CronJob may not hold is refused here,
+// whatever the environment policy: see CronjobConfig.validate and
+// cronjobDefaultedZeros. The CronJob's name is held to the length the API
+// server creates one under.
 func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	if err := validateCronJobName(component.ObjectName(), component.Name); err != nil {
 		return nil, err
 	}
-	config := &CronjobConfig{
+	spec, props, err := decodeKindSpec[batchv1.CronJobSpec](component.Properties, "batch/v1 CronJobSpec")
+	if err != nil {
+		return nil, err
+	}
+	if err := refuseUncarriedSpecValues(props, spec, cronjobDefaultedZeros(spec)); err != nil {
+		return nil, err
+	}
+	if err := refuseUnauthoredRequired(props, jobTemplateLabelSelectorRequired()); err != nil {
+		return nil, err
+	}
+	cfg := &CronjobConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
 		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
+		Spec:       *spec,
 	}
+	if _, err := cfg.validate(component.Name); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
 
-	props := component.Properties
-
-	// The JobSpec fields the job component refuses, for the same reasons: the
-	// CronJob's job is the same JobSpec. Refused before anything is read out of
-	// props, as there.
-	if err := refusedProperty(props, cronJobSpecRejectedKeys, jobSpecRejectedKeys); err != nil {
-		return nil, err
-	}
-
-	image, ok := props["image"].(string)
-	if !ok {
-		return nil, errors.New("required property 'image' missing or not a string")
-	}
-	if err := ValidateImageRef(image); err != nil {
-		return nil, err
-	}
-	config.Image = image
-
-	schedule, ok := props["schedule"].(string)
-	if !ok {
-		return nil, errors.New("required property 'schedule' missing or not a string")
-	}
-	if err := validateCronSchedule(schedule); err != nil {
-		return nil, err
-	}
-	config.Schedule = schedule
-
-	config.RestartPolicy = corev1.RestartPolicyOnFailure
-	// Read raw rather than through parseStringField, as job.go does: that helper
-	// reports an authored "" as absent, and "" is a value the switch below must
-	// refuse rather than default.
-	if raw, present := authoredValue(props, "restartPolicy"); present {
-		rp, ok := raw.(string)
-		if !ok {
-			return nil, errors.Errorf("restartPolicy: must be a string, got %T", raw)
-		}
-		switch rp {
-		case string(corev1.RestartPolicyNever):
-			config.RestartPolicy = corev1.RestartPolicyNever
-		case string(corev1.RestartPolicyOnFailure):
-			config.RestartPolicy = corev1.RestartPolicyOnFailure
-		default:
-			return nil, errors.Errorf("invalid restartPolicy %q, must be 'Never' or 'OnFailure'", rp)
-		}
-	} else {
-		config.parseFills = append(config.parseFills, "restartPolicy")
-	}
-
-	config.SuccessfulJobsHistoryLimit = 3
-	if raw, ok := authoredValue(props, "successfulJobsHistoryLimit"); ok {
-		limit, err := parseHistoryLimit("successfulJobsHistoryLimit", raw)
-		if err != nil {
-			return nil, err
-		}
-		config.SuccessfulJobsHistoryLimit = limit
-	} else {
-		config.parseFills = append(config.parseFills, "successfulJobsHistoryLimit")
-	}
-
-	config.FailedJobsHistoryLimit = 1
-	if raw, ok := authoredValue(props, "failedJobsHistoryLimit"); ok {
-		limit, err := parseHistoryLimit("failedJobsHistoryLimit", raw)
-		if err != nil {
-			return nil, err
-		}
-		config.FailedJobsHistoryLimit = limit
-	} else {
-		config.parseFills = append(config.parseFills, "failedJobsHistoryLimit")
-	}
-
-	if v, present, err := parseStringField(props, "concurrencyPolicy", "concurrencyPolicy"); err != nil {
-		return nil, err
-	} else if present {
-		switch batchv1.ConcurrencyPolicy(v) {
-		case batchv1.AllowConcurrent, batchv1.ForbidConcurrent, batchv1.ReplaceConcurrent:
-			cp := batchv1.ConcurrencyPolicy(v)
-			config.ConcurrencyPolicy = &cp
-		default:
-			return nil, errors.Errorf("concurrencyPolicy: invalid value %q, must be %q, %q, or %q", v, batchv1.AllowConcurrent, batchv1.ForbidConcurrent, batchv1.ReplaceConcurrent)
-		}
-	}
-
-	if suspend, err := parseBoolField(props, "suspend", "suspend"); err != nil {
-		return nil, err
-	} else if suspend != nil {
-		config.Suspend = suspend
-	}
-
-	if v, present, err := parseInt64Field(props, "startingDeadlineSeconds", "startingDeadlineSeconds"); err != nil {
-		return nil, err
-	} else if present {
-		if v < 0 {
-			return nil, errors.Errorf("startingDeadlineSeconds: must be >= 0, got %d", v)
-		}
-		config.StartingDeadlineSeconds = &v
-	}
-
-	// timeZone cannot reuse parseStringField: that helper treats an authored ""
-	// the same as omission (ok=false, no error), but timeZone must reject an
-	// authored "" outright — time.LoadLocation("") itself returns UTC with no
-	// error, which would silently accept a value the author almost certainly
-	// didn't intend. "Local" is rejected case-insensitively before calling
-	// time.LoadLocation for the same reason: LoadLocation("Local") succeeds
-	// (it returns the process's own local zone), but Kubernetes' own CronJob
-	// validation explicitly rejects "Local" as server-dependent.
-	if raw, present := authoredValue(props, "timeZone"); present {
-		tz, ok := raw.(string)
-		if !ok {
-			return nil, errors.Errorf("timeZone: must be a string, got %T", raw)
-		}
-		if tz == "" {
-			return nil, errors.New("timeZone: must not be an empty string; omit the property instead")
-		}
-		if strings.EqualFold(tz, "Local") {
-			return nil, errors.Errorf("timeZone: %q is not a valid IANA time zone name (Kubernetes rejects \"Local\" as server-dependent)", tz)
-		}
-		if _, err := time.LoadLocation(tz); err != nil {
-			return nil, errors.Errorf("timeZone: %q is not a valid IANA time zone name: %v", tz, err)
-		}
-		config.TimeZone = &tz
-	}
-
-	jobSpec, err := parseJobSpec(props)
-	if err != nil {
-		return nil, err
-	}
-	config.JobSpec = jobSpec
-	config.parseFills = append(config.parseFills, podFailurePolicyStatusFills(props)...)
-
-	env, err := parseEnv(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Env = env
-	envFrom, err := parseEnvFrom(props)
-	if err != nil {
-		return nil, err
-	}
-	config.EnvFrom = envFrom
-	if resources, present, err := parseObjectField(props, "resources", "resources"); err != nil {
-		return nil, err
-	} else if present {
-		r, err := parseResources(resources)
-		if err != nil {
-			return nil, errors.Wrap(err, "invalid resources configuration")
-		}
-		config.Resources = r
-	}
-	command, err := parseCommand(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Command = command
-	args, err := parseArgs(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Args = args
-	ports, portFills, err := parseContainerPorts(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Ports = ports
-	config.parseFills = append(config.parseFills, portFills...)
-	// Without `ports`, namedPortsAllowed=false: the main container then
-	// declares no ContainerPort for the kubelet to resolve a named
-	// probe/lifecycle port against. With `ports`, a name resolves against them.
-	probes, lifecycle, err := parseMainContainerHandlers(props, ports)
-	if err != nil {
-		return nil, err
-	}
-	config.Probes = probes
-	config.Lifecycle = lifecycle
-	securityContext, err := parseSecurityContext(props)
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid securityContext configuration")
-	}
-	config.SecurityContext = securityContext
-	if workingDir, present, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
-		return nil, err
-	} else if present {
-		config.WorkingDir = workingDir
-	}
-	if config.ContainerFields, err = parseMainContainerFields(props); err != nil {
-		return nil, err
-	}
-
-	parsed, err := parsePodVolumes(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Volumes = parsed.Volumes
-	config.VolumeMounts = parsed.Mounts
-	if err := checkMainContainerMountPropagation(parsed.Mounts, securityContext); err != nil {
-		return nil, err
-	}
-	config.VolumeDevices = parsed.Devices
-	config.PVCs = parsed.PVCs
-
-	initContainers, err := parseInitContainers(props)
-	if err != nil {
-		return nil, err
-	}
-	config.InitContainers = initContainers
-	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, nil); err != nil {
-		return nil, err
-	}
-	if err := checkPodContainerNames(component.Name, initContainers, nil); err != nil {
-		return nil, err
-	}
-	// The main container's `ports` and the native sidecars share one name space;
-	// jobs take no sidecars.
-	if err := checkPodPortNames(config.Ports, initContainers, nil); err != nil {
-		return nil, err
-	}
-	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, nil); err != nil {
-		return nil, err
-	}
-
-	if config.Affinity, err = parseRawAffinity(props); err != nil {
-		return nil, err
-	}
-	if config.Tolerations, err = parseTolerations(props); err != nil {
-		return nil, err
-	}
-	if config.TopologySpreadConstraints, err = parseTopologySpreadConstraints(props); err != nil {
-		return nil, err
-	}
-
-	podSpec, err := parsePodSpec(props, true)
-	if err != nil {
-		return nil, err
-	}
-	config.PodSpec = podSpec
-
-	podMetadata, err := parsePodMetadata(props, true)
-	if err != nil {
-		return nil, err
-	}
-	config.PodMetadata = podMetadata
-
-	return config, nil
+// cronjobDefaultedZeros is the defaulted-zero list of a CronJobSpec: the pod
+// spec's list under jobTemplate.spec.template.spec, and concurrencyPolicy,
+// which the encoding omits when empty and the API server then defaults to
+// Allow. Every other field of the spec carries its zero: the pointers, and the
+// schedule the config refuses when it is empty.
+func cronjobDefaultedZeros(spec *batchv1.CronJobSpec) defaultedZeroFields {
+	zeros := jobTemplateDefaultedZeros(&spec.JobTemplate)
+	zeros.fields["concurrencyPolicy"] = `"Allow"`
+	return zeros
 }
 
 // CronjobConfig implements stack.ApplicationConfig for cronjob components.
+// Spec is the decoded CronJobSpec exactly as authored.
 type CronjobConfig struct {
 	Name string
-	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
-	oam.PolicyDefaultLog
-	// parseFills are the property paths the parser filled because the author wrote
-	// no value (BuiltinDefaults reads them).
-	parseFills []string
-	// ObjectName names the CronJob (oam.Component.ObjectName); its labels and
-	// main container keep Name. Empty for the application's name.
+	// ObjectName names the CronJob (oam.Component.ObjectName); its labels keep
+	// Name. Empty for the application's name.
 	ObjectName string
 	// Metadata is the labels and annotations authored for the CronJob
 	// (oam.Component.ObjectMetadata). They go on the CronJob's own metadata:
-	// its pod template keeps the labels of the kind, with the ones PodMetadata
-	// adds.
-	Metadata oam.ObjectMetadata
-	// PodMetadata is the labels and annotations authored for the pod template
-	// of the Jobs the CronJob creates (`podMetadata`); the CronJob's and the job
-	// template's own metadata are not it.
-	PodMetadata                PodMetadata
-	Namespace                  string
-	Image                      string
-	Schedule                   string
-	RestartPolicy              corev1.RestartPolicy
-	SuccessfulJobsHistoryLimit int32
-	FailedJobsHistoryLimit     int32
-	// ConcurrencyPolicy, Suspend, StartingDeadlineSeconds, and TimeZone are all
-	// presence-gated pointers. Every corresponding batchv1.CronJobSpec field IS
-	// tagged `omitempty`, but that only suppresses a nil pointer (Suspend,
-	// StartingDeadlineSeconds, TimeZone) or the Go zero value on a non-pointer
-	// scalar (ConcurrencyPolicy's underlying string type) — none of that
-	// protects against createCronJob calling a kure setter unconditionally,
-	// since every one of those setters writes a non-nil/non-zero value
-	// regardless of whether the author authored it. A bare (non-presence-gated)
-	// value here would add a key to every generated CronJob that no author
-	// asked for. See the plan's CronJobSpec-level field table.
-	ConcurrencyPolicy       *batchv1.ConcurrencyPolicy
-	Suspend                 *bool
-	StartingDeadlineSeconds *int64
-	TimeZone                *string
-	JobSpec                 JobSpecConfig
-	Env                     []corev1.EnvVar
-	EnvFrom                 []corev1.EnvFromSource
-	Resources               ResourceRequirements
-	Command                 []string
-	Args                    []string
-	Ports                   []corev1.ContainerPort
-	Probes                  ProbeConfig
-	Lifecycle               *corev1.Lifecycle
-	SecurityContext         *corev1.SecurityContext
-	WorkingDir              string
-	// ContainerFields are the main container's fields every container of the
-	// pod accepts (see parseContainerFields).
-	ContainerFields ContainerFields
-	Volumes         []corev1.Volume
-	VolumeMounts    []corev1.VolumeMount
-	VolumeDevices   []corev1.VolumeDevice
-	InitContainers  []InitContainerConfig
-	PVCs            []PVCConfig
-	// Affinity, Tolerations and TopologySpreadConstraints are the raw
-	// scheduling shapes, written onto the pod template of the Job the CronJob
-	// creates as authored (see scheduling.go).
-	Affinity                  *corev1.Affinity
-	Tolerations               []corev1.Toleration
-	TopologySpreadConstraints []corev1.TopologySpreadConstraint
-	// PodSpec holds the shared pod-level properties (see parsePodSpec). Parsed
-	// with jobPods=true, so `podActiveDeadlineSeconds` (the pod's own
-	// deadline) is accepted alongside the job-level `activeDeadlineSeconds`
-	// from schemaJobSpec — two different fields, two different keys.
-	PodSpec PodSpecConfig
+	// the job template keeps its own, and the pod template the labels of the
+	// kind.
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      batchv1.CronJobSpec
 }
 
-// ServiceAccountName implements oam.ServiceAccountNamer: the authored
-// serviceAccountName, or "" when the pods run as no named account.
-func (c *CronjobConfig) ServiceAccountName() (string, bool) {
-	return c.PodSpec.ServiceAccountName, true
+// validate refuses a spec the CronJob cannot be emitted from and returns the
+// labels of the pod template of its job template. The schedule must be one the
+// API server reads, the time zone a named IANA zone, the job template no
+// selector (the API server generates it), the pod template
+// validateBatchPodTemplate, and its labels podTemplateAppLabelsAt. The API's
+// other value rules are left to the API server.
+func (c *CronjobConfig) validate(component string) (map[string]string, error) {
+	if c.Spec.Schedule == "" {
+		return nil, errors.New("schedule: required (a 5-field cron expression, an @-descriptor, or \"@every <duration>\")")
+	}
+	if err := validateCronSchedule(c.Spec.Schedule); err != nil {
+		return nil, err
+	}
+	if err := validateCronJobTimeZone(c.Spec.TimeZone); err != nil {
+		return nil, err
+	}
+	job := &c.Spec.JobTemplate.Spec
+	if job.Selector != nil {
+		return nil, errors.New("jobTemplate.spec.selector: not supported — the API server generates the selector of a CronJob's Job and refuses an authored one; select the pods by the labels of jobTemplate.spec.template.metadata")
+	}
+	if job.ManualSelector != nil && *job.ManualSelector {
+		return nil, errors.New("jobTemplate.spec.manualSelector: not supported — the API server allows only unset or false on a CronJob's job template, since it generates the selector")
+	}
+	if err := validateBatchPodTemplate("jobTemplate.spec.template.", &job.Template); err != nil {
+		return nil, err
+	}
+	return podTemplateAppLabelsAt("jobTemplate.spec.template", component, job.Template.Labels)
 }
 
-// ApplyPolicy applies defaults then enforces limits from the policy.
-// CronJobs don't have replicas, so only resource and registry limits apply.
-func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
-	if p == nil {
+// validateCronJobTimeZone refuses a time zone the API server refuses. An unset
+// one is the API's own default. "Local" is refused case-insensitively:
+// time.LoadLocation("Local") succeeds with the process's own zone, which
+// Kubernetes' CronJob validation rejects as server-dependent, and the empty
+// string is refused because time.LoadLocation("") would read it as UTC, which
+// the author almost certainly did not intend.
+func validateCronJobTimeZone(tz *string) error {
+	if tz == nil {
 		return nil
 	}
-
-	if err := applyContainerPolicyDefaults(p, &c.PolicyDefaultLog, &c.Resources, c.InitContainers, nil); err != nil {
-		return err
+	if *tz == "" {
+		return errors.New("timeZone: must not be an empty string; omit the property instead")
 	}
-
-	if err := enforceMaxResources(c.Resources, p.MaxCPU(), p.MaxMemory()); err != nil {
-		return err
+	if strings.EqualFold(*tz, "Local") {
+		return errors.Errorf("timeZone: %q is not a valid IANA time zone name (Kubernetes rejects \"Local\" as server-dependent)", *tz)
 	}
-	if err := enforceAllowedRegistries(c.Image, p.AllowedRegistries()); err != nil {
-		return err
-	}
-	if err := enforcePrivileged(c.SecurityContext, p.AllowPrivileged()); err != nil {
-		return err
-	}
-	if err := enforceVolumeSourcePolicy("", c.Volumes, p); err != nil {
-		return err
-	}
-	if err := enforceHostNamespaces(c.PodSpec, p); err != nil {
-		return err
-	}
-	if err := enforcePodResources(c.PodSpec, p.MaxCPU(), p.MaxMemory()); err != nil {
-		return err
-	}
-	if err := enforcePodHostProcess(c.PodSpec, p.AllowPrivileged()); err != nil {
-		return err
-	}
-	if err := enforceContainerCapabilities(c.SecurityContext, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
-		return err
-	}
-	for i, ic := range c.InitContainers {
-		if err := enforceExtraContainer("initContainers", i, ic.Name, ic.Image,
-			ic.Resources, ic.SecurityContext, p); err != nil {
-			return err
-		}
+	if _, err := time.LoadLocation(*tz); err != nil {
+		return errors.Errorf("timeZone: %q is not a valid IANA time zone name: %v", *tz, err)
 	}
 	return nil
 }
 
-// Generate creates a Kubernetes CronJob, and nothing beside it: no
-// ServiceAccount and no claim (go-kure/launcher#702). The name-length check is
-// repeated, since the config is exported.
-func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if err := validateCronJobName(kindObjectName(c.ObjectName, app.Name), app.Name); err != nil {
-		return nil, err
+// ServiceAccountName implements oam.ServiceAccountNamer: the account the pods
+// of the CronJob's Jobs run as, read from the pod template as the pod kind
+// reads its spec. No account is generated, so "" means the namespace's default
+// account.
+func (c *CronjobConfig) ServiceAccountName() (string, bool) {
+	spec := &c.Spec.JobTemplate.Spec.Template.Spec
+	if spec.ServiceAccountName != "" {
+		return spec.ServiceAccountName, true
 	}
-	cronjob, err := c.createCronJob(app)
-	if err != nil {
-		return nil, err
-	}
-	return kindObject(cronjob, c.Metadata)
+	return spec.DeprecatedServiceAccount, true
 }
 
-func (c *CronjobConfig) createCronJob(app *stack.Application) (*batchv1.CronJob, error) {
-	container, err := buildMainContainer(app.Name, mainContainerInput{
-		Image:           c.Image,
-		Command:         c.Command,
-		Args:            c.Args,
-		Resources:       c.Resources,
-		Ports:           c.Ports,
-		Env:             c.Env,
-		EnvFrom:         c.EnvFrom,
-		Probes:          c.Probes,
-		WorkingDir:      c.WorkingDir,
-		Lifecycle:       c.Lifecycle,
-		SecurityContext: c.SecurityContext,
-		VolumeMounts:    c.VolumeMounts,
-		VolumeDevices:   c.VolumeDevices,
-		Fields:          c.ContainerFields,
-	})
+// ApplyPolicy holds the pod template of the CronJob's job template to the
+// environment policy (enforcePodTemplatePolicy). A CronJob has no replicas, so
+// no replica maximum applies, and it fills no default. A nil policy checks
+// nothing.
+func (c *CronjobConfig) ApplyPolicy(p oam.Policy) error {
+	if p == nil {
+		return nil
+	}
+	return enforcePodTemplatePolicy("jobTemplate.spec.template.spec", &c.Spec.JobTemplate.Spec.Template.Spec, p)
+}
+
+// Generate emits the CronJob, and nothing beside it: no ServiceAccount and no
+// claim (go-kure/launcher#702). It is kure's identity-only constructor, a deep
+// copy of the spec, and the `app` label on the pod template of the job
+// template. The parse-time refusals the typed spec can show are repeated,
+// since the config is exported and the label and the name are valued from
+// app.Name.
+func (c *CronjobConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	name := kindObjectName(c.ObjectName, app.Name)
+	if err := validateCronJobName(name, app.Name); err != nil {
+		return nil, err
+	}
+	labelled, err := c.validate(app.Name)
 	if err != nil {
 		return nil, err
 	}
-
-	cj := kubernetes.CreateCronJob(kindObjectName(c.ObjectName, app.Name), app.Namespace)
-	cj.Spec.Schedule = c.Schedule
-	cj.Labels = appLabels(app.Name)
-	cj.Annotations = nil
-	cj.Spec.JobTemplate.Labels = appLabels(app.Name)
-	cj.Spec.JobTemplate.Spec.Template.Labels = appLabels(app.Name)
-	if err := c.PodMetadata.applyTo(&cj.Spec.JobTemplate.Spec.Template); err != nil {
-		return nil, err
-	}
-	kubernetes.SetCronJobSuccessfulJobsHistoryLimit(cj, c.SuccessfulJobsHistoryLimit)
-	kubernetes.SetCronJobFailedJobsHistoryLimit(cj, c.FailedJobsHistoryLimit)
-	if c.ConcurrencyPolicy != nil {
-		cj.Spec.ConcurrencyPolicy = *c.ConcurrencyPolicy
-	}
-	if c.Suspend != nil {
-		kubernetes.SetCronJobSuspend(cj, *c.Suspend)
-	}
-	if c.StartingDeadlineSeconds != nil {
-		kubernetes.SetCronJobStartingDeadlineSeconds(cj, *c.StartingDeadlineSeconds)
-	}
-	if c.TimeZone != nil {
-		kubernetes.SetCronJobTimeZone(cj, c.TimeZone)
-	}
-	applyJobSpec(&cj.Spec.JobTemplate.Spec, c.JobSpec)
-
-	// Replaces the whole pod spec. Under the release-1 builder contract
-	// (go-kure/launcher#361) CreateCronJob is identity-only and pre-fills no
-	// RestartPolicy at all, so the emitted value is entirely this handler's:
-	// c.RestartPolicy is always set (default OnFailure), which is what the pod
-	// template carries — unchanged from when the constructor still wrote
-	// `Never` and this assignment overwrote it.
-	podSpec, err := buildPodSpec(podSpecInput{
-		Config:         c.PodSpec,
-		MainContainer:  container,
-		InitContainers: c.InitContainers,
-		Volumes:        c.Volumes,
-		RestartPolicy:  c.RestartPolicy,
-
-		Affinity:                  c.Affinity,
-		Tolerations:               c.Tolerations,
-		TopologySpreadConstraints: c.TopologySpreadConstraints,
-	})
-	if err != nil {
-		return nil, err
-	}
-	cj.Spec.JobTemplate.Spec.Template.Spec = podSpec
-
-	// After the template is assigned, for the same reason as in createJob: the
-	// cronjob's jobTemplate.spec is the same batchv1.JobSpec, validated by the
-	// same upstream validateJobSpec (go-kure/launcher#345).
-	if err := validateJobPodFailurePolicyAgainstTemplate(&cj.Spec.JobTemplate.Spec); err != nil {
-		return nil, err
-	}
-
-	return cj, nil
+	cj := kubernetes.CreateCronJob(name, app.Namespace)
+	c.Spec.DeepCopyInto(&cj.Spec)
+	cj.Spec.JobTemplate.Spec.Template.Labels = labelled
+	return kindObject(cj, c.Metadata)
 }

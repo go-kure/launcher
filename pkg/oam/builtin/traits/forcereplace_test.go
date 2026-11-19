@@ -106,7 +106,7 @@ func TestForceReplaceHandler_Apply_RealJob(t *testing.T) {
 	cfg, err := (&components.JobHandler{}).ToApplicationConfig(&oam.Component{
 		Name:       "migrate",
 		Type:       "job",
-		Properties: map[string]any{"image": "ghcr.io/example/migrate:v1.0.0"},
+		Properties: rawJobProps("ghcr.io/example/migrate:v1.0.0"),
 	}, "default")
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)

@@ -111,11 +111,10 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		// Each of the kinds below counts one more own key since
 		// go-kure/launcher#1178: `podMetadata`, in no shared list.
 		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 21, statefulSetSpecPropertyKeys, false},
-		{"cronjob", (&CronjobHandler{}).PropertySchema(), 25, jobSpecPropertyKeys, true},
-		{"job", (&JobHandler{}).PropertySchema(), 19, jobSpecPropertyKeys, true},
 		// The reshaped deployment parser is the role member, which keeps this
-		// count (go-kure/launcher#1629). The kind-named `deployment` takes the
-		// upstream spec and is not merged from these fragments.
+		// count (go-kure/launcher#1629). The kind-named `deployment`, `daemonset`,
+		// `job` and `cronjob` take the upstream spec and are not merged from these
+		// fragments.
 		// 17, not 14: go-kure/launcher#412 added affinity, tolerations and
 		// topologySpreadConstraints as own keys on this kind. Verified a real
 		// own-key increase and not the collision this guard exists to catch —

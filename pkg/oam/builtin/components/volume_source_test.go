@@ -170,8 +170,9 @@ func TestVolumeSource_Refusals(t *testing.T) {
 	}
 }
 
-// TestVolumeSource_FlatFormUnchanged: a flat entry still reads as before, a
-// claimName-less pvc is still refused where no claim is generated.
+// TestVolumeSource_FlatFormUnchanged: a flat entry still reads as before. The
+// raw `daemonset`, `job` and `cronjob` kinds (go-kure/launcher#1629) take no
+// flat entry and are not in workloadKinds.
 func TestVolumeSource_FlatFormUnchanged(t *testing.T) {
 	for _, k := range workloadKinds {
 		t.Run(k.name, func(t *testing.T) {
@@ -181,16 +182,6 @@ func TestVolumeSource_FlatFormUnchanged(t *testing.T) {
 				t.Errorf("configMap = %+v", got)
 			}
 		})
-	}
-	for _, kind := range []string{"daemonset", "job", "cronjob"} {
-		for _, k := range workloadKinds {
-			if k.name != kind {
-				continue
-			}
-			t.Run("pvc without claimName/"+kind, func(t *testing.T) {
-				refuses(t, kind, withProps(k.props, props{"volumes": []any{props{"name": "p", "type": "pvc", "mountPath": "/p"}}}), []string{`volume "p"`})
-			})
-		}
 	}
 }
 
@@ -289,7 +280,7 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 		{"image volume outside the registry allowlist", image, &stubPolicy{allowedRegistries: []string{"ghcr.io"}}, "assets"},
 	}
 	// worker stands for the reshaped deployment parser (go-kure/launcher#1629).
-	for _, kind := range []string{"worker", "statefulset", "job", "cronjob"} {
+	for _, kind := range []string{"worker", "statefulset"} {
 		for _, c := range cases {
 			t.Run(c.name+"/"+kind, func(t *testing.T) {
 				err := volumePolicyConfig(t, kind, c.entry).ApplyPolicy(c.policy)
@@ -299,8 +290,34 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 			})
 		}
 	}
-	// The raw `daemonset` kind (go-kure/launcher#1629) takes the upstream
-	// volume under `template.spec.volumes`, and the same two gates apply to it.
+	// The raw `daemonset`, `job` and `cronjob` kinds (go-kure/launcher#1629)
+	// take the upstream volume under the pod spec of their template, and the
+	// same two gates apply to them.
+	jobPodSpec := func() map[string]any {
+		return map[string]any{"restartPolicy": "Never", "containers": []any{map[string]any{"name": "app", "image": "ghcr.io/org/app:v1"}}}
+	}
+	rawKinds := []struct {
+		kind    string
+		handler oam.ComponentHandler
+		// build returns the component's properties and the pod spec within them.
+		build func() (p, podSpec map[string]any)
+	}{
+		{"daemonset", &components.DaemonsetHandler{}, func() (map[string]any, map[string]any) {
+			p := rawDaemonsetProps("ghcr.io/org/app:v1")
+			return p, p["template"].(map[string]any)["spec"].(map[string]any)
+		}},
+		{"job", &components.JobHandler{}, func() (map[string]any, map[string]any) {
+			spec := jobPodSpec()
+			return map[string]any{"template": map[string]any{"spec": spec}}, spec
+		}},
+		{"cronjob", &components.CronjobHandler{}, func() (map[string]any, map[string]any) {
+			spec := jobPodSpec()
+			return map[string]any{
+				"schedule":    "0 2 * * *",
+				"jobTemplate": map[string]any{"spec": map[string]any{"template": map[string]any{"spec": spec}}},
+			}, spec
+		}},
+	}
 	rawVolumes := map[string][]any{
 		"ephemeral claim over the storage cap": {map[string]any{"name": "scratch", "ephemeral": map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
 			"accessModes": []any{"ReadWriteOnce"},
@@ -308,26 +325,28 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 		}}}}},
 		"image volume outside the registry allowlist": {map[string]any{"name": "assets", "image": map[string]any{"reference": "evil.example.com/assets:v1"}}},
 	}
-	for _, c := range cases {
-		t.Run(c.name+"/daemonset", func(t *testing.T) {
-			p := rawDaemonsetProps("ghcr.io/org/app:v1")
-			p["template"].(map[string]any)["spec"].(map[string]any)["volumes"] = rawVolumes[c.name]
-			cfg, err := (&components.DaemonsetHandler{}).ToApplicationConfig(&oam.Component{Name: "app", Type: "daemonset", Properties: p}, "default")
-			if err != nil {
-				t.Fatalf("ToApplicationConfig: %v", err)
-			}
-			err = cfg.(oam.Enforceable).ApplyPolicy(c.policy)
-			if err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("ApplyPolicy = %v, want an error naming %q", err, c.want)
-			}
-		})
+	for _, k := range rawKinds {
+		for _, c := range cases {
+			t.Run(c.name+"/"+k.kind, func(t *testing.T) {
+				p, podSpec := k.build()
+				podSpec["volumes"] = rawVolumes[c.name]
+				cfg, err := k.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: k.kind, Properties: p}, "default")
+				if err != nil {
+					t.Fatalf("ToApplicationConfig: %v", err)
+				}
+				err = cfg.(oam.Enforceable).ApplyPolicy(c.policy)
+				if err == nil || !strings.Contains(err.Error(), c.want) {
+					t.Fatalf("ApplyPolicy = %v, want an error naming %q", err, c.want)
+				}
+			})
+		}
 	}
 	t.Run("within the policy", func(t *testing.T) {
 		if err := volumePolicyConfig(t, "worker", ephemeral("5Gi")).ApplyPolicy(&stubPolicy{maxStorageSize: "10Gi"}); err != nil {
 			t.Errorf("ephemeral within the cap: %v", err)
 		}
 		ok := nested("image", "assets", props{"reference": "ghcr.io/org/assets:v1"})
-		if err := volumePolicyConfig(t, "job", ok).ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}}); err != nil {
+		if err := volumePolicyConfig(t, "statefulset", ok).ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}}); err != nil {
 			t.Errorf("image within the allowlist: %v", err)
 		}
 	})

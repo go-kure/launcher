@@ -18,8 +18,6 @@ var refusedKeyBase = map[string]map[string]any{
 	"worker":                {"image": "ghcr.io/org/app:v1"},
 	"statefulset":           {"image": "ghcr.io/org/app:v1"},
 	"daemonset":             rawDaemonsetInternalProps("ghcr.io/org/app:v1"),
-	"job":                   {"image": "ghcr.io/org/app:v1"},
-	"cronjob":               {"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"},
 	"service":               {"ports": []any{map[string]any{"port": 80}}},
 	"persistentvolumeclaim": {"size": "1Gi"},
 	"serviceaccount":        {},
@@ -168,16 +166,10 @@ func TestRefusedKeys_BothPathsGiveTheReason(t *testing.T) {
 // TestRefusedKeys_NamedRefusals names the refusals go-kure/launcher#790 added,
 // so that a row dropped from a map or from the table is a failure here and not
 // only one case fewer in the table test above. Before, the parser dropped each
-// of these in silence: the cronjob's three JobSpec keys, the whole `template`
-// on a statefulset and a daemonset, and the upstream fields no hand-parsed type
-// reads.
+// of these in silence: the whole `template` on a statefulset, and the upstream
+// fields no hand-parsed type reads.
 func TestRefusedKeys_NamedRefusals(t *testing.T) {
 	for _, tc := range []struct{ componentType, key string }{
-		{"cronjob", "selector"},
-		{"cronjob", "manualSelector"},
-		{"cronjob", "template"},
-		{"cronjob", "scheduling"},
-		{"job", "scheduling"},
 		{"statefulset", "template"},
 		{"role-deployment", "restartPolicy"},
 		{"statefulset", "restartPolicy"},
@@ -186,21 +178,15 @@ func TestRefusedKeys_NamedRefusals(t *testing.T) {
 		{"role-deployment", "activeDeadlineSeconds"},
 		{"statefulset", "activeDeadlineSeconds"},
 		{"role-deployment", "evictionResponders"},
-		{"job", "evictionResponders"},
 		{"role-deployment", "restartPolicyRules"},
-		{"cronjob", "restartPolicyRules"},
 		{"serviceaccount", "secrets"},
 		// Upstream names read in another shape.
 		{"role-deployment", "containers"},
-		{"job", "containers"},
 		{"webservice", "livenessProbe"},
 		{"statefulset", "readinessProbe"},
-		{"cronjob", "startupProbe"},
 		{"statefulset", "volumeMounts"},
 		{"statefulset", "volumeDevices"},
 		{"worker", "name"},
-		{"job", "name"},
-		{"cronjob", "jobTemplate"},
 		{"persistentvolumeclaim", "resources"},
 	} {
 		if refusedKeyHint(tc.componentType, tc.key) == "" {
@@ -210,24 +196,26 @@ func TestRefusedKeys_NamedRefusals(t *testing.T) {
 	// A key the type has no refusal for, whether it reads the key or leaves it
 	// undeclared, gets no hint, whatever another type makes of it.
 	for _, tc := range []struct{ componentType, key string }{
-		{"job", "restartPolicy"},
-		{"cronjob", "restartPolicy"},
-		// The raw `deployment` kind takes the upstream spec, so it refuses
-		// none of what the reshaped parsers refuse (go-kure/launcher#1629).
+		// The raw `deployment`, `daemonset`, `job` and `cronjob` kinds take the
+		// upstream spec, so they refuse none of what the reshaped parsers refuse
+		// (go-kure/launcher#1629).
 		{"deployment", "restartPolicy"},
 		{"deployment", "activeDeadlineSeconds"},
 		{"deployment", "containers"},
 		{"deployment", "evictionResponders"},
 		{"deployment", "restartPolicyRules"},
-		// The same for the raw `daemonset` kind.
 		{"daemonset", "template"},
 		{"daemonset", "restartPolicy"},
 		{"daemonset", "activeDeadlineSeconds"},
 		{"daemonset", "containers"},
 		{"daemonset", "volumeMounts"},
+		{"job", "restartPolicy"},
+		{"job", "containers"},
 		{"job", "activeDeadlineSeconds"},
-		{"cronjob", "schedule"},
 		{"job", "jobTemplate"},
+		{"cronjob", "restartPolicy"},
+		{"cronjob", "containers"},
+		{"cronjob", "schedule"},
 		{"service", "name"},
 		{"serviceaccount", "name"},
 	} {
@@ -310,13 +298,8 @@ func TestRefusedKeys_OneLevelDown(t *testing.T) {
 	entry := func(resources map[string]any) []any {
 		return []any{map[string]any{"name": "extra", "image": "busybox:1", "resources": resources}}
 	}
-	for _, componentType := range []string{"role-deployment", "webservice", "worker", "statefulset", "job", "cronjob"} {
-		// A job's pod runs to completion, so `job` and `cronjob` have no
-		// `sidecars` property.
+	for _, componentType := range []string{"role-deployment", "webservice", "worker", "statefulset"} {
 		lists := []string{"initContainers", "sidecars"}
-		if componentType == "job" || componentType == "cronjob" {
-			lists = []string{"initContainers"}
-		}
 		t.Run(componentType+"/resources/control", func(t *testing.T) {
 			requests := map[string]any{"requests": map[string]any{"cpu": "10m"}}
 			documents := []map[string]any{with(componentType, "resources", requests)}
@@ -379,7 +362,7 @@ func TestRefusedKeys_InAnEntry(t *testing.T) {
 	initEntry := func(key string) []any {
 		return []any{map[string]any{"name": "init", "image": "busybox:1", key: map[string]any{}}}
 	}
-	for _, componentType := range []string{"role-deployment", "webservice", "worker", "statefulset", "job", "cronjob"} {
+	for _, componentType := range []string{"role-deployment", "webservice", "worker", "statefulset"} {
 		if refusedKeyHint(componentType, "livenessProbe") == "" {
 			t.Fatalf("type %q has no top-level refusal of livenessProbe; pick another key for the control below", componentType)
 		}

@@ -29,8 +29,6 @@ var resourceKinds = []struct {
 	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{roleMemberType, &components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "0 2 * * *"}},
-	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"postgresql", postgresqlViaRule{}, map[string]any{}},
 }
 

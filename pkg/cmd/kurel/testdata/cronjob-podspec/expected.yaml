@@ -2,16 +2,13 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   labels:
-    app: cleanup
     launcher.gokure.dev/component: cleanup
   name: cleanup
   namespace: default
 spec:
-  failedJobsHistoryLimit: 1
   jobTemplate:
     metadata:
       labels:
-        app: cleanup
         launcher.gokure.dev/component: cleanup
     spec:
       activeDeadlineSeconds: 900
@@ -22,16 +19,10 @@ spec:
             launcher.gokure.dev/component: cleanup
         spec:
           activeDeadlineSeconds: 600
-          automountServiceAccountToken: false
           containers:
           - image: ghcr.io/example/cleanup:v1.0.0
             name: cleanup
-            resources:
-              limits:
-                memory: 128Mi
-              requests:
-                cpu: 100m
-                memory: 128Mi
+            resources: {}
           hostnameOverride: cleanup.batch.example
           nodeName: batch-node-a
           restartPolicy: OnFailure
@@ -43,4 +34,3 @@ spec:
               type: RuntimeDefault
           terminationGracePeriodSeconds: 10
   schedule: 0 * * * *
-  successfulJobsHistoryLimit: 3

@@ -8,8 +8,6 @@ spec:
     - name: migrate
       type: job
       properties:
-        image: ghcr.io/example/migrate:v1.0.0
-        restartPolicy: Never
         suspend: true
         backoffLimit: 4
         completions: 6
@@ -26,3 +24,9 @@ spec:
             - succeededIndexes: "0-3"
               succeededCount: 3
             - succeededCount: 5
+        template:
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: migrate
+                image: ghcr.io/example/migrate:v1.0.0

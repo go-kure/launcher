@@ -31,8 +31,6 @@ type portKind struct {
 
 var portKinds = []portKind{
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "nginx:1.27"}},
-	{"job", &components.JobHandler{}, map[string]any{"image": "busybox:1.36"}},
-	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "busybox:1.36", "schedule": "0 2 * * *"}},
 }
 
 // props is the kind's minimal properties plus extra.

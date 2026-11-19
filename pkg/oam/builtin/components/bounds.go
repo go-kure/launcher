@@ -105,7 +105,13 @@ func podBounds() map[string][]oam.RefusalClass {
 // `template` node: every class of podBounds, on that node. replicas says
 // whether the type has a `replicas` the policy holds.
 func podTemplateBounds(replicas bool) map[string][]oam.RefusalClass {
-	b := map[string][]oam.RefusalClass{"template": slices.Concat(slices.Collect(maps.Values(podBounds()))...)}
+	return podTemplateBoundsOn("template", replicas)
+}
+
+// podTemplateBoundsOn is podTemplateBounds for a type whose open node is key, as
+// `jobTemplate` is for a CronJob, whose pod sits below it.
+func podTemplateBoundsOn(key string, replicas bool) map[string][]oam.RefusalClass {
+	b := map[string][]oam.RefusalClass{key: slices.Concat(slices.Collect(maps.Values(podBounds()))...)}
 	if replicas {
 		b["replicas"] = []oam.RefusalClass{oam.RefusalReplicaMaximum}
 	}

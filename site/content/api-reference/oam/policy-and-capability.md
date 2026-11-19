@@ -189,16 +189,17 @@ with no entry is not shown to be free of a bound.
 
 The container properties are those of the main container, at the top of the component, and
 the same ones under `initContainers[]` and `sidecars[]`. Where an entry names no type, it
-holds for the workload types that keep the reshaped form: `webservice`, `worker`, `statefulset`,
-`job` and `cronjob` (the last two have no `sidecars`).
+holds for the workload types that keep the reshaped form: `webservice`, `worker` and
+`statefulset`.
 
 The kinds that take a pod as the API type leave most of it open, so their bounds sit on the
 open nodes, with no path below them. `pod` declares `host-namespace` on `hostNetwork`,
 `hostPID` and `hostIPC`; `privileged`, `container-capability`, `registry` and
 `resource-maximum` on `containers` and on `initContainers`; `privileged` on
 `securityContext`; `resource-maximum` on `resources`; and `host-path`, `registry` and
-`storage-maximum` on `volumes`. `podtemplate`, `deployment`, `daemonset`, `replicaset` and
-`replicationcontroller` declare those seven classes on their one `template` node.
+`storage-maximum` on `volumes`. `podtemplate`, `deployment`, `daemonset`, `job`,
+`replicaset` and `replicationcontroller` declare those seven classes on their one `template`
+node, and `cronjob` on its `jobTemplate` node.
 
 Four classes are declared on no property yet. `trait-capability` and `object-kind` are about
 a type as a whole. `explicit-secret` and `unreadable-object` cannot be caused on the types

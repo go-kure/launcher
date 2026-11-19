@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -85,9 +86,10 @@ func TestFeatureGates_ValueGatedPathsNameRealFieldsAndValues(t *testing.T) {
 	}
 	pod := schemaOf("pod")
 	holders := []holder{{"pod initContainers[]", *pod["initContainers"].Items, container}}
-	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset"} {
+	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset", "job"} {
 		holders = append(holders, holder{kind + " template", schemaOf(kind)["template"], reflect.TypeOf(corev1.PodTemplateSpec{})})
 	}
+	holders = append(holders, holder{"cronjob jobTemplate", schemaOf("cronjob")["jobTemplate"], reflect.TypeOf(batchv1.JobTemplateSpec{})})
 	holders = append(holders, holder{"cnpg-pooler template", schemaOf("cnpg-pooler")["template"], reflect.TypeOf(cnpgv1.PodTemplateSpec{})})
 
 	for _, h := range holders {

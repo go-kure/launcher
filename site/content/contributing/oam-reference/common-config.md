@@ -58,9 +58,9 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - `job` refused the name from its introduction; the other six gained the check in
     go-kure/launcher#407. [the name is a workload component name; `job` and the other six are
     the seven workload kinds `webservice`, `worker`, `deployment`, `statefulset`, `daemonset`,
-    `cronjob` and `job`; `deployment` and `daemonset` have since become raw kinds with no main
-    container named after the component (go-kure/launcher#1629), so the reference page lists
-    the kinds that keep the reshaped form]
+    `cronjob` and `job`; `deployment`, `daemonset`, `job` and `cronjob` have since become raw
+    kinds with no main container named after the component (go-kure/launcher#1629), so the
+    reference page lists the kinds that keep the reshaped form]
   - Until go-kure/launcher#405 all three were read with a bare comma-ok assertion, so a
     handler called directly — without the schema validation an authored document gets first,
     which already refused these shapes — dropped the value and emitted a container with no
@@ -70,8 +70,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
     and `command: [ls, 3]` emitted `["ls"]` and said nothing about the `3`. Closing it changed
     their signature to return an error, which is why the fix touches all 9 call sites — the
     seven workload kinds' own main containers, plus `initContainers` and `sidecars` in
-    `common.go` [they: `command` and `args`; `deployment` and `daemonset` have no main container
-    of their own since go-kure/launcher#1629]
+    `common.go` [they: `command` and `args`; `deployment`, `daemonset`, `job` and `cronjob` have
+    no main container of their own since go-kure/launcher#1629]
   - go-kure/launcher#660; before that the name and protocol were taken unchecked, and a
     non-list `ports`, an unknown key, a non-string name or a non-string protocol, which then
     read as `TCP`, was dropped [the sentence is about the entries of a sidecar's `ports`]
@@ -120,8 +120,9 @@ Text in square brackets is added here to say what a moved sentence refers to.
 
 - **History:**
   - go-kure/launcher#342 (the seven kind components share one pod-level property surface,
-    `parsePodSpec` [the reshaped ones only: `deployment` and `daemonset` took the upstream pod
-    spec under `template.spec` in go-kure/launcher#1629]).
+    `parsePodSpec` [the reshaped ones only: `deployment`, `daemonset`, `job` and `cronjob` took the
+    upstream pod spec under `template.spec` (`jobTemplate.spec.template.spec` on a `cronjob`)
+    in go-kure/launcher#1629]).
   - go-kure/launcher#1183 (a property whose feature gate is off at the profile's
     `kubernetesVersion` refused).
   - go-kure/launcher#1231 (a profile's `spec.featureGates` replaces the release default for a
@@ -153,6 +154,10 @@ Text in square brackets is added here to say what a moved sentence refers to.
     fields, strictly decoded, with no launcher default and an empty fill report. A breaking
     pre-GA change; the reshaped form of the kind is gone, and its reference page is the
     `daemonset` entry of "Kinds: core workloads").
+  - go-kure/launcher#1629 (`job` and `cronjob` became raw kinds in the same way: the `JobSpec`
+    and `CronJobSpec` fields, strictly decoded, with no launcher default and an empty fill
+    report. A breaking pre-GA change; the reshaped form of both kinds is gone, and their
+    reference pages are the `job` and `cronjob` entries of "Kinds: core workloads").
   - go-kure/launcher#343 (the kind-named `deployment` component).
   - go-kure/launcher#341 (`DeploymentSpec` parsed by `parseDeploymentSpec` into real `appsv1`
     types, from one fragment all three handlers compose).
@@ -170,8 +175,9 @@ Text in square brackets is added here to say what a moved sentence refers to.
     since go-kure/launcher#1629, those of `template.spec.containers[0]`]).
   - go-kure/launcher#225 (`job`, `cronjob` and `worker` report no endpoint).
   - go-kure/launcher#334 (`daemonset`, `statefulset`, `job` and `cronjob` publish one
-    `ports` property, with the same entry rules [`daemonset` no longer: its ports are
-    `template.spec.containers[0].ports`, go-kure/launcher#1629]).
+    `ports` property, with the same entry rules [`daemonset`, `job` and `cronjob` no longer: their ports
+    are `template.spec.containers[0].ports` (`jobTemplate.spec.template.spec.containers[0].ports`
+    on a `cronjob`), go-kure/launcher#1629]).
   - go-kure/launcher#343 (`deployment` dropped `port` and the Service it drove).
   - go-kure/launcher#690 (`daemonset` and `statefulset` drop `port` and the Service it drove
     (breaking), and replace it with `ports`).
@@ -185,8 +191,9 @@ Text in square brackets is added here to say what a moved sentence refers to.
     since go-kure/launcher#1629 they are `template.spec.*` and no longer read by that parser).
   - go-kure/launcher#790 (the other kind-named workloads (`statefulset`, `daemonset`, `job`,
     `cronjob`) publish the same shapes through the same parsers and schemas, and `statefulset`
-    dropped the four-key `affinity` shorthand (breaking) [`daemonset` stopped publishing them at
-    the top level in go-kure/launcher#1629: they are `template.spec.*`]).
+    dropped the four-key `affinity` shorthand (breaking) [`daemonset`, `job` and `cronjob`
+    stopped publishing them at the top level in go-kure/launcher#1629: they are
+    `template.spec.*`, and `jobTemplate.spec.template.spec.*` on a `cronjob`]).
   - go-kure/launcher#1473 (`webservice` and `worker` publish `tolerations` and
     `topologySpreadConstraints` as the same shapes, from the same schemas and parsers).
 
