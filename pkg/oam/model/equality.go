@@ -38,7 +38,8 @@ const compareBudgetName = "@compare-budget"
 // budgetedCalls are the calls that the evaluation replaces, because cel-go compares, copies or
 // prints nested values in them and charges the outer length only: `==`, `!=`, `in`, `distinct`,
 // `flatten` and `join`. The join of a list that holds a non-string builds its error from the
-// text of the whole tree. The first four are every caller of Equal in cel-go v0.33.2 that a model reaches, read in
+// text of the whole tree. The first four are every caller of Equal in cel-go v0.33.2 that a model reaches (read again
+// at v0.33.4, with no new caller), read in
 // common/types (Contains, behind `in`), ext (distinct) and interpreter (the == and != nodes).
 // flatten is the one list function of the pinned extension that copies nested elements under the
 // legacy cost tracker (ext/lists.go, trackListFlattenLegacy). A new cel-go version, or a new

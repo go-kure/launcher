@@ -203,7 +203,8 @@ func TestComparisonStopReportsTheCostOfItsCall(t *testing.T) {
 	}
 }
 
-// The evaluation replaces five calls that compare or copy values, and join. They were read from cel-go v0.33.2: the callers of
+// The evaluation replaces five calls that compare or copy values, and join. They were read from cel-go v0.33.2 and read again
+// at v0.33.4, which adds no caller (it changes cost estimation only): the callers of
 // Equal in common/types (Contains, behind `in`), in ext (distinct) and in interpreter (the
 // == and != nodes). Three callers are new since v0.31.0 and none is reachable from a model: the
 // optional library's hasValue (the environment does not enable it), the async call matcher (no async
@@ -226,8 +227,8 @@ func TestComparisonCallSetIsReadFromCelGo(t *testing.T) {
 			version = d.Version
 		}
 	}
-	if version != "v0.33.2" {
-		t.Fatalf("cel-go is %q. The budgeted calls were read from v0.33.2. Search common/types, ext and interpreter for every caller of Equal in the new version, extend budgetedCalls, then change this version", version)
+	if version != "v0.33.4" {
+		t.Fatalf("cel-go is %q. The budgeted calls were read from v0.33.4. Search common/types, ext and interpreter for every caller of Equal in the new version, extend budgetedCalls, then change this version", version)
 	}
 }
 
