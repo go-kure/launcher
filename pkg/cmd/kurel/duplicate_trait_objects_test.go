@@ -65,7 +65,14 @@ var duplicateShapes = []struct {
     - name: agent
       type: daemonset
       properties:
-        image: ghcr.io/example/agent:v1.0.0
+        selector:
+          matchLabels:
+            app: agent
+        template:
+          spec:
+            containers:
+              - name: agent
+                image: ghcr.io/example/agent:v1.0.0
 `, policies: `
   policies:
     - name: agent-first

@@ -19,17 +19,17 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - `oam.BuiltinDefaultReporter`, embedded `oam.BuiltinDefaultLog` in
     `cnpg-cluster`
     ["is reported as a `builtin` entry", in the reference's tier 2.]
-  - `builtin_defaults.go`: `BuiltinDefaults()` of the five workload configs, answered
+  - `builtin_defaults.go`: `BuiltinDefaults()` of the workload configs that keep the reshaped form, answered
     from the paths each parser recorded (`parseFills`, `portFills`,
     `accessModesFilled`) minus the paths the policy reported, so it is pure; the
     decision of `strategy.type` is `nonRWXFillsStrategy` in `deployment_spec.go`,
     which `applyNonRWXConstraint` takes too
     ["So is what the parser of `webservice`, `worker`, `statefulset`, ... fills", in the reference's
-    tier 2. The raw `deployment` of go-kure/launcher#1629 reports no fill.]
+    tier 2. The raw `deployment` and `daemonset` of go-kure/launcher#1629 report no fill.]
   - `common.go`
     ["`buildResourceRequirements`", in the reference's tier 3.]
   - `builtin_defaults_generate.go`: the generate-time fills, which
-    `BuiltinDefaults` of the five controller kinds (`builtin_defaults.go`) adds
+    `BuiltinDefaults` of the reshaped controller kinds (`builtin_defaults.go`) adds
     through `generateFillPaths`. They record nothing. They answer from the config with
     `builtinResourceFills` and `tokenAutomountIsBuiltin`, the functions
     `buildResourceRequirements` and `buildPodSpec` decide by, so the report and

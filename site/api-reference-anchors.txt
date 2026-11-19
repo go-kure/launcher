@@ -54,7 +54,6 @@ api-reference/oam-components/ pod-level-properties
 api-reference/oam-components/ deployment-level-properties-webservice-worker
 api-reference/oam-components/ main-container-ports
 api-reference/oam-components/ raw-scheduling-properties
-api-reference/oam-components/ what-tolerations-changed-for-daemonset
 api-reference/oam-components/ policy-defaults--enforcement-ordering
 api-reference/oam-components/ policy-refusal-classes
 api-reference/oam-components/ pod-view-of-a-monitoring-workload-object-monitoringpodspec

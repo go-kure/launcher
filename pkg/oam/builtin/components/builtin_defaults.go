@@ -7,9 +7,11 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
-// BuiltinDefaults of the five handler-built workload kinds (deployment,
-// statefulset, daemonset, job, cronjob): the values launcher's own parser filled
-// because the author wrote none (go-kure/launcher#1580). The parsers record the
+// BuiltinDefaults of the handler-built workload kinds that keep the reshaped
+// form (the role member of webservice and worker, statefulset, job, cronjob):
+// the values launcher's own parser filled because the author wrote none
+// (go-kure/launcher#1580). The raw kinds, deployment and daemonset, fill
+// nothing (go-kure/launcher#1629). The parsers record the
 // paths they filled, and each method answers from that record and the config's
 // state when the transform asks, so:
 //
@@ -30,7 +32,6 @@ import (
 var (
 	_ oam.BuiltinDefaultReporter = (*RoleDeploymentConfig)(nil)
 	_ oam.BuiltinDefaultReporter = (*StatefulsetConfig)(nil)
-	_ oam.BuiltinDefaultReporter = (*DaemonsetConfig)(nil)
 	_ oam.BuiltinDefaultReporter = (*JobConfig)(nil)
 	_ oam.BuiltinDefaultReporter = (*CronjobConfig)(nil)
 )
@@ -123,14 +124,6 @@ func (c *StatefulsetConfig) BuiltinDefaults() []oam.BuiltinDefault {
 	}
 	paths = append(paths, generateFillPaths(c.Resources, c.InitContainers, c.Sidecars, c.PodSpec)...)
 	return builtinReport("statefulset", paths, c.PolicyDefaults())
-}
-
-// BuiltinDefaults implements oam.BuiltinDefaultReporter.
-func (c *DaemonsetConfig) BuiltinDefaults() []oam.BuiltinDefault {
-	paths := append(slices.Clone(c.parseFills), containerFills(c.InitContainers, c.Sidecars)...)
-	paths = append(paths, claimFills(c.PVCs)...)
-	paths = append(paths, generateFillPaths(c.Resources, c.InitContainers, c.Sidecars, c.PodSpec)...)
-	return builtinReport("daemonset", paths, c.PolicyDefaults())
 }
 
 // BuiltinDefaults implements oam.BuiltinDefaultReporter.

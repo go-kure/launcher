@@ -90,7 +90,7 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		name    string
 		schema  map[string]oam.PropertySchema
 		ownKeys int
-		// specKeys is the handler's kind-level fragment (schemaDaemonSetSpec
+		// specKeys is the handler's kind-level fragment (schemaDeploymentSpec
 		// and friends), merged by the same maps.Copy. Held as the parser's own
 		// key list rather than a literal so adding a kind-level property does
 		// not require editing a magic number here — which would turn this
@@ -108,10 +108,9 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		{"webservice", WebserviceRule{}.PropertySchema(), 23, deploymentSpecPropertyKeys, false},
 		{"worker", WorkerRule{}.PropertySchema(), 21, deploymentSpecPropertyKeys, false},
 		// 18 and 14: go-kure/launcher#690 removed `port` from both kinds.
-		// Each of the five kinds below counts one more own key since
+		// Each of the kinds below counts one more own key since
 		// go-kure/launcher#1178: `podMetadata`, in no shared list.
 		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 21, statefulSetSpecPropertyKeys, false},
-		{"daemonset", (&DaemonsetHandler{}).PropertySchema(), 18, daemonSetSpecPropertyKeys, false},
 		{"cronjob", (&CronjobHandler{}).PropertySchema(), 25, jobSpecPropertyKeys, true},
 		{"job", (&JobHandler{}).PropertySchema(), 19, jobSpecPropertyKeys, true},
 		// The reshaped deployment parser is the role member, which keeps this

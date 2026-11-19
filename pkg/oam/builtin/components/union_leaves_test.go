@@ -31,10 +31,10 @@ func (r unionLeafRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext
 func unionLeafTransformer() *oam.Transformer {
 	return oam.NewTransformer(map[string]oam.ComponentHandler{
 		// The reshaped deployment parser is the role member
-		// (go-kure/launcher#1629); the raw `deployment` kind's `strategy` is an
-		// open object the strict decode checks, not a published union leaf.
+		// (go-kure/launcher#1629); the raw `deployment` and `daemonset` kinds'
+		// `strategy` and `updateStrategy` are open objects the strict decode
+		// checks, not published union leaves.
 		roleMemberType: &components.RoleDeploymentHandler{},
-		"daemonset":    &components.DaemonsetHandler{},
 		"statefulset":  &components.StatefulsetHandler{},
 		"webservice":   webserviceViaRule{},
 		"service":      &components.ServiceHandler{},
@@ -135,13 +135,6 @@ func deploymentRollingUpdate(knobs map[string]any) map[string]any {
 	}
 }
 
-func daemonSetRollingUpdate(knobs map[string]any) map[string]any {
-	return map[string]any{
-		"image":          "ghcr.io/org/agent:v1",
-		"updateStrategy": map[string]any{"type": "RollingUpdate", "rollingUpdate": knobs},
-	}
-}
-
 var unionLeaves = []unionLeaf{
 	{
 		name: "role-deployment strategy.rollingUpdate.maxUnavailable", compType: roleMemberType, strForm: "25%",
@@ -155,23 +148,6 @@ var unionLeaves = []unionLeaf{
 		props: func(v any) map[string]any { return deploymentRollingUpdate(map[string]any{"maxSurge": v}) },
 		rendered: func(objs []client.Object) string {
 			return firstOf[*appsv1.Deployment](objs).Spec.Strategy.RollingUpdate.MaxSurge.String()
-		},
-	},
-	{
-		name: "daemonset updateStrategy.rollingUpdate.maxUnavailable", compType: "daemonset", strForm: "25%",
-		props: func(v any) map[string]any { return daemonSetRollingUpdate(map[string]any{"maxUnavailable": v}) },
-		rendered: func(objs []client.Object) string {
-			return firstOf[*appsv1.DaemonSet](objs).Spec.UpdateStrategy.RollingUpdate.MaxUnavailable.String()
-		},
-	},
-	{
-		// A non-zero maxSurge requires maxUnavailable: 0 alongside it.
-		name: "daemonset updateStrategy.rollingUpdate.maxSurge", compType: "daemonset", strForm: "25%",
-		props: func(v any) map[string]any {
-			return daemonSetRollingUpdate(map[string]any{"maxSurge": v, "maxUnavailable": 0})
-		},
-		rendered: func(objs []client.Object) string {
-			return firstOf[*appsv1.DaemonSet](objs).Spec.UpdateStrategy.RollingUpdate.MaxSurge.String()
 		},
 	},
 	{

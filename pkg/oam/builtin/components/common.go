@@ -1327,7 +1327,7 @@ func parseReplicas(props map[string]any, defaultVal int32) (int32, bool, error) 
 // Ports, so a string port can never resolve there and is rejected outright
 // rather than authoring a probe/lifecycle hook that is guaranteed to fail at
 // runtime. Kinds whose main container declares ports only when authored
-// (deployment, daemonset, statefulset, job, cronjob) pass `len(ports) > 0`
+// (the role member of webservice and worker, statefulset, job, cronjob) pass `len(ports) > 0`
 // with an empty matchName and check the names against the whole list
 // afterwards (checkNamedPortsDeclared); webservice, whose container always
 // declares "http", passes true. matchName is the
@@ -2996,8 +2996,8 @@ func parseClaimReference(m map[string]any, volName, claimName string, volumeMode
 	}, nil
 }
 
-// parsePodVolumes is parseVolumes for a pod kind (deployment, statefulset,
-// daemonset, job, cronjob), which generates no claim of its own
+// parsePodVolumes is parseVolumes for a pod kind (statefulset, job, cronjob),
+// which generates no claim of its own
 // (go-kure/launcher#702): every pvc volume must reference an existing claim by
 // claimName. The role rules call parseVolumes itself and route the claims their
 // pvc volumes describe through synthesized `pvc` traits (roleClaims). The check
@@ -3684,15 +3684,14 @@ func parseAffinity(props map[string]any) (AffinityConfig, error) {
 // go-kure/launcher#412 published this property on a second kind.
 var tolerationKeys = []string{"key", "operator", "value", "effect", "tolerationSeconds"}
 
-// parseTolerations is SHARED: daemonset (daemonset.go), deployment
-// (deployment.go) and, since go-kure/launcher#790, statefulset (statefulset.go),
-// job (job.go) and cronjob (cronjob.go) are its callers, and schemaTolerations
-// has the same ones. Every rejection below therefore lands on all of them, so completing the
-// projection for go-kure/launcher#412 narrowed what daemonset accepts as well —
-// deliberately, and not additively. What each rule costs daemonset, and why none
-// of them is gated behind a deployment-only option, is set out in
-// README.md's "What `tolerations` changed for `daemonset`". A rejection added
-// here in future changes every calling kind; say so there in the same change.
+// parseTolerations is SHARED: the role member of webservice and worker
+// (role_deployment.go) and, since go-kure/launcher#790, statefulset
+// (statefulset.go), job (job.go) and cronjob (cronjob.go) are its callers, and
+// schemaTolerations has the same ones. Every rejection below therefore lands on
+// all of them. The kinds that take the upstream spec whole, deployment and
+// daemonset (go-kure/launcher#1629), read none of it. A rejection added here in
+// future changes every calling kind; say so in the docs of each in the same
+// change.
 // parseObjectList, not a bare props["tolerations"].([]any) assertion: a
 // comma-ok read cannot tell an ABSENT key from one authored with the wrong
 // container type, and returning (nil, nil) for both silently discarded the
@@ -3902,9 +3901,8 @@ func parseTolerations(props map[string]any) ([]corev1.Toleration, error) {
 		// tolerationSeconds read above left this rule unenforced and said why:
 		// the only citation reachable then was a near-verbatim COPY carried by a
 		// direct dependency, which is second-hand and demonstrably older than the
-		// pinned k8s.io/api. It also said what would change that — "if a
-		// first-hand citation becomes available, add the check there and to
-		// README.md's daemonset compatibility table in the same change".
+		// pinned k8s.io/api. It also said what would change that: a first-hand
+		// citation, which would let the check be added.
 		//
 		// It is available: ValidateTolerations rejects the pair outright at
 		// pkg/apis/core/validation/validation.go, release-1.36:4377-4380, with
@@ -4247,7 +4245,7 @@ func parseJobSpecIndexedFields(cfg *JobSpecConfig) error {
 
 // jobSuccessPolicyKeys and jobSuccessPolicyRuleKeys are the nested key sets
 // parseJobSuccessPolicy accepts, declared here so the schema fragment can be
-// pinned to them the way daemonset_spec.go pins its own.
+// pinned to them (TestJobSpecSchemaMatchesParser).
 var (
 	jobSuccessPolicyKeys     = []string{"rules"}
 	jobSuccessPolicyRuleKeys = []string{"succeededIndexes", "succeededCount"}

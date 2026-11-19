@@ -2,6 +2,7 @@ package components
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -9,9 +10,37 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
+// schemaKeysAt returns the property names the schema publishes at a
+// dot-separated path, e.g. "successPolicy.rules".
+func schemaKeysAt(t *testing.T, root map[string]oam.PropertySchema, path string) []string {
+	t.Helper()
+	cur := root
+	for _, seg := range strings.Split(path, ".") {
+		s, ok := cur[seg]
+		if !ok {
+			t.Fatalf("schema has no property at %q (missing segment %q)", path, seg)
+		}
+		cur = s.Properties
+	}
+	keys := make([]string, 0, len(cur))
+	for k := range cur {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+func assertKeysAt(t *testing.T, root map[string]oam.PropertySchema, path string, want []string) {
+	t.Helper()
+	sorted := slices.Clone(want)
+	slices.Sort(sorted)
+	if got := schemaKeysAt(t, root, path); !slices.Equal(got, sorted) {
+		t.Errorf("schema keys at %q = %v, want %v", path, got, sorted)
+	}
+}
+
 // TestJobSpecSchemaMatchesParser pins the published JobSpec-level schema to the
-// key slices the parser reads and rejects against, at every nesting level —
-// the same guard daemonset_spec_internal_test.go applies to its own fragment.
+// key slices the parser reads and rejects against, at every nesting level.
 // Without it a key added to one half and not the other reads as correct at
 // both: the schema consumer accepts a document the parser then refuses, or the
 // parser accepts a key no schema documents.

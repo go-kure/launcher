@@ -25,7 +25,6 @@ import (
 var parityHandlers = map[string]oam.ComponentHandler{
 	roleDeploymentMember:    &RoleDeploymentHandler{},
 	"statefulset":           &StatefulsetHandler{},
-	"daemonset":             &DaemonsetHandler{},
 	"job":                   &JobHandler{},
 	"cronjob":               &CronjobHandler{},
 	"service":               &ServiceHandler{},
@@ -94,7 +93,7 @@ func parityPodTemplate(t *testing.T, objects []*client.Object) (pod corev1.PodTe
 // component's name on the container.
 func TestHandParsedKinds_TemplateMetadataAndContainerName(t *testing.T) {
 	want := metav1.ObjectMeta{Labels: map[string]string{"app": "app"}}
-	for _, componentType := range []string{roleDeploymentMember, "statefulset", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{roleDeploymentMember, "statefulset", "job", "cronjob"} {
 		t.Run(componentType, func(t *testing.T) {
 			objects, err := parityGenerate(t, componentType, nil)
 			if err != nil {
@@ -172,15 +171,15 @@ type paritySelectorSite struct {
 	read func(t *testing.T, objects []*client.Object) *metav1.LabelSelector
 }
 
-// paritySelectorSites lists every label selector the ten hand-parsed kinds
-// parse: 47.
+// paritySelectorSites lists every label selector the nine hand-parsed kinds
+// parse: 38.
 //
-//   - role-deployment (the reshaped deployment parser), statefulset, daemonset,
-//     job and cronjob read the raw
+//   - role-deployment (the reshaped deployment parser), statefulset, job and
+//     cronjob read the raw
 //     `affinity`: two arms (podAffinity, podAntiAffinity), each with required
 //     and preferred terms, each term with a labelSelector and a
 //     namespaceSelector — eight selectors — and the labelSelector of a
-//     `topologySpreadConstraints` entry: nine a kind, 45;
+//     `topologySpreadConstraints` entry: nine a kind, 36;
 //   - statefulset also has the `selector` of a `volumeClaimTemplates` entry:
 //     one;
 //   - persistentvolumeclaim has its `selector`: one. The `pvc` trait reads a
@@ -216,7 +215,7 @@ func paritySelectorSites() []paritySelectorSite {
 			},
 		}
 	}
-	for _, componentType := range []string{roleDeploymentMember, "statefulset", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{roleDeploymentMember, "statefulset", "job", "cronjob"} {
 		for _, arm := range []string{"podAffinity", "podAntiAffinity"} {
 			for _, mode := range []string{required, preferred} {
 				for _, field := range []string{"labelSelector", "namespaceSelector"} {
@@ -306,8 +305,8 @@ func paritySelectorSites() []paritySelectorSite {
 // not write, or as an object the API server turns away.
 func TestHandParsedKinds_MatchExpressionsAtEverySelector(t *testing.T) {
 	sites := paritySelectorSites()
-	if len(sites) != 47 {
-		t.Fatalf("paritySelectorSites lists %d sites, want 47:a site was added or lost, so recount its comment", len(sites))
+	if len(sites) != 38 {
+		t.Fatalf("paritySelectorSites lists %d sites, want 38:a site was added or lost, so recount its comment", len(sites))
 	}
 	whole := map[string]any{"key": "tier", "operator": "In", "values": []any{"web"}}
 	wantWhole := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{

@@ -421,10 +421,11 @@ spec:
 	"csidriver": {
 		props: map[string]any{"attachRequired": false},
 	},
-	// daemonset and statefulset emit no Service since go-kure/launcher#690, so
-	// their long-name refusal is the container name's, as role-deployment's.
+	// statefulset emits no Service since go-kure/launcher#690, so its long-name
+	// refusal is the container name's, as role-deployment's. daemonset is raw since
+	// go-kure/launcher#1629, like deployment below: its container is named by the author.
 	"daemonset": {
-		props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1,
+		props: rawDaemonsetProps("ghcr.io/example/app:v1.0.0"), labelled: true, selectors: 1,
 	},
 	// deployment is raw since go-kure/launcher#1629: its container is named by the
 	// author, not after the component, so it takes the long name as replicaset does.

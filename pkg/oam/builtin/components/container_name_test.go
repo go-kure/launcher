@@ -21,9 +21,9 @@ import (
 // serviceNamed marks a kind that always names a Service after the component
 // too (go-kure/launcher#546): the Service-name rule, a DNS-1123 label as the
 // container name's is (go-kure/launcher#959), refuses a dotted or long name at
-// conversion, before the container is built. statefulset and daemonset
-// would too, so their properties keep the Service's name off the component
-// name (an authored serviceName) or emit no Service at all (no port).
+// conversion, before the container is built. statefulset would too, so its
+// properties keep the Service's name off the component name (an authored
+// serviceName).
 //
 // ownLength is set for a kind that holds its object's name to a length of its
 // own (cronjob, job): that rule refuses a name over 63 characters at
@@ -38,11 +38,10 @@ var containerNameCases = []struct {
 }{
 	{"webservice", webserviceViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, true, ""},
 	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
-	// The reshaped parser's own handler: the raw `deployment` kind names its
-	// containers as authored (go-kure/launcher#1629).
+	// The reshaped parser's own handler: the raw `deployment` and `daemonset`
+	// kinds name their containers as authored (go-kure/launcher#1629).
 	{roleMemberType, &components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "db"}, false, ""},
-	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
 	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}, false,
 		"the component name is the CronJob's name, which must be at most 52 characters"},
 	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false,

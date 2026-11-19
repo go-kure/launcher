@@ -17,7 +17,7 @@ var refusedKeyBase = map[string]map[string]any{
 	"webservice":            {"image": "ghcr.io/org/app:v1"},
 	"worker":                {"image": "ghcr.io/org/app:v1"},
 	"statefulset":           {"image": "ghcr.io/org/app:v1"},
-	"daemonset":             {"image": "ghcr.io/org/app:v1"},
+	"daemonset":             rawDaemonsetInternalProps("ghcr.io/org/app:v1"),
 	"job":                   {"image": "ghcr.io/org/app:v1"},
 	"cronjob":               {"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"},
 	"service":               {"ports": []any{map[string]any{"port": 80}}},
@@ -179,15 +179,12 @@ func TestRefusedKeys_NamedRefusals(t *testing.T) {
 		{"cronjob", "scheduling"},
 		{"job", "scheduling"},
 		{"statefulset", "template"},
-		{"daemonset", "template"},
 		{"role-deployment", "restartPolicy"},
 		{"statefulset", "restartPolicy"},
-		{"daemonset", "restartPolicy"},
 		{"webservice", "restartPolicy"},
 		{"worker", "restartPolicy"},
 		{"role-deployment", "activeDeadlineSeconds"},
 		{"statefulset", "activeDeadlineSeconds"},
-		{"daemonset", "activeDeadlineSeconds"},
 		{"role-deployment", "evictionResponders"},
 		{"job", "evictionResponders"},
 		{"role-deployment", "restartPolicyRules"},
@@ -199,7 +196,7 @@ func TestRefusedKeys_NamedRefusals(t *testing.T) {
 		{"webservice", "livenessProbe"},
 		{"statefulset", "readinessProbe"},
 		{"cronjob", "startupProbe"},
-		{"daemonset", "volumeMounts"},
+		{"statefulset", "volumeMounts"},
 		{"statefulset", "volumeDevices"},
 		{"worker", "name"},
 		{"job", "name"},
@@ -222,6 +219,12 @@ func TestRefusedKeys_NamedRefusals(t *testing.T) {
 		{"deployment", "containers"},
 		{"deployment", "evictionResponders"},
 		{"deployment", "restartPolicyRules"},
+		// The same for the raw `daemonset` kind.
+		{"daemonset", "template"},
+		{"daemonset", "restartPolicy"},
+		{"daemonset", "activeDeadlineSeconds"},
+		{"daemonset", "containers"},
+		{"daemonset", "volumeMounts"},
 		{"job", "activeDeadlineSeconds"},
 		{"cronjob", "schedule"},
 		{"job", "jobTemplate"},
@@ -307,7 +310,7 @@ func TestRefusedKeys_OneLevelDown(t *testing.T) {
 	entry := func(resources map[string]any) []any {
 		return []any{map[string]any{"name": "extra", "image": "busybox:1", "resources": resources}}
 	}
-	for _, componentType := range []string{"role-deployment", "webservice", "worker", "statefulset", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{"role-deployment", "webservice", "worker", "statefulset", "job", "cronjob"} {
 		// A job's pod runs to completion, so `job` and `cronjob` have no
 		// `sidecars` property.
 		lists := []string{"initContainers", "sidecars"}
@@ -376,7 +379,7 @@ func TestRefusedKeys_InAnEntry(t *testing.T) {
 	initEntry := func(key string) []any {
 		return []any{map[string]any{"name": "init", "image": "busybox:1", key: map[string]any{}}}
 	}
-	for _, componentType := range []string{"role-deployment", "webservice", "worker", "statefulset", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{"role-deployment", "webservice", "worker", "statefulset", "job", "cronjob"} {
 		if refusedKeyHint(componentType, "livenessProbe") == "" {
 			t.Fatalf("type %q has no top-level refusal of livenessProbe; pick another key for the control below", componentType)
 		}
@@ -422,6 +425,7 @@ func TestRefusedKeys_OtherKeysReadAsBefore(t *testing.T) {
 		base          map[string]any
 	}{
 		{"deployment", refusedKeyBase["deployment"]},
+		{"daemonset", refusedKeyBase["daemonset"]},
 		{"role-deployment", refusedKeyBase["role-deployment"]},
 		{"webservice", refusedKeyBase["webservice"]},
 		{"service", refusedKeyBase["service"]},

@@ -16,8 +16,8 @@ import (
 
 // The handler-built workload kinds with a reshaped parser report the values
 // their own parser fills when the author wrote none (go-kure/launcher#1580):
-// the role member `role-deployment` (the kind-named `deployment` is raw since
-// go-kure/launcher#1629 and fills nothing) and statefulset, daemonset, job and
+// the role member `role-deployment` (the kind-named `deployment` and `daemonset`
+// are raw since go-kure/launcher#1629 and fill nothing) and statefulset, job and
 // cronjob. These tests read the report through oam.BuiltinDefaultReporter, as
 // the transform does.
 
@@ -31,7 +31,6 @@ var builtinKinds = map[string]struct {
 }{
 	roleMemberType: {&components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	"statefulset":  {&components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "app-headless"}},
-	"daemonset":    {&components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	"job":          {&components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	"cronjob":      {&components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "0 2 * * *"}},
 }
@@ -120,7 +119,7 @@ type builtinRow struct {
 }
 
 func builtinRows() []builtinRow {
-	allPods := []string{roleMemberType, "statefulset", "daemonset", "job", "cronjob"}
+	allPods := []string{roleMemberType, "statefulset", "job", "cronjob"}
 	return []builtinRow{
 		{name: "replicas", kinds: []string{roleMemberType, "statefulset"}, want: []string{"replicas"},
 			authored: map[string]any{"replicas": 1}, gone: []string{"replicas"}},
@@ -143,7 +142,7 @@ func builtinRows() []builtinRow {
 		{name: "init container port protocol", kinds: allPods, props: map[string]any{"initContainers": init1(ctrPorts)},
 			authored: map[string]any{"initContainers": init1([]any{map[string]any{"containerPort": 8080, "protocol": "TCP"}, map[string]any{"containerPort": 9090, "protocol": "UDP"}})},
 			gone:     []string{"initContainers[0].ports[0].protocol"}},
-		{name: "sidecar port protocol", kinds: []string{roleMemberType, "statefulset", "daemonset"}, props: map[string]any{"sidecars": side1(ctrPorts)},
+		{name: "sidecar port protocol", kinds: []string{roleMemberType, "statefulset"}, props: map[string]any{"sidecars": side1(ctrPorts)},
 			authored: map[string]any{"sidecars": side1([]any{map[string]any{"containerPort": 8080, "protocol": "TCP"}, map[string]any{"containerPort": 9090, "protocol": "UDP"}})},
 			gone:     []string{"sidecars[0].ports[0].protocol"}},
 		{name: "pod failure policy condition status", kinds: []string{"job", "cronjob"},

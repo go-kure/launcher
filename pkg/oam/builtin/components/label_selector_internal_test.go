@@ -151,6 +151,7 @@ var strictlyDecodedTypes = typesByName([]namedType{
 	{"admissionregistrationv1.ValidatingAdmissionPolicySpec", reflect.TypeFor[admissionregistrationv1.ValidatingAdmissionPolicySpec]()},
 	{"admissionregistrationv1.ValidatingWebhookConfiguration", reflect.TypeFor[admissionregistrationv1.ValidatingWebhookConfiguration]()},
 	{"apiregistrationv1.APIServiceSpec", reflect.TypeFor[apiregistrationv1.APIServiceSpec]()},
+	{"appsv1.DaemonSetSpec", reflect.TypeFor[appsv1.DaemonSetSpec]()},
 	{"appsv1.DeploymentSpec", reflect.TypeFor[appsv1.DeploymentSpec]()},
 	{"appsv1.ReplicaSetSpec", reflect.TypeFor[appsv1.ReplicaSetSpec]()},
 	{"autoscalingv2.HorizontalPodAutoscalerSpec", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec]()},
@@ -663,8 +664,8 @@ func nestedVolumeConfig(c *oam.Component) (stack.ApplicationConfig, error) {
 // reason. Cilium's API declares a copy of the selector type; the kinds that
 // decode it list key and operator already and are held to the CRDs of the
 // linked module (TestCiliumBGPKinds_RequiredMatchCRD and its siblings). The
-// reshaped workload kinds (the role member, statefulset, daemonset, job and
-// cronjob) and the claim templates decode no type: they parse a selector
+// reshaped workload kinds (the role member, statefulset, job and cronjob) and
+// the claim templates decode no type: they parse a selector
 // by hand and refuse key, operator and values there (parseLabelSelectorOpts).
 // Their nested `volumes` entry is the exception, and its row decodes the volume
 // source itself (nestedVolumeConfig).
@@ -695,6 +696,20 @@ var labelSelectorKinds = []labelSelectorKind{
 	},
 	{
 		component: "deployment", typ: "appsv1.DeploymentSpec", config: kindConfig(&DeploymentHandler{}),
+		base: map[string]any{
+			"selector": map[string]any{"matchLabels": map[string]any{"tier": "web"}},
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"tier": "web"}},
+				"spec":     map[string]any{"containers": labelSelectorTestContainers},
+			},
+		},
+		expressions: true,
+		excluded: map[string]string{
+			"selector": "refused already, and wholly: the kind reads it as apimachinery does to compare it with the `app` label (refuseSelectorAgainstAppLabel), which refuses an expression without a key, with an operator that is none of the four or with the wrong number of values, in apimachinery's words (TestReplicaSetSelector_RefusedAsAPIMachineryReadsIt)",
+		},
+	},
+	{
+		component: "daemonset", typ: "appsv1.DaemonSetSpec", config: kindConfig(&DaemonsetHandler{}),
 		base: map[string]any{
 			"selector": map[string]any{"matchLabels": map[string]any{"tier": "web"}},
 			"template": map[string]any{
@@ -1144,7 +1159,7 @@ func TestLabelSelectorKinds_CoverEverySelector(t *testing.T) {
 // same, under its path, by the comparison with the `app` label. The raw
 // `deployment` kind (go-kure/launcher#1629) reads its selector the same way.
 func TestReplicaSetSelector_RefusedAsAPIMachineryReadsIt(t *testing.T) {
-	for _, component := range []string{"replicaset", "deployment"} {
+	for _, component := range []string{"replicaset", "deployment", "daemonset"} {
 		var selectorKind labelSelectorKind
 		for _, kind := range labelSelectorKinds {
 			if kind.component == component {

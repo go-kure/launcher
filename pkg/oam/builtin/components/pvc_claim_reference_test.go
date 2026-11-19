@@ -125,7 +125,6 @@ func TestPVCVolume_ClaimName_OtherKindsGenerateNoClaim(t *testing.T) {
 		extra map[string]any
 	}{
 		{"statefulset", &components.StatefulsetHandler{}, nil},
-		{"daemonset", &components.DaemonsetHandler{}, nil},
 		{"job", &components.JobHandler{}, nil},
 		{"cronjob", &components.CronjobHandler{}, map[string]any{"schedule": "0 2 * * *"}},
 	} {
@@ -184,7 +183,6 @@ func TestPVCVolume_PodKindsRequireClaimName(t *testing.T) {
 	}{
 		{roleMemberType, &components.RoleDeploymentHandler{}, nil},
 		{"statefulset", &components.StatefulsetHandler{}, nil},
-		{"daemonset", &components.DaemonsetHandler{}, nil},
 		{"job", &components.JobHandler{}, nil},
 		{"cronjob", &components.CronjobHandler{}, map[string]any{"schedule": "0 2 * * *"}},
 	} {

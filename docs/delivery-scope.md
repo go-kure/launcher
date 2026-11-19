@@ -2313,8 +2313,6 @@ and by scope, whatever component or trait emits it.
 - **Field gaps** in the hand-parsed kinds (upstream fields with no schema key):
   - `statefulset`: no scheduling field is left; the raw `affinity`, `tolerations`
     and `topologySpreadConstraints` are read;
-  - `daemonset`: no scheduling field is left; the raw `affinity`, `tolerations`,
-    `topologySpreadConstraints` and `sidecars` are read;
   - `job`, `cronjob`: the raw `affinity`, `tolerations` and `topologySpreadConstraints`
     are read;
   - `job`, `cronjob`: `sidecars` (a plain sidecar keeps the Job's pod from completing;
@@ -2347,9 +2345,10 @@ and by scope, whatever component or trait emits it.
   `daemonSetSpecRejectedKeys`, `jobSpecRejectedKeys`, in `deployment_spec.go`,
   `statefulset_spec.go`, `daemonset_spec.go` and `job.go`); each kind's sub-task decides
   whether that refusal stays, with its reason documented. Each kind gets a sub-task in the
-  ticket. (Since go-kure/launcher#1629 the `deployment` kind authors `selector` and
-  `template` itself, as the raw `DeploymentSpec`; `deploymentSpecRejectedKeys` now binds only
-  the `role-deployment` member that `webservice` and `worker` lower into.)
+  ticket. (Since go-kure/launcher#1629 the `deployment` and `daemonset` kinds author
+  `selector` and `template` themselves, as the raw `DeploymentSpec` and `DaemonSetSpec`;
+  `deploymentSpecRejectedKeys` now binds only the `role-deployment` member that `webservice`
+  and `worker` lower into, and `daemonSetSpecRejectedKeys` is gone.)
 - **Missing kinds:** the inventory's `missing` rows. The inventory has no `trait` row left: no kind is reachable only as a trait.
   The ticket adds the missing kinds group by group. A kind kure lacks is added to kure
   first.

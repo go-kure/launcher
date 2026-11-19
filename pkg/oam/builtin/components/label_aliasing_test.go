@@ -36,9 +36,10 @@ var aliasingPVCVolume = []any{
 // labelAliasingProps adds, per kind, whatever that kind needs to reach every
 // label map it can produce: replicas >= 3 so both topology spread constraints
 // are built, pod anti-affinity so an affinity selector exists, and, on a role
-// kind, a pvc volume so a claim is generated. daemonset and cronjob take neither
-// replicas nor affinity, so they contribute their object and template label
-// maps only.
+// kind, a pvc volume so a claim is generated. cronjob takes neither replicas
+// nor affinity, so it contributes its object and template label maps only. The
+// raw `deployment` and `daemonset` kinds (go-kure/launcher#1629) are not in the
+// loop: they read their labels from the authored template.
 var labelAliasingProps = map[string]map[string]any{
 	"webservice": {"replicas": 3, "affinity": map[string]any{"enablePodAntiAffinity": true}, "volumes": aliasingPVCVolume},
 	"worker":     {"replicas": 3, "affinity": map[string]any{"enablePodAntiAffinity": true}, "volumes": aliasingPVCVolume},
@@ -61,8 +62,7 @@ var labelAliasingProps = map[string]map[string]any{
 			map[string]any{"name": "state", "size": "1Gi", "mountPath": "/state"},
 		},
 	},
-	"daemonset": {},
-	"cronjob":   {},
+	"cronjob": {},
 }
 
 // labelMap is one caller-reachable label map, named by where it lives so a
@@ -216,11 +216,6 @@ func TestCollectLabelMaps_ReachesEveryGuardedPosition(t *testing.T) {
 			"StatefulSet/app.spec.selector.matchLabels",
 			"StatefulSet/app.spec.template.labels",
 			"StatefulSet/app.spec.template.spec.podAntiAffinity.preferred[0].labelSelector",
-		},
-		"daemonset": {
-			"DaemonSet/app.metadata.labels",
-			"DaemonSet/app.spec.selector.matchLabels",
-			"DaemonSet/app.spec.template.labels",
 		},
 		"cronjob": {
 			"CronJob/app.metadata.labels",

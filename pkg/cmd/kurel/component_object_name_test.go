@@ -147,7 +147,7 @@ func TestObjectName_RenamesTheObjectAlone(t *testing.T) {
 // the fields it knows passes over the property, and the object keeps the
 // component name (`configmap`, `service`, `role-deployment`); one that decodes its
 // properties strictly refuses it as a field it does not know (`namespace`,
-// `helmrelease`, `cnpg-cluster`, and `deployment` since go-kure/launcher#1629).
+// `helmrelease`, `cnpg-cluster`, and `deployment` and `daemonset` since go-kure/launcher#1629).
 // Both are met among the built-in kinds.
 func TestObjectName_HandlerDrivenDirectly(t *testing.T) {
 	const component = "widget"
@@ -206,7 +206,7 @@ func TestObjectName_HandlerDrivenDirectly(t *testing.T) {
 			t.Errorf("%s no longer passes over objectName when driven directly (passing over: %v); the oam README names it", typ, passesOver)
 		}
 	}
-	for _, typ := range []string{"namespace", "helmrelease", "cnpg-cluster", "deployment"} {
+	for _, typ := range []string{"namespace", "helmrelease", "cnpg-cluster", "deployment", "daemonset"} {
 		if !slices.Contains(refuses, typ) {
 			t.Errorf("%s no longer refuses objectName when driven directly (refusing: %v); the oam README names it", typ, refuses)
 		}

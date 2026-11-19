@@ -8,7 +8,7 @@ import (
 // transform runs with. The deployment fills nothing of its own, so the probe
 // holds the fills of the trait only.
 func withTrait(name string, trait oam.Trait, caps map[string]oam.CapabilityBinding, fills []Fill) Probe {
-	comps := rawDeployment("app", nil, nil)
+	comps := rawWorkload("deployment", "app", nil, nil)
 	comps[0].Traits = []oam.Trait{trait}
 	return Probe{
 		Name:         name,

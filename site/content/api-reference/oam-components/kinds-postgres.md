@@ -312,7 +312,7 @@ creates a new one: the old one is pruned with its data unless it is protected**
 
 `resources` forwards every name the shared parser admits — `cpu`, `memory`,
 `ephemeral-storage`, `hugepages-<size>` and qualified extended resources such as
-`nvidia.com/gpu`, under the same validation as the six workload kinds —
+`nvidia.com/gpu`, under the same validation as the reshaped workload kinds —
 onto the Cluster's `spec.resources` `requests`/`limits` unchanged
 (go-kure/launcher#484; until then any name other than `cpu`/`memory` was
 rejected, so this is an additive change). Only `cpu`/`memory` carry a policy

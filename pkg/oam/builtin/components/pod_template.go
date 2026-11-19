@@ -52,11 +52,11 @@ func podTemplateLabelSelectorRequired() map[string]string {
 // controllerActiveDeadlineReason is the error text, after the path of the pod
 // spec, for an activeDeadlineSeconds on the pod template of a controller that
 // keeps its pods running.
-const controllerActiveDeadlineReason = "activeDeadlineSeconds: not supported — the API server forbids it on the pod template of a Deployment, ReplicaSet or ReplicationController, whose pods are restarted and replaced for as long as the controller exists; a pod or a Job may set it"
+const controllerActiveDeadlineReason = "activeDeadlineSeconds: not supported — the API server forbids it on the pod template of a Deployment, ReplicaSet, ReplicationController, DaemonSet or StatefulSet, whose pods are restarted and replaced for as long as the controller exists; a pod or a Job may set it"
 
 // validateControllerPodTemplate refuses, with or without an environment
-// policy, what the pod template of a Deployment, ReplicaSet or
-// ReplicationController may not hold: what a pod authored through a kind
+// policy, what the pod template of a Deployment, ReplicaSet,
+// ReplicationController, DaemonSet or StatefulSet may not hold: what a pod authored through a kind
 // component may not (validateAuthoredPodSpec), and activeDeadlineSeconds, which
 // the API server's validation of each of them forbids, as cnpg-pooler refuses it on its template.
 // The API's other value rules, restartPolicy among them, are left to the API

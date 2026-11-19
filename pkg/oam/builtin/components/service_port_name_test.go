@@ -74,7 +74,7 @@ func TestWorkloadConfigs_NoServiceKindsAreNotBackends(t *testing.T) {
 		handler oam.ComponentHandler
 		props   map[string]any
 	}{
-		{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "prom/node-exporter:v1.0.0", "ports": ports}},
+		{"daemonset", &components.DaemonsetHandler{}, rawDaemonsetPropsWithPorts("prom/node-exporter:v1.0.0", ports)},
 		{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "postgres:16", "ports": ports, "serviceName": "db"}},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {

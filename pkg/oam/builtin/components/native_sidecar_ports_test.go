@@ -157,7 +157,6 @@ func TestNativeSidecarPorts_NameUniqueAcrossThePod(t *testing.T) {
 		{"webservice", map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, "http"},
 		{roleMemberType, map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{map[string]any{"name": "grpc", "containerPort": 9000}}}, "grpc"},
 		{"statefulset", map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{map[string]any{"name": "tcp", "containerPort": 5432}}}, "tcp"},
-		{"daemonset", map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{map[string]any{"name": "metrics", "containerPort": 9100}}}, "metrics"},
 	}
 	kinds := sidecarKindProps()
 	for _, tc := range mainCases {

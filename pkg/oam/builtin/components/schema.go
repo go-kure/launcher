@@ -11,7 +11,7 @@ import (
 )
 
 // This file holds PropertySchema fragments shared by the container-workload
-// component handlers (webservice/worker/deployment/cronjob/job/daemonset/statefulset). Each
+// component handlers that keep the reshaped form (webservice/worker/cronjob/job/statefulset). Each
 // fragment mirrors a shared parser in common.go / podspec.go (parseEnv,
 // parseResources, parsePodSpec, …). The target is full corev1 fidelity: a
 // nested shape is modeled field-by-field, with a Description on every key,
@@ -302,7 +302,7 @@ func schemaAppArmorProfile(scope string) oam.PropertySchema {
 
 // schemaPodSpec describes the pod-level properties shared by every container
 // workload kind (see parsePodSpec in podspec.go). A map, like schemaJobSpec,
-// because all six kinds must expose the identical set — TestPodSpecSchema
+// because every kind that publishes it must expose the identical set — TestPodSpecSchema
 // pins its key set to podSpecPropertyKeys. Every key, nested or not, carries a
 // Description; enum-valued fields declare their Enum so schema validation
 // rejects a bad value before the parser does.

@@ -50,9 +50,9 @@ default `Allow`, and the handler leaves the field unset for the cluster to apply
 `Allow` changes the generated manifest text and not the cluster's behaviour. The cronjob
 probe lists it in `LeftToCluster`. It is the one place check A disagrees with a schema.
 
-The probes cover the handler-built workload types: statefulset, daemonset,
+The probes cover the handler-built workload types: statefulset,
 job and cronjob, with their init containers, sidecars, claim templates and pod failure
-policy. The raw `deployment` (go-kure/launcher#1629) fills nothing, so its probes are raw
+policy. The raw `deployment` and `daemonset` (go-kure/launcher#1629) fill nothing, so their probes are raw
 documents (a selector and a pod template, with an init container, a second container and
 ports) that list no fill. Check B fails on any `policy` or `builtin` entry a probe does not
 list, so a fill that came back to the kind fails there. It also probes the types that lower to other components: `webservice` and `worker`,
