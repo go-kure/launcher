@@ -8,7 +8,7 @@ import (
 )
 
 // This file holds PropertySchema fragments shared by the container-workload
-// component handlers that keep the reshaped form (webservice/worker/cronjob/job/statefulset). Each
+// component handlers that keep the reshaped form (webservice/worker/statefulset). Each
 // fragment mirrors a shared parser in common.go / podspec.go (parseEnv,
 // parseResources, parsePodSpec, …). The target is full corev1 fidelity: a
 // nested shape is modeled field-by-field, with a Description on every key,

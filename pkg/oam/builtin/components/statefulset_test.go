@@ -36,6 +36,30 @@ func TestStatefulsetHandler_RequiredImage_Missing(t *testing.T) {
 	}
 }
 
+// TestStatefulsetHandler_WorkingDir_NonString_Error holds the bug pattern the
+// hand-parsed kinds share (statefulset, worker, webservice): a mistyped
+// workingDir value was once treated as absent instead of rejected. The
+// handler of each raw kind (job and cronjob among them) refuses it when it
+// decodes the upstream spec.
+func TestStatefulsetHandler_WorkingDir_NonString_Error(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	_, err := h.ToApplicationConfig(&oam.Component{
+		Name: "db",
+		Type: "statefulset",
+		Properties: map[string]any{
+			"image":       "ghcr.io/org/db:v1.0.0",
+			"serviceName": "db-headless",
+			"workingDir":  123,
+		},
+	}, "default")
+	if err == nil {
+		t.Fatal("expected error for non-string workingDir, got nil")
+	}
+	if !strings.Contains(err.Error(), "workingDir") {
+		t.Errorf("error should name workingDir, got %v", err)
+	}
+}
+
 // TestStatefulsetHandler_Generate_BasicResources pins the output since
 // go-kure/launcher#690: a StatefulSet and its ServiceAccount, and no headless
 // Service, which an authored `service` component provides instead.
