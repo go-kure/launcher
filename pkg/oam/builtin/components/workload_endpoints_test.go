@@ -22,9 +22,34 @@ type endpointWorkload struct {
 
 func endpointWorkloads() []endpointWorkload {
 	return []endpointWorkload{
-		{"deployment", &components.DeploymentHandler{}},
+		{roleMemberType, &components.RoleDeploymentHandler{}},
 		{"statefulset", &components.StatefulsetHandler{}},
 		{"daemonset", &components.DaemonsetHandler{}},
+	}
+}
+
+// The raw `deployment` kind reports one endpoint per port of the first
+// template container, in the authored order, and none without ports
+// (go-kure/launcher#1629). The reshaped tests above cover the role member.
+func TestWorkloadEndpoints_RawDeploymentReadsTheFirstContainer(t *testing.T) {
+	h := &components.DeploymentHandler{}
+	props := rawDeploymentProps("ghcr.io/example/app:1.0")
+	eps, err := h.Endpoints(&oam.Component{Name: "shop", Type: "deployment", Properties: props})
+	if err != nil || len(eps) != 0 {
+		t.Fatalf("no ports: endpoints = %+v, err = %v; want none", eps, err)
+	}
+	container := props["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)
+	container["ports"] = []any{portEntry(8080, "http", ""), portEntry(53, "dns", "UDP")}
+	eps, err = h.Endpoints(&oam.Component{Name: "shop", Type: "deployment", Properties: props})
+	if err != nil || len(eps) != 2 {
+		t.Fatalf("endpoints = %+v, err = %v; want two", eps, err)
+	}
+	// A raw port keeps the protocol as authored: empty, which Endpoint reads as TCP.
+	if eps[0].Name != "http" || eps[0].Protocol != "" || eps[0].Ports[0].IntVal != 8080 {
+		t.Errorf("endpoint[0] = %+v, want http, protocol as authored (empty), 8080", eps[0])
+	}
+	if eps[1].Name != "dns" || eps[1].Protocol != corev1.ProtocolUDP || eps[1].Ports[0].IntVal != 53 {
+		t.Errorf("endpoint[1] = %+v, want dns UDP 53", eps[1])
 	}
 }
 

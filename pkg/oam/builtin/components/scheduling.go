@@ -36,7 +36,7 @@ import (
 //     kind is for.
 //
 // The two therefore compose rather than compete: a component-position lowering
-// rule evaluates the shorthand and emits a `deployment` component carrying the
+// rule evaluates the shorthand and emits a `role-deployment` member carrying the
 // resulting explicit values, which is only possible because the raw shapes are
 // published here. A rule may emit only Components and Policies
 // (loweringPositionRules, pkg/oam/lowering.go), so there is no side channel

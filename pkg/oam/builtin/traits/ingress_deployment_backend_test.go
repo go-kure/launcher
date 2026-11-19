@@ -24,7 +24,7 @@ func deploymentApp(t *testing.T) *stack.Application {
 	cfg, err := h.ToApplicationConfig(&oam.Component{
 		Name:       "api",
 		Type:       "deployment",
-		Properties: map[string]any{"image": "nginx:1.27"},
+		Properties: rawDeploymentProps("api", "nginx:1.27"),
 	}, "default")
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)

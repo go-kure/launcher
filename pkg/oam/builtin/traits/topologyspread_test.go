@@ -28,14 +28,12 @@ func topologySpreadTrait() *oam.Trait {
 	return &oam.Trait{Type: "topology-spread"}
 }
 
-// deploymentComponent returns a `deployment` component named api with the
-// given extra properties on top of its image.
+// deploymentComponent returns a raw `deployment` component named api: the
+// minimal DeploymentSpec of rawDeploymentProps with extra merged over it
+// ({"replicas": 3}, or rawPod(...) for a pod spec field).
 func deploymentComponent(extra map[string]any) *oam.Component {
-	props := map[string]any{"image": "ghcr.io/org/api:v1"}
-	for k, v := range extra {
-		props[k] = v
-	}
-	return &oam.Component{Name: "api", Type: "deployment", Properties: props}
+	return &oam.Component{Name: "api", Type: "deployment",
+		Properties: rawDeploymentProps("api", "ghcr.io/org/api:v1", extra)}
 }
 
 // generateWithTopologySpread runs the production order for one component —
@@ -289,11 +287,13 @@ func transformedDeploymentCtx(t *testing.T, comp oam.Component, ctx oam.Transfor
 // that authors no replicas gets no spread without a policy and the full spread under a policy
 // defaulting to three: the policy step is the only difference between the two
 // runs, so this pair is what pins the ordering (policy at component
-// conversion, traits after, Generate last).
+// conversion, traits after, Generate last). The raw `deployment` kind fills no
+// replica default, so the policy default is exercised on a worker with its own
+// opinion off, which leaves the trait the only source of constraints.
 func TestTopologySpread_FollowsPolicyDefaultedReplicas(t *testing.T) {
 	comp := oam.Component{
-		Name: "api", Type: "deployment",
-		Properties: map[string]any{"image": "ghcr.io/org/api:v1"},
+		Name: "api", Type: "worker",
+		Properties: map[string]any{"image": "ghcr.io/org/api:v1", "topologySpread": false},
 		Traits:     []oam.Trait{*topologySpreadTrait()},
 	}
 
@@ -326,8 +326,10 @@ func TestTopologySpread_FollowsPolicyDefaultedReplicas(t *testing.T) {
 func TestTopologySpread_RefusesExistingConstraints(t *testing.T) {
 	authored := deploymentComponent(map[string]any{
 		"replicas": 3,
-		"topologySpreadConstraints": []any{map[string]any{
-			"maxSkew": 2, "topologyKey": "kubernetes.io/hostname", "whenUnsatisfiable": "ScheduleAnyway",
+		"template": map[string]any{"spec": map[string]any{
+			"topologySpreadConstraints": []any{map[string]any{
+				"maxSkew": 2, "topologyKey": "kubernetes.io/hostname", "whenUnsatisfiable": "ScheduleAnyway",
+			}},
 		}},
 	})
 	if _, err := generateWithTopologySpread(t, &components.DeploymentHandler{}, authored, nil); err == nil {
@@ -452,7 +454,7 @@ func TestTopologySpread_AcceptsEngineOwnedScope(t *testing.T) {
 func TestTopologySpread_ScopeSelectsScopedCapability(t *testing.T) {
 	comp := oam.Component{
 		Name: "api", Type: "deployment",
-		Properties: map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3},
+		Properties: rawDeploymentProps("api", "ghcr.io/org/api:v1", map[string]any{"replicas": 3}),
 		Traits:     []oam.Trait{{Type: "topology-spread", Properties: map[string]any{"scope": "zone-a"}}},
 	}
 	dep, result, err := transformedDeploymentCtx(t, comp, oam.TransformContext{
@@ -481,7 +483,7 @@ func TestTopologySpread_ScopeSelectsScopedCapability(t *testing.T) {
 func TestTopologySpread_RefusesCapabilityRenderingKey(t *testing.T) {
 	comp := oam.Component{
 		Name: "api", Type: "deployment",
-		Properties: map[string]any{"image": "ghcr.io/org/api:v1"},
+		Properties: rawDeploymentProps("api", "ghcr.io/org/api:v1"),
 		Traits:     []oam.Trait{*topologySpreadTrait()},
 	}
 	_, _, err := transformedDeploymentCtx(t, comp, oam.TransformContext{
@@ -533,7 +535,7 @@ func TestTopologySpread_RefusesRenderingKeysAtProfileEvaluation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			comp := oam.Component{
 				Name: "api", Type: "deployment",
-				Properties: map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3},
+				Properties: rawDeploymentProps("api", "ghcr.io/org/api:v1", map[string]any{"replicas": 3}),
 				Traits:     []oam.Trait{*topologySpreadTrait()},
 			}
 			_, _, err := buildWithProfile(t, comp, map[string]oam.CapabilityBinding{
@@ -557,7 +559,7 @@ func TestTopologySpread_RefusesRenderingKeysAtProfileEvaluation(t *testing.T) {
 func TestTopologySpread_ProfileEvaluationKeepsAuthoredScope(t *testing.T) {
 	comp := oam.Component{
 		Name: "api", Type: "deployment",
-		Properties: map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3},
+		Properties: rawDeploymentProps("api", "ghcr.io/org/api:v1", map[string]any{"replicas": 3}),
 		Traits:     []oam.Trait{{Type: "topology-spread", Properties: map[string]any{"scope": "zone-a"}}},
 	}
 	dep, result, err := buildWithProfile(t, comp, map[string]oam.CapabilityBinding{
@@ -750,7 +752,7 @@ func TestTopologySpread_SelectorsDoNotAliasTheDeployment(t *testing.T) {
 // every other trait decorator.
 func TestTopologySpread_ForwardsServiceAccountName(t *testing.T) {
 	cfg, err := (&components.DeploymentHandler{}).ToApplicationConfig(
-		deploymentComponent(map[string]any{"serviceAccountName": "shared-sa"}), "default")
+		deploymentComponent(rawPod(map[string]any{"serviceAccountName": "shared-sa"})), "default")
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
 	}

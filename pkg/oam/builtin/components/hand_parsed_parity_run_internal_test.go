@@ -23,7 +23,7 @@ import (
 // label selector these kinds parse by hand.
 
 var parityHandlers = map[string]oam.ComponentHandler{
-	"deployment":            &DeploymentHandler{},
+	roleDeploymentMember:    &RoleDeploymentHandler{},
 	"statefulset":           &StatefulsetHandler{},
 	"daemonset":             &DaemonsetHandler{},
 	"job":                   &JobHandler{},
@@ -94,7 +94,7 @@ func parityPodTemplate(t *testing.T, objects []*client.Object) (pod corev1.PodTe
 // component's name on the container.
 func TestHandParsedKinds_TemplateMetadataAndContainerName(t *testing.T) {
 	want := metav1.ObjectMeta{Labels: map[string]string{"app": "app"}}
-	for _, componentType := range []string{"deployment", "statefulset", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{roleDeploymentMember, "statefulset", "daemonset", "job", "cronjob"} {
 		t.Run(componentType, func(t *testing.T) {
 			objects, err := parityGenerate(t, componentType, nil)
 			if err != nil {
@@ -175,7 +175,8 @@ type paritySelectorSite struct {
 // paritySelectorSites lists every label selector the ten hand-parsed kinds
 // parse: 47.
 //
-//   - deployment, statefulset, daemonset, job and cronjob read the raw
+//   - role-deployment (the reshaped deployment parser), statefulset, daemonset,
+//     job and cronjob read the raw
 //     `affinity`: two arms (podAffinity, podAntiAffinity), each with required
 //     and preferred terms, each term with a labelSelector and a
 //     namespaceSelector — eight selectors — and the labelSelector of a
@@ -215,7 +216,7 @@ func paritySelectorSites() []paritySelectorSite {
 			},
 		}
 	}
-	for _, componentType := range []string{"deployment", "statefulset", "daemonset", "job", "cronjob"} {
+	for _, componentType := range []string{roleDeploymentMember, "statefulset", "daemonset", "job", "cronjob"} {
 		for _, arm := range []string{"podAffinity", "podAntiAffinity"} {
 			for _, mode := range []string{required, preferred} {
 				for _, field := range []string{"labelSelector", "namespaceSelector"} {

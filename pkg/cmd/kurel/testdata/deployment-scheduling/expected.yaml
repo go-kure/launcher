@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: backend
     launcher.gokure.dev/component: backend
   name: backend
   namespace: default
@@ -39,16 +38,10 @@ spec:
               matchLabels:
                 app: backend
             topologyKey: kubernetes.io/hostname
-      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/backend:v1.0.0
         name: backend
-        resources:
-          limits:
-            memory: 128Mi
-          requests:
-            cpu: 100m
-            memory: 128Mi
+        resources: {}
       tolerations:
       - effect: NoSchedule
         key: dedicated

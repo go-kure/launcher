@@ -63,7 +63,11 @@ func disruptionTransformer() *oam.Transformer {
 }
 
 func disruptionComponent(name, kind string, trs ...oam.Trait) oam.Component {
-	return oam.Component{Name: name, Type: kind, Properties: map[string]any{"image": "ghcr.io/org/app:v1"}, Traits: trs}
+	props := map[string]any{"image": "ghcr.io/org/app:v1"}
+	if kind == "deployment" {
+		props = rawDeploymentProps(name, "ghcr.io/org/app:v1")
+	}
+	return oam.Component{Name: name, Type: kind, Properties: props, Traits: trs}
 }
 
 func disruptionTrait(props map[string]any) oam.Trait {

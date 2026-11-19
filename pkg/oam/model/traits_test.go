@@ -24,7 +24,13 @@ spec:
     - id: web
       type: deployment.apps@v1
       properties:
-        image: nginx:1.27
+        selector:
+          matchLabels: {app: orders-web}
+        template:
+          spec:
+            containers:
+              - name: app
+                image: nginx:1.27
 `
 
 const outerModel = `apiVersion: launcher.gokure.dev/v1alpha1

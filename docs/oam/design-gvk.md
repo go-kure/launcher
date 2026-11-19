@@ -194,12 +194,13 @@ component itself emits a Deployment and nothing beside it; the `webservice` rule
 ServiceAccount as a sibling component and the volume claims as traits. Defaults and safety
 constraints shared by every type that projects the
 same kind are the other: the guard that refuses more than one replica and forces a `Recreate`
-strategy when a non-RWX PVC is attached applies to `deployment`, `webservice` and `worker`
-alike. A *role-named* type is named for the job it does: it combines kinds as peers
+strategy when a non-RWX PVC is attached applies to `webservice` and `worker` (through their
+`role-deployment` member). The raw `deployment` has no such guard since go-kure/launcher#1629:
+its author writes the strategy and replicas. A *role-named* type is named for the job it does: it combines kinds as peers
 (`webservice`: Deployment plus Service), chooses between them (`expose`: an `ingress` or an
 `httproute`), or emits one primary kind shaped by launcher's opinions about that job
 (`worker`: a Deployment with a default topology spread and an `affinity` shorthand, both of
-which `deployment` deliberately leaves out; see `pkg/oam/builtin/components/README.md`). The
+which the raw `deployment` leaves out; see `pkg/oam/builtin/components/README.md`). The
 number of kinds emitted does not decide the axis; whether the type projects the API kind or a
 role does. Nothing checks this axis; it binds naming choices, like the covenant above.
 

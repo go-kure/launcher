@@ -1,742 +1,383 @@
 package components_test
 
 import (
+	"maps"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-func deploymentConfig(t *testing.T, name string, props map[string]any) stack.ApplicationConfig {
-	t.Helper()
-	h := &components.DeploymentHandler{}
-	cfg, err := h.ToApplicationConfig(&oam.Component{
-		Name:       name,
-		Type:       "deployment",
-		Properties: props,
-	}, "default")
-	if err != nil {
-		t.Fatalf("ToApplicationConfig: %v", err)
-	}
-	return cfg
-}
-
-func generateDeployment(t *testing.T, name string, props map[string]any) (*appsv1.Deployment, []*client.Object) {
-	t.Helper()
-	cfg := deploymentConfig(t, name, props)
-	objects, err := cfg.Generate(stack.NewApplication(name, "default", cfg))
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	var dep *appsv1.Deployment
-	for _, obj := range objects {
-		if d, ok := (*obj).(*appsv1.Deployment); ok {
-			dep = d
-		}
-	}
-	if dep == nil {
-		t.Fatal("Generate produced no Deployment")
-	}
-	return dep, objects
-}
+// The deployment kind takes the upstream appsv1.DeploymentSpec, as replicaset
+// takes its ReplicaSetSpec (go-kure/launcher#1629). The reshaped form belongs to
+// webservice, worker and their member type role-deployment, and its tests are
+// role_deployment_*_test.go.
 
 func TestDeploymentHandler_CanHandle(t *testing.T) {
 	h := &components.DeploymentHandler{}
 	if !h.CanHandle("deployment") {
-		t.Error("expected true for deployment")
+		t.Error("CanHandle(deployment) = false")
 	}
-	for _, other := range []string{"worker", "webservice", "statefulset", "daemonset", ""} {
+	for _, other := range []string{"role-deployment", "webservice", "worker", "replicaset", "statefulset", ""} {
 		if h.CanHandle(other) {
-			t.Errorf("expected false for %q", other)
+			t.Errorf("CanHandle(%q) = true", other)
 		}
 	}
 }
 
-func TestDeploymentHandler_RequiredImage_Missing(t *testing.T) {
-	h := &components.DeploymentHandler{}
-	if _, err := h.ToApplicationConfig(&oam.Component{
-		Name:       "app",
-		Type:       "deployment",
-		Properties: map[string]any{},
-	}, "default"); err == nil {
-		t.Fatal("expected error for missing image")
+// dpRich is a Deployment spec that sets every top-level field and a pod spec
+// with an init container, two containers and a probe.
+const dpRich = `replicas: 2
+minReadySeconds: 5
+revisionHistoryLimit: 4
+paused: true
+progressDeadlineSeconds: 120
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+selector:
+  matchLabels:
+    tier: web
+template:
+  metadata:
+    labels:
+      tier: web
+    annotations:
+      example.com/scrape: "true"
+  spec:
+    serviceAccountName: web
+    initContainers:
+      - name: init
+        image: registry.example/team/init:1.0.0
+    containers:
+      - name: app
+        image: registry.example/team/app:1.2.3
+        ports:
+          - name: http
+            containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 2
+          successThreshold: 1
+          failureThreshold: 4
+      - name: proxy
+        image: registry.example/team/proxy:2.0.0
+        ports:
+          - name: metrics
+            containerPort: 9090
+`
+
+// dpPlain is the smallest deployment component: a selector, and a template
+// whose labels it matches, running the given pod spec.
+func dpPlain(podSpec string) string {
+	return "selector:\n  matchLabels:\n    tier: web\ntemplate:\n  metadata:\n    labels:\n      tier: web\n  spec:\n" + htIndent(podSpec, "    ")
+}
+
+// dpGenerate generates a deployment component under the given policies and
+// returns the Deployment.
+func dpGenerate(t *testing.T, name string, props map[string]any, policies ...oam.Policy) *appsv1.Deployment {
+	t.Helper()
+	return generateCoreKindUnder(t, &components.DeploymentHandler{}, "deployment", name, props, policies...).(*appsv1.Deployment)
+}
+
+// TestDeploymentHandler_EmitsAuthoredSpec: the Deployment is named after the
+// component in the build namespace, unlabelled, and its spec is the authored
+// one, field for field, with one thing added: the `app` label on the pod
+// template, beside the authored labels.
+func TestDeploymentHandler_EmitsAuthoredSpec(t *testing.T) {
+	var want appsv1.DeploymentSpec
+	if err := yaml.UnmarshalStrict([]byte(dpRich), &want); err != nil {
+		t.Fatalf("decoding the test spec: %v", err)
+	}
+	want.Template.Labels["app"] = "web"
+	dep := dpGenerate(t, "web", ptObject(t, dpRich), ptStrictPolicy(), nil)
+	if dep.APIVersion != "apps/v1" || dep.Kind != "Deployment" {
+		t.Errorf("GVK = %s %s, want apps/v1 Deployment", dep.APIVersion, dep.Kind)
+	}
+	if dep.Namespace != coreKindNamespace {
+		t.Errorf("namespace = %q, want the build namespace %q", dep.Namespace, coreKindNamespace)
+	}
+	if !reflect.DeepEqual(dep.Spec, want) {
+		t.Errorf("spec differs from the authored one plus the app label:\n got %+v\nwant %+v", dep.Spec, want)
 	}
 }
 
-// TestDeploymentHandler_Generate_NoService pins the deliberate omissions: this
-// kind has no `port` property, so unlike webservice it never emits a Service,
-// and it generates no ServiceAccount (go-kure/launcher#702) — the Deployment is
-// its only object.
-func TestDeploymentHandler_Generate_NoService(t *testing.T) {
-	_, objects := generateDeployment(t, "backend", map[string]any{
-		"image": "ghcr.io/org/backend:v1.0.0",
-	})
+// TestDeploymentHandler_FillsNothing: the kind adds no default of launcher's: a
+// policy that carries replica and resource defaults fills none of them, and the
+// pod keeps the API's own posture on the service account token and on the
+// protocol of a port.
+func TestDeploymentHandler_FillsNothing(t *testing.T) {
+	defaults := &stubPolicy{
+		defaultCPURequest: "100m", defaultMemoryRequest: "128Mi",
+		defaultCPULimit: "500m", defaultMemoryLimit: "256Mi",
+		defaultReplicas: int32ptr(2), defaultStorageSize: "1Gi",
+	}
+	pod := htPlainPod + "    ports:\n      - containerPort: 8080\n"
+	dep := dpGenerate(t, "web", ptObject(t, dpPlain(pod)), defaults)
+	if dep.Spec.Replicas != nil {
+		t.Errorf("replicas = %d, want it unset as authored", *dep.Spec.Replicas)
+	}
+	ps := dep.Spec.Template.Spec
+	if res := ps.Containers[0].Resources; len(res.Requests) != 0 || len(res.Limits) != 0 {
+		t.Errorf("resources = %+v, want none: the deployment kind fills no policy default", res)
+	}
+	if ps.AutomountServiceAccountToken != nil {
+		t.Errorf("automountServiceAccountToken = %v, want it unset: the kind fills no value", *ps.AutomountServiceAccountToken)
+	}
+	if got := ps.Containers[0].Ports[0].Protocol; got != "" {
+		t.Errorf("port protocol = %q, want it unset as authored", got)
+	}
+	if len(dep.Labels) != 0 || len(dep.Annotations) != 0 {
+		t.Errorf("the Deployment carries labels %v and annotations %v, want none", dep.Labels, dep.Annotations)
+	}
+}
 
-	for _, obj := range objects {
-		switch (*obj).(type) {
-		case *corev1.Service:
-			t.Error("deployment must not generate a Service — it publishes no port property")
-		case *corev1.ServiceAccount:
-			t.Error("deployment must not generate a ServiceAccount")
+// TestDeploymentHandler_ReportsNoBuiltinDefault: no config of the kind reports a
+// fill, since there is none to report.
+func TestDeploymentHandler_ReportsNoBuiltinDefault(t *testing.T) {
+	cfg, err := (&components.DeploymentHandler{}).ToApplicationConfig(
+		&oam.Component{Name: "web", Type: "deployment", Properties: ptObject(t, dpPlain(htPlainPod))}, coreKindNamespace)
+	if err != nil {
+		t.Fatalf("ToApplicationConfig: %v", err)
+	}
+	if r, ok := cfg.(oam.BuiltinDefaultReporter); ok {
+		if got := r.BuiltinDefaults(); len(got) != 0 {
+			t.Errorf("BuiltinDefaults() = %+v, want none", got)
 		}
 	}
-	if len(objects) != 1 {
-		t.Errorf("generated %d objects, want the Deployment alone", len(objects))
-	}
 }
 
-// TestDeploymentHandler_LabelMapsAreNotShared is the guard against the defect
-// class being fixed on the sibling kinds: one `map[string]string`
-// literal reused by the object metadata, the pod template and the selector.
-// Sharing is invisible until something mutates one of them — a trait adding a
-// label to object metadata — at which point the selector changes too, and a
-// Deployment's selector is immutable once created, so the object becomes
-// unpatchable and orphans its ReplicaSets. Mutating one map here must leave
-// every other consumer untouched.
-func TestDeploymentHandler_LabelMapsAreNotShared(t *testing.T) {
-	dep, _ := generateDeployment(t, "app", map[string]any{
-		"image": "ghcr.io/org/app:v1",
-	})
-
-	if dep.Spec.Selector == nil {
-		t.Fatal("Deployment has no selector")
-	}
-
-	// Named rather than iterated so a failure says which consumer aliased.
-	consumers := []struct {
-		name string
-		m    map[string]string
-	}{
-		{"deployment.metadata.labels", dep.Labels},
-		{"deployment.spec.selector.matchLabels", dep.Spec.Selector.MatchLabels},
-		{"deployment.spec.template.metadata.labels", dep.Spec.Template.Labels},
-	}
-	// t.Fatalf, not t.Errorf: the aliasing loop below writes into every one of
-	// these maps, and a nil map there panics with "assignment to entry in nil
-	// map" — aborting the binary instead of reporting the failure this loop
-	// already detected.
-	for _, c := range consumers {
-		if c.m == nil {
-			t.Fatalf("%s has no label map", c.name)
-		}
-		if c.m["app"] != "app" {
-			t.Fatalf("%s = %v, want app=app", c.name, c.m)
+// TestDeploymentHandler_Refusals: what the component refuses when it is read,
+// with no policy involved: the reshaped form (the main container's fields at the
+// top level, `sidecars`, `podMetadata`), a key that is no DeploymentSpec field
+// at any depth, an unauthored selector or template, and what the pod kind
+// refuses of a pod spec, by its path under the template.
+func TestDeploymentHandler_Refusals(t *testing.T) {
+	const notASpec = "properties do not decode into a apps/v1 DeploymentSpec"
+	app := map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3"}
+	selector := map[string]any{"matchLabels": map[string]any{"tier": "web"}}
+	with := func(extra map[string]any) map[string]any {
+		spec := map[string]any{"containers": []any{app}}
+		maps.Copy(spec, extra)
+		return map[string]any{
+			"selector": selector,
+			"template": map[string]any{"metadata": map[string]any{"labels": map[string]any{"tier": "web"}}, "spec": spec},
 		}
 	}
-
-	for i, mutated := range consumers {
-		mutated.m["probe.example.com/canary"] = "1"
-		for j, other := range consumers {
-			if i == j {
-				continue
-			}
-			if _, aliased := other.m["probe.example.com/canary"]; aliased {
-				t.Errorf("%s and %s are the same map: writing to one changed the other", mutated.name, other.name)
-			}
-		}
-		delete(mutated.m, "probe.example.com/canary")
-	}
-}
-
-// TestDeploymentHandler_DeploymentSpecFieldsAreProjected walks every
-// DeploymentSpec-level property from the document to the generated object.
-func TestDeploymentHandler_DeploymentSpecFieldsAreProjected(t *testing.T) {
-	dep, _ := generateDeployment(t, "app", map[string]any{
-		"image": "ghcr.io/org/app:v1",
-		"strategy": map[string]any{
-			"type": "RollingUpdate",
-			"rollingUpdate": map[string]any{
-				"maxUnavailable": "25%",
-				"maxSurge":       2,
-			},
-		},
-		"minReadySeconds":         15,
-		"revisionHistoryLimit":    0,
-		"paused":                  true,
-		"progressDeadlineSeconds": 600,
-	})
-
-	if dep.Spec.Strategy.Type != appsv1.RollingUpdateDeploymentStrategyType {
-		t.Errorf("Strategy.Type = %q, want RollingUpdate", dep.Spec.Strategy.Type)
-	}
-	if ru := dep.Spec.Strategy.RollingUpdate; ru == nil {
-		t.Error("Strategy.RollingUpdate is nil")
-	} else {
-		if got := ru.MaxUnavailable.String(); got != "25%" {
-			t.Errorf("MaxUnavailable = %q, want \"25%%\"", got)
-		}
-		if got := ru.MaxSurge.String(); got != "2" {
-			t.Errorf("MaxSurge = %q, want \"2\"", got)
-		}
-	}
-	if dep.Spec.MinReadySeconds != 15 {
-		t.Errorf("MinReadySeconds = %d, want 15", dep.Spec.MinReadySeconds)
-	}
-	// Zero is a meaningful revisionHistoryLimit (keep no old ReplicaSets), and
-	// distinguishable from unset only because the field is a pointer.
-	if dep.Spec.RevisionHistoryLimit == nil || *dep.Spec.RevisionHistoryLimit != 0 {
-		t.Errorf("RevisionHistoryLimit = %v, want an explicit 0", dep.Spec.RevisionHistoryLimit)
-	}
-	if !dep.Spec.Paused {
-		t.Error("Paused = false, want true")
-	}
-	if dep.Spec.ProgressDeadlineSeconds == nil || *dep.Spec.ProgressDeadlineSeconds != 600 {
-		t.Errorf("ProgressDeadlineSeconds = %v, want 600", dep.Spec.ProgressDeadlineSeconds)
-	}
-}
-
-// TestDeploymentHandler_UnauthoredSpecFieldsStayEmpty is the counterpart: a
-// document that authors none of the new properties must produce the same
-// Deployment the builder produced before this kind existed, so the apiserver's
-// own defaults still apply rather than launcher freezing them into the
-// manifest.
-func TestDeploymentHandler_UnauthoredSpecFieldsStayEmpty(t *testing.T) {
-	dep, _ := generateDeployment(t, "app", map[string]any{
-		"image": "ghcr.io/org/app:v1",
-	})
-
-	if dep.Spec.Strategy.Type != "" || dep.Spec.Strategy.RollingUpdate != nil {
-		t.Errorf("Strategy = %+v, want the zero value so apiserver defaulting applies", dep.Spec.Strategy)
-	}
-	if dep.Spec.MinReadySeconds != 0 {
-		t.Errorf("MinReadySeconds = %d, want 0", dep.Spec.MinReadySeconds)
-	}
-	if dep.Spec.RevisionHistoryLimit != nil {
-		t.Errorf("RevisionHistoryLimit = %v, want nil", dep.Spec.RevisionHistoryLimit)
-	}
-	if dep.Spec.Paused {
-		t.Error("Paused = true, want false")
-	}
-	if dep.Spec.ProgressDeadlineSeconds != nil {
-		t.Errorf("ProgressDeadlineSeconds = %v, want nil", dep.Spec.ProgressDeadlineSeconds)
-	}
-}
-
-func nonRWXVolumeProps(extra map[string]any) map[string]any {
-	props := map[string]any{
-		"image": "ghcr.io/org/app:v1",
-		"volumes": []any{
-			map[string]any{
-				"name":        "data",
-				"type":        "pvc",
-				"mountPath":   "/data",
-				"claimName":   "data",
-				"accessModes": []any{"ReadWriteOnce"},
-			},
-		},
-	}
-	for k, v := range extra {
-		props[k] = v
-	}
-	return props
-}
-
-// TestDeploymentHandler_NonRWXForcesRecreate covers the build-time guard: a
-// ReadWriteOnce claim cannot be held by an old and a new pod at once, so the
-// unauthored strategy becomes Recreate.
-func TestDeploymentHandler_NonRWXForcesRecreate(t *testing.T) {
-	dep, _ := generateDeployment(t, "app", nonRWXVolumeProps(nil))
-	if dep.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
-		t.Errorf("Strategy.Type = %q, want Recreate for a non-RWX PVC", dep.Spec.Strategy.Type)
-	}
-}
-
-// TestDeploymentHandler_NonRWXWithRecreateAuthored asserts an author who wrote
-// the same thing the guard would have chosen is not treated as a conflict, and
-// that the later apply does not undo it.
-func TestDeploymentHandler_NonRWXWithRecreateAuthored(t *testing.T) {
-	dep, _ := generateDeployment(t, "app", nonRWXVolumeProps(map[string]any{
-		"strategy": map[string]any{"type": "Recreate"},
-	}))
-	if dep.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
-		t.Errorf("Strategy.Type = %q, want Recreate", dep.Spec.Strategy.Type)
-	}
-	if dep.Spec.Strategy.RollingUpdate != nil {
-		t.Errorf("Strategy.RollingUpdate = %+v, want nil under Recreate", dep.Spec.Strategy.RollingUpdate)
-	}
-}
-
-// TestDeploymentHandler_NonRWXRejectsConflictingStrategy is the difference from
-// the worker kind, where the Recreate substitution is silent because there is
-// no strategy property to contradict. Here the author said RollingUpdate, and
-// overwriting it silently would ship something they did not write.
-func TestDeploymentHandler_NonRWXRejectsConflictingStrategy(t *testing.T) {
-	cfg := deploymentConfig(t, "app", nonRWXVolumeProps(map[string]any{
-		"strategy": map[string]any{"type": "RollingUpdate"},
-	}))
-	_, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
-	if err == nil {
-		t.Fatal("expected an error for RollingUpdate alongside a non-RWX PVC")
-	}
-	if !strings.Contains(err.Error(), "strategy.type must be Recreate") {
-		t.Errorf("error = %q, want it to name the conflicting strategy.type", err.Error())
-	}
-}
-
-// TestDeploymentHandler_RWXCapableClaimIsNotConstrained pins the read of
-// `accessModes` the guard depends on. The field is a request for a volume that
-// supports *every* mode listed, so a claim naming ReadWriteMany alongside
-// ReadWriteOnce binds a volume many pods can mount read-write: constraining it
-// would refuse a document Kubernetes accepts and serves, and force a Recreate
-// rollout on a workload that never needed one. The single-mode case below is
-// the control — without it this test would pass just as well if the guard
-// stopped firing altogether.
-func TestDeploymentHandler_RWXCapableClaimIsNotConstrained(t *testing.T) {
-	rwxProps := func(modes []any, extra map[string]any) map[string]any {
-		props := map[string]any{
-			"image": "ghcr.io/org/app:v1",
-			"volumes": []any{
-				map[string]any{
-					"name":        "data",
-					"type":        "pvc",
-					"mountPath":   "/data",
-					"claimName":   "data",
-					"accessModes": modes,
-				},
-			},
-		}
-		for k, v := range extra {
-			props[k] = v
-		}
+	top := func(extra map[string]any) map[string]any {
+		props := with(nil)
+		maps.Copy(props, extra)
 		return props
 	}
-
-	t.Run("a claim listing ReadWriteMany alongside ReadWriteOnce takes replicas > 1", func(t *testing.T) {
-		dep, _ := generateDeployment(t, "app", rwxProps([]any{"ReadWriteOnce", "ReadWriteMany"}, map[string]any{
-			"replicas": 2,
-		}))
-		if dep.Spec.Replicas == nil {
-			t.Fatal("Spec.Replicas = nil, want a value")
-		}
-		if got := *dep.Spec.Replicas; got != 2 {
-			t.Errorf("Replicas = %d, want 2", got)
-		}
-		if dep.Spec.Strategy.Type == appsv1.RecreateDeploymentStrategyType {
-			t.Error("Strategy.Type = Recreate, want the strategy left alone for an RWX-capable claim")
-		}
-	})
-
-	t.Run("an authored RollingUpdate is not a conflict either", func(t *testing.T) {
-		dep, _ := generateDeployment(t, "app", rwxProps([]any{"ReadWriteOnce", "ReadWriteMany"}, map[string]any{
-			"strategy": map[string]any{"type": "RollingUpdate"},
-		}))
-		if dep.Spec.Strategy.Type != appsv1.RollingUpdateDeploymentStrategyType {
-			t.Errorf("Strategy.Type = %q, want RollingUpdate", dep.Spec.Strategy.Type)
-		}
-	})
-
-	t.Run("ReadWriteOnce alone is still constrained", func(t *testing.T) {
-		cfg := deploymentConfig(t, "app", rwxProps([]any{"ReadWriteOnce"}, map[string]any{"replicas": 2}))
-		_, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
-		if err == nil {
-			t.Fatal("expected an error for replicas=2 alongside a ReadWriteOnce-only claim")
-		}
-		if !strings.Contains(err.Error(), "at most one replica") {
-			t.Errorf("error = %q, want it to name the replica constraint", err.Error())
-		}
-	})
-
-	t.Run("one RWX-capable claim does not excuse a second, constrained one", func(t *testing.T) {
-		// The skip is per claim, not a verdict for the workload: a component
-		// mounting a shared claim and a private ReadWriteOnce one is still
-		// pinned to a single pod by the second.
-		props := map[string]any{
-			"image":    "ghcr.io/org/app:v1",
-			"replicas": 2,
-			"volumes": []any{
-				map[string]any{
-					"name": "shared", "type": "pvc", "mountPath": "/shared", "claimName": "shared",
-					"accessModes": []any{"ReadWriteOnce", "ReadWriteMany"},
-				},
-				map[string]any{
-					"name": "private", "type": "pvc", "mountPath": "/private", "claimName": "private",
-					"accessModes": []any{"ReadWriteOnce"},
-				},
-			},
-		}
-		cfg := deploymentConfig(t, "app", props)
-		_, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
-		if err == nil {
-			t.Fatal("expected an error: the second claim is ReadWriteOnce-only")
-		}
-		if !strings.Contains(err.Error(), "at most one replica") {
-			t.Errorf("error = %q, want it to name the replica constraint", err.Error())
-		}
-	})
-
-	t.Run("ReadWriteOnce with ReadOnlyMany is still constrained", func(t *testing.T) {
-		// ReadOnlyMany lets many pods mount the volume read-only; it does not
-		// make the read-write mount shareable, so the guard still applies.
-		cfg := deploymentConfig(t, "app", rwxProps([]any{"ReadWriteOnce", "ReadOnlyMany"}, map[string]any{"replicas": 2}))
-		_, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
-		if err == nil {
-			t.Fatal("expected an error for replicas=2 alongside a ReadWriteOnce/ReadOnlyMany claim")
-		}
-	})
-}
-
-func TestDeploymentHandler_NonRWXRejectsMultipleReplicas(t *testing.T) {
-	cfg := deploymentConfig(t, "app", nonRWXVolumeProps(map[string]any{"replicas": 2}))
-	_, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
-	if err == nil {
-		t.Fatal("expected an error for replicas=2 alongside a non-RWX PVC")
-	}
-	if !strings.Contains(err.Error(), "at most one replica") {
-		t.Errorf("error = %q, want it to name the replica constraint", err.Error())
-	}
-}
-
-// TestDeploymentHandler_ReplicasIsValidated pins this kind's checked reading of
-// `replicas`: a non-integer and a negative are refused at build time rather
-// than defaulted or carried through to the apiserver. Every kind that reads
-// `replicas` shares the same reading; replicas_test.go pins it per kind.
-func TestDeploymentHandler_ReplicasIsValidated(t *testing.T) {
-	cases := []struct {
-		name  string
-		value any
+	for name, tc := range map[string]struct {
+		props map[string]any
 		want  string
 	}{
-		{"string", "3", "replicas: must be an integer, got string"},
-		{"boolean", true, "replicas: must be an integer, got bool"},
-		{"negative", -1, "replicas: must be >= 0, got -1"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := &components.DeploymentHandler{}
-			_, err := h.ToApplicationConfig(&oam.Component{
-				Name: "app",
-				Type: "deployment",
-				Properties: map[string]any{
-					"image":    "nginx:1.27",
-					"replicas": tc.value,
-				},
-			}, "default")
-			if err == nil {
-				t.Fatalf("ToApplicationConfig(replicas: %v) = nil error, want one containing %q", tc.value, tc.want)
-			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("error = %q, want it to contain %q", err.Error(), tc.want)
-			}
-		})
-	}
-}
-
-// TestDeploymentHandler_ReplicasRoundTrip covers the accepting side of the
-// guard above, including the unauthored default, so a parser that rejected
-// every replicas value could not pass.
-func TestDeploymentHandler_ReplicasRoundTrip(t *testing.T) {
-	cases := []struct {
-		name  string
-		props map[string]any
-		want  int32
-	}{
-		{"unauthored defaults to 1", map[string]any{}, 1},
-		{"authored", map[string]any{"replicas": 3}, 3},
-		{"scale to zero", map[string]any{"replicas": 0}, 0},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			props := map[string]any{"image": "nginx:1.27"}
-			for k, v := range tc.props {
-				props[k] = v
-			}
-			dep, _ := generateDeployment(t, "app", props)
-			if dep.Spec.Replicas == nil {
-				t.Fatal("Spec.Replicas = nil, want a value")
-			}
-			if *dep.Spec.Replicas != tc.want {
-				t.Errorf("Spec.Replicas = %d, want %d", *dep.Spec.Replicas, tc.want)
-			}
-		})
-	}
-}
-
-// TestDeploymentHandler_NonRWXAllowsZeroReplicas pins the "at most one" reading
-// of the guard: scale-to-zero holds the ReadWriteOnce claim in no pod at all,
-// so it is legal. Without this, tightening the guard to "exactly one" would
-// leave the suite green.
-func TestDeploymentHandler_NonRWXAllowsZeroReplicas(t *testing.T) {
-	cfg := deploymentConfig(t, "app", nonRWXVolumeProps(map[string]any{"replicas": 0}))
-	if _, err := cfg.Generate(stack.NewApplication("app", "default", cfg)); err != nil {
-		t.Fatalf("Generate() error = %v, want replicas=0 accepted alongside a non-RWX PVC", err)
-	}
-}
-
-// TestDeploymentHandler_NonRWXStrategyGuardAppliesAtZeroReplicas pins the other
-// half of the scale-to-zero rule, which the test above deliberately says nothing
-// about: the `replicas: 0` exemption is the replica count's alone, and the
-// strategy half of the guard still runs. Scale-to-zero is a state the document
-// can leave by editing one number, so a RollingUpdate that survived the guard
-// while at zero would be wrong the moment the first pod starts — in a later edit
-// that touches neither the volume nor the strategy.
-//
-// Without this, reading "left alone" as "the whole constraint is skipped" and
-// returning early at zero replicas would leave the suite green.
-func TestDeploymentHandler_NonRWXStrategyGuardAppliesAtZeroReplicas(t *testing.T) {
-	t.Run("an authored RollingUpdate is still rejected", func(t *testing.T) {
-		cfg := deploymentConfig(t, "app", nonRWXVolumeProps(map[string]any{
-			"replicas": 0,
-			"strategy": map[string]any{"type": "RollingUpdate"},
-		}))
-		_, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
-		if err == nil {
-			t.Fatal("Generate() error = nil, want a refusal for RollingUpdate with a non-RWX PVC at replicas: 0")
-		}
-		if !strings.Contains(err.Error(), "strategy.type must be Recreate") {
-			t.Errorf("Generate() error = %v, want the non-RWX strategy refusal", err)
-		}
-	})
-
-	t.Run("an unauthored strategy is still forced to Recreate", func(t *testing.T) {
-		dep, _ := generateDeployment(t, "app", nonRWXVolumeProps(map[string]any{"replicas": 0}))
-		if dep.Spec.Strategy.Type != appsv1.RecreateDeploymentStrategyType {
-			t.Errorf("Strategy.Type = %q, want Recreate for a non-RWX PVC at replicas: 0", dep.Spec.Strategy.Type)
-		}
-	})
-}
-
-// TestDeploymentHandler_RWXLeavesStrategyUntouched proves the guard is scoped
-// to non-RWX claims: without it the test above would pass for the wrong reason.
-func TestDeploymentHandler_RWXLeavesStrategyUntouched(t *testing.T) {
-	dep, _ := generateDeployment(t, "app", map[string]any{
-		"image":    "ghcr.io/org/app:v1",
-		"replicas": 3,
-		"volumes": []any{
-			map[string]any{
-				"name":        "data",
-				"type":        "pvc",
-				"mountPath":   "/data",
-				"claimName":   "data",
-				"accessModes": []any{"ReadWriteMany"},
-			},
-		},
-	})
-	if dep.Spec.Strategy.Type != "" {
-		t.Errorf("Strategy.Type = %q, want it left unset for an RWX claim", dep.Spec.Strategy.Type)
-	}
-}
-
-func TestDeploymentHandler_ServiceAccountName_Authored(t *testing.T) {
-	cfg := deploymentConfig(t, "app", map[string]any{
-		"image":              "ghcr.io/org/app:v1",
-		"serviceAccountName": "existing-sa",
-	})
-	objects, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	for _, obj := range objects {
-		if _, ok := (*obj).(*corev1.ServiceAccount); ok {
-			t.Error("an authored serviceAccountName must not also generate a ServiceAccount")
-		}
-	}
-	namer, ok := cfg.(oam.ServiceAccountNamer)
-	if !ok {
-		t.Fatal("RoleDeploymentConfig does not implement oam.ServiceAccountNamer")
-	}
-	if got, _ := namer.ServiceAccountName(); got != "existing-sa" {
-		t.Errorf("ServiceAccountName() = %q, want %q", got, "existing-sa")
-	}
-}
-
-func TestDeploymentHandler_SharedPodFieldsAreProjected(t *testing.T) {
-	dep, _ := generateDeployment(t, "app", map[string]any{
-		"image":                         "ghcr.io/org/app:v1",
-		"hostNetwork":                   true,
-		"terminationGracePeriodSeconds": 45,
-		"nodeSelector":                  map[string]any{"disktype": "ssd"},
-	})
-	ps := dep.Spec.Template.Spec
-	if !ps.HostNetwork {
-		t.Error("HostNetwork = false, want true")
-	}
-	if ps.TerminationGracePeriodSeconds == nil || *ps.TerminationGracePeriodSeconds != 45 {
-		t.Errorf("TerminationGracePeriodSeconds = %v, want 45", ps.TerminationGracePeriodSeconds)
-	}
-	if ps.NodeSelector["disktype"] != "ssd" {
-		t.Errorf("NodeSelector = %v, want disktype=ssd", ps.NodeSelector)
-	}
-}
-
-func TestDeploymentHandler_NamedProbePort_Error(t *testing.T) {
-	h := &components.DeploymentHandler{}
-	_, err := h.ToApplicationConfig(&oam.Component{
-		Name: "app",
-		Type: "deployment",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/app:v1",
-			"probes": map[string]any{
-				"liveness": map[string]any{
-					"httpGet": map[string]any{"path": "/healthz", "port": "http"},
-				},
-			},
-		},
-	}, "default")
-	if err == nil {
-		t.Fatal("expected an error for a named probe port: this kind declares no ContainerPort to resolve it against")
-	}
-}
-
-func TestDeploymentConfig_ApplyPolicy_MaxReplicas(t *testing.T) {
-	cfg := deploymentConfig(t, "app", map[string]any{
-		"image":    "ghcr.io/org/app:v1",
-		"replicas": 3,
-	})
-	if err := cfg.(oam.Enforceable).ApplyPolicy(&stubPolicy{maxReplicas: int32ptr(2)}); err == nil {
-		t.Error("expected an error when replicas exceed max")
-	}
-}
-
-func TestDeploymentConfig_ApplyPolicy_NilPolicy(t *testing.T) {
-	cfg := deploymentConfig(t, "app", map[string]any{"image": "ghcr.io/org/app:v1"})
-	if err := cfg.(oam.Enforceable).ApplyPolicy(nil); err != nil {
-		t.Errorf("nil policy should be a no-op, got: %v", err)
-	}
-}
-
-func TestDeploymentConfig_ApplyPolicy_PrivilegedDenied(t *testing.T) {
-	cfg := deploymentConfig(t, "app", map[string]any{
-		"image":           "ghcr.io/org/app:v1",
-		"securityContext": map[string]any{"privileged": true},
-	})
-	if err := cfg.(oam.Enforceable).ApplyPolicy(&stubPolicy{}); err == nil {
-		t.Error("expected an error for a privileged container under a policy that forbids it")
-	}
-}
-
-// TestDeploymentHandler_PropertySchemaComposition asserts the handler publishes
-// all three layers — its own container-level keys, the shared pod-level
-// fragment, and the DeploymentSpec fragment. Composition is easy to break by
-// dropping one maps.Copy, and every individual key would still validate.
-func TestDeploymentHandler_PropertySchemaComposition(t *testing.T) {
-	s := (&components.DeploymentHandler{}).PropertySchema()
-	for _, k := range []string{
-		"image", "replicas", "probes", "volumes", // own keys
-		"nodeSelector", "hostNetwork", "serviceAccountName", // schemaPodSpec
-		"strategy", "minReadySeconds", "revisionHistoryLimit", "paused", "progressDeadlineSeconds", // schemaDeploymentSpec
-		"affinity", "tolerations", "topologySpreadConstraints", // raw corev1 scheduling shapes
+		"no properties":                  {nil, "selector: required"},
+		"no selector":                    {map[string]any{"template": with(nil)["template"]}, "selector: required"},
+		"no template":                    {map[string]any{"selector": selector}, "template.spec.containers: required"},
+		"the reshaped image":             {top(map[string]any{"image": "registry.example/team/app:1.2.3"}), notASpec},
+		"the reshaped sidecars":          {top(map[string]any{"sidecars": []any{}}), notASpec},
+		"the reshaped podMetadata":       {top(map[string]any{"podMetadata": map[string]any{}}), notASpec},
+		"the reshaped ports":             {top(map[string]any{"ports": []any{}}), notASpec},
+		"a statefulset's field":          {top(map[string]any{"serviceName": "web"}), notASpec},
+		"replicas a string":              {top(map[string]any{"replicas": "two"}), notASpec},
+		"unknown key in a container":     {with(map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3", "bogus": 1}}}), notASpec},
+		"the reshaped volume mountPath":  {with(map[string]any{"volumes": []any{map[string]any{"name": "d", "emptyDir": map[string]any{}, "mountPath": "/d"}}}), notASpec},
+		"the reshaped container probes":  {with(map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3", "probes": map[string]any{}}}}), notASpec},
+		"two spellings":                  {top(map[string]any{"replicas": 1, "Replicas": 2}), "sets the same field as"},
+		"active deadline":                {with(map[string]any{"activeDeadlineSeconds": 600}), "template.spec.activeDeadlineSeconds: not supported"},
+		"ephemeral containers":           {with(map[string]any{"ephemeralContainers": []any{map[string]any{"name": "debug", "image": "registry.example/debug:1"}}}), "template.spec.ephemeralContainers: not supported"},
+		"priority":                       {with(map[string]any{"priority": 1000}), "template.spec.priority: not authorable"},
+		"overhead":                       {with(map[string]any{"overhead": map[string]any{"cpu": "100m"}}), "template.spec.overhead: not authorable"},
+		"untagged image":                 {with(map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/app"}}}), `template.spec.containers[0] "app": image "registry.example/team/app" rejected: no tag or digest specified`},
+		"latest init image":              {with(map[string]any{"initContainers": []any{map[string]any{"name": "init", "image": "busybox:latest"}}}), `template.spec.initContainers[0] "init": image "busybox:latest" rejected: :latest tag not allowed`},
+		"duplicate container names":      {with(map[string]any{"containers": []any{app, app}}), `container name "app" is also used by template.spec.containers[0]`},
+		"a selector with a bad operator": {top(map[string]any{"selector": map[string]any{"matchExpressions": []any{map[string]any{"key": "tier", "operator": "Bogus"}}}}), `selector: "Bogus" is not a valid label selector operator`},
 	} {
-		if _, ok := s[k]; !ok {
-			t.Errorf("PropertySchema is missing %q", k)
-		}
-	}
-	// The omissions are as much a decision as the inclusions
-	// (go-kure/launcher#343): no port, so no Service.
-	for _, k := range []string{"port"} {
-		if _, ok := s[k]; ok {
-			t.Errorf("PropertySchema declares %q, which this kind deliberately does not accept", k)
-		}
-	}
-	// go-kure/launcher#412 published `affinity` here, but as the raw
-	// corev1.Affinity shape — NOT the four-key shorthand webservice/worker
-	// carry. That distinction is the whole reason the property is
-	// admissible on this kind at all (go-kure/launcher#343 excluded the shorthand, not the API
-	// field), so assert which of the two arrived rather than merely that the
-	// key exists.
-	if affinity, ok := s["affinity"]; ok {
-		if _, isRaw := affinity.Properties["nodeAffinity"]; !isRaw {
-			t.Error(`"affinity" does not declare "nodeAffinity" — expected the raw corev1.Affinity shape`)
-		}
-		if _, isShorthand := affinity.Properties["enablePodAntiAffinity"]; isShorthand {
-			t.Error(`"affinity" declares "enablePodAntiAffinity" — this kind must not carry the four-key shorthand`)
-		}
-	}
-	for k, v := range s {
-		if v.Description == "" {
-			t.Errorf("property %q has no Description", k)
-		}
-	}
-}
-
-// TestDeploymentHandler_TopLevelNullIsOmission pins null-as-absence across this
-// kind's whole published top-level surface rather than the one field a review
-// named. pkg/oam's property validator reads an explicit null under an optional
-// property as absent, so each of these documents is schema-valid; the typed
-// parse helpers answer "present?" with a bare map lookup, so without the strip
-// the nil reaches a type check and the component fails during conversion after
-// the schema accepted it.
-//
-// The case list is derived from PropertySchema rather than written out, so a
-// property added later is covered without anyone remembering to add it here.
-func TestDeploymentHandler_TopLevelNullIsOmission(t *testing.T) {
-	h := &components.DeploymentHandler{}
-	schema := h.PropertySchema()
-
-	optional := make([]string, 0, len(schema))
-	for key, ps := range schema {
-		if !ps.Required {
-			optional = append(optional, key)
-		}
-	}
-	if len(optional) < 10 {
-		t.Fatalf("PropertySchema yielded only %d optional properties, want the kind's full surface — the derivation above is broken", len(optional))
-	}
-
-	for _, key := range optional {
-		t.Run(key, func(t *testing.T) {
-			_, err := h.ToApplicationConfig(&oam.Component{
-				Name:       "app",
-				Type:       "deployment",
-				Properties: map[string]any{"image": "nginx:1.27", key: nil},
-			}, "default")
-			if err != nil {
-				t.Fatalf("%s: null was refused: %v", key, err)
+		t.Run(name, func(t *testing.T) {
+			err := coreKindErr(&components.DeploymentHandler{}, "deployment", "web", tc.props)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, tc.want)
 			}
 		})
 	}
+}
 
-	t.Run("every optional property null at once", func(t *testing.T) {
-		props := map[string]any{"image": "nginx:1.27"}
-		for _, key := range optional {
-			props[key] = nil
+// TestDeploymentHandler_SelectorAndTheAppLabel: a selector that matches the
+// authored template labels and stops matching once the `app` label is on them is
+// refused, and an authored `app` label with another value is refused too.
+func TestDeploymentHandler_SelectorAndTheAppLabel(t *testing.T) {
+	rules := func(op string) map[string]any {
+		return map[string]any{
+			"selector": map[string]any{"matchExpressions": []any{map[string]any{"key": "app", "operator": op}}},
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"tier": "web"}},
+				"spec":     map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3"}}},
+			},
 		}
-		dep, _ := generateDeployment(t, "app", props)
-		if dep.Spec.Replicas == nil || *dep.Spec.Replicas != 1 {
-			t.Errorf("Spec.Replicas = %v, want the unauthored default 1 — `replicas: null` must read as absent, not as an authored value", dep.Spec.Replicas)
-		}
-	})
+	}
+	err := coreKindErr(&components.DeploymentHandler{}, "deployment", "web", rules("DoesNotExist"))
+	if err == nil || !strings.Contains(err.Error(), "selector: rules out the label `app: web`") {
+		t.Errorf("DoesNotExist: err = %v, want the app-label refusal", err)
+	}
+	if err := coreKindErr(&components.DeploymentHandler{}, "deployment", "web", rules("Exists")); err != nil {
+		t.Errorf("Exists: refused: %v", err)
+	}
+	other := ptObject(t, dpPlain(htPlainPod))
+	other["template"].(map[string]any)["metadata"].(map[string]any)["labels"].(map[string]any)["app"] = "frontend"
+	err = coreKindErr(&components.DeploymentHandler{}, "deployment", "web", other)
+	if err == nil || !strings.Contains(err.Error(), "template.metadata.labels.app: \"frontend\" is not the `app` label of component \"web\"") {
+		t.Errorf("another app label: err = %v, want the refusal", err)
+	}
+	if dep := dpGenerate(t, "web", ptObject(t, dpPlain(htPlainPod))); dep.Spec.Template.Labels["app"] != "web" {
+		t.Errorf("template labels = %v, want the app label", dep.Spec.Template.Labels)
+	}
+}
 
-	// A typed nil is what a Go-constructed lowering rule produces when it
-	// assigns a nil map or slice into an `any`. It is not `== nil`, so it needs
-	// the reflection arm the property validator also uses.
-	t.Run("typed nil", func(t *testing.T) {
-		props := map[string]any{
-			"image":           "nginx:1.27",
-			"env":             []any(nil),
-			"resources":       map[string]any(nil),
-			"securityContext": map[string]any(nil),
-			"volumes":         []any(nil),
+// TestDeploymentHandler_ScalerOwnsTheCount: a component with a scaler trait is
+// built without spec.replicas, whichever count is authored, and the policy's
+// replica maximum is not applied to it (the scaler holds its own maxReplicas to
+// the same maximum). Without a scaler the count is kept and held to the maximum
+// (go-kure/launcher#1179).
+func TestDeploymentHandler_ScalerOwnsTheCount(t *testing.T) {
+	scaler := oam.Trait{Type: "scaler", Properties: map[string]any{"minReplicas": 1, "maxReplicas": 2}}
+	build := func(t *testing.T, traits ...oam.Trait) (*appsv1.Deployment, error) {
+		t.Helper()
+		props := ptObject(t, dpPlain(htPlainPod))
+		props["replicas"] = 10
+		cfg, err := (&components.DeploymentHandler{}).ToApplicationConfig(
+			&oam.Component{Name: "web", Type: "deployment", Properties: props, Traits: traits}, coreKindNamespace)
+		if err != nil {
+			t.Fatalf("ToApplicationConfig: %v", err)
 		}
-		if _, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: "deployment", Properties: props}, "default"); err != nil {
-			t.Fatalf("typed nils were refused: %v", err)
+		if err := cfg.(oam.Enforceable).ApplyPolicy(ptStrictPolicy()); err != nil {
+			return nil, err
 		}
-	})
+		objs, err := cfg.Generate(stack.NewApplication("web", coreKindNamespace, cfg))
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		return (*objs[0]).(*appsv1.Deployment), nil
+	}
 
-	// The stripping must not reach the keys that may not appear at all: those
-	// are refused before it runs, so naming one — even as a null — still earns
-	// the explanatory refusal. Passing the stripped copy into
-	// parseDeploymentSpec would make this silent, and every parser-level test
-	// would stay green.
-	t.Run("a rejected key named as null is still rejected", func(t *testing.T) {
-		for _, key := range []string{"selector", "template"} {
-			_, err := h.ToApplicationConfig(&oam.Component{
-				Name:       "app",
-				Type:       "deployment",
-				Properties: map[string]any{"image": "nginx:1.27", key: nil},
-			}, "default")
-			if err == nil {
-				t.Errorf("%s: null was accepted, want the not-authorable refusal", key)
-				continue
+	dep, err := build(t, scaler)
+	if err != nil {
+		t.Fatalf("with a scaler: %v", err)
+	}
+	if dep.Spec.Replicas != nil {
+		t.Errorf("with a scaler: replicas = %d, want it unset", *dep.Spec.Replicas)
+	}
+	if _, err := build(t); err == nil || !strings.Contains(err.Error(), "replicas 10 exceeds enforced maximum 3") {
+		t.Errorf("without a scaler: err = %v, want the replica maximum refusal", err)
+	}
+}
+
+// TestDeploymentPolicy_PodTemplate: the pod template is held to the environment
+// policy for every container, the init containers included, and a violation
+// names its path under the template.
+func TestDeploymentPolicy_PodTemplate(t *testing.T) {
+	const image = "image: registry.example/team/app:1.2.3\n"
+	pods := map[string]struct {
+		pod  string
+		want string
+	}{
+		"a privileged second container": {
+			"containers:\n  - name: app\n    " + image + "  - name: side\n    " + image + "    securityContext:\n      privileged: true\n",
+			"template.spec.containers[1]"},
+		"a privileged init container": {
+			"initContainers:\n  - name: setup\n    " + image + "    securityContext:\n      privileged: true\ncontainers:\n  - name: app\n    " + image,
+			"template.spec.initContainers[0]"},
+		"a cpu limit over the maximum": {
+			"containers:\n  - name: app\n    " + image + "    resources:\n      limits:\n        cpu: \"8\"\n",
+			"template.spec.containers[0]"},
+		"an image outside the allowlist": {
+			"containers:\n  - name: app\n    " + image + "  - name: side\n    image: other.example/team/side:1.0.0\n",
+			"template.spec.containers[1]"},
+		"host networking": {
+			htPlainPod + "hostNetwork: true\n",
+			"template.spec"},
+	}
+	for name, tc := range pods {
+		t.Run(name, func(t *testing.T) {
+			_, err := pvTransform("deployment", &components.DeploymentHandler{}, ptObject(t, dpPlain(tc.pod)), pvPolicy(ptStrictPolicy()))
+			htWantViolation(t, err, tc.want)
+		})
+	}
+	// The same pod spec with nothing the policy forbids builds.
+	if _, err := pvTransform("deployment", &components.DeploymentHandler{}, ptObject(t, dpPlain(htPlainPod)), pvPolicy(ptStrictPolicy())); err != nil {
+		t.Errorf("a plain pod: %v", err)
+	}
+}
+
+// TestDeploymentHandler_EndpointsComeFromTheFirstContainer: the endpoints are the
+// ports of the first container of the template, in the authored order; the ports
+// of a later container are not the component's service surface.
+func TestDeploymentHandler_EndpointsComeFromTheFirstContainer(t *testing.T) {
+	h := &components.DeploymentHandler{}
+	eps, err := h.Endpoints(&oam.Component{Name: "web", Type: "deployment", Properties: ptObject(t, dpRich)})
+	if err != nil {
+		t.Fatalf("Endpoints: %v", err)
+	}
+	if len(eps) != 1 || eps[0].Name != "http" || eps[0].Ports[0].IntValue() != 8080 {
+		t.Errorf("endpoints = %+v, want the one http:8080 of the first container", eps)
+	}
+	eps, err = h.Endpoints(&oam.Component{Name: "web", Type: "deployment", Properties: ptObject(t, dpPlain(htPlainPod))})
+	if err != nil || len(eps) != 0 {
+		t.Errorf("a component with no ports: endpoints = %+v, err = %v; want none", eps, err)
+	}
+	if _, err := h.Endpoints(&oam.Component{Name: "web", Type: "deployment", Properties: map[string]any{"image": "x"}}); err == nil {
+		t.Error("Endpoints of a refused component returned no error")
+	}
+}
+
+// TestDeploymentConfig_ServiceAccountName: the Deployment reports the account
+// its pods run as to the traits that bind identity to it: the template's
+// serviceAccountName, the deprecated serviceAccount where that one is unset, and
+// "" for the namespace's default account. It always runs pods.
+func TestDeploymentConfig_ServiceAccountName(t *testing.T) {
+	for name, tc := range map[string]struct {
+		podSpec string
+		want    string
+	}{
+		"none authored":      {htPlainPod, ""},
+		"serviceAccountName": {htPlainPod + "serviceAccountName: web\n", "web"},
+		"deprecated alias":   {htPlainPod + "serviceAccount: legacy\n", "legacy"},
+		"both":               {htPlainPod + "serviceAccountName: web\nserviceAccount: legacy\n", "web"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := (&components.DeploymentHandler{}).ToApplicationConfig(
+				&oam.Component{Name: "web", Type: "deployment", Properties: ptObject(t, dpPlain(tc.podSpec))}, coreKindNamespace)
+			if err != nil {
+				t.Fatalf("ToApplicationConfig: %v", err)
 			}
-			if !strings.Contains(err.Error(), "not authorable") {
-				t.Errorf("%s: null produced %q, want the not-authorable refusal", key, err.Error())
+			namer, ok := cfg.(oam.ServiceAccountNamer)
+			if !ok {
+				t.Fatal("the deployment config does not implement oam.ServiceAccountNamer")
 			}
-		}
-	})
+			if got, runsPods := namer.ServiceAccountName(); got != tc.want || !runsPods {
+				t.Errorf("ServiceAccountName() = %q, %v; want %q, true", got, runsPods, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeploymentConfig_ApplyPolicy_NilIsANoOp: a nil policy checks nothing, as
+// on every other config.
+func TestDeploymentConfig_ApplyPolicy_NilIsANoOp(t *testing.T) {
+	cfg := &components.DeploymentConfig{Name: "web", Namespace: coreKindNamespace}
+	if err := cfg.ApplyPolicy(nil); err != nil {
+		t.Errorf("ApplyPolicy(nil) = %v, want nil", err)
+	}
 }

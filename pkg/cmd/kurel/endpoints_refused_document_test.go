@@ -252,9 +252,10 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 }
 
 // TestEndpoints_TypesWithAnEntry pins which component types have an endpoint
-// entry: the five the table above holds to the rule, the three workload kinds
-// (deployment, statefulset, daemonset), which take their endpoints from the main
-// container's ports, and the three chart types (helm, helmrelease, helmtemplate),
+// entry: the five the table above holds to the rule, the workload kinds
+// (deployment, role-deployment, statefulset, daemonset), which take their endpoints
+// from the main container's ports (the raw deployment's are those of
+// template.spec.containers[0]), and the three chart types (helm, helmrelease, helmtemplate),
 // which take a declared `endpoints` property. It reads the two registries `kurel build` registers its
 // component types from, and asks each handler and rule whether it implements an
 // endpoint interface, so a type that gains an entry fails here until it is listed.

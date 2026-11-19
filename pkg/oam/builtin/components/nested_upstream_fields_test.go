@@ -86,7 +86,7 @@ func TestContainerWindowsOptions_HostProcessPodAccepted(t *testing.T) {
 	for name, extra := range cases {
 		t.Run(name, func(t *testing.T) {
 			props := withProps(map[string]any{"image": "ghcr.io/org/app:v1", "hostNetwork": true}, extra)
-			ps := podTemplateSpec(t, generateKind(t, &components.DeploymentHandler{}, "deployment", props))
+			ps := podTemplateSpec(t, generateKind(t, &components.RoleDeploymentHandler{}, roleMemberType, props))
 			if !ps.HostNetwork {
 				t.Error("hostNetwork not rendered")
 			}
@@ -248,7 +248,7 @@ func TestWindowsOptions_StringRules(t *testing.T) {
 // error. The pod-wide HostProcess rules need the assembled pod, so they are
 // refused when the pod is built, not when a property is parsed.
 func deploymentBuildError(props map[string]any) error {
-	cfg, err := (&components.DeploymentHandler{}).ToApplicationConfig(&oam.Component{Name: "app", Type: "deployment", Properties: props}, "default")
+	cfg, err := (&components.RoleDeploymentHandler{}).ToApplicationConfig(&oam.Component{Name: "app", Type: roleMemberType, Properties: props}, "default")
 	if err != nil {
 		return err
 	}
@@ -286,12 +286,12 @@ func TestEnforcePrivileged_ContainerHostProcess(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			props := withProps(map[string]any{"image": "ghcr.io/org/app:v1"}, tc.extra)
-			cfg := objects2Config(t, &components.DeploymentHandler{}, "deployment", props).(oam.Enforceable)
+			cfg := objects2Config(t, &components.RoleDeploymentHandler{}, roleMemberType, props).(oam.Enforceable)
 			err := cfg.ApplyPolicy(&hostNetworkOK{&stubPolicy{}})
 			if err == nil || !strings.Contains(err.Error(), want) || !strings.HasPrefix(err.Error(), tc.prefix) {
 				t.Fatalf("ApplyPolicy error = %v, want prefix %q and containing %q", err, tc.prefix, want)
 			}
-			allowed := objects2Config(t, &components.DeploymentHandler{}, "deployment", props).(oam.Enforceable)
+			allowed := objects2Config(t, &components.RoleDeploymentHandler{}, roleMemberType, props).(oam.Enforceable)
 			if err := allowed.ApplyPolicy(&hostNetworkOK{&stubPolicy{allowPrivileged: true}}); err != nil {
 				t.Fatalf("ApplyPolicy with allowPrivileged: unexpected error %v", err)
 			}
@@ -391,7 +391,7 @@ func TestInitContainerRestart_Refusals(t *testing.T) {
 				entry[k] = v
 			}
 			props := map[string]any{"image": "ghcr.io/org/app:v1", "initContainers": []any{entry}}
-			_, err := (&components.DeploymentHandler{}).ToApplicationConfig(&oam.Component{Name: "app", Type: "deployment", Properties: props}, "default")
+			_, err := (&components.RoleDeploymentHandler{}).ToApplicationConfig(&oam.Component{Name: "app", Type: roleMemberType, Properties: props}, "default")
 			if err == nil {
 				t.Fatal("expected an error, got none")
 			}
@@ -410,7 +410,7 @@ func TestInitContainerRestart_NullIsAbsent(t *testing.T) {
 	props := map[string]any{"image": "ghcr.io/org/app:v1", "initContainers": []any{map[string]any{
 		"name": "init", "image": "ghcr.io/org/init:v1", "restartPolicy": nil, "restartPolicyRules": nil,
 	}}}
-	ps := podTemplateSpec(t, generateKind(t, &components.DeploymentHandler{}, "deployment", props))
+	ps := podTemplateSpec(t, generateKind(t, &components.RoleDeploymentHandler{}, roleMemberType, props))
 	if ic := ps.InitContainers[0]; ic.RestartPolicy != nil || ic.RestartPolicyRules != nil {
 		t.Errorf("RestartPolicy = %v, rules %v; want neither", ic.RestartPolicy, ic.RestartPolicyRules)
 	}
@@ -436,7 +436,7 @@ func TestInitContainerRestart_RenderingTwiceIsUnaffectedByEditingTheFirstRender(
 		"name": "init", "image": "ghcr.io/org/init:v1",
 		"restartPolicy": "OnFailure", "restartPolicyRules": []any{restartRule("In", 1)},
 	}}}
-	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", props, func(objects []*client.Object) {
+	second := renderTwice(t, &components.RoleDeploymentHandler{}, roleMemberType, props, func(objects []*client.Object) {
 		ic := &podTemplateSpec(t, objects).InitContainers[0]
 		*ic.RestartPolicy = corev1.ContainerRestartPolicyAlways
 		ic.RestartPolicyRules[0].Action = "Edited"

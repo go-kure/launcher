@@ -9,7 +9,8 @@ import (
 )
 
 // rawSchedulingKeys are the three properties go-kure/launcher#412 published on
-// the deployment kind.
+// the deployment kind, which is now the role member `role-deployment`
+// (go-kure/launcher#1629).
 var rawSchedulingKeys = []string{"affinity", "tolerations", "topologySpreadConstraints"}
 
 // rawSchedulingKinds names, per kind, the raw scheduling keys its own literal
@@ -22,7 +23,7 @@ var rawSchedulingKinds = []struct {
 	schema func() map[string]oam.PropertySchema
 	keys   []string
 }{
-	{"deployment", (&DeploymentHandler{}).PropertySchema, rawSchedulingKeys},
+	{roleDeploymentMember, (&RoleDeploymentHandler{}).PropertySchema, rawSchedulingKeys},
 	{"statefulset", (&StatefulsetHandler{}).PropertySchema, rawSchedulingKeys},
 	{"daemonset", (&DaemonsetHandler{}).PropertySchema, rawSchedulingKeys},
 	{"job", (&JobHandler{}).PropertySchema, rawSchedulingKeys},

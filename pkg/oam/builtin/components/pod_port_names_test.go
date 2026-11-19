@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
 // These tests cover go-kure/launcher#660: a sidecar's ports were read without
@@ -22,9 +23,14 @@ type sidecarKind struct {
 }
 
 // sidecarKindProps returns each sidecar-bearing kind's handler and minimum
-// properties, keyed by kind.
+// properties, keyed by kind. The role member `role-deployment` is one: it is
+// the reshaped parser the kind-named `deployment` was before it became raw
+// (go-kure/launcher#1629), and the only handler that reads a main-container
+// `ports` list besides statefulset and daemonset.
 func sidecarKindProps() map[string]sidecarKind {
-	out := map[string]sidecarKind{}
+	out := map[string]sidecarKind{
+		roleMemberType: {&components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
+	}
 	for _, k := range workloadKinds {
 		if sidecarKinds[k.name] {
 			out[k.name] = sidecarKind{k.handler, k.props}
@@ -135,7 +141,7 @@ func TestPodPortNames_MainVsSidecar(t *testing.T) {
 		{"statefulset ports list", "statefulset", map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{
 			map[string]any{"name": "tcp", "containerPort": 5432},
 		}}, "tcp"},
-		{"deployment ports list", "deployment", map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{
+		{"role-deployment ports list", roleMemberType, map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{
 			map[string]any{"name": "grpc", "containerPort": 9000},
 		}}, "grpc"},
 		{"daemonset ports list", "daemonset", map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{
@@ -172,7 +178,7 @@ func TestPodPortNames_Accepted(t *testing.T) {
 			sidecarWithPorts("a", map[string]any{"name": "metrics", "containerPort": 9090}),
 			sidecarWithPorts("b", map[string]any{"name": "admin", "containerPort": 9091}),
 		}}},
-		{"nameless ports", "deployment", map[string]any{"image": "ghcr.io/org/app:v1",
+		{"nameless ports", roleMemberType, map[string]any{"image": "ghcr.io/org/app:v1",
 			"ports": []any{map[string]any{"containerPort": 8080}},
 			"sidecars": []any{
 				sidecarWithPorts("a", map[string]any{"containerPort": 9090}),

@@ -26,7 +26,7 @@ tiers, in precedence order:
    unset from `oam.Policy.DefaultCPURequest()`/`DefaultMemoryRequest()`/
    `DefaultCPULimit()`/`DefaultMemoryLimit()`. A negative policy default fails the build, as a
    negative authored quantity does, since Kubernetes would refuse it at apply;
-   zero is accepted. The defaults reach every container of the seven kinds
+   zero is accepted. The defaults reach every container of the six kinds
    below: the main container and each `initContainers` and `sidecars` entry,
    by the same rules. Each default that fills a value is reported to the
    provenance report as a `policy` entry, at the path the author would have
@@ -42,14 +42,15 @@ tiers, in precedence order:
    own default limit the error names the policy and carries no class. What
    the postgresql defaults step fills after the policy (`enablePDB`, and the
    `1Gi` `storage.size` fallback) is reported as a `builtin` entry, not as `policy`.
-   So is what the parser of `deployment`, `statefulset`, `daemonset`, `job` and
+   So is what the parser of `webservice`, `worker`, `statefulset`, `daemonset`, `job` and
    `cronjob` fills when the author wrote no value (an explicit `null` counts as no
-   value): `replicas` 1 (`deployment` and `statefulset`), `restartPolicy`
+   value): `replicas` 1 (`webservice`, `worker` and `statefulset`), `restartPolicy`
    `OnFailure` and the two history limits of `cronjob`, `ports[i].protocol` `TCP`
    (also in a `sidecars` entry and in a restartable `initContainers` entry), the
    `status` `True` of a pod failure policy condition, the `accessModes`
    `ReadWriteOnce` of a `pvc` volume that references a claim and of a
-   `volumeClaimTemplates` entry. A `deployment` with a non-RWX claim and no authored
+   `volumeClaimTemplates` entry. The raw `deployment` fills none of these, and its
+   fill report is empty. A `webservice` or `worker` with a non-RWX claim and no authored
    `strategy` is built with the `Recreate` strategy, a decision taken when the object
    is generated; it is reported at `strategy.type` from the same predicate the
    generator uses. A path is reported by one source only, the one
@@ -84,10 +85,11 @@ came from the intrinsic tier specifically (absent from the authored/policy-
 defaulted value, present only after the intrinsic fallback), the error names
 it as a "generated default" so the mismatch isn't mysterious.
 
-This three-tier effective-value enforcement applies to the seven kind
+This three-tier effective-value enforcement applies to the six kind
 components that call `buildResourceRequirements` on their main container
-(`webservice`, `worker`, `deployment`, `cronjob`, `job`, `statefulset`,
-`daemonset`).
+(`webservice`, `worker`, `cronjob`, `job`, `statefulset`, `daemonset`).
+The raw `deployment` has no intrinsic or policy default tier: it enforces the
+maxima on the resources as authored, for every container of its template.
 **`postgresql` is exempt**: its lowering rule copies every entry of
 `c.Resources` straight onto the Cluster spec and never calls
 `buildResourceRequirements`, so it has no intrinsic tier for its existing
@@ -102,12 +104,15 @@ entries too:
 each entry's resources, image registry, `securityContext.privileged`, and
 `securityContext.capabilities.add` are checked against the same policy
 methods the main container uses, via the shared `enforceExtraContainer`
-helper. All seven kind components enforce their
-`initContainers`; only `webservice`, `worker`, `deployment`, `statefulset`
+helper. All six reshaped kind components enforce their
+`initContainers`; only `webservice`, `worker`, `statefulset`
 and, since go-kure/launcher#790, `daemonset` have a
 `sidecars` schema key at all (`cronjob`/`job` have no sidecars support,
-per ["Per-type highlights"](/pkg/oam/builtin/components/README.md#per-type-highlights)) so only those five enforce a sidecars
-loop. Errors name the authored list position and container, e.g.
+per ["Per-type highlights"](/pkg/oam/builtin/components/README.md#per-type-highlights)) so only those four enforce a sidecars
+loop. The raw `deployment` has no `sidecars`: its further containers are entries
+of `template.spec.containers`, and its `initContainers` are those of
+`template.spec`, each checked by `enforcePodTemplatePolicy` (see the `deployment`
+section of [Kinds: core workloads](kinds-core-workloads.md#deployment)). Errors name the authored list position and container, e.g.
 `initContainers[0] "init": image "docker.io/x/y:v1" is not from an allowed
 registry [...]`.
 
@@ -153,7 +158,7 @@ The classes, what each covers and what stays unclassified are in
   HorizontalPodAutoscaler's `maxReplicas` and `cnpg-cluster`'s `instances`.
 - **A request above the policy's default limit is `oam.RefusalResourceDefaultLimit`:** an
   authored cpu or memory request, on the main container, an init container or a sidecar of
-  the seven workload kinds, above the limit the policy fills because the container authors
+  the six workload kinds, above the limit the policy fills because the container authors
   none (go-kure/launcher#1582). The author has the remedy, a limit or a lower request.
   `cnpg-cluster` makes the same comparison when it generates its object, and that is a
   generation error with no violation and no class.
@@ -184,9 +189,9 @@ The classes, what each covers and what stays unclassified are in
 A new policy check in this package builds its refusal with `oam.NewPolicyRefusal` and a class
 constant; `TestBuiltinPolicyRefusalsCarryAClass` (`pkg/oam`) fails on one that does not.
 
-**Bounds in the schema.** The seven workload types (`deployment`, `webservice`, `worker`,
-`statefulset`, `daemonset`, `job`, `cronjob`) and the four kinds that take a pod as the API
-type (`pod`, `podtemplate`, `replicaset`, `replicationcontroller`) publish, in `boundedBy`,
+**Bounds in the schema.** The six workload types (`webservice`, `worker`,
+`statefulset`, `daemonset`, `job`, `cronjob`) and the five kinds that take a pod as the API
+type (`pod`, `podtemplate`, `deployment`, `replicaset`, `replicationcontroller`) publish, in `boundedBy`,
 the classes an authored value at a property can cause. The list of properties is in
 `site/content/api-reference/oam/policy-and-capability.md`, "Declared bounds". What is
 particular to this package:

@@ -61,7 +61,7 @@ func okWantRefusal(t *testing.T, err error, fragments ...string) {
 // the policy at generation.
 func TestObjectKindPolicy_KindComponent(t *testing.T) {
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"deployment": &components.DeploymentHandler{}}, nil)
-	app := mfApp("deployment", map[string]any{"image": "registry.example/team/app:1.2.3"})
+	app := mfApp("deployment", rawDeploymentProps("registry.example/team/app:1.2.3"))
 	generate := func(policy oam.Policy) error {
 		cluster, err := tr.Transform(app, oam.TransformContext{Namespace: "demo", Policy: policy})
 		if err != nil {

@@ -44,6 +44,18 @@ func i32(v int32) *int32 { return &v }
 // owner names the property map an entry belongs to.
 type owner struct{ component, member, trait string }
 
+// workerOwner is where a worker named app reports what its deployment member
+// fills: the reshaped deployment is the role member (go-kure/launcher#1629), and
+// a worker that generates its own account emits it beside the account.
+var workerOwner = owner{component: "app", member: "role-deployment"}
+
+// authoredOnTheMember is whether a value the author wrote reads as authored at
+// the place the rule copied it to: on the member of a worker the source is the
+// rule's copy of the authored value, never the builtin or the policy.
+func authoredOnTheMember(s oam.Source) bool {
+	return s.Kind == oam.SourceAuthored || (s.Kind == oam.SourceCopied && s.From == oam.SourceAuthored)
+}
+
 func policyProvenanceFor(t *testing.T, p oam.Policy, comps ...oam.Component) (*oam.Provenance, []byte) {
 	t.Helper()
 	// One pipeline, shared with the probe package: a consumer's own harness runs
@@ -122,15 +134,18 @@ func policyDefaultCases() []policyDefaultCase {
 	var cases []policyDefaultCase
 	// Resource defaults on every kind that has them. cnpg-cluster is reached
 	// through a postgresql component.
+	// The raw `deployment` has none (go-kure/launcher#1629); the worker stands for
+	// the reshaped deployment it lowers into, which reports on its role member.
 	kinds := []struct {
 		typ   string
 		extra map[string]any
+		owner owner
 	}{
-		{"deployment", nil},
-		{"statefulset", nil},
-		{"daemonset", nil},
-		{"cronjob", map[string]any{"schedule": "0 2 * * *"}},
-		{"job", nil},
+		{"worker", nil, workerOwner},
+		{"statefulset", nil, owner{component: "app"}},
+		{"daemonset", nil, owner{component: "app"}},
+		{"cronjob", map[string]any{"schedule": "0 2 * * *"}, owner{component: "app"}},
+		{"job", nil, owner{component: "app"}},
 	}
 	for _, k := range kinds {
 		comp := workload("app", k.typ, k.extra)
@@ -146,14 +161,14 @@ func policyDefaultCases() []policyDefaultCase {
 		} {
 			cases = append(cases, policyDefaultCase{
 				name: k.typ + "/" + r.accessor, accessor: r.accessor, comp: comp,
-				policy: r.policy, owner: owner{component: "app"}, path: r.path,
+				policy: r.policy, owner: k.owner, path: r.path,
 			})
 		}
 	}
-	for _, k := range []string{"deployment", "statefulset"} {
+	for _, k := range kinds[:2] {
 		cases = append(cases, policyDefaultCase{
-			name: k + "/DefaultReplicas", accessor: "DefaultReplicas", comp: workload("app", k, nil),
-			policy: &defaultsPolicy{replicas: i32(3)}, owner: owner{component: "app"}, path: "replicas",
+			name: k.typ + "/DefaultReplicas", accessor: "DefaultReplicas", comp: workload("app", k.typ, nil),
+			policy: &defaultsPolicy{replicas: i32(3)}, owner: k.owner, path: "replicas",
 		})
 	}
 	// A postgresql component lowers to a cnpg Cluster; the policy runs on the
@@ -183,7 +198,7 @@ func policyDefaultCases() []policyDefaultCase {
 		policy: &defaultsPolicy{store: "20Gi"}, owner: owner{component: "data"}, path: "size",
 	})
 	withTrait := func(typ string, props map[string]any) oam.Component {
-		c := workload("app", "deployment", nil)
+		c := rawDeployment("app", nil)
 		c.Traits = []oam.Trait{{Type: typ, Properties: props}}
 		return c
 	}
@@ -229,7 +244,7 @@ func TestPolicyDefaults_ReportedWhereApplied(t *testing.T) {
 // An authored value is never reported as policy, and its source stays authored.
 func TestPolicyDefaults_AuthoredValueIsNotReported(t *testing.T) {
 	p := &defaultsPolicy{replicas: i32(3), cpuRequest: "250m", memoryRequest: "256Mi", cpuLimit: "500m", memoryLimit: "512Mi"}
-	comp := workload("app", "deployment", map[string]any{
+	comp := workload("app", "worker", map[string]any{
 		"replicas":  2,
 		"resources": map[string]any{"requests": map[string]any{"cpu": "100m", "memory": "64Mi"}, "limits": map[string]any{"cpu": "1", "memory": "1Gi"}},
 	})
@@ -237,10 +252,10 @@ func TestPolicyDefaults_AuthoredValueIsNotReported(t *testing.T) {
 	if got := policyEntries(prov); len(got) != 0 {
 		t.Errorf("authored values reported as policy: %v", got)
 	}
-	e := entriesOf(prov, owner{component: "app"})
+	e := entriesOf(prov, workerOwner)
 	for _, path := range []string{"replicas", "resources.requests.cpu", "resources.limits.memory"} {
-		if e[path].Kind != oam.SourceAuthored {
-			t.Errorf("%s = %+v, want authored", path, e[path])
+		if !authoredOnTheMember(e[path]) {
+			t.Errorf("%s = %+v, want authored (as the rule copied it)", path, e[path])
 		}
 	}
 }
@@ -249,7 +264,7 @@ func TestPolicyDefaults_AuthoredValueIsNotReported(t *testing.T) {
 // applied, so there is nothing to report.
 func TestPolicyDefaults_UnlimitedLimitIsNotReported(t *testing.T) {
 	p := &defaultsPolicy{cpuLimit: "500m", memoryLimit: "512Mi"}
-	comp := workload("app", "deployment", map[string]any{
+	comp := workload("app", "worker", map[string]any{
 		"resources": map[string]any{"limits": map[string]any{"cpu": "unlimited", "memory": "unlimited"}},
 	})
 	prov, _ := policyProvenanceFor(t, p, comp)
@@ -262,12 +277,12 @@ func TestPolicyDefaults_UnlimitedLimitIsNotReported(t *testing.T) {
 // value is not the policy's, but the policy default caused it.
 func TestPolicyDefaults_RequestCappedToTheLimit(t *testing.T) {
 	p := &defaultsPolicy{cpuRequest: "2"}
-	comp := workload("app", "deployment", map[string]any{
+	comp := workload("app", "worker", map[string]any{
 		"resources": map[string]any{"limits": map[string]any{"cpu": "500m"}},
 	})
 	prov, _ := policyProvenanceFor(t, p, comp)
 	want := oam.Source{Kind: oam.SourcePolicy, Ref: "DefaultCPURequest", Detail: "capped-to-limit"}
-	if got := entriesOf(prov, owner{component: "app"})["resources.requests.cpu"]; got != want {
+	if got := entriesOf(prov, workerOwner)["resources.requests.cpu"]; got != want {
 		t.Errorf("resources.requests.cpu = %+v, want %+v", got, want)
 	}
 }
@@ -277,14 +292,14 @@ func TestPolicyDefaults_RequestCappedToTheLimit(t *testing.T) {
 // the same deployment without a scaler has one.
 func TestPolicyDefaults_ScaledDeploymentHasNoReplicasEntry(t *testing.T) {
 	p := &defaultsPolicy{replicas: i32(3)}
-	scaled := workload("app", "deployment", nil)
+	scaled := workload("app", "worker", nil)
 	scaled.Traits = []oam.Trait{{Type: "scaler", Properties: map[string]any{"minReplicas": 2, "maxReplicas": 5}}}
 	prov, _ := policyProvenanceFor(t, p, scaled)
 	if got := policyEntries(prov); len(got) != 0 {
 		t.Errorf("a scaled deployment reports a policy default: %v", got)
 	}
-	prov, _ = policyProvenanceFor(t, p, workload("app", "deployment", nil))
-	if got := entriesOf(prov, owner{component: "app"})["replicas"]; got.Kind != oam.SourcePolicy {
+	prov, _ = policyProvenanceFor(t, p, workload("app", "worker", nil))
+	if got := entriesOf(prov, workerOwner)["replicas"]; got.Kind != oam.SourcePolicy {
 		t.Errorf("an unscaled deployment: replicas = %+v, want policy", got)
 	}
 }
@@ -373,7 +388,6 @@ func extraContainerCases() []struct {
 		sidecars bool
 		owner    owner
 	}{
-		{"deployment", nil, true, owner{component: "app"}},
 		{"statefulset", nil, true, owner{component: "app"}},
 		{"daemonset", nil, true, owner{component: "app"}},
 		{"job", nil, false, owner{component: "app"}},

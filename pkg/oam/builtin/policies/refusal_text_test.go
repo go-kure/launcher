@@ -8,6 +8,20 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/policies"
 )
 
+// rawDeploymentProps is the smallest `deployment` the raw kind takes: the
+// upstream DeploymentSpec fields, with a selector and one container.
+func rawDeploymentProps(name, image string) map[string]any {
+	return map[string]any{
+		"selector": map[string]any{"matchLabels": map[string]any{"app": name}},
+		"template": map[string]any{
+			"metadata": map[string]any{"labels": map[string]any{"app": name}},
+			"spec": map[string]any{"containers": []any{
+				map[string]any{"name": "app", "image": image},
+			}},
+		},
+	}
+}
+
 // TestRefusalsNameThePolicyOnce holds the whole message of every refusal of the
 // two built-in policy handlers as the transform returns it: the transform names
 // the policy, once, and the handler says what is wrong with it. One row per
@@ -145,8 +159,8 @@ func TestRefusalsNameThePolicyOnce(t *testing.T) {
 				Metadata:   oam.Metadata{Name: "shop"},
 				Spec: oam.ApplicationSpec{
 					Components: []oam.Component{
-						{Name: "web", Type: "deployment", Properties: map[string]any{"image": "ghcr.io/org/web:v1"}},
-						{Name: "db", Type: "deployment", Properties: map[string]any{"image": "ghcr.io/org/db:v1"}},
+						{Name: "web", Type: "deployment", Properties: rawDeploymentProps("web", "ghcr.io/org/web:v1")},
+						{Name: "db", Type: "deployment", Properties: rawDeploymentProps("db", "ghcr.io/org/db:v1")},
 					},
 					Policies: tc.policies,
 				},

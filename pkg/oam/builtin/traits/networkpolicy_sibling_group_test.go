@@ -30,7 +30,7 @@ func (ownPodsRule) ComponentType() string { return "own-pods" }
 
 func (r ownPodsRule) LowerComponent(c *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
 	return oam.LoweringResult{Components: []oam.Component{
-		{Name: c.Name, Type: "deployment", Properties: map[string]any{"image": "ghcr.io/example/web:1.0"}, Traits: r.depTraits},
+		{Name: c.Name, Type: "role-deployment", Properties: map[string]any{"image": "ghcr.io/example/web:1.0"}, Traits: r.depTraits},
 		{Name: c.Name, Type: "service", Properties: map[string]any{
 			"selector": map[string]any{"app": c.Name},
 			"ports":    r.ports,

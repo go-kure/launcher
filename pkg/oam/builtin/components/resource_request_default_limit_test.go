@@ -53,7 +53,7 @@ func resourceHolders() []resourceHolder {
 
 // hasSidecars lists the kinds whose schema publishes `sidecars`.
 var hasSidecars = map[string]bool{
-	"webservice": true, "worker": true, "deployment": true, "statefulset": true, "daemonset": true,
+	"webservice": true, "worker": true, "statefulset": true, "daemonset": true,
 }
 
 // TestBuildResourceRequirements_RequestNeverAboveAuthoredLimit pins
@@ -98,7 +98,7 @@ func TestBuildResourceRequirements_RequestNeverAboveAuthoredLimit(t *testing.T) 
 // go-kure/launcher#1217 moves nothing else: a limit at or above the default,
 // or a request authored beside the limit, still gets the same output.
 func TestBuildResourceRequirements_DefaultsKeptWhereTheyFit(t *testing.T) {
-	handler := &components.DeploymentHandler{}
+	handler := &components.RoleDeploymentHandler{}
 	cases := []struct {
 		name         string
 		resources    map[string]any
@@ -150,7 +150,7 @@ func TestBuildResourceRequirements_DefaultsKeptWhereTheyFit(t *testing.T) {
 			if tc.resources != nil {
 				props["resources"] = tc.resources
 			}
-			res := podTemplateSpec(t, generateKind(t, handler, "deployment", props)).Containers[0].Resources
+			res := podTemplateSpec(t, generateKind(t, handler, roleMemberType, props)).Containers[0].Resources
 			assertQuantities(t, "requests", res.Requests, tc.wantRequests)
 			assertQuantities(t, "limits", res.Limits, tc.wantLimits)
 		})

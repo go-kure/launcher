@@ -155,7 +155,7 @@ func TestPruneProtection_SubApplicationKeepsLayoutIntent(t *testing.T) {
 		Spec: oam.ApplicationSpec{Components: []oam.Component{{
 			Name:       "web",
 			Type:       "deployment",
-			Properties: map[string]any{"image": "nginx:1.25"},
+			Properties: rawDeploymentProps("web", "nginx:1.25"),
 			Traits:     []oam.Trait{{Type: "intent-sub"}, {Type: "prune-protection"}},
 		}}},
 	}, oam.TransformContext{Namespace: "default"})

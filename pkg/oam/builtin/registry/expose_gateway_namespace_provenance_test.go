@@ -31,7 +31,7 @@ spec:
 
 func exposeNamespaceReport(t *testing.T, caps map[string]oam.CapabilityBinding) (entry oam.Source, manifests string) {
 	t.Helper()
-	comp := workload("app", "deployment", nil)
+	comp := rawDeployment("app", nil)
 	comp.Traits = []oam.Trait{{Type: "expose", Properties: map[string]any{"hostnames": []any{"a.example.com"}, "servicePort": 8080}}}
 	app := &oam.Application{
 		APIVersion: oam.SupportedAPIVersion,

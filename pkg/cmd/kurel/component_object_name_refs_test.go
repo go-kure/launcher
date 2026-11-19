@@ -99,11 +99,21 @@ spec:
     - name: api
       type: deployment
       properties:
-        image: ghcr.io/example/app:v1.0.0
         objectName: api-renamed
-        ports:
-          - name: http
-            containerPort: 8080
+        selector:
+          matchLabels:
+            tier: web
+        template:
+          metadata:
+            labels:
+              tier: web
+          spec:
+            containers:
+              - name: app
+                image: ghcr.io/example/app:v1.0.0
+                ports:
+                  - name: http
+                    containerPort: 8080
       traits:
         - type: scaler
           properties:
@@ -441,7 +451,17 @@ func TestObjectName_CollidesWithAGeneratedName(t *testing.T) {
 			components: `    - name: web
       type: deployment
       properties:
-        image: ghcr.io/example/app:v1.0.0
+        selector:
+          matchLabels:
+            tier: web
+        template:
+          metadata:
+            labels:
+              tier: web
+          spec:
+            containers:
+              - name: app
+                image: ghcr.io/example/app:v1.0.0
       traits:
         - type: configmap
           properties:

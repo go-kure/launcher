@@ -22,7 +22,7 @@ import (
 // sidecarKinds are the workload kinds that publish a `sidecars` key at all.
 // `daemonset` joined them in go-kure/launcher#790; `job` and `cronjob` stay
 // out, since a plain sidecar keeps a Job's pod from completing.
-var sidecarKinds = map[string]bool{"webservice": true, "worker": true, "statefulset": true, "deployment": true, "daemonset": true}
+var sidecarKinds = map[string]bool{"webservice": true, "worker": true, "statefulset": true, "daemonset": true}
 
 func containerNamed(t *testing.T, list []corev1.Container, name string) corev1.Container {
 	t.Helper()

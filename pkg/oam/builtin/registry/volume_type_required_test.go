@@ -8,8 +8,11 @@ import (
 )
 
 // A volume's `type` is required (go-kure/launcher#1626): parseVolumes refuses an
-// entry without one, so the published schema says so, for each of the seven kinds
-// that share the volumes declaration. The cases go through the property
+// entry without one, so the published schema says so, for each of the six kinds
+// that share the volumes declaration (the `deployment` kind takes the upstream
+// `volumes` since go-kure/launcher#1629, and the declaration its reshaped form
+// had is the role member's, which `worker` and `webservice` publish: the member
+// itself is read from the schema, as no document can author it). The cases go through the property
 // validation that runs before any handler, which is what a consumer of the
 // published schema relies on, and each has a control: the same volume with a type
 // passes.
@@ -19,12 +22,17 @@ func TestVolumeTypeIsRequired(t *testing.T) {
 		"webservice":  {"image": "ghcr.io/org/app:v1"},
 		"statefulset": {"image": "ghcr.io/org/app:v1"},
 		"job":         {"image": "ghcr.io/org/app:v1"},
-		"deployment":  {"image": "ghcr.io/org/app:v1"},
 		"daemonset":   {"image": "ghcr.io/org/app:v1"},
 		"cronjob":     {"image": "ghcr.io/org/app:v1", "schedule": "0 * * * *"},
 	}
 	tr := newTransformer()
 	published := tr.HandlerSchemas().Components
+	t.Run("role-deployment", func(t *testing.T) {
+		volumes, ok := published["role-deployment"]["volumes"]
+		if !ok || volumes.Items == nil || !volumes.Items.Properties["type"].Required {
+			t.Errorf("the role member publishes no volumes array whose type is Required: %+v", volumes)
+		}
+	})
 	for kind, base := range kinds {
 		t.Run(kind, func(t *testing.T) {
 			volumes, ok := published[kind]["volumes"]

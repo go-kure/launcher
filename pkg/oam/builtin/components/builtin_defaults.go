@@ -96,7 +96,10 @@ func withoutReplicasUnderScaler(paths []string, scaled bool) []string {
 	return slices.DeleteFunc(slices.Clone(paths), func(p string) bool { return p == "replicas" })
 }
 
-// BuiltinDefaults implements oam.BuiltinDefaultReporter.
+// BuiltinDefaults implements oam.BuiltinDefaultReporter. The member reports its
+// refs under "deployment", the kind of the object it builds: the kind-named
+// `deployment` component fills nothing since go-kure/launcher#1629, so these
+// refs are the role members' alone.
 func (c *RoleDeploymentConfig) BuiltinDefaults() []oam.BuiltinDefault {
 	paths := withoutReplicasUnderScaler(c.parseFills, c.scaled)
 	paths = append(slices.Clone(paths), containerFills(c.InitContainers, c.Sidecars)...)

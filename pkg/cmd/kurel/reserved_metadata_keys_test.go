@@ -89,9 +89,30 @@ var reservedKeyCarriers = map[string]struct {
 	},
 	// `podMetadata` (go-kure/launcher#1178) is a way in too: the check reads the
 	// generated pod template, so it needs no rule of its own.
-	"a deployment's podMetadata label": {
+	// The raw deployment kind (go-kure/launcher#1629) writes the template's labels
+	// as template.metadata.labels, and a worker lowers into the reshaped member.
+	"a deployment's template label": {
 		component: `    - name: carrier
       type: deployment
+      properties:
+        selector:
+          matchLabels:
+            tier: web
+        template:
+          metadata:
+            labels:
+              tier: web
+              %[1]s: a
+          spec:
+            containers:
+              - name: app
+                image: ghcr.io/example/web:v1.0.0
+`,
+		object: `Deployment "carrier"`, what: "pod template label",
+	},
+	"a worker's podMetadata label": {
+		component: `    - name: carrier
+      type: worker
       properties:
         image: ghcr.io/example/web:v1.0.0
         podMetadata:

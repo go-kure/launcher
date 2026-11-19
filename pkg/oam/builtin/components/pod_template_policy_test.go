@@ -32,6 +32,12 @@ func (k podTemplatePolicyKind) object(podSpec string) string {
 
 var podTemplatePolicyKinds = []podTemplatePolicyKind{
 	{
+		typ: "deployment", kind: "Deployment", apiVersion: "apps/v1",
+		handler:    &components.DeploymentHandler{},
+		objectPath: "spec.template.spec", propsPath: "template.spec",
+		props: dpPlain, controller: true,
+	},
+	{
 		typ: "replicaset", kind: "ReplicaSet", apiVersion: "apps/v1",
 		handler:    &components.ReplicaSetHandler{},
 		objectPath: "spec.template.spec", propsPath: "template.spec",

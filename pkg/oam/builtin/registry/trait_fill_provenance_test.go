@@ -44,7 +44,8 @@ type traitFillCase struct {
 	// omitted leaves the value out, so the handler fills it; written holds it,
 	// authored or rendered by a capability.
 	omitted, written traitDoc
-	// extra is added to the properties of the deployment the trait sits on.
+	// extra is merged into the properties of the raw deployment the trait sits on
+	// (rawDeploymentProps).
 	extra  map[string]any
 	policy *defaultsPolicy
 	// nameRole is the role the fill is resolved under when it is the name of an
@@ -171,7 +172,7 @@ func traitFillCases() []traitFillCase {
 	addName("rbac", "name", oam.NameRoleRBAC, map[string]any{
 		"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}}},
 	})
-	cases[len(cases)-1].extra = map[string]any{"serviceAccountName": "runner"}
+	cases[len(cases)-1].extra = map[string]any{"template": map[string]any{"spec": map[string]any{"serviceAccountName": "runner"}}}
 	addName("scaler", "hpaName", oam.NameRoleHPA, map[string]any{"minReplicas": 2, "maxReplicas": 5})
 	addName("scaler", "pdbName", oam.NameRolePDB, map[string]any{"minReplicas": 2, "maxReplicas": 5, "enablePDB": true})
 	addName("disruption", "pdbName", oam.NameRolePDB, map[string]any{"maxUnavailable": 1})
@@ -231,7 +232,7 @@ func traitProvenance(t *testing.T, c traitFillCase, doc traitDoc) (*oam.Provenan
 
 func traitFillApplication(t *testing.T, c traitFillCase, doc traitDoc) (*oam.Application, oam.TransformContext) {
 	t.Helper()
-	comp := workload("app", "deployment", c.extra)
+	comp := rawDeployment("app", c.extra)
 	comp.Traits = []oam.Trait{{Type: c.trait, Properties: doc.props}}
 	app := &oam.Application{
 		APIVersion: oam.SupportedAPIVersion,
@@ -463,7 +464,7 @@ func TestTraitFills_HookNamedIsNotReported(t *testing.T) {
 // namespaced or cluster-scoped, the property is not launcher's fill. Where it
 // names none, the four objects keep the default and the property is reported.
 func TestTraitFills_RBACNameHookedForOneObjectIsNotReported(t *testing.T) {
-	c := traitFillCase{trait: "rbac", extra: map[string]any{"serviceAccountName": "runner"}}
+	c := traitFillCase{trait: "rbac", extra: map[string]any{"template": map[string]any{"spec": map[string]any{"serviceAccountName": "runner"}}}}
 	doc := traitDoc{props: map[string]any{
 		"clusterWide": true,
 		"rules":       []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}}},

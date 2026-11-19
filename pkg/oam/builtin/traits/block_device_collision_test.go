@@ -17,9 +17,12 @@ import (
 // is also a mountPath in the same container, and checkMountPathCollision
 // previously looked at VolumeMounts only (go-kure/launcher#385).
 func TestMountDecorators_RefuseAPathTakenByABlockDevice(t *testing.T) {
-	cfg, err := (&components.DeploymentHandler{}).ToApplicationConfig(&oam.Component{
+	// The block device on the main container is the reshaped form's (a volume with
+	// a devicePath), which the deployment kind no longer takes (go-kure/launcher#1629):
+	// the role member holds it.
+	cfg, err := (&components.RoleDeploymentHandler{}).ToApplicationConfig(&oam.Component{
 		Name: "app",
-		Type: "deployment",
+		Type: "role-deployment",
 		Properties: map[string]any{
 			"image": "ghcr.io/org/app:v1",
 			"volumes": []any{map[string]any{
@@ -71,24 +74,42 @@ func TestMountDecorators_RefuseANameTakenByABlockDevice(t *testing.T) {
 			ToApplicationConfig(*oam.Component, string) (stack.ApplicationConfig, error)
 		}
 		props map[string]any
+		// exact says props are the whole properties, with no image added: the
+		// raw deployment takes the upstream pod template, whose block device is a
+		// claim volume of the pod.
+		exact bool
 	}
+	rawBlock := rawDeploymentProps("app", "ghcr.io/org/app:v1", rawPod(map[string]any{
+		"containers": []any{map[string]any{
+			"name": "app", "image": "ghcr.io/org/app:v1",
+			"volumeDevices": []any{map[string]any{"name": "disk", "devicePath": "/dev/xvda"}},
+		}},
+		"volumes": []any{
+			map[string]any{"name": "disk", "persistentVolumeClaim": map[string]any{"claimName": "disk"}},
+		},
+	}))
 	sources := []source{
-		{"webservice", webserviceViaRule{}, blockPVC},
-		{"worker", workerViaRule{}, blockPVC},
-		{"deployment", &components.DeploymentHandler{}, blockPVC},
-		{"statefulset", &components.StatefulsetHandler{}, blockPVC},
-		{"daemonset", &components.DaemonsetHandler{}, blockPVC},
-		{"job", &components.JobHandler{}, blockPVC},
-		{"cronjob", &components.CronjobHandler{}, mergeBlockProps(blockPVC, map[string]any{"schedule": "0 2 * * *"})},
+		{"webservice", webserviceViaRule{}, blockPVC, false},
+		{"worker", workerViaRule{}, blockPVC, false},
+		{"role-deployment", &components.RoleDeploymentHandler{}, blockPVC, false},
+		{"deployment", &components.DeploymentHandler{}, rawBlock, true},
+		{"statefulset", &components.StatefulsetHandler{}, blockPVC, false},
+		{"daemonset", &components.DaemonsetHandler{}, blockPVC, false},
+		{"job", &components.JobHandler{}, blockPVC, false},
+		{"cronjob", &components.CronjobHandler{}, mergeBlockProps(blockPVC, map[string]any{"schedule": "0 2 * * *"}), false},
 		{"statefulset claim template", &components.StatefulsetHandler{}, map[string]any{"volumeClaimTemplates": []any{map[string]any{
 			"name": "disk", "size": "1Gi", "devicePath": "/dev/xvda", "volumeMode": "Block",
-		}}}},
+		}}}, false},
 	}
 	for _, src := range sources {
 		kind := strings.TrimSuffix(src.kind, " claim template")
+		props := mergeBlockProps(map[string]any{"image": "ghcr.io/org/app:v1"}, src.props)
+		if src.exact {
+			props = src.props
+		}
 		cfg, err := src.handler.ToApplicationConfig(&oam.Component{
 			Name: "app", Type: kind,
-			Properties: mergeBlockProps(map[string]any{"image": "ghcr.io/org/app:v1"}, src.props),
+			Properties: props,
 		}, "default")
 		if err != nil {
 			t.Fatalf("%s: ToApplicationConfig: %v", src.kind, err)

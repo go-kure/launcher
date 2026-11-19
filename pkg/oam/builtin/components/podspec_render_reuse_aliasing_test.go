@@ -89,7 +89,7 @@ func deploymentPodSpec(t *testing.T, objects []*client.Object) *corev1.PodSpec {
 // copy leaves every map, pointer and slice backing array in common with the
 // config.
 func TestDeployment_PodLevelFieldsRenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
-	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", podSpecAliasProps(),
+	second := renderTwice(t, &components.RoleDeploymentHandler{}, roleMemberType, podSpecAliasProps(),
 		func(objects []*client.Object) {
 			ps := deploymentPodSpec(t, objects)
 			if ps.NodeSelector == nil || ps.TerminationGracePeriodSeconds == nil ||
@@ -134,7 +134,7 @@ func TestDeployment_PodLevelFieldsRenderingTwiceIsUnaffectedByEditingTheFirstRen
 // `ps.Volumes = append(ps.Volumes, in.Volumes...)`: the append copies each
 // Volume struct but not the *...VolumeSource pointer inside it.
 func TestDeployment_VolumesRenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
-	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", podSpecAliasProps(),
+	second := renderTwice(t, &components.RoleDeploymentHandler{}, roleMemberType, podSpecAliasProps(),
 		func(objects []*client.Object) {
 			ps := deploymentPodSpec(t, objects)
 			if len(ps.Volumes) != 1 || ps.Volumes[0].EmptyDir == nil {
@@ -164,7 +164,7 @@ func TestDeployment_VolumesRenderingTwiceIsUnaffectedByEditingTheFirstRender(t *
 // context fields, so the dereference into ps.Containers / ps.InitContainers
 // shares all of them.
 func TestDeployment_ContainersRenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
-	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", podSpecAliasProps(),
+	second := renderTwice(t, &components.RoleDeploymentHandler{}, roleMemberType, podSpecAliasProps(),
 		func(objects []*client.Object) {
 			ps := deploymentPodSpec(t, objects)
 			if len(ps.Containers) != 2 || len(ps.InitContainers) != 1 {
@@ -230,7 +230,7 @@ func TestDeployment_ContainersRenderingTwiceIsUnaffectedByEditingTheFirstRender(
 // If it ever FAILS, the element slices or the PodSpec struct itself are shared,
 // which is a broader regression than the nested-reference tests target.
 func TestDeployment_PodSpecShallowMutationPassesEvenWhenAliased(t *testing.T) {
-	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", podSpecAliasProps(),
+	second := renderTwice(t, &components.RoleDeploymentHandler{}, roleMemberType, podSpecAliasProps(),
 		func(objects []*client.Object) {
 			ps := deploymentPodSpec(t, objects)
 			if len(ps.Volumes) == 0 || len(ps.Containers) == 0 || len(ps.InitContainers) == 0 {

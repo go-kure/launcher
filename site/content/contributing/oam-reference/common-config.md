@@ -58,7 +58,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - `job` refused the name from its introduction; the other six gained the check in
     go-kure/launcher#407. [the name is a workload component name; `job` and the other six are
     the seven workload kinds `webservice`, `worker`, `deployment`, `statefulset`, `daemonset`,
-    `cronjob` and `job`]
+    `cronjob` and `job`; `deployment` has since become a raw kind with no main container named
+    after the component (go-kure/launcher#1629), so the reference page counts six]
   - Until go-kure/launcher#405 all three were read with a bare comma-ok assertion, so a
     handler called directly — without the schema validation an authored document gets first,
     which already refused these shapes — dropped the value and emitted a container with no
@@ -137,24 +138,31 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - go-kure/launcher#790 made the container `windowsOptions` authorable [the container
     `windowsOptions`: `securityContext.windowsOptions`]
 
-### Deployment-level properties (`deployment`, `webservice`, `worker`)
+### Deployment-level properties (`webservice`, `worker`)
 
 - **History:**
+  - go-kure/launcher#1629 (the kind-named `deployment` became a raw kind: its properties are the
+    `DeploymentSpec` fields, strictly decoded, and the reshaped form moved to the `role-deployment`
+    member that `webservice` and `worker` lower into. A breaking pre-GA change of `deployment`,
+    with no launcher default: the sentences below that say "all three" or name `deployment` as one
+    of the sharing kinds are from before it. [the reference page now says two]).
   - go-kure/launcher#343 (the kind-named `deployment` component).
   - go-kure/launcher#341 (`DeploymentSpec` parsed by `parseDeploymentSpec` into real `appsv1`
     types, from one fragment all three handlers compose).
-  - go-kure/launcher#1216 (the pod template's `podMetadata` is the same on all three).
+  - go-kure/launcher#1216 (the pod template's `podMetadata` is the same on all three
+    [`deployment`, `webservice` and `worker`, then; since go-kure/launcher#1629 on the two roles]).
 
 #### Main container ports
 
 - **History:**
-  - go-kure/launcher#280 (`deployment` publishes `ports`, the main container's
-    `corev1.ContainerPort` list).
+  - go-kure/launcher#280 (`deployment` published `ports`, the main container's
+    `corev1.ContainerPort` list; since go-kure/launcher#1629 its ports are
+    `template.spec.containers[0].ports`).
   - go-kure/launcher#1132 (`deployment`, `statefulset` and `daemonset` implement
     `oam.EndpointProvider` from the main container's `ports`).
   - go-kure/launcher#225 (`job`, `cronjob` and `worker` report no endpoint).
-  - go-kure/launcher#334 (`daemonset`, `statefulset`, `job` and `cronjob` publish the same
-    `ports`, with the same entry rules).
+  - go-kure/launcher#334 (`daemonset`, `statefulset`, `job` and `cronjob` publish one
+    `ports` property, with the same entry rules).
   - go-kure/launcher#343 (`deployment` dropped `port` and the Service it drove).
   - go-kure/launcher#690 (`daemonset` and `statefulset` drop `port` and the Service it drove
     (breaking), and replace it with `ports`).
@@ -163,8 +171,9 @@ Text in square brackets is added here to say what a moved sentence refers to.
 #### Raw scheduling properties
 
 - **History:**
-  - go-kure/launcher#412 (`deployment` publishes `affinity`, `tolerations` and
-    `topologySpreadConstraints` as their plain `corev1` shapes, parsed by `scheduling.go`).
+  - go-kure/launcher#412 (`deployment` published `affinity`, `tolerations` and
+    `topologySpreadConstraints` as their plain `corev1` shapes, parsed by `scheduling.go`;
+    since go-kure/launcher#1629 they are `template.spec.*` and no longer read by that parser).
   - go-kure/launcher#790 (the other kind-named workloads (`statefulset`, `daemonset`, `job`,
     `cronjob`) publish the same shapes through the same parsers and schemas, and `statefulset`
     dropped the four-key `affinity` shorthand (breaking)).
@@ -180,7 +189,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - go-kure/launcher#1268 (`scaler` is available on `statefulset`, with the HPA's
     `scaleTargetRef` naming a `StatefulSet`).
   - go-kure/launcher#1178 (`deployment` reports its pod template labels, its own and the ones
-    `podMetadata.labels` adds).
+    `podMetadata.labels` adds [the reshaped handler, now the `role-deployment` member; the raw
+    `deployment` of go-kure/launcher#1629 has no such method]).
   - go-kure/launcher#1216 (the `role-deployment` member of a `webservice` or `worker` reports the
     same, authored `podMetadata.labels` included).
   - go-kure/launcher#794 (`statefulset`, `daemonset`, `job` and `cronjob` have no
@@ -228,7 +238,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
     keys once read with a bare lookup read a null as omission).
   - go-kure/launcher#790 (an authored StatefulSet-level `spec.template` is rejected with an
     error, where the parser dropped it silently before; the pod template is projected from the
-    component's own container and pod-level properties, as on `deployment`).
+    component's own container and pod-level properties, as on `deployment` [then; now as on
+    `webservice` and `worker`]).
   - go-kure/launcher#394 extended the same treatment to the shared field helpers and to the
     parsers it converted, so it reaches well beyond these fields — but not the whole package.
     [the same treatment: reading an explicit null as omission; these fields: the optional

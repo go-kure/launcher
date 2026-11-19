@@ -227,6 +227,11 @@ func fluxSourceKind(kind string) schema.GroupKind {
 }
 
 // ComponentObject declares the deployment kind's Deployment.
+func (h *DeploymentHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
+	return appsKind("Deployment"), oam.ObjectScopeNamespaced
+}
+
+// ComponentObject declares the Deployment of the role member.
 func (h *RoleDeploymentHandler) ComponentObject() (schema.GroupKind, oam.ObjectScope) {
 	return appsKind("Deployment"), oam.ObjectScopeNamespaced
 }

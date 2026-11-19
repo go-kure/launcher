@@ -51,7 +51,7 @@ api-reference/oam-components/ container-fields
 api-reference/oam-components/ referencing-an-existing-claim-pvcclaimname
 api-reference/oam-components/ raw-block-volumes-volumemode-block
 api-reference/oam-components/ pod-level-properties
-api-reference/oam-components/ deployment-level-properties-deployment-webservice-worker
+api-reference/oam-components/ deployment-level-properties-webservice-worker
 api-reference/oam-components/ main-container-ports
 api-reference/oam-components/ raw-scheduling-properties
 api-reference/oam-components/ what-tolerations-changed-for-daemonset

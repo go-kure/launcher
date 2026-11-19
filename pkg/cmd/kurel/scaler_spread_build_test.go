@@ -79,6 +79,9 @@ func TestScalerSpread_BuiltinTransformerSpreadsByTheScalersMinimum(t *testing.T)
 						authored = scaler + spread
 					}
 					props := "        image: ghcr.io/example/app:v1.0.0\n"
+					if kind == "deployment" {
+						props = rawDeploymentYAML(8, "ghcr.io/example/app:v1.0.0")
+					}
 					if kind == "webservice" {
 						props += "        port: 8080\n"
 					}

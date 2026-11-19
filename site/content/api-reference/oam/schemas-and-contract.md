@@ -252,7 +252,7 @@ component "batch" (type "job"): properties: unsupported field "scheduling" (allo
 ```
 
 The built-in hand-parsed kinds answer with the reason they refuse a field of the
-Kubernetes type they project, `webservice` and `worker` with their `deployment`'s,
+Kubernetes type they project, `webservice` and `worker` with their `role-deployment` member's,
 and the `pvc` trait with the `persistentvolumeclaim` kind's
 (`site/content/api-reference/oam-components/upstream-fields-not-read.md`, "Upstream fields a hand-parsed kind does
 not read"); `helmchart` and `helmrelease` point a removed key to its replacement,

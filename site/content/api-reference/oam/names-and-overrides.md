@@ -654,7 +654,14 @@ one object, named after the component. `objectName` gives that object another na
   type: deployment
   properties:
     objectName: shop-api
-    image: ghcr.io/example/api:v1.0.0
+    selector:
+      matchLabels:
+        app: api
+    template:
+      spec:
+        containers:
+          - name: api
+            image: ghcr.io/example/api:v1.0.0
 ```
 
 The name is resolved in the order of every role: the author's `objectName`, else the `Naming`
@@ -678,9 +685,9 @@ type that declares no object and a property of that name keeps its property, whi
 engine does not read. A kind handler
 driven directly, outside a transform, never names its object with it: its own
 `PropertySchema` does not declare the property, and its `ToApplicationConfig` either passes
-over it, the object keeping the component name (`configmap`, `service`, `deployment`), or,
+over it, the object keeping the component name (`configmap`, `service`), or,
 where the handler decodes its properties strictly, refuses it as a field it does not know
-(`namespace`, `helmrelease`, `cnpg-cluster`).
+(`namespace`, `helmrelease`, `cnpg-cluster`, `deployment`).
 The object is claimed as its kind in the document's namespace, in none for a cluster-scoped
 kind (the components README's "Kind inventory" gives the scope of each), and in the Flux
 namespace for a Flux kind when the transform has one, so it is held against every other
@@ -849,8 +856,9 @@ declares no object refuses the two properties if its schema does not declare the
 them, unread by the engine, if it declares them or declares no schema.
 
 The two properties never reach a pod template. The pod template's labels and annotations are
-a handler's own property, `podMetadata`, on `deployment`, `statefulset`, `daemonset`, `job` and
+a handler's own property, `podMetadata`, on `statefulset`, `daemonset`, `job` and
 `cronjob` and on `webservice` and `worker`, which hand it to their
-deployment member; the engine neither reads nor removes it. What it writes is
+`role-deployment` member; the engine neither reads nor removes it. A `deployment`
+has no such property: its template's metadata is `template.metadata`. What it writes is
 checked as any pod template is: `ReservedMetadataKeys` and the component label.
 

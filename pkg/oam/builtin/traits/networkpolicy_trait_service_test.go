@@ -63,6 +63,9 @@ func traitServiceSourceNamespace(traitType string) string {
 // Service it does not own (go-kure/launcher#690).
 func routerProps(kind string) map[string]any {
 	props := map[string]any{"image": "api:1.0"}
+	if kind == "deployment" {
+		props = rawDeploymentProps("api", "api:1.0")
+	}
 	if kind == "statefulset" {
 		props["serviceName"] = "api-headless"
 	}
@@ -73,7 +76,7 @@ func routerProps(kind string) map[string]any {
 // selects its pods, on port 8080.
 func billingComponents() []oam.Component {
 	return []oam.Component{
-		{Name: "billing", Type: "deployment", Properties: map[string]any{"image": "billing:1.0"}},
+		{Name: "billing", Type: "deployment", Properties: rawDeploymentProps("billing", "billing:1.0")},
 		{Name: "billing-svc", Type: "service", Properties: map[string]any{
 			"selector": map[string]any{"app": "billing"},
 			"ports":    []any{map[string]any{"name": "http", "port": 8080, "targetPort": 8080}},

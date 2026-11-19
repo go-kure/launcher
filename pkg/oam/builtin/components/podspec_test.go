@@ -14,8 +14,12 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// workloadKinds enumerates the seven kinds that share the pod-level property
-// surface, with the minimum properties each needs to generate.
+// workloadKinds enumerates the six reshaped kinds that share the pod-level
+// property surface, with the minimum properties each needs to generate. The
+// kind-named `deployment` takes the upstream DeploymentSpec since
+// go-kure/launcher#1629 and is not in it; webservice and worker reach the
+// reshaped deployment parser through the role member `role-deployment`, which
+// has tests of its own (role_deployment_*_test.go).
 var workloadKinds = []struct {
 	name    string
 	handler oam.ComponentHandler
@@ -26,7 +30,6 @@ var workloadKinds = []struct {
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}},
-	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 	{"job", &components.JobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 }
 

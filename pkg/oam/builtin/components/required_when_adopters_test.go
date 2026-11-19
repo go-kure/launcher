@@ -23,7 +23,7 @@ func requiredWhenSentence(key, whenKey, equals string) string {
 }
 
 func TestRequiredWhenAdopters_VolumeSourceObjects(t *testing.T) {
-	site := exclusiveSite{compType: "deployment", handler: &components.DeploymentHandler{}}
+	site := exclusiveSite{compType: roleMemberType, handler: &components.RoleDeploymentHandler{}}
 	volume := func(extra map[string]any) map[string]any {
 		v := map[string]any{"name": "v", "mountPath": "/v"}
 		for k, val := range extra {
@@ -61,7 +61,7 @@ func TestRequiredWhenAdopters_VolumeSourceObjects(t *testing.T) {
 }
 
 func TestRequiredWhenAdopters_VolumeMode(t *testing.T) {
-	deployment := exclusiveSite{compType: "deployment", handler: &components.DeploymentHandler{}}
+	deployment := exclusiveSite{compType: roleMemberType, handler: &components.RoleDeploymentHandler{}}
 	statefulset := exclusiveSite{compType: "statefulset", handler: &components.StatefulsetHandler{}}
 	pvc := func(extra map[string]any) map[string]any {
 		v := map[string]any{"name": "disk", "type": "pvc", "claimName": "disk"}
@@ -128,7 +128,7 @@ func TestRequiredWhenAdopters_PublishedRules(t *testing.T) {
 		return f.RequiredWhen.Key + "=" + f.RequiredWhen.Equals.(string)
 	}
 
-	volumes := published("deployment", &components.DeploymentHandler{})["volumes"].Items.Properties
+	volumes := published(roleMemberType, &components.RoleDeploymentHandler{})["volumes"].Items.Properties
 	for key, want := range map[string]string{
 		"csi": "type=csi", "downwardAPI": "type=downwardAPI", "ephemeral": "type=ephemeral",
 		"image": "type=image", "projected": "type=projected", "volumeMode": "devicePath",

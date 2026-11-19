@@ -21,7 +21,7 @@ import (
 // openGateKinds are the component types whose containers or pod template are open
 // schemas. pod takes a PodSpec's fields at its top level; the others take them under
 // template.spec.
-var openGateKinds = []string{"pod", "podtemplate", "replicaset", "replicationcontroller"}
+var openGateKinds = []string{"pod", "podtemplate", "replicaset", "replicationcontroller", "deployment"}
 
 // The cnpg-pooler kind takes a pod template under `template` too, decoded into the
 // CloudNativePG pod template type (go-kure/launcher#1321). openGateCaseKinds adds it to
@@ -230,7 +230,7 @@ func openGateDoc(kind, spec string) (doc, prefix string) {
 	case "podtemplate":
 		props = "        template:\n          spec:\n" + indentLines(spec, 12)
 		prefix = "template.spec."
-	case "replicaset":
+	case "replicaset", "deployment":
 		props = "        selector:\n          matchLabels:\n            tier: web\n" +
 			"        template:\n          metadata:\n            labels:\n              tier: web\n          spec:\n" + indentLines(spec, 12)
 		prefix = "template.spec."
@@ -442,7 +442,7 @@ func resolveGatedPathType(typ reflect.Type, path string) (reflect.Type, error) {
 
 // TestFeatureGates_GatedPathsNameRealFields holds every GatedPaths path to a field of
 // the Kubernetes type its open node is decoded into, so a typo cannot hide a gated
-// field, and holds the set of nodes that carry one to the six listed in holders.
+// field, and holds the set of nodes that carry one to the seven listed in holders.
 func TestFeatureGates_GatedPathsNameRealFields(t *testing.T) {
 	// The resolver itself: a wrong key, a "[]" on a non-list and a missing "[]" all fail.
 	container := reflect.TypeOf(corev1.Container{})
@@ -472,7 +472,7 @@ func TestFeatureGates_GatedPathsNameRealFields(t *testing.T) {
 		{"pod containers[]", *pod["containers"].Items, container},
 		{"pod initContainers[]", *pod["initContainers"].Items, container},
 	}
-	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller"} {
+	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment"} {
 		holders = append(holders, holder{kind + " template", schemaOf(kind)["template"], reflect.TypeOf(corev1.PodTemplateSpec{})})
 	}
 	// The pooler's template is the CloudNativePG pod template type, not corev1's.
@@ -597,7 +597,7 @@ type casingCase struct {
 	kinds   []string
 }
 
-var templateKinds = []string{"podtemplate", "replicaset", "replicationcontroller"}
+var templateKinds = []string{"podtemplate", "replicaset", "replicationcontroller", "deployment"}
 
 const casingApp = `containers:
   - name: app

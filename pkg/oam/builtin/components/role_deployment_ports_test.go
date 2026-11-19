@@ -14,8 +14,8 @@ import (
 )
 
 func deploymentConvertErr(props map[string]any) error {
-	_, err := (&components.DeploymentHandler{}).ToApplicationConfig(&oam.Component{
-		Name: "web", Type: "deployment", Properties: props,
+	_, err := (&components.RoleDeploymentHandler{}).ToApplicationConfig(&oam.Component{
+		Name: "web", Type: "role-deployment", Properties: props,
 	}, "default")
 	return err
 }
@@ -24,9 +24,9 @@ func portProps(ports ...any) map[string]any {
 	return map[string]any{"image": "nginx:1.27", "ports": ports}
 }
 
-// TestDeploymentHandler_PortsProjected pins the emitted ContainerPort list:
+// TestRoleDeploymentHandler_PortsProjected pins the emitted ContainerPort list:
 // authored order, protocol defaulting to TCP, and no Service.
-func TestDeploymentHandler_PortsProjected(t *testing.T) {
+func TestRoleDeploymentHandler_PortsProjected(t *testing.T) {
 	dep, objs := generateDeployment(t, "web", portProps(
 		map[string]any{"name": "http", "containerPort": 8080},
 		map[string]any{"containerPort": 9090, "protocol": "UDP"},
@@ -45,9 +45,9 @@ func TestDeploymentHandler_PortsProjected(t *testing.T) {
 	}
 }
 
-// TestDeploymentHandler_NoPortsDeclaresNone keeps the portless main container:
+// TestRoleDeploymentHandler_NoPortsDeclaresNone keeps the portless main container:
 // absent and empty `ports` both declare nothing.
-func TestDeploymentHandler_NoPortsDeclaresNone(t *testing.T) {
+func TestRoleDeploymentHandler_NoPortsDeclaresNone(t *testing.T) {
 	for name, props := range map[string]map[string]any{
 		"absent": {"image": "nginx:1.27"},
 		"empty":  portProps(),
@@ -62,10 +62,10 @@ func TestDeploymentHandler_NoPortsDeclaresNone(t *testing.T) {
 	}
 }
 
-// TestDeploymentHandler_PortMatchesWebservice pins that a deployment declaring
+// TestRoleDeploymentHandler_PortMatchesWebservice pins that a deployment declaring
 // webservice's port gets webservice's exact main container port, which the
 // webservice lowering onto deployment relies on for identical output.
-func TestDeploymentHandler_PortMatchesWebservice(t *testing.T) {
+func TestRoleDeploymentHandler_PortMatchesWebservice(t *testing.T) {
 	dep, _ := generateDeployment(t, "web", portProps(map[string]any{"name": "http", "containerPort": 8080}))
 
 	cfg, err := webserviceViaRule{}.ToApplicationConfig(&oam.Component{
@@ -93,7 +93,7 @@ func TestDeploymentHandler_PortMatchesWebservice(t *testing.T) {
 	}
 }
 
-func TestDeploymentHandler_PortsRefused(t *testing.T) {
+func TestRoleDeploymentHandler_PortsRefused(t *testing.T) {
 	cases := []struct {
 		name  string
 		props map[string]any
@@ -131,9 +131,9 @@ func TestDeploymentHandler_PortsRefused(t *testing.T) {
 	}
 }
 
-// TestDeploymentHandler_SamePortOtherProtocol accepts one port number on two
+// TestRoleDeploymentHandler_SamePortOtherProtocol accepts one port number on two
 // protocols, which is two distinct ports.
-func TestDeploymentHandler_SamePortOtherProtocol(t *testing.T) {
+func TestRoleDeploymentHandler_SamePortOtherProtocol(t *testing.T) {
 	if err := deploymentConvertErr(portProps(
 		map[string]any{"containerPort": 53, "name": "dns-tcp"},
 		map[string]any{"containerPort": 53, "name": "dns-udp", "protocol": "UDP"},
@@ -142,9 +142,9 @@ func TestDeploymentHandler_SamePortOtherProtocol(t *testing.T) {
 	}
 }
 
-// TestDeploymentHandler_NamedProbePorts resolves a named probe or lifecycle
+// TestRoleDeploymentHandler_NamedProbePorts resolves a named probe or lifecycle
 // port against the main container's declared names.
-func TestDeploymentHandler_NamedProbePorts(t *testing.T) {
+func TestRoleDeploymentHandler_NamedProbePorts(t *testing.T) {
 	readiness := func(port any) map[string]any {
 		return map[string]any{"readiness": map[string]any{"httpGet": map[string]any{"path": "/healthz", "port": port}}}
 	}
@@ -198,12 +198,12 @@ func TestDeploymentHandler_NamedProbePorts(t *testing.T) {
 	}
 }
 
-// TestDeploymentHandler_PortsSchemaAgreesWithParser runs each entry through
+// TestRoleDeploymentHandler_PortsSchemaAgreesWithParser runs each entry through
 // the published schema (as kurel build and a lowering rule's emission are
 // checked) and through the parser, and requires the same verdict from both.
-func TestDeploymentHandler_PortsSchemaAgreesWithParser(t *testing.T) {
-	h := &components.DeploymentHandler{}
-	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"deployment": h}, nil)
+func TestRoleDeploymentHandler_PortsSchemaAgreesWithParser(t *testing.T) {
+	h := &components.RoleDeploymentHandler{}
+	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"role-deployment": h}, nil)
 	for name, entry := range map[string]map[string]any{
 		"minimal":        {"containerPort": 8080},
 		"full":           {"containerPort": 8080, "name": "http", "protocol": "SCTP"},
@@ -215,7 +215,7 @@ func TestDeploymentHandler_PortsSchemaAgreesWithParser(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			props := portProps(entry)
 			app := &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{
-				{Name: "web", Type: "deployment", Properties: props},
+				{Name: "web", Type: "role-deployment", Properties: props},
 			}}}
 			_, schemaErr := tr.ValidateAuthoredProperties(app)
 			parseErr := deploymentConvertErr(props)
@@ -226,9 +226,9 @@ func TestDeploymentHandler_PortsSchemaAgreesWithParser(t *testing.T) {
 	}
 }
 
-// TestDeploymentHandler_PortsSchema pins the published `ports` shape.
-func TestDeploymentHandler_PortsSchema(t *testing.T) {
-	s, ok := (&components.DeploymentHandler{}).PropertySchema()["ports"]
+// TestRoleDeploymentHandler_PortsSchema pins the published `ports` shape.
+func TestRoleDeploymentHandler_PortsSchema(t *testing.T) {
+	s, ok := (&components.RoleDeploymentHandler{}).PropertySchema()["ports"]
 	if !ok {
 		t.Fatal("deployment publishes no ports property")
 	}

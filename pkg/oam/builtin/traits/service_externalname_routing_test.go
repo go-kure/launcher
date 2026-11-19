@@ -48,7 +48,7 @@ func routeTo(backend string) oam.Component {
 	return oam.Component{
 		Name:       "web",
 		Type:       "deployment",
-		Properties: map[string]any{"image": "ghcr.io/example/web:1.0"},
+		Properties: rawDeploymentProps("web", "ghcr.io/example/web:1.0"),
 		Traits: []oam.Trait{ingressTrait(map[string]any{
 			"path":            "/",
 			"backend":         backend,
@@ -243,7 +243,7 @@ func (r aliasedWorkloadRule) LowerComponent(c *oam.Component, _ oam.LoweringCont
 		svc["externalName"] = "db.example.com"
 	}
 	return oam.LoweringResult{Components: []oam.Component{
-		{Name: c.Name, Type: "deployment", Properties: map[string]any{"image": "ghcr.io/example/db:1.0"}},
+		{Name: c.Name, Type: "role-deployment", Properties: map[string]any{"image": "ghcr.io/example/db:1.0"}},
 		{Name: c.Name, Type: "service", Properties: svc, Traits: c.Traits},
 	}}, nil
 }

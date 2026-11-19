@@ -46,7 +46,7 @@ func valuesOutside(gates map[string]string, enum []string) []string {
 // TestFeatureGates_ValueGatedPathsNameRealFieldsAndValues holds every ValueGatedPaths path
 // to a field of the Kubernetes type its open node is decoded into, every value to that
 // type's enum, and every gate to a row of the lifecycle table, and holds the set of nodes
-// that carry one to the five listed in holders. It holds the raw table to the workload
+// that carry one to the six listed in holders. It holds the raw table to the reshaped
 // kinds' shorthand table, so the two cannot diverge.
 func TestFeatureGates_ValueGatedPathsNameRealFieldsAndValues(t *testing.T) {
 	// The controls: a wrong path does not resolve, a mistyped value is reported, and a
@@ -85,7 +85,7 @@ func TestFeatureGates_ValueGatedPathsNameRealFieldsAndValues(t *testing.T) {
 	}
 	pod := schemaOf("pod")
 	holders := []holder{{"pod initContainers[]", *pod["initContainers"].Items, container}}
-	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller"} {
+	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment"} {
 		holders = append(holders, holder{kind + " template", schemaOf(kind)["template"], reflect.TypeOf(corev1.PodTemplateSpec{})})
 	}
 	holders = append(holders, holder{"cnpg-pooler template", schemaOf("cnpg-pooler")["template"], reflect.TypeOf(cnpgv1.PodTemplateSpec{})})
@@ -122,7 +122,7 @@ func TestFeatureGates_ValueGatedPathsNameRealFieldsAndValues(t *testing.T) {
 	// The raw table is the shorthand table: every workload kind whose init container takes
 	// a restartPolicy declares the same values with the same gates.
 	want := holders[0].schema.ValueGatedPaths["restartPolicy"]
-	for _, kind := range []string{"webservice", "worker", "deployment"} {
+	for _, kind := range []string{"webservice", "worker"} {
 		prop, ok := schemaOf(kind)["initContainers"].Items.Properties["restartPolicy"]
 		if !ok {
 			t.Errorf("%s: initContainers declares no restartPolicy", kind)

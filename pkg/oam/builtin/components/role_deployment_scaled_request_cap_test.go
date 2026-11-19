@@ -12,22 +12,22 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// TestDeploymentConfig_ScaledStillCapsPolicyRequestDefaults pins that the
+// TestRoleDeploymentConfig_ScaledStillCapsPolicyRequestDefaults pins that the
 // scaler's ownership of the replica count (go-kure/launcher#1179) leaves the
 // policy's resource handling alone: a scaled Deployment still gets the request
 // cap of go-kure/launcher#1217, so a policy default request above the authored
 // limit renders at the limit and the object stays admissible. The count itself
 // is the scaler's: spec.replicas is unset.
-func TestDeploymentConfig_ScaledStillCapsPolicyRequestDefaults(t *testing.T) {
+func TestRoleDeploymentConfig_ScaledStillCapsPolicyRequestDefaults(t *testing.T) {
 	policy := &stubPolicy{defaultCPURequest: "200m", defaultMemoryRequest: "256Mi"}
 	scaler := oam.Trait{Type: "scaler", Properties: map[string]any{"minReplicas": 1, "maxReplicas": 2}}
 
 	build := func(t *testing.T, traits ...oam.Trait) *appsv1.Deployment {
 		t.Helper()
-		h := &components.DeploymentHandler{}
+		h := &components.RoleDeploymentHandler{}
 		cfg, err := h.ToApplicationConfig(&oam.Component{
 			Name: "app",
-			Type: "deployment",
+			Type: "role-deployment",
 			Properties: map[string]any{
 				"image": "ghcr.io/org/app:v1",
 				"resources": map[string]any{

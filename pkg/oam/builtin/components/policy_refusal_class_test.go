@@ -378,12 +378,12 @@ func TestPolicyRefusalClass_ComponentApplyPolicy(t *testing.T) {
 		},
 		{name: "pod, cpu limit", class: oam.RefusalResourceMaximum, typ: "pod", handler: &components.PodHandler{}, props: pod(rcCPULimit)},
 		{
-			name: "deployment, request above the policy default limit", class: oam.RefusalResourceDefaultLimit, typ: "deployment", handler: &components.DeploymentHandler{},
+			name: "role-deployment, request above the policy default limit", class: oam.RefusalResourceDefaultLimit, typ: roleMemberType, handler: &components.RoleDeploymentHandler{},
 			props:  props(map[string]any{"image": "registry.example/team/app:1.0.0", "resources": map[string]any{"requests": map[string]any{"cpu": "1"}}}),
 			policy: rcWith(func(p *stubPolicy) { p.defaultCPULimit = "500m" }),
 		},
 		{
-			name: "deployment, init container request above the policy default limit", class: oam.RefusalResourceDefaultLimit, typ: "deployment", handler: &components.DeploymentHandler{},
+			name: "role-deployment, init container request above the policy default limit", class: oam.RefusalResourceDefaultLimit, typ: roleMemberType, handler: &components.RoleDeploymentHandler{},
 			props: props(map[string]any{"image": "registry.example/team/app:1.0.0", "initContainers": []any{map[string]any{
 				"name": "setup", "image": "registry.example/team/setup:1.0.0", "resources": map[string]any{"requests": map[string]any{"memory": "512Mi"}},
 			}}}),
@@ -597,7 +597,7 @@ func TestPolicyRefusalClass_Unclassified(t *testing.T) {
 // authored value caused it: the violation is unclassified and holds no refusal.
 func TestPolicyRefusalClass_PolicyDefaultsThatDisagree(t *testing.T) {
 	policy := rcWith(func(p *stubPolicy) { p.defaultCPURequest, p.defaultCPULimit = "1", "500m" })
-	_, err := pvTransform("deployment", &components.DeploymentHandler{},
+	_, err := pvTransform(roleMemberType, &components.RoleDeploymentHandler{},
 		map[string]any{"image": "registry.example/team/app:1.0.0"}, policy())
 	rcWantClass(t, err, oam.RefusalUnclassified)
 	if want := "the policy's default cpu request"; err != nil && !strings.Contains(err.Error(), want) {

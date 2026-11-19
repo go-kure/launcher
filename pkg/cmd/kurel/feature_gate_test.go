@@ -242,9 +242,12 @@ var ungatedValueCases = []gateCase{
 	},
 }
 
-// gatedKinds are the component types that take every gated property above; a
-// webservice and a worker reach them through their lowering rules' schemas.
-var gatedKinds = []string{"deployment", "webservice", "worker"}
+// gatedKinds are the component types that take every gated property above, in the
+// reshaped form (a main container at the top level); a webservice and a worker reach
+// them through their lowering rules' schemas. The raw deployment kind takes them under
+// template.spec instead, like replicaset, and the open-schema tests cover it
+// (openGateKinds in feature_gate_open_test.go).
+var gatedKinds = []string{"webservice", "worker"}
 
 func gateAppYAML(kind, props string) string {
 	return fmt.Sprintf(`apiVersion: launcher.gokure.dev/v1alpha1
@@ -372,7 +375,7 @@ func TestFeatureGates_PodKindsCarryTheGates(t *testing.T) {
 // TestFeatureGates_NullUsesNoGate: a null is absent at every depth, so a gated key
 // authored as null does not trip its gate.
 func TestFeatureGates_NullUsesNoGate(t *testing.T) {
-	doc := gateAppYAML("deployment", "\n        hostnameOverride: null\n")
+	doc := gateAppYAML("worker", "\n        hostnameOverride: null\n")
 	if err := validateForTarget(t, doc, &oam.KubernetesVersion{Major: 1, Minor: 1}); err != nil {
 		t.Fatalf("a null hostnameOverride must pass any version, got %v", err)
 	}
@@ -418,7 +421,7 @@ func TestBuildCommand_KubernetesVersion(t *testing.T) {
             memory: 1Gi
         hostnameOverride: web.example.com
 `
-	doc := gateAppYAML("deployment", props)
+	doc := gateAppYAML("worker", props)
 
 	// build runs `kurel build` with a profile stating version, or none when "".
 	build := func(version string) ([]map[string]any, error) {

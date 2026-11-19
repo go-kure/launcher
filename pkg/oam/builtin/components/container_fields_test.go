@@ -140,7 +140,7 @@ func TestContainerFields_NullAndEmptyAreAbsent(t *testing.T) {
 				"initContainers": []any{entry("init")},
 				"sidecars":       []any{entry("proxy")},
 			})
-			ps := podTemplateSpec(t, generateKind(t, &components.DeploymentHandler{}, "deployment", props))
+			ps := podTemplateSpec(t, generateKind(t, &components.RoleDeploymentHandler{}, roleMemberType, props))
 			for _, c := range append(append([]corev1.Container{}, ps.InitContainers...), ps.Containers...) {
 				if c.ImagePullPolicy != "" || c.TerminationMessagePath != "" || c.TerminationMessagePolicy != "" ||
 					c.Stdin || c.StdinOnce || c.TTY || c.ResizePolicy != nil {
@@ -163,7 +163,7 @@ func TestContainerFields_FalseBooleansRenderAsAbsent(t *testing.T) {
 		for _, k := range keys {
 			props[k] = authored
 		}
-		ps := podTemplateSpec(t, generateKind(t, &components.DeploymentHandler{}, "deployment", props))
+		ps := podTemplateSpec(t, generateKind(t, &components.RoleDeploymentHandler{}, roleMemberType, props))
 		raw, err := json.Marshal(ps.Containers[0])
 		if err != nil {
 			t.Fatalf("json.Marshal: %v", err)
@@ -265,8 +265,8 @@ func TestExtraContainer_ContainerFieldErrors(t *testing.T) {
 				entry := maps.Clone(tc.fields)
 				entry["name"] = "c"
 				entry["image"] = "ghcr.io/org/c:v1"
-				_, err := (&components.DeploymentHandler{}).ToApplicationConfig(&oam.Component{
-					Name: "app", Type: "deployment",
+				_, err := (&components.RoleDeploymentHandler{}).ToApplicationConfig(&oam.Component{
+					Name: "app", Type: roleMemberType,
 					Properties: map[string]any{"image": "ghcr.io/org/app:v1", list: []any{entry}},
 				}, "default")
 				if err == nil {
@@ -288,8 +288,8 @@ func TestExtraContainer_ContainerFieldErrors(t *testing.T) {
 // sidecar. An empty string is where they could part: the published enums do not
 // list it, and parseStringField would read it as absence.
 func TestContainerFields_AuthoredCheckAgreesWithParser(t *testing.T) {
-	h := &components.DeploymentHandler{}
-	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"deployment": h}, nil)
+	h := &components.RoleDeploymentHandler{}
+	tr := oam.NewTransformer(map[string]oam.ComponentHandler{roleMemberType: h}, nil)
 	cases := []struct {
 		name   string
 		fields map[string]any
@@ -316,7 +316,7 @@ func TestContainerFields_AuthoredCheckAgreesWithParser(t *testing.T) {
 	for position, props := range positions {
 		for _, tc := range cases {
 			t.Run(position+"/"+tc.name, func(t *testing.T) {
-				component := oam.Component{Name: "app", Type: "deployment", Properties: props(tc.fields)}
+				component := oam.Component{Name: "app", Type: roleMemberType, Properties: props(tc.fields)}
 				_, authoredErr := tr.ValidateAuthoredProperties(&oam.Application{
 					Spec: oam.ApplicationSpec{Components: []oam.Component{component}},
 				})
@@ -363,7 +363,7 @@ func TestInitContainer_ResizeRestartContainerRefused(t *testing.T) {
 		"initContainers": []any{map[string]any{"name": "init", "image": "ghcr.io/org/init:v1", "resizePolicy": resize("NotRequired")}},
 		"sidecars":       []any{map[string]any{"name": "proxy", "image": "ghcr.io/org/proxy:v1", "resizePolicy": resize("RestartContainer")}},
 	}
-	generateKind(t, &components.DeploymentHandler{}, "deployment", props)
+	generateKind(t, &components.RoleDeploymentHandler{}, roleMemberType, props)
 }
 
 // TestJobPods_ResizeRestartContainerNeedsARestartingPod: upstream requires
@@ -435,7 +435,7 @@ func TestContainerFields_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *te
 		"initContainers": []any{entry("init")},
 		"sidecars":       []any{entry("proxy")},
 	})
-	second := renderTwice(t, &components.DeploymentHandler{}, "deployment", props, func(objects []*client.Object) {
+	second := renderTwice(t, &components.RoleDeploymentHandler{}, roleMemberType, props, func(objects []*client.Object) {
 		ps := podTemplateSpec(t, objects)
 		ps.Containers[0].ResizePolicy[0].RestartPolicy = corev1.RestartContainer
 		ps.Containers[1].ResizePolicy[0].RestartPolicy = corev1.RestartContainer

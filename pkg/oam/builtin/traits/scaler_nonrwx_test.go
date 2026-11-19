@@ -38,8 +38,11 @@ func nonRWXScalerTransformer() *oam.Transformer {
 
 // claimProps mounts one claim with the given access modes. A role kind
 // (webservice, worker) describes the claim it synthesizes, named
-// "<component>-data"; a pod kind generates none, so it references an existing
-// claim "data" and states that claim's modes (go-kure/launcher#702).
+// "<component>-data"; a volume that names a claim by claimName generates none,
+// so it references an existing claim "data" and states that claim's modes
+// (go-kure/launcher#702). That second form is the one the raw `deployment` kind
+// no longer reads (its volumes are the pod's own, with no accessModes), so it is
+// exercised on the `role-deployment` member, which keeps the guard.
 func claimProps(kind string, modes ...string) map[string]any {
 	authored := make([]any, len(modes))
 	for i, m := range modes {
@@ -51,7 +54,7 @@ func claimProps(kind string, modes ...string) map[string]any {
 		"mountPath":   "/data",
 		"accessModes": authored,
 	}
-	if kind == "deployment" {
+	if kind == "role-deployment" {
 		vol["claimName"] = "data"
 	} else {
 		vol["size"] = "1Gi"
@@ -64,7 +67,7 @@ func claimProps(kind string, modes ...string) map[string]any {
 
 // nonRWXClaimName is the claim the scaler refusal names for claimProps(kind).
 func nonRWXClaimName(kind string) string {
-	if kind == "deployment" {
+	if kind == "role-deployment" {
 		return `"data"`
 	}
 	return `"app-data"`
@@ -151,12 +154,12 @@ func TestScaler_NonRWXClaim_RejectsMaxReplicasAboveOne(t *testing.T) {
 			[]oam.Trait{scalerTrait(map[string]any{"minReplicas": 1})}, "4"},
 		{"worker/behind-decorator", "worker", []string{"ReadWriteOnce"}, nil,
 			[]oam.Trait{configmapMount, scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 5})}, "5"},
-		{"deployment/authored", "deployment", []string{"ReadWriteOnce"}, nil,
+		{"role-deployment/authored", "role-deployment", []string{"ReadWriteOnce"}, nil,
 			[]oam.Trait{scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 5})}, "5"},
-		{"deployment/policy-default-max", "deployment", []string{"ReadWriteOnce"},
+		{"role-deployment/policy-default-max", "role-deployment", []string{"ReadWriteOnce"},
 			&stubScalerPolicy{defaultScalerMax: int32ptr32(4)},
 			[]oam.Trait{scalerTrait(map[string]any{"minReplicas": 1})}, "4"},
-		{"deployment/behind-decorator", "deployment", []string{"ReadWriteOnce"}, nil,
+		{"role-deployment/behind-decorator", "role-deployment", []string{"ReadWriteOnce"}, nil,
 			[]oam.Trait{configmapMount, scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 5})}, "5"},
 	}
 	for _, tc := range cases {
@@ -185,9 +188,9 @@ func TestScaler_NonRWXClaim_AcceptsSafeCombinations(t *testing.T) {
 		{"worker/maxReplicas-1", "worker", claimProps("worker", "ReadWriteOnce"), 1},
 		{"webservice/shareable-claim", "webservice", claimProps("webservice", "ReadWriteOnce", "ReadWriteMany"), 5},
 		{"worker/no-claim", "worker", map[string]any{"image": "ghcr.io/org/app:v1"}, 5},
-		{"deployment/maxReplicas-1", "deployment", claimProps("deployment", "ReadWriteOnce"), 1},
-		{"deployment/shareable-claim", "deployment", claimProps("deployment", "ReadWriteOnce", "ReadWriteMany"), 5},
-		{"deployment/no-claim", "deployment", map[string]any{"image": "ghcr.io/org/app:v1"}, 5},
+		{"role-deployment/maxReplicas-1", "role-deployment", claimProps("role-deployment", "ReadWriteOnce"), 1},
+		{"role-deployment/shareable-claim", "role-deployment", claimProps("role-deployment", "ReadWriteOnce", "ReadWriteMany"), 5},
+		{"deployment/no-claim", "deployment", rawDeploymentProps("app", "ghcr.io/org/app:v1"), 5},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -217,7 +220,7 @@ func TestScaler_NonRWXClaim_AcceptsSafeCombinations(t *testing.T) {
 	}
 }
 
-// A deployment's non-RWX guard must look past a shareable first claim: the
+// A role member's non-RWX guard must look past a shareable first claim: the
 // claim that limits the pod count here is the second one, and the refusal has
 // to name it.
 func TestScaler_NonRWXClaim_DeploymentNamesLaterClaim(t *testing.T) {
@@ -234,7 +237,7 @@ func TestScaler_NonRWXClaim_DeploymentNamesLaterClaim(t *testing.T) {
 			},
 		},
 	}
-	err := transformOne(t, "deployment", props, nil,
+	err := transformOne(t, "role-deployment", props, nil,
 		scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 5}))
 	if err == nil {
 		t.Fatal("expected the build to fail: the second claim is ReadWriteOnce and the HPA can scale to 5")

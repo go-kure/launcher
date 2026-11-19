@@ -29,7 +29,10 @@ type parityKind struct {
 }
 
 var parityKinds = []parityKind{
-	{"deployment", (&DeploymentHandler{}).PropertySchema, reflect.TypeFor[appsv1.Deployment]()},
+	// The reshaped deployment parser is the role member; the kind-named
+	// `deployment` decodes the upstream spec (go-kure/launcher#1629) and is held
+	// to it by TestCoreKindSchemas_CoverSpec.
+	{"role-deployment", (&RoleDeploymentHandler{}).PropertySchema, reflect.TypeFor[appsv1.Deployment]()},
 	{"statefulset", (&StatefulsetHandler{}).PropertySchema, reflect.TypeFor[appsv1.StatefulSet]()},
 	{"daemonset", (&DaemonsetHandler{}).PropertySchema, reflect.TypeFor[appsv1.DaemonSet]()},
 	{"job", (&JobHandler{}).PropertySchema, reflect.TypeFor[batchv1.Job]()},

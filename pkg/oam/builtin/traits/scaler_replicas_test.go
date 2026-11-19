@@ -74,9 +74,19 @@ func oneDeployment(t *testing.T, cluster *stack.Cluster) *appsv1.Deployment {
 	return deps[0]
 }
 
+// appProps is the smallest properties of a component named app of the given
+// kind: the raw `deployment` takes a DeploymentSpec, every other kind here an
+// image.
+func appProps(kind string) map[string]any {
+	if kind == "deployment" {
+		return rawDeploymentProps("app", "ghcr.io/org/app:v1")
+	}
+	return map[string]any{"image": "ghcr.io/org/app:v1"}
+}
+
 func TestScaler_OmitsSpecReplicasOnTheScaledDeployment(t *testing.T) {
-	props := map[string]any{"image": "ghcr.io/org/app:v1"}
-	for _, kind := range []string{"webservice", "worker", "deployment"} {
+	for _, kind := range []string{"webservice", "worker", "role-deployment", "deployment"} {
+		props := appProps(kind)
 		t.Run(kind, func(t *testing.T) {
 			cluster, err := transformCluster(t, kind, props, nil, scaledDeploymentTrait())
 			if err != nil {
@@ -90,12 +100,17 @@ func TestScaler_OmitsSpecReplicasOnTheScaledDeployment(t *testing.T) {
 			}
 
 			// Control: the same component without a scaler keeps the kind's default.
+			// The raw `deployment` fills none: its replicas stay as authored, unset.
 			cluster, err = transformCluster(t, kind, props, nil)
 			if err != nil {
 				t.Fatalf("transform without scaler: %v", err)
 			}
 			got := oneDeployment(t, cluster).Spec.Replicas
-			if got == nil || *got != 1 {
+			if kind == "deployment" {
+				if got != nil {
+					t.Errorf("spec.replicas = %d without a scaler on the raw kind, want it unset (no default is filled)", *got)
+				}
+			} else if got == nil || *got != 1 {
 				t.Errorf("spec.replicas = %v without a scaler, want 1", got)
 			}
 		})
@@ -168,7 +183,7 @@ func TestScaler_OutputIsIdenticalInBothOrdersWithTopologySpread(t *testing.T) {
 			"policy default 3": &replicasPolicy{defaultReplicas: &three},
 		} {
 			t.Run(kind+"/"+policyName, func(t *testing.T) {
-				props := map[string]any{"image": "ghcr.io/org/app:v1"}
+				props := appProps(kind)
 				render := func(trs ...oam.Trait) (string, *appsv1.Deployment) {
 					cluster, err := transformCluster(t, kind, props, policy, trs...)
 					if err != nil {
@@ -239,11 +254,13 @@ func generateErr(cluster *stack.Cluster) error {
 // no Deployment will carry. Before this the workaround was to author
 // `replicas: 1`, which the scaler now refuses (go-kure/launcher#1179). The webservice
 // and worker rows reach the Deployment through a lowering rule that forwards the
-// scaler, so they prove the signal survives the fixpoint.
+// scaler, so they prove the signal survives the fixpoint. The raw `deployment`
+// kind has no claim guard and fills no replica default, so the member both
+// lowerings emit, `role-deployment`, stands in for it.
 func TestScaler_NonRWXClaim_UnusedPolicyDefaultCountIsNotChecked(t *testing.T) {
 	three := int32(3)
 	policy := &replicasPolicy{defaultReplicas: &three}
-	for _, kind := range []string{"deployment", "webservice", "worker"} {
+	for _, kind := range []string{"role-deployment", "webservice", "worker"} {
 		t.Run(kind, func(t *testing.T) {
 			one := scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 1})
 			cluster, err := transformCluster(t, kind, claimProps(kind, "ReadWriteOnce"), policy, one)
@@ -304,9 +321,9 @@ func TestScaler_PolicyDefaultAndCeilingSkipTheUnusedCount(t *testing.T) {
 	spread := oam.Trait{Type: "topology-spread", Properties: map[string]any{}}
 	within := scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 2})
 	over := scalerTrait(map[string]any{"minReplicas": 1, "maxReplicas": 3})
-	props := map[string]any{"image": "ghcr.io/org/app:v1"}
 
-	for _, kind := range []string{"deployment", "webservice", "worker"} {
+	for _, kind := range []string{"deployment", "role-deployment", "webservice", "worker"} {
+		props := appProps(kind)
 		t.Run(kind, func(t *testing.T) {
 			orders := map[string][]oam.Trait{
 				"scaler only":  {within},
@@ -340,8 +357,14 @@ func TestScaler_PolicyDefaultAndCeilingSkipTheUnusedCount(t *testing.T) {
 
 			// Control: without a scaler the default count is the Deployment's
 			// own and the ceiling refuses it.
+			// The raw `deployment` fills no default, so its unset count reads as 1
+			// and passes the ceiling.
 			err = transformOne(t, kind, props, policy)
-			if err == nil || !strings.Contains(err.Error(), "exceeds enforced maximum 2") {
+			if kind == "deployment" {
+				if err != nil {
+					t.Errorf("raw deployment, no scaler, no default filled: error = %v, want none", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "exceeds enforced maximum 2") {
 				t.Errorf("no scaler, default 3 over a ceiling of 2: error = %v, want the replica-maximum refusal", err)
 			}
 		})

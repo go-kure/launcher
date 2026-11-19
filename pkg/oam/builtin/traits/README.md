@@ -80,7 +80,7 @@ preflight reject every valid use of the trait.
 |--------|----------|----------------|
 | `configmap` | ConfigMap (+ optional volume mount) | The `configmap` kind's twin: `data`, `binaryData` and `immutable` are parsed and the ConfigMap built by the kind's own code, so both build the same ConfigMap and refuse the same input; the trait adds only the ConfigMap's `name`, the owner's `app` label, namespace and bundle, and the mount (go-kure/launcher#741). `name`, `mountPath` (mounts into a Deployment, StatefulSet, DaemonSet, ReplicaSet, ReplicationController, Job, CronJob, or a `pod` component's Pod; a component that generates none of them is refused at generation, see [Pod-spec traits on a component without a workload](#pod-spec-traits-on-a-component-without-a-workload)), `data` (string values only), `binaryData` (base64; a key may not also appear in `data`), `immutable`. The `data` values and decoded `binaryData` values may total at most 1,048,576 bytes, the API server's ConfigMap limit; more is refused at build time. Keys must be valid ConfigMap keys (alphanumerics, `-`, `_`, `.`, at most 253 characters, not `.` or `..` or starting with `..`); an invalid key is refused at build time, the first in sorted order. **Pre-GA tightening** (go-kure/launcher#741): a number or boolean `data` value used to be stringified and is now refused, as the kind refuses it; quote it. |
 | `topology-spread` | (modifies the Deployment's PodSpec) | (no properties; an authored engine-owned `scope` is accepted; a capability rendering carries no keys). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source or a `helmtemplate` chart render), from its post-policy `spec.replicas`, or from the `minReplicas` of the `scaler` that scales the Deployment, wherever in the bundle that `scaler` sits (a launcher-built Deployment under a `scaler` has no `spec.replicas`; an adopted one keeps its own, which is then ignored): none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment (a `pod` component, for one: the trait is Deployment-only); a Deployment passed through as raw, unstructured output (`passthrough`) is not inspected (see below). |
-| `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, each reported to the provenance report as a `policy` entry at `minReplicas`/`maxReplicas`; policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`, `hpaName` and `pdbName` (optional; the objects' names, default `<component>-hpa` and `<component>-pdb`; `pdbName` without `enablePDB: true` names no object and is refused). Admitted on `webservice`, `worker`, `deployment` and `statefulset` only; the HPA's `scaleTargetRef` takes its kind from the component's settled type (`Deployment`, or `StatefulSet` for a `statefulset`). On a Deployment kind with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. A `statefulset` has no such check: its `volumeClaimTemplates` give one claim per pod, and a claim shared through `volumes` stays as unguarded under a `scaler` as it is under authored replicas. The HPA owns the replica count, so the Deployment or StatefulSet it scales is built without `spec.replicas`, and a component that authors `replicas` beside a `scaler` is refused (go-kure/launcher#1179); see the components README's "Replicas under a `scaler`". |
+| `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, each reported to the provenance report as a `policy` entry at `minReplicas`/`maxReplicas`; policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`, `hpaName` and `pdbName` (optional; the objects' names, default `<component>-hpa` and `<component>-pdb`; `pdbName` without `enablePDB: true` names no object and is refused). Admitted on `webservice`, `worker`, `deployment` and `statefulset` only; the HPA's `scaleTargetRef` takes its kind from the component's settled type (`Deployment`, or `StatefulSet` for a `statefulset`). On a `webservice` or `worker` with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. The raw `deployment` has none either: it has no `pvc` volume type and reports no claim. A `statefulset` has no such check: its `volumeClaimTemplates` give one claim per pod, and a claim shared through `volumes` stays as unguarded under a `scaler` as it is under authored replicas. The HPA owns the replica count, so the Deployment or StatefulSet it scales is built without `spec.replicas`, and a component that authors `replicas` beside a `scaler` is refused (go-kure/launcher#1179); see the components README's "Replicas under a `scaler`". |
 | `disruption` | PodDisruptionBudget | `minAvailable` or `maxUnavailable` (exactly one, required, no default; a whole number from 0 or a percentage string from `"0%"` to `"100%"`), `unhealthyPodEvictionPolicy` (optional; `IfHealthyBudget` or `AlwaysAllow`), `pdbName` (optional; the object's name, default `<component>-pdb`). Any other key is refused. Admitted on `webservice`, `worker`, `deployment` and `statefulset` only. Selects the component's pods by the `app` label. Refused beside a `scaler` with `enablePDB: true` on the same component: see "The disruption trait" below (go-kure/launcher#1266). |
 
 ### Operational (FluxCD)
@@ -768,9 +768,9 @@ the objects of the three authored values equal to the fill's.
 
 `topology-spread` makes launcher's default spread opinion available on a kind
 that carries none of its own. `webservice` and `worker` apply that opinion from
-their `topologySpread` property; `deployment` deliberately does not, and until
-this trait the only way to spread a `deployment` was to author the raw
-`topologySpreadConstraints`. The trait and the two role kinds share one
+their `topologySpread` property; `deployment` does not (it takes the upstream spec,
+go-kure/launcher#1629), and without this trait the only way to spread a `deployment`
+is to author `template.spec.topologySpreadConstraints`. The trait and the two role kinds share one
 definition, `components.BuildTopologySpreadConstraints`, so the output is
 identical. `worker` and `webservice` go further and apply their opinion through
 this very trait: their component lowering rules (`components.WorkerRule` and
@@ -794,8 +794,9 @@ either trait order. A `scaler` that scales another Deployment does not
 count. At a `minReplicas` of 1 the trait applies no constraints.
 
 Each constraint's `labelSelector` is a copy of the Deployment's own
-`spec.selector.matchLabels` (`app: <component>` for `deployment`, `webservice`
-and `worker`; whatever the manifest declares for a `manifests` Deployment).
+`spec.selector.matchLabels` (`app: <component>` for `webservice` and `worker`;
+whatever the author wrote for a `deployment`, and whatever the manifest declares
+for a `manifests` Deployment).
 
 Without a `scaler` that scales the Deployment (matched by name and namespace,
 as above), the replica count is the one the generated Deployment carries,
@@ -820,8 +821,8 @@ The trait is strict in five ways, each an error at build time:
   evaluation, naming the key and the capability. A rendered `scope` is merged
   in after the engine chose the binding, so it could select nothing.
 - **No merging.** A Deployment that already has `topologySpreadConstraints` is
-  refused rather than merged, whatever put them there: the raw property on
-  `deployment`, or the `topologySpread` default of `webservice`/`worker` at 2
+  refused rather than merged, whatever put them there: `template.spec.topologySpreadConstraints`
+  on a `deployment`, or the `topologySpread` default of `webservice`/`worker` at 2
   or more replicas (the `scaler`'s `minReplicas` when the component has one).
   The same holds for `topologySpreadConstraints` authored on a role kind
   (go-kure/launcher#1473): set `topologySpread: false` to own the constraints,
@@ -853,9 +854,10 @@ The trait is strict in five ways, each an error at build time:
   since the spread selector could not select exactly its pods. The check runs
   at every replica count, including 1 and unset where no constraint would be
   written, so a document does not build in one environment and fail in
-  another whose policy raises the count. `deployment`, `webservice` and
-  `worker` always select on `app: <component>`; a `manifests` Deployment can
-  declare any selector, and is refused when it does not meet this rule.
+  another whose policy raises the count. `webservice` and
+  `worker` always select on `app: <component>`; a `deployment` selects on what its
+  author wrote, and a `manifests` Deployment can declare any selector. Both are
+  refused when the selector does not meet this rule.
 
 ## The disruption trait
 

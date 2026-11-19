@@ -145,9 +145,10 @@ func TestObjectName_RenamesTheObjectAlone(t *testing.T) {
 // directly, outside a transform, where no engine reads the property off the
 // component first. No handler names its object with it. A handler that reads
 // the fields it knows passes over the property, and the object keeps the
-// component name (`configmap`, `service`, `deployment`); one that decodes its
+// component name (`configmap`, `service`, `role-deployment`); one that decodes its
 // properties strictly refuses it as a field it does not know (`namespace`,
-// `helmrelease`, `cnpg-cluster`). Both are met among the built-in kinds.
+// `helmrelease`, `cnpg-cluster`, and `deployment` since go-kure/launcher#1629).
+// Both are met among the built-in kinds.
 func TestObjectName_HandlerDrivenDirectly(t *testing.T) {
 	const component = "widget"
 	handlers := builtinComponentHandlers()
@@ -200,12 +201,12 @@ func TestObjectName_HandlerDrivenDirectly(t *testing.T) {
 		}
 	}
 	// The three named on each side in the README and in this test's comment.
-	for _, typ := range []string{"configmap", "service", "deployment"} {
+	for _, typ := range []string{"configmap", "service", "role-deployment"} {
 		if !slices.Contains(passesOver, typ) {
 			t.Errorf("%s no longer passes over objectName when driven directly (passing over: %v); the oam README names it", typ, passesOver)
 		}
 	}
-	for _, typ := range []string{"namespace", "helmrelease", "cnpg-cluster"} {
+	for _, typ := range []string{"namespace", "helmrelease", "cnpg-cluster", "deployment"} {
 		if !slices.Contains(refuses, typ) {
 			t.Errorf("%s no longer refuses objectName when driven directly (refusing: %v); the oam README names it", typ, refuses)
 		}

@@ -118,7 +118,7 @@ func TestDeliveryIntent_FluxWorkflowAnnotatesEverythingAComponentOwns(t *testing
 				},
 			},
 			{Name: "chart", Type: "augmenting", Traits: []oam.Trait{{Type: "prune-protection"}}},
-			{Name: "plain", Type: "deployment", Properties: map[string]any{"image": "nginx:1.25"}},
+			{Name: "plain", Type: "deployment", Properties: rawDeploymentProps("plain", "nginx:1.25")},
 		}},
 	}, oam.TransformContext{Namespace: "default", ComponentLabelKey: deliveryTestLabelKey})
 	if err != nil {

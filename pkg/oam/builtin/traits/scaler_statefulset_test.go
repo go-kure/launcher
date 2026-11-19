@@ -37,6 +37,10 @@ func sssApp(comps ...oam.Component) *oam.Application {
 // needs to build, and the given traits.
 func sssComponent(name, typ string, extra map[string]any, trs ...oam.Trait) oam.Component {
 	props := map[string]any{"image": "ghcr.io/org/app:v1"}
+	if typ == "deployment" || typ == "widget" {
+		// The raw kind takes a DeploymentSpec, and widget builds like it.
+		props = rawDeploymentProps(name, "ghcr.io/org/app:v1")
+	}
 	if typ == "statefulset" {
 		props["serviceName"] = "db-headless"
 	}
@@ -44,6 +48,12 @@ func sssComponent(name, typ string, extra map[string]any, trs ...oam.Trait) oam.
 		props[k] = v
 	}
 	return oam.Component{Name: name, Type: typ, Properties: props, Traits: trs}
+}
+
+// sssComponentWith is sssComponent with no extra properties and the traits
+// given as a slice.
+func sssComponentWith(name, typ string, trs []oam.Trait) oam.Component {
+	return sssComponent(name, typ, nil, trs...)
 }
 
 func sssScaler() oam.Trait {
@@ -96,7 +106,7 @@ func TestScalerStatefulSet_HPATargetsAStatefulSet(t *testing.T) {
 // TestScalerStatefulSet_DeploymentKindsKeepTheDeploymentTarget is the control:
 // the kinds that build a Deployment keep a Deployment target.
 func TestScalerStatefulSet_DeploymentKindsKeepTheDeploymentTarget(t *testing.T) {
-	for _, typ := range []string{"deployment", "webservice", "worker"} {
+	for _, typ := range []string{"deployment", "role-deployment", "webservice", "worker"} {
 		t.Run(typ, func(t *testing.T) {
 			hpas := sssHPAs(t, disruptionTransformer(), sssComponent("app", typ, nil, sssScaler()))
 			sssWantTarget(t, hpas, "Deployment", "app")
@@ -184,13 +194,9 @@ type lowersTo struct{ from, to string }
 func (r lowersTo) ComponentType() string { return r.from }
 
 func (r lowersTo) LowerComponent(c *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
-	props := map[string]any{"image": "ghcr.io/org/app:v1"}
-	if r.to == "statefulset" {
-		props["serviceName"] = "db-headless"
-	}
-	return oam.LoweringResult{Components: []oam.Component{{
-		Name: c.Name, Type: r.to, Properties: props, Traits: c.Traits,
-	}}}, nil
+	return oam.LoweringResult{Components: []oam.Component{
+		sssComponentWith(c.Name, r.to, c.Traits),
+	}}, nil
 }
 
 // TestScalerStatefulSet_SettledTypeDecidesTheTarget: the kind follows the type the

@@ -38,7 +38,9 @@ var containerNameCases = []struct {
 }{
 	{"webservice", webserviceViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, true, ""},
 	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
-	{"deployment", &components.DeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
+	// The reshaped parser's own handler: the raw `deployment` kind names its
+	// containers as authored (go-kure/launcher#1629).
+	{roleMemberType, &components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
 	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "db"}, false, ""},
 	{"daemonset", &components.DaemonsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
 	{"cronjob", &components.CronjobHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "schedule": "*/5 * * * *"}, false,

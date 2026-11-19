@@ -8,7 +8,14 @@ spec:
     - name: api-server
       type: deployment
       properties:
-        image: ghcr.io/example/api:v1.0
+        selector:
+          matchLabels:
+            app: api-server
+        template:
+          spec:
+            containers:
+              - name: api-server
+                image: ghcr.io/example/api:v1.0
     - name: api
       type: service
       properties:

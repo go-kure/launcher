@@ -26,12 +26,12 @@ import (
 // refused to accepted when go-kure/launcher#394 landed; the second must never
 // flip, and is the control that the null handling did not widen into "any key
 // I do not understand is absent".
-func TestDeploymentHandler_NestedNull(t *testing.T) {
+func TestRoleDeploymentHandler_NestedNull(t *testing.T) {
 	convert := func(t *testing.T, props map[string]any) error {
 		t.Helper()
-		h := &components.DeploymentHandler{}
+		h := &components.RoleDeploymentHandler{}
 		_, err := h.ToApplicationConfig(&oam.Component{
-			Name: "app", Type: "deployment", Properties: props,
+			Name: "app", Type: "role-deployment", Properties: props,
 		}, "default")
 		return err
 	}
@@ -50,11 +50,11 @@ func TestDeploymentHandler_NestedNull(t *testing.T) {
 		// the same thing. Two parsers that accept the same document and emit
 		// different objects is the divergence go-kure/launcher#394 was about,
 		// one level down from where it was reported.
-		h := &components.DeploymentHandler{}
+		h := &components.RoleDeploymentHandler{}
 		build := func(t *testing.T, sc map[string]any) any {
 			t.Helper()
 			cfg, err := h.ToApplicationConfig(&oam.Component{
-				Name: "app", Type: "deployment",
+				Name: "app", Type: "role-deployment",
 				Properties: map[string]any{"image": "nginx:1.27", "securityContext": sc},
 			}, "default")
 			if err != nil {

@@ -187,9 +187,9 @@ func TestUnlimitedLimit_RefusedUnderAMaximum(t *testing.T) {
 // TestUnlimitedLimit_RefusedWhereThereIsNothingToOptOutOf: the marker is
 // refused by name wherever it has no meaning.
 func TestUnlimitedLimit_RefusedWhereThereIsNothingToOptOutOf(t *testing.T) {
-	deployment := workloadKinds[5]
-	if deployment.name != "deployment" {
-		t.Fatalf("workloadKinds[5] is %s, want deployment", deployment.name)
+	deployment := workloadKinds[1]
+	if deployment.name != "worker" {
+		t.Fatalf("workloadKinds[1] is %s, want worker (the reshaped deployment parser)", deployment.name)
 	}
 	cases := []struct {
 		name  string
@@ -224,7 +224,7 @@ func TestUnlimitedLimit_RefusedWhereThereIsNothingToOptOutOf(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := deployment.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: "deployment", Properties: withProps(deployment.props, tc.props)}, "default")
+			_, err := deployment.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: deployment.name, Properties: withProps(deployment.props, tc.props)}, "default")
 			if err == nil {
 				t.Fatal("ToApplicationConfig accepted the marker")
 			}
@@ -253,11 +253,11 @@ func TestUnlimitedLimit_RefusedWhereThereIsNothingToOptOutOf(t *testing.T) {
 // TestUnlimitedLimit_NullStaysAbsence: the `null` rule is unchanged, and an
 // unlimited marker beside it does not disturb it.
 func TestUnlimitedLimit_NullStaysAbsence(t *testing.T) {
-	deployment := workloadKinds[5]
+	deployment := workloadKinds[1]
 	props := withProps(deployment.props, map[string]any{"resources": map[string]any{
 		"limits": map[string]any{"cpu": nil, "memory": nil},
 	}})
-	res := podTemplateSpec(t, generateKind(t, deployment.handler, "deployment", props)).Containers[0].Resources
+	res := podTemplateSpec(t, generateKind(t, deployment.handler, deployment.name, props)).Containers[0].Resources
 	assertQuantities(t, "requests", res.Requests, map[corev1.ResourceName]string{corev1.ResourceCPU: "100m", corev1.ResourceMemory: "128Mi"})
 	assertQuantities(t, "limits", res.Limits, map[corev1.ResourceName]string{corev1.ResourceMemory: "128Mi"})
 	if hasQuantity(res.Limits, corev1.ResourceCPU) {

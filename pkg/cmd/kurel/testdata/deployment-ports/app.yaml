@@ -8,24 +8,30 @@ spec:
     - name: api
       type: deployment
       properties:
-        image: ghcr.io/example/api:v1.0.0
-        ports:
-          - name: http
-            containerPort: 8080
-          - name: metrics
-            containerPort: 9090
-          - containerPort: 5353
-            protocol: UDP
-        probes:
-          readiness:
-            httpGet:
-              path: /healthz
-              port: http
-          liveness:
-            tcpSocket:
-              port: metrics
-        lifecycle:
-          preStop:
-            httpGet:
-              path: /drain
-              port: http
+        selector:
+          matchLabels:
+            app: api
+        template:
+          spec:
+            containers:
+              - name: api
+                image: ghcr.io/example/api:v1.0.0
+                ports:
+                  - name: http
+                    containerPort: 8080
+                  - name: metrics
+                    containerPort: 9090
+                  - containerPort: 5353
+                    protocol: UDP
+                readinessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: http
+                livenessProbe:
+                  tcpSocket:
+                    port: metrics
+                lifecycle:
+                  preStop:
+                    httpGet:
+                      path: /drain
+                      port: http

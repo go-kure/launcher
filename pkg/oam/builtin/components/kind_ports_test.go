@@ -274,10 +274,10 @@ func TestKindPorts_SchemaAgreesWithParser(t *testing.T) {
 	}
 }
 
-// TestKindPorts_Schema pins the published `ports` shape: deployment's entry
-// schema on every kind.
+// TestKindPorts_Schema pins the published `ports` shape: the role member's
+// entry schema (the reshaped deployment's) on every kind.
 func TestKindPorts_Schema(t *testing.T) {
-	want := (&components.DeploymentHandler{}).PropertySchema()["ports"].Items
+	want := (&components.RoleDeploymentHandler{}).PropertySchema()["ports"].Items
 	for _, k := range portKinds {
 		t.Run(k.typ, func(t *testing.T) {
 			s, ok := k.handler.PropertySchema()["ports"]

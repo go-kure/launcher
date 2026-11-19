@@ -20,7 +20,7 @@ func TestBuildCommand_FeatureGates(t *testing.T) {
 	const props = `
         hostnameOverride: web.example.com
 `
-	doc := gateAppYAML("deployment", props)
+	doc := gateAppYAML("worker", props)
 	build := func(spec string) ([]map[string]any, error) {
 		return buildWithProfile(t, doc, profileWithSpec(spec))
 	}

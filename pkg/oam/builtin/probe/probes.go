@@ -16,6 +16,27 @@ func component(name, typ string, props map[string]any) []oam.Component {
 	return []oam.Component{{Name: name, Type: typ, Properties: p}}
 }
 
+// rawDeployment is a deployment component as the kind takes it since it took the
+// upstream spec (go-kure/launcher#1629): a selector and a pod template whose
+// first container is the one container adds fields to, and whose pod spec pod
+// adds fields to (a key of pod replaces the one of the same name, `containers`
+// included). The kind fills nothing, so a probe built on it holds no fill of
+// the kind's own.
+func rawDeployment(name string, container, pod map[string]any) []oam.Component {
+	main := map[string]any{"name": "app", "image": image}
+	for k, v := range container {
+		main[k] = v
+	}
+	spec := map[string]any{"containers": []any{main}}
+	for k, v := range pod {
+		spec[k] = v
+	}
+	return []oam.Component{{Name: name, Type: "deployment", Properties: map[string]any{
+		"selector": map[string]any{"matchLabels": map[string]any{"app": name}},
+		"template": map[string]any{"spec": spec},
+	}}}
+}
+
 // resourceFills are the generation-time fills of one container: the requests,
 // the memory limit mirroring the request and, with the probe policy, the limit
 // of the cpu. prefix is "" for the main container and "sidecars[0]." and the
@@ -113,7 +134,6 @@ func Probes() []Probe {
 		}
 		return fills
 	}
-	claimVolume := []any{map[string]any{"name": "data", "type": "pvc", "claimName": "data", "mountPath": "/data"}}
 	accessModes := func(comp, path string) Fill {
 		return Fill{Component: comp, Path: path, WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin,
 			ValueWithPolicy: []any{"ReadWriteOnce"}, ValueWithoutPolicy: []any{"ReadWriteOnce"}}
@@ -132,23 +152,19 @@ func Probes() []Probe {
 	}
 
 	return withOthers(append([]Probe{
-		{Name: "deployment", Components: component("app", "deployment", nil),
-			Fills: join([]Fill{replicas("app"), automount("app")}, resourceFills("app", ""))},
-		{Name: "deployment with an init container, a sidecar and ports", Components: component("app", "deployment", containers),
-			Fills: join([]Fill{replicas("app"), automount("app")}, resourceFills("app", ""), containerFills("app", true))},
-		{Name: "deployment with a claim reference", Components: component("app", "deployment", map[string]any{"volumes": claimVolume}),
-			RefusedWithPolicy: "a non-RWX PVC allows at most one replica",
-			Fills: join([]Fill{
-				// Replicas: the claim allows at most one, so the second value is 0. No value
-				// on strategy.type, which the claim pins to Recreate (any other value is
-				// refused), nor on accessModes, since the referenced claim is not
-				// generated and no object shows the access mode: check B could not tell a
-				// right value from a wrong one on either.
-				{Component: "app", Path: "replicas", WithoutPolicy: oam.SourceBuiltin, ValueWithoutPolicy: 1, Other: 0},
-				{Component: "app", Path: "automountServiceAccountToken", WithoutPolicy: oam.SourceBuiltin, ValueWithoutPolicy: false},
-				{Component: "app", Path: "strategy.type", WithoutPolicy: oam.SourceBuiltin},
-				{Component: "app", Path: "volumes[0].accessModes", WithoutPolicy: oam.SourceBuiltin},
-			}, withoutPolicyOnly(resourceFills("app", "")))},
+		// The raw deployment fills nothing (go-kure/launcher#1629): the report of
+		// these two documents holds no entry, and a fill that came back would show
+		// as a change of that report.
+		{Name: "deployment", Components: rawDeployment("app", nil, nil)},
+		{Name: "deployment with an init container, a second container and ports", Components: rawDeployment("app",
+			nil,
+			map[string]any{
+				"initContainers": []any{map[string]any{"name": "setup", "image": image, "restartPolicy": "Always", "ports": ports()}},
+				"containers": []any{
+					map[string]any{"name": "app", "image": image, "ports": ports()},
+					map[string]any{"name": "proxy", "image": image, "ports": ports()},
+				},
+			})},
 		{Name: "statefulset", Components: component("app", "statefulset", map[string]any{"serviceName": "app-headless"}),
 			Fills: join([]Fill{replicas("app"), automount("app")}, resourceFills("app", ""))},
 		{Name: "statefulset with containers and claim templates", Components: component("app", "statefulset", map[string]any{
@@ -171,18 +187,4 @@ func Probes() []Probe {
 			}, resourceFills("app", "")),
 			LeftToCluster: map[string]string{"concurrencyPolicy": "the handler omits it and the cluster applies Allow"}},
 	}, append(loweredProbes(), traitProbes()...)...))
-}
-
-// withoutPolicyOnly keeps the fills a document with no policy shows, as that
-// state's expectation only.
-func withoutPolicyOnly(fills []Fill) []Fill {
-	var out []Fill
-	for _, f := range fills {
-		if f.WithoutPolicy == "" {
-			continue
-		}
-		f.WithPolicy, f.ValueWithPolicy = "", nil
-		out = append(out, f)
-	}
-	return out
 }

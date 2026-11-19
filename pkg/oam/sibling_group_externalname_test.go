@@ -21,6 +21,20 @@ type routingTargeter interface {
 	ServiceRoutingTarget([]intstr.IntOrString) (*metav1.LabelSelector, []intstr.IntOrString)
 }
 
+// rawDeploymentProps is the smallest `deployment` the raw kind takes: the
+// upstream DeploymentSpec fields, with a selector and one container.
+func rawDeploymentProps(image string) map[string]any {
+	return map[string]any{
+		"selector": map[string]any{"matchLabels": map[string]any{"app": "db"}},
+		"template": map[string]any{
+			"metadata": map[string]any{"labels": map[string]any{"app": "db"}},
+			"spec": map[string]any{"containers": []any{
+				map[string]any{"name": "app", "image": image},
+			}},
+		},
+	}
+}
+
 func siblingMemberConfig(t *testing.T, h oam.ComponentHandler, typ string, props map[string]any) stack.ApplicationConfig {
 	t.Helper()
 	cfg, err := h.ToApplicationConfig(&oam.Component{Name: "db", Type: typ, Properties: props}, "default")
@@ -35,7 +49,7 @@ func siblingMemberConfig(t *testing.T, h oam.ComponentHandler, typ string, props
 // member's own config.
 func externalNameGroup(t *testing.T) (group, svc stack.ApplicationConfig) {
 	t.Helper()
-	dep := siblingMemberConfig(t, &components.DeploymentHandler{}, "deployment", map[string]any{"image": "ghcr.io/example/db:1.0"})
+	dep := siblingMemberConfig(t, &components.DeploymentHandler{}, "deployment", rawDeploymentProps("ghcr.io/example/db:1.0"))
 	svc = siblingMemberConfig(t, &components.ServiceHandler{}, "service", map[string]any{
 		"type": "ExternalName", "externalName": "db.example.com",
 		"ports": []any{map[string]any{"name": "pg", "port": 5432}},

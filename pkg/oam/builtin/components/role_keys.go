@@ -117,7 +117,7 @@ func (r WorkerRule) keys() roleKeys {
 }
 
 // LoweringKeys implements oam.LoweringKeyDeclarer: where each property of a
-// webservice lands in its deployment and service members.
+// webservice lands in its role-deployment and service members.
 func (r WebserviceRule) LoweringKeys() map[string][]oam.LoweredKey { return r.keys().loweringKeys() }
 
 // LoweringKeys implements oam.LoweringKeyDeclarer: where each property of a

@@ -53,7 +53,11 @@ Every built-in type has one identity, held by `ComponentTypeIDs()`, `TraitTypeID
 `PolicyTypeIDs()`, each keyed by the type's plain name. A type named for its one Kubernetes
 kind has the identity `kind.group@<API version>`: `deployment` is `deployment.apps@v1`, and
 a core kind has no group (`configmap@v1`). Every other type is
-`<name>.launcher.gokure.dev@v1`, with the domain held in `LauncherDomain`.
+`<name>.launcher.gokure.dev@v1`, with the domain held in `LauncherDomain`. That includes
+`role-deployment`, the member type `webservice` and `worker` lower into since
+go-kure/launcher#1629: it is registered because lowering needs a handler for every member
+type, and a document is not meant to author it. The identity `deployment.apps@v1` belongs
+to the raw `deployment` kind.
 
 `DeclareTypes(t)` declares all three maps on a transformer. Call it after the registration
 sequence, so every type it names is registered. It returns an error when two types claim one

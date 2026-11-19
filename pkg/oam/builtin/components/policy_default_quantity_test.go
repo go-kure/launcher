@@ -25,7 +25,7 @@ func TestApplyPolicy_NegativeResourceDefaultRefused(t *testing.T) {
 		h     configHandler
 		props map[string]any
 	}{
-		{"deployment", &components.DeploymentHandler{}, image},
+		{roleMemberType, &components.RoleDeploymentHandler{}, image},
 		{"statefulset", &components.StatefulsetHandler{}, image},
 		{"daemonset", &components.DaemonsetHandler{}, image},
 		{"job", &components.JobHandler{}, image},

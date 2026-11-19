@@ -208,7 +208,7 @@ func (h *ScalerHandler) parseProperties(props map[string]any, app *stack.Applica
 }
 
 // nonRWXClaimer is implemented by component configs whose Deployment carries a
-// claim only one pod can hold read-write (webservice, worker, deployment). NonRWXClaim
+// claim only one pod can hold read-write (webservice, worker, through their role-deployment member). NonRWXClaim
 // names that claim, or returns "" when none constrains the workload.
 // decoratorBase forwards it, so a decorating trait declared before the scaler
 // does not hide it.
