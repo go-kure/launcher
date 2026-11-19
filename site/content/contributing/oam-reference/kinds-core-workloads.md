@@ -253,6 +253,14 @@ Text in square brackets is added here to say what a moved sentence refers to.
 ## statefulset
 
 - **History:**
+  - go-kure/launcher#1629 (the kind takes the upstream `StatefulSetSpec`, strictly decoded, on the
+    `deployment` recipe: a breaking pre-GA change with no launcher default, no
+    `automountServiceAccountToken: false` fill and no `policy` or `builtin` fill report. Claim
+    templates are raw PersistentVolumeClaim objects; the `pvc` capability's storage class on a
+    claim template that authors none, and the storage maximum on each claim template, stay. The
+    reshaped form is gone from the kind; the entries below describe the kind as it was before,
+    and the claim template spelling and the `updateStrategy` strictness they mention are no
+    longer launcher's: the API server's own rules apply).
   - go-kure/launcher#690 (`statefulset` emits no Service, and `serviceName` no longer defaults
     to the component name).
   - go-kure/launcher#790 (`affinity`, `tolerations` and `topologySpreadConstraints` as the raw

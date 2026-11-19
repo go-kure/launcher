@@ -68,6 +68,8 @@ Text in square brackets is added here to say what a moved sentence refers to.
     `onPodConditions` [read by hand until go-kure/launcher#1629 made `job` and `cronjob`
     decode the upstream spec], `volumeClaimTemplates`, `valuesFrom`, `scopeOverrides`) pass each
     element through `nullElem` first, for the same untyped refusal and message.
+    [`volumeClaimTemplates` of `statefulset` is a raw list of PersistentVolumeClaims since
+    go-kure/launcher#1629 and is decoded strictly with the rest of the spec.]
     ["The same typed-nil shape" is the one of the entry above.]
 - **Tests:**
   - `TestNoOptionalFieldWrappers` (`no_optional_wrappers_internal_test.go`) keeps them

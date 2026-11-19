@@ -410,9 +410,10 @@ text of its own; that refusal is the component label's now, text included.
 - A document that built before is refused at generation when a volume claim template of a
   `StatefulSet` (`spec.volumeClaimTemplates[].metadata`) holds a reserved metadata key as a
   label or an annotation. Before, a volume claim template's metadata was not read. The
-  `statefulset` kind writes nothing there but the claim's name, so this reaches a
+  reshaped `statefulset` kind wrote nothing there but the claim's name, so this reached a
   `passthrough` or `manifests` document, a chart rendered at build time and a consumer's own
-  config.
+  config. The raw `statefulset` kind takes the claim template's `metadata` as authored, so a
+  reserved key written there is refused too.
 - The component label is neither read nor written there, as before: another component's
   value builds, and the output does not change.
 - New exported API: `ReservedKeyInVolumeClaimTemplate`, the `ReservedKeyHolder` of a volume

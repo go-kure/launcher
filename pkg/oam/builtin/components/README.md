@@ -21,10 +21,11 @@ Container projection shared by every kind). Only genuine escape-hatch fields (`p
 closed, and so is the four-key `affinity` shorthand: its schema declares the four keys and
 no other, and since go-kure/launcher#790 its parser refuses any other key too. The
 `initContainers`/`sidecars` entries themselves are closed (go-kure/launcher#321, see "Common
-config"). The raw `corev1` `affinity` that `statefulset` publishes is
-a different schema and is not part of that gap — it is modeled field-by-field. (The `deployment`,
-`daemonset`, `job` and `cronjob` kinds carry no such schema: each decodes its whole spec into
-the upstream type, which `statefulset` does not.) `helmrelease`
+config"). The raw `corev1` `affinity` of the raw kinds is
+a different schema and is not part of that gap — it is the upstream type. (The `deployment`,
+`statefulset`, `daemonset`, `job`, `cronjob`, `replicaset` and `pod` kinds carry no hand-modeled
+schema: each decodes its whole spec into the upstream type, and only `webservice` and `worker`
+are reshaped.) `helmrelease`
 takes the other route to the same strictness: its schema declares exactly the top-level
 `HelmReleaseSpec` keys and leaves the nested Flux blocks open, and its handler decodes the
 whole property map strictly into `HelmReleaseSpec`, refusing an unknown or wrongly typed key at
@@ -284,7 +285,7 @@ reads it.
 | `serviceaccount` | ServiceAccount | Kind-named ServiceAccount: `automountServiceAccountToken`, `imagePullSecrets`. A workload names it with `serviceAccountName` — see below. |
 | `servicecidr` | ServiceCIDR | Kind-named ServiceCIDR: the whole `ServiceCIDRSpec` (`cidrs`, required, at least one), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `servicemonitor` | ServiceMonitor | Kind-named Prometheus operator ServiceMonitor: the whole `ServiceMonitorSpec`, strictly decoded; `endpoints` and `selector` are required. The selector is the author's. No environment policy applies and no capability is required — see below. |
-| `statefulset` | StatefulSet | Stateful workload with `volumeClaimTemplates`; `serviceName` names a governing `service` authored beside it. Emits no Service (go-kure/launcher#690). Declares one endpoint per main-container port. |
+| `statefulset` | StatefulSet | Kind-named StatefulSet: the whole `StatefulSetSpec`, strictly decoded; `selector` and `template` are required. `volumeClaimTemplates` are raw PersistentVolumeClaim objects; `serviceName` names a governing `service` authored beside it. The pod template is held to what the `pod` kind holds its spec to, less `activeDeadlineSeconds`, and it gains the `app` label; a claim template that authors no `spec.storageClassName` gets the ClusterProfile `pvc` capability's class. `replicas`, the template and each claim template's storage request are held to environment policy, no default filled (go-kure/launcher#1629). A `scaler` builds it without `spec.replicas`. Emits no Service (go-kure/launcher#690). Declares one endpoint per port of `template.spec.containers[0]`. Breaking: the reshaped form is gone from the kind — see below. |
 | `storageclass` | StorageClass | Kind-named StorageClass: the object's fields beside its identity (`provisioner`, required, `parameters`, `reclaimPolicy`, …), strictly decoded. Cluster-scoped; no environment policy applies — see below. |
 | `tcproute` | TCPRoute | Kind-named Gateway API TCPRoute: the whole `TCPRouteSpec`, strictly decoded; `rules` and a rule's `backendRefs` are required, with the `name` of a backend and the `port` of one that is a Service. An authored object, as the `httproute` kind is: no parent is synthesized from a capability, no NetworkPolicy allow rule is synthesized for it, no capability is required and no environment policy applies — see below. |
 | `thanosruler` | ThanosRuler | Kind-named Prometheus operator ThanosRuler: the whole `ThanosRulerSpec`, strictly decoded, with the spec's `labels` (Prometheus external labels) published as `externalLabels`; no top-level field is required. The operator runs the pods: `image`, `replicas`, `resources`, storage, `containers`, `initContainers`, `volumes` and `securityContext` are held to the environment policy as the Alertmanager's are, and a literal `remoteWrite[].bearerToken` under a policy that forbids explicit secrets. The replica count and memory request the operator fills where they are unset are held, not written. An image the operator chooses, for `thanos-ruler` or its config-reloader, is refused under a policy with allowed registries. No capability is required — see below. |
@@ -301,7 +302,7 @@ Only the two role kinds, `webservice` and `worker`, emit a per-component
 ServiceAccount, and only when the component does not author
 `serviceAccountName`. The pod kinds (`deployment`, `statefulset`,
 `daemonset`, `job`, `cronjob`) emit no ServiceAccount and no claim of their own
-(go-kure/launcher#702). The raw `deployment`, `daemonset`, `job` and `cronjob` also set no
+(go-kure/launcher#702). The raw `deployment`, `statefulset`, `daemonset`, `job` and `cronjob` also set no
 `automountServiceAccountToken`, so a pod with no account mounts the default account's
 token, as the `pod` and `replicaset` kinds do; `webservice` and `worker` still switch it
 off. See "Pod-level properties" and "Referencing an existing
@@ -440,7 +441,7 @@ the row says the type is checked separately, as the CiliumNetworkPolicy row does
 | `kubernetes.CreateService` | v1 Service | kind | `service` | hand-written parser | - |
 | `kubernetes.CreateServiceAccount` | v1 ServiceAccount | kind | `serviceaccount` | hand-written parser | - |
 | `kubernetes.CreateServiceCIDR` | networking.k8s.io/v1 ServiceCIDR (cluster-scoped) | kind | `servicecidr` | strict decode of `ServiceCIDRSpec` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties. At least one of `cidrs` must be written. No environment policy applies. |
-| `kubernetes.CreateStatefulSet` | apps/v1 StatefulSet | kind | `statefulset` | hand-written parser | - |
+| `kubernetes.CreateStatefulSet` | apps/v1 StatefulSet | kind | `statefulset` | strict decode of `StatefulSetSpec`, as `replicaset` | A claim template is a raw PersistentVolumeClaim; the `pvc` capability's storage class fills one that authors none. |
 | `kubernetes.CreateStorageClass` | storage.k8s.io/v1 StorageClass (cluster-scoped) | kind | `storageclass` | strict decode of the object, less `kind`, `apiVersion` and `metadata` | The object is named after the component unless `objectName` names it. Its labels and annotations are the `labels` and `annotations` properties, the default-class annotation (`storageclass.kubernetes.io/is-default-class`) included. No environment policy applies. |
 | `kubernetes.CreateTCPRoute` | gateway.networking.k8s.io/v1 TCPRoute | kind | `tcproute` | strict decode of `TCPRouteSpec` | No type under `TCPRouteSpec` unmarshals itself, so the decode reaches every depth. The kind refuses a route without `rules`, a rule without `backendRefs` and a Service backend without its `port`, which the API server refuses too; of a parent and a backend that are authored, the `name` must be written. A parent and a backend of another namespace are written as authored, as the `httproute` kind writes them. No capability is required. No environment policy applies. |
 | `kubernetes.CreateTLSRoute` | gateway.networking.k8s.io/v1 TLSRoute | kind | `tlsroute` | strict decode of `TLSRouteSpec` | As the `tcproute` row, and the kind refuses a route without `hostnames` too, which the API requires of a TLSRoute. The host names are not held to the allowed registries, and their form is left to the API server. |
@@ -570,8 +571,7 @@ wrappers those six originally used into the base `parseObjectField`/
 `parseStringField`/etc. helpers themselves — callers now use the base helpers
 directly, and the null-as-absence behavior applies uniformly rather than only
 through the wrappers.) Those helpers were already how several other properties on the
-same components are read — `updateStrategy` and `ordinals` on `statefulset`
-(`statefulset_spec.go`) — so the six behaved differently from properties an
+same components are read, so the six behaved differently from properties an
 author writes beside them in the same document. This covers those six parsers;
 it is not a claim that every property in this package is read through the
 helpers.
@@ -589,18 +589,19 @@ See [Common config](/site/content/api-reference/oam-components/common-config.md#
 ### Raw block volumes (`volumeMode: Block`)
 
 See [Common config](/site/content/api-reference/oam-components/common-config.md#raw-block-volumes-volumemode-block).
-The published schema marks `volumeMode` required (`requiredWhen`) when a `volumes[]` entry or a
-`volumeClaimTemplates[]` entry authors `devicePath`; the value `Block` stays the handler's rule.
+The published schema marks `volumeMode` required (`requiredWhen`) when a `volumes[]` entry
+authors `devicePath`; the value `Block` stays the handler's rule. A `statefulset` claim template
+is a raw PersistentVolumeClaim and carries `volumeMode` itself.
 
 ### Pod-level properties
 
-The three reshaped kind components (`webservice`, `worker`, `statefulset`)
+The two reshaped kind components (`webservice`, `worker`)
 also share one pod-level property surface
 (go-kure/launcher#342, ADR-036 L1), parsed by `parsePodSpec` (`podspec.go`)
 straight into a `corev1.PodSpec` and rendered by the shared `buildPodSpec`,
-which each of them assigns to its pod template. The raw `deployment`, `daemonset`, `job`
-and `cronjob` take their pod spec as `template.spec` (`jobTemplate.spec.template.spec` on
-a `cronjob`) instead (go-kure/launcher#1629). Property names are the
+which each of them assigns to its pod template. The raw `deployment`, `statefulset`,
+`daemonset`, `job` and `cronjob` take their pod spec as `template.spec`
+(`jobTemplate.spec.template.spec` on a `cronjob`) instead (go-kure/launcher#1629). Property names are the
 `corev1.PodSpec` JSON names, except two that carry a `pod` prefix because
 the bare name is already a property at some kind: `podSecurityContext`
 (container `securityContext` exists everywhere) and `podResources` (container
@@ -668,7 +669,7 @@ tiers, in precedence order:
    opt-out (go-kure/launcher#1181): the container gets no limit for that
    resource, because neither a policy default limit (tier 2) nor, for memory,
    the limit mirror (tier 3) is applied to it. It is accepted where a built-in
-   default exists to opt out of: the main container of `statefulset`, `webservice` and
+   default exists to opt out of: the main container of `webservice` and
    `worker`, and their `initContainers` and `sidecars`
    entries. It is refused by name under `requests`, under `podResources` and on
    `postgresql` ("no intrinsic default to opt out of"), under any resource name
@@ -679,7 +680,7 @@ tiers, in precedence order:
    policy default is not provided.
 
 The policy defaults (tier 2) reach every container of those kinds (the raw
-`deployment`, `daemonset`, `job` and `cronjob` take none): the
+`deployment`, `statefulset`, `daemonset`, `job` and `cronjob` take none): the
 main container and each `initContainers` and `sidecars` entry, reported at the
 entry's own path (go-kure/launcher#1581). A default limit that lands under the
 container's request fails the build, naming the container and the remedy
@@ -691,11 +692,11 @@ requests and the mirrored memory limit of every container, and the token
 automount it switches off) is reported to the provenance report as `builtin`
 entries (go-kure/launcher#1580).
 
-The parser of `webservice`, `worker` and `statefulset` fills a few
+The parser of `webservice` and `worker` fills a few
 values when the author wrote none (`replicas`, a port's `protocol`, the
 `accessModes` of a claim). Each config reports them through `BuiltinDefaults()` as
 `builtin`, at the path the author would have written, and never at a path where the policy
-default stands. The raw `deployment`, `daemonset`, `job` and `cronjob` fill none of them and report none. A `webservice`
+default stands. The raw `deployment`, `statefulset`, `daemonset`, `job` and `cronjob` fill none of them and report none (the one thing `statefulset` fills, a claim template's `storageClassName` from the ClusterProfile `pvc` capability, is a capability default, not a parser default). A `webservice`
 or `worker` with a non-RWX claim and no authored `strategy` also reports
 `strategy.type`: the `Recreate` strategy is decided when the object is generated, by the
 predicate the report shares with the generator. `ClaimAccessModesOmitted` is the test of a
@@ -728,14 +729,14 @@ See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-com
 
 Wrong-type handling for the optional top-level properties go-kure/launcher#405
 moved onto the presence-reporting helpers: `port` on `webservice`, `daemonset`
-and `statefulset` (the latter two have since dropped it, go-kure/launcher#690;
+and `statefulset` (the latter two have since dropped it, go-kure/launcher#690,
+and both are raw kinds now, go-kure/launcher#1629;
 `parseInt32Field`; on `webservice` the `Endpoints` declaration runs the
 rule's whole parse, so a wrong type is not declared as an endpoint on port 80
 either, and neither is a component without an `image`; what the rule's
 lowering refuses after the parse is one of the four things an endpoint entry
 does not see, `pkg/oam`, "Name roles and the `Naming` hook"), `topologySpread` on `webservice` and
-`worker` and `prune` on `oci` (`parseBoolField`), `serviceName` on
-`statefulset` and `path`, `interval` and `targetNamespace` on `oci`
+`worker` and `prune` on `oci` (`parseBoolField`), and `path`, `interval` and `targetNamespace` on `oci`
 (`parseStringField`, so an authored `""` still reads as absent). A present value of the wrong type is rejected by
 name (`topologySpread: must be a boolean, got string`) and a null reads as
 absence. Before, each fell back to its default as though the key had been
@@ -914,21 +915,20 @@ Full entry: [Kinds: core workloads](/site/content/api-reference/oam-components/k
 
 ## StatefulSet-level and claim-template properties
 
-The `statefulset` kind projects the whole `appsv1.StatefulSetSpec` field set it
-owns, and each `volumeClaimTemplates` entry projects the whole
-`corev1.PersistentVolumeClaimSpec`. Every field below is written only when
-authored, so an unauthored StatefulSet emits no `podManagementPolicy` at all and
-an empty `updateStrategy: {}` (a non-pointer struct, which `omitempty` does not
-suppress), leaving the apiserver to default both. Until go-kure/launcher#361
-kure's `CreateStatefulSet` wrote `podManagementPolicy: OrderedReady` into the
-object itself; the release-1 builder contract makes that constructor
-identity-only, so the line is gone from the emitted manifest. The *effective*
-policy is unchanged — `OrderedReady` is also the API default — but the manifest
-text moved, which is why three goldens lost a `podManagementPolicy:
-OrderedReady` line. The claim entry's five
-pre-existing keys (`name`, `mountPath`, `size`, `storageClass`, `accessModes`)
-now sit inside a closed key set, so a typo in an entry is reported instead of
-being silently dropped. `devicePath` joined that set with go-kure/launcher#385.
+The `statefulset` kind is a raw kind (go-kure/launcher#1629): its properties are the
+`appsv1.StatefulSetSpec` fields (`replicas`, `selector`, `template`, `serviceName`,
+`volumeClaimTemplates`, `podManagementPolicy`, `updateStrategy`, `minReadySeconds`,
+`revisionHistoryLimit`, `persistentVolumeClaimRetentionPolicy`, `ordinals`), strictly decoded,
+and each `volumeClaimTemplates` entry is a raw PersistentVolumeClaim. Launcher fills no
+default value, so an unauthored StatefulSet leaves `podManagementPolicy` and the
+`updateStrategy` type to the apiserver (an empty `updateStrategy: {}` can still appear in the
+emitted manifest, because the upstream type does not omit it). The reshaped claim entry (`mountPath`, `size`, `storageClass`,
+`accessModes`, `devicePath`) is gone; the mount is a `volumeMounts` entry of a container, and
+the capability storage class fills only a claim template that authors no
+`spec.storageClassName`. Until go-kure/launcher#361 kure's `CreateStatefulSet` wrote
+`podManagementPolicy: OrderedReady` into the object itself; the line left the emitted
+manifest then, and the effective policy is unchanged, since `OrderedReady` is the API
+default.
 
 Full text: [Common config](/site/content/api-reference/oam-components/common-config.md#statefulset-level-and-claim-template-properties).
 

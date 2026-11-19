@@ -5,13 +5,14 @@ weight: 13
 
 ## Upstream fields a hand-parsed kind does not read
 
-Six kinds read their properties key by key instead of decoding them into the
-Kubernetes type: `statefulset`,
-`service`, `persistentvolumeclaim`, `configmap`, `secret` and `serviceaccount`. The first
-builds pods and is "the pod-building kind" below. (The `deployment`, `daemonset`, `job` and
+Five kinds read their properties key by key instead of decoding them into the
+Kubernetes type: `service`, `persistentvolumeclaim`, `configmap`, `secret` and
+`serviceaccount`. None of them builds pods; the pod-building kinds `webservice` and `worker`
+are the "pod-building kind" below. (The `deployment`, `statefulset`, `daemonset`, `job` and
 `cronjob` kinds are not among them: each decodes its properties strictly into the upstream
-`DeploymentSpec`, `DaemonSetSpec`, `JobSpec` or `CronJobSpec`, so it has no refusal map and
-drops no field; see the `deployment`, `daemonset`, `cronjob` and `job` sections of
+`DeploymentSpec`, `StatefulSetSpec`, `DaemonSetSpec`, `JobSpec` or `CronJobSpec`, so it has no
+refusal map and drops no field; see the `deployment`, `statefulset`, `daemonset`, `cronjob`
+and `job` sections of
 [Kinds: core workloads](kinds-core-workloads.md#deployment).) For such
 a kind an upstream field its parser does not know is no decode error; it is a
 key the parser never looks at. The rule that closes that gap:
@@ -31,12 +32,12 @@ An authored key reaches a kind on one of two paths, and both give the reason:
 
 - **A caller of the handler** (`ToApplicationConfig`, or `Transform` without
   the check below) gets the reason alone:
-  `selector: not authorable; the StatefulSet selector is builder-managed (app: <component>), must equal the generated template labels and is immutable once created`.
+  `selector: not authorable; the Deployment selector is builder-managed (app: <component>), must equal the generated template labels and is immutable once created`.
 - **A document** goes through the authored-property check first
   (`Transformer.ValidateAuthoredProperties`, which `kurel build` calls). The
   check refuses a key the kind does not declare before the parser runs, and
   appends the kind's reason to its own text:
-  `component "db" (type "statefulset"): properties: unsupported field "selector" (allowed: …); selector: not authorable; the StatefulSet selector is builder-managed …`.
+  `component "web" (type "webservice"): properties: unsupported field "selector" (allowed: …); selector: not authorable; the Deployment selector is builder-managed …`.
   The kind gives the reason through `UnsupportedFieldHint`
   (`pkg/oam`'s README, "A reason on a refused key").
 
@@ -55,7 +56,6 @@ The positions are:
 | a container's `resources`: the main container's, and an `initContainers` or `sidecars` entry's | every workload kind | `claims` |
 | the pod's `podResources` | every workload kind | `claims` (upstream validation forbids claims at pod level: "claims may not be set for Resources at pod-level") |
 | the `affinity` shorthand | `webservice`, `worker` | `nodeAffinity`, `podAffinity`, `podAntiAffinity` |
-| a `volumeClaimTemplates` entry | `statefulset` | `volumeName`, `dataSource`, `volumeMount` |
 
 A key that is **no field of the upstream type** is not in a refusal map. The
 check refuses it as it refuses any undeclared key, with nothing appended; a
@@ -66,8 +66,8 @@ every handler.
 
 | Key | On | Why |
 |-----|----|-----|
-| `selector` | `statefulset` (`webservice`, `worker`) | Builder-managed (`app: <component>`), equal to the template labels, immutable once created. |
-| `restartPolicy`, `activeDeadlineSeconds` (the pod's) | `statefulset` (`webservice`, `worker`) | apps/v1 validation accepts only `Always`, and no deadline, on these pod templates. |
+| `selector` | `webservice`, `worker` | Builder-managed (`app: <component>`), equal to the template labels, immutable once created. |
+| `restartPolicy`, `activeDeadlineSeconds` (the pod's) | `webservice`, `worker` | apps/v1 validation accepts only `Always`, and no deadline, on these pod templates. |
 | `ephemeralContainers`, `priority`, `overhead`, `serviceAccount` | every workload kind | See [Pod-level properties](common-config.md#pod-level-properties). |
 | `evictionResponders` | every workload kind | Alpha upstream, behind the `EvictionRequestAPI` feature gate. |
 | `restartPolicyRules` (the main container's) | every workload kind | Upstream accepts a container's restart rules only with the container's own `restartPolicy`, which no kind reads on the main container. An `initContainers` entry reads both (see [Container fields](common-config.md#container-fields)). |
@@ -129,7 +129,7 @@ go-kure/launcher#790, left as it was:
 
 - **Read as unauthored:** `service` and `persistentvolumeclaim` on every key
   they refuse.
-- **Refused, as any value is:** `statefulset`,
+- **Refused, as any value is:**
   `serviceaccount`, and `webservice` and `worker`; and every kind on
   `resources.claims`, on `podResources.claims` and on the keys refused under
   the `affinity` shorthand.

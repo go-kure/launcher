@@ -13,8 +13,8 @@ tiers, in precedence order:
    opt-out: the container gets no limit for that
    resource, because neither a policy default limit (tier 2) nor, for memory,
    the limit mirror (tier 3) is applied to it. It is accepted where a built-in
-   default exists to opt out of: the main container of `statefulset`,
-   `webservice` and `worker`, and their `initContainers` and `sidecars`
+   default exists to opt out of: the main container of `webservice` and `worker`, and
+   their `initContainers` and `sidecars`
    entries. It is refused by name under `requests`, under `podResources` and on
    `postgresql` ("no intrinsic default to opt out of"), under any resource name
    other than cpu and memory, and, with the `resource-maximum` refusal class,
@@ -42,14 +42,16 @@ tiers, in precedence order:
    own default limit the error names the policy and carries no class. What
    the postgresql defaults step fills after the policy (`enablePDB`, and the
    `1Gi` `storage.size` fallback) is reported as a `builtin` entry, not as `policy`.
-   So is what the parser of `webservice`, `worker` and `statefulset` fills when the
+   So is what the parser of `webservice` and `worker` fills when the
    author wrote no value (an explicit `null` counts as no
-   value): `replicas` 1 (`webservice`, `worker` and `statefulset`),
-   `ports[i].protocol` `TCP`
+   value): `replicas` 1, `ports[i].protocol` `TCP`
    (also in a `sidecars` entry and in a restartable `initContainers` entry), the
-   `accessModes` `ReadWriteOnce` of a `pvc` volume that references a claim and of a
-   `volumeClaimTemplates` entry. The raw `deployment`, `daemonset`, `job` and `cronjob` fill
-   none of these, and their fill reports are empty. A `webservice` or `worker` with a non-RWX claim and no authored
+   `accessModes` `ReadWriteOnce` of a `pvc` volume that references a claim. The raw
+   `deployment`, `statefulset`, `daemonset`, `job` and `cronjob` fill none of these, and their
+   fill reports hold no `policy` or `builtin` entry. The one value a raw `statefulset` has
+   filled for it is the storage class of a claim template that authors none, from the
+   ClusterProfile's `pvc` capability, which the report names as the capability's. A
+   `webservice` or `worker` with a non-RWX claim and no authored
    `strategy` is built with the `Recreate` strategy, a decision taken when the object
    is generated; it is reported at `strategy.type` from the same predicate the
    generator uses. A path is reported by one source only, the one
@@ -84,12 +86,12 @@ came from the intrinsic tier specifically (absent from the authored/policy-
 defaulted value, present only after the intrinsic fallback), the error names
 it as a "generated default" so the mismatch isn't mysterious.
 
-This three-tier effective-value enforcement applies to the three kind
+This three-tier effective-value enforcement applies to the two kind
 components that call `buildResourceRequirements` on their main container
-(`webservice`, `worker`, `statefulset`).
-The raw `deployment`, `daemonset`, `job` and `cronjob` have no intrinsic or policy default
-tier: they enforce the maxima on the resources as authored, for every container of their
-template.
+(`webservice`, `worker`).
+The raw `deployment`, `statefulset`, `daemonset`, `job` and `cronjob` have no intrinsic or
+policy default tier: they enforce the maxima on the resources as authored, for every
+container of their template.
 **`postgresql` is exempt**: its lowering rule copies every entry of
 `c.Resources` straight onto the Cluster spec and never calls
 `buildResourceRequirements`, so it has no intrinsic tier for its existing
@@ -104,13 +106,13 @@ entries too:
 each entry's resources, image registry, `securityContext.privileged`, and
 `securityContext.capabilities.add` are checked against the same policy
 methods the main container uses, via the shared `enforceExtraContainer`
-helper. All three reshaped kind components (`webservice`, `worker` and `statefulset`)
-enforce their `initContainers` and their `sidecars`. The raw `deployment`, `daemonset`,
-`job` and `cronjob` have no `sidecars`: their further containers are entries
+helper. Both reshaped kind components (`webservice` and `worker`)
+enforce their `initContainers` and their `sidecars`. The raw `deployment`, `statefulset`,
+`daemonset`, `job` and `cronjob` have no `sidecars`: their further containers are entries
 of the pod spec's `containers` (`template.spec.containers`, and under `jobTemplate.spec` on a
 `cronjob`), and their `initContainers` are those of
-the pod spec, each checked by `enforcePodTemplatePolicy` (see the `deployment`, `daemonset`,
-`cronjob` and `job` sections of [Kinds: core workloads](kinds-core-workloads.md#deployment)). Errors name the authored list position and container, e.g.
+the pod spec, each checked by `enforcePodTemplatePolicy` (see the `deployment`, `statefulset`,
+`daemonset`, `cronjob` and `job` sections of [Kinds: core workloads](kinds-core-workloads.md#deployment)). Errors name the authored list position and container, e.g.
 `initContainers[0] "init": image "docker.io/x/y:v1" is not from an allowed
 registry [...]`.
 
@@ -172,9 +174,9 @@ The classes, what each covers and what stays unclassified are in
 A new policy check in this package builds its refusal with `oam.NewPolicyRefusal` and a class
 constant; `TestBuiltinPolicyRefusalsCarryAClass` (`pkg/oam`) fails on one that does not.
 
-**Bounds in the schema.** The three reshaped workload types (`webservice`, `worker`,
-`statefulset`) and the eight kinds that take a pod as the API
-type (`pod`, `podtemplate`, `deployment`, `daemonset`, `job`, `cronjob`, `replicaset`, `replicationcontroller`) publish, in `boundedBy`,
+**Bounds in the schema.** The two reshaped workload types (`webservice`, `worker`)
+and the nine kinds that take a pod as the API
+type (`pod`, `podtemplate`, `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`, `replicaset`, `replicationcontroller`) publish, in `boundedBy`,
 the classes an authored value at a property can cause. The list of properties is in
 `site/content/api-reference/oam/policy-and-capability.md`, "Declared bounds". What is
 particular to this package:

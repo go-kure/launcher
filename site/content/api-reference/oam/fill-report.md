@@ -81,19 +81,19 @@ names the place of each declared default itself (`Probe.DefaultPlaces`).
 
 Only a config that reports its fills has `policy` and `builtin` entries. These do:
 
-- The controller kind `statefulset`:
-  what its parse fills, and what it fills for each container when it generates its
-  object. The list is under
+- `webservice` and `worker`, through the `role-deployment` they lower to. The list is under
   [policy defaults](../oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
-- `webservice` and `worker`, through the `role-deployment` they lower to.
 - The Cluster a `postgresql` component builds.
 - The `persistentvolumeclaim` component: the policy's default `size`.
 - The traits in the table under "Property provenance", each with the paths it reports.
 
-The raw `deployment`, `daemonset`, `job` and `cronjob` kinds are not in the list: they fill
-no default, so their reports are empty (see the `deployment`, `daemonset`, `cronjob` and
-`job` sections of
-[Kinds: core workloads](../oam-components/kinds-core-workloads.md#deployment)).
+The raw `deployment`, `statefulset`, `daemonset`, `job` and `cronjob` kinds are not in the
+list: they fill no default, so they have no `policy` or `builtin` entry (see the
+`deployment`, `statefulset`, `daemonset`, `cronjob` and `job` sections of
+[Kinds: core workloads](../oam-components/kinds-core-workloads.md#deployment)). A
+`statefulset` claim template that authors no `spec.storageClassName` takes the class of the
+ClusterProfile's `pvc` capability, and the report names that capability as the source, at
+`volumeClaimTemplates[<n>].spec.storageClassName`.
 
 A fill can depend on the document. The `topology-spread` trait reports
 `topologySpreadConstraints` for a Deployment of two replicas or more, and nothing at one
