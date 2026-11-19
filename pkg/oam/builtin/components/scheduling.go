@@ -18,8 +18,8 @@ import (
 // parseTolerations) `tolerations` — for the `role-deployment` member of
 // `webservice` and `worker` (go-kure/launcher#412). Other workload kinds publish
 // the ones their PropertySchema names, through the same parsers
-// (go-kure/launcher#790): `statefulset`, `job` and `cronjob` take all three.
-// The kind-named `deployment` and `daemonset` call none of them: since
+// (go-kure/launcher#790): `statefulset` takes all three.
+// The kind-named `deployment`, `daemonset`, `job` and `cronjob` call none of them: since
 // go-kure/launcher#1629 each decodes the whole upstream spec, the pod spec
 // included.
 //

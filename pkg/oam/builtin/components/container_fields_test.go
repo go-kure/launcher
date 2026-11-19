@@ -417,8 +417,7 @@ func TestContainerFields_AuthoredCheckAcceptsTheFullSurface(t *testing.T) {
 // TestContainerFields_AuthoredCheckRejectsUnreadContainerKeys: the container's
 // own restartPolicy and restartPolicyRules are read on an init container only
 // (parseInitContainerRestart), so the authored-property check refuses them on
-// the main container and on a sidecar of a webservice (authoredApp). On job
-// and cronjob a top-level restartPolicy is the pod's, a different key.
+// the main container and on a sidecar of a webservice (authoredApp).
 func TestContainerFields_AuthoredCheckRejectsUnreadContainerKeys(t *testing.T) {
 	for _, key := range []string{"restartPolicy", "restartPolicyRules"} {
 		for _, list := range []string{"", "sidecars"} {

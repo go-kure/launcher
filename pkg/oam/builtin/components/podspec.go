@@ -48,7 +48,8 @@ type PodSpecConfig struct {
 // Three keys carry a `pod` prefix because the bare corev1 field name is
 // already a property at some kind: `podSecurityContext` and `podResources`
 // (container-level securityContext/resources exist on every kind) and
-// `podActiveDeadlineSeconds` (cronjob's job-level activeDeadlineSeconds).
+// `podActiveDeadlineSeconds` (a Job pod's activeDeadlineSeconds, which no
+// shipped kind publishes now).
 var podSpecPropertyKeys = []string{
 	"terminationGracePeriodSeconds", "podActiveDeadlineSeconds", "dnsPolicy", "nodeSelector",
 	"serviceAccountName", "automountServiceAccountToken", "nodeName", "hostNetwork", "hostPID",
@@ -62,7 +63,8 @@ var podSpecPropertyKeys = []string{
 // podSpecJobOnlyKeys are the pod-level properties only Job pods may carry:
 // apps/v1 validation forbids activeDeadlineSeconds on Deployment, StatefulSet
 // and DaemonSet pod templates ("activeDeadlineSeconds in <Kind> is not
-// Supported"), so only the cronjob kind exposes and accepts it.
+// Supported"). No shipped kind exposes it now: the raw job and cronjob take
+// activeDeadlineSeconds in their upstream spec.
 var podSpecJobOnlyKeys = []string{"podActiveDeadlineSeconds"}
 
 // podSpecJobOnlyReason is the error text, after the key, for an
@@ -1392,8 +1394,8 @@ type podSpecInput struct {
 	Tolerations               []corev1.Toleration
 	TopologySpreadConstraints []corev1.TopologySpreadConstraint
 	Affinity                  *corev1.Affinity
-	// RestartPolicy is written only when non-empty (cronjob); the other kinds
-	// leave it to the API default.
+	// RestartPolicy is written only when non-empty; no handler sets it now (the
+	// raw job and cronjob author restartPolicy in their upstream spec).
 	RestartPolicy corev1.RestartPolicy
 }
 

@@ -313,7 +313,9 @@ func schemaAppArmorProfile(scope string) oam.PropertySchema {
 //
 // jobPods selects whether podSpecJobOnlyKeys (podActiveDeadlineSeconds) are
 // published: apps/v1 forbids activeDeadlineSeconds on Deployment, StatefulSet
-// and DaemonSet pod templates, so only cronjob passes true.
+// and DaemonSet pod templates. No shipped kind passes true now: the raw job and
+// cronjob take activeDeadlineSeconds in their upstream spec, and removing the
+// switch is a later change of go-kure/launcher#1629.
 //
 // reserved is a required argument (D3); see schemaEnv's doc comment above.
 func schemaPodSpec(reserved, jobPods bool) map[string]oam.PropertySchema {
