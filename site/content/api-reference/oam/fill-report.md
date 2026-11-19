@@ -86,13 +86,13 @@ Only a config that reports its fills has `policy` and `builtin` entries. These d
   object. The list is under
   [policy defaults](../oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
 - `webservice` and `worker`, through the `role-deployment` they lower to.
-
-The raw `deployment` kind reports no fill: it fills no default, so its report is empty
-(see the `deployment` section of
-[Kinds: core workloads](../oam-components/kinds-core-workloads.md#deployment)).
 - The Cluster a `postgresql` component builds.
 - The `persistentvolumeclaim` component: the policy's default `size`.
 - The traits in the table under "Property provenance", each with the paths it reports.
+
+The raw `deployment` kind is not in the list: it fills no default, so its report is empty
+(see the `deployment` section of
+[Kinds: core workloads](../oam-components/kinds-core-workloads.md#deployment)).
 
 A fill can depend on the document. The `topology-spread` trait reports
 `topologySpreadConstraints` for a Deployment of two replicas or more, and nothing at one
