@@ -123,6 +123,11 @@ func validateObjectProperties(schema map[string]PropertySchema, exclusive []Excl
 	if err := checkExclusive(exclusive, schema, props, true, path, ""); err != nil {
 		return err
 	}
+	// After the groups, as checkNestedRequired orders them: a document that sets both
+	// members of a group is told that before it is told a conditional key is missing.
+	if err := checkRequiredWhen(schema, props, path, ""); err != nil {
+		return err
+	}
 	for _, key := range slices.Sorted(maps.Keys(props)) {
 		field, ok := schema[key]
 		if !ok {
@@ -238,7 +243,128 @@ func checkTopLevelRequired(schema map[string]PropertySchema, props map[string]an
 			return requiredError(path, key, capability)
 		}
 	}
+	return checkRequiredWhen(schema, props, path, capability)
+}
+
+// checkRequiredWhen reports the first property of schema whose RequiredWhen holds
+// and that props leaves out (absent, or a null as isNullValue reads it), in sorted
+// order. It is read wherever Required is, after it, and follows Required wherever
+// that one is relaxed. The rules are checked for shape first, in checkExclusiveGroups.
+func checkRequiredWhen(schema map[string]PropertySchema, props map[string]any, path, capability string) error {
+	for _, key := range slices.Sorted(maps.Keys(schema)) {
+		rule := schema[key].RequiredWhen
+		if rule == nil {
+			continue
+		}
+		if v, present := props[key]; present && !isNullValue(v) {
+			continue
+		}
+		if !requiredWhenHolds(rule, props) {
+			continue
+		}
+		return requiredWhenError(path, key, rule, capability)
+	}
 	return nil
+}
+
+// requiredWhenHolds reports whether the rule's key is set, and set to Equals when
+// that is given. A key is set when Required would count it present. A value is
+// compared by kind, as validatePropertyValue reads it, so a named string type
+// equals its string.
+func requiredWhenHolds(rule *RequiredWhen, props map[string]any) bool {
+	v, present := props[rule.Key]
+	if !present || isNullValue(v) {
+		return false
+	}
+	rv := reflect.ValueOf(v)
+	switch want := rule.Equals.(type) {
+	case nil:
+		return true
+	case string:
+		return rv.Kind() == reflect.String && rv.String() == want
+	case bool:
+		return rv.Kind() == reflect.Bool && rv.Bool() == want
+	}
+	return false
+}
+
+// requiredWhenError is the refusal of a property its RequiredWhen requires and the
+// document leaves out, worded as requiredError is for a capability.
+func requiredWhenError(path, key string, rule *RequiredWhen, capability string) error {
+	var cond string
+	switch want := rule.Equals.(type) {
+	case nil:
+		cond = fmt.Sprintf("%q is set", rule.Key)
+	case string:
+		cond = fmt.Sprintf("%q is %q", rule.Key, want)
+	default:
+		cond = fmt.Sprintf("%q is %v", rule.Key, want)
+	}
+	e := propertyErrorf(PropertyErrorRequired, path, "%q is required when %s", key, cond).withKey(key)
+	if capability != "" {
+		e.msg = fmt.Sprintf("%s; neither the trait nor capability %q's rendering sets it", e.msg, capability)
+	}
+	return e
+}
+
+// checkRequiredWhenRules reports a malformed RequiredWhen among schema's
+// properties, in sorted order: a key schema does not declare, the property itself, a
+// property also Required, an Equals that is neither a string nor a boolean, one
+// whose type is not the key's declared type, or one outside the key's Enum.
+func checkRequiredWhenRules(schema map[string]PropertySchema, path string) error {
+	for _, name := range slices.Sorted(maps.Keys(schema)) {
+		field := schema[name]
+		rule := field.RequiredWhen
+		if rule == nil {
+			continue
+		}
+		keyField, declared := schema[rule.Key]
+		switch {
+		case rule.Key == name:
+			return propertyErrorf(PropertyErrorSchema, path, "schema declares requiredWhen on %q naming the property itself", name)
+		case !declared:
+			return propertyErrorf(PropertyErrorSchema, path, "schema declares requiredWhen on %q naming key %q, which is not a declared property", name, rule.Key)
+		case field.Required:
+			return propertyErrorf(PropertyErrorSchema, path, "schema declares %q Required and requiredWhen; a property is required always or conditionally, not both", name)
+		case rule.Equals == nil:
+			continue
+		}
+		var want PropertyType
+		switch rule.Equals.(type) {
+		case string:
+			want = PropertyTypeString
+		case bool:
+			want = PropertyTypeBoolean
+		default:
+			return propertyErrorf(PropertyErrorSchema, path, "schema declares requiredWhen on %q with an equals of type %T; equals is a string or a boolean", name, rule.Equals)
+		}
+		// A union leaves Type empty and lists its members in Types.
+		keyTypes := keyField.Types
+		if keyField.Type != "" {
+			keyTypes = []PropertyType{keyField.Type}
+		}
+		if len(keyTypes) > 0 && !slices.Contains(keyTypes, want) {
+			names := make([]string, len(keyTypes))
+			for i, kt := range keyTypes {
+				names[i] = string(kt)
+			}
+			return propertyErrorf(PropertyErrorSchema, path, "schema declares requiredWhen on %q with a %s equals, but key %q is declared %s", name, want, rule.Key, strings.Join(names, "/"))
+		}
+		// enumContainsValue, as a value is held to the Enum: a member of a named
+		// string type equals its string.
+		if len(keyField.Enum) > 0 && !enumContainsValue(keyField.Enum, rule.Equals) {
+			return propertyErrorf(PropertyErrorSchema, path, "schema declares requiredWhen on %q with equals %v, which is not one of key %q's enum values", name, quoteScalar(rule.Equals), rule.Key)
+		}
+	}
+	return nil
+}
+
+// quoteScalar renders a string equals quoted and a boolean bare, as an error shows it.
+func quoteScalar(v any) string {
+	if s, ok := v.(string); ok {
+		return strconv.Quote(s)
+	}
+	return fmt.Sprint(v)
 }
 
 // requiredError is the refusal of a missing Required key: the plain wording, or the
@@ -365,8 +491,14 @@ func checkExclusive(groups []ExclusiveGroup, schema map[string]PropertySchema, p
 
 // checkExclusiveGroups reports a malformed group: fewer than two keys, a key schema
 // does not declare, a key listed twice across the groups, or a key declared Required,
-// which would make every other key of its group unsettable.
+// which would make every other key of its group unsettable. It reports a malformed
+// RequiredWhen among schema's properties first (checkRequiredWhenRules): this is the
+// one funnel every object visit and CheckSchemaNodeGroups pass through, so a rule is
+// refused wherever a group would be, as the schema's error and before the document's.
 func checkExclusiveGroups(groups []ExclusiveGroup, schema map[string]PropertySchema, path string) error {
+	if err := checkRequiredWhenRules(schema, path); err != nil {
+		return err
+	}
 	seen := make(map[string]bool)
 	for i, group := range groups {
 		if len(group.Keys) < 2 {
@@ -407,10 +539,24 @@ func checkObjectGroups(schema map[string]PropertySchema, exclusive []ExclusiveGr
 	return nil
 }
 
+// CheckSchemaNodeNotProperty reports a RequiredWhen on a node that is not a property
+// of an object: a rule names a sibling key, and an array's items, the value schema of
+// an open object and a model input have none, so the rule would never be read. A
+// caller that owns a walk calls it for those nodes (checkFieldGroups does, and the
+// loader of a model for an input, its items and its value schema); the properties of
+// an object are held to their rules by CheckSchemaNodeGroups on the object.
+func CheckSchemaNodeNotProperty(field PropertySchema, path string) error {
+	if field.RequiredWhen != nil {
+		return propertyErrorf(PropertyErrorSchema, path, "schema declares requiredWhen on a node that is not a property of an object; a rule names a sibling key")
+	}
+	return nil
+}
+
 // CheckSchemaNodeGroups reports a malformed exclusive group on one declared node: an
 // object node with fewer than two keys in a group, a key it does not declare, a key
 // listed twice across its groups or a key declared Required, or any node that is not an
-// object and still declares groups. It checks this node only and does not recurse: a
+// object and still declares groups. An object node's properties are also held to the
+// rules of RequiredWhen (checkRequiredWhenRules). It checks this node only and does not recurse: a
 // caller that owns the walk, such as the loader of a model, calls it for each node it
 // visits and spells the path itself. path prefixes the error.
 func CheckSchemaNodeGroups(field PropertySchema, path string) error {
@@ -437,9 +583,15 @@ func checkFieldGroups(field PropertySchema, path string) error {
 			}
 		}
 		if field.AdditionalPropertiesSchema != nil {
+			if err := CheckSchemaNodeNotProperty(*field.AdditionalPropertiesSchema, path+".*"); err != nil {
+				return err
+			}
 			return checkFieldGroups(*field.AdditionalPropertiesSchema, path+".*")
 		}
 	case field.Type == PropertyTypeArray && field.Items != nil:
+		if err := CheckSchemaNodeNotProperty(*field.Items, path+"[]"); err != nil {
+			return err
+		}
 		return checkFieldGroups(*field.Items, path+"[]")
 	}
 	return nil

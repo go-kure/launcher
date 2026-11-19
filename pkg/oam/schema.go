@@ -209,6 +209,25 @@ type PropertySchema struct {
 	//
 	// A consumer that predates BoundedBy ignores it; the field is additive for it.
 	BoundedBy []RefusalClass `json:"boundedBy,omitempty" yaml:"boundedBy,omitempty"`
+	// RequiredWhen makes the property mandatory only while a sibling key of the
+	// same object holds a given state, where Required makes it mandatory always
+	// (go-kure/launcher#1625). It is enforced at every place Required is, and it
+	// follows Required wherever that one is relaxed. A property carries at most
+	// one rule and never both RequiredWhen and Required.
+	RequiredWhen *RequiredWhen `json:"requiredWhen,omitempty" yaml:"requiredWhen,omitempty"`
+}
+
+// RequiredWhen is the condition of PropertySchema.RequiredWhen: the property is
+// required when the sibling Key is set (Equals nil) or set to Equals. A key counts
+// as set when the Required check would count it present: not absent and not a
+// null. Equals is a string or a boolean and must match the declared type of Key
+// (and be one of its Enum values when Key declares any).
+type RequiredWhen struct {
+	// Key is a property of the same object as the conditionally required one.
+	Key string `json:"key" yaml:"key"`
+	// Equals is the value Key must hold for the rule to apply; nil means Key is
+	// merely set.
+	Equals any `json:"equals,omitempty" yaml:"equals,omitempty"`
 }
 
 // ExclusiveGroup is one group of PropertySchema.Exclusive: keys of one object, at

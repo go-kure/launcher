@@ -13,8 +13,8 @@ to declare a constrained schema for their user-facing properties. `PropertySchem
 single schema vocabulary — the same type also backs `kurel.yaml` parameters (`ParameterDecl`) and
 `CapabilityDefinition` rendering properties. It has `Type` (string/integer/boolean/number/array/object),
 `Types`, `Description`, `Required`, `Default`, `Enum`, nested `Properties`, `Items`, `AdditionalProperties`
-(default false; escape-hatch fields set it true), `AdditionalPropertiesSchema`, and `Exclusive`. The rich fields
-(`Types`, `Enum`, `Properties`, `Items`, `AdditionalProperties`, `AdditionalPropertiesSchema`, `Exclusive`) are
+(default false; escape-hatch fields set it true), `AdditionalPropertiesSchema`, `Exclusive` and `RequiredWhen`. The rich fields
+(`Types`, `Enum`, `Properties`, `Items`, `AdditionalProperties`, `AdditionalPropertiesSchema`, `Exclusive`, `RequiredWhen`) are
 meaningful only for handler properties: the two flat call sites (kurel
 parameters, capability rendering) reject them at decode time, so unifying the type does not widen
 their accepted behavior.
@@ -94,6 +94,29 @@ that does not read `Exclusive` sees each key as the optional key it is declared 
 `CheckSchemaNodeGroups(field, path)` applies those five rules to one declared node and does not
 recurse, for a caller that walks a schema itself and spells the path itself. `model.Load` calls it
 for each node of the input schemas it visits, so a malformed group in a model is refused at load.
+
+`RequiredWhen` (published as `requiredWhen`) is `Required` under a condition. On a property of an
+`object` node (or of a handler's top level) it names a sibling key of the same object:
+`RequiredWhen{ Key, Equals }` makes the property mandatory while `Key` is set, or, when `Equals` is
+given, set to that value. A key counts as set when it is present and not a null, as for `Required`
+and `Exclusive`; a null or an empty string in the property itself reads as for `Required` (a null is
+absent, an empty string is set). `Equals` is a string or a boolean, of the key's declared type and,
+where the key declares an `Enum`, one of its values. The refusal is the `required` kind and says
+why: `"csi" is required when "type" is "csi"`, `"volumeMode" is required when "devicePath" is set`.
+A property carries one rule. The rule follows `Required` wherever that one is relaxed: it is
+not enforced on the schema a capability-bound trait's author is checked against (the rendering may
+supply the property), and it is checked on the properties merged with the rendering, where the
+refusal names the capability. It is read after the exclusive groups of its object, except at an
+authored document's top level, where it is read with `Required` and so before them. A rule that names
+a key the object does not declare or the property itself, sits on a `Required` property, or has an
+`Equals` of another type (the key's `Type`, or one of its `Types`) or outside the key's `Enum` is a schema error, reported wherever a
+malformed group would be (`CheckSchemaNodeGroups` included, so `model.Load` refuses it). So is a rule
+on a node that is no property of an object, which has no sibling to name: an array's items, the value
+schema of an open object, a model input itself (`CheckSchemaNodeNotProperty`). The two
+flat call sites reject the key at decode time; a model input accepts it. A consumer that does not
+read `RequiredWhen` sees the property as the optional key it is declared as. It states the
+presence of a property and never its value: a handler keeps its own refusal of the rest, and of the
+same case, so a caller that skips validation gets the handler's wording.
 
 `Description` is optional (`json:"description,omitempty"`) but every built-in property populates it —
 including nested object fields and array item schemas at every depth — so the downstream runtime can surface prose in

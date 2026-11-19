@@ -2,6 +2,7 @@ package components
 
 import (
 	"maps"
+	"slices"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -546,12 +547,24 @@ func schemaVolumes() oam.PropertySchema {
 	// The nested source objects (go-kure/launcher#1177): each is the upstream
 	// VolumeSource field of that name, strictly decoded.
 	for _, key := range []string{"configMap", "csi", "downwardAPI", "emptyDir", "ephemeral", "image", "projected", "secret"} {
-		props[key] = oam.PropertySchema{
+		source := oam.PropertySchema{
 			Type:                 oam.PropertyTypeObject,
 			AdditionalProperties: true,
 			Description:          "The " + key + " volume source, as the Kubernetes VolumeSource field of that name. Read when type is " + key + "; an unknown field or a wrongly typed value is refused.",
 		}
+		// These five types have no flat form, so their object is required when the type
+		// names it (parseVolumes refuses the same case a second time, in the handler).
+		// configMap, secret and emptyDir are not here: each is also authored flat.
+		if slices.Contains([]string{"csi", "downwardAPI", "ephemeral", "image", "projected"}, key) {
+			source.RequiredWhen = &oam.RequiredWhen{Key: "type", Equals: key}
+		}
+		props[key] = source
 	}
+	// A raw block volume names its mode (checkVolumeModePairing refuses the same case
+	// a second time). The value Block is not part of the rule: it stays the handler's.
+	volumeMode := props["volumeMode"]
+	volumeMode.RequiredWhen = &oam.RequiredWhen{Key: "devicePath"}
+	props["volumeMode"] = volumeMode
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeArray,
 		Description: "Volumes to attach and mount into the container.",
@@ -883,6 +896,12 @@ func schemaVolumeClaimTemplates() oam.PropertySchema {
 		"accessModes":  {Type: oam.PropertyTypeArray, Description: "Requested access modes for the volume.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: accessModesEnum(), Description: "A single access mode."}},
 	}
 	maps.Copy(props, schemaVolumeClaimSpec())
+	// volumeMode comes from the shared claim spec, which a PersistentVolumeClaim
+	// component takes too and which has no devicePath, so the rule is set here on
+	// this item's copy, after the copy, and never in the shared declaration.
+	volumeMode := props["volumeMode"]
+	volumeMode.RequiredWhen = &oam.RequiredWhen{Key: "devicePath"}
+	props["volumeMode"] = volumeMode
 	// The mount keys of a template with a mountPath (go-kure/launcher#1198).
 	// They are refused beside devicePath, which has no mount.
 	props["readOnly"] = oam.PropertySchema{Type: oam.PropertyTypeBoolean, Description: "Mount the claim read-only. Not a claim-spec field. Only with mountPath."}
