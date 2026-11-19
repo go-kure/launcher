@@ -144,6 +144,23 @@ func cronjobLabelled(labels map[string]any) map[string]any {
 	}
 }
 
+// TestCronjobHandler_WorkingDir_NonString_Error: a mistyped workingDir on the
+// container is refused when the upstream spec is decoded, not read as absent.
+// The hand-parsed kinds hold the same case in
+// TestStatefulsetHandler_WorkingDir_NonString_Error.
+func TestCronjobHandler_WorkingDir_NonString_Error(t *testing.T) {
+	props := cronjobLabelled(nil)
+	spec := props["jobTemplate"].(map[string]any)["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	spec["containers"] = []any{map[string]any{"name": "app", "image": "registry.example/team/app:1.2.3", "workingDir": 123}}
+	err := coreKindErr(&components.CronjobHandler{}, "cronjob", "job", props)
+	if err == nil {
+		t.Fatal("expected error for non-string workingDir, got nil")
+	}
+	if !strings.Contains(err.Error(), "workingDir") {
+		t.Errorf("error should name workingDir, got %v", err)
+	}
+}
+
 // TestCronjobHandler_AuthoredAppLabel: an authored `app` label on the pod
 // template is kept when it is the component's own label value and refused,
 // naming the component and the path, when it is another. One on the job

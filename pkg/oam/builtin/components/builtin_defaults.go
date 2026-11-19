@@ -8,9 +8,10 @@ import (
 )
 
 // BuiltinDefaults of the handler-built workload kinds that keep the reshaped
-// form (the role member of webservice and worker, statefulset, job, cronjob):
+// form (the role member of webservice and worker, and statefulset):
 // the values launcher's own parser filled because the author wrote none
-// (go-kure/launcher#1580). The raw kinds, deployment and daemonset, fill
+// (go-kure/launcher#1580). The raw kinds, deployment, daemonset, job and
+// cronjob, fill
 // nothing (go-kure/launcher#1629). The parsers record the
 // paths they filled, and each method answers from that record and the config's
 // state when the transform asks, so:

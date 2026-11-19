@@ -1325,7 +1325,7 @@ func parseReplicas(props map[string]any, defaultVal int32) (int32, bool, error) 
 // Ports, so a string port can never resolve there and is rejected outright
 // rather than authoring a probe/lifecycle hook that is guaranteed to fail at
 // runtime. Kinds whose main container declares ports only when authored
-// (the role member of webservice and worker, statefulset, job, cronjob) pass `len(ports) > 0`
+// (the role member of webservice and worker, and statefulset) pass `len(ports) > 0`
 // with an empty matchName and check the names against the whole list
 // afterwards (checkNamedPortsDeclared); webservice, whose container always
 // declares "http", passes true. matchName is the
@@ -2994,7 +2994,7 @@ func parseClaimReference(m map[string]any, volName, claimName string, volumeMode
 	}, nil
 }
 
-// parsePodVolumes is parseVolumes for a pod kind (statefulset, job, cronjob),
+// parsePodVolumes is parseVolumes for a pod kind (statefulset),
 // which generates no claim of its own
 // (go-kure/launcher#702): every pvc volume must reference an existing claim by
 // claimName. The role rules call parseVolumes itself and route the claims their
@@ -3428,8 +3428,8 @@ func checkPodPortNames(mainPorts []corev1.ContainerPort, initContainers []InitCo
 // across the lists or within one. The API server refuses such a pod, so the
 // author would see the failure only at apply time (go-kure/launcher#1226). It
 // walks main, init containers, then sidecars, and the error names the entry
-// that repeats and the first one that used the name. A kind with no sidecars
-// (job, cronjob) passes nil. Name syntax is not checked here.
+// that repeats and the first one that used the name. Name syntax is not checked
+// here.
 func checkPodContainerNames(mainName string, inits []InitContainerConfig, sidecars []SidecarContainerConfig) error {
 	usedBy := map[string]string{mainName: fmt.Sprintf("the main container %q", mainName)}
 	for i, ic := range inits {
@@ -3684,10 +3684,10 @@ var tolerationKeys = []string{"key", "operator", "value", "effect", "tolerationS
 
 // parseTolerations is SHARED: the role member of webservice and worker
 // (role_deployment.go) and, since go-kure/launcher#790, statefulset
-// (statefulset.go), job (job.go) and cronjob (cronjob.go) are its callers, and
-// schemaTolerations has the same ones. Every rejection below therefore lands on
-// all of them. The kinds that take the upstream spec whole, deployment and
-// daemonset (go-kure/launcher#1629), read none of it. A rejection added here in
+// (statefulset.go) are its callers, and schemaTolerations has the same ones.
+// Every rejection below therefore lands on both. The kinds that take the
+// upstream spec whole, deployment, daemonset, job and cronjob
+// (go-kure/launcher#1629), read none of it. A rejection added here in
 // future changes every calling kind; say so in the docs of each in the same
 // change.
 // parseObjectList, not a bare props["tolerations"].([]any) assertion: a

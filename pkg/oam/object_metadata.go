@@ -23,10 +23,11 @@ import (
 // They go on the object's own metadata and nowhere else: a pod template the
 // object holds keeps the labels its kind gives it. The metadata of that pod
 // template is a handler's own property where it takes one (`podMetadata`, on
-// statefulset, job and cronjob; go-kure/launcher#1178; and on webservice and
+// statefulset; go-kure/launcher#1178; and on webservice and
 // worker, whose role-deployment member takes it; go-kure/launcher#1216). The raw
 // deployment and daemonset take the whole pod template, so the metadata of it is
-// `template.metadata` (go-kure/launcher#1629).
+// `template.metadata`, and the raw job and cronjob take it at `template.metadata`
+// and `jobTemplate.spec.template.metadata` (go-kure/launcher#1629).
 
 const (
 	// ObjectLabelsProperty is the property an author sets the labels of a kind
