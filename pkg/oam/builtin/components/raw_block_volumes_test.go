@@ -15,12 +15,16 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// Raw block volumes (go-kure/launcher#385). A `volumes[].pvc` entry and a
-// `volumeClaimTemplates` entry take exactly one of `mountPath`/`devicePath`,
-// `devicePath` holds exactly when `volumeMode: Block` is authored, and a device
-// reaches the main container as a corev1.VolumeDevice rather than a
-// VolumeMount. Init containers and sidecars address a Block volume through
-// their own `volumeDevices`, never through `volumeMounts`.
+// Raw block volumes (go-kure/launcher#385). A `volumes[].pvc` entry takes
+// exactly one of `mountPath`/`devicePath`, `devicePath` holds exactly when
+// `volumeMode: Block` is authored, and a device reaches the main container as a
+// corev1.VolumeDevice rather than a VolumeMount. Init containers and sidecars
+// address a Block volume through their own `volumeDevices`, never through
+// `volumeMounts`. The reshaped `volumeClaimTemplates` entry of the statefulset
+// kind took the same two keys until the kind became raw
+// (go-kure/launcher#1629): its claim templates are upstream
+// PersistentVolumeClaim objects now, and the container's own `volumeDevices`
+// and `volumeMounts` are the API server's to validate.
 //
 // Every workload kind with a `volumes` property runs the same cases: the rule
 // lives in the shared parsers, and a kind that forgot to wire the devices into
@@ -39,7 +43,6 @@ func blockKinds() []blockKind {
 		{"webservice", webserviceViaRule{}, map[string]any{}, true},
 		{"worker", workerViaRule{}, map[string]any{}, true},
 		{roleMemberType, &components.RoleDeploymentHandler{}, map[string]any{}, true},
-		{"statefulset", &components.StatefulsetHandler{}, map[string]any{}, true},
 	}
 }
 
@@ -97,7 +100,6 @@ func (k blockKind) configure(t *testing.T, extra map[string]any) (stack.Applicat
 type generated struct {
 	pod    *corev1.PodSpec
 	claims []*corev1.PersistentVolumeClaim
-	vcts   []corev1.PersistentVolumeClaim
 }
 
 func (k blockKind) generate(t *testing.T, extra map[string]any) generated {
@@ -122,7 +124,6 @@ func collectGenerated(t *testing.T, objects []*client.Object) generated {
 			g.pod = &o.Spec.Template.Spec
 		case *appsv1.StatefulSet:
 			g.pod = &o.Spec.Template.Spec
-			g.vcts = o.Spec.VolumeClaimTemplates
 		case *appsv1.DaemonSet:
 			g.pod = &o.Spec.Template.Spec
 		case *batchv1.Job:
@@ -459,173 +460,4 @@ func TestRawBlock_ExtraContainers_VolumeDeviceEntryRules(t *testing.T) {
 			})
 		}
 	}
-}
-
-// --- statefulset volumeClaimTemplates ---
-
-func blockVCT(extra map[string]any) map[string]any {
-	v := map[string]any{"name": "disk", "size": "1Gi"}
-	for key, val := range extra {
-		v[key] = val
-	}
-	return v
-}
-
-func statefulsetKind() blockKind {
-	for _, k := range blockKinds() {
-		if k.kind == "statefulset" {
-			return k
-		}
-	}
-	panic("statefulset kind missing")
-}
-
-// TestRawBlock_VolumeClaimTemplate_RendersVolumeDevice is the issue's own
-// acceptance: a claim template declared as a block device generates a claim
-// with volumeMode: Block and a container volumeDevices entry, with no
-// volumeMounts entry for that volume.
-func TestRawBlock_VolumeClaimTemplate_RendersVolumeDevice(t *testing.T) {
-	k := statefulsetKind()
-	g := k.generate(t, map[string]any{"volumeClaimTemplates": []any{
-		blockVCT(map[string]any{"devicePath": "/dev/xvda", "volumeMode": "Block"}),
-		map[string]any{"name": "data", "size": "1Gi", "mountPath": "/data"},
-	}})
-	main := g.pod.Containers[0]
-	if len(main.VolumeDevices) != 1 || main.VolumeDevices[0] != (corev1.VolumeDevice{Name: "disk", DevicePath: "/dev/xvda"}) {
-		t.Errorf("VolumeDevices = %+v, want [{disk /dev/xvda}]", main.VolumeDevices)
-	}
-	if hasMountNamed(&main, "disk") {
-		t.Errorf("block claim template also mounted as a filesystem: %+v", main.VolumeMounts)
-	}
-	if !hasMountNamed(&main, "data") {
-		t.Errorf("filesystem claim template lost its mount: %+v", main.VolumeMounts)
-	}
-	if len(g.vcts) != 2 {
-		t.Fatalf("expected 2 claim templates, got %d", len(g.vcts))
-	}
-	if vm := g.vcts[0].Spec.VolumeMode; vm == nil || *vm != corev1.PersistentVolumeBlock {
-		t.Errorf("claim template volumeMode = %v, want Block", vm)
-	}
-	if vm := g.vcts[1].Spec.VolumeMode; vm != nil {
-		t.Errorf("unauthored claim template volumeMode rendered as %v, want nil", *vm)
-	}
-}
-
-func TestRawBlock_VolumeClaimTemplate_Rejections(t *testing.T) {
-	k := statefulsetKind()
-	cases := []struct {
-		name    string
-		entry   map[string]any
-		wantErr string
-	}{
-		{"mountPath with Block", blockVCT(map[string]any{"mountPath": "/data", "volumeMode": "Block"}), "volumeMode Block is consumed through devicePath"},
-		{"devicePath with Filesystem", blockVCT(map[string]any{"devicePath": "/dev/xvda", "volumeMode": "Filesystem"}), "devicePath requires volumeMode: Block"},
-		{"devicePath without a mode", blockVCT(map[string]any{"devicePath": "/dev/xvda"}), "devicePath requires volumeMode: Block"},
-		{"both paths", blockVCT(map[string]any{"mountPath": "/data", "devicePath": "/dev/xvda", "volumeMode": "Block"}), "mountPath and devicePath are mutually exclusive"},
-		{"neither path", blockVCT(map[string]any{"volumeMode": "Block"}), "missing required field 'mountPath'"},
-		{"devicePath with backsteps", blockVCT(map[string]any{"devicePath": "../xvda", "volumeMode": "Block"}), "must not contain '..'"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := k.configure(t, map[string]any{"volumeClaimTemplates": []any{tc.entry}})
-			wantErrContaining(t, err, tc.wantErr)
-		})
-	}
-	t.Run("devicePath shared with a pvc volume", func(t *testing.T) {
-		_, err := k.configure(t, map[string]any{
-			"volumeClaimTemplates": []any{blockVCT(map[string]any{"devicePath": "/dev/xvda", "volumeMode": "Block"})},
-			"volumes": []any{map[string]any{
-				"name": "other", "type": "pvc", "size": "1Gi", "devicePath": "/dev/xvda", "volumeMode": "Block",
-			}},
-		})
-		wantErrContaining(t, err, `duplicate devicePath "/dev/xvda"`)
-	})
-	t.Run("devicePath shared with a volumes mountPath", func(t *testing.T) {
-		_, err := k.configure(t, map[string]any{
-			"volumeClaimTemplates": []any{blockVCT(map[string]any{"devicePath": "/dev/xvda", "volumeMode": "Block"})},
-			"volumes":              []any{map[string]any{"name": "scratch", "type": "emptyDir", "mountPath": "/dev/xvda"}},
-		})
-		wantErrContaining(t, err, `"/dev/xvda" is already a mountPath`)
-	})
-	t.Run("devicePath shared with a claim template mountPath", func(t *testing.T) {
-		_, err := k.configure(t, map[string]any{"volumeClaimTemplates": []any{
-			map[string]any{"name": "data", "size": "1Gi", "mountPath": "/dev/xvda"},
-			blockVCT(map[string]any{"devicePath": "/dev/xvda", "volumeMode": "Block"}),
-		}})
-		wantErrContaining(t, err, `"/dev/xvda" is already a mountPath`)
-	})
-}
-
-// TestRawBlock_VolumeClaimTemplate_NameCollisions: the main container takes its
-// devices and mounts from both the claim templates and `volumes`, each parser
-// seeing only its own entries. ValidateVolumeDevices refuses a device name
-// listed twice, and one that is also a volumeMounts name, in the same
-// container.
-func TestRawBlock_VolumeClaimTemplate_NameCollisions(t *testing.T) {
-	k := statefulsetKind()
-	blockDisk := blockVCT(map[string]any{"devicePath": "/dev/xvda", "volumeMode": "Block"})
-	cases := []struct {
-		name    string
-		props   map[string]any
-		wantErr string
-	}{
-		{"Block claim template and a volumes mount", map[string]any{
-			"volumeClaimTemplates": []any{blockDisk},
-			"volumes":              []any{map[string]any{"name": "disk", "type": "emptyDir", "mountPath": "/data"}},
-		}, `volume "disk" is both mounted and attached as a device`},
-		{"Block claim template and a filesystem claim template", map[string]any{
-			"volumeClaimTemplates": []any{blockDisk, map[string]any{"name": "disk", "size": "1Gi", "mountPath": "/data"}},
-		}, `volume "disk" is both mounted and attached as a device`},
-		{"filesystem claim template and a Block pvc volume", map[string]any{
-			"volumeClaimTemplates": []any{map[string]any{"name": "disk", "size": "1Gi", "mountPath": "/data"}},
-			"volumes":              []any{blockPVCVolume(map[string]any{"devicePath": "/dev/xvda", "volumeMode": "Block"})},
-		}, `volume "disk" is both mounted and attached as a device`},
-		{"Block claim template and a Block pvc volume", map[string]any{
-			"volumeClaimTemplates": []any{blockDisk},
-			"volumes":              []any{blockPVCVolume(map[string]any{"devicePath": "/dev/xvdb", "volumeMode": "Block"})},
-		}, `volume "disk" is attached as a device more than once`},
-		{"two Block claim templates", map[string]any{
-			"volumeClaimTemplates": []any{blockDisk, blockVCT(map[string]any{"devicePath": "/dev/xvdb", "volumeMode": "Block"})},
-		}, `volume "disk" is attached as a device more than once`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := k.configure(t, tc.props)
-			wantErrContaining(t, err, tc.wantErr)
-		})
-	}
-}
-
-// TestRawBlock_VolumeClaimTemplate_ExtraContainers: the name→mode map takes
-// the claim templates as well as `volumes`.
-func TestRawBlock_VolumeClaimTemplate_ExtraContainers(t *testing.T) {
-	k := statefulsetKind()
-	vcts := map[string]any{"volumeClaimTemplates": []any{
-		blockVCT(map[string]any{"devicePath": "/dev/xvda", "volumeMode": "Block"}),
-		map[string]any{"name": "data", "size": "1Gi", "mountPath": "/data"},
-	}}
-	t.Run("device naming a Block claim template", func(t *testing.T) {
-		g := k.generate(t, mergeProps(vcts, k.extraContainers(map[string]any{
-			"volumeDevices": []any{map[string]any{"name": "disk", "devicePath": "/dev/block0"}},
-			"volumeMounts":  []any{map[string]any{"name": "data", "mountPath": "/data"}},
-		})))
-		for _, name := range k.extraNames() {
-			c := containerByName(g.pod, name)
-			if c == nil || len(c.VolumeDevices) != 1 || c.VolumeDevices[0].Name != "disk" {
-				t.Errorf("%s did not get the block device", name)
-			}
-		}
-	})
-	t.Run("device naming a filesystem claim template", func(t *testing.T) {
-		_, err := k.configure(t, mergeProps(vcts, k.extraContainers(map[string]any{
-			"volumeDevices": []any{map[string]any{"name": "data", "devicePath": "/dev/block0"}},
-		})))
-		wantErrContaining(t, err, `volume "data" is not a Block volume`)
-	})
-	t.Run("mount naming a Block claim template", func(t *testing.T) {
-		_, err := k.configure(t, mergeProps(vcts, k.extraContainers(map[string]any{
-			"volumeMounts": []any{map[string]any{"name": "disk", "mountPath": "/mnt/disk"}},
-		})))
-		wantErrContaining(t, err, `volume "disk" is a Block volume`)
-	})
 }

@@ -47,8 +47,8 @@ func valuesOutside(gates map[string]string, enum []string) []string {
 // TestFeatureGates_ValueGatedPathsNameRealFieldsAndValues holds every ValueGatedPaths path
 // to a field of the Kubernetes type its open node is decoded into, every value to that
 // type's enum, and every gate to a row of the lifecycle table, and holds the set of nodes
-// that carry one to the seven listed in holders. It holds the raw table to the reshaped
-// kinds' shorthand table, so the two cannot diverge.
+// that carry one to the ten listed in holders. It holds the raw table to the reshaped
+// kinds' shorthand table (webservice and worker), so the two cannot diverge.
 func TestFeatureGates_ValueGatedPathsNameRealFieldsAndValues(t *testing.T) {
 	// The controls: a wrong path does not resolve, a mistyped value is reported, and a
 	// path that ends at a type with no listed enum is told apart from one that has it.
@@ -86,7 +86,7 @@ func TestFeatureGates_ValueGatedPathsNameRealFieldsAndValues(t *testing.T) {
 	}
 	pod := schemaOf("pod")
 	holders := []holder{{"pod initContainers[]", *pod["initContainers"].Items, container}}
-	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset", "job"} {
+	for _, kind := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset", "statefulset", "job"} {
 		holders = append(holders, holder{kind + " template", schemaOf(kind)["template"], reflect.TypeOf(corev1.PodTemplateSpec{})})
 	}
 	holders = append(holders, holder{"cronjob jobTemplate", schemaOf("cronjob")["jobTemplate"], reflect.TypeOf(batchv1.JobTemplateSpec{})})

@@ -89,8 +89,11 @@ func TestTransform_NoServiceKinds_ImplicitBackendRefused(t *testing.T) {
 		kind  string
 		props map[string]any
 	}{
-		{"statefulset", map[string]any{"image": "postgres:16", "ports": ports, "serviceName": "web-headless"}},
-		// The raw daemonset declares its endpoints from the first container's ports.
+		// The raw statefulset and daemonset declare their endpoints from the first
+		// container's ports.
+		{"statefulset", rawStatefulsetProps("web", "postgres:16", map[string]any{"serviceName": "web-headless"}, rawPod(map[string]any{
+			"containers": []any{map[string]any{"name": "app", "image": "postgres:16", "ports": ports}},
+		}))},
 		{"daemonset", rawDaemonsetProps("web", "prom/node-exporter:v1.0.0", rawPod(map[string]any{
 			"containers": []any{map[string]any{"name": "app", "image": "prom/node-exporter:v1.0.0", "ports": ports}},
 		}))},

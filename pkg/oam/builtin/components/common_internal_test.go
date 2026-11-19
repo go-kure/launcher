@@ -2140,49 +2140,6 @@ func TestParseVolumes_EmptyDir_ZeroSizeLimit_Accepted(t *testing.T) {
 	}
 }
 
-// TestParseVolumeClaimTemplates_NegativeSize_Error covers the identical
-// negative-quantity defect found independently in parseVolumeClaimTemplates
-// (StatefulSet's volumeClaimTemplates) while fixing the parseVolumes cases
-// above — same resource.ParseQuantity-accepts-negative root cause, different
-// call site.
-func TestParseVolumeClaimTemplates_NegativeSize_Error(t *testing.T) {
-	_, err := parseVolumeClaimTemplates(map[string]any{
-		"volumeClaimTemplates": []any{
-			map[string]any{
-				"name":      "data",
-				"size":      "-1Gi",
-				"mountPath": "/data",
-			},
-		},
-	})
-	if err == nil {
-		t.Fatal("expected error for a negative volumeClaimTemplate size")
-	}
-}
-
-// TestParseVolumeClaimTemplates_NonStringStorageClass_Error regression-tests
-// a review finding (go-kure/launcher#284): a bare `m["storageClass"].(string)` type
-// assertion treated a present-but-non-string storageClass the same as
-// absent, silently building with the cluster default class instead of
-// rejecting the malformed value — same defect as parseVolumes' pvc case,
-// found independently here since storageClass is optional and has no
-// requiredness check to surface the resulting empty string.
-func TestParseVolumeClaimTemplates_NonStringStorageClass_Error(t *testing.T) {
-	_, err := parseVolumeClaimTemplates(map[string]any{
-		"volumeClaimTemplates": []any{
-			map[string]any{
-				"name":         "data",
-				"size":         "1Gi",
-				"mountPath":    "/data",
-				"storageClass": 123,
-			},
-		},
-	})
-	if err == nil {
-		t.Fatal("expected error for a non-string volumeClaimTemplate storageClass")
-	}
-}
-
 // TestRoleClaims_RewritesVolumesToClaims: a role component's pvc volume that
 // describes a claim becomes a `pvc` trait carrying that claim, qualified by the
 // component name, and the volume is rewritten to reference it by claimName.
@@ -2330,25 +2287,6 @@ func TestRoleClaims_CapabilityStorageClassMustBeAString(t *testing.T) {
 	_, err := roleClaims(&oam.Component{Name: "api"}, props, oam.LoweringContext{}.WithCapabilities(caps))
 	if err == nil || !strings.Contains(err.Error(), `capability "pvc" storageClassName: expected string`) {
 		t.Fatalf("err = %v, want a refusal naming the capability key", err)
-	}
-}
-
-func TestParseVolumeClaimTemplates_StorageClass_Accepted(t *testing.T) {
-	vcts, err := parseVolumeClaimTemplates(map[string]any{
-		"volumeClaimTemplates": []any{
-			map[string]any{
-				"name":         "data",
-				"size":         "1Gi",
-				"mountPath":    "/data",
-				"storageClass": "fast-ssd",
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("parseVolumeClaimTemplates: %v", err)
-	}
-	if len(vcts) != 1 || vcts[0].StorageClass != "fast-ssd" {
-		t.Errorf("vcts = %+v, want StorageClass fast-ssd", vcts)
 	}
 }
 

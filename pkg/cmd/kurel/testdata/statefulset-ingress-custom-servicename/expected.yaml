@@ -2,12 +2,10 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   labels:
-    app: db
     launcher.gokure.dev/component: db
   name: db
   namespace: default
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: db
@@ -18,20 +16,13 @@ spec:
         app: db
         launcher.gokure.dev/component: db
     spec:
-      automountServiceAccountToken: false
       containers:
       - image: ghcr.io/example/postgres:v15.0
         name: db
         ports:
         - containerPort: 5432
           name: tcp
-          protocol: TCP
-        resources:
-          limits:
-            memory: 128Mi
-          requests:
-            cpu: 100m
-            memory: 128Mi
+        resources: {}
   updateStrategy: {}
 ---
 apiVersion: v1

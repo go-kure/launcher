@@ -57,6 +57,62 @@ func TestMountDecorators_RefuseAPathTakenByABlockDevice(t *testing.T) {
 	}
 }
 
+// TestMountDecorators_RefuseANameTakenByAnUnbackedBlockDevice: a container's
+// volumeDevices entry (any container) or the main container's volumeMounts
+// entry names a volume even when the pod has no volume or claim template of
+// that name, so a decorator volume of the same name is refused by that name
+// alone. A later container's mount is accepted: it may mount the volume a trait
+// adds.
+func TestMountDecorators_RefuseANameTakenByAnUnbackedBlockDevice(t *testing.T) {
+	device := map[string]any{"name": "disk", "devicePath": "/dev/xvda"}
+	mount := map[string]any{"name": "disk", "mountPath": "/data"}
+	image := "ghcr.io/org/app:v1"
+	for shape, tc := range map[string]struct {
+		containers []any
+		want       string
+	}{
+		"device in the first container":  {[]any{map[string]any{"name": "app", "image": image, "volumeDevices": []any{device}}}, "as a raw block device"},
+		"device in the second container": {[]any{map[string]any{"name": "app", "image": image}, map[string]any{"name": "side", "image": image, "volumeDevices": []any{device}}}, "as a raw block device"},
+		"mount in the first container":   {[]any{map[string]any{"name": "app", "image": image, "volumeMounts": []any{mount}}}, "as a volume mount"},
+		// A mount in a later container is accepted: a sidecar may mount the
+		// volume a trait adds. The claim template check is what covers a claim.
+		"mount in the second container": {[]any{map[string]any{"name": "app", "image": image}, map[string]any{"name": "side", "image": image, "volumeMounts": []any{mount}}}, ""},
+	} {
+		containers := tc.containers
+		cfg, err := (&components.DeploymentHandler{}).ToApplicationConfig(&oam.Component{
+			Name: "app", Type: "deployment",
+			Properties: rawDeploymentProps("app", "ghcr.io/org/app:v1", rawPod(map[string]any{"containers": containers})),
+		}, "default")
+		if err != nil {
+			t.Fatalf("%s: ToApplicationConfig: %v", shape, err)
+		}
+		decorators := map[string]func() error{
+			"configmap": func() error {
+				_, err := traits.NewConfigMapDecorator(cfg, "disk", "/etc/cfg").Generate(newApp("app", "default"))
+				return err
+			},
+			"external-secret": func() error {
+				_, err := traits.NewExternalSecretDecorator(cfg, "disk", "/etc/creds", false).Generate(newApp("app", "default"))
+				return err
+			},
+		}
+		for name, run := range decorators {
+			t.Run(shape+"/"+name, func(t *testing.T) {
+				err := run()
+				if tc.want == "" {
+					if err != nil {
+						t.Errorf("err = %v, want a later container's mount accepted", err)
+					}
+					return
+				}
+				if err == nil || !strings.Contains(err.Error(), `volume "disk" already exists on the workload `+tc.want) {
+					t.Errorf("err = %v, want the name refused %s", err, tc.want)
+				}
+			})
+		}
+	}
+}
+
 // TestMountDecorators_RefuseANameTakenByABlockDevice: a configmap or
 // external-secret volume named like a Block volume is refused on every
 // workload kind, whether the Block volume is a `volumes[].pvc` entry or a
@@ -75,8 +131,8 @@ func TestMountDecorators_RefuseANameTakenByABlockDevice(t *testing.T) {
 		}
 		props map[string]any
 		// exact says props are the whole properties, with no image added: the
-		// raw deployment, daemonset, job and cronjob take the upstream pod template,
-		// whose block device is a claim volume of the pod.
+		// raw deployment, statefulset, daemonset, job and cronjob take the upstream
+		// pod template, whose block device is a claim volume of the pod.
 		exact bool
 	}
 	blockPod := map[string]any{
@@ -89,18 +145,26 @@ func TestMountDecorators_RefuseANameTakenByABlockDevice(t *testing.T) {
 		},
 	}
 	rawBlock := rawDeploymentProps("app", "ghcr.io/org/app:v1", rawPod(blockPod))
+	// A raw statefulset's claim template is a block device when the claim's
+	// volumeMode is Block and a container lists it in volumeDevices.
+	blockClaim := rawClaimTemplate("disk", "1Gi")
+	blockClaim["spec"].(map[string]any)["volumeMode"] = "Block"
+	rawClaimBlock := rawStatefulsetProps("app", "ghcr.io/org/app:v1", rawPod(map[string]any{
+		"containers": []any{map[string]any{
+			"name": "app", "image": "ghcr.io/org/app:v1",
+			"volumeDevices": []any{map[string]any{"name": "disk", "devicePath": "/dev/xvda"}},
+		}},
+	}), map[string]any{"volumeClaimTemplates": []any{blockClaim}})
 	sources := []source{
 		{"webservice", webserviceViaRule{}, blockPVC, false},
 		{"worker", workerViaRule{}, blockPVC, false},
 		{"role-deployment", &components.RoleDeploymentHandler{}, blockPVC, false},
 		{"deployment", &components.DeploymentHandler{}, rawBlock, true},
-		{"statefulset", &components.StatefulsetHandler{}, blockPVC, false},
+		{"statefulset", &components.StatefulsetHandler{}, rawBlock, true},
 		{"daemonset", &components.DaemonsetHandler{}, rawBlock, true},
 		{"job", &components.JobHandler{}, rawJobProps("ghcr.io/org/app:v1", rawPod(blockPod)), true},
 		{"cronjob", &components.CronjobHandler{}, rawCronjobProps("ghcr.io/org/app:v1", blockPod), true},
-		{"statefulset claim template", &components.StatefulsetHandler{}, map[string]any{"volumeClaimTemplates": []any{map[string]any{
-			"name": "disk", "size": "1Gi", "devicePath": "/dev/xvda", "volumeMode": "Block",
-		}}}, false},
+		{"statefulset claim template", &components.StatefulsetHandler{}, rawClaimBlock, true},
 	}
 	for _, src := range sources {
 		kind := strings.TrimSuffix(src.kind, " claim template")

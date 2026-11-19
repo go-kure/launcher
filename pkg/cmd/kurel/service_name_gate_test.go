@@ -268,7 +268,7 @@ var serviceNameScanSkip = map[string]string{}
 // The cnpg-cluster fixture asks for no additional service, so the scan gives it
 // one: the Cluster names a Service only through spec.managed.services.additional.
 var serviceNameScanProps = map[string]map[string]any{
-	"statefulset":  workloadProps(map[string]any{"serviceName": "web"}),
+	"statefulset":  rawStatefulsetPropsWith(map[string]any{"serviceName": "web"}),
 	"cnpg-cluster": cnpgClusterWithService("extra"),
 }
 

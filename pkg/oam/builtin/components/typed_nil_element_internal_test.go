@@ -25,8 +25,7 @@ func TestParseObjectList_TypedNilElementRefusedLikeUntyped(t *testing.T) {
 }
 
 // The bespoke list readers that do not go through parseObjectList: each must give
-// a typed-nil element (or, for successPolicy.rules, a typed-nil list) the untyped
-// null's exact refusal.
+// a typed-nil element the untyped null's exact refusal.
 func TestBespokeListReaders_TypedNilElementRefusedLikeUntyped(t *testing.T) {
 	sidecar := func(ports any) map[string]any {
 		return map[string]any{"sidecars": []any{map[string]any{"name": "s", "image": "ghcr.io/org/s:v1", "ports": ports}}}
@@ -42,10 +41,6 @@ func TestBespokeListReaders_TypedNilElementRefusedLikeUntyped(t *testing.T) {
 		{"sidecars[0].ports[0]", nil, func(v any) error { _, err := parseSidecars(sidecar([]any{v})); return err }},
 		{"volumeMounts[0]", nil, func(v any) error {
 			_, err := parseVolumeMountList(map[string]any{"volumeMounts": []any{v}}, "p")
-			return err
-		}},
-		{"volumeClaimTemplates[0]", nil, func(v any) error {
-			_, err := parseVolumeClaimTemplates(map[string]any{"volumeClaimTemplates": []any{v}})
 			return err
 		}},
 		{"manifests scopeOverrides[0]", nil, func(v any) error {

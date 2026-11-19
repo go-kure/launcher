@@ -6,25 +6,47 @@ spec:
   components:
   - name: app
     type: statefulset
+    # The spec is the apps/v1 StatefulSetSpec, as the API shapes it. Launcher
+    # adds the `app` label to the pod template and fills no default.
     properties:
-      image: myregistry/my-stateful-app:v1.0.0
       replicas: 3
-      ports:
-      - name: http
-        containerPort: 8080
+      selector:
+        matchLabels:
+          app: app
       # The governing Service gives the pods their stable network identity. A
       # statefulset emits no Service: it names the headless `service` authored
       # below.
       serviceName: app-headless
+      template:
+        metadata:
+          labels:
+            app: app
+        spec:
+          containers:
+          - name: app
+            image: myregistry/my-stateful-app:v1.0.0
+            ports:
+            - name: http
+              containerPort: 8080
+            resources:
+              requests:
+                cpu: "200m"
+                memory: "256Mi"
+            volumeMounts:
+            - name: data
+              mountPath: /data
+      # A claim template is a raw PersistentVolumeClaim. The mount above refers
+      # to it by name.
       volumeClaimTemplates:
-      - name: data
-        size: "20Gi"
-        storageClass: standard
-        mountPath: /data
-      resources:
-        requests:
-          cpu: "200m"
-          memory: "256Mi"
+      - metadata:
+          name: data
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          storageClassName: standard
+          resources:
+            requests:
+              storage: 20Gi
   - name: app-headless
     type: service
     properties:

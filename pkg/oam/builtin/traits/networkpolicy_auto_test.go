@@ -623,7 +623,7 @@ func TestTransform_BackendRef_ResolvesViaServiceName(t *testing.T) {
 				{
 					Name:       "db",
 					Type:       "statefulset",
-					Properties: map[string]any{"image": "postgres:16", "serviceName": "db-headless"},
+					Properties: rawStatefulsetProps("db", "postgres:16", map[string]any{"serviceName": "db-headless"}),
 				},
 				dbHeadlessService(nil),
 			},
@@ -1265,7 +1265,7 @@ func TestTransform_ExternalBackend_NameNoCollisionWhenComponentHasNoPolicy(t *te
 				{
 					Name:       "db",
 					Type:       "statefulset",
-					Properties: map[string]any{"image": "postgres:16", "serviceName": "db-headless"},
+					Properties: rawStatefulsetProps("db", "postgres:16", map[string]any{"serviceName": "db-headless"}),
 				},
 				{
 					Name:       "router",
@@ -1461,7 +1461,7 @@ func TestTransform_BackendRef_RetargetsAcrossTierBundles(t *testing.T) {
 					Name:        "db",
 					Type:        "statefulset",
 					Annotations: map[string]string{"gokure.dev/tier": "services"},
-					Properties:  map[string]any{"image": "postgres:16", "serviceName": "db-headless"},
+					Properties:  rawStatefulsetProps("db", "postgres:16", map[string]any{"serviceName": "db-headless"}),
 				},
 				dbHeadlessService(map[string]string{"gokure.dev/tier": "services"}),
 			},

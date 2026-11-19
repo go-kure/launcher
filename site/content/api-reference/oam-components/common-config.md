@@ -73,11 +73,11 @@ container name is a DNS-1123 label, which forbids dots and allows at most 63
 characters where a subdomain allows 253. `batch.worker` would therefore build
 a workload the API server rejects at admission, naming
 `spec.template.spec.containers[0].name`, a field the author never wrote; an
-undotted name longer than 63 characters is refused by the same check. All
-three workload kinds that name their main container after the component
-(`webservice`, `worker`, `statefulset`) now
+undotted name longer than 63 characters is refused by the same check. Both
+workload kinds that name their main container after the component
+(`webservice`, `worker`) now
 refuse such a name at generation, in the one builder they share. The
-`deployment`, `daemonset`, `job` and `cronjob` kinds take their containers as authored, so
+`deployment`, `daemonset`, `statefulset`, `job` and `cronjob` kinds take their containers as authored, so
 they name none after the component. The name is refused rather than rewritten to `batch-worker`:
 a derived name would silently rename the container and could collide with an
 init container or sidecar of that name. Component types that name no container

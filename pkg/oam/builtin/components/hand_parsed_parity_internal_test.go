@@ -29,10 +29,10 @@ type parityKind struct {
 
 var parityKinds = []parityKind{
 	// The reshaped deployment parser is the role member; the kind-named
-	// `deployment`, `daemonset`, `job` and `cronjob` decode the upstream spec
+	// `deployment`, `daemonset`, `statefulset`, `job` and `cronjob` decode the
+	// upstream spec
 	// (go-kure/launcher#1629) and are held to it by TestCoreKindSchemas_CoverSpec.
 	{"role-deployment", (&RoleDeploymentHandler{}).PropertySchema, reflect.TypeFor[appsv1.Deployment]()},
-	{"statefulset", (&StatefulsetHandler{}).PropertySchema, reflect.TypeFor[appsv1.StatefulSet]()},
 	{"service", (&ServiceHandler{}).PropertySchema, reflect.TypeFor[corev1.Service]()},
 	{"persistentvolumeclaim", (&PersistentVolumeClaimHandler{}).PropertySchema, reflect.TypeFor[corev1.PersistentVolumeClaim]()},
 	{"configmap", (&ConfigMapHandler{}).PropertySchema, reflect.TypeFor[corev1.ConfigMap]()},
@@ -110,8 +110,7 @@ var parityRules = map[string][]parityRule{
 
 	// The pod template: refused as a whole with the reason, and its fields are
 	// the component's own properties.
-	"DeploymentSpec.template":  {{class: parityOtherShape, descend: true}},
-	"StatefulSetSpec.template": {{class: parityOtherShape, descend: true}},
+	"DeploymentSpec.template": {{class: parityOtherShape, descend: true}},
 	// A template's metadata is the builder's: the `app` label, and nothing an
 	// author writes (TestHandParsedKinds_TemplateMetadataAndContainerName).
 	"PodTemplateSpec.metadata": {{class: parityLevel}},

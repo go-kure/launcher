@@ -11,7 +11,7 @@ import (
 // The conditionally required properties the built-in components declare
 // (oam.RequiredWhen, go-kure/launcher#1625): a volume's csi, downwardAPI,
 // ephemeral, image and projected objects when its type names them, and the
-// volumeMode of a volume or a claim template when it authors a devicePath. The
+// volumeMode of a volume when it authors a devicePath. The
 // handler keeps its own refusal of each case as a second line; through Transform
 // the schema's wording comes first.
 
@@ -62,7 +62,6 @@ func TestRequiredWhenAdopters_VolumeSourceObjects(t *testing.T) {
 
 func TestRequiredWhenAdopters_VolumeMode(t *testing.T) {
 	deployment := exclusiveSite{compType: roleMemberType, handler: &components.RoleDeploymentHandler{}}
-	statefulset := exclusiveSite{compType: "statefulset", handler: &components.StatefulsetHandler{}}
 	pvc := func(extra map[string]any) map[string]any {
 		v := map[string]any{"name": "disk", "type": "pvc", "claimName": "disk"}
 		for k, val := range extra {
@@ -70,9 +69,9 @@ func TestRequiredWhenAdopters_VolumeMode(t *testing.T) {
 		}
 		return map[string]any{"image": "ghcr.io/org/app:v1", "volumes": []any{v}}
 	}
-	vct := func(extra map[string]any) map[string]any {
-		return map[string]any{"image": "ghcr.io/org/app:v1", "volumeClaimTemplates": []any{blockVCT(extra)}}
-	}
+	// The claim templates of the raw statefulset kind (go-kure/launcher#1629)
+	// are upstream PersistentVolumeClaim objects with no devicePath, so the
+	// rule sits on `volumes` alone.
 	sites := []struct {
 		name  string
 		site  exclusiveSite
@@ -80,7 +79,6 @@ func TestRequiredWhenAdopters_VolumeMode(t *testing.T) {
 		mount string
 	}{
 		{"volume", deployment, pvc, "/data"},
-		{"claim template", statefulset, vct, "/data"},
 	}
 	want := requiredWhenSentence("volumeMode", "devicePath", "")
 	for _, s := range sites {
@@ -109,7 +107,7 @@ func TestRequiredWhenAdopters_VolumeMode(t *testing.T) {
 	}
 }
 
-// TestRequiredWhenAdopters_PublishedRules pins the seven rows in the schema each
+// TestRequiredWhenAdopters_PublishedRules pins the six rows in the schema each
 // component publishes, and that the shared claim spec stays free of the rule where
 // it has no devicePath to name.
 func TestRequiredWhenAdopters_PublishedRules(t *testing.T) {
@@ -140,9 +138,13 @@ func TestRequiredWhenAdopters_PublishedRules(t *testing.T) {
 		}
 	}
 
-	templates := published("statefulset", &components.StatefulsetHandler{})["volumeClaimTemplates"].Items.Properties
-	if got := rule(templates["volumeMode"]); got != "devicePath" {
-		t.Errorf("volumeClaimTemplates item volumeMode: requiredWhen = %q, want devicePath", got)
+	// The raw statefulset's claim templates are open PersistentVolumeClaim
+	// objects with no devicePath to name: no rule on them.
+	templates := published("statefulset", &components.StatefulsetHandler{})["volumeClaimTemplates"]
+	if templates.Items != nil {
+		if got := rule(templates.Items.Properties["volumeMode"]); got != "" {
+			t.Errorf("volumeClaimTemplates item volumeMode: requiredWhen = %q, want none", got)
+		}
 	}
 
 	// The PersistentVolumeClaim component shares the claim spec and has no devicePath.

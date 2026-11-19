@@ -209,24 +209,23 @@ func overSizedClaim() map[string]any {
 	}}}
 }
 
-// sharedKind is one of the four types built from the shared container and pod
-// fragments (the `deployment`, `daemonset`, `job` and `cronjob` kinds are not
-// among them since go-kure/launcher#1629: they hold the upstream pod template,
-// and their rows are podRows on `template`, or on `jobTemplate` for a cronjob).
-// sizedVolumes says that a `pvc` volume of the type takes a `size` and
-// generates its claim.
+// sharedKind is one of the three types built from the shared container and pod
+// fragments (the `deployment`, `daemonset`, `statefulset`, `job` and `cronjob`
+// kinds are not among them since go-kure/launcher#1629: they hold the upstream
+// pod template, and their rows are podRows on `template`, or on `jobTemplate`
+// for a cronjob). sizedVolumes says that a `pvc` volume of the type takes a
+// `size` and generates its claim.
 type sharedKind struct {
-	typ                        string
-	sidecars, replicas, claims bool
-	sizedVolumes               bool
-	extra                      map[string]any
+	typ                string
+	sidecars, replicas bool
+	sizedVolumes       bool
+	extra              map[string]any
 }
 
 var sharedKinds = []sharedKind{
 	{typ: "role-deployment", sidecars: true, replicas: true},
 	{typ: "webservice", sidecars: true, replicas: true, sizedVolumes: true},
 	{typ: "worker", sidecars: true, replicas: true, sizedVolumes: true},
-	{typ: "statefulset", sidecars: true, replicas: true, claims: true},
 }
 
 func sharedKindRows(k sharedKind) []boundRow {
@@ -277,22 +276,14 @@ func sharedKindRows(k sharedKind) []boundRow {
 		rows = append(rows, volume("volumes[]", oam.RefusalStorageMaximum, anyStorage, "pvc",
 			set{at: "volumes[].size", value: "1Ti"}))
 	}
-	if k.claims {
-		long := row("volumeClaimTemplates[].resources.requests.storage", oam.RefusalStorageMaximum, anyStorage,
-			set{at: "volumeClaimTemplates[].resources.requests.storage", value: "1Ti"})
-		long.with = []set{{at: "volumeClaimTemplates[].size", drop: true}, {at: "volumeClaimTemplates[].resources.requests.storage", value: "1Gi"}}
-		rows = append(rows,
-			row("volumeClaimTemplates[].size", oam.RefusalStorageMaximum, anyStorage, set{at: "volumeClaimTemplates[].size", value: "1Ti"}),
-			long,
-		)
-	}
 	return rows
 }
 
 // podRows are the bounds of a pod written as the API type: at the top of a pod
-// component with prefix "", and below the open template of the seven kinds
+// component with prefix "", and below the open template of the eight kinds
 // that hold one (podtemplate, replicaset, replicationcontroller, deployment,
-// daemonset, job and cronjob), where every class is declared on that one node.
+// daemonset, statefulset, job and cronjob), where every class is declared on
+// that one node.
 func podRows(typ, node, prefix string) []boundRow {
 	row := func(declared string, class oam.RefusalClass, relax knob, change ...set) boundRow {
 		for i := range change {
@@ -337,15 +328,19 @@ func boundRows() []boundRow {
 		rows = append(rows, sharedKindRows(k)...)
 	}
 	rows = append(rows, podRows("pod", "", "")...)
-	for _, typ := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset", "job"} {
+	for _, typ := range []string{"podtemplate", "replicaset", "replicationcontroller", "deployment", "daemonset", "statefulset", "job"} {
 		rows = append(rows, podRows(typ, "template", "template.spec.")...)
 	}
 	// A CronJob holds its pod below the job template.
 	rows = append(rows, podRows("cronjob", "jobTemplate", "jobTemplate.spec.template.spec.")...)
-	for _, typ := range []string{"replicaset", "replicationcontroller", "deployment"} {
+	for _, typ := range []string{"replicaset", "replicationcontroller", "deployment", "statefulset"} {
 		rows = append(rows, boundRow{typ: typ, path: "replicas", class: oam.RefusalReplicaMaximum,
 			change: []set{{at: "replicas", value: 9}}, relax: anyReplicas})
 	}
+	// The claim templates of a StatefulSet are an open node: the bound is on
+	// each one's storage request, below the declared path.
+	rows = append(rows, boundRow{typ: "statefulset", path: "volumeClaimTemplates", class: oam.RefusalStorageMaximum,
+		change: []set{{at: "volumeClaimTemplates[].spec.resources.requests.storage", value: "1Ti"}}, relax: anyStorage})
 	rows = append(rows,
 		boundRow{trait: true, typ: "scaler", path: "maxReplicas", class: oam.RefusalReplicaMaximum,
 			change: []set{{at: "maxReplicas", value: 9}}, relax: anyReplicas},
@@ -390,6 +385,16 @@ func boundDocument(t *testing.T, trait bool, typ string) (oam.Component, map[str
 		props = map[string]any{"schedule": "0 2 * * *", "jobTemplate": map[string]any{"spec": map[string]any{"template": template()}}}
 	case "replicaset", "deployment", "daemonset":
 		props = map[string]any{"selector": map[string]any{"matchLabels": map[string]any{"tier": "web"}}, "template": template()}
+	case "statefulset":
+		// One claim template that passes, so the claim row changes its storage.
+		props = map[string]any{"selector": map[string]any{"matchLabels": map[string]any{"tier": "web"}}, "template": template(),
+			"volumeClaimTemplates": []any{map[string]any{
+				"metadata": map[string]any{"name": "store"},
+				"spec": map[string]any{
+					"accessModes": []any{"ReadWriteOnce"},
+					"resources":   map[string]any{"requests": map[string]any{"storage": "1Gi"}},
+				},
+			}}}
 	case "replicationcontroller":
 		props = map[string]any{"selector": map[string]any{"tier": "web"}, "template": template()}
 	default:
@@ -401,9 +406,6 @@ func boundDocument(t *testing.T, trait bool, typ string) (oam.Component, map[str
 		props = map[string]any{"image": boundImage, "initContainers": []any{container("init")}}
 		if k.sidecars {
 			props["sidecars"] = []any{container("side")}
-		}
-		if k.claims {
-			props["volumeClaimTemplates"] = []any{map[string]any{"name": "store", "size": "1Gi", "mountPath": "/store"}}
 		}
 		for key, v := range k.extra {
 			props[key] = v

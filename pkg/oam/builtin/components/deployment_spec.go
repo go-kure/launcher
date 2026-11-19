@@ -400,7 +400,7 @@ func intOrPercentIsZero(v intstr.IntOrString) bool {
 // apply writes the authored DeploymentSpec-level fields directly onto the
 // Deployment. Unauthored fields keep whatever the constructor set.
 // Deep-copied on the way out for the reason spelled out on
-// VolumeClaimSpecConfig.apply: this kind projects the same two shapes the
+// ClaimSpecFields.apply: this kind projects the same two shapes the
 // others do — a strategy whose struct holds a *RollingUpdateDeployment, so
 // dereferencing alone still shares that block, and two bare *int32.
 func (c DeploymentSpecConfig) apply(dep *appsv1.Deployment) {

@@ -58,9 +58,6 @@ func exclusiveSites() []exclusiveSite {
 		}
 		return image(map[string]any{"volumes": []any{v}})
 	}
-	vct := func(extra map[string]any) map[string]any {
-		return image(map[string]any{"volumeClaimTemplates": []any{blockVCT(extra)}})
-	}
 	claim := func(extra map[string]any) map[string]any {
 		c := map[string]any{"name": "c"}
 		for k, v := range extra {
@@ -107,13 +104,6 @@ func exclusiveSites() []exclusiveSite {
 			emptyBeside: pvc(map[string]any{"mountPath": "", "devicePath": "/dev/xvda", "volumeMode": "Block"}),
 			neither:     pvc(map[string]any{"volumeMode": "Block"}),
 			handlerBoth: "mountPath and devicePath are mutually exclusive", handlerNeither: "mountPath is required (or devicePath",
-		},
-		{
-			name: "volumeClaimTemplates", compType: "statefulset", handler: &components.StatefulsetHandler{}, keys: `"mountPath" and "devicePath"`, nested: true,
-			both:        vct(map[string]any{"mountPath": "/data", "devicePath": "/dev/xvda", "volumeMode": "Block"}),
-			emptyBeside: vct(map[string]any{"mountPath": "/data", "devicePath": ""}),
-			neither:     vct(map[string]any{"volumeMode": "Block"}),
-			handlerBoth: "mountPath and devicePath are mutually exclusive", handlerNeither: "missing required field 'mountPath' (or 'devicePath'",
 		},
 		{
 			name: "resourceClaims", compType: roleMemberType, handler: &components.RoleDeploymentHandler{}, keys: `"resourceClaimName" and "resourceClaimTemplateName"`, nested: true,

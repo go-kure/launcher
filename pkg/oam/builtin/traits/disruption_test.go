@@ -69,6 +69,8 @@ func disruptionComponent(name, kind string, trs ...oam.Trait) oam.Component {
 		props = rawDeploymentProps(name, "ghcr.io/org/app:v1")
 	case "daemonset":
 		props = rawDaemonsetProps(name, "ghcr.io/org/app:v1")
+	case "statefulset":
+		props = rawStatefulsetProps(name, "ghcr.io/org/app:v1")
 	}
 	return oam.Component{Name: name, Type: kind, Properties: props, Traits: trs}
 }

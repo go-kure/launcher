@@ -1012,8 +1012,7 @@ func validateCnpgClusterImageRefs(spec *cnpgv1.ClusterSpec) error {
 // cnpgStorageRequest returns the size a StorageConfiguration requests and the
 // path of the spelling that supplied it: size when set, since CNPG writes it
 // over the template, else the pvcTemplate's storage request. Reading size alone
-// would let the template spelling bypass a maximum, the defect
-// VolumeClaimTemplate.effectiveStorageRequest documents for statefulset.
+// would let the template spelling bypass a maximum.
 func cnpgStorageRequest(sc *cnpgv1.StorageConfiguration, path string) (string, string) {
 	if sc == nil {
 		return "", ""

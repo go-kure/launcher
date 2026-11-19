@@ -54,18 +54,20 @@ func TestDecoratorFills_TopologySpreadReportsTheConstraintsItWrites(t *testing.T
 
 // The component's own fills are not read a second time under a trait that
 // leaves the component's config alone: the scaler adds a sub-application and
-// reports its own fills, and none of the workload's. The workload is a
-// statefulset: the raw deployment fills nothing (go-kure/launcher#1629), so a
-// deployment would have no fill to leak and the check would hold nothing.
+// reports its own fills, and none of the workload's. The workload is a worker:
+// the raw deployment, statefulset and daemonset fill nothing
+// (go-kure/launcher#1629), so one of them would have no fill to leak and the
+// check would hold nothing. The worker's fills are reported on its deployment
+// member.
 func TestDecoratorFills_ATraitThatDoesNotWrapReportsNothingOfTheComponents(t *testing.T) {
 	scaler := oam.Trait{Type: "scaler", Properties: map[string]any{"minReplicas": 2, "maxReplicas": 5}}
-	sts := workload("app", "statefulset", map[string]any{"serviceName": "app"})
-	sts.Traits = []oam.Trait{scaler}
-	prov, _ := policyProvenanceFor(t, &oam.NoopPolicy{}, sts)
-	if own := entriesOf(prov, owner{component: "app"}); own["resources.requests.cpu"].Kind != oam.SourceBuiltin {
-		t.Fatalf("control: the statefulset's own fill is not reported: %v", own)
+	worker := workload("app", "worker", nil)
+	worker.Traits = []oam.Trait{scaler}
+	prov, _ := policyProvenanceFor(t, &oam.NoopPolicy{}, worker)
+	if own := entriesOf(prov, workerOwner); own["resources.requests.cpu"].Kind != oam.SourceBuiltin {
+		t.Fatalf("control: the worker's own fill is not reported: %v", own)
 	}
-	got := entriesOf(prov, owner{component: "app", trait: "scaler"})
+	got := entriesOf(prov, owner{component: "app", member: "role-deployment", trait: "scaler"})
 	if _, ok := got["resources.requests.cpu"]; ok {
 		t.Errorf("the deployment's fill was read under the scaler: %v", got)
 	}

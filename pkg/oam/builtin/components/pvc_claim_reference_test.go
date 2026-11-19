@@ -116,34 +116,6 @@ func TestPVCVolume_ClaimName_NotQualified(t *testing.T) {
 	}
 }
 
-func TestPVCVolume_ClaimName_OtherKindsGenerateNoClaim(t *testing.T) {
-	for _, tc := range []struct {
-		kind    string
-		handler interface {
-			ToApplicationConfig(*oam.Component, string) (stack.ApplicationConfig, error)
-		}
-		extra map[string]any
-	}{
-		{"statefulset", &components.StatefulsetHandler{}, nil},
-	} {
-		t.Run(tc.kind, func(t *testing.T) {
-			cfg, err := tc.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: tc.kind, Properties: claimRefProps(nil, tc.extra)}, "default")
-			if err != nil {
-				t.Fatalf("ToApplicationConfig: %v", err)
-			}
-			objects, err := cfg.Generate(stack.NewApplication("app", "default", cfg))
-			if err != nil {
-				t.Fatalf("Generate: %v", err)
-			}
-			for _, obj := range objects {
-				if pvc, ok := (*obj).(*corev1.PersistentVolumeClaim); ok {
-					t.Errorf("generated claim %q, want none for a claimName reference", pvc.Name)
-				}
-			}
-		})
-	}
-}
-
 func TestPVCVolume_ClaimName_Refusals(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -168,12 +140,12 @@ func TestPVCVolume_ClaimName_Refusals(t *testing.T) {
 	}
 }
 
-// TestPVCVolume_PodKindsRequireClaimName: the two pod kinds that read a flat
-// `volumes` entry (the role member and statefulset) generate no claim
+// TestPVCVolume_PodKindsRequireClaimName: the role member, the one reshaped pod
+// kind that reads a flat `volumes` entry, generates no claim
 // (go-kure/launcher#702), so a pvc volume that describes one instead of
 // referencing it by claimName is refused, not silently left unmounted. The raw
-// `daemonset`, `job` and `cronjob` kinds (go-kure/launcher#1629) take the
-// upstream volume and have no such entry.
+// `daemonset`, `statefulset`, `job` and `cronjob` kinds (go-kure/launcher#1629)
+// take the upstream volume and have no such entry.
 func TestPVCVolume_PodKindsRequireClaimName(t *testing.T) {
 	for _, tc := range []struct {
 		kind    string
@@ -183,7 +155,6 @@ func TestPVCVolume_PodKindsRequireClaimName(t *testing.T) {
 		extra map[string]any
 	}{
 		{roleMemberType, &components.RoleDeploymentHandler{}, nil},
-		{"statefulset", &components.StatefulsetHandler{}, nil},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			props := claimRefProps(map[string]any{"size": "1Gi"}, tc.extra)

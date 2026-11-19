@@ -16,7 +16,7 @@ func component(name, typ string, props map[string]any) []oam.Component {
 	return []oam.Component{{Name: name, Type: typ, Properties: p}}
 }
 
-// rawWorkload is a component of the type typ ("deployment" or "daemonset") as
+// rawWorkload is a component of the type typ ("deployment", "statefulset" or "daemonset") as
 // the kind takes it since it took the upstream spec (go-kure/launcher#1629): a
 // selector and a pod template whose first container is the one container adds
 // fields to, and whose pod spec pod adds fields to (a key of pod replaces the
@@ -60,6 +60,15 @@ func rawBatch(name, typ string, props map[string]any) []oam.Component {
 	return []oam.Component{{Name: name, Type: typ, Properties: p}}
 }
 
+// withTopLevel adds top-level properties to the first component of comps, which
+// a raw workload takes beside its selector and template.
+func withTopLevel(comps []oam.Component, props map[string]any) []oam.Component {
+	for k, v := range props {
+		comps[0].Properties[k] = v
+	}
+	return comps
+}
+
 // rawContainersAndInit is the pod spec part of a raw workload probe with an
 // init container and a second container, each declaring the ports ports builds.
 func rawContainersAndInit(ports func() []any) map[string]any {
@@ -88,19 +97,9 @@ func resourceFills(comp, prefix string) []Fill {
 	}
 }
 
-func automount(comp string) Fill {
-	return Fill{Component: comp, Path: "automountServiceAccountToken", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin,
-		ValueWithPolicy: false, ValueWithoutPolicy: false}
-}
-
 func replicas(comp string) Fill {
 	return Fill{Component: comp, Path: "replicas", WithPolicy: oam.SourcePolicy, WithoutPolicy: oam.SourceBuiltin,
 		ValueWithPolicy: 2, ValueWithoutPolicy: 1}
-}
-
-func protocol(comp, path string) Fill {
-	return Fill{Component: comp, Path: path, WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin,
-		ValueWithPolicy: "TCP", ValueWithoutPolicy: "TCP"}
 }
 
 // others is a second value an author can write for a fill, chosen by the end of
@@ -148,34 +147,16 @@ func join(groups ...[]Fill) []Fill {
 	return out
 }
 
-// Probes returns the probe documents of the handler-built workload kinds, the lowered types and the traits
-// (deployment, statefulset, daemonset, job and cronjob; the raw ones fill nothing), with the fills observed when each runs with the probe policy and
+// Probes returns the probe documents of the raw workload kinds (deployment,
+// statefulset, daemonset, job and cronjob; they fill nothing), the lowered types
+// and the traits, with the fills observed when each runs with the probe policy and
 // without one. What they show is what these documents trigger: a fill under a
 // condition no document meets is not in them.
 func Probes() []Probe {
 	ports := func() []any { return []any{map[string]any{"containerPort": 8080}} }
-	containers := map[string]any{
-		"ports":          ports(),
-		"initContainers": []any{map[string]any{"name": "setup", "image": image, "restartPolicy": "Always", "ports": ports()}},
-		"sidecars":       []any{map[string]any{"name": "proxy", "image": image, "ports": ports()}},
-	}
-	containerFills := func(comp string, sidecars bool) []Fill {
-		fills := join(
-			[]Fill{protocol(comp, "ports[0].protocol"), protocol(comp, "initContainers[0].ports[0].protocol")},
-			resourceFills(comp, "initContainers[0]."),
-		)
-		if sidecars {
-			fills = join(fills, []Fill{protocol(comp, "sidecars[0].ports[0].protocol")}, resourceFills(comp, "sidecars[0]."))
-		}
-		return fills
-	}
-	accessModes := func(comp, path string) Fill {
-		return Fill{Component: comp, Path: path, WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin,
-			ValueWithPolicy: []any{"ReadWriteOnce"}, ValueWithoutPolicy: []any{"ReadWriteOnce"}}
-	}
 
 	return withOthers(append([]Probe{
-		// The raw deployment, daemonset, job and cronjob fill nothing
+		// The raw deployment, daemonset, statefulset, job and cronjob fill nothing
 		// (go-kure/launcher#1629): the report of these documents holds no entry,
 		// and a fill that came back would show as a change of that report.
 		{Name: "deployment", Components: rawWorkload("deployment", "app", nil, nil)},
@@ -184,13 +165,19 @@ func Probes() []Probe {
 		{Name: "daemonset", Components: rawWorkload("daemonset", "app", nil, nil)},
 		{Name: "daemonset with an init container, a second container and ports", Components: rawWorkload("daemonset", "app",
 			nil, rawContainersAndInit(ports))},
-		{Name: "statefulset", Components: component("app", "statefulset", map[string]any{"serviceName": "app-headless"}),
-			Fills: join([]Fill{replicas("app"), automount("app")}, resourceFills("app", ""))},
-		{Name: "statefulset with containers and claim templates", Components: component("app", "statefulset", map[string]any{
-			"serviceName": "app-headless", "ports": containers["ports"], "initContainers": containers["initContainers"], "sidecars": containers["sidecars"],
-			"volumeClaimTemplates": []any{map[string]any{"name": "data", "size": "1Gi", "mountPath": "/data"}},
-		}), Fills: join([]Fill{replicas("app"), automount("app"), accessModes("app", "volumeClaimTemplates[0].accessModes")},
-			resourceFills("app", ""), containerFills("app", true))},
+		{Name: "statefulset", Components: rawWorkload("statefulset", "app", nil, nil)},
+		{Name: "statefulset with an init container, a second container and ports", Components: rawWorkload("statefulset", "app",
+			nil, rawContainersAndInit(ports))},
+		{Name: "statefulset with a claim template", Components: withTopLevel(rawWorkload("statefulset", "app", nil, nil), map[string]any{
+			"serviceName": "app-headless",
+			"volumeClaimTemplates": []any{map[string]any{
+				"metadata": map[string]any{"name": "data"},
+				"spec": map[string]any{
+					"accessModes": []any{"ReadWriteOnce"},
+					"resources":   map[string]any{"requests": map[string]any{"storage": "1Gi"}},
+				},
+			}},
+		})},
 		{Name: "job", Components: rawBatch("app", "job", nil)},
 		{Name: "cronjob", Components: rawBatch("app", "cronjob", map[string]any{"schedule": "0 2 * * *"})},
 	}, append(loweredProbes(), traitProbes()...)...))

@@ -421,9 +421,8 @@ spec:
 	"csidriver": {
 		props: map[string]any{"attachRequired": false},
 	},
-	// statefulset emits no Service since go-kure/launcher#690, so its long-name
-	// refusal is the container name's, as role-deployment's. daemonset is raw since
-	// go-kure/launcher#1629, like deployment below: its container is named by the author.
+	// daemonset is raw since go-kure/launcher#1629, like deployment and statefulset
+	// below: its container is named by the author.
 	"daemonset": {
 		props: rawDaemonsetProps("ghcr.io/example/app:v1.0.0"), labelled: true, selectors: 1,
 	},
@@ -721,8 +720,10 @@ spec:
 	"servicemonitor": {props: map[string]any{
 		"selector":  map[string]any{"matchLabels": map[string]any{"team": "payments"}},
 		"endpoints": []any{map[string]any{"port": "metrics"}}}},
+	// statefulset is raw since go-kure/launcher#1629: its container is named by the
+	// author, not after the component, so it takes the long name as deployment does.
 	"statefulset": {
-		props: workloadProps(nil), longRefusal: containerNameRefusal, labelled: true, selectors: 1,
+		props: rawStatefulsetProps("ghcr.io/example/app:v1.0.0"), labelled: true, selectors: 1,
 	},
 	"storageclass": {
 		props: map[string]any{"provisioner": "csi.example.com"},
@@ -861,21 +862,28 @@ var traitLabelFixtures = map[string]traitLabelFixture{
 	"volsync": {props: map[string]any{"sourcePVC": "data", "schedule": "@daily"},
 		// Pod anti-affinity gives the host a second pod selector beside the
 		// StatefulSet's own, now that it emits no Service (go-kure/launcher#690).
-		// statefulset reads the raw upstream Affinity, so the term is authored;
-		// `Exists` on `app` matches the pods without naming the label value.
-		host: "statefulset", hostProps: workloadProps(map[string]any{
-			"affinity": map[string]any{"podAntiAffinity": map[string]any{
-				"preferredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{
-					"weight": 100,
-					"podAffinityTerm": map[string]any{
-						"topologyKey": "kubernetes.io/hostname",
-						"labelSelector": map[string]any{"matchExpressions": []any{
-							map[string]any{"key": "app", "operator": "Exists"},
+		// statefulset reads the raw upstream Affinity under template.spec, so the
+		// term is authored; `Exists` on `app` matches the pods without naming the
+		// label value.
+		host: "statefulset", hostProps: rawStatefulsetPropsWith(map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"tier": "web"}},
+				"spec": map[string]any{
+					"containers": []any{map[string]any{"name": "app", "image": "ghcr.io/example/app:v1.0.0"}},
+					"affinity": map[string]any{"podAntiAffinity": map[string]any{
+						"preferredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{
+							"weight": 100,
+							"podAffinityTerm": map[string]any{
+								"topologyKey": "kubernetes.io/hostname",
+								"labelSelector": map[string]any{"matchExpressions": []any{
+									map[string]any{"key": "app", "operator": "Exists"},
+								}},
+							},
 						}},
-					},
-				}},
-			}},
-			"volumeClaimTemplates": []any{map[string]any{"name": "data", "size": "10Gi", "mountPath": "/data"}}})},
+					}},
+				},
+			},
+			"volumeClaimTemplates": []any{rawStatefulsetClaimTemplate("data", "10Gi")}})},
 	"rbac": {props: map[string]any{"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"configmaps"}, "verbs": []any{"get"}}},
 		"clusterWide": true}, longHost: true, longLabelled: true},
 	"prune-protection": {longHost: true},

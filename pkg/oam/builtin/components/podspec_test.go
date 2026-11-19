@@ -11,14 +11,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/oam"
-	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// workloadKinds enumerates the three reshaped kinds that share the pod-level
+// workloadKinds enumerates the two reshaped kinds that share the pod-level
 // property surface, with the minimum properties each needs to generate. The
-// kind-named `deployment`, `daemonset`, `job` and `cronjob` take the upstream
-// spec since go-kure/launcher#1629 and are not in it; webservice and worker reach the
-// reshaped deployment parser through the role member `role-deployment`, which
+// kind-named `deployment`, `daemonset`, `statefulset`, `job` and `cronjob` take
+// the upstream spec since go-kure/launcher#1629 and are not in it; webservice
+// and worker reach the reshaped deployment parser through the role member `role-deployment`, which
 // has tests of its own (role_deployment_*_test.go).
 var workloadKinds = []struct {
 	name    string
@@ -27,7 +26,6 @@ var workloadKinds = []struct {
 }{
 	{"webservice", webserviceViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}},
 	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
 }
 
 func withProps(base map[string]any, extra map[string]any) map[string]any {

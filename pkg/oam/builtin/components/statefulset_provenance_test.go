@@ -7,25 +7,33 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// The statefulset's nested fill writes volumeClaimTemplates[i].storageClass, which
-// the provenance report attributes to the capability the filler read, while the
-// sibling fields of the same authored list stay authored. Two statefulsets both get
-// the entry: the second reads a key the first already consumed.
+// The statefulset's nested fill writes volumeClaimTemplates[i].spec.storageClassName,
+// which the provenance report attributes to the capability the filler read, while
+// the sibling fields of the same authored list stay authored. Two statefulsets both
+// get the entry: the second reads a key the first already consumed.
+//
+// The raw kind fills nothing else, so the capability is the only non-authored
+// source in the report: the former `storageClass`, `accessModes`, `resources` and
+// `replicas` fills the reshaped form reported are gone with the form.
 func TestStatefulsetHandler_ProvenanceNestedFill(t *testing.T) {
-	statefulset := func(name string, template map[string]any) oam.Component {
-		return oam.Component{Name: name, Type: "statefulset", Properties: map[string]any{
-			"image":                "ghcr.io/org/db:v1",
-			"volumeClaimTemplates": []any{template},
-		}}
+	statefulset := func(name string, spec map[string]any) oam.Component {
+		props := ptObject(t, stsPlain(htPlainPod))
+		props["volumeClaimTemplates"] = []any{map[string]any{"metadata": map[string]any{"name": "data"}, "spec": spec}}
+		return oam.Component{Name: name, Type: "statefulset", Properties: props}
 	}
+	request := func() map[string]any {
+		return map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "1Gi"}}}
+	}
+	mine := request()
+	mine["storageClassName"] = "mine"
 	app := &oam.Application{
 		APIVersion: oam.SupportedAPIVersion,
 		Kind:       "Application",
 		Metadata:   oam.Metadata{Name: "pkg", Namespace: "default"},
 		Spec: oam.ApplicationSpec{Components: []oam.Component{
-			statefulset("db-a", map[string]any{"name": "data", "mountPath": "/data", "size": "1Gi"}),
-			statefulset("db-b", map[string]any{"name": "data", "mountPath": "/data", "size": "1Gi"}),
-			statefulset("db-c", map[string]any{"name": "data", "mountPath": "/data", "size": "1Gi", "storageClass": "mine"}),
+			statefulset("db-a", request()),
+			statefulset("db-b", request()),
+			statefulset("db-c", mine),
 		}},
 	}
 	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"statefulset": &components.StatefulsetHandler{}}, nil)
@@ -48,18 +56,24 @@ func TestStatefulsetHandler_ProvenanceNestedFill(t *testing.T) {
 	}
 	capability := oam.Source{Kind: oam.SourceCapability, Ref: "pvc"}
 	authored := oam.Source{Kind: oam.SourceAuthored}
+	const class = "volumeClaimTemplates[0].spec.storageClassName"
 	for _, name := range []string{"db-a", "db-b"} {
 		got := bySource[name]
-		if got["volumeClaimTemplates[0].storageClass"] != capability {
-			t.Errorf("%s: storageClass = %+v, want %+v", name, got["volumeClaimTemplates[0].storageClass"], capability)
+		if got[class] != capability {
+			t.Errorf("%s: storageClassName = %+v, want %+v", name, got[class], capability)
 		}
-		for _, p := range []string{"image", "volumeClaimTemplates[0].name", "volumeClaimTemplates[0].mountPath", "volumeClaimTemplates[0].size"} {
+		for _, p := range []string{"selector.matchLabels.tier", "volumeClaimTemplates[0].metadata.name", "volumeClaimTemplates[0].spec.resources.requests.storage"} {
 			if got[p] != authored {
 				t.Errorf("%s: %s = %+v, want authored", name, p, got[p])
 			}
 		}
+		for p, s := range got {
+			if s != authored && p != class {
+				t.Errorf("%s: %s = %+v, want authored: the capability fills only the class", name, p, s)
+			}
+		}
 	}
-	if got := bySource["db-c"]["volumeClaimTemplates[0].storageClass"]; got != authored {
-		t.Errorf("db-c: an authored storageClass = %+v, want authored", got)
+	if got := bySource["db-c"][class]; got != authored {
+		t.Errorf("db-c: an authored storageClassName = %+v, want authored", got)
 	}
 }

@@ -185,15 +185,16 @@ func TestMainMount_Refusals(t *testing.T) {
 }
 
 // TestMainMount_SubPathShapesUpstreamAccepts: a relative subPath that holds no
-// ".." element builds on a `volumes` entry and on a claim template, and an empty
-// one is absent, as upstream skips it (validation.go:3205). The refusals above
-// are the other half.
+// ".." element builds on a `volumes` entry, and an empty one is absent, as
+// upstream skips it (validation.go:3205). The refusals above are the other half.
 func TestMainMount_SubPathShapesUpstreamAccepts(t *testing.T) {
 	// worker stands for the reshaped deployment parser: the raw `deployment`
-	// kind has no `volumes[].mountPath` (go-kure/launcher#1629).
-	dep, sts := workloadKinds[1], workloadKinds[2]
-	if dep.name != "worker" || sts.name != "statefulset" {
-		t.Fatalf("workloadKinds order changed: %q, %q", dep.name, sts.name)
+	// kind has no `volumes[].mountPath` (go-kure/launcher#1629), nor has the raw
+	// `statefulset`, whose claim templates took a `mountPath` and a `subPath`
+	// until then.
+	dep := workloadKinds[1]
+	if dep.name != "worker" {
+		t.Fatalf("workloadKinds order changed: %q", dep.name)
 	}
 	for _, sp := range []string{"a/b", "./a", "a..b/..c", ""} {
 		t.Run("volumes/"+sp, func(t *testing.T) {
@@ -202,19 +203,12 @@ func TestMainMount_SubPathShapesUpstreamAccepts(t *testing.T) {
 				t.Errorf("subPath %q was refused: %v", sp, err)
 			}
 		})
-		t.Run("claim template/"+sp, func(t *testing.T) {
-			vct := props{"name": "data", "size": "1Gi", "mountPath": "/data", "subPath": sp}
-			p := withProps(sts.props, props{"volumeClaimTemplates": []any{vct}})
-			if _, err := sts.handler.ToApplicationConfig(&oam.Component{Name: "app", Type: sts.name, Properties: p}, "default"); err != nil {
-				t.Errorf("subPath %q was refused: %v", sp, err)
-			}
-		})
 	}
 }
 
 // TestMainMount_BidirectionalNeedsPrivilegedOnEveryKind fails if one kind does
 // not run the check: an unprivileged Bidirectional mount is refused and a
-// privileged one builds, on all three kinds.
+// privileged one builds, on every kind of workloadKinds.
 func TestMainMount_BidirectionalNeedsPrivilegedOnEveryKind(t *testing.T) {
 	vol := props{"volumes": []any{volumeEntry(props{"mountPropagation": "Bidirectional"})}}
 	for _, k := range workloadKinds {
@@ -295,14 +289,14 @@ func TestMainMount_BlockDeviceRefusesMountKeys(t *testing.T) {
 
 // TestMainMount_NullIsAbsent: an explicit null on any mount key reads as
 // omission on every path that reads or refuses one (the null-as-absence rule in
-// the README). The four paths are a `volumes` mount, a `volumes` device, a
-// claim template mount and a claim template device. A device path used to
-// refuse the key by presence alone.
+// the README). The two paths are a `volumes` mount and a `volumes` device. A
+// device path used to refuse the key by presence alone. (The statefulset's
+// claim template mount and device were two more until the kind became raw,
+// go-kure/launcher#1629.)
 func TestMainMount_NullIsAbsent(t *testing.T) {
-	sts := workloadKinds[2]
 	dep := workloadKinds[1]
-	if sts.name != "statefulset" || dep.name != "worker" {
-		t.Fatalf("workloadKinds order changed: %q, %q", sts.name, dep.name)
+	if dep.name != "worker" {
+		t.Fatalf("workloadKinds order changed: %q", dep.name)
 	}
 	for _, key := range mountKeys {
 		t.Run(key, func(t *testing.T) {
@@ -317,8 +311,6 @@ func TestMainMount_NullIsAbsent(t *testing.T) {
 			}{
 				{"volumes mount", dep, props{"volumes": []any{volumeEntry(props{key: nil})}}},
 				{"volumes device", dep, props{"volumes": []any{props{"name": "raw", "type": "pvc", "claimName": "existing", "volumeMode": "Block", "devicePath": "/dev/xvda", key: nil}}}},
-				{"claim template mount", sts, props{"volumeClaimTemplates": []any{props{"name": "data", "size": "1Gi", "mountPath": "/data", key: nil}}}},
-				{"claim template device", sts, props{"volumeClaimTemplates": []any{props{"name": "raw", "size": "1Gi", "volumeMode": "Block", "devicePath": "/dev/xvda", key: nil}}}},
 			}
 			for _, tc := range cases {
 				t.Run(tc.path, func(t *testing.T) {
@@ -334,8 +326,7 @@ func TestMainMount_NullIsAbsent(t *testing.T) {
 // TestMainMount_BlockDeviceKeepsReadOnly pins the other half of the split: a
 // `volumes` pvc entry with devicePath still accepts readOnly. It sets the
 // claim source, a valid field before go-kure/launcher#1198, and the entry
-// renders a device and no mount. (A claim template with devicePath refuses
-// readOnly: TestMainMount_ClaimTemplates.)
+// renders a device and no mount.
 func TestMainMount_BlockDeviceKeepsReadOnly(t *testing.T) {
 	entry := props{"name": "raw", "type": "pvc", "claimName": "existing", "volumeMode": "Block", "devicePath": "/dev/xvda", "readOnly": true}
 	for _, k := range workloadKinds {
@@ -361,63 +352,12 @@ func TestMainMount_BlockDeviceKeepsReadOnly(t *testing.T) {
 	}
 }
 
-// TestMainMount_ClaimTemplates: a claim template with a mountPath reads the
-// same keys, including readOnly, and a template with a devicePath refuses all
-// of them.
-func TestMainMount_ClaimTemplates(t *testing.T) {
-	sts := workloadKinds[2]
-	if sts.name != "statefulset" {
-		t.Fatalf("workloadKinds[2] = %q, want statefulset", sts.name)
-	}
-	tmpl := func(extra props) props {
-		e := props{"name": "data", "size": "1Gi", "mountPath": "/data"}
-		for k, v := range extra {
-			e[k] = v
-		}
-		return e
-	}
-	t.Run("render", func(t *testing.T) {
-		vcts := []any{
-			tmpl(props{"name": "a", "mountPath": "/expr", "subPathExpr": "$(POD_NAME)"}),
-			tmpl(props{"name": "b", "mountPath": "/ro", "readOnly": true, "mountPropagation": "None", "recursiveReadOnly": "Enabled"}),
-			tmpl(props{"name": "c", "mountPath": "/sub", "subPath": "sub", "mountPropagation": "HostToContainer"}),
-		}
-		want := []corev1.VolumeMount{
-			{Name: "a", MountPath: "/expr", SubPathExpr: "$(POD_NAME)"},
-			{Name: "b", MountPath: "/ro", ReadOnly: true, MountPropagation: ptr(corev1.MountPropagationNone), RecursiveReadOnly: ptr(corev1.RecursiveReadOnlyEnabled)},
-			{Name: "c", MountPath: "/sub", SubPath: "sub", MountPropagation: ptr(corev1.MountPropagationHostToContainer)},
-		}
-		ps := podTemplateSpec(t, generateKind(t, sts.handler, "statefulset", withProps(sts.props, props{"volumeClaimTemplates": vcts})))
-		c := containerNamed(t, ps.Containers, "app")
-		if !reflect.DeepEqual(c.VolumeMounts, want) {
-			t.Errorf("VolumeMounts = %+v, want %+v", c.VolumeMounts, want)
-		}
-	})
-	for _, tc := range refusalCases {
-		t.Run("refuses/"+tc.name, func(t *testing.T) {
-			extra := props{"volumeClaimTemplates": []any{tmpl(tc.mount)}}
-			if tc.sc != nil {
-				extra["securityContext"] = tc.sc
-			}
-			refuses(t, "statefulset", withProps(sts.props, extra), append([]string{entryName(tc.name, `volumeClaimTemplate "data"`)}, tc.want...))
-		})
-	}
-	values := map[string]any{
-		"readOnly": true, "subPath": "a", "subPathExpr": "a",
-		"mountPropagation": "None", "recursiveReadOnly": "Disabled",
-	}
-	for _, key := range mountKeys {
-		t.Run("devicePath refuses/"+key, func(t *testing.T) {
-			raw := props{"name": "raw", "size": "1Gi", "volumeMode": "Block", "devicePath": "/dev/xvda", key: values[key]}
-			refuses(t, "statefulset", withProps(sts.props, props{"volumeClaimTemplates": []any{raw}}),
-				[]string{`volumeClaimTemplate "raw"`, key, "devicePath", "no mount"})
-		})
-	}
-}
-
 // TestMainMount_SchemaDeclaresKeys: the published `volumes` item declares the
 // keys the parser reads, with the upstream enums, on every kind. The claim
-// template item of statefulset declares them too.
+// template item of statefulset declared them too until the kind became raw
+// (go-kure/launcher#1629): its claim templates are upstream
+// PersistentVolumeClaim objects and its mounts are upstream VolumeMount
+// entries, which the API server validates.
 func TestMainMount_SchemaDeclaresKeys(t *testing.T) {
 	wantEnum := map[string][]any{
 		"mountPropagation":  {"None", "HostToContainer", "Bidirectional"},
@@ -440,9 +380,6 @@ func TestMainMount_SchemaDeclaresKeys(t *testing.T) {
 		t.Run(k.name, func(t *testing.T) {
 			schema := k.handler.(oam.PropertySchemaProvider).PropertySchema()
 			check(t, "volumes item", schema["volumes"].Items.Properties)
-			if k.name == "statefulset" {
-				check(t, "volumeClaimTemplates item", schema["volumeClaimTemplates"].Items.Properties)
-			}
 		})
 	}
 }

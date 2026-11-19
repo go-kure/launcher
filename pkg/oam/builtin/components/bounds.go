@@ -37,9 +37,9 @@ func containerBounds(prefix string) map[string][]oam.RefusalClass {
 }
 
 // workloadBounds are the bounds of a type built from the shared container and
-// pod fragments. sidecars, replicas and claims say whether the type has
-// `sidecars`, a `replicas` the policy holds, and `volumeClaimTemplates`.
-func workloadBounds(sidecars, replicas, claims bool) map[string][]oam.RefusalClass {
+// pod fragments. sidecars and replicas say whether the type has `sidecars` and
+// a `replicas` the policy holds.
+func workloadBounds(sidecars, replicas bool) map[string][]oam.RefusalClass {
 	maximum := []oam.RefusalClass{oam.RefusalResourceMaximum}
 	hostNamespace := []oam.RefusalClass{oam.RefusalHostNamespace}
 	b := map[string][]oam.RefusalClass{
@@ -65,10 +65,6 @@ func workloadBounds(sidecars, replicas, claims bool) map[string][]oam.RefusalCla
 	if replicas {
 		b["replicas"] = []oam.RefusalClass{oam.RefusalReplicaMaximum}
 	}
-	if claims {
-		b["volumeClaimTemplates[].size"] = []oam.RefusalClass{oam.RefusalStorageMaximum}
-		b["volumeClaimTemplates[].resources.requests.storage"] = []oam.RefusalClass{oam.RefusalStorageMaximum}
-	}
 	return b
 }
 
@@ -78,7 +74,7 @@ func workloadBounds(sidecars, replicas, claims bool) map[string][]oam.RefusalCla
 // schema declares no `size` on a volume, so the volume, an open node, lists the
 // class.
 func roleBounds() map[string][]oam.RefusalClass {
-	b := workloadBounds(true, true, false)
+	b := workloadBounds(true, true)
 	b["volumes[]"] = []oam.RefusalClass{oam.RefusalStorageMaximum}
 	return b
 }

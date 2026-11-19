@@ -107,14 +107,10 @@ func TestPodSpecSchema_NoCollisionWithHandlerKeys(t *testing.T) {
 		// `tolerations` and `topologySpreadConstraints`, in neither shared list.
 		{"webservice", WebserviceRule{}.PropertySchema(), 23, deploymentSpecPropertyKeys, false},
 		{"worker", WorkerRule{}.PropertySchema(), 21, deploymentSpecPropertyKeys, false},
-		// 18 and 14: go-kure/launcher#690 removed `port` from both kinds.
-		// Each of the kinds below counts one more own key since
-		// go-kure/launcher#1178: `podMetadata`, in no shared list.
-		{"statefulset", (&StatefulsetHandler{}).PropertySchema(), 21, statefulSetSpecPropertyKeys, false},
 		// The reshaped deployment parser is the role member, which keeps this
 		// count (go-kure/launcher#1629). The kind-named `deployment`, `daemonset`,
-		// `job` and `cronjob` take the upstream spec and are not merged from these
-		// fragments.
+		// `statefulset`, `job` and `cronjob` take the upstream spec and are not
+		// merged from these fragments.
 		// 17, not 14: go-kure/launcher#412 added affinity, tolerations and
 		// topologySpreadConstraints as own keys on this kind. Verified a real
 		// own-key increase and not the collision this guard exists to catch —

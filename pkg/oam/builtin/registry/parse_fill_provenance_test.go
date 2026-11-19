@@ -40,20 +40,23 @@ func TestParseFills_RoleMemberReportsBuiltinAndPolicyOncePerPath(t *testing.T) {
 }
 
 // A port protocol the author wrote is never reported as a builtin fill; the one
-// left out is. Run on a statefulset, which keeps the reshaped `ports`.
+// left out is. Run on a worker's sidecar, a reshaped container entry that still
+// takes a `ports` list (the raw kinds fill no protocol: go-kure/launcher#1629).
 func TestParseFills_AuthoredPortProtocolIsNotBuiltin(t *testing.T) {
-	comp := oam.Component{Name: "app", Type: "statefulset", Properties: map[string]any{
-		"image":       "ghcr.io/org/app:v1",
-		"serviceName": "app-headless",
-		"ports":       []any{map[string]any{"containerPort": 8080}, map[string]any{"containerPort": 9090, "protocol": "UDP"}},
+	comp := oam.Component{Name: "app", Type: "worker", Properties: map[string]any{
+		"image": "ghcr.io/org/app:v1",
+		"sidecars": []any{map[string]any{
+			"name": "proxy", "image": "ghcr.io/org/proxy:v1",
+			"ports": []any{map[string]any{"containerPort": 8080}, map[string]any{"containerPort": 9090, "protocol": "UDP"}},
+		}},
 	}}
 	prov, _ := policyProvenanceFor(t, &defaultsPolicy{}, comp)
-	got := entriesOf(prov, owner{component: "app"})
-	if s := got["ports[0].protocol"]; s.Kind != oam.SourceBuiltin {
-		t.Errorf("control: ports[0].protocol = %+v, want a builtin fill\nentries: %v", s, got)
+	got := entriesOf(prov, owner{component: "app", member: "role-deployment"})
+	if s := got["sidecars[0].ports[0].protocol"]; s.Kind != oam.SourceBuiltin {
+		t.Errorf("control: sidecars[0].ports[0].protocol = %+v, want a builtin fill\nentries: %v", s, got)
 	}
-	if s, ok := got["ports[1].protocol"]; ok && s.Kind == oam.SourceBuiltin {
-		t.Errorf("ports[1].protocol is reported as built in though the author wrote UDP: %+v", s)
+	if s, ok := got["sidecars[0].ports[1].protocol"]; ok && s.Kind == oam.SourceBuiltin {
+		t.Errorf("sidecars[0].ports[1].protocol is reported as built in though the author wrote UDP: %+v", s)
 	}
 }
 

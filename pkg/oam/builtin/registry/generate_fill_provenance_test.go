@@ -25,8 +25,9 @@ var generateTimeFillPaths = []string{
 
 // handlerBuiltKind is a kind whose handler builds the pod with launcher's fills,
 // the owner its report is under, and the fills it makes. The raw `deployment`,
-// `daemonset`, `job` and `cronjob` fill nothing (go-kure/launcher#1629); the worker stands for
-// the reshaped deployment it lowers into, which reports on its role member. The worker
+// `daemonset`, `statefulset`, `job` and `cronjob` fill nothing (go-kure/launcher#1629);
+// the worker stands for the reshaped deployment it lowers into, which reports on
+// its role member. The worker
 // generates its own ServiceAccount and names it, so the pod never meets the
 // token automount fill and the worker's row leaves that path out.
 type handlerBuiltKind struct {
@@ -38,7 +39,6 @@ type handlerBuiltKind struct {
 
 var handlerBuiltKinds = []handlerBuiltKind{
 	{"worker", nil, owner{component: "web", member: "role-deployment"}, generateTimeFillPaths[:3]},
-	{"statefulset", nil, owner{component: "web"}, generateTimeFillPaths},
 }
 
 // TestGenerateTimeFills_AreReported: a workload that authors none of them has
@@ -88,7 +88,7 @@ func TestGenerateTimeFills_ExtraContainersAtTheirOwnPaths(t *testing.T) {
 // the policy's, and no built-in entry replaces it.
 func TestGenerateTimeFills_PolicyValueKeepsItsSource(t *testing.T) {
 	policy := &defaultsPolicy{cpuRequest: "200m", memoryRequest: "256Mi", memoryLimit: "512Mi"}
-	for _, k := range handlerBuiltKinds[:2] {
+	for _, k := range handlerBuiltKinds {
 		t.Run(k.typ, func(t *testing.T) {
 			prov, _ := policyProvenanceFor(t, policy, workload("web", k.typ, k.extra))
 			entries := entriesOf(prov, k.owner)
@@ -112,27 +112,23 @@ func TestGenerateTimeFills_PolicyValueKeepsItsSource(t *testing.T) {
 // read here.
 func TestGenerateTimeFills_AuthoredValueIsNotReported(t *testing.T) {
 	// The worker names an existing account, so it generates none and reports on
-	// the component itself, as the statefulset does.
-	for _, typ := range []string{"worker", "statefulset"} {
-		t.Run(typ, func(t *testing.T) {
-			prov, _ := policyProvenanceFor(t, &defaultsPolicy{}, workload("web", typ, map[string]any{
-				"resources": map[string]any{
-					"requests": map[string]any{"cpu": "50m", "memory": "64Mi"},
-					"limits":   map[string]any{"memory": "128Mi"},
-				},
-				"serviceAccountName": "shared",
-			}))
-			entries := entriesOf(prov, owner{component: "web"})
-			if !authoredOnTheMember(entries["resources.requests.cpu"]) {
-				t.Fatalf("control: resources.requests.cpu = %+v, want authored; entries: %v", entries["resources.requests.cpu"], entries)
-			}
-			for path, src := range entries {
-				generated := path == "automountServiceAccountToken" || strings.HasPrefix(path, "resources.")
-				if generated && src.Kind == oam.SourceBuiltin {
-					t.Errorf("entry at %q is built-in (%+v) on a workload that authors every such value", path, src)
-				}
-			}
-		})
+	// the component itself.
+	prov, _ := policyProvenanceFor(t, &defaultsPolicy{}, workload("web", "worker", map[string]any{
+		"resources": map[string]any{
+			"requests": map[string]any{"cpu": "50m", "memory": "64Mi"},
+			"limits":   map[string]any{"memory": "128Mi"},
+		},
+		"serviceAccountName": "shared",
+	}))
+	entries := entriesOf(prov, owner{component: "web"})
+	if !authoredOnTheMember(entries["resources.requests.cpu"]) {
+		t.Fatalf("control: resources.requests.cpu = %+v, want authored; entries: %v", entries["resources.requests.cpu"], entries)
+	}
+	for path, src := range entries {
+		generated := path == "automountServiceAccountToken" || strings.HasPrefix(path, "resources.")
+		if generated && src.Kind == oam.SourceBuiltin {
+			t.Errorf("entry at %q is built-in (%+v) on a workload that authors every such value", path, src)
+		}
 	}
 }
 

@@ -197,6 +197,7 @@ var coreKindSchemas = []struct {
 	{"secretstore", reflect.TypeFor[esv1.SecretStoreSpec](), &components.SecretStoreHandler{}, nil},
 	{"servicecidr", reflect.TypeFor[networkingv1.ServiceCIDRSpec](), &components.ServiceCIDRHandler{}, nil},
 	{"servicemonitor", reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), &components.ServiceMonitorHandler{}, nil},
+	{"statefulset", reflect.TypeFor[appsv1.StatefulSetSpec](), &components.StatefulsetHandler{}, nil},
 	{"storageclass", reflect.TypeFor[storagev1.StorageClass](), &components.StorageClassHandler{}, objectIdentityExcluded("a storage.k8s.io/v1 StorageClass")},
 	{"tcproute", reflect.TypeFor[gatewayv1.TCPRouteSpec](), &components.TCPRouteHandler{}, nil},
 	{"thanosruler", reflect.TypeFor[monitoringv1.ThanosRulerSpec](), &components.ThanosRulerHandler{}, nil},

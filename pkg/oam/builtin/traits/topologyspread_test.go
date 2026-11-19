@@ -1,7 +1,6 @@
 package traits_test
 
 import (
-	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -594,18 +593,6 @@ func TestTopologySpread_NoDeploymentFails(t *testing.T) {
 	}
 }
 
-// reshapedProps returns a builder of the properties of a reshaped kind, with
-// the constraints at the top level when authored is set.
-func reshapedProps(base map[string]any, constraints []any) func(authored bool) map[string]any {
-	return func(authored bool) map[string]any {
-		props := maps.Clone(base)
-		if authored {
-			props["topologySpreadConstraints"] = constraints
-		}
-		return props
-	}
-}
-
 // TestTopologySpread_OtherWorkloadKindsAreRefused pins the trait to
 // Deployments. A workload kind that publishes raw `topologySpreadConstraints`
 // of its own (go-kure/launcher#790) is still not a target: the trait is
@@ -623,11 +610,16 @@ func TestTopologySpread_OtherWorkloadKindsAreRefused(t *testing.T) {
 		kind    string
 		handler oam.ComponentHandler
 		// props builds the properties afresh, with the constraints authored where
-		// the kind takes them: at the top level of the reshaped statefulset, in the
-		// pod spec of the raw daemonset, job and cronjob.
+		// the kind takes them: in the pod spec of the raw statefulset, daemonset,
+		// job and cronjob.
 		props func(authored bool) map[string]any
 	}{
-		{"statefulset", &components.StatefulsetHandler{}, reshapedProps(map[string]any{"image": "ghcr.io/org/api:v1", "replicas": 3}, constraints)},
+		{"statefulset", &components.StatefulsetHandler{}, func(authored bool) map[string]any {
+			if !authored {
+				return rawStatefulsetProps("api", "ghcr.io/org/api:v1", map[string]any{"replicas": 3})
+			}
+			return rawStatefulsetProps("api", "ghcr.io/org/api:v1", map[string]any{"replicas": 3}, rawPod(map[string]any{"topologySpreadConstraints": constraints}))
+		}},
 		{"daemonset", &components.DaemonsetHandler{}, func(authored bool) map[string]any {
 			if authored {
 				return rawDaemonsetProps("api", "ghcr.io/org/api:v1", rawPod(podFields))

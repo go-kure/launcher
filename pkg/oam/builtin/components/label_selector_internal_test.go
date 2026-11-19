@@ -155,6 +155,7 @@ var strictlyDecodedTypes = typesByName([]namedType{
 	{"appsv1.DaemonSetSpec", reflect.TypeFor[appsv1.DaemonSetSpec]()},
 	{"appsv1.DeploymentSpec", reflect.TypeFor[appsv1.DeploymentSpec]()},
 	{"appsv1.ReplicaSetSpec", reflect.TypeFor[appsv1.ReplicaSetSpec]()},
+	{"appsv1.StatefulSetSpec", reflect.TypeFor[appsv1.StatefulSetSpec]()},
 	{"autoscalingv2.HorizontalPodAutoscalerSpec", reflect.TypeFor[autoscalingv2.HorizontalPodAutoscalerSpec]()},
 	{"autov1.ImageUpdateAutomationSpec", reflect.TypeFor[autov1.ImageUpdateAutomationSpec]()},
 	{"barmanapi.BarmanObjectStoreConfiguration", reflect.TypeFor[barmanapi.BarmanObjectStoreConfiguration]()},
@@ -667,9 +668,11 @@ func nestedVolumeConfig(c *oam.Component) (stack.ApplicationConfig, error) {
 // reason. Cilium's API declares a copy of the selector type; the kinds that
 // decode it list key and operator already and are held to the CRDs of the
 // linked module (TestCiliumBGPKinds_RequiredMatchCRD and its siblings). The
-// reshaped workload kinds (the role member and statefulset) and the claim
-// templates decode no type: they parse a selector by hand and refuse key,
-// operator and values there (parseLabelSelectorOpts).
+// reshaped workload kinds (the role member of webservice and worker) decode no
+// type: they parse a selector by hand and refuse key, operator and values there
+// (parseLabelSelectorOpts). The claim templates of the raw statefulset decode
+// the upstream type and take their key and operator checks from the
+// required-field rows and validateLabelSelector.
 // Their nested `volumes` entry is the exception, and its row decodes the volume
 // source itself (nestedVolumeConfig).
 // A node selector term (corev1.NodeSelectorTerm) and a quota's scope selector
@@ -713,6 +716,20 @@ var labelSelectorKinds = []labelSelectorKind{
 	},
 	{
 		component: "daemonset", typ: "appsv1.DaemonSetSpec", config: kindConfig(&DaemonsetHandler{}),
+		base: map[string]any{
+			"selector": map[string]any{"matchLabels": map[string]any{"tier": "web"}},
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"tier": "web"}},
+				"spec":     map[string]any{"containers": labelSelectorTestContainers},
+			},
+		},
+		expressions: true,
+		excluded: map[string]string{
+			"selector": "refused already, and wholly: the kind reads it as apimachinery does to compare it with the `app` label (refuseSelectorAgainstAppLabel), which refuses an expression without a key, with an operator that is none of the four or with the wrong number of values, in apimachinery's words (TestReplicaSetSelector_RefusedAsAPIMachineryReadsIt)",
+		},
+	},
+	{
+		component: "statefulset", typ: "appsv1.StatefulSetSpec", config: kindConfig(&StatefulsetHandler{}),
 		base: map[string]any{
 			"selector": map[string]any{"matchLabels": map[string]any{"tier": "web"}},
 			"template": map[string]any{
@@ -1183,10 +1200,10 @@ func TestLabelSelectorKinds_CoverEverySelector(t *testing.T) {
 // selector a kind that checks expressions leaves out of the two checks: a
 // replicaset's `selector` is refused for each of the five defects all the
 // same, under its path, by the comparison with the `app` label. The raw
-// `deployment`, `daemonset` and `job` kinds (go-kure/launcher#1629) read theirs
-// the same way.
+// `deployment`, `daemonset`, `statefulset` and `job` kinds
+// (go-kure/launcher#1629) read theirs the same way.
 func TestReplicaSetSelector_RefusedAsAPIMachineryReadsIt(t *testing.T) {
-	for _, component := range []string{"replicaset", "deployment", "daemonset", "job"} {
+	for _, component := range []string{"replicaset", "deployment", "daemonset", "statefulset", "job"} {
 		var selectorKind labelSelectorKind
 		for _, kind := range labelSelectorKinds {
 			if kind.component == component {

@@ -137,11 +137,10 @@ func checkMountPropagationPrivileged(label string, mounts []corev1.VolumeMount, 
 }
 
 // checkMainContainerMountPropagation is checkMountPropagationPrivileged for the
-// main container, whose mounts come from `volumes` and `volumeClaimTemplates`
-// (go-kure/launcher#1198). Each kind calls it once, after it has parsed both
-// the securityContext and the mounts: parseVolumes runs apart from the
-// securityContext parse, so the check cannot live there. The error names the
-// mount, because the list holds claim-template mounts before `volumes` ones.
+// main container, whose mounts come from `volumes` (go-kure/launcher#1198).
+// Each kind calls it once, after it has parsed both the securityContext and
+// the mounts: parseVolumes runs apart from the securityContext parse, so the
+// check cannot live there. The error names the mount.
 func checkMainContainerMountPropagation(mounts []corev1.VolumeMount, sc *corev1.SecurityContext) error {
 	privileged := sc != nil && sc.Privileged != nil && *sc.Privileged
 	for _, vm := range mounts {

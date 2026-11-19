@@ -8,7 +8,7 @@ import (
 )
 
 // This file holds PropertySchema fragments shared by the container-workload
-// component handlers that keep the reshaped form (webservice/worker/statefulset). Each
+// component handlers that keep the reshaped form (webservice/worker). Each
 // fragment mirrors a shared parser in common.go / podspec.go (parseEnv,
 // parseResources, parsePodSpec, …). The target is full corev1 fidelity: a
 // nested shape is modeled field-by-field, with a Description on every key,
@@ -19,10 +19,6 @@ import (
 // closed, see schemaContainerEntry) are a known gap awaiting their own strict parsers, not a design
 // choice to stay shallow. Each accessor returns a fresh value so consumers can't
 // mutate shared state.
-
-func accessModesEnum() []any {
-	return []any{"ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"}
-}
 
 // intOrStringTypes is the Types union an intstr.IntOrString leaf publishes: a
 // rolling update's maxUnavailable/maxSurge takes an integer or a percentage string,
@@ -298,7 +294,7 @@ func schemaAppArmorProfile(scope string) oam.PropertySchema {
 }
 
 // schemaPodSpec describes the pod-level properties shared by every container
-// workload kind (see parsePodSpec in podspec.go). A map, like schemaStatefulSetSpec,
+// workload kind (see parsePodSpec in podspec.go). A map,
 // because every kind that publishes it must expose the identical set — TestPodSpecSchema
 // pins its key set to podSpecPropertyKeys. Every key, nested or not, carries a
 // Description; enum-valued fields declare their Enum so schema validation
@@ -579,8 +575,8 @@ func schemaVolumes() oam.PropertySchema {
 }
 
 // schemaMountExtras declares the mountExtraKeys, the mount keys other than
-// readOnly. A `volumes` entry, a claim template and a `volumeMounts` item share
-// them, since parseMountExtras reads all three (go-kure/launcher#1193, go-kure/launcher#1198).
+// readOnly. A `volumes` entry and a `volumeMounts` item share them
+// (go-kure/launcher#1193, go-kure/launcher#1198).
 func schemaMountExtras() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"subPath":           {Type: oam.PropertyTypeString, Description: "Sub-path within the volume to mount instead of its root. Relative, no `..` element."},
@@ -719,40 +715,6 @@ func schemaTolerations() oam.PropertySchema {
 				// time-bounded NoExecute toleration into an unbounded one.
 				"tolerationSeconds": {Type: oam.PropertyTypeInteger, Description: "Seconds the pod tolerates a NoExecute taint before eviction. Unset means tolerate forever; 0 or negative means evict immediately. Only meaningful with effect NoExecute, and upstream validation is documented as refusing it under any other effect, so set that effect explicitly."},
 			},
-		},
-	}
-}
-
-// schemaVolumeClaimTemplates describes the shared `volumeClaimTemplates` property
-// (see parseVolumeClaimTemplates).
-func schemaVolumeClaimTemplates() oam.PropertySchema {
-	props := map[string]oam.PropertySchema{
-		"name":         {Type: oam.PropertyTypeString, Required: true, Description: "Claim name (also used as the mount name)."},
-		"size":         {Type: oam.PropertyTypeString, Description: `Requested storage size (e.g. "10Gi"). Shorthand for resources.requests.storage; exactly one of the two is required.`},
-		"mountPath":    {Type: oam.PropertyTypeString, Description: "Path where the claim is mounted in the container. Not a claim-spec field — it drives the container's VolumeMount. Exactly one of mountPath and devicePath is required."},
-		"devicePath":   {Type: oam.PropertyTypeString, Description: "Path in the container where a volumeMode: Block claim appears as a raw block device. Not a claim-spec field — it drives the container's VolumeDevice. Authored instead of mountPath, and only together with volumeMode: Block."},
-		"storageClass": {Type: oam.PropertyTypeString, Description: "StorageClass used to provision the volume. Unset takes the ClusterProfile pvc capability's storageClassName, else the cluster's default class; an empty string requests no class (no dynamic provisioning)."},
-		"accessModes":  {Type: oam.PropertyTypeArray, Description: "Requested access modes for the volume.", Items: &oam.PropertySchema{Type: oam.PropertyTypeString, Enum: accessModesEnum(), Description: "A single access mode."}},
-	}
-	maps.Copy(props, schemaVolumeClaimSpec())
-	// volumeMode comes from the shared claim spec, which a PersistentVolumeClaim
-	// component takes too and which has no devicePath, so the rule is set here on
-	// this item's copy, after the copy, and never in the shared declaration.
-	volumeMode := props["volumeMode"]
-	volumeMode.RequiredWhen = &oam.RequiredWhen{Key: "devicePath"}
-	props["volumeMode"] = volumeMode
-	// The mount keys of a template with a mountPath (go-kure/launcher#1198).
-	// They are refused beside devicePath, which has no mount.
-	props["readOnly"] = oam.PropertySchema{Type: oam.PropertyTypeBoolean, Description: "Mount the claim read-only. Not a claim-spec field. Only with mountPath."}
-	maps.Copy(props, schemaMountExtras())
-	return oam.PropertySchema{
-		Type:        oam.PropertyTypeArray,
-		Description: "PersistentVolumeClaim templates provisioned per replica.",
-		Items: &oam.PropertySchema{
-			Type:        oam.PropertyTypeObject,
-			Description: "A single volume claim template: the corev1.PersistentVolumeClaimSpec fields, plus mountPath or devicePath.",
-			Properties:  props,
-			Exclusive:   []oam.ExclusiveGroup{{Keys: []string{"mountPath", "devicePath"}, Required: true}},
 		},
 	}
 }

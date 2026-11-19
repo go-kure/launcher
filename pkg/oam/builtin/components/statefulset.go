@@ -1,15 +1,15 @@
 package components
 
 import (
+	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -17,7 +17,22 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
-// StatefulsetHandler handles OAM statefulset components.
+// StatefulsetHandler handles OAM statefulset components: the kind-named
+// projection of an apps/v1 StatefulSet (go-kure/launcher#1629).
+//
+// Its properties are the top-level json fields of appsv1.StatefulSetSpec,
+// decoded strictly (decodeKindSpec), as the deployment kind's are. It emits the
+// StatefulSet, named after the component in the build namespace, with the
+// authored spec. Two things are added: the `app` label on the pod template,
+// beside the authored labels, which every workload kind gives its pods and
+// launcher's traits and Services select on (podTemplateAppLabels), and the
+// platform's storage class on each claim template that authors none
+// (FillCapabilityDefaults). The selector stays as authored, and the object
+// itself gets no label, no annotation and no other default of launcher's. The
+// reshaped form, with the main container at the top level, belongs to
+// `webservice` and `worker`.
+// TestCoreKindSchemas_CoverSpec keeps the published key set equal to the
+// upstream json tags.
 type StatefulsetHandler struct{}
 
 // CanHandle returns true for statefulset component type.
@@ -25,47 +40,47 @@ func (h *StatefulsetHandler) CanHandle(componentType string) bool {
 	return componentType == "statefulset"
 }
 
-// PropertySchema declares the statefulset component's user-facing properties.
+// PropertySchema declares every top-level appsv1.StatefulSetSpec field by its
+// json name. Structured fields are open objects whose content is checked by
+// the strict decode, not by this schema.
 func (h *StatefulsetHandler) PropertySchema() map[string]oam.PropertySchema {
-	m := map[string]oam.PropertySchema{
-		"image":                {Type: oam.PropertyTypeString, Required: true, Description: "Container image reference for the main container."},
-		"replicas":             {Type: oam.PropertyTypeInteger, Default: 1, Description: "Number of StatefulSet pod replicas."},
-		"ports":                schemaMainContainerPorts(),
-		"serviceName":          {Type: oam.PropertyTypeString, Description: "Name of the governing Service that gives the pods their stable network identity, a headless `service` component authored beside this one. No default. Must be a valid Service name, a DNS-1123 label (a digit first is accepted at every Kubernetes release: the API validates this field as a DNS-1123 label, not as a Service name)."},
-		"env":                  schemaEnv(false),
-		"envFrom":              schemaEnvFrom(false),
-		"resources":            schemaResources(false),
-		"command":              schemaStringArray(),
-		"args":                 schemaStringArray(),
-		"probes":               schemaProbes(false),
-		"lifecycle":            schemaLifecycle(false),
-		"securityContext":      schemaSecurityContext(false),
-		"workingDir":           schemaWorkingDir(false),
-		"volumeClaimTemplates": schemaVolumeClaimTemplates(),
-		"volumes":              schemaVolumes(),
-		"initContainers":       schemaInitContainers(),
-		"sidecars":             schemaSidecars(),
-		// The three raw scheduling shapes scheduling.go projects.
-		"affinity":                  schemaRawAffinity(),
-		"tolerations":               schemaTolerations(),
-		"topologySpreadConstraints": schemaTopologySpreadConstraints(),
-		podMetadataProperty:         schemaPodMetadata("StatefulSet"),
-	}
-	maps.Copy(m, schemaContainerFields())
-	maps.Copy(m, schemaPodSpec(false, false))
-	maps.Copy(m, schemaStatefulSetSpec())
-	return oam.DeclareBounds(m, workloadBounds(true, true, true))
+	selector := podObjectSchema("Required. StatefulSet spec.selector: the label selector over the pods the StatefulSet owns. It must match the template's labels, and it is immutable once the object exists. A selector that rules out the `app` label launcher adds to the template is refused.", "LabelSelector")
+	selector.Required = true
+	template := podTemplateSchema("Required. StatefulSet spec.template: the pods the StatefulSet creates. Its spec is held to what the pod kind holds its own to (containers required, the image rule, ephemeralContainers, priority and overhead refused) and to the environment policy; activeDeadlineSeconds is refused. metadata.labels gains the `app` label; an authored `app` with another value is refused.")
+	template.Required = true
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
+		"replicas":    {Type: oam.PropertyTypeInteger, Description: "StatefulSet spec.replicas: the number of pods. The API server defaults it to 1. Held to the environment policy's replica maximum; no policy default is filled. Left out of the object when the component carries a scaler trait, whose HorizontalPodAutoscaler owns the count."},
+		"selector":    selector,
+		"template":    template,
+		"serviceName": {Type: oam.PropertyTypeString, Description: "StatefulSet spec.serviceName: the name of the governing Service that gives the pods their stable network identity, a headless `service` component authored beside this one. No default. Must be a valid Service name, a DNS-1123 label (a digit first is accepted at every Kubernetes release: the API validates this field as a DNS-1123 label, not as a Service name)."},
+		"volumeClaimTemplates": podListSchema("StatefulSet spec.volumeClaimTemplates: the claims the controller creates for each pod, named after the template and the pod. A template that authors no `spec.storageClassName` (absent or null) gets the ClusterProfile `pvc` capability's storage class; an authored one, \"\" included, wins. Each template's storage request is held to the environment policy's storage maximum.",
+			"One PersistentVolumeClaim: metadata.name and spec (access modes, resources.requests.storage, storageClassName, volumeMode, ...).", "PersistentVolumeClaim"),
+		"podManagementPolicy":                  {Type: oam.PropertyTypeString, Description: "StatefulSet spec.podManagementPolicy: OrderedReady or Parallel. The API server defaults it to OrderedReady."},
+		"updateStrategy":                       podObjectSchema("StatefulSet spec.updateStrategy: `type` (RollingUpdate or OnDelete) and `rollingUpdate` (`partition`, `maxUnavailable`). The API server defaults it to RollingUpdate.", "StatefulSetUpdateStrategy"),
+		"minReadySeconds":                      {Type: oam.PropertyTypeInteger, Description: "StatefulSet spec.minReadySeconds: seconds a new pod must be ready, without a container crashing, to count as available. The API server defaults it to 0."},
+		"revisionHistoryLimit":                 {Type: oam.PropertyTypeInteger, Description: "StatefulSet spec.revisionHistoryLimit: the number of old ControllerRevisions kept for rollback. The API server defaults it to 10."},
+		"persistentVolumeClaimRetentionPolicy": podObjectSchema("StatefulSet spec.persistentVolumeClaimRetentionPolicy: `whenDeleted` and `whenScaled`, each Retain or Delete. The API server defaults both to Retain.", "StatefulSetPersistentVolumeClaimRetentionPolicy"),
+		"ordinals":                             podObjectSchema("StatefulSet spec.ordinals: `start`, the number the first pod's ordinal takes. The API server defaults it to 0.", "StatefulSetOrdinals"),
+	}, statefulsetBounds())
+}
+
+// statefulsetBounds are the bounds of the pod template and replicas, plus the
+// storage maximum on each claim template.
+func statefulsetBounds() map[string][]oam.RefusalClass {
+	b := podTemplateBounds(true)
+	b["volumeClaimTemplates"] = []oam.RefusalClass{oam.RefusalStorageMaximum}
+	return b
 }
 
 // FillCapabilityDefaults gives each volumeClaimTemplates entry that leaves
-// storageClass unauthored (absent or null) the ClusterProfile `pvc`
+// spec.storageClassName unauthored (absent or null) the ClusterProfile `pvc`
 // capability's storageClassName, as an authored pvc trait, the
 // persistentvolumeclaim kind and a webservice or worker pvc volume take it
 // (go-kure/launcher#761). An authored class, "" included, wins. The binding is
 // read once, and only when the list holds an entry, so `pvc` is recorded as
 // consumed exactly when the component builds a claim template. A shape the
-// parser refuses (a list that is not one, an entry that is not a mapping) is
-// left for ToApplicationConfig to refuse.
+// parser refuses (a list that is not one, an entry or a spec that is not a
+// mapping) is left for ToApplicationConfig to refuse.
 func (h *StatefulsetHandler) FillCapabilityDefaults(props map[string]any, lctx oam.LoweringContext) (map[string]any, error) {
 	entries, ok := props["volumeClaimTemplates"].([]any)
 	if !ok {
@@ -79,6 +94,16 @@ func (h *StatefulsetHandler) FillCapabilityDefaults(props map[string]any, lctx o
 		if !ok {
 			continue
 		}
+		// The strict decode matches keys without regard to case, so `Spec` and
+		// `StorageClassName` are authored spellings too: fill under the spelling
+		// the document used, or the decode would see the field twice.
+		specKey := authoredSpelling(entry, "spec")
+		spec := map[string]any{}
+		if raw, present := authoredValue(entry, specKey); present {
+			if spec, ok = raw.(map[string]any); !ok {
+				continue
+			}
+		}
 		if !platformRead {
 			platformRead = true
 			sc, err := capabilityStorageClass(lctx)
@@ -90,14 +115,17 @@ func (h *StatefulsetHandler) FillCapabilityDefaults(props map[string]any, lctx o
 			}
 			platformClass = sc
 		}
-		if _, present := authoredValue(entry, "storageClass"); present {
+		classKey := authoredSpelling(spec, "storageClassName")
+		if _, present := authoredValue(spec, classKey); present {
 			continue
 		}
 		if filled == nil {
 			filled = slices.Clone(entries)
 		}
+		spec = maps.Clone(spec)
+		spec[classKey] = platformClass
 		entry = maps.Clone(entry)
-		entry["storageClass"] = platformClass
+		entry[specKey] = spec
 		filled[i] = entry
 	}
 	if filled == nil {
@@ -108,509 +136,216 @@ func (h *StatefulsetHandler) FillCapabilityDefaults(props map[string]any, lctx o
 	return out, nil
 }
 
-// Endpoints implements oam.EndpointProvider: one endpoint per port the main
-// container declares (containerPortEndpoints). The handler's own parse runs
-// first, so a component it refuses has no endpoint, in the parse's words.
+// authoredSpelling returns the key of m that spells name, matching without
+// regard to case as the strict decode does: name itself when present, else the
+// first other spelling in sorted order, else name.
+func authoredSpelling(m map[string]any, name string) string {
+	if _, ok := m[name]; ok {
+		return name
+	}
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		if strings.EqualFold(k, name) {
+			return k
+		}
+	}
+	return name
+}
+
+// Endpoints implements oam.EndpointProvider: one endpoint per port the first
+// container of the template declares (containerPortEndpoints). Endpoints are
+// collected apart from the build, so the handler's own parse runs here too: a
+// component it refuses has no endpoint, in the parse's words.
 func (h *StatefulsetHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
 	cfg, err := h.ToApplicationConfig(component, "")
 	if err != nil {
 		return nil, err
 	}
-	return containerPortEndpoints(component.Name, cfg.(*StatefulsetConfig).Ports), nil
+	containers := cfg.(*StatefulsetConfig).Spec.Template.Spec.Containers
+	if len(containers) == 0 {
+		return nil, nil
+	}
+	return containerPortEndpoints(component.Name, containers[0].Ports), nil
 }
 
-// ToApplicationConfig converts an OAM statefulset component to a StatefulsetConfig.
+// ToApplicationConfig decodes an OAM statefulset component into a
+// StatefulsetConfig, under the package's null contract and the strict decode
+// every spec-projecting kind uses. What the StatefulSet may not hold is refused
+// here, whatever the environment policy: see StatefulsetConfig.validate,
+// podTemplateDefaultedZeros and podTemplateLabelSelectorRequired.
 func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	config := &StatefulsetConfig{
+	spec, props, err := decodeKindSpec[appsv1.StatefulSetSpec](component.Properties, "apps/v1 StatefulSetSpec")
+	if err != nil {
+		return nil, err
+	}
+	if err := refuseUncarriedSpecValues(props, spec, podTemplateDefaultedZeros(&spec.Template)); err != nil {
+		return nil, err
+	}
+	required := podTemplateLabelSelectorRequired()
+	maps.Copy(required, labelSelectorRequired("volumeClaimTemplates[].spec.selector"))
+	if err := refuseUnauthoredRequired(props, required); err != nil {
+		return nil, err
+	}
+	cfg := &StatefulsetConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
 		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
+		Spec:       *spec,
+		scaled:     slices.ContainsFunc(component.Traits, func(t oam.Trait) bool { return t.Type == "scaler" }),
 	}
-
-	props := component.Properties
-
-	image, ok := props["image"].(string)
-	if !ok {
-		return nil, errors.New("required property 'image' missing or not a string")
-	}
-	if err := ValidateImageRef(image); err != nil {
+	if _, err := cfg.validate(component.Name); err != nil {
 		return nil, err
 	}
-	config.Image = image
-
-	replicas, replicasAuthored, err := parseReplicas(props, 1)
-	if err != nil {
-		return nil, err
-	}
-	config.Replicas = replicas
-	config.explicitReplicas = replicasAuthored
-	if !replicasAuthored {
-		config.parseFills = append(config.parseFills, "replicas")
-	}
-	config.scaled = slices.ContainsFunc(component.Traits, func(t oam.Trait) bool { return t.Type == "scaler" })
-
-	// serviceName names the governing Service, which the component does not
-	// emit, so it is held to the Service-name rule (validateServiceName). It
-	// has no default: unset, spec.serviceName stays empty.
-	if sn, present, err := parseStringField(props, "serviceName", "serviceName"); err != nil {
-		return nil, err
-	} else if present {
-		if err := validateServiceName("serviceName", sn); err != nil {
-			return nil, err
-		}
-		config.ServiceName = sn
-	}
-
-	env, err := parseEnv(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Env = env
-	envFrom, err := parseEnvFrom(props)
-	if err != nil {
-		return nil, err
-	}
-	config.EnvFrom = envFrom
-
-	if resources, present, err := parseObjectField(props, "resources", "resources"); err != nil {
-		return nil, err
-	} else if present {
-		r, err := parseResources(resources)
-		if err != nil {
-			return nil, errors.Wrap(err, "invalid resources configuration")
-		}
-		config.Resources = r
-	}
-	command, err := parseCommand(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Command = command
-	args, err := parseArgs(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Args = args
-
-	ports, portFills, err := parseContainerPorts(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Ports = ports
-	config.parseFills = append(config.parseFills, portFills...)
-	probes, lifecycle, err := parseMainContainerHandlers(props, ports)
-	if err != nil {
-		return nil, err
-	}
-	config.Probes = probes
-	config.Lifecycle = lifecycle
-	securityContext, err := parseSecurityContext(props)
-	if err != nil {
-		return nil, errors.Wrap(err, "invalid securityContext configuration")
-	}
-	config.SecurityContext = securityContext
-	if workingDir, present, err := parseStringField(props, "workingDir", "workingDir"); err != nil {
-		return nil, err
-	} else if present {
-		config.WorkingDir = workingDir
-	}
-	if config.ContainerFields, err = parseMainContainerFields(props); err != nil {
-		return nil, err
-	}
-
-	vcts, err := parseVolumeClaimTemplates(props)
-	if err != nil {
-		return nil, err
-	}
-	config.VolumeClaimTemplates = vcts
-
-	parsed, err := parsePodVolumes(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Volumes = parsed.Volumes
-	config.VolumeMounts = parsed.Mounts
-	config.VolumeDevices = parsed.Devices
-	config.PVCs = parsed.PVCs
-	// The main container's devices and mounts come from two parsers here — the
-	// claim templates and `volumes` — each of which checks only its own
-	// entries.
-	vctMounts, vctDevices := claimTemplateMountsAndDevices(vcts)
-	mainMounts := append(vctMounts, parsed.Mounts...)
-	if err := checkMainContainerVolumeDevices(mainMounts, append(vctDevices, parsed.Devices...)); err != nil {
-		return nil, err
-	}
-	if err := checkClaimTemplateCollisions(vcts, parsed.Volumes, mainMounts); err != nil {
-		return nil, err
-	}
-	if err := checkMainContainerMountPropagation(mainMounts, securityContext); err != nil {
-		return nil, err
-	}
-
-	initContainers, err := parseInitContainers(props)
-	if err != nil {
-		return nil, err
-	}
-	config.InitContainers = initContainers
-
-	affinity, err := parseRawAffinity(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Affinity = affinity
-	tolerations, err := parseTolerations(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Tolerations = tolerations
-	tscs, err := parseTopologySpreadConstraints(props)
-	if err != nil {
-		return nil, err
-	}
-	config.TopologySpreadConstraints = tscs
-
-	sidecars, err := parseSidecars(props)
-	if err != nil {
-		return nil, err
-	}
-	config.Sidecars = sidecars
-	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, vcts), initContainers, sidecars); err != nil {
-		return nil, err
-	}
-	if err := checkPodContainerNames(component.Name, initContainers, sidecars); err != nil {
-		return nil, err
-	}
-	if err := checkPodPortNames(config.Ports, initContainers, sidecars); err != nil {
-		return nil, err
-	}
-	// Claim templates are left out on purpose: they are persistentVolumeClaim
-	// volumes, never emptyDir, so the API server refuses a fileKeyRef naming one.
-	if err := checkFileKeyRefVolumes(parsed.Volumes, env, initContainers, sidecars); err != nil {
-		return nil, err
-	}
-
-	podSpec, err := parsePodSpec(props, false)
-	if err != nil {
-		return nil, err
-	}
-	config.PodSpec = podSpec
-
-	podMetadata, err := parsePodMetadata(props, false)
-	if err != nil {
-		return nil, err
-	}
-	config.PodMetadata = podMetadata
-
-	stsSpec, err := parseStatefulSetSpec(props)
-	if err != nil {
-		return nil, err
-	}
-	config.StatefulSetSpec = stsSpec
-
-	return config, nil
+	return cfg, nil
 }
 
-// StatefulsetConfig implements stack.ApplicationConfig for statefulset components.
+// StatefulsetConfig implements stack.ApplicationConfig for statefulset
+// components. Spec is the decoded StatefulSetSpec exactly as authored.
 type StatefulsetConfig struct {
 	Name string
-	// PolicyDefaultLog holds the defaults ApplyPolicy applied (oam.PolicyDefaultReporter).
-	oam.PolicyDefaultLog
-	// parseFills are the property paths the parser filled because the author wrote
-	// no value (BuiltinDefaults reads them).
-	parseFills []string
 	// ObjectName names the StatefulSet (oam.Component.ObjectName), and with it
-	// the pods and volume claims the controller names after it; its labels,
-	// selector and main container keep Name. Empty for the application's name.
+	// the pods and volume claims the controller names after it; its labels keep
+	// Name. Empty for the application's name.
 	ObjectName string
 	// Metadata is the labels and annotations authored for the StatefulSet
-	// (oam.Component.ObjectMetadata). They go on the StatefulSet's own
-	// metadata: its pod template keeps the labels of the kind, with the ones
-	// PodMetadata adds.
-	Metadata oam.ObjectMetadata
-	// PodMetadata is the labels and annotations authored for the pod template
-	// (`podMetadata`). They never reach the selector.
-	PodMetadata          PodMetadata
-	Namespace            string
-	Image                string
-	Replicas             int32
-	Ports                []corev1.ContainerPort // the main container's ports
-	ServiceName          string                 // spec.serviceName, the governing Service; empty when unset
-	Env                  []corev1.EnvVar
-	EnvFrom              []corev1.EnvFromSource
-	Resources            ResourceRequirements
-	Command              []string
-	Args                 []string
-	Probes               ProbeConfig
-	Lifecycle            *corev1.Lifecycle
-	SecurityContext      *corev1.SecurityContext
-	WorkingDir           string
-	ContainerFields      ContainerFields // the main container's fields every container accepts (see parseContainerFields)
-	VolumeClaimTemplates []VolumeClaimTemplate
-	Volumes              []corev1.Volume
-	VolumeMounts         []corev1.VolumeMount
-	VolumeDevices        []corev1.VolumeDevice
-	PVCs                 []PVCConfig
-	InitContainers       []InitContainerConfig
-	Sidecars             []SidecarContainerConfig
-	// Affinity, Tolerations and TopologySpreadConstraints are the raw corev1
-	// scheduling shapes (see scheduling.go), carried as the API types because
-	// nothing is inferred from them.
-	Affinity                  *corev1.Affinity
-	Tolerations               []corev1.Toleration
-	TopologySpreadConstraints []corev1.TopologySpreadConstraint
-	// PodSpec holds the shared pod-level properties (see parsePodSpec).
-	PodSpec PodSpecConfig
-	// StatefulSetSpec holds the StatefulSetSpec-level properties that are
-	// neither the pod template nor the claim templates (see
-	// parseStatefulSetSpec).
-	StatefulSetSpec  StatefulSetSpecConfig
-	explicitReplicas bool
-	// scaled is true when the settled component carries a scaler trait. The
-	// HorizontalPodAutoscaler then owns the replica count and the scaler builds
-	// this StatefulSet without spec.replicas, as it does a Deployment
-	// (go-kure/launcher#1179, go-kure/launcher#1268), so the count held here is
-	// not what runs; the scaler's own maxReplicas check is the guard.
+	// (oam.Component.ObjectMetadata). They go on the StatefulSet's own metadata:
+	// its pod template keeps the labels of the kind.
+	Metadata  oam.ObjectMetadata
+	Namespace string
+	Spec      appsv1.StatefulSetSpec
+
+	// scaled is true when the component carries a scaler trait. The
+	// HorizontalPodAutoscaler then owns the replica count and the StatefulSet is
+	// built without spec.replicas, whichever order the traits are declared in
+	// (go-kure/launcher#1179, go-kure/launcher#1268); the scaler enforces the
+	// replica maximum on its own maxReplicas.
 	scaled bool
 }
 
-// ServiceAccountName implements oam.ServiceAccountNamer: the authored
-// serviceAccountName, or "" when the pods run as no named account.
-func (c *StatefulsetConfig) ServiceAccountName() (string, bool) {
-	return c.PodSpec.ServiceAccountName, true
-}
-
-// ApplyPolicy applies defaults then enforces limits from the policy.
-func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
-	if p == nil {
-		return nil
+// validate refuses a spec the StatefulSet cannot be emitted from and returns the
+// labels of its pod template. selector must be authored: the Go type cannot
+// omit it, so an unset one would be written as null, and launcher derives none.
+// serviceName names the governing Service, which the component does not emit, so
+// it is held to the Service-name rule (validateServiceName); unset, it stays
+// empty. The template is held to validateControllerPodTemplate, its labels to
+// podTemplateAppLabels, and the selector must keep matching the template once
+// the `app` label is on it (refuseSelectorAgainstAppLabel). The claim templates
+// are held to checkClaimTemplateCollisions. The API's other value rules are left
+// to the API server.
+func (c *StatefulsetConfig) validate(component string) (map[string]string, error) {
+	if c.Spec.Selector == nil {
+		return nil, errors.New("selector: required (the label selector over the pods the StatefulSet owns; it must match the template's labels)")
 	}
-
-	// Under a scaler the HorizontalPodAutoscaler owns the count and this
-	// StatefulSet is built without spec.replicas, so the policy's default and
-	// ceiling have no count to act on. The scaler enforces the same ceiling on
-	// its own maxReplicas.
-	if !c.scaled {
-		c.Replicas = applyReportedReplicas(&c.PolicyDefaultLog, "replicas", c.Replicas, c.explicitReplicas, p.DefaultReplicas())
-	}
-	if err := applyContainerPolicyDefaults(p, &c.PolicyDefaultLog, &c.Resources, c.InitContainers, c.Sidecars); err != nil {
-		return err
-	}
-
-	if !c.scaled {
-		if err := enforceMaxReplicas(c.Replicas, p.MaxReplicas()); err != nil {
-			return err
-		}
-	}
-	if err := enforceMaxResources(c.Resources, p.MaxCPU(), p.MaxMemory()); err != nil {
-		return err
-	}
-	if err := enforceAllowedRegistries(c.Image, p.AllowedRegistries()); err != nil {
-		return err
-	}
-	if err := enforcePrivileged(c.SecurityContext, p.AllowPrivileged()); err != nil {
-		return err
-	}
-	if err := enforceVolumeSourcePolicy("", c.Volumes, p); err != nil {
-		return err
-	}
-	if err := enforceHostNamespaces(c.PodSpec, p); err != nil {
-		return err
-	}
-	if err := enforcePodResources(c.PodSpec, p.MaxCPU(), p.MaxMemory()); err != nil {
-		return err
-	}
-	if err := enforcePodHostProcess(c.PodSpec, p.AllowPrivileged()); err != nil {
-		return err
-	}
-	if err := enforceContainerCapabilities(c.SecurityContext, p.AllowedContainerCapabilities(), p.ForbiddenContainerCapabilities()); err != nil {
-		return err
-	}
-	for i, ic := range c.InitContainers {
-		if err := enforceExtraContainer("initContainers", i, ic.Name, ic.Image,
-			ic.Resources, ic.SecurityContext, p); err != nil {
-			return err
-		}
-	}
-	for i, sc := range c.Sidecars {
-		if err := enforceExtraContainer("sidecars", i, sc.Name, sc.Image,
-			sc.Resources, sc.SecurityContext, p); err != nil {
-			return err
-		}
-	}
-	for _, vct := range c.VolumeClaimTemplates {
-		if err := enforceMaxStorageSize(vct.effectiveStorageRequest(), p.MaxStorageSize()); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// Generate creates a Kubernetes StatefulSet, and nothing beside it: no
-// ServiceAccount and no standalone claim (go-kure/launcher#702). It emits no
-// Service either: ServiceName names one authored beside it. A library caller
-// may set ServiceName itself, so a non-empty one is held to the Service-name
-// rule here too.
-func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if c.ServiceName != "" {
-		if err := validateServiceName("serviceName", c.ServiceName); err != nil {
+	if c.Spec.ServiceName != "" {
+		if err := validateServiceName("serviceName", c.Spec.ServiceName); err != nil {
 			return nil, err
 		}
 	}
-	sts, err := c.createStatefulSet(app)
+	if err := validateControllerPodTemplate(&c.Spec.Template); err != nil {
+		return nil, err
+	}
+	if err := checkClaimTemplateCollisions(c.Spec.VolumeClaimTemplates, c.Spec.Template.Spec.Volumes); err != nil {
+		return nil, err
+	}
+	for i := range c.Spec.VolumeClaimTemplates {
+		if err := validateLabelSelector(fmt.Sprintf("volumeClaimTemplates[%d].spec.selector", i), c.Spec.VolumeClaimTemplates[i].Spec.Selector); err != nil {
+			return nil, err
+		}
+	}
+	labelled, err := podTemplateAppLabels(component, c.Spec.Template.Labels)
 	if err != nil {
 		return nil, err
 	}
-	return kindObject(sts, c.Metadata)
-}
-
-// claimTemplateMountsAndDevices splits the claim templates into the main
-// container's filesystem mounts and, for a volumeMode: Block template
-// (go-kure/launcher#385), its raw block devices. Each template has exactly one
-// of MountPath and DevicePath (parseVolumeClaimTemplates).
-func claimTemplateMountsAndDevices(vcts []VolumeClaimTemplate) ([]corev1.VolumeMount, []corev1.VolumeDevice) {
-	var mounts []corev1.VolumeMount
-	var devices []corev1.VolumeDevice
-	for _, vct := range vcts {
-		if vct.DevicePath != "" {
-			devices = append(devices, corev1.VolumeDevice{Name: vct.Name, DevicePath: vct.DevicePath})
-			continue
-		}
-		vm := vct.MountOptions
-		vm.Name, vm.MountPath = vct.Name, vct.MountPath
-		mounts = append(mounts, vm)
+	if err := refuseSelectorAgainstAppLabel(component, c.Spec.Selector, c.Spec.Template.Labels, labelled); err != nil {
+		return nil, err
 	}
-	return mounts, devices
+	return labelled, nil
 }
 
 // checkClaimTemplateCollisions refuses a claim template that shares its name
-// with another claim template or with a `volumes` entry, and a main-container
-// mountPath used twice across the claim templates and `volumes`. Each parser
-// checks only its own entries, and the apiserver does not catch the overlap
-// either: StatefulSet validation skips the pod template's volumes. The
-// StatefulSet controller keys claim templates by name, so of two sharing a name
-// only one claim is created, and it replaces a pod volume named like a template
-// with that template's claim, so the authored volume is never mounted. A
-// repeated mountPath is refused only when the controller creates the pods.
-// mounts is the main container's full mount list, claim templates first; the
-// Block (device) side is checkMainContainerVolumeDevices'.
-func checkClaimTemplateCollisions(vcts []VolumeClaimTemplate, volumes []corev1.Volume, mounts []corev1.VolumeMount) error {
+// with another claim template or with a `template.spec.volumes` entry. The
+// apiserver does not catch the overlap: StatefulSet validation skips the pod
+// template's volumes. The StatefulSet controller keys claim templates by name,
+// so of two sharing a name only one claim is created, and it replaces a pod
+// volume named like a template with that template's claim, so the authored
+// volume is never mounted.
+func checkClaimTemplateCollisions(vcts []corev1.PersistentVolumeClaim, volumes []corev1.Volume) error {
 	names := make(map[string]bool, len(vcts))
 	for _, vct := range vcts {
 		if names[vct.Name] {
-			return errors.Errorf("volumeClaimTemplate %q: duplicate name; the StatefulSet controller creates one claim per template name, so one of the two would never be provisioned", vct.Name)
+			return errors.Errorf("volumeClaimTemplates: duplicate name %q; the StatefulSet controller creates one claim per template name, so one of the two would never be provisioned", vct.Name)
 		}
 		names[vct.Name] = true
 	}
 	for _, v := range volumes {
 		if names[v.Name] {
-			return errors.Errorf("volume %q has the same name as a claim template; the StatefulSet controller replaces a pod volume named like a claim template with the claim, so this volume would never be mounted. Rename one of them", v.Name)
+			return errors.Errorf("template.spec.volumes: volume %q has the same name as a claim template; the StatefulSet controller replaces a pod volume named like a claim template with the claim, so this volume would never be mounted. Rename one of them", v.Name)
 		}
-	}
-	paths := make(map[string]string, len(mounts))
-	for _, m := range mounts {
-		if other, dup := paths[m.MountPath]; dup {
-			return errors.Errorf("volume %q: duplicate mountPath %q, already used by %q", m.Name, m.MountPath, other)
-		}
-		paths[m.MountPath] = m.Name
 	}
 	return nil
 }
 
-func (c *StatefulsetConfig) createStatefulSet(app *stack.Application) (*appsv1.StatefulSet, error) {
-	// Claim-template mounts (and devices) precede the authored volume ones, as
-	// before.
-	vctMounts, vctDevices := claimTemplateMountsAndDevices(c.VolumeClaimTemplates)
-	mounts := make([]corev1.VolumeMount, 0, len(vctMounts)+len(c.VolumeMounts))
-	mounts = append(mounts, vctMounts...)
-	mounts = append(mounts, c.VolumeMounts...)
-	devices := make([]corev1.VolumeDevice, 0, len(vctDevices)+len(c.VolumeDevices))
-	devices = append(devices, vctDevices...)
-	devices = append(devices, c.VolumeDevices...)
-	container, err := buildMainContainer(app.Name, mainContainerInput{
-		Image:           c.Image,
-		Command:         c.Command,
-		Args:            c.Args,
-		Resources:       c.Resources,
-		Ports:           c.Ports,
-		Env:             c.Env,
-		EnvFrom:         c.EnvFrom,
-		Probes:          c.Probes,
-		WorkingDir:      c.WorkingDir,
-		Lifecycle:       c.Lifecycle,
-		SecurityContext: c.SecurityContext,
-		VolumeMounts:    mounts,
-		VolumeDevices:   devices,
-		Fields:          c.ContainerFields,
-	})
+// ServiceAccountName implements oam.ServiceAccountNamer: the account the
+// StatefulSet's pods run as, read from the template as the pod kind reads its
+// spec. No account is generated, so "" means the namespace's default account.
+func (c *StatefulsetConfig) ServiceAccountName() (string, bool) {
+	if name := c.Spec.Template.Spec.ServiceAccountName; name != "" {
+		return name, true
+	}
+	return c.Spec.Template.Spec.DeprecatedServiceAccount, true
+}
+
+// ApplyPolicy holds the StatefulSet to the environment policy, as the
+// rendered-object check holds one a chart renders: replicas (one when unset,
+// the API server's default) to the replica maximum, unless a scaler owns the
+// count, the pod template to enforcePodTemplatePolicy, and each claim
+// template's storage request to the storage maximum. It fills no default: an
+// unset replicas stays unset. A nil policy checks nothing.
+func (c *StatefulsetConfig) ApplyPolicy(p oam.Policy) error {
+	if p == nil {
+		return nil
+	}
+	if !c.scaled {
+		replicas := int32(1)
+		if c.Spec.Replicas != nil {
+			replicas = *c.Spec.Replicas
+		}
+		if err := enforceMaxReplicas(replicas, p.MaxReplicas()); err != nil {
+			return err
+		}
+	}
+	if err := enforcePodTemplatePolicy("template.spec", &c.Spec.Template.Spec, p); err != nil {
+		return err
+	}
+	for i, vct := range c.Spec.VolumeClaimTemplates {
+		request, ok := vct.Spec.Resources.Requests[corev1.ResourceStorage]
+		if !ok {
+			continue
+		}
+		label := fmt.Sprintf("volumeClaimTemplates[%d].spec.resources.requests.storage", i)
+		if err := enforceMaxStorageAt(request.String(), p.MaxStorageSize(), label); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Generate emits the StatefulSet: kure's identity-only constructor, a deep copy
+// of the spec, and the `app` label on the pod template. Under a scaler the
+// StatefulSet is built without spec.replicas. The parse-time refusals the typed
+// spec can show are repeated, since the config is exported and the label is
+// valued from app.Name. No ServiceAccount, claim or Service is emitted beside
+// it (go-kure/launcher#702): serviceName names a Service authored beside it.
+func (c *StatefulsetConfig) Generate(app *stack.Application) ([]*client.Object, error) {
+	labelled, err := c.validate(app.Name)
 	if err != nil {
 		return nil, err
 	}
-
 	sts := kubernetes.CreateStatefulSet(kindObjectName(c.ObjectName, app.Name), app.Namespace)
-	sts.Labels = appLabels(app.Name)
-	sts.Annotations = nil
-	sts.Spec.Template.Labels = appLabels(app.Name)
-	if err := c.PodMetadata.applyTo(&sts.Spec.Template); err != nil {
-		return nil, err
-	}
-	sts.Spec.Selector = &metav1.LabelSelector{MatchLabels: appLabels(app.Name)}
-	kubernetes.SetStatefulSetReplicas(sts, c.Replicas)
+	c.Spec.DeepCopyInto(&sts.Spec)
+	sts.Spec.Template.Labels = labelled
 	if c.scaled {
-		// The HorizontalPodAutoscaler owns the count (go-kure/launcher#1268).
 		sts.Spec.Replicas = nil
 	}
-	sts.Spec.ServiceName = c.ServiceName
-	c.StatefulSetSpec.apply(sts)
-
-	podSpec, err := buildPodSpec(podSpecInput{
-		Config:         c.PodSpec,
-		MainContainer:  container,
-		InitContainers: c.InitContainers,
-		Sidecars:       c.Sidecars,
-		Volumes:        c.Volumes,
-		Affinity:       c.Affinity,
-
-		Tolerations:               c.Tolerations,
-		TopologySpreadConstraints: c.TopologySpreadConstraints,
-	})
-	if err != nil {
-		return nil, err
-	}
-	sts.Spec.Template.Spec = podSpec
-
-	for _, vct := range c.VolumeClaimTemplates {
-		accessModes := make([]corev1.PersistentVolumeAccessMode, 0, len(vct.AccessModes))
-		for _, mode := range vct.AccessModes {
-			accessModes = append(accessModes, corev1.PersistentVolumeAccessMode(mode))
-		}
-		if len(accessModes) == 0 {
-			accessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
-		}
-		// vct.Size is empty exactly when the author used the long spelling,
-		// resources.requests.storage, which vct.Spec.apply writes in a moment;
-		// the parser guarantees one of the two is present, and MustParse would
-		// panic on "".
-		var request resource.Quantity
-		if vct.Size != "" {
-			request = resource.MustParse(vct.Size)
-		}
-		pvc := corev1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{Name: vct.Name},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: accessModes,
-				Resources: corev1.VolumeResourceRequirements{
-					Requests: corev1.ResourceList{corev1.ResourceStorage: request},
-				},
-			},
-		}
-		if vct.StorageClass != "" || vct.StorageClassExplicitEmpty {
-			pvc.Spec.StorageClassName = &vct.StorageClass
-		}
-		vct.Spec.apply(&pvc)
-		kubernetes.AddStatefulSetVolumeClaimTemplate(sts, pvc)
-	}
-
-	return sts, nil
+	return kindObject(sts, c.Metadata)
 }

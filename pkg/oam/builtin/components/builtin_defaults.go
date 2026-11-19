@@ -8,11 +8,10 @@ import (
 )
 
 // BuiltinDefaults of the handler-built workload kinds that keep the reshaped
-// form (the role member of webservice and worker, and statefulset):
-// the values launcher's own parser filled because the author wrote none
-// (go-kure/launcher#1580). The raw kinds, deployment, daemonset, job and
-// cronjob, fill
-// nothing (go-kure/launcher#1629). The parsers record the
+// form (the role member of webservice and worker): the values launcher's own
+// parser filled because the author wrote none (go-kure/launcher#1580). The raw
+// kinds, deployment, daemonset, statefulset, job and cronjob, fill nothing
+// (go-kure/launcher#1629). The parsers record the
 // paths they filled, and each method answers from that record and the config's
 // state when the transform asks, so:
 //
@@ -32,7 +31,6 @@ import (
 
 var (
 	_ oam.BuiltinDefaultReporter = (*RoleDeploymentConfig)(nil)
-	_ oam.BuiltinDefaultReporter = (*StatefulsetConfig)(nil)
 )
 
 // builtinRef names a fill by its kind and its path, as the generation-time fills
@@ -109,18 +107,4 @@ func (c *RoleDeploymentConfig) BuiltinDefaults() []oam.BuiltinDefault {
 	}
 	paths = append(paths, generateFillPaths(c.Resources, c.InitContainers, c.Sidecars, c.PodSpec)...)
 	return builtinReport("deployment", paths, c.PolicyDefaults())
-}
-
-// BuiltinDefaults implements oam.BuiltinDefaultReporter.
-func (c *StatefulsetConfig) BuiltinDefaults() []oam.BuiltinDefault {
-	paths := withoutReplicasUnderScaler(c.parseFills, c.scaled)
-	paths = append(slices.Clone(paths), containerFills(c.InitContainers, c.Sidecars)...)
-	paths = append(paths, claimFills(c.PVCs)...)
-	for _, vct := range c.VolumeClaimTemplates {
-		if vct.accessModesFilled {
-			paths = append(paths, fmt.Sprintf("volumeClaimTemplates[%d].accessModes", vct.index))
-		}
-	}
-	paths = append(paths, generateFillPaths(c.Resources, c.InitContainers, c.Sidecars, c.PodSpec)...)
-	return builtinReport("statefulset", paths, c.PolicyDefaults())
 }

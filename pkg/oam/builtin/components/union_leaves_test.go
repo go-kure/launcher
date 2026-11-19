@@ -31,11 +31,10 @@ func (r unionLeafRule) LowerComponent(comp *oam.Component, _ oam.LoweringContext
 func unionLeafTransformer() *oam.Transformer {
 	return oam.NewTransformer(map[string]oam.ComponentHandler{
 		// The reshaped deployment parser is the role member
-		// (go-kure/launcher#1629); the raw `deployment` and `daemonset` kinds'
-		// `strategy` and `updateStrategy` are open objects the strict decode
-		// checks, not published union leaves.
+		// (go-kure/launcher#1629); the raw `deployment`, `daemonset` and
+		// `statefulset` kinds' `strategy`, `updateStrategy` and claim templates
+		// are open objects the strict decode checks, not published union leaves.
 		roleMemberType: &components.RoleDeploymentHandler{},
-		"statefulset":  &components.StatefulsetHandler{},
 		"webservice":   webserviceViaRule{},
 		"service":      &components.ServiceHandler{},
 	}, nil)
@@ -151,18 +150,6 @@ var unionLeaves = []unionLeaf{
 		},
 	},
 	{
-		name: "statefulset updateStrategy.rollingUpdate.maxUnavailable", compType: "statefulset", strForm: "25%",
-		props: func(v any) map[string]any {
-			return map[string]any{
-				"image":          "ghcr.io/org/db:v1",
-				"updateStrategy": map[string]any{"rollingUpdate": map[string]any{"maxUnavailable": v}},
-			}
-		},
-		rendered: func(objs []client.Object) string {
-			return firstOf[*appsv1.StatefulSet](objs).Spec.UpdateStrategy.RollingUpdate.MaxUnavailable.String()
-		},
-	},
-	{
 		name: "resources.requests.cpu", compType: "webservice", strForm: "500m",
 		props: func(v any) map[string]any {
 			return map[string]any{
@@ -184,21 +171,6 @@ var unionLeaves = []unionLeaf{
 		},
 		rendered: func(objs []client.Object) string {
 			return firstOf[*appsv1.Deployment](objs).Spec.Template.Spec.Containers[0].Resources.Requests.Memory().String()
-		},
-	},
-	{
-		name: "volumeClaimTemplates[].resources.requests.storage", compType: "statefulset", strForm: "10Gi",
-		props: func(v any) map[string]any {
-			return map[string]any{
-				"image": "ghcr.io/org/db:v1",
-				"volumeClaimTemplates": []any{map[string]any{
-					"name": "data", "mountPath": "/var/lib/data",
-					"resources": map[string]any{"requests": map[string]any{"storage": v}},
-				}},
-			}
-		},
-		rendered: func(objs []client.Object) string {
-			return firstOf[*appsv1.StatefulSet](objs).Spec.VolumeClaimTemplates[0].Spec.Resources.Requests.Storage().String()
 		},
 	},
 	{

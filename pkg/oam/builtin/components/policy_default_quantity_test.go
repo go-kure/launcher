@@ -26,7 +26,6 @@ func TestApplyPolicy_NegativeResourceDefaultRefused(t *testing.T) {
 		props map[string]any
 	}{
 		{roleMemberType, &components.RoleDeploymentHandler{}, image},
-		{"statefulset", &components.StatefulsetHandler{}, image},
 		{"webservice", webserviceViaRule{}, image},
 		{"postgresql", postgresqlViaRule{}, map[string]any{}},
 	}

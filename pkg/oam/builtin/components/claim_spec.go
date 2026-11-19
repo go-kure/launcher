@@ -18,11 +18,10 @@ import (
 // persistentvolumeclaim kind and its twin, the pvc trait, read them through
 // ParseClaimProperties (go-kure/launcher#790).
 //
-// A workload's `pvc` volume does not author them, and a statefulset's
-// `volumeClaimTemplates` entry has its own projection (volumeclaim_spec.go),
-// whose selector and dataSourceRef parsers are reused here. `volumeName` is the
-// one key the two treat differently: a template refuses it, since every replica
-// would name the same volume, and a standalone claim accepts it.
+// A workload's `pvc` volume does not author them. The statefulset kind's
+// `volumeClaimTemplates` are raw PersistentVolumeClaims and go through none of
+// this; the selector and dataSourceRef parsers live in volumeclaim_spec.go and
+// are used here.
 //
 // The long `resources` spelling of `size` stays unprojected on a standalone
 // claim.

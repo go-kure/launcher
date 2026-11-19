@@ -117,7 +117,6 @@ var kindListExceptions = map[string]map[string]string{
 		"secret":                ownProperties,
 		"service":               ownProperties,
 		"serviceaccount":        ownProperties,
-		"statefulset":           ownProperties,
 	},
 	"apiSetKinds": {
 		"clusterexternalsecret": ownKindsTable,
@@ -135,7 +134,6 @@ var kindListExceptions = map[string]map[string]string{
 		"secretstore":           ownKindsTable,
 		"service":               ownProperties,
 		"serviceaccount":        ownProperties,
-		"statefulset":           ownProperties,
 	},
 }
 

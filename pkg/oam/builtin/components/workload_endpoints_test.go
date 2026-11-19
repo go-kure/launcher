@@ -23,7 +23,6 @@ type endpointWorkload struct {
 func endpointWorkloads() []endpointWorkload {
 	return []endpointWorkload{
 		{roleMemberType, &components.RoleDeploymentHandler{}},
-		{"statefulset", &components.StatefulsetHandler{}},
 	}
 }
 

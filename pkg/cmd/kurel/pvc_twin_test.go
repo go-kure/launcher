@@ -334,21 +334,27 @@ func TestPVCTwin_RoleVolumeTakesTheCapabilityDefault(t *testing.T) {
 	}
 }
 
-// claimTemplateApp returns an Application holding one statefulset "db" whose
-// single volumeClaimTemplates entry "data" carries props.
+// claimTemplateApp returns an Application holding one raw statefulset "db" whose
+// single volumeClaimTemplates entry "data" is the raw claim the pvc trait's props
+// describe: `size` is its storage request and `storageClassName` its class, which
+// stays out of the spec when props has no such key.
 func claimTemplateApp(t *testing.T, props map[string]any) string {
 	t.Helper()
-	entry := map[string]any{"name": "data", "mountPath": "/data"}
-	for k, v := range props {
-		entry[k] = v
+	spec := map[string]any{"accessModes": []any{"ReadWriteOnce"}}
+	if size, ok := props["size"]; ok {
+		spec["resources"] = map[string]any{"requests": map[string]any{"storage": size}}
 	}
+	if class, ok := props["storageClassName"]; ok {
+		spec["storageClassName"] = class
+	}
+	entry := map[string]any{"metadata": map[string]any{"name": "data"}, "spec": spec}
 	app := map[string]any{
 		"apiVersion": "launcher.gokure.dev/v1alpha1",
 		"kind":       "Application",
 		"metadata":   map[string]any{"name": "my-app", "namespace": "default"},
 		"spec": map[string]any{"components": []any{map[string]any{
 			"name": "db", "type": "statefulset",
-			"properties": map[string]any{"image": "ghcr.io/example/db:v1.0.0", "volumeClaimTemplates": []any{entry}},
+			"properties": rawStatefulsetPropsWith(map[string]any{"volumeClaimTemplates": []any{entry}}),
 		}}},
 	}
 	out, err := yaml.Marshal(app)
@@ -370,9 +376,9 @@ func TestPVCTwin_ClaimTemplateTakesTheCapabilityDefault(t *testing.T) {
 		want  any // spec.storageClassName; nil means absent
 	}{
 		{name: "unset takes the platform class", props: map[string]any{"size": "1Gi"}, want: "platform-ssd"},
-		{name: "null takes the platform class", props: map[string]any{"size": "1Gi", "storageClass": nil}, want: "platform-ssd"},
-		{name: "authored class wins", props: map[string]any{"size": "1Gi", "storageClass": "slow"}, want: "slow"},
-		{name: "authored empty string wins", props: map[string]any{"size": "1Gi", "storageClass": ""}, want: ""},
+		{name: "null takes the platform class", props: map[string]any{"size": "1Gi", "storageClassName": nil}, want: "platform-ssd"},
+		{name: "authored class wins", props: map[string]any{"size": "1Gi", "storageClassName": "slow"}, want: "slow"},
+		{name: "authored empty string wins", props: map[string]any{"size": "1Gi", "storageClassName": ""}, want: ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -397,14 +403,7 @@ func TestPVCTwin_ClaimTemplateTakesTheCapabilityDefault(t *testing.T) {
 			}
 			templateSpec, _ := template["spec"].(map[string]any)
 
-			traitProps := map[string]any{}
-			for k, v := range tc.props {
-				if k == "storageClass" {
-					k = "storageClassName"
-				}
-				traitProps[k] = v
-			}
-			docs, stderr, err = buildPVCDocsWithProfile(t, pvcTwinApp(t, true, "data", traitProps), pvcCapabilityClusterYAML)
+			docs, stderr, err = buildPVCDocsWithProfile(t, pvcTwinApp(t, true, "data", tc.props), pvcCapabilityClusterYAML)
 			if err != nil {
 				t.Fatalf("trait: %v\n%s", err, stderr)
 			}
