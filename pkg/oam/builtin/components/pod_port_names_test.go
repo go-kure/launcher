@@ -26,8 +26,8 @@ type sidecarKind struct {
 // properties, keyed by kind. The role member `role-deployment` is one: it is
 // the reshaped parser the kind-named `deployment` was before it became raw
 // (go-kure/launcher#1629), and the only handler that reads a main-container
-// `ports` list besides statefulset. The raw `daemonset` kind is not one: its
-// containers, sidecars included, are `template.spec` entries.
+// `ports` list. The raw kinds (`daemonset`, `statefulset`, `job`, `cronjob`)
+// are not one: their containers, sidecars included, are pod template entries.
 func sidecarKindProps() map[string]sidecarKind {
 	out := map[string]sidecarKind{
 		roleMemberType: {&components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
@@ -139,9 +139,6 @@ func TestPodPortNames_MainVsSidecar(t *testing.T) {
 		{"webservice http", "webservice", map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, "http"},
 		// webservice's main port is named "http" even when `port` is left to its default.
 		{"webservice default port", "webservice", map[string]any{"image": "ghcr.io/org/app:v1"}, "http"},
-		{"statefulset ports list", "statefulset", map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{
-			map[string]any{"name": "tcp", "containerPort": 5432},
-		}}, "tcp"},
 		{"role-deployment ports list", roleMemberType, map[string]any{"image": "ghcr.io/org/app:v1", "ports": []any{
 			map[string]any{"name": "grpc", "containerPort": 9000},
 		}}, "grpc"},
@@ -163,8 +160,7 @@ func TestPodPortNames_MainVsSidecar(t *testing.T) {
 
 // TestPodPortNames_Accepted keeps what the check must not refuse: distinct
 // names across containers, nameless ports sharing a number across containers
-// (each container has its own network view of declared ports), a statefulset
-// sidecar named "tcp" when the main container declares no ports, and a worker
+// (each container has its own network view of declared ports), and a worker
 // sidecar named "http" (worker's main container declares none).
 func TestPodPortNames_Accepted(t *testing.T) {
 	cases := []struct {
@@ -182,9 +178,6 @@ func TestPodPortNames_Accepted(t *testing.T) {
 				sidecarWithPorts("a", map[string]any{"containerPort": 9090}),
 				sidecarWithPorts("b", map[string]any{"containerPort": 9091}),
 			}}},
-		{"statefulset without main ports", "statefulset", map[string]any{"image": "ghcr.io/org/app:v1", "sidecars": []any{
-			sidecarWithPorts("proxy", map[string]any{"name": "tcp", "containerPort": 15000}),
-		}}},
 		{"worker without main ports", "worker", map[string]any{"image": "ghcr.io/org/app:v1", "sidecars": []any{
 			sidecarWithPorts("proxy", map[string]any{"name": "http", "containerPort": 15000}),
 		}}},

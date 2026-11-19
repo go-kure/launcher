@@ -24,13 +24,12 @@ import (
 //
 // A key that is no field of the upstream type is not listed: the document
 // check refuses it as it refuses any undeclared key, and a caller that skips
-// the check has it dropped, as pkg/oam's README states. The one exception is
-// jobCronOnlyRejectedKeys, the CronJobSpec fields `job` refuses by name.
+// the check has it dropped, as pkg/oam's README states.
 //
 // The hint is a type's answer for its top-level keys. A field below the top
 // level, inside a property the type declares, is refused by the parser of that
 // property (resourcesRejectedKeys, podResourcesRejectedKeys,
-// affinityShorthandRejectedKeys below, volumeClaimTemplateRejectedKeys); the document check appends the type's
+// affinityShorthandRejectedKeys below); the document check appends the type's
 // NestedUnsupportedFieldHint to its refusal of such a key
 // (refusedNestedKeyHint).
 
@@ -56,15 +55,16 @@ var mainContainerRejectedKeys = map[string]string{
 	"volumeDevices":  "volumeDevices: authored on the volume — a volumes entry's devicePath attaches a volumeMode: Block claim to the main container",
 }
 
-// appsPodTemplateRejectedKeys are the corev1.PodSpec fields the types whose
-// object is an apps/v1 workload do not read: apps/v1 validation leaves an
+// appsPodTemplateRejectedKeys are the corev1.PodSpec fields the reshaped types
+// whose object is an apps/v1 Deployment do not read: apps/v1 validation leaves an
 // author nothing to choose on a Deployment's, a StatefulSet's or a DaemonSet's
 // pod template (ValidatePodTemplateSpecForReplicaSet, ValidateStatefulSetSpec
 // and ValidateDaemonSetSpec in pkg/apis/apps/validation). `restartPolicy` is
 // the container field of that name too, which no type reads for its main
-// container. The raw `job` and `cronjob` read the pod's own at
-// `template.spec.restartPolicy` and `jobTemplate.spec.template.spec.restartPolicy`
-// (go-kure/launcher#1629). parsePodSpec refuses them on a pod that is no Job's.
+// container. The raw kinds read the pod's own inside their upstream spec: a
+// `job` at `template.spec.restartPolicy` and a `cronjob` at
+// `jobTemplate.spec.template.spec.restartPolicy` (go-kure/launcher#1629).
+// parsePodSpec refuses them on a pod that is no Job's.
 var appsPodTemplateRejectedKeys = map[string]string{
 	"restartPolicy":         "restartPolicy: not authorable — apps/v1 validation accepts only Always as the restart policy of a Deployment's, a StatefulSet's or a DaemonSet's pod template, which is the API's default; a container's own restartPolicy is not read",
 	"activeDeadlineSeconds": "activeDeadlineSeconds: " + podSpecJobOnlyReason,
@@ -113,7 +113,6 @@ var refusedKeys = map[string][]map[string]string{
 	"role-deployment":       {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"webservice":            {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"worker":                {deploymentSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
-	"statefulset":           {statefulSetSpecRejectedKeys, appsPodTemplateRejectedKeys, podSpecRejectedKeys, mainContainerRejectedKeys},
 	"service":               {serviceRejectedKeys},
 	"persistentvolumeclaim": {claimRejectedKeys},
 	"serviceaccount":        {serviceAccountRejectedKeys},
@@ -159,17 +158,13 @@ var containerNestedRefusals = map[string]nestedRefusal{
 
 // nestedRefusedKeys lists, by component type, the objects below its top level
 // whose parser refuses keys by name (see containerNestedRefusals): the
-// `affinity` shorthand of webservice and worker, and a statefulset's
-// `volumeClaimTemplates` entry, besides the container ones.
+// `affinity` shorthand of webservice and worker, besides the container ones.
 var nestedRefusedKeys = map[string]map[string]nestedRefusal{
 	"role-deployment": containerNestedRefusals,
 	"webservice":      withNestedRefusals(containerNestedRefusals, "affinity", nestedRefusal{affinityShorthandRejectedKeys, reasonOnly}),
 	"worker":          withNestedRefusals(containerNestedRefusals, "affinity", nestedRefusal{affinityShorthandRejectedKeys, reasonOnly}),
-	"statefulset": withNestedRefusals(containerNestedRefusals, "volumeClaimTemplates", nestedRefusal{volumeClaimTemplateRejectedKeys, func(key, reason string) string {
-		return key + ": not authorable — " + reason
-	}}),
-	"job":     containerNestedRefusals,
-	"cronjob": containerNestedRefusals,
+	"job":             containerNestedRefusals,
+	"cronjob":         containerNestedRefusals,
 }
 
 // withNestedRefusals returns a copy of refusals with r added under path.
@@ -216,11 +211,6 @@ func (WorkerRule) NestedUnsupportedFieldHint(parents []string, key string) strin
 	return refusedNestedKeyHint("worker", parents, key)
 }
 
-// NestedUnsupportedFieldHint is the statefulset's refusedNestedKeyHint.
-func (h *StatefulsetHandler) NestedUnsupportedFieldHint(parents []string, key string) string {
-	return refusedNestedKeyHint("statefulset", parents, key)
-}
-
 // NestedUnsupportedFieldHint is the job's refusedNestedKeyHint.
 func (h *JobHandler) NestedUnsupportedFieldHint(parents []string, key string) string {
 	return refusedNestedKeyHint("job", parents, key)
@@ -244,11 +234,6 @@ func (WebserviceRule) UnsupportedFieldHint(key string) string {
 // UnsupportedFieldHint is the worker's refusedKeyHint.
 func (WorkerRule) UnsupportedFieldHint(key string) string {
 	return refusedKeyHint("worker", key)
-}
-
-// UnsupportedFieldHint is the statefulset's refusedKeyHint.
-func (h *StatefulsetHandler) UnsupportedFieldHint(key string) string {
-	return refusedKeyHint("statefulset", key)
 }
 
 // UnsupportedFieldHint is the job's refusedKeyHint.

@@ -71,13 +71,14 @@ func TestProbes_FaultB_AFillThatDoesNotHappen(t *testing.T) {
 // Fault B, the other direction: an entry no probe row lists is named, with what to
 // do about it.
 //
-// The raw deployment fills nothing (go-kure/launcher#1629), so the probe of the
-// reshaped statefulset stands in as the document with a fill to drop.
+// The raw deployment, statefulset, daemonset, job and cronjob fill nothing
+// (go-kure/launcher#1629), so the probe of the webservice stands in as the document
+// with a fill to drop: the protocol its rule fills on the one port.
 func TestProbes_FaultB_AnEntryNoRowLists(t *testing.T) {
-	p := probeNamed(t, "statefulset")
-	p.Fills = slices.DeleteFunc(slices.Clone(p.Fills), func(f probe.Fill) bool { return f.Path == "replicas" })
+	p := probeNamed(t, "webservice")
+	p.Fills = slices.DeleteFunc(slices.Clone(p.Fills), func(f probe.Fill) bool { return f.Path == "ports[0].protocol" })
 	got := strings.Join(probe.CheckReportedFillsAreReal(newTransformer(), []probe.Probe{p}), "\n")
-	for _, want := range []string{"replicas", "no Fill of the probe lists", "add a Fill row", "fix the report"} {
+	for _, want := range []string{"ports[0].protocol", "no Fill of the probe lists", "add a Fill row", "fix the report"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("finding lacks %q: %s", want, got)
 		}
@@ -99,7 +100,7 @@ func TestProbes_FaultA_AStaleLeftToClusterRow(t *testing.T) {
 // Check A names a probe it could not check: a refusal the probe does not state is a
 // finding and never a skip.
 func TestProbes_FaultA_AProbeItCouldNotCheck(t *testing.T) {
-	broken := probeNamed(t, "statefulset")
+	broken := probeNamed(t, "worker")
 	delete(broken.Components[0].Properties, "image")
 	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{broken}), "\n"); !strings.Contains(got, "the probe does not say so") {
 		t.Errorf("a refused probe: want a finding, got %q", got)
@@ -111,10 +112,10 @@ func TestProbes_FaultA_AProbeItCouldNotCheck(t *testing.T) {
 // not it is applied, so a probe row also carries an Other value that must change
 // them. A negative path index in a row is a diagnostic, not a panic.
 func TestProbes_FaultB_ANegativeIndexIsADiagnostic(t *testing.T) {
-	p := probeNamed(t, "statefulset with containers and claim templates")
+	p := probeNamed(t, "deployment with an ingress")
 	fills := slices.Clone(p.Fills)
-	i := slices.IndexFunc(fills, func(f probe.Fill) bool { return f.Path == "ports[0].protocol" })
-	fills[i].Path = "ports[-1].protocol"
+	i := slices.IndexFunc(fills, func(f probe.Fill) bool { return f.Trait == "ingress" && f.Path == "rules[0].paths[0].path" })
+	fills[i].Path = "rules[-1].paths[0].path"
 	p.Fills = fills
 	got := strings.Join(probe.CheckReportedFillsAreReal(newTransformer(), []probe.Probe{p}), "\n")
 	if !strings.Contains(got, "no element -1") {
@@ -125,7 +126,7 @@ func TestProbes_FaultB_ANegativeIndexIsADiagnostic(t *testing.T) {
 // Fault B, the third one: a row that states a value and no source never has its
 // value compared, so it is a finding and not a silent pass.
 func TestProbes_FaultB_AValueWithNoSource(t *testing.T) {
-	p := probeNamed(t, "statefulset")
+	p := probeNamed(t, "worker")
 	fills := slices.Clone(p.Fills)
 	i := slices.IndexFunc(fills, func(f probe.Fill) bool { return f.Path == "resources.limits.cpu" })
 	fills[i].ValueWithoutPolicy = "999m"
@@ -139,7 +140,7 @@ func TestProbes_FaultB_AValueWithNoSource(t *testing.T) {
 // An explicit null on the way to a fill reads as omitted when the fill is authored,
 // as the pipeline reads it: the probe still renders and the fill is still compared.
 func TestProbes_FaultB_ANullOnTheWayToAFill(t *testing.T) {
-	p := probeNamed(t, "statefulset")
+	p := probeNamed(t, "worker")
 	p.Components[0].Properties["resources"] = map[string]any{"requests": nil}
 	for _, f := range probe.CheckReportedFillsAreReal(newTransformer(), []probe.Probe{p}) {
 		if strings.Contains(f, "not under an object") {
@@ -173,7 +174,9 @@ func TestProbes_FaultA_LoweredTypes(t *testing.T) {
 	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{p}), "\n"); !strings.Contains(got, "topologySpread") {
 		t.Errorf("an unlisted gap: want a finding naming topologySpread, got %q", got)
 	}
-	q := probeNamed(t, "statefulset")
+	// The raw statefulset declares no default at all now (go-kure/launcher#1629),
+	// so the stale row sits on the worker's `replicas`, which the report holds.
+	q := probeNamed(t, "worker")
 	q.Unreported = map[string]string{"replicas": "stale"}
 	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{q}), "\n"); !strings.Contains(got, "remove the entry from Unreported") {
 		t.Errorf("a stale Unreported row: want the finding, got %q", got)
@@ -265,23 +268,30 @@ func TestProbes_FaultB_ATraitOtherThatChangesNothing(t *testing.T) {
 	}
 }
 
-// statefulsetWithAScaler is the document that exercises NotAuthorable. The raw
-// deployment declares no replicas default (go-kure/launcher#1629), so the shipped
-// scaler probe, which is a deployment, has no refusal to list. The reshaped
-// statefulset still declares one, and a scaler on it refuses an authored
-// replicas with the same text.
-func statefulsetWithAScaler(t *testing.T) probe.Probe {
+// workerWithAScaler is the document that exercises NotAuthorable. The raw
+// deployment, statefulset and daemonset declare no replicas default
+// (go-kure/launcher#1629), so the shipped scaler probe, which is a deployment,
+// has no refusal to list. The reshaped worker still declares one, and a scaler
+// on it refuses an authored replicas with the same text.
+func workerWithAScaler(t *testing.T) probe.Probe {
 	t.Helper()
-	p := probeNamed(t, "statefulset")
-	p.Name = "statefulset with a scaler"
+	p := probeNamed(t, "worker")
+	p.Name = "worker with a scaler"
 	p.Components[0].Traits = []oam.Trait{{Type: "scaler", Properties: map[string]any{"minReplicas": 2, "maxReplicas": 5}}}
-	// The scaler owns the replica count: the statefulset reports none, and the
-	// trait reports its own fills.
-	p.Fills = slices.DeleteFunc(slices.Clone(p.Fills), func(f probe.Fill) bool { return f.Trait == "" && f.Path == "replicas" })
+	// The scaler owns the replica count: the worker reports none, and the
+	// trait reports its own fills, on the member. Its minimum of two makes the
+	// topology-spread trait write constraints with no policy too, so the gap the
+	// shipped worker probe lists is none here.
+	p.Unreported = nil
+	p.Fills = slices.DeleteFunc(slices.Clone(p.Fills), func(f probe.Fill) bool {
+		return f.Trait == "topology-spread" || (f.Trait == "" && f.Path == "replicas")
+	})
 	p.Fills = append(p.Fills,
-		probe.Fill{Component: "app", Trait: "scaler", Path: "cpuUtilization", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin,
+		probe.Fill{Component: "app", Member: "role-deployment", Trait: "topology-spread", Path: "topologySpreadConstraints",
+			WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin},
+		probe.Fill{Component: "app", Member: "role-deployment", Trait: "scaler", Path: "cpuUtilization", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin,
 			ValueWithPolicy: 80, ValueWithoutPolicy: 80, Other: 70},
-		probe.Fill{Component: "app", Trait: "scaler", Path: "hpaName", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin})
+		probe.Fill{Component: "app", Member: "role-deployment", Trait: "scaler", Path: "hpaName", WithPolicy: oam.SourceBuiltin, WithoutPolicy: oam.SourceBuiltin})
 	p.NotAuthorable = map[string]string{"replicas": "owns the replica count"}
 	return p
 }
@@ -289,25 +299,25 @@ func statefulsetWithAScaler(t *testing.T) probe.Probe {
 // A default the document's own rule refuses to have written is listed in NotAuthorable,
 // and the entry must stay true in both directions.
 func TestProbes_FaultA_NotAuthorable(t *testing.T) {
-	if got := probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{statefulsetWithAScaler(t)}); len(got) != 0 {
+	if got := probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{workerWithAScaler(t)}); len(got) != 0 {
 		t.Fatalf("test bug: the control probe is not clean: %v", got)
 	}
-	p := statefulsetWithAScaler(t)
+	p := workerWithAScaler(t)
 	p.NotAuthorable = nil
 	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{p}), "\n"); !strings.Contains(got, "NotAuthorable") {
 		t.Errorf("an unlisted refusal: want a finding naming NotAuthorable, got %q", got)
 	}
-	e := statefulsetWithAScaler(t)
+	e := workerWithAScaler(t)
 	e.NotAuthorable = map[string]string{"replicas": ""}
 	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{e}), "\n"); !strings.Contains(got, "no text the refusal must contain") {
 		t.Errorf("an empty text: want the finding, got %q", got)
 	}
-	w := statefulsetWithAScaler(t)
+	w := workerWithAScaler(t)
 	w.NotAuthorable = map[string]string{"replicas": "some other reason"}
 	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{w}), "\n"); !strings.Contains(got, "does not contain the stated") {
 		t.Errorf("a refusal for another reason: want the finding, got %q", got)
 	}
-	q := probeNamed(t, "statefulset")
+	q := probeNamed(t, "worker")
 	q.NotAuthorable = map[string]string{"replicas": "stale"}
 	if got := strings.Join(probe.CheckDeclaredDefaults(newTransformer(), []probe.Probe{q}), "\n"); !strings.Contains(got, "remove the entry from NotAuthorable") {
 		t.Errorf("a stale row: want the finding, got %q", got)

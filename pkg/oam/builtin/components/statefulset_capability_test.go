@@ -1,14 +1,11 @@
 package components_test
 
 import (
-	"maps"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -19,36 +16,51 @@ func pvcBinding(rendering map[string]any) map[string]oam.CapabilityBinding {
 	return map[string]oam.CapabilityBinding{"pvc": {Rendering: rendering}}
 }
 
-// A volumeClaimTemplates entry that leaves storageClass unauthored (absent or
-// null) takes the `pvc` capability's storageClassName (go-kure/launcher#761);
-// an authored value, "" included, wins, and a binding that supplies no class
-// fills nothing.
+// stsClaimSpec returns the spec of volumeClaimTemplates[i] of props, and whether
+// the entry has one.
+func stsClaimSpec(props map[string]any, i int) (map[string]any, bool) {
+	spec, ok := props["volumeClaimTemplates"].([]any)[i].(map[string]any)["spec"].(map[string]any)
+	return spec, ok
+}
+
+// A volumeClaimTemplates entry that leaves spec.storageClassName unauthored
+// (absent or null) takes the `pvc` capability's storageClassName
+// (go-kure/launcher#761); an authored value, "" included, wins, and a binding
+// that supplies no class fills nothing.
 func TestStatefulsetHandler_FillCapabilityDefaults(t *testing.T) {
 	platform := pvcBinding(map[string]any{"storageClassName": "platform-ssd"})
 	const absent = "<absent>"
+	// spec builds the entry's spec afresh, so the input and the copy kept to check
+	// it was not mutated share nothing.
+	withClass := func(v any) func() map[string]any {
+		return func() map[string]any {
+			return map[string]any{"metadata": map[string]any{"name": "data"}, "spec": map[string]any{"storageClassName": v, "resources": map[string]any{"requests": map[string]any{"storage": "1Gi"}}}}
+		}
+	}
+	noClass := func() map[string]any {
+		return map[string]any{"metadata": map[string]any{"name": "data"}, "spec": map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "1Gi"}}}}
+	}
+	noSpec := func() map[string]any { return map[string]any{"metadata": map[string]any{"name": "data"}} }
 	cases := []struct {
 		name  string
-		entry map[string]any
+		entry func() map[string]any
 		caps  map[string]oam.CapabilityBinding
-		want  any // the entry's storageClass after the fill; absent means no key
+		want  any // the entry's spec.storageClassName after the fill; absent means no key
 	}{
-		{name: "unset takes the platform class", entry: map[string]any{}, caps: platform, want: "platform-ssd"},
-		{name: "null takes the platform class", entry: map[string]any{"storageClass": nil}, caps: platform, want: "platform-ssd"},
-		{name: "authored class wins", entry: map[string]any{"storageClass": "slow"}, caps: platform, want: "slow"},
-		{name: "authored empty string wins", entry: map[string]any{"storageClass": ""}, caps: platform, want: ""},
-		{name: "no binding", entry: map[string]any{}, caps: nil, want: absent},
-		{name: "rendering without the key", entry: map[string]any{}, caps: pvcBinding(map[string]any{"accessModes": []any{"ReadWriteOnce"}}), want: absent},
-		{name: "rendering null", entry: map[string]any{"storageClass": nil}, caps: pvcBinding(map[string]any{"storageClassName": nil}), want: nil},
-		{name: "scoped binding is not read", entry: map[string]any{}, caps: map[string]oam.CapabilityBinding{"pvc.fast": {Rendering: map[string]any{"storageClassName": "fast"}}}, want: absent},
+		{name: "unset takes the platform class", entry: noClass, caps: platform, want: "platform-ssd"},
+		{name: "no spec takes the platform class", entry: noSpec, caps: platform, want: "platform-ssd"},
+		{name: "null takes the platform class", entry: withClass(nil), caps: platform, want: "platform-ssd"},
+		{name: "authored class wins", entry: withClass("slow"), caps: platform, want: "slow"},
+		{name: "authored empty string wins", entry: withClass(""), caps: platform, want: ""},
+		{name: "no binding", entry: noClass, caps: nil, want: absent},
+		{name: "rendering without the key", entry: noClass, caps: pvcBinding(map[string]any{"accessModes": []any{"ReadWriteOnce"}}), want: absent},
+		{name: "rendering null", entry: withClass(nil), caps: pvcBinding(map[string]any{"storageClassName": nil}), want: nil},
+		{name: "scoped binding is not read", entry: noClass, caps: map[string]oam.CapabilityBinding{"pvc.fast": {Rendering: map[string]any{"storageClassName": "fast"}}}, want: absent},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			entry := map[string]any{"name": "data", "mountPath": "/data", "size": "1Gi"}
-			for k, v := range tc.entry {
-				entry[k] = v
-			}
-			props := map[string]any{"image": "db:1", "volumeClaimTemplates": []any{entry}}
-			before := map[string]any{"image": "db:1", "volumeClaimTemplates": []any{maps.Clone(entry)}}
+			props := map[string]any{"volumeClaimTemplates": []any{tc.entry()}}
+			before := map[string]any{"volumeClaimTemplates": []any{tc.entry()}}
 
 			got, err := (&components.StatefulsetHandler{}).FillCapabilityDefaults(props, oam.LoweringContext{}.WithCapabilities(tc.caps))
 			if err != nil {
@@ -57,13 +69,22 @@ func TestStatefulsetHandler_FillCapabilityDefaults(t *testing.T) {
 			if !reflect.DeepEqual(props, before) {
 				t.Errorf("input mutated: %#v, was %#v", props, before)
 			}
-			filled := got["volumeClaimTemplates"].([]any)[0].(map[string]any)
-			v, present := filled["storageClass"]
-			if !present {
-				v = absent
+			v := any(absent)
+			if spec, ok := stsClaimSpec(got, 0); ok {
+				if class, present := spec["storageClassName"]; present {
+					v = class
+				}
 			}
 			if v != tc.want {
-				t.Errorf("storageClass = %#v, want %#v", v, tc.want)
+				t.Errorf("spec.storageClassName = %#v, want %#v", v, tc.want)
+			}
+			if name := got["volumeClaimTemplates"].([]any)[0].(map[string]any)["metadata"]; !reflect.DeepEqual(name, map[string]any{"name": "data"}) {
+				t.Errorf("metadata = %#v, want it untouched", name)
+			}
+			if spec, ok := stsClaimSpec(got, 0); ok && tc.name != "no spec takes the platform class" {
+				if !reflect.DeepEqual(spec["resources"], map[string]any{"requests": map[string]any{"storage": "1Gi"}}) {
+					t.Errorf("resources = %#v, want them untouched", spec["resources"])
+				}
 			}
 		})
 	}
@@ -72,29 +93,119 @@ func TestStatefulsetHandler_FillCapabilityDefaults(t *testing.T) {
 // Each entry is filled on its own: one entry's authored class does not stop
 // the next entry from taking the platform class.
 func TestStatefulsetHandler_FillCapabilityDefaults_PerEntry(t *testing.T) {
+	entry := func(name string, class ...any) map[string]any {
+		spec := map[string]any{}
+		if len(class) > 0 {
+			spec["storageClassName"] = class[0]
+		}
+		return map[string]any{"metadata": map[string]any{"name": name}, "spec": spec}
+	}
 	props := map[string]any{"volumeClaimTemplates": []any{
-		map[string]any{"name": "data", "storageClass": "slow"},
-		map[string]any{"name": "wal"},
-		map[string]any{"name": "logs", "storageClass": ""},
+		entry("data", "slow"),
+		entry("wal"),
+		entry("logs", ""),
 	}}
 	got, err := (&components.StatefulsetHandler{}).FillCapabilityDefaults(props, oam.LoweringContext{}.WithCapabilities(pvcBinding(map[string]any{"storageClassName": "platform-ssd"})))
 	if err != nil {
 		t.Fatalf("FillCapabilityDefaults: %v", err)
 	}
 	var classes []any
-	for _, e := range got["volumeClaimTemplates"].([]any) {
-		classes = append(classes, e.(map[string]any)["storageClass"])
+	for i := range got["volumeClaimTemplates"].([]any) {
+		spec, _ := stsClaimSpec(got, i)
+		classes = append(classes, spec["storageClassName"])
 	}
 	if want := []any{"slow", "platform-ssd", ""}; !reflect.DeepEqual(classes, want) {
-		t.Errorf("storageClass per entry = %#v, want %#v", classes, want)
+		t.Errorf("storageClassName per entry = %#v, want %#v", classes, want)
+	}
+}
+
+// The strict decode matches keys without regard to case, so `Spec` and
+// `StorageClassName` are authored spellings. The fill works under the spelling
+// the document used: it never adds a second spelling of a field the document
+// has (the decode refuses two), and an authored value in any spelling wins.
+func TestStatefulsetHandler_FillCapabilityDefaults_AnySpelling(t *testing.T) {
+	caps := pvcBinding(map[string]any{"storageClassName": "platform-ssd"})
+	storage := map[string]any{"requests": map[string]any{"storage": "1Gi"}}
+	cases := map[string]struct {
+		entry     map[string]any
+		wantSpec  string // the key the entry's spec ends up under
+		wantClass string // the key the class ends up under
+		want      any
+	}{
+		"Spec, class unset": {
+			entry:    map[string]any{"Spec": map[string]any{"resources": storage}},
+			wantSpec: "Spec", wantClass: "storageClassName", want: "platform-ssd",
+		},
+		"StorageClassName null": {
+			entry:    map[string]any{"spec": map[string]any{"StorageClassName": nil}},
+			wantSpec: "spec", wantClass: "StorageClassName", want: "platform-ssd",
+		},
+		"StorageClassName authored empty": {
+			entry:    map[string]any{"spec": map[string]any{"StorageClassName": ""}},
+			wantSpec: "spec", wantClass: "StorageClassName", want: "",
+		},
+		"Spec and StorageClassName authored": {
+			entry:    map[string]any{"Spec": map[string]any{"STORAGECLASSNAME": "slow"}},
+			wantSpec: "Spec", wantClass: "STORAGECLASSNAME", want: "slow",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			tc.entry["metadata"] = map[string]any{"name": "data"}
+			props := map[string]any{"volumeClaimTemplates": []any{tc.entry}}
+			got, err := (&components.StatefulsetHandler{}).FillCapabilityDefaults(props, oam.LoweringContext{}.WithCapabilities(caps))
+			if err != nil {
+				t.Fatalf("FillCapabilityDefaults: %v", err)
+			}
+			out := got["volumeClaimTemplates"].([]any)[0].(map[string]any)
+			for k := range out {
+				if k != "metadata" && k != tc.wantSpec {
+					t.Errorf("entry has key %q, want only metadata and %q", k, tc.wantSpec)
+				}
+			}
+			spec, _ := out[tc.wantSpec].(map[string]any)
+			if v, ok := spec[tc.wantClass]; !ok || v != tc.want {
+				t.Errorf("spec[%q] = %#v (present %v), want %#v", tc.wantClass, v, ok, tc.want)
+			}
+			for k := range spec {
+				if strings.EqualFold(k, "storageClassName") && k != tc.wantClass {
+					t.Errorf("spec has a second spelling %q of storageClassName", k)
+				}
+			}
+		})
 	}
 }
 
 func TestStatefulsetHandler_FillCapabilityDefaults_ClassMustBeAString(t *testing.T) {
-	props := map[string]any{"volumeClaimTemplates": []any{map[string]any{"name": "data"}}}
+	props := map[string]any{"volumeClaimTemplates": []any{map[string]any{"metadata": map[string]any{"name": "data"}}}}
 	_, err := (&components.StatefulsetHandler{}).FillCapabilityDefaults(props, oam.LoweringContext{}.WithCapabilities(pvcBinding(map[string]any{"storageClassName": 3})))
 	if err == nil || !strings.Contains(err.Error(), `capability "pvc" storageClassName: expected string, got int`) {
 		t.Fatalf("err = %v, want the non-string storageClassName refused", err)
+	}
+}
+
+// A shape the parser refuses is left alone by the fill, whatever the binding, and
+// the platform's capability is not read for it: the parse refuses it in its own
+// words, and `pvc` is not recorded as consumed for a template that is not one.
+func TestStatefulsetHandler_FillCapabilityDefaults_LeavesRefusedShapesToTheParse(t *testing.T) {
+	platform := oam.LoweringContext{}.WithCapabilities(pvcBinding(map[string]any{"storageClassName": 3})) // a binding that would fail if it were read
+	for name, props := range map[string]map[string]any{
+		"no claim templates":         {},
+		"null claim templates":       {"volumeClaimTemplates": nil},
+		"claim templates not a list": {"volumeClaimTemplates": "data"},
+		"an entry that is no map":    {"volumeClaimTemplates": []any{"data"}},
+		"a spec that is no map":      {"volumeClaimTemplates": []any{map[string]any{"metadata": map[string]any{"name": "data"}, "spec": "fast"}}},
+		"an empty list":              {"volumeClaimTemplates": []any{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := (&components.StatefulsetHandler{}).FillCapabilityDefaults(props, platform)
+			if err != nil {
+				t.Fatalf("FillCapabilityDefaults: %v", err)
+			}
+			if !reflect.DeepEqual(got, props) {
+				t.Errorf("props changed: %#v, was %#v", got, props)
+			}
+		})
 	}
 }
 
@@ -108,12 +219,12 @@ func TestStatefulsetHandler_PVCCapabilityIsConsumed(t *testing.T) {
 		wantConsumed []string
 		wantClass    []string
 	}{
-		"claim template":    {templates: []any{map[string]any{"name": "data", "mountPath": "/data", "size": "1Gi"}}, wantConsumed: []string{"pvc"}, wantClass: []string{"platform-ssd"}},
+		"claim template":    {templates: []any{stsClaim("data", "1Gi")}, wantConsumed: []string{"pvc"}, wantClass: []string{"platform-ssd"}},
 		"no claim template": {templates: nil, wantConsumed: nil, wantClass: nil},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			props := map[string]any{"image": "ghcr.io/org/db:v1"}
+			props := ptObject(t, stsPlain(htPlainPod))
 			if tc.templates != nil {
 				props["volumeClaimTemplates"] = tc.templates
 			}
@@ -160,48 +271,34 @@ func TestStatefulsetHandler_PVCCapabilityIsConsumed(t *testing.T) {
 	}
 }
 
-// An authored `storageClass: ""` on a claim template requests no class: the
-// template's storageClassName is a pointer to "", not nil, as on a pvc volume
+// An authored `spec.storageClassName: ""` on a claim template requests no class:
+// the template's storageClassName is a pointer to "", not nil, as on a pvc volume
 // and the persistentvolumeclaim kind (go-kure/launcher#761). Absent, it stays
 // nil and the cluster's default class applies.
 func TestStatefulsetHandler_ClaimTemplateExplicitEmptyStorageClass(t *testing.T) {
 	cases := map[string]struct {
-		entry map[string]any
-		want  *string
+		spec map[string]any
+		want *string
 	}{
-		"explicit empty": {entry: map[string]any{"storageClass": ""}, want: new("")},
-		"absent":         {entry: map[string]any{}, want: nil},
-		"null":           {entry: map[string]any{"storageClass": nil}, want: nil},
-		"authored":       {entry: map[string]any{"storageClass": "fast"}, want: new("fast")},
+		"explicit empty": {spec: map[string]any{"storageClassName": ""}, want: new("")},
+		"absent":         {spec: map[string]any{}, want: nil},
+		"null":           {spec: map[string]any{"storageClassName": nil}, want: nil},
+		"authored":       {spec: map[string]any{"storageClassName": "fast"}, want: new("fast")},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			entry := map[string]any{"name": "data", "mountPath": "/data", "size": "1Gi"}
-			for k, v := range tc.entry {
-				entry[k] = v
+			spec := map[string]any{"resources": map[string]any{"requests": map[string]any{"storage": "1Gi"}}}
+			for k, v := range tc.spec {
+				spec[k] = v
 			}
-			cfg, err := (&components.StatefulsetHandler{}).ToApplicationConfig(&oam.Component{
-				Name: "db", Type: "statefulset",
-				Properties: map[string]any{"image": "db:1", "volumeClaimTemplates": []any{entry}},
-			}, "default")
-			if err != nil {
-				t.Fatalf("ToApplicationConfig: %v", err)
+			props := ptObject(t, stsPlain(htPlainPod))
+			props["volumeClaimTemplates"] = []any{map[string]any{"metadata": map[string]any{"name": "data"}, "spec": spec}}
+			sts := stsGenerate(t, "db", props)
+			if len(sts.Spec.VolumeClaimTemplates) != 1 {
+				t.Fatalf("got %d claim templates, want 1", len(sts.Spec.VolumeClaimTemplates))
 			}
-			objects, err := cfg.Generate(stack.NewApplication("db", "default", cfg))
-			if err != nil {
-				t.Fatalf("Generate: %v", err)
-			}
-			var got *corev1.PersistentVolumeClaim
-			for _, obj := range objects {
-				if s, ok := (*obj).(*appsv1.StatefulSet); ok && len(s.Spec.VolumeClaimTemplates) == 1 {
-					got = &s.Spec.VolumeClaimTemplates[0]
-				}
-			}
-			if got == nil {
-				t.Fatal("no StatefulSet with one claim template")
-			}
-			if !reflect.DeepEqual(got.Spec.StorageClassName, tc.want) {
-				t.Errorf("storageClassName = %v, want %v", ptrString(got.Spec.StorageClassName), ptrString(tc.want))
+			if got := sts.Spec.VolumeClaimTemplates[0].Spec.StorageClassName; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("storageClassName = %v, want %v", ptrString(got), ptrString(tc.want))
 			}
 		})
 	}

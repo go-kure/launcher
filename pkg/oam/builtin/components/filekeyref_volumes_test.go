@@ -19,7 +19,6 @@ var fileKeyRefKinds = []struct {
 	{"webservice", webserviceViaRule{}, nil, true},
 	{"worker", workerViaRule{}, nil, true},
 	{roleMemberType, &components.RoleDeploymentHandler{}, nil, true},
-	{"statefulset", &components.StatefulsetHandler{}, nil, true},
 }
 
 func fileKeyRefEnv(volumeName string) []any {
@@ -110,26 +109,5 @@ func TestFileKeyRef_VolumeCrossCheck(t *testing.T) {
 				})
 			}
 		}
-	}
-}
-
-// TestFileKeyRef_StatefulsetClaimTemplateRefused pins that a volumeClaimTemplate
-// does not satisfy a fileKeyRef: it becomes a persistentVolumeClaim volume, not
-// an emptyDir one, so the API server refuses the reference.
-func TestFileKeyRef_StatefulsetClaimTemplateRefused(t *testing.T) {
-	_, err := (&components.StatefulsetHandler{}).ToApplicationConfig(&oam.Component{
-		Name: "db",
-		Type: "statefulset",
-		Properties: map[string]any{
-			"image": "ghcr.io/org/postgres:v15",
-			"env":   fileKeyRefEnv("data"),
-			"volumeClaimTemplates": []any{
-				map[string]any{"name": "data", "size": "10Gi", "mountPath": "/var/lib/data"},
-			},
-		},
-	}, "default")
-	want := `env "API_KEY": fileKeyRef.volumeName "data": no volume of that name is declared`
-	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("error = %v, want one containing %q", err, want)
 	}
 }

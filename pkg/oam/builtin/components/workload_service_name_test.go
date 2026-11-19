@@ -161,8 +161,8 @@ func TestWorkloadKinds_NoService_AcceptsNonServiceName(t *testing.T) {
 	}{
 		{"daemonset", &components.DaemonsetHandler{}, rawDaemonsetProps("ghcr.io/org/app:v1")},
 		{"daemonset", &components.DaemonsetHandler{}, rawDaemonsetPropsWithPorts("ghcr.io/org/app:v1", ports)},
-		{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-		{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "ports": ports}},
+		{"statefulset", &components.StatefulsetHandler{}, rawStatefulsetProps("ghcr.io/org/app:v1")},
+		{"statefulset", &components.StatefulsetHandler{}, rawStatefulsetPropsWithPorts("ghcr.io/org/app:v1", ports)},
 	} {
 		objs := buildComponent(t, tc.handler, "1api", tc.typ, tc.props)
 		if svcs := servicesIn(objs); len(svcs) != 0 {
@@ -177,10 +177,8 @@ func TestStatefulsetHandler_RejectsInvalidAuthoredServiceName(t *testing.T) {
 	h := &components.StatefulsetHandler{}
 	for _, n := range invalidServiceNames {
 		t.Run(n.name, func(t *testing.T) {
-			_, err := h.ToApplicationConfig(&oam.Component{Name: "db", Type: "statefulset", Properties: map[string]any{
-				"image":       "ghcr.io/org/app:v1",
-				"serviceName": n.value,
-			}}, "default")
+			_, err := h.ToApplicationConfig(&oam.Component{Name: "db", Type: "statefulset",
+				Properties: withProp(rawStatefulsetProps("ghcr.io/org/app:v1"), "serviceName", n.value)}, "default")
 			wantServiceNameError(t, err, "serviceName", n.value)
 		})
 	}
@@ -196,10 +194,8 @@ func TestStatefulsetHandler_AuthoredServiceNameProjected(t *testing.T) {
 		{"db", longest},
 		{"db", leadingDigitServiceName},
 	} {
-		objs := buildComponent(t, &components.StatefulsetHandler{}, tc.component, "statefulset", map[string]any{
-			"image":       "ghcr.io/org/app:v1",
-			"serviceName": tc.serviceName,
-		})
+		objs := buildComponent(t, &components.StatefulsetHandler{}, tc.component, "statefulset",
+			withProp(rawStatefulsetProps("ghcr.io/org/app:v1"), "serviceName", tc.serviceName))
 		if svcs := servicesIn(objs); len(svcs) != 0 {
 			t.Errorf("%s: Services = %v, want none", tc.component, svcs)
 		}
@@ -214,7 +210,7 @@ func TestStatefulsetHandler_AuthoredServiceNameProjected(t *testing.T) {
 func TestStatefulsetHandler_NoServiceName_LeavesItEmpty(t *testing.T) {
 	for _, name := range []string{"db", ""} {
 		cfg, err := (&components.StatefulsetHandler{}).ToApplicationConfig(&oam.Component{
-			Name: name, Type: "statefulset", Properties: map[string]any{"image": "ghcr.io/org/app:v1"},
+			Name: name, Type: "statefulset", Properties: rawStatefulsetProps("ghcr.io/org/app:v1"),
 		}, "default")
 		if err != nil {
 			t.Fatalf("%q: ToApplicationConfig: %v", name, err)
@@ -244,7 +240,7 @@ func statefulSetServiceName(t *testing.T, objs []*client.Object) string {
 // the rule to a non-empty one too.
 func TestStatefulsetConfig_GenerateRejectsInvalidServiceName(t *testing.T) {
 	cfg, err := (&components.StatefulsetHandler{}).ToApplicationConfig(&oam.Component{
-		Name: "db", Type: "statefulset", Properties: map[string]any{"image": "ghcr.io/org/app:v1"},
+		Name: "db", Type: "statefulset", Properties: rawStatefulsetProps("ghcr.io/org/app:v1"),
 	}, "default")
 	if err != nil {
 		t.Fatalf("ToApplicationConfig: %v", err)
@@ -253,7 +249,7 @@ func TestStatefulsetConfig_GenerateRejectsInvalidServiceName(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *StatefulsetConfig, got %T", cfg)
 	}
-	sc.ServiceName = "api.v1"
+	sc.Spec.ServiceName = "api.v1"
 	_, err = cfg.Generate(stack.NewApplication("db", "default", cfg))
 	wantServiceNameError(t, err, "serviceName", "api.v1")
 }

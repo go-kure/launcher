@@ -7,9 +7,8 @@ import (
 	"testing"
 )
 
-// The pod template metadata an author sets with `podMetadata` on the reshaped
-// controller kinds (go-kure/launcher#1178) and on the webservice and worker
-// (go-kure/launcher#1216). The properties `labels` and
+// The pod template metadata an author sets with `podMetadata` on the webservice
+// and worker (go-kure/launcher#1178, go-kure/launcher#1216). The properties `labels` and
 // `annotations` of the same component stay on the object (component_object_
 // metadata_test.go); these tests hold that `podMetadata` reaches the pod
 // template, and only it.
@@ -27,13 +26,11 @@ var podMetadataKinds = []struct {
 	selector  bool
 }{
 	// The webservice and worker lower to the role-deployment member, which takes
-	// the property (go-kure/launcher#1216). The raw deployment, daemonset, job and
-	// cronjob kinds take none: their pod template metadata is the upstream
-	// template.metadata (TestPodMetadata_RawKindsRefuseIt). The statefulset row
-	// stands for the Set kinds.
+	// the property (go-kure/launcher#1216). The raw deployment, daemonset,
+	// statefulset, job and cronjob kinds take none: their pod template metadata is
+	// the upstream template.metadata (TestPodMetadata_RawKindsRefuseIt).
 	{typ: "webservice", kind: "Deployment", template: []string{"spec", "template"}, selector: true},
 	{typ: "worker", kind: "Deployment", template: []string{"spec", "template"}, selector: true},
-	{typ: "statefulset", kind: "StatefulSet", template: []string{"spec", "template"}, selector: true},
 }
 
 func podMetadataProps(typ string, podMetadata any) map[string]any {
@@ -160,15 +157,16 @@ func TestPodMetadata_JobKeysAreOrdinaryElsewhere(t *testing.T) {
 	}
 }
 
-// The raw deployment, daemonset, job and cronjob kinds have no `podMetadata`:
-// their pod template metadata is the upstream template.metadata, so the reshaped
-// property is an unsupported field (go-kure/launcher#1629).
+// The raw deployment, daemonset, statefulset, job and cronjob kinds have no
+// `podMetadata`: their pod template metadata is the upstream template.metadata, so
+// the reshaped property is an unsupported field (go-kure/launcher#1629).
 func TestPodMetadata_RawKindsRefuseIt(t *testing.T) {
 	for typ, props := range map[string]map[string]any{
-		"deployment": rawDeploymentProps("ghcr.io/example/app:v1.0.0"),
-		"daemonset":  rawDaemonsetProps("ghcr.io/example/app:v1.0.0"),
-		"job":        rawJobProps("ghcr.io/example/app:v1.0.0"),
-		"cronjob":    rawCronjobProps("ghcr.io/example/app:v1.0.0"),
+		"deployment":  rawDeploymentProps("ghcr.io/example/app:v1.0.0"),
+		"daemonset":   rawDaemonsetProps("ghcr.io/example/app:v1.0.0"),
+		"statefulset": rawStatefulsetProps("ghcr.io/example/app:v1.0.0"),
+		"job":         rawJobProps("ghcr.io/example/app:v1.0.0"),
+		"cronjob":     rawCronjobProps("ghcr.io/example/app:v1.0.0"),
 	} {
 		t.Run(typ, func(t *testing.T) {
 			props["podMetadata"] = map[string]any{"labels": map[string]any{podMetadataLabelKey: podMetadataLabelValue}}

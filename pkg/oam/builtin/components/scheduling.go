@@ -16,10 +16,8 @@ import (
 // This file projects the three raw corev1 pod-level scheduling shapes —
 // `affinity`, `topologySpreadConstraints` and (via the pre-existing
 // parseTolerations) `tolerations` — for the `role-deployment` member of
-// `webservice` and `worker` (go-kure/launcher#412). Other workload kinds publish
-// the ones their PropertySchema names, through the same parsers
-// (go-kure/launcher#790): `statefulset` takes all three.
-// The kind-named `deployment`, `daemonset`, `job` and `cronjob` call none of them: since
+// `webservice` and `worker` (go-kure/launcher#412). The kind-named `deployment`,
+// `daemonset`, `statefulset`, `job` and `cronjob` call none of them: since
 // go-kure/launcher#1629 each decodes the whole upstream spec, the pod spec
 // included.
 //

@@ -134,7 +134,7 @@ func policyDefaultCases() []policyDefaultCase {
 	var cases []policyDefaultCase
 	// Resource defaults on every kind that has them. cnpg-cluster is reached
 	// through a postgresql component.
-	// The raw `deployment`, `daemonset`, `job` and `cronjob` have none (go-kure/launcher#1629); the worker stands for
+	// The raw `deployment`, `daemonset`, `statefulset`, `job` and `cronjob` have none (go-kure/launcher#1629); the worker stands for
 	// the reshaped deployment it lowers into, which reports on its role member.
 	kinds := []struct {
 		typ   string
@@ -142,7 +142,6 @@ func policyDefaultCases() []policyDefaultCase {
 		owner owner
 	}{
 		{"worker", nil, workerOwner},
-		{"statefulset", nil, owner{component: "app"}},
 	}
 	for _, k := range kinds {
 		comp := workload("app", k.typ, k.extra)
@@ -162,7 +161,8 @@ func policyDefaultCases() []policyDefaultCase {
 			})
 		}
 	}
-	for _, k := range kinds[:2] {
+	// The replica default is the worker's alone: the raw kinds apply none.
+	for _, k := range kinds[:1] {
 		cases = append(cases, policyDefaultCase{
 			name: k.typ + "/DefaultReplicas", accessor: "DefaultReplicas", comp: workload("app", k.typ, nil),
 			policy: &defaultsPolicy{replicas: i32(3)}, owner: k.owner, path: "replicas",
@@ -385,7 +385,6 @@ func extraContainerCases() []struct {
 		sidecars bool
 		owner    owner
 	}{
-		{"statefulset", nil, true, owner{component: "app"}},
 		{"webservice", map[string]any{"port": 8080}, true, owner{component: "app", member: "role-deployment"}},
 		{"worker", nil, true, owner{component: "app", member: "role-deployment"}},
 	}

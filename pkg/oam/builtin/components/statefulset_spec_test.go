@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -9,23 +10,21 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 )
 
-// statefulSetFrom pulls the StatefulSet out of a generated object list.
-func statefulSetFrom(t *testing.T, props map[string]any) *appsv1.StatefulSet {
+// statefulSetFrom builds the plain raw statefulset with the given top-level
+// properties added, and returns the generated StatefulSet.
+func statefulSetFrom(t *testing.T, extra map[string]any) *appsv1.StatefulSet {
 	t.Helper()
-	for _, obj := range generateKind(t, &components.StatefulsetHandler{}, "statefulset", props) {
-		if sts, ok := (*obj).(*appsv1.StatefulSet); ok {
-			return sts
-		}
+	props := ptObject(t, stsPlain(htPlainPod))
+	for k, v := range extra {
+		props[k] = v
 	}
-	t.Fatal("no StatefulSet in the generated objects")
-	return nil
+	return stsGenerate(t, "db", props)
 }
 
-// TestStatefulSetSpec_ReachesSpec checks the six kind-level properties land on
-// the generated appsv1.StatefulSetSpec, not merely on the parsed config.
+// TestStatefulSetSpec_ReachesSpec checks the kind-level properties land on the
+// generated appsv1.StatefulSetSpec, not merely on the parsed config.
 func TestStatefulSetSpec_ReachesSpec(t *testing.T) {
 	sts := statefulSetFrom(t, map[string]any{
-		"image":               "ghcr.io/org/app:v1",
 		"podManagementPolicy": "Parallel",
 		"updateStrategy": map[string]any{
 			"type": "RollingUpdate",
@@ -40,7 +39,9 @@ func TestStatefulSetSpec_ReachesSpec(t *testing.T) {
 			"whenDeleted": "Delete",
 			"whenScaled":  "Retain",
 		},
-		"ordinals": map[string]any{"start": 4},
+		"ordinals":    map[string]any{"start": 4},
+		"serviceName": "db-headless",
+		"replicas":    2,
 	})
 	spec := sts.Spec
 
@@ -76,17 +77,28 @@ func TestStatefulSetSpec_ReachesSpec(t *testing.T) {
 	if spec.Ordinals == nil || spec.Ordinals.Start != 4 {
 		t.Errorf("Ordinals = %v, want start 4", spec.Ordinals)
 	}
+	if spec.ServiceName != "db-headless" {
+		t.Errorf("ServiceName = %q, want db-headless", spec.ServiceName)
+	}
+	if spec.Replicas == nil || *spec.Replicas != 2 {
+		t.Errorf("Replicas = %v, want 2", spec.Replicas)
+	}
 }
 
-// TestStatefulSetSpec_UnauthoredKeepsConstructorDefaults pins the no-op half of
-// the projection: with none of the six properties authored, the generated spec
-// still carries exactly what kure's CreateStatefulSet leaves unset — nothing,
-// since the builder-contract release-1 constructor is identity-only
-// (go-kure/launcher#361; PodManagementPolicy used to default to OrderedReady
-// here, now left empty for the API server to default at admission).
-func TestStatefulSetSpec_UnauthoredKeepsConstructorDefaults(t *testing.T) {
-	spec := statefulSetFrom(t, map[string]any{"image": "ghcr.io/org/app:v1"}).Spec
+// TestStatefulSetSpec_UnauthoredStaysUnset pins the no-op half of the projection:
+// with none of the optional properties authored, the generated spec carries
+// nothing the author did not write, since the constructor is identity-only
+// (go-kure/launcher#361) and the kind fills no default (go-kure/launcher#1629):
+// the API server defaults them at admission.
+func TestStatefulSetSpec_UnauthoredStaysUnset(t *testing.T) {
+	spec := statefulSetFrom(t, nil).Spec
 
+	if spec.Replicas != nil {
+		t.Errorf("Replicas = %d, want nil", *spec.Replicas)
+	}
+	if spec.ServiceName != "" {
+		t.Errorf("ServiceName = %q, want empty", spec.ServiceName)
+	}
 	if spec.PodManagementPolicy != "" {
 		t.Errorf("PodManagementPolicy = %q, want empty (constructor is identity-only)", spec.PodManagementPolicy)
 	}
@@ -105,24 +117,33 @@ func TestStatefulSetSpec_UnauthoredKeepsConstructorDefaults(t *testing.T) {
 	if spec.Ordinals != nil {
 		t.Errorf("Ordinals = %v, want nil", spec.Ordinals)
 	}
+	if len(spec.VolumeClaimTemplates) != 0 {
+		t.Errorf("VolumeClaimTemplates = %v, want none", spec.VolumeClaimTemplates)
+	}
 }
 
-// TestStatefulSetSpec_SelectorStaysBuilderManaged: `selector` is rejected as a
-// property rather than ignored, and the handler's own selector survives. Since
-// the release-1 builder contract (go-kure/launcher#361) that selector is written
-// by statefulset.go, not by the constructor — the emitted value is unchanged,
-// only its author is.
-func TestStatefulSetSpec_SelectorStaysBuilderManaged(t *testing.T) {
-	err := generateErr(t, &components.StatefulsetHandler{}, "statefulset", map[string]any{
-		"image":    "ghcr.io/org/app:v1",
-		"selector": map[string]any{"matchLabels": map[string]any{"app": "mine"}},
+// TestStatefulSetSpec_SelectorIsAuthored: `selector` is a required property and
+// the emitted one is the authored one, untouched: launcher derives none and adds no
+// `app` entry to it. Before go-kure/launcher#1629 it was refused as a property and
+// the handler wrote `app=<name>` itself.
+func TestStatefulSetSpec_SelectorIsAuthored(t *testing.T) {
+	sts := statefulSetFrom(t, map[string]any{
+		"selector": map[string]any{"matchLabels": map[string]any{"tier": "db", "role": "primary"}},
+		"template": map[string]any{
+			"metadata": map[string]any{"labels": map[string]any{"tier": "db", "role": "primary"}},
+			"spec":     map[string]any{"containers": []any{map[string]any{"name": "app", "image": "registry.example/team/db:1.2.3"}}},
+		},
 	})
-	if err == nil {
-		t.Fatal("authoring selector succeeded, want a rejection")
+	got := sts.Spec.Selector
+	if got == nil || len(got.MatchLabels) != 2 || got.MatchLabels["tier"] != "db" || got.MatchLabels["role"] != "primary" || len(got.MatchExpressions) != 0 {
+		t.Errorf("Selector = %v, want the authored tier and role labels only", got)
+	}
+	if sts.Spec.Template.Labels["app"] != "db" {
+		t.Errorf("template labels = %v, want the app label added", sts.Spec.Template.Labels)
 	}
 
-	sts := statefulSetFrom(t, map[string]any{"image": "ghcr.io/org/app:v1"})
-	if sts.Spec.Selector == nil || sts.Spec.Selector.MatchLabels["app"] != "app" {
-		t.Errorf("Selector = %v, want the handler's app=app", sts.Spec.Selector)
+	err := generateErr(t, &components.StatefulsetHandler{}, "statefulset", map[string]any{"template": ptObject(t, stsPlain(htPlainPod))["template"]})
+	if err == nil || !strings.Contains(err.Error(), "selector: required") {
+		t.Errorf("no selector: err = %v, want the required refusal", err)
 	}
 }

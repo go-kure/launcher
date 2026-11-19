@@ -731,6 +731,12 @@ func (d *ExternalSecretDecorator) Generate(app *stack.Application) ([]*client.Ob
 		}
 		return nil, noWorkloadError("external-secret", props, decoratedComponent(d.decoratorBase, app), "")
 	}
+	if d.MountPath != "" {
+		if err := checkClaimTemplateCollision(objects, d.SecretName,
+			"external-secret mountPath", "rename the secret via targetSecretName"); err != nil {
+			return nil, err
+		}
+	}
 	for _, podSpec := range podSpecs {
 		if err := d.injectInto(podSpec); err != nil {
 			return nil, err

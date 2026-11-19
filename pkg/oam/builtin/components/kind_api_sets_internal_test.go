@@ -673,6 +673,7 @@ var apiSetKinds = []apiSetKind{
 	{component: "runtimeclass", typ: reflect.TypeFor[nodev1.RuntimeClass](), source: markerAPISource, skip: objectIdentity},
 	{component: "servicecidr", typ: reflect.TypeFor[networkingv1.ServiceCIDRSpec](), source: markerAPISource},
 	{component: "servicemonitor", typ: reflect.TypeFor[monitoringv1.ServiceMonitorSpec](), source: markerAPISource},
+	{component: "statefulset", typ: reflect.TypeFor[appsv1.StatefulSetSpec](), source: markerAPISource, listed: podSpecOmitted("template.spec.")},
 	{component: "storageclass", typ: reflect.TypeFor[storagev1.StorageClass](), source: markerAPISource, skip: objectIdentity},
 	{
 		component: "tcproute", typ: reflect.TypeFor[gatewayv1.TCPRouteSpec](),

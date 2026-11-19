@@ -23,7 +23,6 @@ import (
 
 var parityHandlers = map[string]oam.ComponentHandler{
 	roleDeploymentMember:    &RoleDeploymentHandler{},
-	"statefulset":           &StatefulsetHandler{},
 	"service":               &ServiceHandler{},
 	"persistentvolumeclaim": &PersistentVolumeClaimHandler{},
 }
@@ -68,8 +67,6 @@ func parityPodTemplate(t *testing.T, objects []*client.Object) corev1.PodTemplat
 		switch o := (*obj).(type) {
 		case *appsv1.Deployment:
 			return o.Spec.Template
-		case *appsv1.StatefulSet:
-			return o.Spec.Template
 		}
 	}
 	t.Fatal("no workload object in the output")
@@ -84,7 +81,7 @@ func parityPodTemplate(t *testing.T, objects []*client.Object) corev1.PodTemplat
 // the container.
 func TestHandParsedKinds_TemplateMetadataAndContainerName(t *testing.T) {
 	want := metav1.ObjectMeta{Labels: map[string]string{"app": "app"}}
-	for _, componentType := range []string{roleDeploymentMember, "statefulset"} {
+	for _, componentType := range []string{roleDeploymentMember} {
 		t.Run(componentType, func(t *testing.T) {
 			objects, err := parityGenerate(t, componentType, nil)
 			if err != nil {
@@ -157,16 +154,15 @@ type paritySelectorSite struct {
 }
 
 // paritySelectorSites lists every label selector the hand-parsed kinds
-// parse: 20.
+// parse: 10. The raw kinds (deployment, daemonset, statefulset, job and
+// cronjob, go-kure/launcher#1629) decode the upstream spec and are held to
+// every selector by TestLabelSelectorKinds_CoverEverySelector.
 //
-//   - role-deployment (the reshaped deployment parser) and statefulset read
-//     the raw
+//   - role-deployment (the reshaped deployment parser) reads the raw
 //     `affinity`: two arms (podAffinity, podAntiAffinity), each with required
 //     and preferred terms, each term with a labelSelector and a
 //     namespaceSelector — eight selectors — and the labelSelector of a
-//     `topologySpreadConstraints` entry: nine a kind, 18;
-//   - statefulset also has the `selector` of a `volumeClaimTemplates` entry:
-//     one;
+//     `topologySpreadConstraints` entry: nine;
 //   - persistentvolumeclaim has its `selector`: one. The `pvc` trait reads a
 //     claim through the same parser (ParseClaimProperties).
 //
@@ -199,7 +195,7 @@ func paritySelectorSites() []paritySelectorSite {
 			},
 		}
 	}
-	for _, componentType := range []string{roleDeploymentMember, "statefulset"} {
+	for _, componentType := range []string{roleDeploymentMember} {
 		for _, arm := range []string{"podAffinity", "podAntiAffinity"} {
 			for _, mode := range []string{required, preferred} {
 				for _, field := range []string{"labelSelector", "namespaceSelector"} {
@@ -255,20 +251,6 @@ func paritySelectorSites() []paritySelectorSite {
 		sites = append(sites, topologySpread(componentType))
 	}
 	sites = append(sites, paritySelectorSite{
-		componentType: "statefulset",
-		path:          "volumeClaimTemplates[0].selector",
-		author: func(sel map[string]any) (string, any) {
-			return "volumeClaimTemplates", []any{map[string]any{"name": "data", "mountPath": "/data", "size": "1Gi", "selector": sel}}
-		},
-		read: func(t *testing.T, objects []*client.Object) *metav1.LabelSelector {
-			t.Helper()
-			templates := parityObject[*appsv1.StatefulSet](t, objects).Spec.VolumeClaimTemplates
-			if len(templates) != 1 {
-				t.Fatalf("volumeClaimTemplates = %+v, want one", templates)
-			}
-			return templates[0].Spec.Selector
-		},
-	}, paritySelectorSite{
 		componentType: "persistentvolumeclaim",
 		path:          "selector",
 		author:        func(sel map[string]any) (string, any) { return "selector", sel },
@@ -289,8 +271,8 @@ func paritySelectorSites() []paritySelectorSite {
 // not write, or as an object the API server turns away.
 func TestHandParsedKinds_MatchExpressionsAtEverySelector(t *testing.T) {
 	sites := paritySelectorSites()
-	if len(sites) != 20 {
-		t.Fatalf("paritySelectorSites lists %d sites, want 20: a site was added or lost, so recount its comment", len(sites))
+	if len(sites) != 10 {
+		t.Fatalf("paritySelectorSites lists %d sites, want 10: a site was added or lost, so recount its comment", len(sites))
 	}
 	whole := map[string]any{"key": "tier", "operator": "In", "values": []any{"web"}}
 	wantWhole := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{

@@ -42,7 +42,8 @@ func sssComponent(name, typ string, extra map[string]any, trs ...oam.Trait) oam.
 		props = rawDeploymentProps(name, "ghcr.io/org/app:v1")
 	}
 	if typ == "statefulset" {
-		props["serviceName"] = "db-headless"
+		// The raw kind takes a StatefulSetSpec.
+		props = rawStatefulsetProps(name, "ghcr.io/org/app:v1", map[string]any{"serviceName": "db-headless"})
 	}
 	for k, v := range extra {
 		props[k] = v
@@ -376,9 +377,8 @@ func (sstsGroupRule) ComponentType() string { return "db-pair" }
 
 func (sstsGroupRule) LowerComponent(c *oam.Component, _ oam.LoweringContext) (oam.LoweringResult, error) {
 	return oam.LoweringResult{Components: []oam.Component{
-		{Name: c.Name, Type: "statefulset", Properties: map[string]any{
-			"image": "ghcr.io/org/db:v1", "serviceName": c.Name,
-		}, Traits: c.Traits},
+		{Name: c.Name, Type: "statefulset", Properties: rawStatefulsetProps(c.Name, "ghcr.io/org/db:v1",
+			map[string]any{"serviceName": c.Name}), Traits: c.Traits},
 		{Name: c.Name, Type: "service", Properties: map[string]any{
 			"clusterIP": "None",
 			"selector":  map[string]any{"app": c.Name},

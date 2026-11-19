@@ -3,9 +3,11 @@ package traits
 import (
 	"github.com/go-kure/kure/pkg/stack"
 	"github.com/go-kure/kure/pkg/stack/layout"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -225,16 +227,15 @@ func (d decoratorBase) ComponentName() string {
 // property the caller can change to resolve the collision (e.g. "rename the
 // secret via targetSecretName").
 //
-// The main container's raw block devices are checked by name too
-// (go-kure/launcher#385): a statefulset's volumeMode: Block claim template
-// has no entry in podSpec.Volumes, only a VolumeDevice, and a same-named
-// mount beside it is refused by ValidateVolumeDevices.
-//
-// So are the main container's mounts: a statefulset's filesystem claim
-// template likewise has no entry in podSpec.Volumes, only a VolumeMount, and
-// the StatefulSet controller replaces a pod volume named like a claim template
-// with the claim — the trait's ConfigMap or Secret would never be mounted.
-// Every other mount names a Volume, which the first loop already covers.
+// The container lists are checked by name too (go-kure/launcher#385), because
+// the launcher does not check that the pod has a volume for every entry (the
+// API server does), so a raw workload can mount or attach a name no entry of
+// podSpec.Volumes carries. A decorator volume of that name would back it
+// silently. Devices: any container or init container, since neither trait adds
+// a Block volume and a same-named filesystem mount beside a device is refused
+// by ValidateVolumeDevices. Mounts: the main container only, as before: a
+// sidecar or init container may mount the volume a trait adds, which is the
+// reason an undeclared mount name stays accepted there.
 func checkVolumeCollision(podSpec *corev1.PodSpec, name, source, hint string) error {
 	for _, v := range podSpec.Volumes {
 		if v.Name == name {
@@ -243,19 +244,50 @@ func checkVolumeCollision(podSpec *corev1.PodSpec, name, source, hint string) er
 				source, name, hint)
 		}
 	}
-	if len(podSpec.Containers) > 0 {
-		for _, vd := range podSpec.Containers[0].VolumeDevices {
-			if vd.Name == name {
-				return errors.Errorf(
-					"%s: volume %q already exists on the workload as a raw block device; %s",
-					source, name, hint)
+	for _, cs := range [][]corev1.Container{podSpec.InitContainers, podSpec.Containers} {
+		for _, c := range cs {
+			for _, vd := range c.VolumeDevices {
+				if vd.Name == name {
+					return errors.Errorf(
+						"%s: volume %q already exists on the workload as a raw block device; %s",
+						source, name, hint)
+				}
 			}
 		}
+	}
+	if len(podSpec.Containers) > 0 {
 		for _, vm := range podSpec.Containers[0].VolumeMounts {
 			if vm.Name == name {
 				return errors.Errorf(
-					"%s: volume %q already exists on the workload as a claim template; %s",
+					"%s: volume %q already exists on the workload as a volume mount; %s",
 					source, name, hint)
+			}
+		}
+	}
+	return nil
+}
+
+// checkClaimTemplateCollision returns an error if a StatefulSet among objects
+// has a claim template named name (go-kure/launcher#385). A claim template
+// (spec.volumeClaimTemplates) has no entry in the pod's volumes, so
+// checkVolumeCollision cannot see it, and the StatefulSet controller replaces
+// a pod volume named like a claim template with the claim: the trait's
+// ConfigMap or Secret would never be mounted, whichever container mounts the
+// claim and even when none does.
+func checkClaimTemplateCollision(objects []*client.Object, name, source, hint string) error {
+	for _, objPtr := range objects {
+		if objPtr == nil {
+			continue
+		}
+		sts, ok := (*objPtr).(*appsv1.StatefulSet)
+		if !ok {
+			continue
+		}
+		for _, vct := range sts.Spec.VolumeClaimTemplates {
+			if vct.Name == name {
+				return errors.Errorf(
+					"%s: volume %q already exists on the workload as a claim template of StatefulSet %q; %s",
+					source, name, sts.Name, hint)
 			}
 		}
 	}

@@ -162,6 +162,10 @@ func (d *ConfigMapDecorator) Generate(app *stack.Application) ([]*client.Object,
 	if len(podSpecs) == 0 {
 		return nil, noWorkloadError("configmap", []string{"mountPath"}, decoratedComponent(d.decoratorBase, app), "")
 	}
+	if err := checkClaimTemplateCollision(objects, d.ConfigMapName,
+		"configmap mountPath", "rename the configmap via the 'name' property"); err != nil {
+		return nil, err
+	}
 	for _, podSpec := range podSpecs {
 		if err := checkVolumeCollision(podSpec, d.ConfigMapName,
 			"configmap mountPath", "rename the configmap via the 'name' property"); err != nil {

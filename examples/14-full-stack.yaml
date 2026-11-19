@@ -178,16 +178,34 @@ spec:
   - name: session-store
     type: statefulset
     properties:
-      image: myregistry/session-store:v1.0.0
       replicas: 3
-      ports:
-      - name: tcp
-        containerPort: 6379
+      selector:
+        matchLabels:
+          app: session-store
       serviceName: session-store-headless
+      template:
+        metadata:
+          labels:
+            app: session-store
+        spec:
+          containers:
+          - name: session-store
+            image: myregistry/session-store:v1.0.0
+            ports:
+            - name: tcp
+              containerPort: 6379
+            volumeMounts:
+            - name: data
+              mountPath: /data
       volumeClaimTemplates:
-      - name: data
-        size: "10Gi"
-        mountPath: /data
+      - metadata:
+          name: data
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi
 
   # --- service: the statefulset's governing (headless) Service ---
   - name: session-store-headless

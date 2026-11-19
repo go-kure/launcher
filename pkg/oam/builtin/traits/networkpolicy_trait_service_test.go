@@ -67,7 +67,7 @@ func routerProps(kind string) map[string]any {
 		props = rawDeploymentProps("api", "api:1.0")
 	}
 	if kind == "statefulset" {
-		props["serviceName"] = "api-headless"
+		props = rawStatefulsetProps("api", "api:1.0", map[string]any{"serviceName": "api-headless"})
 	}
 	return props
 }

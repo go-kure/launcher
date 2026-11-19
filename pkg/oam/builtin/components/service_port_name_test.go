@@ -75,7 +75,7 @@ func TestWorkloadConfigs_NoServiceKindsAreNotBackends(t *testing.T) {
 		props   map[string]any
 	}{
 		{"daemonset", &components.DaemonsetHandler{}, rawDaemonsetPropsWithPorts("prom/node-exporter:v1.0.0", ports)},
-		{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "postgres:16", "ports": ports, "serviceName": "db"}},
+		{"statefulset", &components.StatefulsetHandler{}, rawStatefulsetPropsWithPorts("postgres:16", ports)},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			cfg, err := tc.handler.ToApplicationConfig(&oam.Component{Name: "web", Type: tc.kind, Properties: tc.props}, "default")

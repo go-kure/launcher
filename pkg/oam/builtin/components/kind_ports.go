@@ -4,7 +4,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
@@ -33,33 +32,10 @@ func containerPortEndpoints(componentName string, ports []corev1.ContainerPort) 
 	return eps
 }
 
-// The kind-named workload component that keeps the reshaped form, statefulset,
-// publishes the main container's `ports` list at the top level
-// (go-kure/launcher#334): container ports are a PodSpec field, and a kind
-// component projects its API kind's fields. The raw kinds, deployment and
-// daemonset, take them under `template.spec.containers` (go-kure/launcher#1629). Declaring them emits no
+// The reshaped workload member, `role-deployment`, publishes the main
+// container's `ports` list at the top level (go-kure/launcher#334). The raw
+// kinds take the ports as upstream ContainerPort entries
+// (go-kure/launcher#1629): deployment, daemonset, statefulset and job under
+// `template.spec.containers`, cronjob under
+// `jobTemplate.spec.template.spec.containers`. Declaring ports emits no
 // Service; an authored `service` component exposes the pods.
-
-// parseMainContainerHandlers parses the main container's `probes` and
-// `lifecycle` on a kind whose main container declares ports, the authored
-// `ports` as parseContainerPorts returned them. Without them a named
-// probe/lifecycle port is refused outright, since the kubelet has no
-// ContainerPort to resolve it against. With them, any valid name is admitted
-// and then checked against the declared names, as deployment checks its own.
-func parseMainContainerHandlers(props map[string]any, ports []corev1.ContainerPort) (ProbeConfig, *corev1.Lifecycle, error) {
-	namedPorts := len(ports) > 0
-	probes, err := parseProbes(props, namedPorts, "")
-	if err != nil {
-		return ProbeConfig{}, nil, errors.Wrap(err, "invalid probe configuration")
-	}
-	lifecycle, err := parseLifecycle(props, namedPorts, "")
-	if err != nil {
-		return ProbeConfig{}, nil, errors.Wrap(err, "invalid lifecycle configuration")
-	}
-	if namedPorts {
-		if err := checkNamedPortsDeclared(probes, lifecycle, ports, "the main container"); err != nil {
-			return ProbeConfig{}, nil, err
-		}
-	}
-	return probes, lifecycle, nil
-}

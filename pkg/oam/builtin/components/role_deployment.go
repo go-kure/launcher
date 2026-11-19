@@ -102,7 +102,7 @@ func (h *RoleDeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 	maps.Copy(m, schemaContainerFields())
 	maps.Copy(m, schemaPodSpec(false, false))
 	maps.Copy(m, schemaDeploymentSpec())
-	return oam.DeclareBounds(m, workloadBounds(true, true, false))
+	return oam.DeclareBounds(m, workloadBounds(true, true))
 }
 
 // Endpoints implements oam.EndpointProvider: one endpoint per port the main
@@ -256,7 +256,7 @@ func (h *RoleDeploymentHandler) ToApplicationConfig(component *oam.Component, na
 		return nil, err
 	}
 	config.Sidecars = sidecars
-	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed, nil), initContainers, sidecars); err != nil {
+	if err := checkExtraContainerVolumeModes(declaredVolumeModes(parsed), initContainers, sidecars); err != nil {
 		return nil, err
 	}
 	if err := checkPodContainerNames(component.Name, initContainers, sidecars); err != nil {

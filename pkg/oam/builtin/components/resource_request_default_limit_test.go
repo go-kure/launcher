@@ -53,7 +53,7 @@ func resourceHolders() []resourceHolder {
 
 // hasSidecars lists the kinds whose schema publishes `sidecars`.
 var hasSidecars = map[string]bool{
-	"webservice": true, "worker": true, "statefulset": true,
+	"webservice": true, "worker": true,
 }
 
 // TestBuildResourceRequirements_RequestNeverAboveAuthoredLimit pins

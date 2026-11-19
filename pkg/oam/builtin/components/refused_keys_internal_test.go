@@ -16,7 +16,7 @@ var refusedKeyBase = map[string]map[string]any{
 	"role-deployment":       {"image": "ghcr.io/org/app:v1"},
 	"webservice":            {"image": "ghcr.io/org/app:v1"},
 	"worker":                {"image": "ghcr.io/org/app:v1"},
-	"statefulset":           {"image": "ghcr.io/org/app:v1"},
+	"statefulset":           rawStatefulsetInternalProps("ghcr.io/org/app:v1"),
 	"daemonset":             rawDaemonsetInternalProps("ghcr.io/org/app:v1"),
 	"service":               {"ports": []any{map[string]any{"port": 80}}},
 	"persistentvolumeclaim": {"size": "1Gi"},
@@ -166,26 +166,24 @@ func TestRefusedKeys_BothPathsGiveTheReason(t *testing.T) {
 // TestRefusedKeys_NamedRefusals names the refusals go-kure/launcher#790 added,
 // so that a row dropped from a map or from the table is a failure here and not
 // only one case fewer in the table test above. Before, the parser dropped each
-// of these in silence: the whole `template` on a statefulset, and the upstream
+// of these in silence: the whole `template` on a role-deployment, and the upstream
 // fields no hand-parsed type reads.
 func TestRefusedKeys_NamedRefusals(t *testing.T) {
 	for _, tc := range []struct{ componentType, key string }{
-		{"statefulset", "template"},
+		{"role-deployment", "template"},
 		{"role-deployment", "restartPolicy"},
-		{"statefulset", "restartPolicy"},
 		{"webservice", "restartPolicy"},
 		{"worker", "restartPolicy"},
 		{"role-deployment", "activeDeadlineSeconds"},
-		{"statefulset", "activeDeadlineSeconds"},
 		{"role-deployment", "evictionResponders"},
 		{"role-deployment", "restartPolicyRules"},
 		{"serviceaccount", "secrets"},
 		// Upstream names read in another shape.
 		{"role-deployment", "containers"},
 		{"webservice", "livenessProbe"},
-		{"statefulset", "readinessProbe"},
-		{"statefulset", "volumeMounts"},
-		{"statefulset", "volumeDevices"},
+		{"role-deployment", "readinessProbe"},
+		{"role-deployment", "volumeMounts"},
+		{"role-deployment", "volumeDevices"},
 		{"worker", "name"},
 		{"persistentvolumeclaim", "resources"},
 	} {
@@ -196,9 +194,9 @@ func TestRefusedKeys_NamedRefusals(t *testing.T) {
 	// A key the type has no refusal for, whether it reads the key or leaves it
 	// undeclared, gets no hint, whatever another type makes of it.
 	for _, tc := range []struct{ componentType, key string }{
-		// The raw `deployment`, `daemonset`, `job` and `cronjob` kinds take the
-		// upstream spec, so they refuse none of what the reshaped parsers refuse
-		// (go-kure/launcher#1629).
+		// The raw `deployment`, `daemonset`, `statefulset`, `job` and `cronjob`
+		// kinds take the upstream spec, so they refuse none of what the reshaped
+		// parsers refuse (go-kure/launcher#1629).
 		{"deployment", "restartPolicy"},
 		{"deployment", "activeDeadlineSeconds"},
 		{"deployment", "containers"},
@@ -209,6 +207,12 @@ func TestRefusedKeys_NamedRefusals(t *testing.T) {
 		{"daemonset", "activeDeadlineSeconds"},
 		{"daemonset", "containers"},
 		{"daemonset", "volumeMounts"},
+		{"statefulset", "template"},
+		{"statefulset", "restartPolicy"},
+		{"statefulset", "activeDeadlineSeconds"},
+		{"statefulset", "containers"},
+		{"statefulset", "volumeMounts"},
+		{"statefulset", "volumeDevices"},
 		{"job", "restartPolicy"},
 		{"job", "containers"},
 		{"job", "activeDeadlineSeconds"},
@@ -298,7 +302,7 @@ func TestRefusedKeys_OneLevelDown(t *testing.T) {
 	entry := func(resources map[string]any) []any {
 		return []any{map[string]any{"name": "extra", "image": "busybox:1", "resources": resources}}
 	}
-	for _, componentType := range []string{"role-deployment", "webservice", "worker", "statefulset"} {
+	for _, componentType := range []string{"role-deployment", "webservice", "worker"} {
 		lists := []string{"initContainers", "sidecars"}
 		t.Run(componentType+"/resources/control", func(t *testing.T) {
 			requests := map[string]any{"requests": map[string]any{"cpu": "10m"}}
@@ -331,8 +335,7 @@ func TestRefusedKeys_OneLevelDown(t *testing.T) {
 
 // TestRefusedKeys_InAnEntry holds the refusals inside a list entry the type
 // declares (go-kure/launcher#790): `probes` and `lifecycle` on an init
-// container entry, on every workload type, and the claim-spec fields a
-// statefulset's volumeClaimTemplates entry refuses. The document check refuses
+// container entry, on every reshaped workload type. The document check refuses
 // each with its generic text followed by the reason the entry's parser gives.
 // A key of an entry that a type refuses only at its top level (the main
 // container's `livenessProbe`) gets the generic text alone: the type's
@@ -362,7 +365,7 @@ func TestRefusedKeys_InAnEntry(t *testing.T) {
 	initEntry := func(key string) []any {
 		return []any{map[string]any{"name": "init", "image": "busybox:1", key: map[string]any{}}}
 	}
-	for _, componentType := range []string{"role-deployment", "webservice", "worker", "statefulset"} {
+	for _, componentType := range []string{"role-deployment", "webservice", "worker"} {
 		if refusedKeyHint(componentType, "livenessProbe") == "" {
 			t.Fatalf("type %q has no top-level refusal of livenessProbe; pick another key for the control below", componentType)
 		}
@@ -384,14 +387,6 @@ func TestRefusedKeys_InAnEntry(t *testing.T) {
 			check(t, componentType, props, "properties.podResources", "noSuchKey", "")
 		})
 	}
-	for _, key := range slices.Sorted(maps.Keys(volumeClaimTemplateRejectedKeys)) {
-		t.Run("statefulset/volumeClaimTemplates/"+key, func(t *testing.T) {
-			props := maps.Clone(refusedKeyBase["statefulset"])
-			props["volumeClaimTemplates"] = []any{map[string]any{"name": "data", "size": "1Gi", "mountPath": "/data", key: "x"}}
-			check(t, "statefulset", props, "properties.volumeClaimTemplates[0]", key,
-				key+": not authorable — "+volumeClaimTemplateRejectedKeys[key])
-		})
-	}
 }
 
 // TestRefusedKeys_OtherKeysReadAsBefore is the control for the hint: a key that
@@ -409,6 +404,7 @@ func TestRefusedKeys_OtherKeysReadAsBefore(t *testing.T) {
 	}{
 		{"deployment", refusedKeyBase["deployment"]},
 		{"daemonset", refusedKeyBase["daemonset"]},
+		{"statefulset", refusedKeyBase["statefulset"]},
 		{"role-deployment", refusedKeyBase["role-deployment"]},
 		{"webservice", refusedKeyBase["webservice"]},
 		{"service", refusedKeyBase["service"]},

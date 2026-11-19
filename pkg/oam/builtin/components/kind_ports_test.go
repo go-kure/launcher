@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-kure/kure/pkg/stack"
 	appsv1 "k8s.io/api/apps/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/oam"
@@ -21,16 +20,20 @@ type portKindHandler interface {
 	PropertySchema() map[string]oam.PropertySchema
 }
 
-// portKind is one kind-named workload component that publishes the main
-// container's `ports` beside deployment (go-kure/launcher#334).
+// portKind is one component type that publishes the main container's `ports`
+// at the top level (go-kure/launcher#334). With `deployment`, `daemonset`,
+// `statefulset`, `job` and `cronjob` raw (go-kure/launcher#1629), a container's
+// ports there are upstream ContainerPort entries under the template's pod
+// spec, so the role member is the only type that publishes the reshaped list.
 type portKind struct {
 	typ     string
 	handler portKindHandler
 	base    map[string]any
 }
 
+// portKinds is the role member alone.
 var portKinds = []portKind{
-	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "nginx:1.27"}},
+	{roleMemberType, &components.RoleDeploymentHandler{}, map[string]any{"image": "nginx:1.27"}},
 }
 
 // props is the kind's minimal properties plus extra.
@@ -61,12 +64,8 @@ func (k portKind) generate(t *testing.T, props map[string]any) (corev1.PodSpec, 
 	var svcs []*corev1.Service
 	for _, o := range objs {
 		switch v := (*o).(type) {
-		case *appsv1.StatefulSet:
+		case *appsv1.Deployment:
 			spec = &v.Spec.Template.Spec
-		case *batchv1.Job:
-			spec = &v.Spec.Template.Spec
-		case *batchv1.CronJob:
-			spec = &v.Spec.JobTemplate.Spec.Template.Spec
 		case *corev1.Service:
 			svcs = append(svcs, v)
 		}
@@ -106,7 +105,7 @@ func TestKindPorts_Projected(t *testing.T) {
 	}
 }
 
-// TestKindPorts_NoPortProperty pins `port`'s removal from statefulset
+// TestKindPorts_NoPortProperty pins `port`'s removal from the kinds
 // (go-kure/launcher#690), as deployment dropped it
 // (go-kure/launcher#343): no kind publishes it, and an authored `port` is
 // refused as an unknown property.
@@ -203,8 +202,8 @@ func TestKindPorts_NamedProbePorts(t *testing.T) {
 				{"no ports at all", k.props(map[string]any{"probes": readiness("metrics")}),
 					`named port "metrics" is not supported here: this component declares no container ports for the kubelet to resolve the name against — use a numeric port instead`},
 				// The name `port` once gave statefulset ("tcp") is no longer
-				// declared implicitly (daemonset's "http" went with the kind's
-				// reshaped form, go-kure/launcher#1629).
+				// declared implicitly (daemonset's "http" and statefulset's
+				// reshaped form went with go-kure/launcher#1629).
 				{"former port name", k.props(map[string]any{"probes": readiness("tcp")}),
 					`named port "tcp" is not supported here`},
 			}
@@ -222,11 +221,13 @@ func TestKindPorts_NamedProbePorts(t *testing.T) {
 
 // TestKindPorts_SidecarNameCollision refuses a sidecar port named like one of
 // the main container's `ports` (checkPodPortNames sees the whole list), on the
-// one of these kinds with sidecars: statefulset. (The raw `daemonset` kind has
-// no `sidecars` key since go-kure/launcher#1629.)
+// kind with sidecars: the role member. (The raw `daemonset` and `statefulset`
+// kinds have no `sidecars` key since go-kure/launcher#1629; `job` and `cronjob`
+// never had one.)
 func TestKindPorts_SidecarNameCollision(t *testing.T) {
 	want := `sidecars[0] "exporter": ports[0].name: port name "metrics" is also declared by the main container`
-	for _, k := range portKinds[:1] {
+	roleMember := portKind{roleMemberType, &components.RoleDeploymentHandler{}, map[string]any{"image": "nginx:1.27"}}
+	for _, k := range []portKind{roleMember} {
 		t.Run(k.typ, func(t *testing.T) {
 			props := k.props(map[string]any{
 				"ports": extraPorts(),

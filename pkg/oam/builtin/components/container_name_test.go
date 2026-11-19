@@ -21,9 +21,7 @@ import (
 // serviceNamed marks a kind that always names a Service after the component
 // too (go-kure/launcher#546): the Service-name rule, a DNS-1123 label as the
 // container name's is (go-kure/launcher#959), refuses a dotted or long name at
-// conversion, before the container is built. statefulset would too, so its
-// properties keep the Service's name off the component name (an authored
-// serviceName).
+// conversion, before the container is built.
 //
 // ownLength is set for a kind that holds its object's name to a length of its
 // own (cronjob, job): that rule refuses a name over 63 characters at
@@ -39,10 +37,9 @@ var containerNameCases = []struct {
 	{"webservice", webserviceViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, true, ""},
 	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
 	// The reshaped parser's own handler: the raw `deployment`, `daemonset`,
-	// `job` and `cronjob` kinds name their containers as authored
-	// (go-kure/launcher#1629).
+	// `statefulset`, `job` and `cronjob` kinds name their containers as
+	// authored (go-kure/launcher#1629).
 	{roleMemberType, &components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false, ""},
-	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "db"}, false, ""},
 }
 
 // generateWorkload runs a component through ToApplicationConfig and Generate,

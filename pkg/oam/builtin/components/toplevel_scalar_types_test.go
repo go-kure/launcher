@@ -37,7 +37,6 @@ var wrongTopLevel = []struct {
 	{"webservice", webserviceViaRule{}, imageBase, "port", "8080", "port: must be an integer, got string"},
 	{"webservice", webserviceViaRule{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
 	{"worker", workerViaRule{}, imageBase, "topologySpread", "false", "topologySpread: must be a boolean, got string"},
-	{"statefulset", &components.StatefulsetHandler{}, imageBase, "serviceName", 3, "serviceName: must be a string, got int"},
 	{"oci", ociViaRule{}, ociBase, "path", 3, "path: must be a string, got int"},
 	{"oci", ociViaRule{}, ociBase, "prune", "false", "prune: must be a boolean, got string"},
 	{"oci", ociViaRule{}, ociBase, "interval", 10, "interval: must be a string, got int"},
@@ -91,18 +90,22 @@ func TestTopLevelOptional_PreservedBehaviour(t *testing.T) {
 			t.Errorf("Port = %d, want 8080", got)
 		}
 	})
-	// serviceName has no default since go-kure/launcher#690, so an empty one
-	// reads as unset: spec.serviceName stays empty.
-	t.Run("statefulset empty serviceName is unset", func(t *testing.T) {
-		cfg, err := (&components.StatefulsetHandler{}).ToApplicationConfig(
-			&oam.Component{Name: "app", Type: "statefulset", Properties: withProp(imageBase, "serviceName", "")}, "default")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := cfg.(*components.StatefulsetConfig).ServiceName; got != "" {
-			t.Errorf("ServiceName = %q, want empty", got)
-		}
-	})
+	// serviceName has no default since go-kure/launcher#690, so an empty or null
+	// one reads as unset: spec.serviceName stays empty. The raw statefulset
+	// (go-kure/launcher#1629) decodes it strictly, so a wrong type is the
+	// decode's refusal, which the statefulset tests pin.
+	for name, value := range map[string]any{"empty": "", "null": nil} {
+		t.Run("statefulset "+name+" serviceName is unset", func(t *testing.T) {
+			cfg, err := (&components.StatefulsetHandler{}).ToApplicationConfig(
+				&oam.Component{Name: "app", Type: "statefulset", Properties: withProp(rawStatefulsetProps("ghcr.io/org/app:v1"), "serviceName", value)}, "default")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.(*components.StatefulsetConfig).Spec.ServiceName; got != "" {
+				t.Errorf("ServiceName = %q, want empty", got)
+			}
+		})
+	}
 	t.Run("webservice topologySpread false disables spreading", func(t *testing.T) {
 		cfg, err := webserviceViaRule{}.ToApplicationConfig(
 			&oam.Component{Name: "app", Type: "webservice", Properties: withProp(imageBase, "topologySpread", false)}, "default")

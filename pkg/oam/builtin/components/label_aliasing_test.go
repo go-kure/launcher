@@ -37,30 +37,12 @@ var aliasingPVCVolume = []any{
 // label map it can produce: replicas >= 3 so both topology spread constraints
 // are built, pod anti-affinity so an affinity selector exists, and, on a role
 // kind, a pvc volume so a claim is generated. The raw `deployment`,
-// `daemonset`, `job` and `cronjob` kinds (go-kure/launcher#1629) are not in the
-// loop: they read their labels from the authored template.
+// `daemonset`, `statefulset`, `job` and `cronjob` kinds (go-kure/launcher#1629)
+// are not in the loop: they read their labels, selector, affinity and claim
+// templates from the authored spec, as authored.
 var labelAliasingProps = map[string]map[string]any{
 	"webservice": {"replicas": 3, "affinity": map[string]any{"enablePodAntiAffinity": true}, "volumes": aliasingPVCVolume},
 	"worker":     {"replicas": 3, "affinity": map[string]any{"enablePodAntiAffinity": true}, "volumes": aliasingPVCVolume},
-	"statefulset": {
-		"replicas": 3,
-		// statefulset reads the raw upstream Affinity, so its anti-affinity
-		// selector is authored rather than built from the app labels.
-		"affinity": map[string]any{"podAntiAffinity": map[string]any{
-			"preferredDuringSchedulingIgnoredDuringExecution": []any{map[string]any{
-				"weight": 100,
-				"podAffinityTerm": map[string]any{
-					"topologyKey":   "kubernetes.io/hostname",
-					"labelSelector": map[string]any{"matchLabels": map[string]any{"app": "app"}},
-				},
-			}},
-		}},
-		// A claim template is a per-object metadata position only this kind
-		// has, so only this kind can carry it into the collection.
-		"volumeClaimTemplates": []any{
-			map[string]any{"name": "state", "size": "1Gi", "mountPath": "/state"},
-		},
-	},
 }
 
 // labelMap is one caller-reachable label map, named by where it lives so a
@@ -181,11 +163,9 @@ func TestCollectLabelMaps_ReachesEveryGuardedPosition(t *testing.T) {
 	// Every kind emits its workload and a pod template; webservice and worker
 	// also emit a ServiceAccount and a PersistentVolumeClaim from the pvc
 	// volume. Only webservice and worker build topology spread constraints and
-	// an anti-affinity selector; statefulset's selector is the one its fixture
-	// authors. A StatefulSet claim template carries no
-	// labels today, so there is no position to require — the collector reads
-	// it anyway, so labelling one later lands in these tests rather than
-	// slipping past them.
+	// an anti-affinity selector. The collector also reads the positions of the
+	// raw kinds (a StatefulSet's claim templates, a Job's and a CronJob's
+	// templates), which no kind of workloadKinds reaches.
 	want := map[string][]string{
 		"webservice": {
 			"Deployment/app.metadata.labels",
@@ -209,12 +189,6 @@ func TestCollectLabelMaps_ReachesEveryGuardedPosition(t *testing.T) {
 			"ServiceAccount/app.metadata.labels",
 			"PersistentVolumeClaim/app-data.metadata.labels",
 		},
-		"statefulset": {
-			"StatefulSet/app.metadata.labels",
-			"StatefulSet/app.spec.selector.matchLabels",
-			"StatefulSet/app.spec.template.labels",
-			"StatefulSet/app.spec.template.spec.podAntiAffinity.preferred[0].labelSelector",
-		},
 	}
 
 	for _, k := range workloadKinds {
@@ -228,18 +202,6 @@ func TestCollectLabelMaps_ReachesEveryGuardedPosition(t *testing.T) {
 			for _, w := range want[k.name] {
 				if !have[w] {
 					t.Errorf("collectLabelMaps did not reach %s; it reached %v", w, sortedKeys(have))
-				}
-			}
-
-			// The claim template contributes no label map, so nothing above
-			// can prove the fixture still produces one. Assert it directly.
-			if k.name == "statefulset" {
-				sts, ok := (*objects[0]).(*appsv1.StatefulSet)
-				if !ok {
-					t.Fatalf("first object is %T, want *appsv1.StatefulSet", *objects[0])
-				}
-				if len(sts.Spec.VolumeClaimTemplates) != 1 {
-					t.Errorf("got %d volume claim templates, want 1 — the claim-template arm of collectLabelMaps is unreached", len(sts.Spec.VolumeClaimTemplates))
 				}
 			}
 		})

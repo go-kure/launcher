@@ -280,7 +280,7 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 		{"image volume outside the registry allowlist", image, &stubPolicy{allowedRegistries: []string{"ghcr.io"}}, "assets"},
 	}
 	// worker stands for the reshaped deployment parser (go-kure/launcher#1629).
-	for _, kind := range []string{"worker", "statefulset"} {
+	for _, kind := range []string{"worker"} {
 		for _, c := range cases {
 			t.Run(c.name+"/"+kind, func(t *testing.T) {
 				err := volumePolicyConfig(t, kind, c.entry).ApplyPolicy(c.policy)
@@ -290,9 +290,9 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 			})
 		}
 	}
-	// The raw `daemonset`, `job` and `cronjob` kinds (go-kure/launcher#1629)
-	// take the upstream volume under the pod spec of their template, and the
-	// same two gates apply to them.
+	// The raw `daemonset`, `statefulset`, `job` and `cronjob` kinds
+	// (go-kure/launcher#1629) take the upstream volume under the pod spec of
+	// their template, and the same two gates apply to them.
 	jobPodSpec := func() map[string]any {
 		return map[string]any{"restartPolicy": "Never", "containers": []any{map[string]any{"name": "app", "image": "ghcr.io/org/app:v1"}}}
 	}
@@ -304,6 +304,10 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 	}{
 		{"daemonset", &components.DaemonsetHandler{}, func() (map[string]any, map[string]any) {
 			p := rawDaemonsetProps("ghcr.io/org/app:v1")
+			return p, p["template"].(map[string]any)["spec"].(map[string]any)
+		}},
+		{"statefulset", &components.StatefulsetHandler{}, func() (map[string]any, map[string]any) {
+			p := rawStatefulsetProps("ghcr.io/org/app:v1")
 			return p, p["template"].(map[string]any)["spec"].(map[string]any)
 		}},
 		{"job", &components.JobHandler{}, func() (map[string]any, map[string]any) {
@@ -346,7 +350,7 @@ func TestVolumeSource_PolicyGates(t *testing.T) {
 			t.Errorf("ephemeral within the cap: %v", err)
 		}
 		ok := nested("image", "assets", props{"reference": "ghcr.io/org/assets:v1"})
-		if err := volumePolicyConfig(t, "statefulset", ok).ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}}); err != nil {
+		if err := volumePolicyConfig(t, "worker", ok).ApplyPolicy(&stubPolicy{allowedRegistries: []string{"ghcr.io"}}); err != nil {
 			t.Errorf("image within the allowlist: %v", err)
 		}
 	})

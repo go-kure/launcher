@@ -29,7 +29,6 @@ var replicaKinds = []struct {
 }{
 	{"webservice", webserviceViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1", "port": 8080}, false},
 	{"worker", workerViaRule{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
-	{"statefulset", &components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
 	{roleMemberType, &components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}, false},
 	{"postgresql", postgresqlViaRule{}, map[string]any{}, true},
 }

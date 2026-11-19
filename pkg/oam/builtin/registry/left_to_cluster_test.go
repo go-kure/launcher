@@ -52,7 +52,9 @@ func standInTransformer() *oam.Transformer {
 }
 
 func standInProbe(props map[string]any) probe.Probe {
-	p := map[string]any{"image": "ghcr.io/example/app:1.0", "serviceName": "app-headless"}
+	// The raw statefulset takes the upstream spec: a selector and a pod template
+	// with one container, and a serviceName.
+	p := rawDeploymentProps("app", "ghcr.io/example/app:1.0", map[string]any{"serviceName": "app-headless"})
 	maps.Copy(p, props)
 	return probe.Probe{
 		Name:       "stand-in",

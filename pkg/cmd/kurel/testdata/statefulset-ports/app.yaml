@@ -8,21 +8,35 @@ spec:
     - name: db
       type: statefulset
       properties:
-        image: ghcr.io/example/postgres:v15.0
-        ports:
-          - name: tcp
-            containerPort: 5432
-          - name: metrics
-            containerPort: 9187
-        probes:
-          readiness:
-            tcpSocket:
-              port: tcp
-          liveness:
-            httpGet:
-              path: /metrics
-              port: metrics
+        selector:
+          matchLabels:
+            app: db
+        template:
+          spec:
+            containers:
+              - name: db
+                image: ghcr.io/example/postgres:v15.0
+                ports:
+                  - name: tcp
+                    containerPort: 5432
+                  - name: metrics
+                    containerPort: 9187
+                readinessProbe:
+                  tcpSocket:
+                    port: tcp
+                livenessProbe:
+                  httpGet:
+                    path: /metrics
+                    port: metrics
+                volumeMounts:
+                  - name: data
+                    mountPath: /var/lib/postgresql/data
         volumeClaimTemplates:
-          - name: data
-            size: 10Gi
-            mountPath: /var/lib/postgresql/data
+          - metadata:
+              name: data
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 10Gi

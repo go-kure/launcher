@@ -1,57 +1,76 @@
 package components_test
 
-import "testing"
+import (
+	"testing"
 
-// TestStatefulset_ClaimTemplateCollisions: a claim template shares the pod's
-// volume namespace and the main container's mount paths with `volumes`, but
-// each parser checks only its own entries. The apiserver does not catch the
-// overlap either — StatefulSet validation skips the pod template's volumes —
-// so it surfaces only in the controller: getPersistentVolumeClaims keys the
-// templates by name, so a repeated name keeps one claim and drops the other,
-// and updateStorage replaces a pod volume named like a template with that
-// template's claim. A repeated mountPath fails pod creation instead.
-func TestStatefulset_ClaimTemplateCollisions(t *testing.T) {
-	k := statefulsetKind()
-	data := map[string]any{"name": "data", "size": "1Gi", "mountPath": "/data"}
+	appsv1 "k8s.io/api/apps/v1"
+
+	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/components"
+)
+
+// rawClaimTemplate is one raw `volumeClaimTemplates` entry: an upstream
+// PersistentVolumeClaim with a name and a storage request.
+func rawClaimTemplate(name string) map[string]any {
+	return map[string]any{
+		"metadata": map[string]any{"name": name},
+		"spec": map[string]any{
+			"accessModes": []any{"ReadWriteOnce"},
+			"resources":   map[string]any{"requests": map[string]any{"storage": "1Gi"}},
+		},
+	}
+}
+
+// TestRawStatefulset_ClaimTemplateNamesCollide: a claim template shares the
+// pod's volume namespace with `template.spec.volumes`, and the apiserver does
+// not catch an overlap: StatefulSet validation skips the pod template's
+// volumes. It surfaces only in the controller, which keys the templates by
+// name, so a repeated name keeps one claim and drops the other, and replaces a
+// pod volume named like a template with that template's claim. The raw kind
+// (go-kure/launcher#1629) refuses both at parse time. A repeated mountPath is
+// not checked any more: the API server refuses it when the pod is created.
+func TestRawStatefulset_ClaimTemplateNamesCollide(t *testing.T) {
+	h := &components.StatefulsetHandler{}
+	build := func(claims []any, volumes []any) map[string]any {
+		props := rawStatefulsetProps("ghcr.io/org/app:v1")
+		props["volumeClaimTemplates"] = claims
+		if volumes != nil {
+			props["template"].(map[string]any)["spec"].(map[string]any)["volumes"] = volumes
+		}
+		return props
+	}
 	cases := []struct {
 		name    string
 		props   map[string]any
 		wantErr string
 	}{
-		{"two claim templates with one name", map[string]any{
-			"volumeClaimTemplates": []any{data, map[string]any{"name": "data", "size": "2Gi", "mountPath": "/other"}},
-		}, `volumeClaimTemplate "data": duplicate name`},
-		{"claim template and an emptyDir volume", map[string]any{
-			"volumeClaimTemplates": []any{data},
-			"volumes":              []any{map[string]any{"name": "data", "type": "emptyDir", "mountPath": "/scratch"}},
-		}, `volume "data" has the same name as a claim template`},
-		{"claim template and a pvc volume", map[string]any{
-			"volumeClaimTemplates": []any{data},
-			"volumes":              []any{map[string]any{"name": "data", "type": "pvc", "claimName": "shared-data", "mountPath": "/shared", "accessModes": []any{"ReadWriteMany"}}},
-		}, `volume "data" has the same name as a claim template`},
-		{"two claim templates with one mountPath", map[string]any{
-			"volumeClaimTemplates": []any{data, map[string]any{"name": "logs", "size": "1Gi", "mountPath": "/data"}},
-		}, `duplicate mountPath "/data"`},
-		{"claim template and a volume with one mountPath", map[string]any{
-			"volumeClaimTemplates": []any{data},
-			"volumes":              []any{map[string]any{"name": "scratch", "type": "emptyDir", "mountPath": "/data"}},
-		}, `duplicate mountPath "/data"`},
+		{"two claim templates with one name",
+			build([]any{rawClaimTemplate("data"), rawClaimTemplate("data")}, nil),
+			`volumeClaimTemplates: duplicate name "data"`},
+		{"claim template and an emptyDir volume",
+			build([]any{rawClaimTemplate("data")}, []any{map[string]any{"name": "data", "emptyDir": map[string]any{}}}),
+			`template.spec.volumes: volume "data" has the same name as a claim template`},
+		{"claim template and a pvc volume",
+			build([]any{rawClaimTemplate("data")}, []any{map[string]any{"name": "data", "persistentVolumeClaim": map[string]any{"claimName": "shared-data"}}}),
+			`template.spec.volumes: volume "data" has the same name as a claim template`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := k.configure(t, tc.props)
+			_, err := h.ToApplicationConfig(&oam.Component{Name: "app", Type: "statefulset", Properties: tc.props}, "default")
 			wantErrContaining(t, err, tc.wantErr)
 		})
 	}
 
-	t.Run("distinct names and paths still build", func(t *testing.T) {
-		g := k.generate(t, map[string]any{
-			"volumeClaimTemplates": []any{data, map[string]any{"name": "logs", "size": "1Gi", "mountPath": "/logs"}},
-			"volumes":              []any{map[string]any{"name": "scratch", "type": "emptyDir", "mountPath": "/scratch"}},
-		})
-		if len(g.vcts) != 2 || len(g.pod.Volumes) != 1 || len(g.pod.Containers[0].VolumeMounts) != 3 {
-			t.Errorf("got %d claim templates, %d volumes, %d mounts; want 2, 1, 3",
-				len(g.vcts), len(g.pod.Volumes), len(g.pod.Containers[0].VolumeMounts))
+	t.Run("distinct names still build", func(t *testing.T) {
+		props := build([]any{rawClaimTemplate("data"), rawClaimTemplate("logs")}, []any{map[string]any{"name": "scratch", "emptyDir": map[string]any{}}})
+		objects := buildComponent(t, h, "app", "statefulset", props)
+		sts, ok := (*objects[0]).(*appsv1.StatefulSet)
+		if !ok {
+			t.Fatalf("first object is %T, want a StatefulSet", *objects[0])
+		}
+		if len(sts.Spec.VolumeClaimTemplates) != 2 || len(sts.Spec.Template.Spec.Volumes) != 1 {
+			t.Errorf("got %d claim templates, %d volumes; want 2, 1",
+				len(sts.Spec.VolumeClaimTemplates), len(sts.Spec.Template.Spec.Volumes))
 		}
 	})
 }

@@ -17,7 +17,7 @@ import (
 )
 
 // This file is the shared pod/container builder every container-workload kind
-// (webservice, worker, statefulset) assembles
+// (webservice and worker) assembles
 // its pod template through (go-kure/launcher#342). It writes `corev1.PodSpec` and
 // `corev1.Container` fields directly — the upstream struct is the construction
 // API — and deliberately calls none of kure's per-kind pod-template

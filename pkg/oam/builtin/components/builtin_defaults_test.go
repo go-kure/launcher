@@ -16,9 +16,9 @@ import (
 
 // The handler-built workload kinds with a reshaped parser report the values
 // their own parser fills when the author wrote none (go-kure/launcher#1580):
-// the role member `role-deployment` and statefulset (the kind-named `deployment`,
-// `daemonset`, `job` and `cronjob` are raw since go-kure/launcher#1629 and fill
-// nothing). These tests read the report through oam.BuiltinDefaultReporter, as
+// the role member `role-deployment` (the kind-named `deployment`, `daemonset`,
+// `statefulset`, `job` and `cronjob` are raw since go-kure/launcher#1629 and
+// fill nothing). These tests read the report through oam.BuiltinDefaultReporter, as
 // the transform does.
 
 type configBuilder interface {
@@ -30,7 +30,6 @@ var builtinKinds = map[string]struct {
 	base    map[string]any
 }{
 	roleMemberType: {&components.RoleDeploymentHandler{}, map[string]any{"image": "ghcr.io/org/app:v1"}},
-	"statefulset":  {&components.StatefulsetHandler{}, map[string]any{"image": "ghcr.io/org/app:v1", "serviceName": "app-headless"}},
 }
 
 func newKindConfig(t *testing.T, kind string, props map[string]any, traits ...oam.Trait) stack.ApplicationConfig {
@@ -109,11 +108,11 @@ type builtinRow struct {
 }
 
 func builtinRows() []builtinRow {
-	allPods := []string{roleMemberType, "statefulset"}
+	allPods := []string{roleMemberType}
 	return []builtinRow{
-		{name: "replicas", kinds: []string{roleMemberType, "statefulset"}, want: []string{"replicas"},
+		{name: "replicas", kinds: []string{roleMemberType}, want: []string{"replicas"},
 			authored: map[string]any{"replicas": 1}, gone: []string{"replicas"}},
-		{name: "replicas null reads as omitted", kinds: []string{roleMemberType, "statefulset"},
+		{name: "replicas null reads as omitted", kinds: []string{roleMemberType},
 			props: map[string]any{"replicas": nil}, want: []string{"replicas"}},
 		{name: "main container port protocol", kinds: allPods, props: map[string]any{"ports": ctrPorts},
 			authored: map[string]any{"ports": []any{map[string]any{"containerPort": 8080, "protocol": "TCP"}, map[string]any{"containerPort": 9090, "protocol": "UDP"}}},
@@ -121,7 +120,7 @@ func builtinRows() []builtinRow {
 		{name: "init container port protocol", kinds: allPods, props: map[string]any{"initContainers": init1(ctrPorts)},
 			authored: map[string]any{"initContainers": init1([]any{map[string]any{"containerPort": 8080, "protocol": "TCP"}, map[string]any{"containerPort": 9090, "protocol": "UDP"}})},
 			gone:     []string{"initContainers[0].ports[0].protocol"}},
-		{name: "sidecar port protocol", kinds: []string{roleMemberType, "statefulset"}, props: map[string]any{"sidecars": side1(ctrPorts)},
+		{name: "sidecar port protocol", kinds: []string{roleMemberType}, props: map[string]any{"sidecars": side1(ctrPorts)},
 			authored: map[string]any{"sidecars": side1([]any{map[string]any{"containerPort": 8080, "protocol": "TCP"}, map[string]any{"containerPort": 9090, "protocol": "UDP"}})},
 			gone:     []string{"sidecars[0].ports[0].protocol"}},
 		{name: "pvc volume accessModes", kinds: allPods, props: map[string]any{"volumes": oneVolume},
@@ -150,7 +149,7 @@ func expectedPaths(kind string, r builtinRow) []string {
 	}
 	// What a bare kind always carries.
 	switch kind {
-	case roleMemberType, "statefulset":
+	case roleMemberType:
 		want = append(want, "replicas")
 	}
 	for k, v := range r.props {
@@ -226,7 +225,7 @@ func TestBuiltinDefaults_RefNamesTheKindAndTheFill(t *testing.T) {
 // as policy and never as builtin. A default equal to the built-in value is still
 // the policy's.
 func TestBuiltinDefaults_PolicyWinsTheReplicasPath(t *testing.T) {
-	for _, kind := range []string{roleMemberType, "statefulset"} {
+	for _, kind := range []string{roleMemberType} {
 		for _, dflt := range []int32{1, 3} {
 			t.Run(kind, func(t *testing.T) {
 				cfg := newKindConfig(t, kind, nil)
@@ -252,7 +251,7 @@ func TestBuiltinDefaults_PolicyWinsTheReplicasPath(t *testing.T) {
 // without spec.replicas, so no fill happens and none is reported.
 func TestBuiltinDefaults_ScalerOwnsTheReplicaCount(t *testing.T) {
 	scaler := oam.Trait{Type: "scaler", Properties: map[string]any{"minReplicas": 1, "maxReplicas": 2}}
-	for _, kind := range []string{roleMemberType, "statefulset"} {
+	for _, kind := range []string{roleMemberType} {
 		t.Run(kind, func(t *testing.T) {
 			cfg := newKindConfig(t, kind, nil, scaler)
 			if _, ok := reportedBuiltin(cfg)["replicas"]; ok {
@@ -347,27 +346,6 @@ func TestBuiltinDefaults_RecreateStrategyForANonRWXClaim(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestBuiltinDefaults_StatefulSetClaimTemplateAccessModes: volumeClaimTemplates
-// default to ReadWriteOnce.
-func TestBuiltinDefaults_StatefulSetClaimTemplateAccessModes(t *testing.T) {
-	vct := func(extra map[string]any) []any {
-		m := map[string]any{"name": "data", "size": "1Gi", "mountPath": "/data"}
-		maps.Copy(m, extra)
-		return []any{m}
-	}
-	bare := newKindConfig(t, "statefulset", map[string]any{"volumeClaimTemplates": vct(nil)})
-	if _, ok := reportedBuiltin(bare)["volumeClaimTemplates[0].accessModes"]; !ok {
-		t.Errorf("accessModes of a claim template not reported: %v", reportedBuiltin(bare))
-	}
-	written := newKindConfig(t, "statefulset", map[string]any{"volumeClaimTemplates": vct(map[string]any{"accessModes": []any{"ReadWriteOnce"}})})
-	if _, ok := reportedBuiltin(written)["volumeClaimTemplates[0].accessModes"]; ok {
-		t.Error("accessModes reported though the author wrote it")
-	}
-	if a, b := generatedJSON(t, bare), generatedJSON(t, written); a != b {
-		t.Errorf("authoring accessModes changed the objects:\n%s\n%s", a, b)
 	}
 }
 

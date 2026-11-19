@@ -8,19 +8,19 @@ import (
 )
 
 // A volume's `type` is required (go-kure/launcher#1626): parseVolumes refuses an
-// entry without one, so the published schema says so, for each of the three kinds
-// that share the volumes declaration (the `deployment`, `daemonset`, `job` and
-// `cronjob` kinds take the upstream `volumes` since go-kure/launcher#1629, and the declaration their reshaped form
-// had is the role member's, which `worker` and `webservice` publish: the member
+// entry without one, so the published schema says so, for each of the two kinds
+// that share the volumes declaration (the `deployment`, `daemonset`,
+// `statefulset`, `job` and `cronjob` kinds take the upstream `volumes` since
+// go-kure/launcher#1629, and the declaration their reshaped form had is the role
+// member's, which `worker` and `webservice` publish: the member
 // itself is read from the schema, as no document can author it). The cases go through the property
 // validation that runs before any handler, which is what a consumer of the
 // published schema relies on, and each has a control: the same volume with a type
 // passes.
 func TestVolumeTypeIsRequired(t *testing.T) {
 	kinds := map[string]map[string]any{
-		"worker":      {"image": "ghcr.io/org/app:v1"},
-		"webservice":  {"image": "ghcr.io/org/app:v1"},
-		"statefulset": {"image": "ghcr.io/org/app:v1"},
+		"worker":     {"image": "ghcr.io/org/app:v1"},
+		"webservice": {"image": "ghcr.io/org/app:v1"},
 	}
 	tr := newTransformer()
 	published := tr.HandlerSchemas().Components

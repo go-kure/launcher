@@ -1294,7 +1294,7 @@ func parseArgs(props map[string]any) ([]string, error) {
 }
 
 // parseReplicas is the one reading of `replicas`, shared by every kind that
-// has it (webservice, worker, statefulset, deployment, postgresql). It returns
+// has it (webservice, worker, postgresql). It returns
 // the count, whether the document authored it, and an error for a value that
 // is not an integer (naming its type) or is negative (naming the value).
 // Absent and explicit null both yield defaultVal with authored=false
@@ -1325,7 +1325,7 @@ func parseReplicas(props map[string]any, defaultVal int32) (int32, bool, error) 
 // Ports, so a string port can never resolve there and is rejected outright
 // rather than authoring a probe/lifecycle hook that is guaranteed to fail at
 // runtime. Kinds whose main container declares ports only when authored
-// (the role member of webservice and worker, and statefulset) pass `len(ports) > 0`
+// (the role member of webservice and worker) pass `len(ports) > 0`
 // with an empty matchName and check the names against the whole list
 // afterwards (checkNamedPortsDeclared); webservice, whose container always
 // declares "http", passes true. matchName is the
@@ -2994,7 +2994,7 @@ func parseClaimReference(m map[string]any, volName, claimName string, volumeMode
 	}, nil
 }
 
-// parsePodVolumes is parseVolumes for a pod kind (statefulset),
+// parsePodVolumes is parseVolumes for a pod kind,
 // which generates no claim of its own
 // (go-kure/launcher#702): every pvc volume must reference an existing claim by
 // claimName. The role rules call parseVolumes itself and route the claims their
@@ -3150,7 +3150,7 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 		// Closed key set (go-kure/launcher#321). The explained refusals run
 		// first so an init-container probe or hook names the Kubernetes rule
 		// it breaks rather than reading as a typo. Sorted, like
-		// parseVolumeClaimTemplates' equivalent loop, so an entry authoring
+		// parsePodSpec's equivalent loop, so an entry authoring
 		// both reports the same one every run. A restartable entry (a native
 		// sidecar, go-kure/launcher#1180) takes both; whether it is one is read
 		// off the raw key here, and parseInitContainerRestart holds the value
@@ -3683,10 +3683,9 @@ func parseAffinity(props map[string]any) (AffinityConfig, error) {
 var tolerationKeys = []string{"key", "operator", "value", "effect", "tolerationSeconds"}
 
 // parseTolerations is SHARED: the role member of webservice and worker
-// (role_deployment.go) and, since go-kure/launcher#790, statefulset
-// (statefulset.go) are its callers, and schemaTolerations has the same ones.
-// Every rejection below therefore lands on both. The kinds that take the
-// upstream spec whole, deployment, daemonset, job and cronjob
+// (role_deployment.go) calls it, and schemaTolerations has the same ones, so
+// every rejection below lands on every caller. The kinds that take the
+// upstream spec whole, deployment, daemonset, statefulset, job and cronjob
 // (go-kure/launcher#1629), read none of it. A rejection added here in
 // future changes every calling kind; say so in the docs of each in the same
 // change.
@@ -4224,246 +4223,6 @@ func buildSidecarContainer(sc SidecarContainerConfig) (*corev1.Container, error)
 	container.Lifecycle = sc.Lifecycle.DeepCopy()
 	sc.Fields.apply(container)
 	return container, nil
-}
-
-// VolumeClaimTemplate represents a PVC template for a StatefulSet.
-type VolumeClaimTemplate struct {
-	Name         string
-	StorageClass string
-	// StorageClassExplicitEmpty records an authored `storageClass: ""`, which
-	// requests no class: createStatefulSet then sets Spec.StorageClassName to
-	// a pointer to "", as BuildPVC does for PVCConfig's field of the same name
-	// (go-kure/launcher#761). Absent, the field stays nil and the cluster's
-	// default class applies.
-	StorageClassExplicitEmpty bool
-	Size                      string
-	AccessModes               []string
-	// accessModesFilled records that the parser filled AccessModes with
-	// ReadWriteOnce because the author wrote none, and index is the entry's
-	// position in the authored `volumeClaimTemplates` (go-kure/launcher#1580).
-	accessModesFilled bool
-	index             int
-	MountPath         string
-	// DevicePath is where a volumeMode: Block claim appears in the main
-	// container as a raw block device. Exactly one of MountPath and
-	// DevicePath is set (go-kure/launcher#385).
-	DevicePath string
-	// MountOptions carries the mount keys of a template that has a MountPath
-	// (readOnly, subPath, subPathExpr, mountPropagation, recursiveReadOnly;
-	// go-kure/launcher#1198). Only those fields are set. Name and MountPath
-	// stay in the fields above, and claimTemplateMountsAndDevices joins them.
-	MountOptions corev1.VolumeMount
-	// Spec carries the rest of the corev1.PersistentVolumeClaimSpec
-	// projection (volumeclaim_spec.go); the five fields above predate it and
-	// keep their own shorthand spellings.
-	Spec VolumeClaimSpecConfig
-}
-
-// effectiveStorageRequest returns the entry's requested storage in whichever
-// spelling authored it. Policy enforcement must not read Size directly: an
-// entry using the long resources.requests.storage spelling leaves Size empty,
-// and enforceMaxResource treats an empty current value as "nothing to check",
-// so reading Size alone let any MaxStorageSize limit be bypassed by choosing
-// the other spelling.
-func (v VolumeClaimTemplate) effectiveStorageRequest() string {
-	if v.Size != "" {
-		return v.Size
-	}
-	if v.Spec.Resources != nil {
-		if q, ok := v.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
-			return q.String()
-		}
-	}
-	return ""
-}
-
-// parseVolumeClaimTemplates parses volumeClaimTemplates from OAM properties.
-func parseVolumeClaimTemplates(props map[string]any) ([]VolumeClaimTemplate, error) {
-	raw, present := props["volumeClaimTemplates"]
-	// An explicit null is absence, not a present-but-wrong type.
-	// `volumeClaimTemplates:` with no value decodes to a nil entry, the schema
-	// keeps the key optional, and the property validator already reads a nil as
-	// absent when deciding requiredness (`isNullValue`,
-	// pkg/oam/property_validate.go) — so such a document is valid v1alpha1
-	// today and has to stay valid. The type check below exists to catch a value
-	// the author wrote and got wrong; a null is a value the author did not
-	// write at all. isExplicitNull, not `raw == nil`, so a []any(nil) emitted by
-	// a Go-constructed lowering rule is classified the way the validator
-	// classifies it — see the wrapper block above.
-	if !present || isExplicitNull(raw) {
-		return nil, nil
-	}
-	// Presence and type are two questions: a single type assertion answered
-	// both with "absent", so `volumeClaimTemplates: {}` or a stray scalar built
-	// a StatefulSet with no claim templates and said nothing — the same silent
-	// drop the closed key set below exists to end.
-	vctList, ok := raw.([]any)
-	if !ok {
-		return nil, errors.Errorf("volumeClaimTemplates: must be a list, got %T", raw)
-	}
-	var vcts []VolumeClaimTemplate
-	for authoredIndex, v := range vctList {
-		v = nullElem(v)
-		m, ok := v.(map[string]any)
-		if !ok {
-			return nil, errors.New("volumeClaimTemplates: each entry must be a mapping")
-		}
-		vct := VolumeClaimTemplate{}
-		// parseStringField, not a bare assertion, for every string leaf here:
-		// a present-but-non-string value (YAML reads `size: 10e9` and
-		// `name: 123` as float64/int, not string) read as absent and then
-		// surfaced as the requiredness error below — "missing required field
-		// 'size' (or resources.requests.storage)" for a field the author did
-		// write, with no hint that the type was the problem. Same silent-drop
-		// class as storageClass below.
-		name, _, err := parseStringField(m, "name", "volumeClaimTemplate: name")
-		if err != nil {
-			return nil, err
-		}
-		vct.Name = name
-		entryLabel := fmt.Sprintf("volumeClaimTemplate %q", vct.Name)
-		// Closed key set, added with the claim-spec projection: an unrecognized
-		// key used to be dropped silently, so a misspelled `storageClassName`
-		// built with the cluster default class and said nothing.
-		// Sorted, like parsePodSpec's equivalent loop: map iteration order is
-		// randomised, so an entry authoring two rejected keys at once would
-		// otherwise report a different one run to run.
-		rejected := make([]string, 0, len(volumeClaimTemplateRejectedKeys))
-		for k := range volumeClaimTemplateRejectedKeys {
-			rejected = append(rejected, k)
-		}
-		slices.Sort(rejected)
-		for _, k := range rejected {
-			if _, present := m[k]; present {
-				return nil, errors.Errorf("%s: %s: not authorable — %s", entryLabel, k, volumeClaimTemplateRejectedKeys[k])
-			}
-		}
-		if err := rejectUnknownKeys(m, volumeClaimTemplatePropertyKeys, entryLabel); err != nil {
-			return nil, err
-		}
-		// parseStorageClassField, as on the `volumes[].pvc` path: a
-		// present-but-non-string storageClass is refused rather than read as
-		// absent, a non-empty class must be a DNS-1123 subdomain
-		// (ValidateClassName, which the apiserver runs on every non-empty
-		// storageClassName), and an authored "" is kept apart from an absent
-		// key, so it requests no class (go-kure/launcher#761).
-		storageClass, explicitEmpty, err := parseStorageClassField(m, fmt.Sprintf("volumeClaimTemplate %q: storageClass", vct.Name))
-		if err != nil {
-			return nil, err
-		}
-		vct.StorageClass = storageClass
-		vct.StorageClassExplicitEmpty = explicitEmpty
-		size, sizeAuthored, err := parseStringField(m, "size", entryLabel+": size")
-		if err != nil {
-			return nil, err
-		}
-		vct.Size = size
-		mountPath, _, err := parseStringField(m, "mountPath", entryLabel+": mountPath")
-		if err != nil {
-			return nil, err
-		}
-		vct.MountPath = mountPath
-		devicePath, _, err := parseStringField(m, "devicePath", entryLabel+": devicePath")
-		if err != nil {
-			return nil, err
-		}
-		vct.DevicePath = devicePath
-		accessModes, err := parseAccessModes(m)
-		if err != nil {
-			return nil, errors.Wrapf(err, "volumeClaimTemplate %q", vct.Name)
-		}
-		vct.AccessModes = accessModes
-		vct.accessModesFilled = accessModesOmitted(m)
-		vct.index = authoredIndex
-		if vct.Name == "" {
-			return nil, errors.New("volumeClaimTemplate entry missing required field 'name'")
-		}
-		// Exactly one of mountPath and devicePath (go-kure/launcher#385); the
-		// devicePath ⇔ volumeMode: Block pairing is checked once the spec,
-		// which carries volumeMode, is parsed below.
-		if vct.MountPath == "" && vct.DevicePath == "" {
-			return nil, errors.Errorf("volumeClaimTemplate %q missing required field 'mountPath' (or 'devicePath' for a volumeMode: Block claim)", vct.Name)
-		}
-		// An empty path beside the other counts as authored, as in parseVolumes.
-		if bothAuthored(m, "mountPath", "devicePath") {
-			return nil, errors.Errorf("%s: mountPath and devicePath are mutually exclusive; author mountPath for a filesystem claim or devicePath for a volumeMode: Block claim", entryLabel)
-		}
-		// The mount keys belong to a filesystem mount. A devicePath claim is a
-		// raw block device with no mount, so it refuses all five
-		// (go-kure/launcher#1198).
-		if vct.DevicePath != "" {
-			if err := refuseMountKeysOnDevice(m, mountOptionKeys, entryLabel); err != nil {
-				return nil, err
-			}
-		} else if err := parseMountOptions(m, entryLabel, &vct.MountOptions); err != nil {
-			return nil, err
-		}
-		// sizeAuthored comes from parseStringField's `present`, which is false
-		// for an empty string (common.go, parseStringField): `size: ""` is not
-		// an authored size, so it must not trip the both-spellings rejection
-		// in parseVolumeClaimSpec.
-		spec, err := parseVolumeClaimSpec(m, entryLabel, sizeAuthored)
-		if err != nil {
-			return nil, err
-		}
-		vct.Spec = spec
-		var volumeMode corev1.PersistentVolumeMode
-		if spec.VolumeMode != nil {
-			volumeMode = *spec.VolumeMode
-		}
-		if err := checkVolumeModePairing(entryLabel, volumeMode, vct.MountPath != "", vct.DevicePath); err != nil {
-			return nil, err
-		}
-		// A requested size is still mandatory, but the claim-spec projection
-		// gives it a second, longer spelling. Either satisfies the requirement;
-		// parseVolumeClaimSpec has already rejected authoring both.
-		if vct.Size == "" {
-			var authored bool
-			if spec.Resources != nil {
-				_, authored = spec.Resources.Requests[corev1.ResourceStorage]
-			}
-			if !authored {
-				return nil, errors.Errorf("volumeClaimTemplate %q missing required field 'size' (or resources.requests.storage)", vct.Name)
-			}
-		} else {
-			qty, err := resource.ParseQuantity(vct.Size)
-			if err != nil {
-				return nil, errors.Errorf("volumeClaimTemplate %q: invalid size %q: %w", vct.Name, vct.Size, err)
-			}
-			// Symmetric with the long resources.requests.storage spelling in
-			// parseStorageResourceList: upstream ValidatePositiveQuantityValue
-			// rejects Cmp <= 0, so zero is as invalid as negative.
-			//
-			// The parent parser rejected only a negative quantity, so `size:
-			// "0"` reaches this line having built successfully before. That is
-			// a deliberate tightening, not an oversight: it is
-			// ValidatePersistentVolumeClaimSpec that runs
-			// ValidatePositiveQuantityValue over requests[storage], so a
-			// zero-sized claim was never admissible — the document built here
-			// and was refused by the apiserver. Failing fast with the field
-			// named beats emitting a manifest that cannot apply. Recorded as
-			// behavior-changing in this package's README, on the precedent of
-			// 6aed090, which tightened init/sidecar container entries the same
-			// way under an unchanged launcher.gokure.dev/v1alpha1.
-			if qty.Sign() <= 0 {
-				return nil, errors.Errorf("volumeClaimTemplate %q: size must be positive, got %q", vct.Name, vct.Size)
-			}
-		}
-		// A storage limit below the requested size is a contradiction the
-		// apiserver does not catch. The request <= limit rule lives in
-		// validateResourceRequirements, which takes the *container* shape
-		// (core.ResourceRequirements); a claim carries
-		// core.VolumeResourceRequirements and goes through
-		// ValidatePersistentVolumeClaimSpec, which reads
-		// Resources.Requests[storage] and never looks at Resources.Limits at
-		// all. So the pair is accepted, the limit is inert, and this parser is
-		// the only place it can be reported.
-		if err := checkClaimStorageLimit(vct, entryLabel); err != nil {
-			return nil, err
-		}
-		vcts = append(vcts, vct)
-	}
-	return vcts, nil
 }
 
 // BuildPVC creates a PersistentVolumeClaim from a PVCConfig. The size must be

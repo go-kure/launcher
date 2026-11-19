@@ -100,7 +100,7 @@ type PropertySource struct {
 	TraitIndex int `json:"traitIndex,omitempty" yaml:"traitIndex,omitempty"`
 	// Path addresses the leaf: dot-separated object keys, [i] for a list element,
 	// and ["key"] (a Go-quoted string) for a key that is empty or holds ".", "[" or
-	// "]". Example: volumeClaimTemplates[0].storageClass.
+	// "]". Example: volumeClaimTemplates[0].spec.storageClassName.
 	Path   string `json:"path" yaml:"path"`
 	Source Source `json:"source" yaml:"source"`
 }

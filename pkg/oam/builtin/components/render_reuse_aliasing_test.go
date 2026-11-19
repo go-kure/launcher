@@ -48,8 +48,7 @@ func renderTwice(t *testing.T, h oam.ComponentHandler, kind string, props map[st
 // symptom shows up far from the cause: a second workload silently carrying the
 // first one's customization.
 func TestStatefulset_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testing.T) {
-	props := map[string]any{
-		"image":                "ghcr.io/org/app:v1",
+	props := withProps(rawStatefulsetProps("ghcr.io/org/app:v1"), map[string]any{
 		"revisionHistoryLimit": 7,
 		"updateStrategy": map[string]any{
 			"type":          "RollingUpdate",
@@ -62,28 +61,28 @@ func TestStatefulset_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testin
 		"ordinals": map[string]any{"start": 3},
 		"volumeClaimTemplates": []any{
 			map[string]any{
-				"name":      "data",
-				"mountPath": "/data",
-				"size":      "1Gi",
-				"selector": map[string]any{
-					"matchLabels": map[string]any{"tier": "db"},
+				"metadata": map[string]any{"name": "data"},
+				"spec": map[string]any{
+					"accessModes": []any{"ReadWriteOnce"},
+					"selector": map[string]any{
+						"matchLabels": map[string]any{"tier": "db"},
+					},
+					"resources": map[string]any{
+						"requests": map[string]any{"storage": "1Gi"},
+						"limits":   map[string]any{"storage": "2Gi"},
+					},
+					"dataSourceRef": map[string]any{
+						"kind": "PersistentVolumeClaim",
+						"name": "seed",
+					},
+					// The edit below flips the mode to Block: a value the
+					// config does not hold, which makes a leak unmistakable.
+					"volumeMode":                "Filesystem",
+					"volumeAttributesClassName": "gold",
 				},
-				"resources": map[string]any{
-					"limits": map[string]any{"storage": "2Gi"},
-				},
-				"dataSourceRef": map[string]any{
-					"kind": "PersistentVolumeClaim",
-					"name": "seed",
-				},
-				// Filesystem is the only mode this kind accepts (a Block
-				// volume would need volumeDevices, not a mountPath), so the
-				// edit below flips it to Block: a value the config could not
-				// hold, which makes a leak unmistakable.
-				"volumeMode":                "Filesystem",
-				"volumeAttributesClassName": "gold",
 			},
 		},
-	}
+	})
 
 	second := renderTwice(t, &components.StatefulsetHandler{}, "statefulset", props, func(objects []*client.Object) {
 		sts, ok := (*objects[0]).(*appsv1.StatefulSet)
@@ -184,9 +183,6 @@ func TestStatefulset_RenderingTwiceIsUnaffectedByEditingTheFirstRender(t *testin
 	if got := pvc.Spec.Resources.Limits[corev1.ResourceStorage]; got.String() != "2Gi" {
 		t.Errorf("resources.limits.storage = %q, want 2Gi", got.String())
 	}
-	// Requests is the one value here the apply cannot alias at the map level —
-	// the constructor builds that map fresh per render and apply merges into
-	// it — so this assertion pins that property rather than the deep copy.
 	if got := pvc.Spec.Resources.Requests[corev1.ResourceStorage]; got.String() != "1Gi" {
 		t.Errorf("resources.requests.storage = %q, want 1Gi", got.String())
 	}
