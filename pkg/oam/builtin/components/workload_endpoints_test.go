@@ -190,7 +190,14 @@ func TestWorkloadEndpoints_BatchKindsReportNone(t *testing.T) {
 			if typ == "cronjob" {
 				props = map[string]any{"schedule": "0 * * * *", "jobTemplate": map[string]any{"spec": map[string]any{"template": template}}}
 			}
-			eps, err := tr.ComponentEndpoints(workloadComponent(typ, "batch", props))
+			// Built directly: workloadComponent adds a top-level `image`, which the raw
+			// kinds refuse. The properties must parse before "none" means anything.
+			comp := &oam.Component{Name: "batch", Type: typ, Properties: props}
+			handlers := map[string]oam.ComponentHandler{"job": &components.JobHandler{}, "cronjob": &components.CronjobHandler{}}
+			if _, err := handlers[typ].ToApplicationConfig(comp, "default"); err != nil {
+				t.Fatalf("the raw properties do not parse: %v", err)
+			}
+			eps, err := tr.ComponentEndpoints(comp)
 			if err != nil || len(eps) != 0 {
 				t.Errorf("endpoints = %+v, err = %v; want none", eps, err)
 			}
