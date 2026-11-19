@@ -300,6 +300,11 @@ func validateAuthoredComponentAgainst(handler ComponentHandler, props map[string
 		// The capability fills these keys when the author leaves them out, so their
 		// absence is not refused here (ComponentCapabilityDefaults).
 		_, keys := d.CapabilityDefaults()
+		// The schema as declared is checked before relaxation clears a RequiredWhen
+		// that may be the malformed one, as the trait path does.
+		if err := checkObjectGroups(schema, exclusiveProperties(handler), path); err != nil {
+			return err
+		}
 		schema = withoutRequired(schema, keys)
 	}
 	return validateAuthoredTopLevel(schema, exclusiveProperties(handler), props, path)
@@ -312,6 +317,7 @@ func withoutRequired(schema map[string]PropertySchema, keys []string) map[string
 	for _, key := range keys {
 		if field, ok := out[key]; ok {
 			field.Required = false
+			field.RequiredWhen = nil
 			out[key] = field
 		}
 	}
@@ -454,6 +460,9 @@ func relaxObjectRequired(schema map[string]PropertySchema) map[string]PropertySc
 // relaxFieldRequired is relaxObjectRequired for one field, returned as a copy.
 func relaxFieldRequired(field PropertySchema) PropertySchema {
 	field.Required = false
+	// A RequiredWhen is Required under a condition, so the rendering that may supply
+	// the property relaxes it too. The pointer is dropped on this copy only.
+	field.RequiredWhen = nil
 	if field.Type != PropertyTypeObject {
 		return field
 	}

@@ -44,6 +44,9 @@ var inputFieldDecisions = map[string]inputFieldDecision{
 	"valueGatedPaths":            {accepted: true, body: []string{"type: object", "additionalProperties: true", "valueGatedPaths: {a: {v: SomeGate}}"}},
 	"valueGates":                 {accepted: true, body: []string{"type: string", "enum: [a]", "valueGates: {a: SomeGate}"}},
 	"boundedBy":                  {body: []string{"type: string", "boundedBy: [registry]"}},
+	// A rule sits on a property of an object and names a sibling, so the body is
+	// an object whose property b is required when its sibling a is set.
+	"requiredWhen": {accepted: true, body: []string{"type: object", "properties: {a: {type: string}, b: {type: string, requiredWhen: {key: a}}}"}},
 }
 
 // inputBlock is a spec.inputs block with one input, image, whose schema is body

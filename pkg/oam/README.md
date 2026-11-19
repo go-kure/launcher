@@ -167,8 +167,10 @@ to declare a constrained schema for their user-facing properties. `PropertySchem
 single schema vocabulary — the same type also backs `kurel.yaml` parameters (`ParameterDecl`) and
 `CapabilityDefinition` rendering properties. It has `Type` (string/integer/boolean/number/array/object),
 `Types`, `Description`, `Required`, `Default`, `Enum`, nested `Properties`, `Items`, `AdditionalProperties`
-(default false; escape-hatch fields set it true), `AdditionalPropertiesSchema`, and `Exclusive`. The rich fields
-(`Types`, `Enum`, `Properties`, `Items`, `AdditionalProperties`, `AdditionalPropertiesSchema`, `Exclusive`) are
+(default false; escape-hatch fields set it true), `AdditionalPropertiesSchema`, `Exclusive` and `RequiredWhen`
+(a property required while a sibling key is set, or set to a value; see "Property schemas" in the API
+reference). The rich fields
+(`Types`, `Enum`, `Properties`, `Items`, `AdditionalProperties`, `AdditionalPropertiesSchema`, `Exclusive`, `RequiredWhen`) are
 meaningful only for handler properties: the two flat call sites (kurel
 parameters, capability rendering) reject them at decode time, so unifying the type does not widen
 their accepted behavior.

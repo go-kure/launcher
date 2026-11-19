@@ -585,6 +585,8 @@ See [Common config](/site/content/api-reference/oam-components/common-config.md#
 ### Raw block volumes (`volumeMode: Block`)
 
 See [Common config](/site/content/api-reference/oam-components/common-config.md#raw-block-volumes-volumemode-block).
+The published schema marks `volumeMode` required (`requiredWhen`) when a `volumes[]` entry or a
+`volumeClaimTemplates[]` entry authors `devicePath`; the value `Block` stays the handler's rule.
 
 ### Pod-level properties
 

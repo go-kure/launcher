@@ -241,11 +241,23 @@ func validateInputs(inputs map[string]oam.PropertySchema) error {
 		if err := checkIdent(path, name); err != nil {
 			return err
 		}
-		if err := validateSchema(path, inputs[name]); err != nil {
+		if err := validateNonProperty(path, inputs[name]); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// validateNonProperty is validateSchema for a node that is no property of an object: an
+// input, an array's items, the value schema of an open object. A requiredWhen names a
+// sibling key, which such a node has none of, so it is refused there (pkg/oam
+// CheckSchemaNodeNotProperty) rather than left unread. The properties of an object are
+// walked by validateSchema itself, where CheckSchemaNodeGroups holds their rules.
+func validateNonProperty(path string, s oam.PropertySchema) error {
+	if err := oam.CheckSchemaNodeNotProperty(s, path); err != nil {
+		return errors.Errorf("%w: %s", ErrInvalid, err.Error())
+	}
+	return validateSchema(path, s)
 }
 
 // validateSchema checks that a declared schema names a known type. It looks at
@@ -304,12 +316,12 @@ func validateSchema(path string, s oam.PropertySchema) error {
 		}
 	}
 	if s.AdditionalPropertiesSchema != nil {
-		if err := validateSchema(path+".additionalPropertiesSchema", *s.AdditionalPropertiesSchema); err != nil {
+		if err := validateNonProperty(path+".additionalPropertiesSchema", *s.AdditionalPropertiesSchema); err != nil {
 			return err
 		}
 	}
 	if s.Items != nil {
-		return validateSchema(path+".items", *s.Items)
+		return validateNonProperty(path+".items", *s.Items)
 	}
 	return nil
 }

@@ -625,7 +625,9 @@ no defined root to resolve a relative value against, and real admission
 `configMap.configMapName` and `secret.secretName` are each required the same
 way as `pvc.size`; an entry can also author its
 source as the upstream object under a key named like its `type`: `projected`,
-`downwardAPI`, `csi`, `ephemeral` and `image` take only that nested form
+`downwardAPI`, `csi`, `ephemeral` and `image` take only that nested form, so
+the published schema marks each of those five objects required (`requiredWhen`)
+when `type` names it
 (`- {name: tok, type: projected, mountPath: /var/run/tok, projected: {sources: [...]}}`),
 and `configMap`, `secret` and `emptyDir` take it as well, for the fields their
 flat keys have no name for (`items`, `defaultMode`, `optional`, `medium`). The
@@ -995,7 +997,10 @@ all seven kinds (`webservice`, `worker`, `deployment`, `statefulset`,
 
 - **`volumes[]` pvc entry.** Adds `volumeMode` (`Filesystem`|`Block`) and
   `devicePath`. The entry takes exactly one of `mountPath` and `devicePath`,
-  and `devicePath` is authored if and only if `volumeMode: Block` is — in both
+  and `devicePath` is authored if and only if `volumeMode: Block` is (the
+  published schema states the first half: `volumeMode` is required,
+  `requiredWhen`, when `devicePath` is set, on a `volumes[]` entry and on a
+  `volumeClaimTemplates[]` entry; the value `Block` is the handler's rule) — in both
   directions, with nothing inferred: `mountPath` with `Block`, `devicePath`
   with `Filesystem` or with no mode, and both paths at once are each an error.
   A Block entry reaches the main container as a `corev1.VolumeDevice` and has

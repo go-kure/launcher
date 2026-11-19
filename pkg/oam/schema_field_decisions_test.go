@@ -38,6 +38,7 @@ var flatSiteDecisions = map[string]flatSiteDecision{
 	"valueGatedPaths":            {sample: `valueGatedPaths: {}`},
 	"valueGates":                 {sample: `valueGates: {}`},
 	"boundedBy":                  {sample: `boundedBy: []`},
+	"requiredWhen":               {sample: `requiredWhen: {key: mode}`},
 }
 
 // propertySchemaKeys returns the YAML key of every field of PropertySchema, and

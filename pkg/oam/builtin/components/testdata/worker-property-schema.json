@@ -2613,7 +2613,11 @@
         "csi": {
           "type": "object",
           "description": "The csi volume source, as the Kubernetes VolumeSource field of that name. Read when type is csi; an unknown field or a wrongly typed value is refused.",
-          "additionalProperties": true
+          "additionalProperties": true,
+          "requiredWhen": {
+            "key": "type",
+            "equals": "csi"
+          }
         },
         "devicePath": {
           "type": "string",
@@ -2622,7 +2626,11 @@
         "downwardAPI": {
           "type": "object",
           "description": "The downwardAPI volume source, as the Kubernetes VolumeSource field of that name. Read when type is downwardAPI; an unknown field or a wrongly typed value is refused.",
-          "additionalProperties": true
+          "additionalProperties": true,
+          "requiredWhen": {
+            "key": "type",
+            "equals": "downwardAPI"
+          }
         },
         "emptyDir": {
           "type": "object",
@@ -2635,7 +2643,11 @@
           "additionalProperties": true,
           "boundedBy": [
             "storage-maximum"
-          ]
+          ],
+          "requiredWhen": {
+            "key": "type",
+            "equals": "ephemeral"
+          }
         },
         "image": {
           "type": "object",
@@ -2643,7 +2655,11 @@
           "additionalProperties": true,
           "boundedBy": [
             "registry"
-          ]
+          ],
+          "requiredWhen": {
+            "key": "type",
+            "equals": "image"
+          }
         },
         "mountPath": {
           "type": "string",
@@ -2666,7 +2682,11 @@
         "projected": {
           "type": "object",
           "description": "The projected volume source, as the Kubernetes VolumeSource field of that name. Read when type is projected; an unknown field or a wrongly typed value is refused.",
-          "additionalProperties": true
+          "additionalProperties": true,
+          "requiredWhen": {
+            "key": "type",
+            "equals": "projected"
+          }
         },
         "readOnly": {
           "type": "boolean",
@@ -2720,7 +2740,10 @@
           "enum": [
             "Filesystem",
             "Block"
-          ]
+          ],
+          "requiredWhen": {
+            "key": "devicePath"
+          }
         }
       },
       "additionalProperties": true,

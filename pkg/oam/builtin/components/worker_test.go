@@ -40,7 +40,8 @@ func TestWorkerRule_ComponentType(t *testing.T) {
 // each property that needs a Kubernetes feature gate, and go-kure/launcher#1230
 // the gate of each enum value that needs one (an init container's restartPolicy);
 // go-kure/launcher#1473 added `tolerations` and `topologySpreadConstraints`, the
-// same entries `deployment` publishes.
+// same entries `deployment` publishes, and go-kure/launcher#1625 the
+// `requiredWhen` of a volume's five source objects and of its `volumeMode`.
 func TestWorkerRule_PropertySchemaUnchanged(t *testing.T) {
 	want, err := os.ReadFile("testdata/worker-property-schema.json")
 	if err != nil {
