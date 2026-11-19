@@ -1876,9 +1876,10 @@ On a job with `completionMode: Indexed` and `completions` above 0 the name is
 held to one more rule of the API server's (`validateNameAllowsCompletions`):
 the pod of each index takes the hostname `<name>-<index>`, so
 `<name>-<completions-1>` must be a DNS-1123 label, at most 63 characters and
-without a dot. A document cannot leave `completions` unset on an Indexed job,
-but a `JobConfig` built in Go can: with `Parallelism` unset too the API server
-reads both as 1, so `Generate` holds the name to `<name>-0` there.
+without a dot. `completions` is optional here: with it and `parallelism` both
+unset the API server reads completions as 1, so the name is held to `<name>-0`,
+in a document and in a `JobConfig` built in Go alike. The other constraints on
+`completions` are the API server's.
 
 Every other value rule is left to the API server: `activeDeadlineSeconds`
 bounds, `completionMode` against `completions`, `backoffLimitPerIndex` and
