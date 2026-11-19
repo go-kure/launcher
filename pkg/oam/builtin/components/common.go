@@ -1320,7 +1320,7 @@ func parseReplicas(props map[string]any, defaultVal int32) (int32, bool, error) 
 }
 
 // namedPortsAllowed is false for a component kind whose main container never
-// declares any port (worker, cronjob): the kubelet resolves a named httpGet/
+// declares any port (worker): the kubelet resolves a named httpGet/
 // tcpSocket port by looking it up in that same container's own declared
 // Ports, so a string port can never resolve there and is rejected outright
 // rather than authoring a probe/lifecycle hook that is guaranteed to fail at
@@ -1703,7 +1703,7 @@ func parseHTTPHeaders(raw map[string]any, key string) ([]corev1.HTTPHeader, erro
 // namedPortsAllowed rejects the string form outright before the name-syntax
 // check below: the kubelet resolves a named port only against that same
 // container's own declared Ports, so on a component kind whose main
-// container never declares any port (worker, cronjob — see parseProbes),
+// container never declares any port (worker — see parseProbes),
 // a string port is guaranteed unresolvable at runtime, not just possibly
 // wrong. matchName, when non-empty, further restricts an allowed named port
 // to that exact declared name — a syntactically valid but different name

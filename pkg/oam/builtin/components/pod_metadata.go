@@ -14,10 +14,10 @@ import (
 )
 
 // This file holds the `podMetadata` property of the controller kind components
-// whose spec carries a pod template the author does not write whole: statefulset,
-// job and cronjob (go-kure/launcher#1178), and the property the webservice and
+// whose spec carries a pod template the author does not write whole: statefulset
+// (go-kure/launcher#1178), and the property the webservice and
 // worker rules hand to their role-deployment member (go-kure/launcher#1216). The
-// raw kinds, deployment and daemonset, write the template whole
+// raw kinds, deployment, daemonset, job and cronjob, write the template whole
 // (go-kure/launcher#1629). The labels and
 // annotations of a component's object go on the object's own metadata
 // (oam.ObjectMetadata), and the pod template keeps the labels its kind gives it;
@@ -46,10 +46,10 @@ type PodMetadata struct {
 }
 
 // jobControllerLabelKeys are the pod template labels the Job controller owns:
-// the API server generates the selector of a Job from them. A job or cronjob
-// component refuses them (parsePodMetadata), since a value authored here would
-// meet the generated selector at admission. The refusal can be loosened later
-// without invalidating a document; the other way round it could not.
+// the API server generates the selector of a Job from them. parsePodMetadata
+// refuses them when its job flag is true, since a value authored here would
+// meet the generated selector at admission. No handler passes true now: the
+// raw job and cronjob take the pod template whole (go-kure/launcher#1629).
 var jobControllerLabelKeys = []string{
 	"batch.kubernetes.io/controller-uid",
 	"batch.kubernetes.io/job-name",

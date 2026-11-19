@@ -33,8 +33,8 @@ func containerPortEndpoints(componentName string, ports []corev1.ContainerPort) 
 	return eps
 }
 
-// The kind-named workload components that keep the reshaped form — statefulset,
-// job and cronjob — publish the main container's `ports` list at the top level
+// The kind-named workload component that keeps the reshaped form, statefulset,
+// publishes the main container's `ports` list at the top level
 // (go-kure/launcher#334): container ports are a PodSpec field, and a kind
 // component projects its API kind's fields. The raw kinds, deployment and
 // daemonset, take them under `template.spec.containers` (go-kure/launcher#1629). Declaring them emits no

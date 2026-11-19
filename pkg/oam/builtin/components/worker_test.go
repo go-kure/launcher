@@ -423,9 +423,8 @@ func TestWorker_WithSharedPodFields(t *testing.T) {
 // `port` property at all — see PropertySchema above), so a named httpGet
 // port in `lifecycle`/`probes` can never resolve against it and is rejected
 // at parse time instead of authoring a hook guaranteed to fail at runtime.
-// worker is the representative test for this fix — cronjob shares the same
-// portless shape and the same shared parsing path (parseProbes/
-// parseLifecycle's namedPortsAllowed parameter, common.go).
+// worker is the only kind that passes false outright for the namedPortsAllowed
+// parameter of parseProbes/parseLifecycle (common.go).
 func TestWorker_NamedLifecyclePort_Error(t *testing.T) {
 	h := workerViaRule{}
 	_, err := h.ToApplicationConfig(&oam.Component{
