@@ -1,6 +1,52 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.11] - 2026-11-19
+
+### Build
+
+- Update module cel.dev/cel-go to v0.33.4
+
+### Changed
+
+- Give webservice and worker their own workload member type
+- Remove the Job-pod switch no kind passes
+
+### Document Format
+
+- Model inputs accept requiredWhen
+- Derive volume source rules from the handler's list
+- The cel-go comparison-caller read is recorded at v0.33.4
+- Take the upstream DeploymentSpec in the deployment kind
+- Take the upstream DaemonSetSpec in the daemonset kind
+- Take the upstream JobSpec and CronJobSpec in the job and cronjob kinds
+- Take the upstream StatefulSetSpec in the statefulset kind
+- Read a set spelling over a null one in the claim class fill
+
+### Documentation
+
+- Keep the fill-report list of reporting types in one piece
+- Separate the raw scheduling fields from the deployment kind's raw spec
+- Drop the anchor of the section the job and cronjob change removed
+- The contributor page no longer lists the removed section or the old kind count
+- Finish the comment cleanup for job and cronjob as raw kinds
+- Drop the last comments that list job and cronjob as reshaped
+- Describe the raw statefulset kind
+- Name the pod-spec key that references a migrated claim
+
+### Fixed
+
+- Keep issue numbers out of the builtin component property descriptions
+- Declare a volume's type Required in the published schema
+- Name Deployment in the activeDeadlineSeconds refusal and the scheduling doc
+
+### Testing
+
+- Pin the activeDeadlineSeconds refusal in the daemonset test
+- Restore the LeftToCluster, endpoint and job-key tests the raw kinds dropped
+- Restore the cronjob schedule table and reserved-annotation case, fix migration paths
+- Restore the workingDir wrong-type case, fix comments that still list job and cronjob as reshaped
+
 ## [0.2.0-beta.10] - 2026-11-18
 
 ### Added
