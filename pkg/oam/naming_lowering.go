@@ -243,6 +243,13 @@ func (l LoweringContext) lowerName(base, suffix string, spec NameSpec, documentO
 	return l.lowerDefault(def, spec, documentOwned)
 }
 
+// Application is the name of the document the context lowers, as the Naming
+// hook is asked it (NameRequest.Application): the one a query for outputs was
+// made under, else the document's own, else the one the origin names. A rule
+// that names what it emits after the application reads it here, so that the
+// query for its outputs and the build read the same name.
+func (l LoweringContext) Application() string { return l.documentName() }
+
 // documentName is the name of the document the context lowers, as the Naming
 // hook is asked it (NameRequest.Application): the one a query was made under,
 // else the document's own, else the one the origin names.

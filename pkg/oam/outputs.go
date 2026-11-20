@@ -222,11 +222,14 @@ func probeCopy(comp Component) Component {
 // apart two names a rule resolves under one role and default (a ConfigMap and
 // a Secret answered differently by the hook). A derived output claims nothing:
 // its derivation is applied again to the name held for its parent and must give
-// the name it was answered (checkDerivedOutputs).
-func checkRuleOutputs(component string, decls []OutputDecl, outs []Output, claims []loweredName) error {
+// the name it was answered (checkDerivedOutputs). A forwarded output claims
+// nothing either: the component it names must be among the ones the rule
+// emitted, and outputsOf (the query of the transformer, for one component) must
+// answer the key it names with the same name and kind (checkForwardedOutputs).
+func checkRuleOutputs(component string, decls []OutputDecl, outs []Output, claims []loweredName, emitted []Component, outputsOf func(*Component) ([]Output, error)) error {
 	held := make(map[string]string, len(decls))
 	for _, d := range decls {
-		if d.From != "" || d.Derive != nil {
+		if d.From != "" || d.Derive != nil || isForwarded(d) {
 			continue
 		}
 		var matched []loweredName
@@ -250,7 +253,61 @@ func checkRuleOutputs(component string, decls []OutputDecl, outs []Output, claim
 		}
 		held[d.Key] = matched[0].name
 	}
+	if err := checkForwardedOutputs(component, decls, emitted, outputsOf); err != nil {
+		return err
+	}
 	return checkDerivedOutputs(component, decls, outs, held)
+}
+
+// isForwarded reports whether d is a forwarded declaration.
+func isForwarded(d OutputDecl) bool { return d.ForwardOf != "" || d.ForwardKey != "" }
+
+// checkForwardedOutputs holds each forwarded output to the component it names: that
+// component is one the rule emitted, it publishes the key the output names, and its
+// answer carries the name and kind the output was answered. The rule's own claims
+// cannot tell, since the emitted component names its object itself, so this asks it.
+func checkForwardedOutputs(component string, decls []OutputDecl, emitted []Component, outputsOf func(*Component) ([]Output, error)) error {
+	for _, d := range decls {
+		if !isForwarded(d) {
+			continue
+		}
+		var target *Component
+		for i := range emitted {
+			if emitted[i].Name == d.ForwardOf {
+				target = &emitted[i]
+				break
+			}
+		}
+		if target == nil || outputsOf == nil {
+			return errors.Errorf("output %q of component %q forwards the output %q of the component %q, which the lowering did not emit",
+				d.Key, component, d.ForwardKey, d.ForwardOf)
+		}
+		probe := probeCopy(*target)
+		got, err := outputsOf(&probe)
+		if err != nil {
+			return errors.Wrapf(err, "output %q of component %q forwards an output of the component %q", d.Key, component, d.ForwardOf)
+		}
+		var found *Output
+		for i := range got {
+			if got[i].Key == d.ForwardKey {
+				found = &got[i]
+				break
+			}
+		}
+		switch {
+		case found == nil:
+			keys := make([]string, 0, len(got))
+			for _, o := range got {
+				keys = append(keys, o.Key)
+			}
+			return errors.Errorf("output %q of component %q forwards the output %q of the component %q, which publishes none of that key (it publishes: %s)",
+				d.Key, component, d.ForwardKey, d.ForwardOf, strings.Join(keys, ", "))
+		case found.Name != d.Name || found.Kind != d.Kind:
+			return errors.Errorf("output %q of component %q declares the %s name %q, but the output %q of the component %q is the %s name %q",
+				d.Key, component, d.Kind, d.Name, d.ForwardKey, d.ForwardOf, found.Kind, found.Name)
+		}
+	}
+	return nil
 }
 
 // checkHandlerOutputs holds the outputs a handler declared for comp against
@@ -266,6 +323,10 @@ func checkHandlerOutputs(comp *Component, handler ComponentHandler, decls []Outp
 	}
 	held := make(map[string]string, len(decls))
 	for _, d := range decls {
+		if isForwarded(d) {
+			return errors.Errorf("output %q of component %q is forwarded: a handler declares the one object it names after the component and forwards no output of another component",
+				d.Key, comp.Name)
+		}
 		if d.From != "" || d.Derive != nil {
 			continue
 		}
@@ -330,10 +391,29 @@ func checkDerivedOutputs(component string, decls []OutputDecl, outs []Output, he
 	return nil
 }
 
+// checkForwarded holds the shape of a forwarded declaration: it names the component
+// and the key it forwards, carries the name and kind the provider answered for it,
+// and is neither allocated (no role, no default) nor derived. The check after the
+// lowering holds the answer against what the component publishes (checkRuleOutputs).
+func checkForwarded(d OutputDecl) error {
+	switch {
+	case d.ForwardOf == "" || d.ForwardKey == "":
+		return errors.Errorf("output %q forwards an output of an emitted component and must name both the component and its key", d.Key)
+	case d.From != "" || d.Derive != nil:
+		return errors.Errorf("output %q is both forwarded and derived", d.Key)
+	case d.Role != "" || d.Default != "":
+		return errors.Errorf("output %q is forwarded, so it declares no role and no default: the emitted component names the object", d.Key)
+	case strings.TrimSpace(d.Name) == "":
+		return errors.Errorf("output %q has no name", d.Key)
+	}
+	return nil
+}
+
 // resolveOutputs checks decls and answers them: every key is one identifier and
 // appears once, an allocated output has a name, a kind, a name role that names an
 // object and a default, a derived output names an earlier allocated output and
-// carries its derivation.
+// carries its derivation, and a forwarded output names the component and the key
+// it forwards.
 func resolveOutputs(decls []OutputDecl) ([]Output, error) {
 	outs := make([]Output, 0, len(decls))
 	names := make(map[string]string, len(decls))
@@ -353,6 +433,10 @@ func resolveOutputs(decls []OutputDecl) ([]Output, error) {
 		}
 		name := d.Name
 		switch {
+		case d.ForwardOf != "" || d.ForwardKey != "":
+			if err := checkForwarded(d); err != nil {
+				return nil, err
+			}
 		case d.From != "" || d.Derive != nil:
 			if name != "" {
 				return nil, errors.Errorf("output %q is both derived and named; a derived output takes its name from %q", d.Key, d.From)
@@ -378,7 +462,7 @@ func resolveOutputs(decls []OutputDecl) ([]Output, error) {
 				return nil, err
 			}
 		}
-		allocated[d.Key] = d.From == "" && d.Derive == nil
+		allocated[d.Key] = d.From == "" && d.Derive == nil && d.ForwardOf == "" && d.ForwardKey == ""
 		names[d.Key] = name
 		outs = append(outs, Output{Key: d.Key, Kind: d.Kind, Name: name})
 	}
