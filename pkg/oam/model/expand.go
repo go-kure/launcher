@@ -195,6 +195,10 @@ func (s *site) checkPartReads(path string, parts map[string]map[string]any) erro
 					return errors.Errorf("model: evaluate %s: %s: %s is the record of an output: read its name, as %s.%s", path, r.text(), here, here, recordNameField)
 				}
 				cur, owner = x, "output "+strconv.Quote(k)+" of part "+strconv.Quote(r.part)
+			default:
+				// A read of a name is typed as a string (isRecordText), so a scope that binds
+				// anything else would turn `parts.a.name + parts.b.name` into a number.
+				return errors.Errorf("model: evaluate %s: %s: %s is a %T, and the output of a part is a name (a string) or a record", path, r.text(), here, v)
 			}
 		}
 	}
