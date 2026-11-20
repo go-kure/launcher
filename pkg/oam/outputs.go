@@ -79,6 +79,12 @@ type OutputDecl struct {
 	Name    string
 	From    string
 	Derive  func(string) string
+
+	// ForwardOf and ForwardKey make a declaration forwarded: the output is one record
+	// that a component the rule emits already publishes, ForwardOf names that component
+	// and ForwardKey its output key. Name and Kind are what the provider answered for it.
+	ForwardOf  string
+	ForwardKey string
 }
 
 // Output is the answer to one declaration: the key, the kind of object and the
