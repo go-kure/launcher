@@ -892,8 +892,8 @@ name unless `backup.serverName` sets it. Renaming an existing Cluster creates a
 new one: the old one is pruned with its data unless it is protected. Every
 address or Secret reference written with the old name is the author's to
 change.** A model part that reads this component writes no name by hand:
-`parts.<part>.app_secret` gives the name of the Secret `<cluster>-app`, and
-`parts.<part>.cluster` gives the Cluster's name. A part that sets
+`parts.<part>.app_secret.name` gives the name of the Secret `<cluster>-app`, and
+`parts.<part>.cluster.name` gives the Cluster's name. A part that sets
 `recovery.secret.name` declares no `app_secret`, because CloudNativePG does not
 generate that Secret then, and a read of it fails. The name follows
 `clusterObjectName` and the `Naming` hook, like the name of the Cluster the

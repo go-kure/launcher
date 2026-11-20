@@ -73,8 +73,10 @@ A component type answers with the optional `OutputProvider` interface, which the
 as for `EndpointProvider`. `Transformer.ComponentOutputs(comp)` returns one `Output` per
 declaration, in the provider's order: a `Key`, the object's `Kind` (a `schema.GroupKind`) and
 its `Name`. A key is one identifier (a letter or underscore, then letters, digits and
-underscores), so a document can address it as `parts.<part>.<key>`; `name` and `kind` are
-reserved. A handler that declares its one object (`ComponentObjectProvider`) and no outputs of
+underscores), so a document can address it as the record `parts.<part>.<key>` and read its
+name as `parts.<part>.<key>.name` (the part's own object, key `object`, is `parts.<part>.name`);
+`name` and `kind` are reserved. A model publishes the records it names in `spec.outputs` as
+forwarded outputs, and the build holds each against the component the part emitted. A handler that declares its one object (`ComponentObjectProvider`) and no outputs of
 its own publishes that object as the output `object` (`ObjectOutputKey`). A type that provides
 no outputs and declares no object answers `(nil, nil)`. The query parses nothing for that
 default, so it answers for a `configmap` or `secret` whose properties the build refuses; the

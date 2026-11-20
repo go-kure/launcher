@@ -579,8 +579,10 @@ A component type answers with the optional `OutputProvider` interface, which the
 as for `EndpointProvider`. `Transformer.ComponentOutputs(comp)` returns one `Output` per
 declaration, in the provider's order: a `Key`, the object's `Kind` (a `schema.GroupKind`) and
 its `Name`. A key is one identifier (a letter or underscore, then letters, digits and
-underscores), so a document can address it as `parts.<part>.<key>`. The keys `name` and
-`kind` are reserved (a declaration that uses one is refused): they are the fields of a record.
+underscores), so a document can address it as the record `parts.<part>.<key>` and read its name as
+`parts.<part>.<key>.name`; the part's own object, key `object`, is read as `parts.<part>.name`. The
+keys `name` and `kind` are reserved (a declaration that uses one is refused): they are the fields
+of a record.
 A handler that declares its one object (`ComponentObjectProvider`) and no outputs of its own
 publishes that object as the output `object` (`oam.ObjectOutputKey`), with the kind it declares and the name the build gives
 it; the engine provides this, and it parses no properties. A type that provides no outputs
@@ -594,7 +596,7 @@ consults no hook, and a consumer that sets `Naming` calls
 `ComponentOutputsNamed(application, comp, naming)`, which asks `naming` the same
 `NameRequest` the transform asks.
 
-A declaration is one of two shapes. An **allocated** output carries the `Role` and `Default`
+A declaration is one of three shapes. An **allocated** output carries the `Role` and `Default`
 the name was resolved under, and `Name`. The role must be a name role that names an object
 and the default must not be empty, as the allocator requires; a declaration that fails either
 is refused where it is answered, by a query as by the build. A **derived** output carries
@@ -603,7 +605,14 @@ names an object the operator gives, not launcher: the Secret CloudNativePG gener
 `postgresql` component's application user is `<cluster>-app`. It is not in the built
 application, so nothing is claimed for it. The build applies `Derive` again to the name it
 holds for the parent and fails if the result is not the name the output was answered, so
-`Derive` must give one name for one parent name.
+`Derive` must give one name for one parent name. A **forwarded** output is a record of a
+component the rule emits: `ForwardOf` names that component, `ForwardKey` its output key, and
+`Name` and `Kind` are what the rule answered for it, with no role, default or claim of its own.
+A configuration-defined model publishes each output of its `spec.outputs` this way. After the
+lowering the build asks the transformer, as a consumer does, for the outputs of the component
+named `ForwardOf`, and fails if it was not emitted, publishes no such key, or answers another name
+or kind, naming the component, the output and the forwarded component. A handler forwards
+nothing: it names its one object after the component.
 
 **The build holds every declaration.** The transform asks each provider for its
 outputs as it lowers the component (asking the `Naming` hook again for each name the provider

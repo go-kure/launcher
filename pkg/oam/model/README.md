@@ -34,6 +34,8 @@ spec:
   values:
     - name: full
       expr: "${inputs.image + ':latest'}"
+  outputs:
+    deployment: "${parts.app.name}"   # the record the model publishes under `deployment`
   parts:
     - id: app
       type: deployment.apps@v1
@@ -52,8 +54,9 @@ spec:
 | `spec.celEnv` | Required. It must be `"1"`. The value names a fixed set of CEL functions, so a model means the same later. |
 | `spec.inputs` | Map of input name to `oam.PropertySchema`. Each name is a CEL identifier. Each schema has a `type` or `types`. A schema may set `additionalPropertiesSchema`, the schema of the values of an object's open keys, on an object only; the loader checks it as it checks `properties` and `items`. A schema may not set `boundedBy`, at any depth, `additionalPropertiesSchema` included, an empty list included: a bound is published where a test holds it, and nothing holds one a model states (go-kure/launcher#1580). |
 | `spec.values` | Ordered list of `{name, expr}`. A value reads inputs and earlier values only. Each name is a CEL identifier and is unique. |
+| `spec.outputs` | Required: the key must be there, and a model with no `outputs` (left out, or `null`) is refused when it is registered, naming the model. `outputs: {}` says the model publishes nothing. Otherwise a map of output key to exactly one `${ }` hole that is one read of the name of a record of a part, `${ parts.<id>.name }` or `${ parts.<id>.<key>.name }` (see `parts[].id`); text around the hole, a computed name, a read of a record itself and a part with `when` or `forEach` are refused when the model compiles, and the error names `spec.outputs.<key>` and the two forms. A key is a CEL identifier and is neither `name` nor `kind`. The model publishes each as an output of its own component, with the kind and the name its part publishes: a model part in another model reads it as `parts.<id>.<key>.name`. The build holds each against the component the part emitted. Computed outputs are not supported: a string carries no provenance, so the build could not tell two objects of one name apart. |
 | `spec.parts` | At least one part. A model that expands to nothing is an error. |
-| `parts[].id` | A CEL identifier, unique in the model. A later part reads `parts.<id>.<key>`, the object name of one output that the part declares. A part reads only an earlier part, and never a part with `when` or `forEach`. A read of any other part, or of the part itself, fails when the model compiles, and the error names the site and the part. A key the part does not declare fails when `Expand` runs, and the error names the site, the part and the key. |
+| `parts[].id` | A CEL identifier, unique in the model. A later part reads the outputs of the part as records. The part's own object is `parts.<id>.name`, and every other output the part declares is a record under its key, `parts.<id>.<key>.name`: for a `postgresql` part, `parts.<id>.cluster.name` and `parts.<id>.app_secret.name`. Only the name of a record can be read: `parts.<id>`, a record without `.name`, and any other field fail when `Expand` runs, and the error names the site, the read and what the part declares. A part reads only an earlier part, and never a part with `when` or `forEach`. A read of any other part, or of the part itself, fails when the model compiles, and the error names the site and the part. A key the part does not declare fails when `Expand` runs, and the error names the site, the part and the key. |
 | `parts[].type`, `traits[].type` | A full identity, `name@version`. A short name and a missing version are refused. |
 | `parts[].when` | Optional. Exactly one `${ }` hole that gives a bool. The part is emitted only when it is true. It does not see the loop variable. |
 | `parts[].forEach` | Optional `{as, in}`. `in` is exactly one `${ }` hole that gives a list. `as` is the loop variable, a CEL identifier. A filter per element goes in `in`. |
@@ -192,11 +195,13 @@ has the element type of `forEach.in`.
 order. A part whose `when` is false emits nothing. A part with `forEach` emits one component for
 each element. A part without a `name` takes its id. After it builds a part that has no `when` and
 no `forEach`, `Expand` asks the Transformer for the outputs of that component
-(`ComponentOutputsNamed`, with `naming` as the Naming hook) and stores the object name of each under
-the part id. A later part reads it as `parts.<id>.<key>`, so the name follows an authored object
-name and the Naming hook, as the name of the built object does. `tr` must declare the type
+(`ComponentOutputsNamed`, with `naming` as the Naming hook) and stores each as a record under the
+part id: the part's own object (key `object`) is `name`, and every other output is a record
+`{name}` under its key. A later part reads `parts.<id>.name` or `parts.<id>.<key>.name`, so the name
+follows an authored object name and the Naming hook, as the name of the built object does. The Go
+API keeps the whole answer (`oam.Output`: key, kind, name). `tr` must declare the type
 identities of the parts (`registry.DeclareTypes`): a type that does not resolve declares no output,
-so a read of it fails as an undeclared key. `Eval` takes the same outputs in `Scope.Parts`, and it
+so a read of it fails as an undeclared key. `Eval` takes the same records in `Scope.Parts`, and it
 refuses a key that is not there with the same error. `Expand` reads the inputs and `self` from the
 scope and sets the other fields itself. `partName` turns the name of a part into the name of its
 component. The lowering rule passes the name allocator here. A nil `partName` keeps the name. More
@@ -210,6 +215,8 @@ refuses it in these cases.
 
 - The type of the model is already declared, or the Transformer refuses to declare it. The error
   names the model.
+- The model has no `spec.outputs` (left out, or `null`). The error names the model. `outputs: {}`
+  registers a model that publishes nothing.
 - A part type or a trait type is not declared on the Transformer. The error names the path of the
   part or the trait. A model can name only a model registered before it, so no cycle exists.
 - The models nest more than 4 deep. A model with no model part has depth 1. The depth is read from
@@ -225,7 +232,14 @@ A component of the model type lowers into the components of its parts.
   `self.application` is the name of its document.
 - A part is named `<component>-<part>`. The name allocator of the run gives it, so two parts that want
   one name fail the build, and the error names the name.
-- `parts.<id>.<key>` reads the name that the build gives, under the Naming hook of the run where one
+- The model publishes its `spec.outputs` (`oam.OutputProvider`): the rule renders the model once
+  on the allocator of the query and answers each output as the record of one of its parts, forwarded
+  under the key of the output (`oam.OutputDecl.ForwardOf`, `ForwardKey`). A consumer reads
+  `parts.<id>.<key>.name` of a model part as it reads one of a built-in type. The build then holds
+  each against the component the part emitted, asked as a consumer asks it, and refuses a build in
+  which the two differ, naming the model component, the output and the part. A model with
+  `outputs: {}` renders nothing for the query.
+- `parts.<id>.name` and `parts.<id>.<key>.name` read the name that the build gives, under the Naming hook of the run where one
   is set (`LoweringContext.NamingHook`). The hook sees the name of the document as it stands in that
   round. The lowering rule emits a kind part (a Secret or a ConfigMap), and the build names its object
   after the part and never asks the hook for it. So the rule's read does not ask the hook for the
@@ -429,15 +443,17 @@ identity names one definition: a changed model under the same identity must use 
 | `model.Compile(m)` | Compiles every expression site of `m` with a cache of its own. |
 | `(*Cache).Compile(m)` | The same, with a shared cache from `model.CreateCache()`. `Len()` counts the cached sites. |
 | `(*Compiled).Eval(path, scope)` | Runs one site. Returns the Go value, the actual cost and an error. |
-| `(*Compiled).Expand(tr, scope, naming, partName)` | Builds the components of the parts in document order and binds `parts.<id>.<key>` from `Transformer.ComponentOutputsNamed`. It runs no transform. |
+| `(*Compiled).Expand(tr, scope, naming, partName)` | Builds the components of the parts in document order and binds `parts.<id>.name` and `parts.<id>.<key>.name` from `Transformer.ComponentOutputsNamed`. It runs no transform. |
 | `model.NewRegistry(tr)` | Returns a registry for one Transformer. |
 | `(*Registry).Register(m)` | Compiles `m`, refuses it as the Lowering section says, then registers its rule and declares its type. |
 | `(*Registry).Rule(key)` | Returns the rule registered under a `Key()`, or nil. |
 | `(*Rule).LowerComponent(comp, lctx)` | Lowers a component of the model type into the components of its parts. |
+| `(*Rule).Outputs(comp, lctx)` | Answers the records of `spec.outputs` as forwarded outputs (`oam.OutputProvider`). |
 | `model.Load(data)` | Decodes one document and checks it. A failure of a decoded document wraps `model.ErrInvalid` and names the field, for example `spec.parts[1].id`. A YAML, `apiVersion` or `kind` failure does not wrap it. A YAML type error, such as a list where a string belongs, names the line of the field and not its path. An explicit tag that does not fit its value, such as `!!bool notabool`, names its line too, when one tagged value is at fault; with two or more, the error has no line. |
 | `(*Model).Identity()` | The model identity as written in `metadata`. |
 | `(*Model).Key()` | The identity with the version in the canonical form (`name@v2.0.0`). The registry returns a version as it was registered, so compare and store this form (`oam.TypeID.Canonical`). |
 
 `Load` returns the first failure. The YAML, `apiVersion` and `kind` checks come first. Then come the
 null and duplicate-key checks, the metadata, `spec.celEnv`, the inputs in alphabetical order of
-their names (a Go map keeps no document order), the values and the parts in document order.
+their names (a Go map keeps no document order), the values and the parts in document order, then
+the output keys in alphabetical order.
