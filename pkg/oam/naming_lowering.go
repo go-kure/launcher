@@ -250,6 +250,22 @@ func (l LoweringContext) lowerName(base, suffix string, spec NameSpec, documentO
 // query for its outputs and the build read the same name.
 func (l LoweringContext) Application() string { return l.documentName() }
 
+// emittedMemberNaming is the Naming hook as a component that a rule emitted sees it: the build
+// names the one object of such a component after the component and never asks the hook for the
+// role object (withObjectName), so a query about it must not ask either. Every other role is
+// still the hook's. A nil hook stays nil.
+func emittedMemberNaming(hook func(NameRequest) (string, bool)) func(NameRequest) (string, bool) {
+	if hook == nil {
+		return nil
+	}
+	return func(r NameRequest) (string, bool) {
+		if r.Role == NameRoleObject {
+			return "", false
+		}
+		return hook(r)
+	}
+}
+
 // documentName is the name of the document the context lowers, as the Naming
 // hook is asked it (NameRequest.Application): the one a query was made under,
 // else the document's own, else the one the origin names.

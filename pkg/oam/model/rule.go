@@ -82,9 +82,12 @@ func (r *Rule) Outputs(comp *oam.Component, lctx oam.LoweringContext) ([]oam.Out
 	if len(r.c.outputs) == 0 {
 		return nil, nil
 	}
-	exp, _, err := r.render(comp, lctx)
+	exp, budget, err := r.render(comp, lctx)
+	if err == nil {
+		err = budget.checkDeadline()
+	}
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "model: %s", r.m.Key())
 	}
 	decls, err := r.c.publish(exp)
 	if err != nil {
@@ -123,6 +126,11 @@ func (r *Rule) render(comp *oam.Component, lctx oam.LoweringContext) (*expansion
 	defer cancel()
 	// The application is the name a Naming hook is asked in the build.
 	sc := Scope{Inputs: inputs, Self: Self{Name: comp.Name, Application: lctx.Application()}, Ctx: ctx, budget: budget}
+	// The queries about the parts share the run of the build, so a chain of models that each ask
+	// about the next spends from the one budget.
+	sc.queryOutputs = func(c *oam.Component, naming func(oam.NameRequest) (string, bool)) ([]oam.Output, error) {
+		return r.t.ComponentOutputsWithin(lctx, c, naming)
+	}
 	name := func(part string) (string, error) { return lctx.Namer.Name(comp.Name, part, lctx.Origin) }
 	exp, err := r.c.expand(r.t, sc, objectNameUnhooked(lctx.NamingHook()), name)
 	if err != nil {

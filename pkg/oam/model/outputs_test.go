@@ -271,3 +271,53 @@ func TestRule_AModelReadsTheOutputsOfAModelPart(t *testing.T) {
 		t.Fatalf("the outer model publishes %v, but the build made the Cluster %s", got, clusters[0])
 	}
 }
+
+// TestRule_AForwardedSecretSurvivesAHookOnTheRoleObject: the build names the object of a kind part
+// (a Secret) after its component and never asks the Naming hook, so the forwarded-output check
+// and the read of the name give the same answer when the hook renames the role object.
+func TestRule_AForwardedSecretSurvivesAHookOnTheRoleObject(t *testing.T) {
+	tr := registerAll(t,
+		outputsDoc("webapp.acme.example", publishedOutputs, pgOnlyParts),
+		outputsDoc("shop.acme.example", "  outputs:\n    cluster: \"${ parts.app.cluster.name }\"\n", consumerParts))
+	objs := objectsOK(t, tr, []oam.Component{{Name: "orders", Type: consumerType}}, hookedNaming(oam.NameRoleObject))
+
+	cms := names(objs, "ConfigMap")
+	if len(cms) != 1 {
+		t.Fatalf("the build made %d ConfigMaps (%v), want 1", len(cms), cms)
+	}
+	creds, _ := objs[[2]string{"ConfigMap", cms[0]}]["data"].(map[string]any)["creds"].(string)
+	if _, ok := objs[[2]string{"Secret", creds}]; !ok {
+		t.Fatalf("the ConfigMap reads the Secret %q, which the build did not make (Secrets: %v)", creds, names(objs, "Secret"))
+	}
+}
+
+// TestCompile_ReadsAreRefusedWhateverTheirSpelling: a read of a part is checked against what the
+// part declares however it is written. A key with a dot in it is one key and not two, and a
+// leading dot reaches the global `parts` where a comprehension variable of that name shadows it.
+func TestCompile_ReadsAreRefusedWhateverTheirSpelling(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value string
+		want  string
+	}{
+		"a dotted key next to the path it looks like": {"${ parts.db.app_secret.name + parts.db['app_secret.name'] }", `declares no output "app_secret.name"`},
+		"a global identifier under a shadow":          {"${ [0].map(parts, .parts.db.nope.name)[0] }", `declares no output "nope"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			parts := pgOnlyParts + `
+    - id: cfg
+      type: configmap@v1
+      properties:
+        data:
+          x: "` + tc.value + `"
+`
+			tr := registerAll(t, outputsDoc("webapp.acme.example", "  outputs: {}\n", parts))
+			_, err := objects(t, tr, []oam.Component{{Name: "orders", Type: webappType}}, nil)
+			if err == nil {
+				t.Fatal("the build accepted it")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not say %q", err, tc.want)
+			}
+		})
+	}
+}

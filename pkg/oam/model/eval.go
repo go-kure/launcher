@@ -55,6 +55,11 @@ type Scope struct {
 	// and the outputs the Transformer answered, so the model can publish them.
 	published map[string]publishedPart
 
+	// queryOutputs asks for the outputs of a part's component. A rule sets it so that the query
+	// shares the run of the build (oam.Transformer.ComponentOutputsWithin); a direct Expand asks
+	// the Transformer on a run of its own.
+	queryOutputs func(comp *oam.Component, naming func(oam.NameRequest) (string, bool)) ([]oam.Output, error)
+
 	// budget is the limits of the build this evaluation belongs to. A rule sets it, and a
 	// direct Eval or Expand has none.
 	budget *buildBudget
