@@ -89,6 +89,12 @@ type Output struct {
 	Name string
 }
 
+// reservedOutputKeys are the keys no output may take: the fields of a record
+// (go-kure/launcher#1643). A document reads a part as one map, the fields of the
+// part's own record (ObjectOutputKey) beside one record per other key, so a key
+// named like a field would be read as that field.
+var reservedOutputKeys = map[string]bool{"name": true, "kind": true}
+
 // validOutputKey reports whether key is one identifier: a letter or underscore,
 // then letters, digits and underscores, ASCII only. A key is addressed as
 // parts.<part>.<key> in a document, so it must read as one.
@@ -322,6 +328,9 @@ func resolveOutputs(decls []OutputDecl) ([]Output, error) {
 	for _, d := range decls {
 		if !validOutputKey(d.Key) {
 			return nil, errors.Errorf("output key %q is not one identifier (letters, digits and underscores, not starting with a digit)", d.Key)
+		}
+		if reservedOutputKeys[d.Key] {
+			return nil, errors.Errorf("output key %q is reserved: a document reads a part as one map, the fields of its own record beside one record per key, and %q is a field", d.Key, d.Key)
 		}
 		if _, dup := names[d.Key]; dup {
 			return nil, errors.Errorf("output key %q declared twice", d.Key)
