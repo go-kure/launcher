@@ -27,6 +27,64 @@ func (r forwardRule) Outputs(c *Component, _ LoweringContext) ([]OutputDecl, err
 
 var configMapKind = schema.GroupKind{Kind: "ConfigMap"}
 
+// namedMemberRule emits one kind component, resolves the name of its object with
+// ResolveMemberName (the author's name when authored is set, else the Naming hook's) and forwards
+// the object output under the name forwarded.
+type namedMemberRule struct{ authored, forwarded string }
+
+func (namedMemberRule) ComponentType() string { return "named-member" }
+
+func (r namedMemberRule) LowerComponent(c *Component, lctx LoweringContext) (LoweringResult, error) {
+	member := Component{Name: c.Name + "-inner", Type: "cfg", Properties: map[string]any{}}
+	spec := NameSpec{Role: NameRoleObject, Kind: configMapKind}
+	if r.authored != "" {
+		spec.Property, spec.Authored = "properties.name", r.authored
+	}
+	if err := lctx.ResolveMemberName(&member, spec); err != nil {
+		return LoweringResult{}, err
+	}
+	return LoweringResult{Components: []Component{member}}, nil
+}
+
+func (r namedMemberRule) Outputs(c *Component, _ LoweringContext) ([]OutputDecl, error) {
+	return []OutputDecl{{Key: "settings", Kind: configMapKind, Name: r.forwarded, ForwardOf: c.Name + "-inner", ForwardKey: "object"}}, nil
+}
+
+// TestForwardedOutput_AMemberTheRuleNamedIsHeldToItsResolvedName: a rule that resolves the name of
+// the object of a member it emits (ResolveMemberName) forwards that name, and the check holds the
+// forward to it, not to the component name, whether the author or the Naming hook chose it.
+func TestForwardedOutput_AMemberTheRuleNamedIsHeldToItsResolvedName(t *testing.T) {
+	hook := func(r NameRequest) (string, bool) {
+		if r.Role != NameRoleObject {
+			return "", false
+		}
+		return "h-" + r.Default, true
+	}
+	for name, tc := range map[string]struct {
+		authored, forwarded string
+		naming              func(NameRequest) (string, bool)
+		ok                  bool
+	}{
+		"an authored name, the resolved name":  {"renamed", "renamed", nil, true},
+		"an authored name, the component name": {"renamed", "pg-inner", nil, false},
+		"a hook's name, the resolved name":     {"", "h-pg-inner", hook, true},
+		"a hook's name, the component name":    {"", "pg-inner", hook, false},
+		"no other name, the component name":    {"", "pg-inner", nil, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := NewTransformer(map[string]ComponentHandler{"cfg": &objectOutputHandler{typ: "cfg"}}, nil)
+			tr.RegisterComponentLowering(namedMemberRule{authored: tc.authored, forwarded: tc.forwarded})
+			_, err := tr.Transform(terminalApp(Component{Name: "pg", Type: "named-member"}), TransformContext{Naming: tc.naming})
+			if tc.ok && err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatal("Transform accepted a forward of a name the build does not give")
+			}
+		})
+	}
+}
+
 // hookedObjectRule is a lowering rule that names the object it declares for the role object
 // through ResolveName, so the Naming hook is asked for it in its own lowering and in its query.
 type hookedObjectRule struct{}

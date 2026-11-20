@@ -806,9 +806,19 @@ func (t *Transformer) queryProvider(comp *Component, application string, naming 
 		if emitted {
 			objectHook = emittedMemberNaming(naming)
 		}
-		named, nameErr := withObjectName(*comp, handler, "", "", &nameResolver{hook: objectHook, application: application})
-		if nameErr != nil {
-			return nil, nil, false, errors.Wrapf(nameErr, "component %q", comp.Name)
+		named := *comp
+		var nameErr error
+		// A member whose rule resolved its object's name (ResolveMemberName) keeps it: the
+		// build keeps it too, so resolving the default again would overwrite it.
+		if !emitted || comp.objectName == "" {
+			named, nameErr = withObjectName(*comp, handler, "", "", &nameResolver{hook: objectHook, application: application})
+			if nameErr != nil {
+				return nil, nil, false, errors.Wrapf(nameErr, "component %q", comp.Name)
+			}
+		} else if _, has := named.Properties[ObjectNameProperty]; has {
+			// The handler never sees the property, as withObjectName leaves it.
+			named.Properties = maps.Clone(named.Properties)
+			delete(named.Properties, ObjectNameProperty)
 		}
 		// Its `labels` and `annotations` are read off it too, so the handler is
 		// handed the properties it is handed in the transform. There is no
