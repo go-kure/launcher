@@ -1,6 +1,57 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.2.0-beta.12] - 2026-11-20
+
+### Added
+
+- Refuse the output keys name and kind
+
+### Build
+
+- Update dependency goreleaser to v2.20.3
+- Update dependency flux2 to v2.10.1
+- Update dependency flux-schema-plugin to v0.18.0
+
+### Document Format
+
+- Every one-object component type publishes its object as an output a Model reads
+- The kind default never answers for a lowering rule; the docs say where the query answers without a parse
+- The kind default follows the registration of the type, not its interfaces
+- A Model reads a part's outputs as records, parts.<id>.name and parts.<id>.<key>.name
+- A rule's output can forward one record of a component it emits
+- The Model document declares spec.outputs and publishes the records it names
+- A model's output query shares the run of the build and names an emitted member as the build does
+- The query for outputs hands a rule the whole hook and keeps the run of the build through a handler
+- A forwarded-output query keeps the object name a rule resolved for a member
+- A record name stays a string inside a sum or a conditional of reads
+- A forwarded output is held to the same-name component its answer matches
+- A read of a part refuses a bound name that is not a string
+- A refused forward of a same-name component blames the one of the declared kind
+- Say what a non-string name does to a sum, and pin the first-refusal fallback
+
+### Documentation
+
+- Every kind component publishes its object as an output, name and kind are reserved keys
+- Say why the default output is not checked at build, and that role-deployment is lowering-only
+- A model declares spec.outputs; a part is read as a record; forwarded outputs
+
+### Fixed
+
+- Let GoReleaser load the release notes into the GitHub release body
+
+### Testing
+
+- Every one-object component type must publish its object output
+- An output key may not be name or kind
+- The kind default never applies to a lowering rule
+- The kind default follows the registration, not the interfaces
+- Hold that the GoReleaser changelog step stays enabled
+- A part's outputs are read as records, parts.<id>.name and parts.<id>.<key>.name
+- A forwarded output is held against the component the rule emits
+- A CloudNativePG model refers to its store and cluster only through part names
+- A model publishes the role object of a part that is a lowering rule under a renaming hook
+
 ## [0.2.0-beta.11] - 2026-11-19
 
 ### Build
