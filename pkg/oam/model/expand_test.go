@@ -19,7 +19,7 @@ const (
 	pgType       = "postgresql.launcher.gokure.dev@v1"
 	secretType   = "secret@v1"
 	webType      = "webservice.launcher.gokure.dev@v1"
-	modelHeader  = "apiVersion: launcher.gokure.dev/v1alpha1\nkind: Model\nmetadata:\n  name: webapp.acme.example\n  version: v1\nspec:\n  celEnv: \"1\"\n  parts:\n"
+	modelHeader  = "apiVersion: launcher.gokure.dev/v1alpha1\nkind: Model\nmetadata:\n  name: webapp.acme.example\n  version: v1\nspec:\n  celEnv: \"1\"\n  outputs: {}\n  parts:\n"
 	secretEnvRef = `
         env:
           - name: DB_PASSWORD

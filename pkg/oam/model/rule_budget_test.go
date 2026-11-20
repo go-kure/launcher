@@ -38,7 +38,7 @@ const (
         data:
           k: "${ string(lists.range(100).map(i, i).size()) }"
 `
-	blobModel = "apiVersion: launcher.gokure.dev/v1alpha1\nkind: Model\nmetadata:\n  name: webapp.acme.example\n  version: v1\nspec:\n  celEnv: \"1\"\n" +
+	blobModel = "apiVersion: launcher.gokure.dev/v1alpha1\nkind: Model\nmetadata:\n  name: webapp.acme.example\n  version: v1\nspec:\n  celEnv: \"1\"\n  outputs: {}\n" +
 		"  inputs:\n    blob:\n      type: string\n      required: true\n  parts:\n" + `
     - id: cfg
       type: configmap@v1
