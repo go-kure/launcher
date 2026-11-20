@@ -63,6 +63,46 @@ func TestComponentOutputs_RuleDispatch(t *testing.T) {
 	}
 }
 
+// A handler that declares its one object and no outputs publishes that object
+// under ObjectOutputKey: the component name, else the author's objectName, else
+// the consumer hook's answer (go-kure/launcher#1643). A handler that declares its
+// own outputs keeps them, and one that declares no object publishes none.
+func TestComponentOutputs_KindComponentPublishesItsObject(t *testing.T) {
+	tr := NewTransformer(map[string]ComponentHandler{
+		"widget": kindStub("widget", outputSecretKind, ObjectScopeNamespaced),
+	}, nil)
+	want := func(name string) []Output {
+		return []Output{{Key: ObjectOutputKey, Kind: outputSecretKind, Name: name}}
+	}
+	sameOutputs := func(got, want []Output) bool {
+		return len(got) == len(want) && (len(got) == 0 || got[0] == want[0])
+	}
+
+	got, err := tr.ComponentOutputs(&Component{Name: "w", Type: "widget", Properties: map[string]any{}})
+	if err != nil || !sameOutputs(got, want("w")) {
+		t.Errorf("ComponentOutputs = %v, %v; want %v", got, err, want("w"))
+	}
+	got, err = tr.ComponentOutputs(&Component{Name: "w", Type: "widget", Properties: map[string]any{ObjectNameProperty: "authored"}})
+	if err != nil || !sameOutputs(got, want("authored")) {
+		t.Errorf("ComponentOutputs with objectName = %v, %v; want %v", got, err, want("authored"))
+	}
+	hook := func(r NameRequest) (string, bool) { return "h-" + r.Default, r.Role == NameRoleObject }
+	got, err = tr.ComponentOutputsNamed("shop", &Component{Name: "w", Type: "widget", Properties: map[string]any{}}, hook)
+	if err != nil || !sameOutputs(got, want("h-w")) {
+		t.Errorf("ComponentOutputsNamed = %v, %v; want %v", got, err, want("h-w"))
+	}
+
+	// What a handler declares itself wins over the default.
+	own := &objectOutputHandler{typ: "own", declared: "own-name", kind: outputSecretKind}
+	if p, ok := handlerOutputProvider(own); !ok || p != OutputProvider(own) {
+		t.Errorf("handlerOutputProvider(own) = %v, %v; want the handler itself", p, ok)
+	}
+	// A handler with neither interface declares none.
+	if p, ok := handlerOutputProvider(&stubComponentHandler{}); ok {
+		t.Errorf("handlerOutputProvider(plain) = %v, true; want none", p)
+	}
+}
+
 // The query claims nothing: asking twice, and asking for a name the transform
 // would refuse as a second resolution, gives the same answer both times.
 func TestComponentOutputs_ClaimsNothing(t *testing.T) {

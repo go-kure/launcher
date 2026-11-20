@@ -12,7 +12,6 @@ import (
 // go-kure/launcher#1259). A key is one identifier, addressed as
 // parts.<part>.<key> in a document.
 const (
-	outputKeyObject      = "object"
 	outputKeyCluster     = "cluster"
 	outputKeyAppSecret   = "app_secret"
 	outputKeyObjectStore = "objectstore"
@@ -32,31 +31,9 @@ const (
 // (pkg/oam/README.md, the Cluster name warning).
 const cnpgAppSecretSuffix = "-app"
 
-// objectOutputs declares the one object of a kind component under the key
-// "object": the name the transform gives it (Component.ObjectName), which is
-// the author's `objectName`, else the consumer hook's, else the component name.
-func objectOutputs(comp *oam.Component, handler oam.ComponentObjectProvider) []oam.OutputDecl {
-	kind, _ := handler.ComponentObject()
-	return []oam.OutputDecl{{Key: outputKeyObject, Role: oam.NameRoleObject, Kind: kind, Default: comp.Name, Name: comp.ObjectName()}}
-}
-
-// Outputs implements oam.OutputProvider: the ConfigMap, under "object". It
-// answers only for properties the component's own parse accepts.
-func (h *ConfigMapHandler) Outputs(comp *oam.Component, _ oam.LoweringContext) ([]oam.OutputDecl, error) {
-	if _, err := parseConfigMap(comp); err != nil {
-		return nil, err
-	}
-	return objectOutputs(comp, h), nil
-}
-
-// Outputs implements oam.OutputProvider: the Secret, under "object". It
-// answers only for properties the component's own parse accepts.
-func (h *SecretHandler) Outputs(comp *oam.Component, _ oam.LoweringContext) ([]oam.OutputDecl, error) {
-	if _, err := ParseSecretProperties(comp.Properties); err != nil {
-		return nil, err
-	}
-	return objectOutputs(comp, h), nil
-}
+// A kind component (oam.ComponentObjectProvider) declares no outputs here: the
+// engine publishes its one object under oam.ObjectOutputKey for every such type
+// (go-kure/launcher#1643). A type with more to publish declares its own.
 
 // Outputs implements oam.OutputProvider for a postgresql component:
 //

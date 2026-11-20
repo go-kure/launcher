@@ -381,9 +381,10 @@ func requireOutputsBuilt(t *testing.T, tr *oam.Transformer, app *oam.Application
 	}
 }
 
-// A configmap and a secret answer only for a component their own parse
-// accepts, as every other builtin does.
-func TestBuiltinOutputs_KindComponentsRefuseWhatTheParseRefuses(t *testing.T) {
+// A configmap and a secret publish their object by the engine's default, which
+// parses nothing: the query answers for properties the handler's own parse
+// refuses (go-kure/launcher#1643), and the build still refuses them.
+func TestBuiltinOutputs_KindComponentsAnswerWhereTheBuildRefuses(t *testing.T) {
 	for _, tc := range []struct {
 		typ   string
 		props map[string]any
@@ -393,9 +394,19 @@ func TestBuiltinOutputs_KindComponentsRefuseWhatTheParseRefuses(t *testing.T) {
 		{"secret", map[string]any{"type": 42}, "type"},
 	} {
 		t.Run(tc.typ, func(t *testing.T) {
+			tr := outputsTransformer()
 			comp := &oam.Component{Name: "cfg", Type: tc.typ, Properties: tc.props}
-			if _, err := outputsTransformer().ComponentOutputs(comp); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("ComponentOutputs = %v; want the parse error containing %q", err, tc.want)
+			outs, err := tr.ComponentOutputs(comp)
+			if err != nil || len(outs) != 1 || outs[0].Key != "object" || outs[0].Name != "cfg" {
+				t.Fatalf("ComponentOutputs = %v, %v; want the one output \"object\" named cfg", outs, err)
+			}
+			app := &oam.Application{
+				APIVersion: oam.SupportedAPIVersion, Kind: "Application",
+				Metadata: oam.Metadata{Name: "shop", Namespace: "demo"},
+				Spec:     oam.ApplicationSpec{Components: []oam.Component{*comp}},
+			}
+			if _, err := tr.Transform(app, oam.TransformContext{Namespace: "demo"}); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Transform = %v; want the parse error containing %q", err, tc.want)
 			}
 		})
 	}
