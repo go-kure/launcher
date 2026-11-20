@@ -57,6 +57,8 @@ func partChain(e celast.Expr) (part string, keys []string, ok bool) {
 		if p, ks, ok := partChain(call.Args()[0]); ok {
 			return p, append(ks, k), true
 		}
+	case celast.UnspecifiedExprKind, celast.LiteralKind, celast.ListKind, celast.MapKind, celast.StructKind, celast.ComprehensionKind:
+		// None of these is a select or an index on a part.
 	}
 	return "", nil, false
 }
