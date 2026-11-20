@@ -103,6 +103,27 @@ func TestComponentOutputs_KindComponentPublishesItsObject(t *testing.T) {
 	}
 }
 
+// ruleThatIsAlsoAKindHandler is a lowering rule that embeds a kind component's
+// handler, so it implements ComponentHandler and ComponentObjectProvider as well.
+type ruleThatIsAlsoAKindHandler struct{ *kindStubHandler }
+
+func (r ruleThatIsAlsoAKindHandler) ComponentType() string { return r.typ }
+func (r ruleThatIsAlsoAKindHandler) LowerComponent(c *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{*c}}, nil
+}
+
+// A registered lowering rule decides what its type builds, so the engine's
+// default for a kind component never applies to one, whatever interfaces the rule
+// also implements: the object it would publish is one the lowering never builds.
+func TestComponentOutputs_KindDefaultNeverAppliesToARule(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(ruleThatIsAlsoAKindHandler{kindStub("ruled", outputSecretKind, ObjectScopeNamespaced)})
+	got, err := tr.ComponentOutputs(&Component{Name: "w", Type: "ruled", Properties: map[string]any{}})
+	if err != nil || got != nil {
+		t.Errorf("ComponentOutputs = %v, %v; want nil, nil for a rule", got, err)
+	}
+}
+
 // The query claims nothing: asking twice, and asking for a name the transform
 // would refuse as a second resolution, gives the same answer both times.
 func TestComponentOutputs_ClaimsNothing(t *testing.T) {
