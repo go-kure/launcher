@@ -27,6 +27,72 @@ func (r forwardRule) Outputs(c *Component, _ LoweringContext) ([]OutputDecl, err
 
 var configMapKind = schema.GroupKind{Kind: "ConfigMap"}
 
+// hookedObjectRule is a lowering rule that names the object it declares for the role object
+// through ResolveName, so the Naming hook is asked for it in its own lowering and in its query.
+type hookedObjectRule struct{}
+
+func (hookedObjectRule) ComponentType() string { return "hooked-db" }
+
+func (hookedObjectRule) LowerComponent(c *Component, lctx LoweringContext) (LoweringResult, error) {
+	if _, err := lctx.ResolveName(c.Name, "s", NameSpec{Role: NameRoleObject, Kind: configMapKind}); err != nil {
+		return LoweringResult{}, err
+	}
+	return LoweringResult{Components: []Component{{Name: c.Name + "-cfg", Type: "cfg", Properties: map[string]any{}}}}, nil
+}
+
+func (hookedObjectRule) Outputs(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
+	name, err := lctx.ResolveName(c.Name, "s", NameSpec{Role: NameRoleObject, Kind: configMapKind})
+	if err != nil {
+		return nil, err
+	}
+	return []OutputDecl{{Key: "s", Role: NameRoleObject, Kind: configMapKind, Default: c.Name + "-s", Name: name}}, nil
+}
+
+// forwardsHookedRule emits one component of the rule above and forwards its output.
+type forwardsHookedRule struct{ forwarded string }
+
+func (forwardsHookedRule) ComponentType() string { return "wrap-hooked" }
+
+func (forwardsHookedRule) LowerComponent(c *Component, _ LoweringContext) (LoweringResult, error) {
+	return LoweringResult{Components: []Component{{Name: c.Name + "-in", Type: "hooked-db", Properties: map[string]any{}}}}, nil
+}
+
+func (r forwardsHookedRule) Outputs(c *Component, _ LoweringContext) ([]OutputDecl, error) {
+	return []OutputDecl{{Key: "s", Kind: configMapKind, Name: r.forwarded, ForwardOf: c.Name + "-in", ForwardKey: "s"}}, nil
+}
+
+// TestForwardedOutput_ARuleAmongTheEmittedKeepsTheHookForTheRoleObject: the build names the object
+// of an emitted kind component without the hook, but an emitted rule that resolves the role object
+// gets the hook whole, so a forward of its output is held to the name the hook gave.
+func TestForwardedOutput_ARuleAmongTheEmittedKeepsTheHookForTheRoleObject(t *testing.T) {
+	hook := func(r NameRequest) (string, bool) {
+		if r.Role != NameRoleObject {
+			return "", false
+		}
+		return "h-" + r.Default, true
+	}
+	for name, tc := range map[string]struct {
+		forwarded string
+		ok        bool
+	}{
+		"the name the hook gave":  {"h-pg-in-s", true},
+		"the name without a hook": {"pg-in-s", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := NewTransformer(map[string]ComponentHandler{"cfg": &objectOutputHandler{typ: "cfg"}}, nil)
+			tr.RegisterComponentLowering(hookedObjectRule{})
+			tr.RegisterComponentLowering(forwardsHookedRule{forwarded: tc.forwarded})
+			_, err := tr.Transform(terminalApp(Component{Name: "pg", Type: "wrap-hooked"}), TransformContext{Naming: hook})
+			if tc.ok && err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatal("Transform accepted a forward of the unhooked name")
+			}
+		})
+	}
+}
+
 // forwardOf is the forwarded declaration that agrees with the lowering: the emitted component
 // is pg-inner and it publishes its object under "object", a ConfigMap of that name.
 func forwardOf(c *Component) OutputDecl {

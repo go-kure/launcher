@@ -1545,10 +1545,11 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			if declared != nil {
 				// A forwarded output is held to what the component the rule emitted answers,
 				// asked as a consumer asks it: under the application and the Naming hook of
-				// this run, except that a component the rule emitted is never named by the hook
-				// for the role object (withObjectName), so neither is the query.
+				// this run, except that the object of a kind component the rule emitted is never
+				// named by the hook for the role object (withObjectName), so the query does not
+				// ask for it either. A rule among the emitted components keeps the whole hook.
 				outputsOf := func(c *Component) ([]Output, error) {
-					return t.componentOutputs(c, lctx.documentName(), emittedMemberNaming(namer.hook), namer)
+					return t.componentOutputs(c, lctx.documentName(), namer.hook, namer, true)
 				}
 				if err := checkRuleOutputs(compName, declared, answered, namer.lowered[resolvedBefore:], result.Components, outputsOf); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)

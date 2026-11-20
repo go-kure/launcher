@@ -132,25 +132,12 @@ func (r *Rule) render(comp *oam.Component, lctx oam.LoweringContext) (*expansion
 		return r.t.ComponentOutputsWithin(lctx, c, naming)
 	}
 	name := func(part string) (string, error) { return lctx.Namer.Name(comp.Name, part, lctx.Origin) }
-	exp, err := r.c.expand(r.t, sc, objectNameUnhooked(lctx.NamingHook()), name)
+	// The parts are components this rule emits, so ComponentOutputsWithin leaves the role object
+	// to the build (a kind part is never named by the hook for it) and gives the hook whole to a
+	// part that is itself a rule.
+	exp, err := r.c.expand(r.t, sc, lctx.NamingHook(), name)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "model: %s", r.m.Key())
 	}
 	return exp, budget, nil
-}
-
-// objectNameUnhooked is naming without its answers for the role object. The build names the
-// object of a kind part (a Secret, a ConfigMap) after its component and never asks the hook,
-// because this rule emitted it, so the read of the name must not ask either. A direct Expand
-// keeps the hook: its components are not emitted members, and a Transform asks it for them.
-func objectNameUnhooked(naming func(oam.NameRequest) (string, bool)) func(oam.NameRequest) (string, bool) {
-	if naming == nil {
-		return nil
-	}
-	return func(r oam.NameRequest) (string, bool) {
-		if r.Role == oam.NameRoleObject {
-			return "", false
-		}
-		return naming(r)
-	}
 }

@@ -243,7 +243,9 @@ A component of the model type lowers into the components of its parts.
   is set (`LoweringContext.NamingHook`). The hook sees the name of the document as it stands in that
   round. The lowering rule emits a kind part (a Secret or a ConfigMap), and the build names its object
   after the part and never asks the hook for it. So the rule's read does not ask the hook for the
-  role `object` either. A direct `Expand` keeps the hook, because a later `Transform` asks it.
+  role `object` either. A part that is itself a lowering rule (a model, for one) keeps the whole
+  hook, because the build gives it to that rule. A direct `Expand` keeps the hook, because a later
+  `Transform` asks it.
 - The rule tells the `TransformContext.EmitHook` of the run about each component it emits, with the
   model, the part, the type as written, the name and a copy of the properties. It does so after the
   whole render succeeded, so a render that fails reports nothing. A direct `Expand` calls no hook:
