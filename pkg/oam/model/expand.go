@@ -123,8 +123,44 @@ const recordNameField = "name"
 // `parts.<part>.<key>.name`. The type of such a read is a string, though the checker types
 // everything below a part as dyn.
 func isRecordNameRead(ast *cel.Ast) bool {
-	_, keys, ok := partChain(ast.NativeRep().Expr())
+	return recordNameChain(ast.NativeRep().Expr())
+}
+
+// recordNameChain is isRecordNameRead on one expression.
+func recordNameChain(e celast.Expr) bool {
+	_, keys, ok := partChain(e)
 	return ok && (len(keys) == 1 || len(keys) == 2) && keys[len(keys)-1] == recordNameField
+}
+
+// isRecordText tells whether ast always gives a string because it is built only of record-name
+// reads, string literals, `+` and `?:` over those: `parts.a.name + parts.b.name` and
+// `c ? parts.a.name : 'x'`. The checker types both as dyn, since it types a read of a part as dyn,
+// and a hole of text refuses dyn.
+func isRecordText(ast *cel.Ast) bool {
+	return recordText(ast.NativeRep().Expr())
+}
+
+func recordText(e celast.Expr) bool {
+	if recordNameChain(e) {
+		return true
+	}
+	switch e.Kind() {
+	case celast.LiteralKind:
+		_, isString := e.AsLiteral().Value().(string)
+		return isString
+	case celast.CallKind:
+		call := e.AsCall()
+		args := call.Args()
+		switch call.FunctionName() {
+		case "_+_":
+			return len(args) == 2 && recordText(args[0]) && recordText(args[1])
+		case "_?_:_":
+			return len(args) == 3 && recordText(args[1]) && recordText(args[2])
+		}
+	case celast.UnspecifiedExprKind, celast.IdentKind, celast.SelectKind, celast.ListKind, celast.MapKind, celast.StructKind, celast.ComprehensionKind:
+		// None of these is a string built from record names.
+	}
+	return false
 }
 
 // checkPartReads refuses a read that is not the name of a record the part declares, and names
@@ -176,11 +212,12 @@ func declaredFields(m map[string]any) string {
 }
 
 // Expand evaluates the model in document order into the components its parts emit, and binds
-// `parts.<part>.<key>` as it goes: after a part that has no when and no forEach is built, the
+// `parts.<part>` as it goes: after a part that has no when and no forEach is built, the
 // Transformer is asked for its outputs (Transformer.ComponentOutputsNamed, with naming as the
-// consumer's Naming hook) and the object name of each is what a later part reads. A part reads
-// only an earlier part of that kind (Compile refuses any other read), and only a key the part
-// declares (Expand refuses it, naming the site, the part and the key).
+// consumer's Naming hook) and each is bound as a record, `parts.<part>.name` for the part's own
+// object and `parts.<part>.<key>.name` for another output, whose `name` is what a later part
+// reads. A part reads only an earlier part of that kind (Compile refuses any other read), and
+// only a record the part declares (Expand refuses it, naming the site, the part and the key).
 //
 // The values are evaluated first, from sc.Inputs and sc.Self. sc.Values, sc.Loop and sc.Parts
 // are not read. A part whose when is false emits nothing. A part with forEach emits one

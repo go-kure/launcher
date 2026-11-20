@@ -331,7 +331,7 @@ func (w *walker) build(path, text string, spec siteSpec) (*site, error) {
 		if err != nil {
 			return nil, err
 		}
-		if out.Kind() == types.DynKind && isRecordNameRead(ast) {
+		if out.Kind() == types.DynKind && isRecordText(ast) {
 			out = cel.StringType
 		}
 		switch {
