@@ -35,8 +35,9 @@ type Self struct {
 
 // Scope is what one evaluation reads: the inputs, `self`, the values computed so far,
 // the loop variable of a forEach part and the outputs of the parts built so far. An input
-// that is absent from Inputs is null. Parts maps a part id to its output keys and the
-// object name of each (`parts.<id>.<key>`); Expand fills it.
+// that is absent from Inputs is null. Parts maps a part id to what a document reads of its
+// outputs: `name` for the part's own object (`parts.<id>.name`), and for every other output
+// a record under its key (`parts.<id>.<key>.name`); Expand fills it.
 //
 // Ctx stops a long comprehension: an evaluation under a context that is done fails with
 // ErrLimit between two steps of the comprehension. A nil Ctx reads as context.Background().
@@ -46,7 +47,7 @@ type Scope struct {
 	Self   Self
 	Values map[string]any
 	Loop   any
-	Parts  map[string]map[string]string
+	Parts  map[string]map[string]any
 	Ctx    context.Context
 
 	// budget is the limits of the build this evaluation belongs to. A rule sets it, and a
@@ -149,7 +150,10 @@ func (c *Cache) Compile(m *Model) (*Compiled, error) {
 			continue
 		}
 		delete(w.notYet, "parts."+p.ID)
-		if err := w.declare("parts."+p.ID, cel.MapType(cel.StringType, cel.StringType)); err != nil {
+		// The shape of a part's outputs is known only at Expand, so the checker types a read
+		// below a part as dyn and Expand refuses a read that is not the name of a record the
+		// part declares (checkPartReads).
+		if err := w.declare("parts."+p.ID, cel.DynType); err != nil {
 			return nil, errors.Wrapf(err, "model: declare part %q", p.ID)
 		}
 	}
@@ -262,6 +266,9 @@ func (w *walker) build(path, text string, spec siteSpec) (*site, error) {
 		ast, out, err := checkHole(env, path, p.text, w.notYet, w.declared)
 		if err != nil {
 			return nil, err
+		}
+		if out.Kind() == types.DynKind && isRecordNameRead(ast) {
+			out = cel.StringType
 		}
 		switch {
 		case s.single:
