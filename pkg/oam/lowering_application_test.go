@@ -27,16 +27,30 @@ type runStateKey struct{}
 type runStateProbe struct {
 	tr         *Transformer
 	asked, own *any
+	// ask is the type the rule asks about, and emit the type of the one component it emits.
+	ask, emit string
 }
 
 func (runStateProbe) ComponentType() string { return "outer" }
 
 func (r runStateProbe) LowerComponent(c *Component, lctx LoweringContext) (LoweringResult, error) {
 	*r.own = lctx.RunState(runStateKey{}, func() any { return new(int) })
-	if _, err := r.tr.ComponentOutputsWithin(lctx, &Component{Name: "q", Type: "inner"}, nil); err != nil {
+	if _, err := r.tr.ComponentOutputsWithin(lctx, &Component{Name: "q", Type: r.ask, Properties: map[string]any{}}, nil); err != nil {
 		return LoweringResult{}, err
 	}
-	return LoweringResult{Components: []Component{{Name: c.Name + "-cfg", Type: "cfg", Properties: map[string]any{}}}}, nil
+	return LoweringResult{Components: []Component{{Name: c.Name + "-cfg", Type: r.emit, Properties: map[string]any{}}}}, nil
+}
+
+// runStateHandler is a handler that declares outputs and keeps the run state its allocator holds
+// at each query, in the query a rule makes and in the check the build makes of its outputs.
+type runStateHandler struct {
+	*objectOutputHandler
+	seen *[]any
+}
+
+func (h runStateHandler) Outputs(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
+	*h.seen = append(*h.seen, lctx.RunState(runStateKey{}, func() any { return new(int) }))
+	return h.objectOutputHandler.Outputs(c, lctx)
 }
 
 type runStateInner struct{ asked *any }
@@ -58,7 +72,7 @@ func (r runStateInner) Outputs(_ *Component, lctx LoweringContext) ([]OutputDecl
 func TestComponentOutputsWithin_SharesTheRunOfTheBuild(t *testing.T) {
 	var asked, own any
 	tr := NewTransformer(map[string]ComponentHandler{"cfg": &objectOutputHandler{typ: "cfg"}}, nil)
-	tr.RegisterComponentLowering(runStateProbe{tr: tr, asked: &asked, own: &own})
+	tr.RegisterComponentLowering(runStateProbe{tr: tr, asked: &asked, own: &own, ask: "inner", emit: "cfg"})
 	tr.RegisterComponentLowering(runStateInner{asked: &asked})
 
 	if _, err := tr.Transform(terminalApp(Component{Name: "pg", Type: "outer"}), TransformContext{}); err != nil {
@@ -69,6 +83,30 @@ func TestComponentOutputsWithin_SharesTheRunOfTheBuild(t *testing.T) {
 	}
 	if own != asked {
 		t.Errorf("the query got its own run state (%p), want the one of the build (%p)", asked, own)
+	}
+}
+
+// TestComponentOutputsWithin_ThePerRunStateReachesAHandlersFinalCheck: a handler that declares
+// outputs is asked twice in one build, by the query of the rule that emits it and by the check of
+// its outputs when the build reaches it, and both see the run state of the build.
+func TestComponentOutputsWithin_ThePerRunStateReachesAHandlersFinalCheck(t *testing.T) {
+	var asked, own any
+	var seen []any
+	tr := NewTransformer(map[string]ComponentHandler{
+		"probe-h": runStateHandler{objectOutputHandler: &objectOutputHandler{typ: "probe-h"}, seen: &seen},
+	}, nil)
+	tr.RegisterComponentLowering(runStateProbe{tr: tr, asked: &asked, own: &own, ask: "probe-h", emit: "probe-h"})
+
+	if _, err := tr.Transform(terminalApp(Component{Name: "pg", Type: "outer"}), TransformContext{}); err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	if own == nil || len(seen) < 2 {
+		t.Fatalf("the rule saw the run state %v and the handler was asked %d times, want at least 2", own, len(seen))
+	}
+	for i, s := range seen {
+		if s != own {
+			t.Errorf("ask %d of the handler saw a run state (%p) other than the one of the build (%p)", i, s, own)
+		}
 	}
 }
 

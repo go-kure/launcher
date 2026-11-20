@@ -733,7 +733,7 @@ func (t *Transformer) ComponentEndpointsNamed(application string, comp *Componen
 }
 
 func (t *Transformer) componentEndpoints(comp *Component, application string, naming func(NameRequest) (string, bool)) ([]netpol.Endpoint, error) {
-	provider, comp, ok, err := t.queryProvider(comp, application, naming, declaresEndpoints)
+	provider, comp, ok, err := t.queryProvider(comp, application, naming, false, declaresEndpoints)
 	if err != nil || !ok {
 		return nil, err
 	}
@@ -769,7 +769,12 @@ func (t *Transformer) componentEndpoints(comp *Component, application string, na
 // does not resolve. declares says whether a handler is one the query reads from;
 // only then is the object's name resolved on the component, as the transform does
 // before ToApplicationConfig. Nothing is claimed.
-func (t *Transformer) queryProvider(comp *Component, application string, naming func(NameRequest) (string, bool), declares func(ComponentHandler) bool) (provider any, out *Component, ok bool, err error) {
+//
+// emitted says comp is one a lowering rule emits: the build names the object of such a kind
+// component after the component and never asks the hook for the role object (withObjectName), so
+// the name resolved here does not ask either. A rule that is the provider keeps the hook whole:
+// the build gives it to the rule's own lowering.
+func (t *Transformer) queryProvider(comp *Component, application string, naming func(NameRequest) (string, bool), emitted bool, declares func(ComponentHandler) bool) (provider any, out *Component, ok bool, err error) {
 	if comp == nil {
 		return nil, nil, false, nil
 	}
@@ -797,7 +802,11 @@ func (t *Transformer) queryProvider(comp *Component, application string, naming 
 		// object name is what its handler is given (Component.ObjectName). Nothing
 		// is claimed. A handler that declares nothing is not asked for a name: the
 		// answer is (nil, nil) whatever its component holds.
-		named, nameErr := withObjectName(*comp, handler, "", "", &nameResolver{hook: naming, application: application})
+		objectHook := naming
+		if emitted {
+			objectHook = emittedMemberNaming(naming)
+		}
+		named, nameErr := withObjectName(*comp, handler, "", "", &nameResolver{hook: objectHook, application: application})
 		if nameErr != nil {
 			return nil, nil, false, errors.Wrapf(nameErr, "component %q", comp.Name)
 		}
@@ -1245,7 +1254,7 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// TestObjectName_RenamesTheObjectAlone holds that name and kind.
 		if p, ok := handler.(OutputProvider); ok {
 			probe := probeCopy(component)
-			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming, nil)
+			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming, ctx.nameClaims)
 			if err == nil {
 				err = checkHandlerOutputs(&component, handler, decls, outs)
 			}
