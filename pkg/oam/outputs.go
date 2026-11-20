@@ -296,7 +296,9 @@ func checkForwardedOutputs(component string, decls []OutputDecl, emitted []Compo
 		}
 		// Components of distinct terminal types may share a name (a ConfigMap and a Secret
 		// both named x), so the name alone does not pick one: the output is held to the one
-		// whose answer it matches, and the first one's refusal is reported when none does.
+		// whose answer it matches. Where none does, the refusal reported is that of the one
+		// of the declared kind, so the order of emission does not change the diagnosis, and
+		// else the first one's.
 		var targets []*Component
 		for i := range emitted {
 			if emitted[i].Name == d.ForwardOf {
@@ -308,19 +310,20 @@ func checkForwardedOutputs(component string, decls []OutputDecl, emitted []Compo
 				d.Key, component, d.ForwardKey, d.ForwardOf)
 		}
 		var refusal error
+		var ofKind bool
 		for _, target := range targets {
 			probe := probeCopy(*target)
 			got, err := outputsOf(&probe)
 			if err != nil {
 				return errors.Wrapf(err, "output %q of component %q forwards an output of the component %q", d.Key, component, d.ForwardOf)
 			}
-			refused := forwardRefusal(component, d, got)
+			sameKind, refused := forwardRefusal(component, d, got)
 			if refused == nil {
 				refusal = nil
 				break
 			}
-			if refusal == nil {
-				refusal = refused
+			if refusal == nil || (sameKind && !ofKind) {
+				refusal, ofKind = refused, sameKind
 			}
 		}
 		if refusal != nil {
@@ -331,8 +334,10 @@ func checkForwardedOutputs(component string, decls []OutputDecl, emitted []Compo
 }
 
 // forwardRefusal holds the forwarded declaration d to the outputs got of the component it names,
-// and returns why they do not carry it, or nil where they do.
-func forwardRefusal(component string, d OutputDecl, got []Output) error {
+// and returns why they do not carry it, or nil where they do. sameKind tells whether the output
+// the declaration names is of the declared kind, so that a refusal about the name is told from
+// one about another object of the same name.
+func forwardRefusal(component string, d OutputDecl, got []Output) (sameKind bool, err error) {
 	var found *Output
 	for i := range got {
 		if got[i].Key == d.ForwardKey {
@@ -346,13 +351,13 @@ func forwardRefusal(component string, d OutputDecl, got []Output) error {
 		for _, o := range got {
 			keys = append(keys, o.Key)
 		}
-		return errors.Errorf("output %q of component %q forwards the output %q of the component %q, which publishes none of that key (it publishes: %s)",
+		return false, errors.Errorf("output %q of component %q forwards the output %q of the component %q, which publishes none of that key (it publishes: %s)",
 			d.Key, component, d.ForwardKey, d.ForwardOf, strings.Join(keys, ", "))
 	case found.Name != d.Name || found.Kind != d.Kind:
-		return errors.Errorf("output %q of component %q declares the %s name %q, but the output %q of the component %q is the %s name %q",
+		return found.Kind == d.Kind, errors.Errorf("output %q of component %q declares the %s name %q, but the output %q of the component %q is the %s name %q",
 			d.Key, component, d.Kind, d.Name, d.ForwardKey, d.ForwardOf, found.Kind, found.Name)
 	}
-	return nil
+	return true, nil
 }
 
 // checkHandlerOutputs holds the outputs a handler declared for comp against
