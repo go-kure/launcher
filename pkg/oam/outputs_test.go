@@ -166,6 +166,11 @@ func TestComponentOutputs_RefusesBadDeclarations(t *testing.T) {
 		{"hyphenated key", []OutputDecl{{Key: "app-secret", Kind: outputSecretKind, Name: "x"}}, `key "app-secret"`},
 		{"leading digit", []OutputDecl{{Key: "0data", Kind: outputSecretKind, Name: "x"}}, `key "0data"`},
 		{"empty key", []OutputDecl{{Kind: outputSecretKind, Name: "x"}}, `key ""`},
+		// A document reads a part as one map: the record fields (name, later kind)
+		// beside one record per other key, so a key may not take a field's name
+		// (go-kure/launcher#1643).
+		{"reserved key name", []OutputDecl{objectDecl("name", "x")}, `key "name" is reserved`},
+		{"reserved key kind", []OutputDecl{objectDecl("kind", "x")}, `key "kind" is reserved`},
 		{"duplicate key", []OutputDecl{
 			objectDecl("a", "x"),
 			objectDecl("a", "y"),
