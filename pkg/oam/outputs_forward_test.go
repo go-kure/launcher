@@ -281,3 +281,69 @@ type forwardingHandler struct{ objectOutputHandler }
 func (h *forwardingHandler) Outputs(c *Component, _ LoweringContext) ([]OutputDecl, error) {
 	return []OutputDecl{{Key: "settings", Kind: configMapKind, Name: c.Name, ForwardOf: "x", ForwardKey: "object"}}, nil
 }
+
+// secretObjectHandler is a kind-component handler whose one object is a Secret.
+type secretObjectHandler struct{ objectOutputHandler }
+
+func (h *secretObjectHandler) ComponentObject() (schema.GroupKind, ObjectScope) {
+	return schema.GroupKind{Kind: "Secret"}, ObjectScopeNamespaced
+}
+
+// sameNameRule emits two components that share one name and differ in type, a ConfigMap and a
+// Secret, in the order of types, and forwards the object output of the one named x under the
+// declared kind and name.
+type sameNameRule struct {
+	types []string
+	decl  OutputDecl
+}
+
+func (sameNameRule) ComponentType() string { return "same-name" }
+
+func (r sameNameRule) LowerComponent(c *Component, _ LoweringContext) (LoweringResult, error) {
+	var comps []Component
+	for _, typ := range r.types {
+		comps = append(comps, Component{Name: c.Name + "-x", Type: typ, Properties: map[string]any{}})
+	}
+	return LoweringResult{Components: comps}, nil
+}
+
+func (r sameNameRule) Outputs(c *Component, _ LoweringContext) ([]OutputDecl, error) {
+	d := r.decl
+	d.ForwardOf = c.Name + "-x"
+	return []OutputDecl{d}, nil
+}
+
+// TestForwardedOutput_ComponentsOfOneNameAreToldApartByTheAnswer: a rule may emit a ConfigMap and a
+// Secret under one name (a sibling group), so the name alone does not pick the component a forward
+// names. The forward is held to the one whose answer it matches, in either order of emission, and
+// a forward that no one of them bears out is still refused.
+func TestForwardedOutput_ComponentsOfOneNameAreToldApartByTheAnswer(t *testing.T) {
+	secretKind := schema.GroupKind{Kind: "Secret"}
+	for name, tc := range map[string]struct {
+		types []string
+		decl  OutputDecl
+		ok    bool
+	}{
+		"the secret, secret second":     {[]string{"cfg", "sec"}, OutputDecl{Key: "s", Kind: secretKind, Name: "pg-x", ForwardKey: "object"}, true},
+		"the secret, secret first":      {[]string{"sec", "cfg"}, OutputDecl{Key: "s", Kind: secretKind, Name: "pg-x", ForwardKey: "object"}, true},
+		"the config map, secret second": {[]string{"cfg", "sec"}, OutputDecl{Key: "s", Kind: configMapKind, Name: "pg-x", ForwardKey: "object"}, true},
+		"the config map, secret first":  {[]string{"sec", "cfg"}, OutputDecl{Key: "s", Kind: configMapKind, Name: "pg-x", ForwardKey: "object"}, true},
+		"a name no one of them has":     {[]string{"cfg", "sec"}, OutputDecl{Key: "s", Kind: secretKind, Name: "other", ForwardKey: "object"}, false},
+		"a kind no one of them is":      {[]string{"cfg", "sec"}, OutputDecl{Key: "s", Kind: schema.GroupKind{Kind: "Service"}, Name: "pg-x", ForwardKey: "object"}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tr := NewTransformer(map[string]ComponentHandler{
+				"cfg": &objectOutputHandler{typ: "cfg"},
+				"sec": &secretObjectHandler{objectOutputHandler{typ: "sec", kind: secretKind}},
+			}, nil)
+			tr.RegisterComponentLowering(sameNameRule{types: tc.types, decl: tc.decl})
+			_, err := tr.Transform(terminalApp(Component{Name: "pg", Type: "same-name"}), TransformContext{})
+			if tc.ok && err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatal("Transform accepted a forward that no component of the name bears out")
+			}
+		})
+	}
+}
