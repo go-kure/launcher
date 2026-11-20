@@ -124,6 +124,20 @@ func TestComponentOutputs_KindDefaultNeverAppliesToARule(t *testing.T) {
 	}
 }
 
+// The counterpart: the registration decides, not the interfaces a value
+// implements. A handler registered as a handler that also implements
+// ComponentLoweringRule (by embedding) is built as a handler, so it publishes the
+// default.
+func TestComponentOutputs_KindDefaultFollowsTheRegistration(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	tr.RegisterComponent("registered", ruleThatIsAlsoAKindHandler{kindStub("registered", outputSecretKind, ObjectScopeNamespaced)})
+	got, err := tr.ComponentOutputs(&Component{Name: "w", Type: "registered", Properties: map[string]any{}})
+	want := []Output{{Key: ObjectOutputKey, Kind: outputSecretKind, Name: "w"}}
+	if err != nil || len(got) != 1 || got[0] != want[0] {
+		t.Errorf("ComponentOutputs = %v, %v; want %v for a handler registered as one", got, err, want)
+	}
+}
+
 // The query claims nothing: asking twice, and asking for a name the transform
 // would refuse as a second resolution, gives the same answer both times.
 func TestComponentOutputs_ClaimsNothing(t *testing.T) {
