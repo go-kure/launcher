@@ -49,43 +49,11 @@ func (*Rule) EmitsAuthoredTraits() bool { return true }
 // run where one is set. Part types and trait types stay as the model wrote them: the engine
 // lowers them in the next round.
 func (r *Rule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
-	if lctx.Namer == nil {
-		return oam.LoweringResult{}, errors.Errorf("model: %s: no name allocator in the lowering context", r.m.Key())
-	}
-	if err := refuseTraits(comp, r.m.Key()); err != nil {
+	exp, budget, err := r.render(comp, lctx)
+	if err != nil {
 		return oam.LoweringResult{}, err
 	}
-	inputs := make(map[string]any, len(r.m.Spec.Inputs))
-	for name, s := range r.m.Spec.Inputs {
-		if s.Default != nil {
-			inputs[name] = s.Default
-		}
-	}
-	for k, v := range comp.Properties {
-		// An explicit null reads as absent (the authored path keeps the key, the emitted path
-		// deletes it), so it never overwrites a default.
-		if oam.IsNullValue(v) {
-			continue
-		}
-		inputs[k] = v
-	}
-	// The name a Naming hook is asked in the build: the document as it stands at this round
-	// (a document rule may have renamed it), else the one the origin names.
-	application := lctx.Origin.Document
-	if lctx.Document != nil {
-		application = lctx.Document.Metadata.Name
-	}
-	// The limits of the build are kept by the run, so every model of one Transform spends from
-	// the same budget. The context stops a long comprehension at the deadline of the build.
-	budget := lctx.RunState(budgetKey{}, func() any { return newBuildBudget() }).(*buildBudget)
-	ctx, cancel := context.WithTimeout(context.Background(), max(budget.remaining(), time.Nanosecond))
-	defer cancel()
-	sc := Scope{Inputs: inputs, Self: Self{Name: comp.Name, Application: application}, Ctx: ctx, budget: budget}
-	name := func(part string) (string, error) { return lctx.Namer.Name(comp.Name, part, lctx.Origin) }
-	comps, parts, err := r.c.expand(r.t, sc, objectNameUnhooked(lctx.NamingHook()), name)
-	if err != nil {
-		return oam.LoweringResult{}, errors.Wrapf(err, "model: %s", r.m.Key())
-	}
+	comps, parts := exp.comps, exp.ids
 	size, err := propertyBytes(comps)
 	if err == nil {
 		err = budget.chargeBytes(size)
@@ -103,6 +71,64 @@ func (r *Rule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 		}
 	}
 	return oam.LoweringResult{Components: comps}, nil
+}
+
+// Outputs (oam.OutputProvider) publishes the records the model names in spec.outputs: each is
+// the record of one of its parts, forwarded under the key of the output. The query renders the
+// model once, on the allocator it is given, to learn the name each part gets; the build holds
+// the answer against the component each part emitted (oam.OutputDecl, ForwardOf). A model that
+// publishes nothing renders nothing here.
+func (r *Rule) Outputs(comp *oam.Component, lctx oam.LoweringContext) ([]oam.OutputDecl, error) {
+	if len(r.c.outputs) == 0 {
+		return nil, nil
+	}
+	exp, _, err := r.render(comp, lctx)
+	if err != nil {
+		return nil, err
+	}
+	decls, err := r.c.publish(exp)
+	if err != nil {
+		return nil, errors.Wrapf(err, "model: %s", r.m.Key())
+	}
+	return decls, nil
+}
+
+// render expands one component of the model under the limits of the build lctx belongs to. It
+// is the whole of a lowering but the check of the size and the emission to the consumer hook.
+func (r *Rule) render(comp *oam.Component, lctx oam.LoweringContext) (*expansion, *buildBudget, error) {
+	if lctx.Namer == nil {
+		return nil, nil, errors.Errorf("model: %s: no name allocator in the lowering context", r.m.Key())
+	}
+	if err := refuseTraits(comp, r.m.Key()); err != nil {
+		return nil, nil, err
+	}
+	inputs := make(map[string]any, len(r.m.Spec.Inputs))
+	for name, s := range r.m.Spec.Inputs {
+		if s.Default != nil {
+			inputs[name] = s.Default
+		}
+	}
+	for k, v := range comp.Properties {
+		// An explicit null reads as absent (the authored path keeps the key, the emitted path
+		// deletes it), so it never overwrites a default.
+		if oam.IsNullValue(v) {
+			continue
+		}
+		inputs[k] = v
+	}
+	// The limits of the build are kept by the run, so every model of one Transform spends from
+	// the same budget. The context stops a long comprehension at the deadline of the build.
+	budget := lctx.RunState(budgetKey{}, func() any { return newBuildBudget() }).(*buildBudget)
+	ctx, cancel := context.WithTimeout(context.Background(), max(budget.remaining(), time.Nanosecond))
+	defer cancel()
+	// The application is the name a Naming hook is asked in the build.
+	sc := Scope{Inputs: inputs, Self: Self{Name: comp.Name, Application: lctx.Application()}, Ctx: ctx, budget: budget}
+	name := func(part string) (string, error) { return lctx.Namer.Name(comp.Name, part, lctx.Origin) }
+	exp, err := r.c.expand(r.t, sc, objectNameUnhooked(lctx.NamingHook()), name)
+	if err != nil {
+		return nil, nil, errors.Wrapf(err, "model: %s", r.m.Key())
+	}
+	return exp, budget, nil
 }
 
 // objectNameUnhooked is naming without its answers for the role object. The build names the

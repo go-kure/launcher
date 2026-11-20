@@ -190,39 +190,81 @@ func declaredFields(m map[string]any) string {
 // It does not run the transform and does not check the traits against a capability: the
 // components are the input of a later step. A failure returns no component.
 func (c *Compiled) Expand(tr *oam.Transformer, sc Scope, naming func(oam.NameRequest) (string, bool), partName func(string) (string, error)) ([]oam.Component, error) {
-	comps, _, err := c.expand(tr, sc, naming, partName)
-	return comps, err
+	exp, err := c.expand(tr, sc, naming, partName)
+	if err != nil {
+		return nil, err
+	}
+	return exp.comps, nil
+}
+
+// expansion is what one expand gives: the components, the id of the part that gave each, and
+// for each part that is read, the name of its component with the outputs the Transformer
+// answered for it (published), and what a document reads of them (parts).
+type expansion struct {
+	comps     []oam.Component
+	ids       []string
+	parts     map[string]map[string]any
+	published map[string]publishedPart
+}
+
+// publishedPart is the component a part gave and the outputs it publishes.
+type publishedPart struct {
+	component string
+	outs      []oam.Output
 }
 
 // expand is Expand that also returns, for each component, the id of the part that gave it.
-func (c *Compiled) expand(tr *oam.Transformer, sc Scope, naming func(oam.NameRequest) (string, bool), partName func(string) (string, error)) ([]oam.Component, []string, error) {
+func (c *Compiled) expand(tr *oam.Transformer, sc Scope, naming func(oam.NameRequest) (string, bool), partName func(string) (string, error)) (*expansion, error) {
 	sc.Values = make(map[string]any, len(c.values))
 	sc.Parts = map[string]map[string]any{}
+	sc.published = map[string]publishedPart{}
 	sc.Loop = nil
 	for i, v := range c.values {
 		val, _, err := c.Eval("spec.values["+strconv.Itoa(i)+"].expr", sc)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		sc.Values[v.Name] = val
 	}
-	var comps []oam.Component
-	var ids []string
+	exp := &expansion{parts: sc.Parts, published: sc.published}
 	for i, p := range c.parts {
 		base := "spec.parts[" + strconv.Itoa(i) + "]"
-		out, err := c.expandPart(tr, base, p, sc, naming, partName, len(comps))
+		out, err := c.expandPart(tr, base, p, sc, naming, partName, len(exp.comps))
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		comps = append(comps, out...)
+		exp.comps = append(exp.comps, out...)
 		for range out {
-			ids = append(ids, p.ID)
+			exp.ids = append(exp.ids, p.ID)
 		}
 	}
-	if len(comps) == 0 {
-		return nil, nil, errors.Errorf("%w: spec.parts: no part emitted a component", ErrInvalid)
+	if len(exp.comps) == 0 {
+		return nil, errors.Errorf("%w: spec.parts: no part emitted a component", ErrInvalid)
 	}
-	return comps, ids, nil
+	return exp, nil
+}
+
+// publish answers the outputs of the model after an expansion: each is the record of a part,
+// forwarded under the key of the output, with the kind and the name the Transformer answered
+// for that part. A read of a key the part does not declare is refused, naming the output, the
+// part and what the part declares (checkPartReads).
+func (c *Compiled) publish(exp *expansion) ([]oam.OutputDecl, error) {
+	decls := make([]oam.OutputDecl, 0, len(c.outputs))
+	for _, o := range c.outputs {
+		path := "spec.outputs." + o.key
+		read := &site{reads: []partRead{{part: o.part, keys: o.keys}}}
+		if err := read.checkPartReads(path, exp.parts); err != nil {
+			return nil, err
+		}
+		p := exp.published[o.part]
+		for _, out := range p.outs {
+			if out.Key == o.field {
+				decls = append(decls, oam.OutputDecl{Key: o.key, Kind: out.Kind, Name: out.Name, ForwardOf: p.component, ForwardKey: o.field})
+				break
+			}
+		}
+	}
+	return decls, nil
 }
 
 // expandPart builds the components of one part and, for a part that is read, binds its outputs
@@ -283,6 +325,7 @@ func (c *Compiled) expandPart(tr *oam.Transformer, base string, p Part, sc Scope
 				bound[o.Key] = map[string]any{recordNameField: o.Name}
 			}
 			sc.Parts[p.ID] = bound
+			sc.published[p.ID] = publishedPart{component: comp.Name, outs: outs}
 		}
 		comps = append(comps, comp)
 	}

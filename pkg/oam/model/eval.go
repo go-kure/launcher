@@ -16,6 +16,7 @@ import (
 	"cel.dev/cel-go/interpreter"
 
 	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // ErrCostLimit is wrapped by the failure of an evaluation that spent more than the cost
@@ -50,6 +51,10 @@ type Scope struct {
 	Parts  map[string]map[string]any
 	Ctx    context.Context
 
+	// published is what Expand keeps beside Parts: for each part that was read, its component
+	// and the outputs the Transformer answered, so the model can publish them.
+	published map[string]publishedPart
+
 	// budget is the limits of the build this evaluation belongs to. A rule sets it, and a
 	// direct Eval or Expand has none.
 	budget *buildBudget
@@ -78,6 +83,8 @@ type Compiled struct {
 	sites  map[string]*site
 	values []Value // the values of the model, in document order, for Expand
 	parts  []Part  // the parts of the model, in document order, for Expand
+	// outputs are the records the model publishes, in the order of their keys.
+	outputs []outputSite
 }
 
 // Cache holds compiled sites keyed by the model identity (Model.Key), the site path and
@@ -157,12 +164,64 @@ func (c *Cache) Compile(m *Model) (*Compiled, error) {
 			return nil, errors.Wrapf(err, "model: declare part %q", p.ID)
 		}
 	}
+	outputs, err := w.outputs(m.Spec.Outputs)
+	if err != nil {
+		return nil, err
+	}
 	inputs := make([]string, 0, len(m.Spec.Inputs))
 	for name := range m.Spec.Inputs {
 		inputs = append(inputs, name)
 	}
 	sort.Strings(inputs)
-	return &Compiled{inputs: inputs, sites: w.sites, values: m.Spec.Values, parts: m.Spec.Parts}, nil
+	return &Compiled{inputs: inputs, sites: w.sites, values: m.Spec.Values, parts: m.Spec.Parts, outputs: outputs}, nil
+}
+
+// outputSite is one output of a model: the key it is published under, and the one record of
+// a part it forwards. Field is the output key of the part (oam.ObjectOutputKey for the part's
+// own object), and keys is the read as the document wrote it, below `parts.<part>`.
+type outputSite struct {
+	key, part, field string
+	keys             []string
+}
+
+// outputForms names the two reads an output may be, for the message of a refusal.
+const outputForms = "exactly one read of the name of a record of a part that has no when and no forEach: ${ parts.<id>.name } for its own object, or ${ parts.<id>.<key>.name } for another of its outputs"
+
+// outputs compiles spec.outputs in the order of the keys. A string carries no provenance, so
+// an output that is anything but one read of a record's name could not be held to the object
+// it names: the build checks a forwarded record against the part that publishes it.
+func (w *walker) outputs(outputs map[string]string) ([]outputSite, error) {
+	keys := make([]string, 0, len(outputs))
+	for k := range outputs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	sites := make([]outputSite, 0, len(keys))
+	for _, k := range keys {
+		path := "spec.outputs." + k
+		inner, err := scanHole(outputs[k])
+		if err != nil {
+			return nil, invalid(path, "must be %s (%s)", outputForms, err)
+		}
+		env, err := w.baseEnv()
+		if err != nil {
+			return nil, err
+		}
+		ast, _, err := checkHole(env, path, inner, w.notYet, w.declared)
+		if err != nil {
+			return nil, err
+		}
+		part, chain, ok := partChain(ast.NativeRep().Expr())
+		if !ok || !isRecordNameRead(ast) {
+			return nil, invalid(path, "must be %s", outputForms)
+		}
+		field := oam.ObjectOutputKey
+		if len(chain) == 2 {
+			field = chain[0]
+		}
+		sites = append(sites, outputSite{key: k, part: part, field: field, keys: chain})
+	}
+	return sites, nil
 }
 
 // siteSpec says how one site is read: strict is the exactly-one-hole form of values,

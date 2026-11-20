@@ -41,6 +41,11 @@ type Spec struct {
 	Inputs map[string]oam.PropertySchema `yaml:"inputs,omitempty"`
 	// Values are computed in order. A value reads inputs and earlier values only.
 	Values []Value `yaml:"values,omitempty"`
+	// Outputs maps an output key to the one read of the name of a record of a part
+	// (`${ parts.<id>.name }` or `${ parts.<id>.<key>.name }`) the model publishes under
+	// that key. The key is mandatory: nil (left out, or null) is refused when the model is
+	// registered, and an empty mapping says the model publishes nothing.
+	Outputs map[string]string `yaml:"outputs"`
 	// Parts are the components and traits the model expands to.
 	Parts []Part `yaml:"parts"`
 }

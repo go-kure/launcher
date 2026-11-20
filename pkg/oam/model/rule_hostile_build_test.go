@@ -98,7 +98,7 @@ func modelNamed(name, parts string) string {
 
 // withBlob is the model document of the header, a string input blob and the given parts.
 func withBlob(parts string) string {
-	return "apiVersion: launcher.gokure.dev/v1alpha1\nkind: Model\nmetadata:\n  name: webapp.acme.example\n  version: v1\nspec:\n  celEnv: \"1\"\n" +
+	return "apiVersion: launcher.gokure.dev/v1alpha1\nkind: Model\nmetadata:\n  name: webapp.acme.example\n  version: v1\nspec:\n  celEnv: \"1\"\n  outputs: {}\n" +
 		"  inputs:\n    blob:\n      type: string\n      required: true\n  parts:\n" + parts
 }
 

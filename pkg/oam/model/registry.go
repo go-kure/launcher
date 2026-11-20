@@ -36,6 +36,11 @@ func (g *Registry) Register(m *Model) (err error) {
 	if _, err := g.t.ResolveComponentType(key); err == nil {
 		return errors.Errorf("model: the type %s is already declared", key)
 	}
+	// The key is mandatory so that a model says what it publishes, even when it publishes
+	// nothing: a model written before the outputs existed is refused, not read as silent.
+	if m.Spec.Outputs == nil {
+		return errors.Errorf("model: %s: spec.outputs is required: name the records the model publishes (${ parts.<id>.name } or ${ parts.<id>.<key>.name }), or write `outputs: {}` for none", key)
+	}
 	// A cache of its own for each model: a refused registration leaves no compiled site for a
 	// later definition of the same identity to read.
 	c, err := Compile(m)

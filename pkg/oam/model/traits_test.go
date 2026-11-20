@@ -20,6 +20,7 @@ metadata:
   version: v1
 spec:
   celEnv: "1"
+  outputs: {}
   parts:
     - id: web
       type: deployment.apps@v1
@@ -40,6 +41,7 @@ metadata:
   version: v1
 spec:
   celEnv: "1"
+  outputs: {}
   parts:
     - id: app
       type: inner.acme.example@v1

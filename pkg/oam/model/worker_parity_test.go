@@ -39,6 +39,7 @@ metadata:
   version: v1
 spec:
   celEnv: "1"
+  outputs: {}
   inputs:
     image: {type: string, required: true}
     replicas: {type: integer, default: 1}

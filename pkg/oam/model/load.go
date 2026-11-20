@@ -35,7 +35,8 @@ var ErrInvalid = errors.New("invalid model")
 // failure, and a nil model with it. The YAML, apiVersion and kind checks come
 // first, then the null and duplicate-key checks, then the metadata, then spec.celEnv,
 // then the inputs in alphabetical order of their names (a Go map keeps no document
-// order), then the values and the parts in document order.
+// order), then the values and the parts in document order, then the output keys in
+// alphabetical order.
 func Load(data []byte) (*Model, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return nil, errors.New("model: empty input")
@@ -204,7 +205,35 @@ func validate(m *Model) error {
 	if err := validateValues(m.Spec.Values); err != nil {
 		return err
 	}
-	return validateParts(m.Spec.Parts)
+	if err := validateParts(m.Spec.Parts); err != nil {
+		return err
+	}
+	return validateOutputs(m.Spec.Outputs)
+}
+
+// validateOutputs checks the keys and the presence of the values of spec.outputs. A key is
+// read as `parts.<id>.<key>` by a document that emits the model, so it is one identifier and
+// no field of a record (name, kind). The value is compiled with the model (Compile).
+func validateOutputs(outputs map[string]string) error {
+	keys := make([]string, 0, len(outputs))
+	for k := range outputs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		path := "spec.outputs." + k
+		switch k {
+		case "name", "kind":
+			return invalid(path, "%q is reserved: it is a field of a record, so a document reading it could not tell the field from the output", k)
+		}
+		if err := checkIdent(path, k); err != nil {
+			return err
+		}
+		if outputs[k] == "" {
+			return invalid(path, "is required, want ${ parts.<id>.name } or ${ parts.<id>.<key>.name }")
+		}
+	}
+	return nil
 }
 
 func validateMetadata(md *Metadata) error {
