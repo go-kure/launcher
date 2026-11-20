@@ -25,7 +25,7 @@ const (
           - name: DB_PASSWORD
             valueFrom:
               secretKeyRef:
-                name: "${ parts.db.app_secret }"
+                name: "${ parts.db.app_secret.name }"
                 key: password`
 )
 
@@ -179,7 +179,7 @@ func TestExpand_RoleReadsASecretPart(t *testing.T) {
         managedRoles:
           - name: app
             login: true
-            passwordSecret: "${ parts.roleSecret.object }"
+            passwordSecret: "${ parts.roleSecret.name }"
 `)
 	comps := expandOK(t, c, nil)
 	if got := prop(t, comps[1].Properties, "managedRoles", 0, "passwordSecret"); got != "creds" {
@@ -228,7 +228,7 @@ func TestExpand_BindsAfterThePropertiesAreEvaluated(t *testing.T) {
 // Case 4: a key the part does not declare fails the build and names the site, the part and the
 // key. It never reads as an empty string.
 func TestExpand_UndeclaredKeyFailsTheBuild(t *testing.T) {
-	c := compileParts(t, strings.Replace(dbThenWorker, "parts.db.app_secret", "parts.db.nope", 1))
+	c := compileParts(t, strings.Replace(dbThenWorker, "parts.db.app_secret.name", "parts.db.nope.name", 1))
 	comps, err := c.Expand(expandTransformer(t), expandScope, nil, nil)
 	if err == nil {
 		t.Fatalf("Expand accepted a read of an undeclared key: %v", comps)
@@ -248,7 +248,7 @@ func TestExpand_UndeclaredKeyFailsTheBuild(t *testing.T) {
 func TestCompile_RefusesAPartThatIsNotReadable(t *testing.T) {
 	ref := `
         data:
-          x: "${ parts.%s.object }"`
+          x: "${ parts.%s.name }"`
 	for _, tc := range []struct {
 		name  string
 		parts string
@@ -330,7 +330,7 @@ func TestExpand_KindPartObjectNameFollowsTheHook(t *testing.T) {
       type: configmap@v1
       properties:
         data:
-          secret: "${ parts.creds.object }"
+          secret: "${ parts.creds.name }"
 `)
 	naming := hookedNaming(oam.NameRoleObject)
 	comps := expandOK(t, c, naming)
@@ -404,8 +404,8 @@ func TestExpand_WhenAndForEach(t *testing.T) {
 // short-circuit would hide the failed read.
 func TestExpand_UndeclaredIndexedKeyFailsTheBuild(t *testing.T) {
 	for name, expr := range map[string]string{
-		"plain":      `${ parts.db['nope'] }`,
-		"suppressed": `${ (parts.db['nope'] == '' || true) ? '' : 'unused' }`,
+		"plain":      `${ parts.db['nope'].name }`,
+		"suppressed": `${ (parts.db['nope'].name == '' || true) ? '' : 'unused' }`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := compileParts(t, `

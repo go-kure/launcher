@@ -150,7 +150,7 @@ func TestRule_BoundNameOfAKindPartIsTheBuiltName(t *testing.T) {
       type: configmap@v1
       properties:
         data:
-          secret: "${ parts.creds.object }"
+          secret: "${ parts.creds.name }"
 `
 	tr, _ := registered(t, doc)
 	objs := objectsOK(t, tr, orders(), hookedNaming(oam.NameRoleObject))
