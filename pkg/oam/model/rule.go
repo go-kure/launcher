@@ -45,7 +45,8 @@ func (*Rule) EmitsAuthoredTraits() bool { return true }
 // LowerComponent expands one component of the model's type into the components of its parts.
 // An input the component does not set takes its default. A part is named
 // "<component>-<part>" by the allocator of the run, so a name that two parts want fails the
-// build, and `parts.<part>.<key>` reads the name the build gives, under the Naming hook of the
+// build, and a part is read as a record: `parts.<part>.name` is the name the build gives its
+// object and `parts.<part>.<key>.name` the name of another output, under the Naming hook of the
 // run where one is set. Part types and trait types stay as the model wrote them: the engine
 // lowers them in the next round.
 func (r *Rule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {

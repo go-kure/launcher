@@ -59,7 +59,7 @@ func handlerOutputProvider(handler ComponentHandler) (OutputProvider, bool) {
 }
 
 // OutputDecl is one object a component declares. Its Key names the output in a
-// document and is one identifier (validOutputKey). It is one of two shapes:
+// document and is one identifier (validOutputKey). It is one of three shapes:
 //
 //   - allocated: Name is the name the provider resolved for the object, Role and
 //     Default are what it resolved it under (a name role that names an object,
@@ -71,6 +71,9 @@ func handlerOutputProvider(handler ComponentHandler) (OutputProvider, bool) {
 //     exist in the built application, so nothing is claimed for it. Derive must
 //     give one name for one parent name: the build applies it again to the name
 //     it holds for the parent and refuses a different answer.
+//   - forwarded: ForwardOf and ForwardKey name an output that a component the rule emits
+//     publishes, and Name and Kind are what the provider answered for it. The build holds
+//     the declaration against that component's own answer (checkForwardedOutputs).
 type OutputDecl struct {
 	Key     string
 	Role    NameRole
@@ -291,41 +294,63 @@ func checkForwardedOutputs(component string, decls []OutputDecl, emitted []Compo
 		if !isForwarded(d) {
 			continue
 		}
-		var target *Component
+		// Components of distinct terminal types may share a name (a ConfigMap and a Secret
+		// both named x), so the name alone does not pick one: the output is held to the one
+		// whose answer it matches, and the first one's refusal is reported when none does.
+		var targets []*Component
 		for i := range emitted {
 			if emitted[i].Name == d.ForwardOf {
-				target = &emitted[i]
-				break
+				targets = append(targets, &emitted[i])
 			}
 		}
-		if target == nil || outputsOf == nil {
+		if len(targets) == 0 || outputsOf == nil {
 			return errors.Errorf("output %q of component %q forwards the output %q of the component %q, which the lowering did not emit",
 				d.Key, component, d.ForwardKey, d.ForwardOf)
 		}
-		probe := probeCopy(*target)
-		got, err := outputsOf(&probe)
-		if err != nil {
-			return errors.Wrapf(err, "output %q of component %q forwards an output of the component %q", d.Key, component, d.ForwardOf)
-		}
-		var found *Output
-		for i := range got {
-			if got[i].Key == d.ForwardKey {
-				found = &got[i]
+		var refusal error
+		for _, target := range targets {
+			probe := probeCopy(*target)
+			got, err := outputsOf(&probe)
+			if err != nil {
+				return errors.Wrapf(err, "output %q of component %q forwards an output of the component %q", d.Key, component, d.ForwardOf)
+			}
+			refused := forwardRefusal(component, d, got)
+			if refused == nil {
+				refusal = nil
 				break
 			}
-		}
-		switch {
-		case found == nil:
-			keys := make([]string, 0, len(got))
-			for _, o := range got {
-				keys = append(keys, o.Key)
+			if refusal == nil {
+				refusal = refused
 			}
-			return errors.Errorf("output %q of component %q forwards the output %q of the component %q, which publishes none of that key (it publishes: %s)",
-				d.Key, component, d.ForwardKey, d.ForwardOf, strings.Join(keys, ", "))
-		case found.Name != d.Name || found.Kind != d.Kind:
-			return errors.Errorf("output %q of component %q declares the %s name %q, but the output %q of the component %q is the %s name %q",
-				d.Key, component, d.Kind, d.Name, d.ForwardKey, d.ForwardOf, found.Kind, found.Name)
 		}
+		if refusal != nil {
+			return refusal
+		}
+	}
+	return nil
+}
+
+// forwardRefusal holds the forwarded declaration d to the outputs got of the component it names,
+// and returns why they do not carry it, or nil where they do.
+func forwardRefusal(component string, d OutputDecl, got []Output) error {
+	var found *Output
+	for i := range got {
+		if got[i].Key == d.ForwardKey {
+			found = &got[i]
+			break
+		}
+	}
+	switch {
+	case found == nil:
+		keys := make([]string, 0, len(got))
+		for _, o := range got {
+			keys = append(keys, o.Key)
+		}
+		return errors.Errorf("output %q of component %q forwards the output %q of the component %q, which publishes none of that key (it publishes: %s)",
+			d.Key, component, d.ForwardKey, d.ForwardOf, strings.Join(keys, ", "))
+	case found.Name != d.Name || found.Kind != d.Kind:
+		return errors.Errorf("output %q of component %q declares the %s name %q, but the output %q of the component %q is the %s name %q",
+			d.Key, component, d.Kind, d.Name, d.ForwardKey, d.ForwardOf, found.Kind, found.Name)
 	}
 	return nil
 }
