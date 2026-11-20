@@ -148,9 +148,12 @@ func (t *Transformer) componentOutputs(comp *Component, application string, nami
 	}
 	p, ok := provider.(OutputProvider)
 	if !ok {
-		// A registered rule decides what its type builds, so the default for a kind
-		// component is never its answer, whatever else the rule implements.
-		if _, isRule := provider.(ComponentLoweringRule); !isRule {
+		// A type registered as a rule is built by that rule, so the default for a
+		// kind component is never its answer; a type registered as a handler is
+		// built by it. The registration decides, whatever interfaces the value also
+		// implements. queryProvider hands back the component under its registered
+		// type.
+		if _, isRule := t.componentLoweringRules[comp.Type]; !isRule {
 			if handler, isHandler := provider.(ComponentHandler); isHandler {
 				p, ok = handlerOutputProvider(handler)
 			}
