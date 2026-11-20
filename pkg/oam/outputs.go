@@ -26,6 +26,38 @@ type OutputProvider interface {
 	Outputs(component *Component, lctx LoweringContext) ([]OutputDecl, error)
 }
 
+// ObjectOutputKey is the key under which the engine publishes the one object of
+// a kind component (a handler that implements ComponentObjectProvider and
+// declares no outputs of its own): the object's kind and the name the build gives
+// it, which is the author's `objectName`, else the consumer hook's, else the
+// component name (go-kure/launcher#1643). A handler that declares its own
+// outputs publishes what it declares.
+const ObjectOutputKey = "object"
+
+// objectOutputProvider is the OutputProvider the engine gives a kind component
+// whose handler declares no outputs: the one object, under ObjectOutputKey. It
+// parses nothing, so a component whose properties the handler refuses still
+// answers; the build refuses those properties.
+type objectOutputProvider struct{ object ComponentObjectProvider }
+
+func (p objectOutputProvider) Outputs(comp *Component, _ LoweringContext) ([]OutputDecl, error) {
+	kind, _ := p.object.ComponentObject()
+	return []OutputDecl{{Key: ObjectOutputKey, Role: NameRoleObject, Kind: kind, Default: comp.Name, Name: comp.ObjectName()}}, nil
+}
+
+// handlerOutputProvider returns what answers for the outputs of handler: the
+// handler itself when it declares its own, else the engine's default for a kind
+// component. A handler that is neither declares none.
+func handlerOutputProvider(handler ComponentHandler) (OutputProvider, bool) {
+	if p, ok := handler.(OutputProvider); ok {
+		return p, true
+	}
+	if p, ok := handler.(ComponentObjectProvider); ok {
+		return objectOutputProvider{object: p}, true
+	}
+	return nil, false
+}
+
 // OutputDecl is one object a component declares. Its Key names the output in a
 // document and is one identifier (validOutputKey). It is one of two shapes:
 //
@@ -77,7 +109,9 @@ func validOutputKey(key string) bool {
 // ComponentOutputs returns the outputs declared for comp.Type by its
 // ComponentLoweringRule, or by its handler when no rule claims the type, or
 // (nil, nil) if comp is nil, neither is registered, or the one registered is not
-// an OutputProvider. A declaration that is malformed is an error (fail-fast).
+// an OutputProvider. A handler that is no OutputProvider but declares its one
+// object (ComponentObjectProvider) publishes it under ObjectOutputKey. A
+// declaration that is malformed is an error (fail-fast).
 //
 // It consults no TransformContext.Naming hook: a name is the author's or the
 // default. A consumer that sets Naming calls ComponentOutputsNamed.
@@ -107,6 +141,11 @@ func (t *Transformer) componentOutputs(comp *Component, application string, nami
 		return nil, err
 	}
 	p, ok := provider.(OutputProvider)
+	if !ok {
+		if handler, isHandler := provider.(ComponentHandler); isHandler {
+			p, ok = handlerOutputProvider(handler)
+		}
+	}
 	if !ok {
 		return nil, nil
 	}
@@ -327,6 +366,6 @@ func resolveOutputs(decls []OutputDecl) ([]Output, error) {
 // declaresOutputs reports whether handler is one componentOutputs reads outputs
 // from. A nil handler is not.
 func declaresOutputs(handler ComponentHandler) bool {
-	_, ok := handler.(OutputProvider)
+	_, ok := handlerOutputProvider(handler)
 	return ok
 }
