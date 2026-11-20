@@ -1543,7 +1543,13 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				return false, steps, errors.Wrapf(err, "%s", compOrigin)
 			}
 			if declared != nil {
-				if err := checkRuleOutputs(compName, declared, answered, namer.lowered[resolvedBefore:]); err != nil {
+				// A forwarded output is held to what the component the rule emitted answers,
+				// asked as a consumer asks it: under the application and the Naming hook of
+				// this run.
+				outputsOf := func(c *Component) ([]Output, error) {
+					return t.componentOutputs(c, lctx.documentName(), namer.hook)
+				}
+				if err := checkRuleOutputs(compName, declared, answered, namer.lowered[resolvedBefore:], result.Components, outputsOf); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}

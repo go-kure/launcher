@@ -141,26 +141,26 @@ func TestCheckRuleOutputs_ExactlyOneClaimMatches(t *testing.T) {
 	decls := []OutputDecl{{Key: "cluster", Role: NameRolePostgresqlCluster, Kind: outputClusterKind, Default: "pg-cluster", Name: "a"}}
 	outs := []Output{{Key: "cluster", Kind: outputClusterKind, Name: "a"}}
 
-	if err := checkRuleOutputs("pg", decls, outs, []loweredName{claim("a")}); err != nil {
+	if err := checkRuleOutputs("pg", decls, outs, []loweredName{claim("a")}, nil, nil); err != nil {
 		t.Errorf("one matching claim: %v", err)
 	}
-	if err := checkRuleOutputs("pg", decls, outs, []loweredName{claim("a"), claim("b")}); err == nil || !strings.Contains(err.Error(), "2") {
+	if err := checkRuleOutputs("pg", decls, outs, []loweredName{claim("a"), claim("b")}, nil, nil); err == nil || !strings.Contains(err.Error(), "2") {
 		t.Errorf("two matching claims: err = %v, want a refusal counting them", err)
 	}
 	other := claim("a")
 	other.claim.owner.component = "other"
-	if err := checkRuleOutputs("pg", decls, outs, []loweredName{other}); err == nil {
+	if err := checkRuleOutputs("pg", decls, outs, []loweredName{other}, nil, nil); err == nil {
 		t.Errorf("a claim of another component matched")
 	}
 	tagged := claim("a")
 	tagged.claim.owner.lowered = false
-	if err := checkRuleOutputs("pg", decls, outs, []loweredName{tagged}); err == nil {
+	if err := checkRuleOutputs("pg", decls, outs, []loweredName{tagged}, nil, nil); err == nil {
 		t.Errorf("a claim that is not a lowering rule's matched")
 	}
 	// A derived output names no claim of its own.
 	derived := append(decls, OutputDecl{Key: "app_secret", Kind: outputSecretKind, From: "cluster", Derive: func(s string) string { return s + "-app" }})
 	derivedOuts := append(outs, Output{Key: "app_secret", Kind: outputSecretKind, Name: "a-app"})
-	if err := checkRuleOutputs("pg", derived, derivedOuts, []loweredName{claim("a")}); err != nil {
+	if err := checkRuleOutputs("pg", derived, derivedOuts, []loweredName{claim("a")}, nil, nil); err != nil {
 		t.Errorf("derived output: %v", err)
 	}
 }
@@ -257,10 +257,10 @@ func TestCheckOutputs_DerivedAnswerMustBeTheDerivationOfTheHeldName(t *testing.T
 		}
 		good := []Output{{Key: "cluster", Kind: outputClusterKind, Name: "a"}, {Key: "app_secret", Kind: outputSecretKind, Name: "a-app"}}
 		stale := []Output{{Key: "cluster", Kind: outputClusterKind, Name: "a"}, {Key: "app_secret", Kind: outputSecretKind, Name: "stale"}}
-		if err := checkRuleOutputs("pg", decls, good, []loweredName{claim}); err != nil {
+		if err := checkRuleOutputs("pg", decls, good, []loweredName{claim}, nil, nil); err != nil {
 			t.Errorf("the derivation's own answer: %v", err)
 		}
-		err := checkRuleOutputs("pg", decls, stale, []loweredName{claim})
+		err := checkRuleOutputs("pg", decls, stale, []loweredName{claim}, nil, nil)
 		if err == nil || !strings.Contains(err.Error(), `output "app_secret"`) || !strings.Contains(err.Error(), `"stale"`) || !strings.Contains(err.Error(), `"a-app"`) {
 			t.Errorf("a stale answer: err = %v, want one naming the output and both names", err)
 		}
