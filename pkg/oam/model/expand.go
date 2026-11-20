@@ -1,6 +1,7 @@
 package model
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,7 +35,9 @@ func (r partRead) text() string {
 func partChain(e celast.Expr) (part string, keys []string, ok bool) {
 	switch e.Kind() {
 	case celast.IdentKind:
-		if id := e.AsIdent(); strings.HasPrefix(id, "parts.") {
+		// A leading dot names the global `parts` even where a comprehension variable of that
+		// name shadows it, so `.parts.db` is the same read as `parts.db`.
+		if id := strings.TrimPrefix(e.AsIdent(), "."); strings.HasPrefix(id, "parts.") {
 			return strings.TrimPrefix(id, "parts."), nil, true
 		}
 	case celast.SelectKind:
@@ -101,8 +104,9 @@ func appendPartReads(reads []partRead, ast *cel.Ast) []partRead {
 		}
 		consumeChain(e, seen)
 		r := partRead{part: part, keys: keys}
+		// Compared by segment: `parts.db['a.b']` and `parts.db.a.b` print alike and differ.
 		for _, old := range reads {
-			if old.text() == r.text() {
+			if old.part == r.part && slices.Equal(old.keys, r.keys) {
 				return
 			}
 		}
@@ -312,7 +316,13 @@ func (c *Compiled) expandPart(tr *oam.Transformer, base string, p Part, sc Scope
 			comp.Name = name
 		}
 		if p.ForEach == nil && p.When == "" {
-			outs, err := tr.ComponentOutputsNamed(sc.Self.Application, &comp, naming)
+			query := sc.queryOutputs
+			if query == nil {
+				query = func(c *oam.Component, n func(oam.NameRequest) (string, bool)) ([]oam.Output, error) {
+					return tr.ComponentOutputsNamed(sc.Self.Application, c, n)
+				}
+			}
+			outs, err := query(&comp, naming)
 			if err != nil {
 				return nil, errors.Wrapf(err, "model: %s: part %q", base, p.ID)
 			}

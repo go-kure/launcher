@@ -1530,7 +1530,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			if p, ok := rule.(OutputProvider); ok && namer != nil {
 				probe := probeCopy(comp)
 				var err error
-				if declared, answered, err = outputsOf(p, &probe, lctx.documentName(), namer.hook); err != nil {
+				if declared, answered, err = outputsOf(p, &probe, lctx.documentName(), namer.hook, namer); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
@@ -1545,9 +1545,10 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			if declared != nil {
 				// A forwarded output is held to what the component the rule emitted answers,
 				// asked as a consumer asks it: under the application and the Naming hook of
-				// this run.
+				// this run, except that a component the rule emitted is never named by the hook
+				// for the role object (withObjectName), so neither is the query.
 				outputsOf := func(c *Component) ([]Output, error) {
-					return t.componentOutputs(c, lctx.documentName(), namer.hook)
+					return t.componentOutputs(c, lctx.documentName(), emittedMemberNaming(namer.hook), namer)
 				}
 				if err := checkRuleOutputs(compName, declared, answered, namer.lowered[resolvedBefore:], result.Components, outputsOf); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)

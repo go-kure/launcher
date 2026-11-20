@@ -1245,7 +1245,7 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// TestObjectName_RenamesTheObjectAlone holds that name and kind.
 		if p, ok := handler.(OutputProvider); ok {
 			probe := probeCopy(component)
-			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming)
+			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming, nil)
 			if err == nil {
 				err = checkHandlerOutputs(&component, handler, decls, outs)
 			}

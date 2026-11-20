@@ -128,7 +128,7 @@ func validOutputKey(key string) bool {
 // It consults no TransformContext.Naming hook: a name is the author's or the
 // default. A consumer that sets Naming calls ComponentOutputsNamed.
 func (t *Transformer) ComponentOutputs(comp *Component) ([]Output, error) {
-	return t.componentOutputs(comp, "", nil)
+	return t.componentOutputs(comp, "", nil, nil)
 }
 
 // ComponentOutputsNamed is ComponentOutputs for a consumer that sets
@@ -144,10 +144,22 @@ func (t *Transformer) ComponentOutputs(comp *Component) ([]Output, error) {
 // objects that collide), and a query made under an application name other than
 // the one the transform asks with is not held against a build.
 func (t *Transformer) ComponentOutputsNamed(application string, comp *Component, naming func(NameRequest) (string, bool)) ([]Output, error) {
-	return t.componentOutputs(comp, application, naming)
+	return t.componentOutputs(comp, application, naming, nil)
 }
 
-func (t *Transformer) componentOutputs(comp *Component, application string, naming func(NameRequest) (string, bool)) ([]Output, error) {
+// ComponentOutputsWithin is ComponentOutputsNamed for a rule that asks about a component it
+// emits while it renders them, under the application of lctx. The query shares the run of
+// lctx (LoweringContext.RunState), so what a rule keeps for the whole build, such as the
+// limits of a model render, counts what the query spends too, and a chain of rules that each
+// ask about the next cannot spend more than one build may. It claims nothing, as the other
+// queries do.
+func (t *Transformer) ComponentOutputsWithin(lctx LoweringContext, comp *Component, naming func(NameRequest) (string, bool)) ([]Output, error) {
+	return t.componentOutputs(comp, lctx.Application(), naming, lctx.Namer)
+}
+
+// componentOutputs answers for comp. parent, when it is not nil, is the allocator of the run the
+// query belongs to: the allocator of the query shares its run state.
+func (t *Transformer) componentOutputs(comp *Component, application string, naming func(NameRequest) (string, bool), parent *NameAllocator) ([]Output, error) {
 	provider, comp, ok, err := t.queryProvider(comp, application, naming, declaresOutputs)
 	if err != nil || !ok {
 		return nil, err
@@ -171,16 +183,23 @@ func (t *Transformer) componentOutputs(comp *Component, application string, nami
 	// The provider is asked about a copy: queryProvider hands back the caller's
 	// own component for a rule, and a write to it must not reach the document.
 	probe := probeCopy(*comp)
-	_, outs, err := outputsOf(p, &probe, application, naming)
+	_, outs, err := outputsOf(p, &probe, application, naming, parent)
 	return outs, err
 }
 
 // outputsOf asks p for comp's outputs on a fresh allocator: what a name is
 // resolved to is asked here, nothing is claimed. It returns the declarations
-// as the provider wrote them and the answers they resolve to.
-func outputsOf(p OutputProvider, comp *Component, application string, naming func(NameRequest) (string, bool)) ([]OutputDecl, []Output, error) {
+// as the provider wrote them and the answers they resolve to. The allocator
+// shares the run state of parent, when there is one.
+func outputsOf(p OutputProvider, comp *Component, application string, naming func(NameRequest) (string, bool), parent *NameAllocator) ([]OutputDecl, []Output, error) {
 	namer := NewNameAllocator()
 	namer.hook = naming
+	if parent != nil {
+		if parent.runState == nil {
+			parent.runState = map[any]any{}
+		}
+		namer.runState = parent.runState
+	}
 	decls, err := p.Outputs(comp, LoweringContext{Component: comp, Namer: namer, application: application})
 	if err != nil {
 		return nil, nil, err
