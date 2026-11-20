@@ -12,44 +12,95 @@ import (
 	"github.com/go-kure/launcher/pkg/oam"
 )
 
-// partRead is one `parts.<part>.<key>` read in a site.
-type partRead struct{ part, key string }
+// partRead is one read below `parts.<part>` in a site: keys is the select chain after the
+// part id (`service`, `name` for `parts.app.service.name`), and empty for a read of the part
+// itself.
+type partRead struct {
+	part string
+	keys []string
+}
 
-// appendPartReads adds each `parts.<part>.<key>` read in ast to reads, once.
-func appendPartReads(reads []partRead, ast *cel.Ast) []partRead {
-	celast.PreOrderVisit(ast.NativeRep().Expr(), celast.NewExprVisitor(func(e celast.Expr) {
-		var op celast.Expr
-		var key string
+// text is the read as the document wrote it.
+func (r partRead) text() string {
+	return strings.Join(append([]string{"parts." + r.part}, r.keys...), ".")
+}
+
+// partChain reads e as a chain of selects and literal-key indexes on a part: `parts.db.key`,
+// `parts.db['key']` and the same below a record. The checker folds the qualified name of a
+// declared variable into one identifier, so `parts.db.key` is a select of `key` on the
+// identifier `parts.db`. A select that only tests presence is no read, and an index with a
+// computed key is not part of a chain: it fails in CEL when the key is missing, so a read of
+// its operand stops at the part, which the check refuses.
+func partChain(e celast.Expr) (part string, keys []string, ok bool) {
+	switch e.Kind() {
+	case celast.IdentKind:
+		if id := e.AsIdent(); strings.HasPrefix(id, "parts.") {
+			return strings.TrimPrefix(id, "parts."), nil, true
+		}
+	case celast.SelectKind:
+		sel := e.AsSelect()
+		if sel.IsTestOnly() {
+			return "", nil, false
+		}
+		if p, ks, ok := partChain(sel.Operand()); ok {
+			return p, append(ks, sel.FieldName()), true
+		}
+	case celast.CallKind:
+		call := e.AsCall()
+		if call.FunctionName() != "_[_]" || len(call.Args()) != 2 || call.Args()[1].Kind() != celast.LiteralKind {
+			return "", nil, false
+		}
+		k, isString := call.Args()[1].AsLiteral().Value().(string)
+		if !isString {
+			return "", nil, false
+		}
+		if p, ks, ok := partChain(call.Args()[0]); ok {
+			return p, append(ks, k), true
+		}
+	}
+	return "", nil, false
+}
+
+// consumeChain marks e and the operands below it that partChain walks, so that the read of a
+// chain is recorded once, at its longest.
+func consumeChain(e celast.Expr, seen map[int64]bool) {
+	for {
+		seen[e.ID()] = true
 		switch e.Kind() {
 		case celast.SelectKind:
-			sel := e.AsSelect()
-			if sel.IsTestOnly() {
-				return
-			}
-			op, key = sel.Operand(), sel.FieldName()
+			e = e.AsSelect().Operand()
 		case celast.CallKind:
-			// An index with a literal key, `parts.db['key']`, reads the same as `parts.db.key`.
-			// An index with a computed key fails in CEL when the key is missing.
-			call := e.AsCall()
-			if call.FunctionName() != "_[_]" || len(call.Args()) != 2 || call.Args()[1].Kind() != celast.LiteralKind {
+			args := e.AsCall().Args()
+			if len(args) != 2 {
 				return
 			}
-			k, ok := call.Args()[1].AsLiteral().Value().(string)
-			if !ok {
-				return
-			}
-			op, key = call.Args()[0], k
+			e = args[0]
 		default:
 			return
 		}
-		// The checker folds the qualified name of a declared variable into one identifier,
-		// so `parts.db.key` is a select of `key` on the identifier `parts.db`.
-		if op.Kind() != celast.IdentKind || !strings.HasPrefix(op.AsIdent(), "parts.") {
+	}
+}
+
+// appendPartReads adds each read below `parts.<part>` in ast to reads, once, as the longest
+// chain: `parts.db.app_secret.name` is one read, and not also `parts.db.app_secret`.
+func appendPartReads(reads []partRead, ast *cel.Ast) []partRead {
+	seen := map[int64]bool{}
+	celast.PreOrderVisit(ast.NativeRep().Expr(), celast.NewExprVisitor(func(e celast.Expr) {
+		if seen[e.ID()] {
 			return
 		}
-		r := partRead{part: strings.TrimPrefix(op.AsIdent(), "parts."), key: key}
+		if e.Kind() == celast.SelectKind && e.AsSelect().IsTestOnly() {
+			consumeChain(e.AsSelect().Operand(), seen)
+			return
+		}
+		part, keys, ok := partChain(e)
+		if !ok {
+			return
+		}
+		consumeChain(e, seen)
+		r := partRead{part: part, keys: keys}
 		for _, old := range reads {
-			if old == r {
+			if old.text() == r.text() {
 				return
 			}
 		}
@@ -58,27 +109,64 @@ func appendPartReads(reads []partRead, ast *cel.Ast) []partRead {
 	return reads
 }
 
-// checkPartReads refuses a read of an output key that the part does not declare, and names
-// the site, the part, the key and the keys the part does declare. CEL's own failure for a
-// missing map key names none of the part, and a read that gave an empty string would put a
-// wrong object name into a document.
-func (s *site) checkPartReads(path string, parts map[string]map[string]string) error {
+// recordNameField is the field of a record that a document reads: the name of the object.
+const recordNameField = "name"
+
+// isRecordNameRead tells whether ast is exactly one read of the name of a record: the name of
+// a part's own object, `parts.<part>.name`, or of one of its other outputs,
+// `parts.<part>.<key>.name`. The type of such a read is a string, though the checker types
+// everything below a part as dyn.
+func isRecordNameRead(ast *cel.Ast) bool {
+	_, keys, ok := partChain(ast.NativeRep().Expr())
+	return ok && (len(keys) == 1 || len(keys) == 2) && keys[len(keys)-1] == recordNameField
+}
+
+// checkPartReads refuses a read that is not the name of a record the part declares, and names
+// the site, the read and what the part declares. CEL's own failure for a missing map key names
+// none of the part, and a read that gave an empty string would put a wrong object name into
+// a document. The part's bound outputs are `name` (the part's own object) and one record,
+// `{name}`, under the key of each other output.
+func (s *site) checkPartReads(path string, parts map[string]map[string]any) error {
 	for _, r := range s.reads {
-		outs, bound := parts[r.part]
-		if !bound {
-			return errors.Errorf("model: evaluate %s: parts.%s.%s: the scope holds no outputs of part %q", path, r.part, r.key, r.part)
+		bound, ok := parts[r.part]
+		if !ok {
+			return errors.Errorf("model: evaluate %s: %s: the scope holds no outputs of part %q", path, r.text(), r.part)
 		}
-		if _, ok := outs[r.key]; ok {
-			continue
+		if len(r.keys) == 0 {
+			return errors.Errorf("model: evaluate %s: parts.%s: a part is read through its outputs, as parts.%s.%s for its own object or parts.%s.<key>.%s for another output (it declares: %s)",
+				path, r.part, r.part, recordNameField, r.part, recordNameField, declaredFields(bound))
 		}
-		declared := make([]string, 0, len(outs))
-		for k := range outs {
-			declared = append(declared, k)
+		cur, owner := bound, "part "+strconv.Quote(r.part)
+		for i, k := range r.keys {
+			v, ok := cur[k]
+			if !ok {
+				return errors.Errorf("model: evaluate %s: %s: %s declares no output %q (it declares: %s)", path, r.text(), owner, k, declaredFields(cur))
+			}
+			here := strings.Join(append([]string{"parts." + r.part}, r.keys[:i+1]...), ".")
+			switch x := v.(type) {
+			case string:
+				if i != len(r.keys)-1 {
+					return errors.Errorf("model: evaluate %s: %s: %s is a name, which has no field %q", path, r.text(), here, r.keys[i+1])
+				}
+			case map[string]any:
+				if i == len(r.keys)-1 {
+					return errors.Errorf("model: evaluate %s: %s: %s is the record of an output: read its name, as %s.%s", path, r.text(), here, here, recordNameField)
+				}
+				cur, owner = x, "output "+strconv.Quote(k)+" of part "+strconv.Quote(r.part)
+			}
 		}
-		sort.Strings(declared)
-		return errors.Errorf("model: evaluate %s: parts.%s.%s: part %q declares no output %q (it declares: %s)", path, r.part, r.key, r.part, r.key, strings.Join(declared, ", "))
 	}
 	return nil
+}
+
+// declaredFields lists the keys of a bound map, sorted.
+func declaredFields(m map[string]any) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ", ")
 }
 
 // Expand evaluates the model in document order into the components its parts emit, and binds
@@ -109,7 +197,7 @@ func (c *Compiled) Expand(tr *oam.Transformer, sc Scope, naming func(oam.NameReq
 // expand is Expand that also returns, for each component, the id of the part that gave it.
 func (c *Compiled) expand(tr *oam.Transformer, sc Scope, naming func(oam.NameRequest) (string, bool), partName func(string) (string, error)) ([]oam.Component, []string, error) {
 	sc.Values = make(map[string]any, len(c.values))
-	sc.Parts = map[string]map[string]string{}
+	sc.Parts = map[string]map[string]any{}
 	sc.Loop = nil
 	for i, v := range c.values {
 		val, _, err := c.Eval("spec.values["+strconv.Itoa(i)+"].expr", sc)
@@ -184,9 +272,15 @@ func (c *Compiled) expandPart(tr *oam.Transformer, base string, p Part, sc Scope
 			if err != nil {
 				return nil, errors.Wrapf(err, "model: %s: part %q", base, p.ID)
 			}
-			bound := make(map[string]string, len(outs))
+			// The part's own object is its `name`, and every other output is a record under
+			// its key. The Go API keeps the whole Output, and a document reads the name.
+			bound := make(map[string]any, len(outs))
 			for _, o := range outs {
-				bound[o.Key] = o.Name
+				if o.Key == oam.ObjectOutputKey {
+					bound[recordNameField] = o.Name
+					continue
+				}
+				bound[o.Key] = map[string]any{recordNameField: o.Name}
 			}
 			sc.Parts[p.ID] = bound
 		}
