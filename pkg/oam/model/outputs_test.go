@@ -272,6 +272,52 @@ func TestRule_AModelReadsTheOutputsOfAModelPart(t *testing.T) {
 	}
 }
 
+// mixedParts reads record names inside larger expressions: a sum of two reads and a conditional
+// over two reads, each as the whole value and inside text.
+const mixedParts = `
+    - id: app
+      type: ` + webappType + `
+      properties: {}
+    - id: cfg
+      type: configmap@v1
+      properties:
+        data:
+          sum: "${ parts.app.cluster.name + parts.app.secret.name }"
+          text: "refs-${ parts.app.cluster.name + '/' + parts.app.secret.name }"
+          sumText: "refs-${ parts.app.cluster.name + parts.app.secret.name }"
+          picked: "x-${ true ? parts.app.cluster.name : parts.app.secret.name }"
+          either: "${ false ? parts.app.cluster.name : 'none' }"
+`
+
+// TestRule_ARecordNameKeepsItsStringTypeInsideLargerExpressions: a read of the name of a record is
+// a string wherever it stands, so a sum of two reads and a conditional over reads are text, as the
+// whole value and inside a template, and the checker's dyn type of a read of a part does not refuse them.
+func TestRule_ARecordNameKeepsItsStringTypeInsideLargerExpressions(t *testing.T) {
+	tr := registerAll(t, outputsDoc("webapp.acme.example", publishedOutputs, pgOnlyParts),
+		outputsDoc("shop.acme.example", "  outputs:\n    cluster: \"${ parts.app.cluster.name }\"\n", mixedParts))
+	objs := objectsOK(t, tr, []oam.Component{{Name: "orders", Type: consumerType}}, nil)
+
+	cms := names(objs, "ConfigMap")
+	clusters := names(objs, "Cluster")
+	if len(cms) != 1 || len(clusters) != 1 {
+		t.Fatalf("the build made ConfigMaps %v and Clusters %v, want one of each", cms, clusters)
+	}
+	data, _ := objs[[2]string{"ConfigMap", cms[0]}]["data"].(map[string]any)
+	cluster, secret := clusters[0], clusters[0]+"-app"
+	want := map[string]any{
+		"sum":     cluster + secret,
+		"text":    "refs-" + cluster + "/" + secret,
+		"sumText": "refs-" + cluster + secret,
+		"picked":  "x-" + cluster,
+		"either":  "none",
+	}
+	for k, v := range want {
+		if data[k] != v {
+			t.Errorf("data[%q] = %v, want %v", k, data[k], v)
+		}
+	}
+}
+
 // TestRule_AForwardedSecretSurvivesAHookOnTheRoleObject: the build names the object of a kind part
 // (a Secret) after its component and never asks the Naming hook, so the forwarded-output check
 // and the read of the name give the same answer when the hook renames the role object.
