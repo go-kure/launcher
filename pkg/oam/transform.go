@@ -1239,7 +1239,10 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// transform gave its object is known (go-kure/launcher#1259). It is asked
 		// the component as the handler is given it, labels and annotations already
 		// taken off, as ComponentOutputsNamed asks it. The query runs on a copy
-		// and its own allocator.
+		// and its own allocator. The engine's default `object` output is not checked
+		// here: it is the handler's own object name and kind, so the check would
+		// compare a value with itself. The build test
+		// TestObjectName_RenamesTheObjectAlone holds that name and kind.
 		if p, ok := handler.(OutputProvider); ok {
 			probe := probeCopy(component)
 			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming)

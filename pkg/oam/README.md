@@ -76,7 +76,10 @@ its `Name`. A key is one identifier (a letter or underscore, then letters, digit
 underscores), so a document can address it as `parts.<part>.<key>`; `name` and `kind` are
 reserved. A handler that declares its one object (`ComponentObjectProvider`) and no outputs of
 its own publishes that object as the output `object` (`ObjectOutputKey`). A type that provides
-no outputs and declares no object answers `(nil, nil)`.
+no outputs and declares no object answers `(nil, nil)`. The query parses nothing for that
+default, so it answers for a `configmap` or `secret` whose properties the build refuses; the
+build still refuses them. `role-deployment` is lowering-only: a document that names it is
+refused by the build, so the query's answer for it is never backed by a build.
 
 Full text: [Names and overrides](/site/content/api-reference/oam/names-and-overrides.md#outputs-the-names-a-components-objects-get).
 
