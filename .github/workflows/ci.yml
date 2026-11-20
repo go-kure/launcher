@@ -1422,7 +1422,7 @@ jobs:
         echo "version=$FLUX_VER" >> $GITHUB_OUTPUT
 
     - name: Install Flux CLI
-      uses: fluxcd/flux2/action@3fa784edd773d56630bb9f62645e08f70c2cff0a # v2.10.0
+      uses: fluxcd/flux2/action@23dcfe98fe672acdf44ecd9c60cbac41b57f5de8 # v2.10.1
       with:
         # Omitting `version:` resolves to the action's own "latest stable" at
         # workflow-run time (action.yml), not the SHA-pinned action's own
