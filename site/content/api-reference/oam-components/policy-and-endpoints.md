@@ -279,17 +279,24 @@ One shared schema and parser serve the three types.
 
 ## Declared outputs
 
-`configmap`, `secret`, `postgresql`, `webservice` and `worker` implement `oam.OutputProvider`:
-the names of the objects a component generates, read through
+Every type that generates one object named after the component (a kind component: every
+type that takes `objectName`) publishes it as the output `object`, and `postgresql`,
+`webservice` and `worker` implement `oam.OutputProvider` for the objects they lower into: the
+names of the objects a component generates, read through
 `Transformer.ComponentOutputs` before the document is built, and held by the build against
 the names it gives (see "Outputs" in `site/content/api-reference/oam/names-and-overrides.md`). A name is the author's property,
 else the `Naming` hook's, else the default, resolved by the code that names the object in the
-lowering, so a query and a build cannot differ. A refused component answers no outputs and is
-refused in the lowering's own words. No other builtin declares any.
+lowering, so a query and a build cannot differ. A component of `postgresql`, `webservice` or
+`worker` that the lowering refuses answers no outputs and is refused in the lowering's own
+words. A kind component's output is the engine's own: it parses no properties, so the query
+answers for a component whose properties the build then refuses. The keys `name` and `kind`
+are reserved and no type declares them. Of the handlers, the four that name no single object
+(`helmtemplate`, `manifests`, `crd` and `passthrough`) publish nothing, and of the lowering
+rules only `postgresql`, `webservice` and `worker` declare outputs.
 
 | Type | Key | Object | Name |
 |---|---|---|---|
-| `configmap`, `secret` | `object` | the ConfigMap or Secret | `objectName`, else the component name |
+| every kind component (`configmap`, `secret`, `deployment`, `cnpg-cluster`, and the rest of the types that take `objectName`) | `object` | the object the type declares | `objectName`, else the Naming hook's, else the component name |
 | `postgresql` | `cluster` | Cluster | `clusterObjectName`, else the component name |
 | `postgresql` | `app_secret` | Secret `<cluster>-app` | derived from `cluster`; **absent** when `recovery.secret.name` is set, because CloudNativePG then uses that Secret and generates none |
 | `postgresql` | `objectstore` | ObjectStore | present when `backup` is set; `backup.objectStoreObjectName`, else the component name |
