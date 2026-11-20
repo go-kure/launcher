@@ -723,6 +723,11 @@ See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-com
 
 ## Declared outputs
 
+Every kind component (a type that takes `objectName`) publishes its one object as the output
+`object`: the engine does it, so a handler declares nothing, and a new type cannot join the
+registry without it (`TestOutputs_EveryObjectTypePublishesItsRecord`). `postgresql`,
+`webservice` and `worker` declare the objects they lower into.
+
 See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#declared-outputs).
 
 ## Per-type highlights

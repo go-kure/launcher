@@ -73,8 +73,10 @@ A component type answers with the optional `OutputProvider` interface, which the
 as for `EndpointProvider`. `Transformer.ComponentOutputs(comp)` returns one `Output` per
 declaration, in the provider's order: a `Key`, the object's `Kind` (a `schema.GroupKind`) and
 its `Name`. A key is one identifier (a letter or underscore, then letters, digits and
-underscores), so a document can address it as `parts.<part>.<key>`. A type that provides no
-outputs answers `(nil, nil)`.
+underscores), so a document can address it as `parts.<part>.<key>`; `name` and `kind` are
+reserved. A handler that declares its one object (`ComponentObjectProvider`) and no outputs of
+its own publishes that object as the output `object` (`ObjectOutputKey`). A type that provides
+no outputs and declares no object answers `(nil, nil)`.
 
 Full text: [Names and overrides](/site/content/api-reference/oam/names-and-overrides.md#outputs-the-names-a-components-objects-get).
 
