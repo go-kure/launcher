@@ -7,8 +7,8 @@ import (
 
 // TestEval_ABoundNameThatIsNotAStringIsRefused: a read of the name of a record is typed as a
 // string, so `parts.a.name + parts.b.name` is text. A scope handed to Eval that binds a number, a
-// null or a list as a name would make that sum a number, so the read refuses it and names the
-// type, and a string name passes.
+// null, a list or a boolean as a name makes that type false (the sum would add numbers, join lists
+// or fail), so the read refuses it and names the type, and a string name passes.
 func TestEval_ABoundNameThatIsNotAStringIsRefused(t *testing.T) {
 	m := celBase(t)
 	m.Spec.Parts = append(m.Spec.Parts, Part{ID: "cfg", Type: "configmap@v1",

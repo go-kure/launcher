@@ -332,7 +332,8 @@ func TestForwardedOutput_ComponentsOfOneNameAreToldApartByTheAnswer(t *testing.T
 		"a name no one of them has":     {[]string{"cfg", "sec"}, OutputDecl{Key: "s", Kind: secretKind, Name: "other", ForwardKey: "object"}, false, `is the Secret name "pg-x"`},
 		"the same, the other order":     {[]string{"sec", "cfg"}, OutputDecl{Key: "s", Kind: secretKind, Name: "other", ForwardKey: "object"}, false, `is the Secret name "pg-x"`},
 		"a config map name nobody has":  {[]string{"sec", "cfg"}, OutputDecl{Key: "s", Kind: configMapKind, Name: "other", ForwardKey: "object"}, false, `is the ConfigMap name "pg-x"`},
-		"a kind no one of them is":      {[]string{"cfg", "sec"}, OutputDecl{Key: "s", Kind: schema.GroupKind{Kind: "Service"}, Name: "pg-x", ForwardKey: "object"}, false, "Service"},
+		"a kind no one of them is":      {[]string{"cfg", "sec"}, OutputDecl{Key: "s", Kind: schema.GroupKind{Kind: "Service"}, Name: "pg-x", ForwardKey: "object"}, false, `is the ConfigMap name "pg-x"`},
+		"a kind nobody is, other order": {[]string{"sec", "cfg"}, OutputDecl{Key: "s", Kind: schema.GroupKind{Kind: "Service"}, Name: "pg-x", ForwardKey: "object"}, false, `is the Secret name "pg-x"`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tr := NewTransformer(map[string]ComponentHandler{

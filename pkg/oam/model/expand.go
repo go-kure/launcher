@@ -196,8 +196,9 @@ func (s *site) checkPartReads(path string, parts map[string]map[string]any) erro
 				}
 				cur, owner = x, "output "+strconv.Quote(k)+" of part "+strconv.Quote(r.part)
 			default:
-				// A read of a name is typed as a string (isRecordText), so a scope that binds
-				// anything else would turn `parts.a.name + parts.b.name` into a number.
+				// A read of a name is typed as a string (isRecordText). A scope that binds
+				// anything else makes that type false: `parts.a.name + parts.b.name` would add
+				// numbers, join lists or fail, and give no text.
 				return errors.Errorf("model: evaluate %s: %s: %s is a %T, and the output of a part is a name (a string) or a record", path, r.text(), here, v)
 			}
 		}
