@@ -148,8 +148,12 @@ func (t *Transformer) componentOutputs(comp *Component, application string, nami
 	}
 	p, ok := provider.(OutputProvider)
 	if !ok {
-		if handler, isHandler := provider.(ComponentHandler); isHandler {
-			p, ok = handlerOutputProvider(handler)
+		// A registered rule decides what its type builds, so the default for a kind
+		// component is never its answer, whatever else the rule implements.
+		if _, isRule := provider.(ComponentLoweringRule); !isRule {
+			if handler, isHandler := provider.(ComponentHandler); isHandler {
+				p, ok = handlerOutputProvider(handler)
+			}
 		}
 	}
 	if !ok {

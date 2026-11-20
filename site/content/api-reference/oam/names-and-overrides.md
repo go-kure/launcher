@@ -640,8 +640,10 @@ with both a refused `labels` or `annotations` value and a failing provider repor
 metadata refusal.
 
 What a query answers is not the build's verdict on the document. It is given one component
-and answers only for one its type's own parse accepts, refusing another in the parse's
-words. It does not see what only the document shows (a name that is already another
+and, for a type that declares its own outputs (`postgresql`, `webservice`, `worker`), answers
+only for one its type's own parse accepts, refusing another in the parse's words. The engine's
+default for a kind component parses nothing and answers for any component of its type; the
+build refuses what the handler's parse refuses. It does not see what only the document shows (a name that is already another
 component, two objects that collide), the schema check of authored properties, or the policy.
 A query made under an `application` other than the one the transform asks with is not held
 against a build: the hook is asked a different `NameRequest`, and a hook that answers by
