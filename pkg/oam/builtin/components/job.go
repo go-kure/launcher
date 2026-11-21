@@ -119,7 +119,7 @@ type JobConfig struct {
 
 // validate refuses a spec the Job cannot be emitted from and returns the
 // labels of its pod template. The template is held to
-// validateBatchPodTemplate, its labels to podTemplateAppLabels, and an authored
+// validateBatchPodTemplateAt, its labels to podTemplateAppLabels, and an authored
 // selector must keep matching the template once the `app` label is on it
 // (refuseSelectorAgainstAppLabel). The API's other value rules are left to the
 // API server.

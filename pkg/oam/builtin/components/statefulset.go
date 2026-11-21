@@ -249,7 +249,7 @@ type StatefulsetConfig struct {
 // omit it, so an unset one would be written as null, and launcher derives none.
 // serviceName names the governing Service, which the component does not emit, so
 // it is held to the Service-name rule (validateServiceName); unset, it stays
-// empty. The template is held to validateControllerPodTemplate, its labels to
+// empty. The template is held to validateControllerPodTemplateAt, its labels to
 // podTemplateAppLabels, and the selector must keep matching the template once
 // the `app` label is on it (refuseSelectorAgainstAppLabel). The claim templates
 // are held to checkClaimTemplateCollisions. The API's other value rules are left

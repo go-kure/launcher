@@ -95,7 +95,7 @@ type ReplicationControllerConfig struct {
 // validate refuses a spec the ReplicationController cannot be emitted from and
 // returns the labels of its pod template. template must be authored: there is
 // no pod to describe without it, and the API server requires it. The template
-// is held to validateControllerPodTemplate and its labels to
+// is held to validateControllerPodTemplateAt and its labels to
 // podTemplateAppLabels.
 //
 // The selector needs no check against the `app` label, unlike a ReplicaSet's:

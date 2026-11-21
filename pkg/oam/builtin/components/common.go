@@ -2990,20 +2990,14 @@ func parseClaimReference(m map[string]any, volName, claimName string, volumeMode
 	}, nil
 }
 
-// parsePodVolumes is parseVolumes for a pod kind,
-// which generates no claim of its own
-// (go-kure/launcher#702): every pvc volume must reference an existing claim by
-// claimName. The role rules call parseVolumes itself and route the claims their
-// pvc volumes describe through synthesized `pvc` traits (roleClaims). The check
-// runs first, so a volume describing a claim to generate is refused for that
-// rather than for a missing size; parseVolumes still reports every malformed
-// shape this lenient scan skips.
-func parsePodVolumes(props map[string]any) (ParsedVolumes, error) {
-	return parsePodVolumesAt(props, oam.ImageLevelTagged)
-}
-
-// parsePodVolumesAt is parsePodVolumes at an image reference level
-// (go-kure/launcher#1644).
+// parsePodVolumesAt is parseVolumes for a pod kind, with its image volumes held
+// to an image reference level (go-kure/launcher#1644). A pod kind generates no
+// claim of its own (go-kure/launcher#702): every pvc volume must reference an
+// existing claim by claimName. The role rules call parseVolumes itself and
+// route the claims their pvc volumes describe through synthesized `pvc` traits
+// (roleClaims). The check runs first, so a volume describing a claim to
+// generate is refused for that rather than for a missing size; parseVolumes
+// still reports every malformed shape this lenient scan skips.
 func parsePodVolumesAt(props map[string]any, level oam.ImageReferenceLevel) (ParsedVolumes, error) {
 	if v, present := authoredValue(props, "volumes"); present {
 		vols, _ := v.([]any)

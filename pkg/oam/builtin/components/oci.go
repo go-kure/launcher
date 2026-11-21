@@ -398,6 +398,11 @@ func (OCIRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}
+	// The version is held to the level the policy names for a source, default
+	// any: the component checked it by nothing before (go-kure/launcher#1644).
+	if err := oam.CheckSourceVersion(props.version, lctx.SourceLevel()); err != nil {
+		return oam.LoweringResult{}, errors.Wrap(err, "oci: version")
+	}
 	identity, err := props.sourceIdentity()
 	if err != nil {
 		return oam.LoweringResult{}, err

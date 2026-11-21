@@ -49,6 +49,8 @@ func CheckImageReference(image string, level ImageReferenceLevel) error {
 		return fmt.Errorf("image %q rejected: %w", image, err)
 	}
 	switch level {
+	case ImageLevelAny:
+		// Syntax only: the parser accepted it.
 	case ImageLevelTagged:
 		switch r := ref.(type) {
 		case name.Digest:
@@ -75,6 +77,50 @@ func CheckImageReference(image string, level ImageReferenceLevel) error {
 	}
 	return nil
 }
+
+// CheckSourceVersion holds the version of an OCI source component, which is a
+// tag or sha256:<digest> and no image reference, to level
+// (go-kure/launcher#1644):
+//
+//   - any: nothing.
+//   - tagged: a tag or a digest, as for an image: not empty and not latest.
+//   - version: a version tag (the pattern CheckImageReference's version level
+//     reads) or a digest.
+//   - digest: sha256:<digest> only.
+//
+// A level that is not one of the four is refused, as CheckImageReference
+// refuses it.
+func CheckSourceVersion(version string, level ImageReferenceLevel) error {
+	if !level.Valid() {
+		return fmt.Errorf("version %q rejected: %q is not an image reference level (any, tagged, version or digest)", version, string(level))
+	}
+	digest := len(version) > len(sourceDigestPrefix) && strings.HasPrefix(version, sourceDigestPrefix)
+	switch level {
+	case ImageLevelAny:
+		// Nothing is held.
+	case ImageLevelTagged:
+		if version == "" {
+			return fmt.Errorf("version rejected: level %q requires a tag or a digest", string(level))
+		}
+		if version == "latest" {
+			return fmt.Errorf("version %q rejected: level %q refuses the latest tag; use an explicit version tag or a digest", version, string(level))
+		}
+	case ImageLevelVersion:
+		if !digest && !versionTag.MatchString(version) {
+			return fmt.Errorf("version %q rejected: level %q requires a version tag, such as v1.2 or 1.2.3-alpine, or a digest", version, string(level))
+		}
+	case ImageLevelDigest:
+		if !digest {
+			return fmt.Errorf("version %q rejected: level %q requires a digest (sha256:<digest>)", version, string(level))
+		}
+	}
+	return nil
+}
+
+// sourceDigestPrefix starts the digest form an OCI source's version takes. The
+// component reads any value with this prefix as a digest and leaves its shape
+// to the source controller, and so does this check.
+const sourceDigestPrefix = "sha256:"
 
 func hasExplicitLatestTag(image string) bool {
 	if i := strings.Index(image, "@"); i >= 0 {

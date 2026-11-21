@@ -273,7 +273,8 @@ Runs on main and `release/*` branches only (not PRs):
   `service_name_gate.go`, `ordering.go`, `flux_namespace_inputs.go`, `classify.go`,
   `sibling_group.go`, `bundle_application_names.go`, `cross_document_collisions.go` (its
   check function has no caller yet, but its helper `keyedObjects` is live), `component_label.go`,
-  `force_warnings.go`, `handler.go`, `naming_engine.go`, `pipeline.go`, `policy.go`,
+  `force_warnings.go`, `handler.go`, `image_reference.go`, `image_reference_level.go`,
+  `naming_engine.go`, `pipeline.go`, `policy.go`,
   `scaler_targets.go`, `schema.go` or `shorten_name.go` (go-kure/launcher#1377: each holds a
   helper that a refusal elsewhere calls), or any non-test
   `.go` file under

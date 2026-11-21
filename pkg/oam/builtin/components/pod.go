@@ -235,7 +235,7 @@ func podSpecDefaultedZeros(prefix string, ps *corev1.PodSpec) defaultedZeroField
 // ValidateImageRef: no untagged image and no :latest. A container name used by
 // more than one init or regular container is refused, naming both entries
 // (checkPodSpecContainerNames, go-kure/launcher#1253). So is the reference of
-// every image volume (validateImageVolumeRefs). A match expression of a label
+// every image volume (validateImageVolumeRefsAt). A match expression of a label
 // selector is held to validateLabelSelector, in every selector the spec holds
 // (validatePodSpecLabelSelectors). The volumeMounts of every init and regular
 // container are held to the single-mount rules of an app.yaml mount
@@ -289,18 +289,13 @@ func validateAuthoredPodSpecAt(prefix string, ps *corev1.PodSpec, barePod bool, 
 	return validatePodSpecLabelSelectors(prefix, ps)
 }
 
-// validateImageVolumeRefs holds the reference of every image volume of a pod
-// spec to ValidateImageRef, with or without an environment policy: the kubelet
-// pulls it as it pulls a container's image. A volume that names no reference
-// names no image, and nothing is checked for it, as the registry allowlist
-// checks nothing for it (enforcePodTemplatePolicy). prefix is the spec's path,
-// as in validateAuthoredPodSpec.
-func validateImageVolumeRefs(prefix string, ps *corev1.PodSpec) error {
-	return validateImageVolumeRefsAt(prefix, ps, oam.ImageLevelTagged)
-}
-
-// validateImageVolumeRefsAt is validateImageVolumeRefs at level
-// (go-kure/launcher#1644).
+// validateImageVolumeRefsAt holds the reference of every image volume of a pod
+// spec to ValidateImageRefAt at level (go-kure/launcher#1644), with or without
+// an environment policy: the kubelet pulls it as it pulls a container's image.
+// A volume that names no reference names no image, and nothing is checked for
+// it, as the registry allowlist checks nothing for it
+// (enforcePodTemplatePolicy). prefix is the spec's path, as in
+// validateAuthoredPodSpec.
 func validateImageVolumeRefsAt(prefix string, ps *corev1.PodSpec, level oam.ImageReferenceLevel) error {
 	for i, v := range ps.Volumes {
 		if v.Image == nil || v.Image.Reference == "" {

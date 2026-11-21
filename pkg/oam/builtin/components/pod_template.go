@@ -50,19 +50,13 @@ func podTemplateLabelSelectorRequired() map[string]string {
 	return labelSelectorRequired(podSpecLabelSelectors("template.spec.")...)
 }
 
-// validateBatchPodTemplate refuses what the pod template of a Job, or of a
+// validateBatchPodTemplateAt refuses what the pod template of a Job, or of a
 // CronJob's job template, may not hold: what a pod authored through a kind
-// component may not (validateAuthoredPodSpec). activeDeadlineSeconds is
-// allowed, as on a pod, since a Job's pods run to completion. prefix is the
-// path of the template in the component's properties, with its trailing dot.
-// The API's other value rules, restartPolicy among them, are left to the API
-// server.
-func validateBatchPodTemplate(prefix string, t *corev1.PodTemplateSpec) error {
-	return validateBatchPodTemplateAt(prefix, t, oam.ImageLevelTagged)
-}
-
-// validateBatchPodTemplateAt is validateBatchPodTemplate holding the images to
-// level (go-kure/launcher#1644).
+// component may not (validateAuthoredPodSpecAt), with its images held to level
+// (go-kure/launcher#1644). activeDeadlineSeconds is allowed, as on a pod, since
+// a Job's pods run to completion. prefix is the path of the template in the
+// component's properties, with its trailing dot. The API's other value rules,
+// restartPolicy among them, are left to the API server.
 func validateBatchPodTemplateAt(prefix string, t *corev1.PodTemplateSpec, level oam.ImageReferenceLevel) error {
 	return validateAuthoredPodSpecAt(prefix+"spec.", &t.Spec, false, level)
 }
@@ -101,19 +95,14 @@ func jobTemplateLabelSelectorRequired() map[string]string {
 // keeps its pods running.
 const controllerActiveDeadlineReason = "activeDeadlineSeconds: not supported — the API server forbids it on the pod template of a Deployment, ReplicaSet, ReplicationController, DaemonSet or StatefulSet, whose pods are restarted and replaced for as long as the controller exists; a pod or a Job may set it"
 
-// validateControllerPodTemplate refuses, with or without an environment
+// validateControllerPodTemplateAt refuses, with or without an environment
 // policy, what the pod template of a Deployment, ReplicaSet,
-// ReplicationController, DaemonSet or StatefulSet may not hold: what a pod authored through a kind
-// component may not (validateAuthoredPodSpec), and activeDeadlineSeconds, which
-// the API server's validation of each of them forbids, as cnpg-pooler refuses it on its template.
-// The API's other value rules, restartPolicy among them, are left to the API
-// server.
-func validateControllerPodTemplate(t *corev1.PodTemplateSpec) error {
-	return validateControllerPodTemplateAt(t, oam.ImageLevelTagged)
-}
-
-// validateControllerPodTemplateAt is validateControllerPodTemplate holding the
-// images to level (go-kure/launcher#1644).
+// ReplicationController, DaemonSet or StatefulSet may not hold: what a pod
+// authored through a kind component may not (validateAuthoredPodSpecAt), with
+// its images held to level (go-kure/launcher#1644), and activeDeadlineSeconds,
+// which the API server's validation of each of them forbids, as cnpg-pooler
+// refuses it on its template. The API's other value rules, restartPolicy among
+// them, are left to the API server.
 func validateControllerPodTemplateAt(t *corev1.PodTemplateSpec, level oam.ImageReferenceLevel) error {
 	if err := validateAuthoredPodSpecAt("template.spec.", &t.Spec, false, level); err != nil {
 		return err
