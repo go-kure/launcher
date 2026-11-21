@@ -1009,7 +1009,9 @@ jobs:
   docs-build:
     name: docs-build
     runs-on: autops-kube-kure
-    timeout-minutes: 15
+    # 25, not 15: on a slow runner every step of this job takes about twice as long, and the
+    # slowest runs have reached 14 minutes and passed or run out at 15 (go-kure/launcher#1658).
+    timeout-minutes: 25
     needs: [changes]
     # Runs on every merge_group, whatever the filter says: the full-tree forbidden-terms
     # guard below is the queue's backstop for a pull request whose own run skipped this
