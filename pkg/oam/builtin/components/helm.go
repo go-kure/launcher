@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	"gopkg.in/yaml.v3"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -725,11 +726,100 @@ func lowerHelmFlux(comp *oam.Component, lctx oam.LoweringContext, props *helmPro
 	return result, nil
 }
 
-// helmValuesKey is the data key the values ConfigMap stores the serialized
-// values under, and the valuesKey its valuesFrom entry names. The stored bytes
-// are JSON (a YAML subset, which is how Flux reads a valuesFrom value), so the
-// key says what they are.
-const helmValuesKey = "values.json"
+// helmValuesKey is the data key the values ConfigMap and the values Secret
+// store the serialized values under, and the valuesKey their valuesFrom entries
+// name. The stored bytes are a YAML values file, so the key is the one Flux
+// assumes when valuesKey is unset.
+const helmValuesKey = "values.yaml"
+
+// helmValuesYAML serializes a values tree as the YAML stored under
+// helmValuesKey: two-space indent, the keys of every map in byte order,
+// numbers written as the text they were authored with, and each string in the
+// style the YAML encoder picks for it, so that Flux's reader (YAML 1.1) reads
+// it back as the same string. The same tree gives the same bytes, and the name
+// of the object that stores them is a digest of these bytes.
+//
+// tree holds what jsonObject and helmReleaseValuesMap return: json.Number,
+// string, bool, nil, map[string]any and []any. The error is fixed text: the
+// Secret path stores values that no error may repeat.
+func helmValuesYAML(tree map[string]any) ([]byte, error) {
+	node, err := yamlValueNode(tree)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(node); err != nil {
+		return nil, errors.New("not representable as YAML")
+	}
+	if err := enc.Close(); err != nil {
+		return nil, errors.New("not representable as YAML")
+	}
+	return buf.Bytes(), nil
+}
+
+// yamlValueNode builds the YAML node of one value of a values tree.
+func yamlValueNode(v any) (*yaml.Node, error) {
+	switch t := v.(type) {
+	case json.Number:
+		// A plain scalar holding its own text: no digit is rounded, and the
+		// encoder does not quote it as it would a string.
+		return &yaml.Node{Kind: yaml.ScalarNode, Value: t.String()}, nil
+	case string:
+		return yamlStringNode(t)
+	case map[string]any:
+		node := &yaml.Node{Kind: yaml.MappingNode}
+		for _, k := range slices.Sorted(maps.Keys(t)) {
+			key, err := yamlStringNode(k)
+			if err != nil {
+				return nil, err
+			}
+			val, err := yamlValueNode(t[k])
+			if err != nil {
+				return nil, err
+			}
+			node.Content = append(node.Content, key, val)
+		}
+		return node, nil
+	case []any:
+		node := &yaml.Node{Kind: yaml.SequenceNode}
+		for _, e := range t {
+			item, err := yamlValueNode(e)
+			if err != nil {
+				return nil, err
+			}
+			node.Content = append(node.Content, item)
+		}
+		return node, nil
+	case bool, nil:
+		var node yaml.Node
+		if err := node.Encode(t); err != nil {
+			return nil, errors.New("not representable as YAML")
+		}
+		return &node, nil
+	}
+	return nil, errors.New("not representable as YAML")
+}
+
+// yamlStringNode returns the node of a string, in the style the encoder picks
+// for it: quoted where the plain form would read as another type (including
+// the YAML 1.1 words Flux's reader knows), a block for a multi-line text. It is
+// quoted by force where the encoder's own choice does not read back: "<<",
+// which a reader takes for a merge key where it is a map key, and any text the
+// encoder writes as a block that a reader does not read as written (a text that
+// starts with a newline or a Unicode line separator, or one the encoder's own
+// parser rejects, such as a multi-line text that starts with a tab).
+func yamlStringNode(s string) (*yaml.Node, error) {
+	// Node.Encode writes s and reads the output back, so on success its Value is
+	// the text a reader sees: where that is not s, or where reading it fails, the
+	// style the encoder chose is wrong for s.
+	var node yaml.Node
+	if err := node.Encode(s); err != nil || node.Value != s || s == "<<" {
+		node = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s, Style: yaml.DoubleQuotedStyle}
+	}
+	return &node, nil
+}
 
 // helmValuesHashLen is how many hex digits of the values digest the values
 // ConfigMap's name carries.
@@ -800,9 +890,9 @@ func helmValuesConfigMap(release map[string]any, name func(digest string) (strin
 	if len(values) == 0 {
 		return nil, nil, nil
 	}
-	data, err := json.MarshalIndent(values, "", "  ")
+	data, err := helmValuesYAML(values)
 	if err != nil {
-		return nil, nil, errors.Errorf("%s: values is not representable as JSON: %w", helmType, err)
+		return nil, nil, errors.Errorf("%s: values is not representable as YAML", helmType)
 	}
 	sum := sha256.Sum256(data)
 	cmName, err := name(hex.EncodeToString(sum[:]))

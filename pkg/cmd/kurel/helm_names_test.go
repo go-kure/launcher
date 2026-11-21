@@ -32,10 +32,13 @@ const namingChart = `    - name: chart
 
 // The defaults of namingChart's three names. Each ends in the digest of what it
 // names, so these also pin that a change of go-kure/launcher#787 moved none.
+// The values ConfigMap and Secret end in the first ten hex digits of the sha256
+// of their stored YAML ("replicaCount: 2\n" and "password: not-a-real-one\n");
+// go-kure/launcher#1639 moved them when the bytes changed from JSON to YAML.
 const (
 	chartSourceDefault    = "shop-source-d3f34901c4"
-	chartConfigMapDefault = "chart-values-7048598917"
-	chartSecretDefault    = "chart-secret-values-7f745ae1e1"
+	chartConfigMapDefault = "chart-values-e15c415d62"
+	chartSecretDefault    = "chart-secret-values-4771132499"
 )
 
 // helmNamesApp is a document named shop, in namespace default, holding

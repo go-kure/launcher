@@ -10,6 +10,7 @@ import (
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"k8s.io/apimachinery/pkg/util/validation"
+	sigsyaml "sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -80,15 +81,15 @@ func assertValuesTrait(t *testing.T, release oam.Component, trait *oam.Trait) (n
 	if len(trait.Properties) != 2 || len(d) != 1 {
 		t.Fatalf("trait properties = %v, want exactly name and a one-key data", trait.Properties)
 	}
-	data, _ = d["values.json"].(string)
+	data, _ = d["values.yaml"].(string)
 	if data == "" {
-		t.Fatalf("trait data = %v, want a values.json string", d)
+		t.Fatalf("trait data = %v, want a values.yaml string", d)
 	}
 	from, _ := release.Properties["valuesFrom"].([]any)
 	if len(from) == 0 {
 		t.Fatal("no valuesFrom entry")
 	}
-	want := map[string]any{"kind": "ConfigMap", "name": name, "valuesKey": "values.json"}
+	want := map[string]any{"kind": "ConfigMap", "name": name, "valuesKey": "values.yaml"}
 	if !reflect.DeepEqual(from[0], want) {
 		t.Errorf("valuesFrom[0] = %v, want %v", from[0], want)
 	}
@@ -124,15 +125,21 @@ func TestHelmRule_ValuesConfigMap(t *testing.T) {
 	if len(from) != 3 || from[1].(map[string]any)["name"] != "creds" || from[2].(map[string]any)["name"] != "extra" {
 		t.Errorf("valuesFrom = %v, want generated, creds, extra", from)
 	}
+	// read as Flux reads a values reference: YAML, numbers kept as text
 	var stored map[string]any
-	dec := json.NewDecoder(strings.NewReader(data))
-	dec.UseNumber()
-	if err := dec.Decode(&stored); err != nil {
+	if err := sigsyaml.Unmarshal([]byte(data), &stored, func(d *json.Decoder) *json.Decoder {
+		d.UseNumber()
+		return d
+	}); err != nil {
 		t.Fatalf("stored values: %v", err)
 	}
 	want := map[string]any{"replicaCount": json.Number("2"), "image": map[string]any{"tag": "1.2"}, "big": json.Number("18446744073709551615")}
 	if !reflect.DeepEqual(stored, want) {
 		t.Errorf("stored values %v, want %v", stored, want)
+	}
+	// a YAML values file, not JSON (which a YAML reader would also accept)
+	if wantText := "big: 18446744073709551615\nimage:\n  tag: \"1.2\"\nreplicaCount: 2\n"; data != wantText {
+		t.Errorf("stored values text = %q, want %q", data, wantText)
 	}
 }
 
