@@ -242,6 +242,12 @@ func podSpecDefaultedZeros(prefix string, ps *corev1.PodSpec) defaultedZeroField
 // lifecycle sleep below zero or above the grace period (checkLifecycleSleep).
 // The API's other value rules are left to the API server.
 func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec, barePod bool) error {
+	return validateAuthoredPodSpecAt(prefix, ps, barePod, oam.ImageLevelTagged)
+}
+
+// validateAuthoredPodSpecAt is validateAuthoredPodSpec holding every container's
+// image and every image volume's reference to level (go-kure/launcher#1644).
+func validateAuthoredPodSpecAt(prefix string, ps *corev1.PodSpec, barePod bool, level oam.ImageReferenceLevel) error {
 	if ps.Containers == nil {
 		return errors.Errorf("%scontainers: required (the containers the pod runs)", prefix)
 	}
@@ -254,19 +260,19 @@ func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec, barePod bool) er
 		return errors.New(prefix + podSpecRejectedKeys["overhead"])
 	}
 	for i, ctr := range ps.InitContainers {
-		if err := ValidateImageRef(ctr.Image); err != nil {
+		if err := ValidateImageRefAt(ctr.Image, level); err != nil {
 			return errors.Wrapf(err, "%sinitContainers[%d] %q", prefix, i, ctr.Name)
 		}
 	}
 	for i, ctr := range ps.Containers {
-		if err := ValidateImageRef(ctr.Image); err != nil {
+		if err := ValidateImageRefAt(ctr.Image, level); err != nil {
 			return errors.Wrapf(err, "%scontainers[%d] %q", prefix, i, ctr.Name)
 		}
 	}
 	if err := checkPodSpecContainerNames(prefix, ps); err != nil {
 		return err
 	}
-	if err := validateImageVolumeRefs(prefix, ps); err != nil {
+	if err := validateImageVolumeRefsAt(prefix, ps, level); err != nil {
 		return err
 	}
 	if err := validateTypedVolumeMounts(prefix, ps); err != nil {
@@ -288,11 +294,17 @@ func validateAuthoredPodSpec(prefix string, ps *corev1.PodSpec, barePod bool) er
 // checks nothing for it (enforcePodTemplatePolicy). prefix is the spec's path,
 // as in validateAuthoredPodSpec.
 func validateImageVolumeRefs(prefix string, ps *corev1.PodSpec) error {
+	return validateImageVolumeRefsAt(prefix, ps, oam.ImageLevelTagged)
+}
+
+// validateImageVolumeRefsAt is validateImageVolumeRefs at level
+// (go-kure/launcher#1644).
+func validateImageVolumeRefsAt(prefix string, ps *corev1.PodSpec, level oam.ImageReferenceLevel) error {
 	for i, v := range ps.Volumes {
 		if v.Image == nil || v.Image.Reference == "" {
 			continue
 		}
-		if err := ValidateImageRef(v.Image.Reference); err != nil {
+		if err := ValidateImageRefAt(v.Image.Reference, level); err != nil {
 			return errors.Wrapf(err, "%svolumes[%d] %q image.reference", prefix, i, v.Name)
 		}
 	}
@@ -306,6 +318,9 @@ func validateImageVolumeRefs(prefix string, ps *corev1.PodSpec) error {
 // the operator of a selector's match expression must be authored
 // (labelSelectorRequired).
 func (h *PodHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	// The images are held to the component's level, which the config keeps for
+	// Generate, where the refusals repeat (go-kure/launcher#1644).
+	level := component.ImageLevel()
 	spec, props, err := decodeKindSpec[corev1.PodSpec](component.Properties, "v1 PodSpec")
 	if err != nil {
 		return nil, err
@@ -316,8 +331,8 @@ func (h *PodHandler) ToApplicationConfig(component *oam.Component, namespace str
 	if err := refuseUnauthoredRequired(props, labelSelectorRequired(podSpecLabelSelectors("")...)); err != nil {
 		return nil, err
 	}
-	cfg := &PodConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
-	if err := validateAuthoredPodSpec("", &cfg.Spec, true); err != nil {
+	cfg := &PodConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec, imageLevel: level}
+	if err := validateAuthoredPodSpecAt("", &cfg.Spec, true, level); err != nil {
 		return nil, err
 	}
 	return cfg, nil
@@ -335,6 +350,10 @@ type PodConfig struct {
 	Metadata  oam.ObjectMetadata
 	Namespace string
 	Spec      corev1.PodSpec
+
+	// imageLevel is the level the images were held to at parse, which Generate
+	// holds them to again; unset is oam.ImageLevelTagged.
+	imageLevel oam.ImageReferenceLevel
 }
 
 // ServiceAccountName implements oam.ServiceAccountNamer: the account the pod
@@ -368,7 +387,7 @@ func (c *PodConfig) ApplyPolicy(p oam.Policy) error {
 // pods. The parse-time refusals the typed spec can show are repeated, since
 // the config is exported.
 func (c *PodConfig) Generate(app *stack.Application) ([]*client.Object, error) {
-	if err := validateAuthoredPodSpec("", &c.Spec, true); err != nil {
+	if err := validateAuthoredPodSpecAt("", &c.Spec, true, imageLevelOrTagged(c.imageLevel)); err != nil {
 		return nil, err
 	}
 	pod := kubernetes.CreatePod(kindObjectName(c.ObjectName, app.Name), app.Namespace)

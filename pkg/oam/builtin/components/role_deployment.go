@@ -115,24 +115,20 @@ func (h *RoleDeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 // never emits the image, and the policy's level is enforced where the image is
 // emitted (go-kure/launcher#1644).
 func (h *RoleDeploymentHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
-	cfg, err := h.ToApplicationConfigAt(component, "", oam.ImageLevelAny)
+	query := component.WithImageLevel(oam.ImageLevelAny)
+	cfg, err := h.ToApplicationConfig(&query, "")
 	if err != nil {
 		return nil, err
 	}
 	return containerPortEndpoints(component.Name, cfg.(*RoleDeploymentConfig).Ports), nil
 }
 
-// ToApplicationConfig converts an OAM deployment component to a RoleDeploymentConfig,
-// holding its image references to the default level (oam.ImageLevelTagged).
+// ToApplicationConfig converts an OAM deployment component to a RoleDeploymentConfig.
+// Every image reference the component authors (the main image, the init
+// containers', the sidecars' and an image volume's) is held to the component's
+// image level (oam.Component.ImageLevel, go-kure/launcher#1644).
 func (h *RoleDeploymentHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
-	return h.ToApplicationConfigAt(component, namespace, oam.ImageLevelTagged)
-}
-
-// ToApplicationConfigAt is ToApplicationConfig holding every image reference
-// the component authors (the main image, the init containers', the sidecars'
-// and an image volume's) to level: the Transformer calls it with the policy's
-// (oam.LevelAwareHandler, go-kure/launcher#1644).
-func (h *RoleDeploymentHandler) ToApplicationConfigAt(component *oam.Component, namespace string, level oam.ImageReferenceLevel) (stack.ApplicationConfig, error) {
+	level := component.ImageLevel()
 	config := &RoleDeploymentConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),

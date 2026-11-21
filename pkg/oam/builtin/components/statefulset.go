@@ -168,7 +168,8 @@ func authoredSpelling(m map[string]any, name string) string {
 // collected apart from the build, so the handler's own parse runs here too: a
 // component it refuses has no endpoint, in the parse's words.
 func (h *StatefulsetHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
-	cfg, err := h.ToApplicationConfig(component, "")
+	query := component.WithImageLevel(oam.ImageLevelAny)
+	cfg, err := h.ToApplicationConfig(&query, "")
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +186,9 @@ func (h *StatefulsetHandler) Endpoints(component *oam.Component) ([]netpol.Endpo
 // here, whatever the environment policy: see StatefulsetConfig.validate,
 // podTemplateDefaultedZeros and podTemplateLabelSelectorRequired.
 func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	// The images are held to the component's level, which the config keeps for
+	// Generate, where the refusals repeat (go-kure/launcher#1644).
+	level := component.ImageLevel()
 	spec, props, err := decodeKindSpec[appsv1.StatefulSetSpec](component.Properties, "apps/v1 StatefulSetSpec")
 	if err != nil {
 		return nil, err
@@ -204,6 +208,8 @@ func (h *StatefulsetHandler) ToApplicationConfig(component *oam.Component, names
 		Namespace:  namespace,
 		Spec:       *spec,
 		scaled:     slices.ContainsFunc(component.Traits, func(t oam.Trait) bool { return t.Type == "scaler" }),
+
+		imageLevel: level,
 	}
 	if _, err := cfg.validate(component.Name); err != nil {
 		return nil, err
@@ -232,6 +238,10 @@ type StatefulsetConfig struct {
 	// (go-kure/launcher#1179, go-kure/launcher#1268); the scaler enforces the
 	// replica maximum on its own maxReplicas.
 	scaled bool
+
+	// imageLevel is the level the images were held to at parse, which validate
+	// holds them to again; unset is oam.ImageLevelTagged.
+	imageLevel oam.ImageReferenceLevel
 }
 
 // validate refuses a spec the StatefulSet cannot be emitted from and returns the
@@ -253,7 +263,7 @@ func (c *StatefulsetConfig) validate(component string) (map[string]string, error
 			return nil, err
 		}
 	}
-	if err := validateControllerPodTemplate(&c.Spec.Template); err != nil {
+	if err := validateControllerPodTemplateAt(&c.Spec.Template, imageLevelOrTagged(c.imageLevel)); err != nil {
 		return nil, err
 	}
 	if err := checkClaimTemplateCollisions(c.Spec.VolumeClaimTemplates, c.Spec.Template.Spec.Volumes); err != nil {

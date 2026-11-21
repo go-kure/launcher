@@ -54,7 +54,8 @@ func (h *DaemonsetHandler) PropertySchema() map[string]oam.PropertySchema {
 // collected apart from the build, so the handler's own parse runs here too: a
 // component it refuses has no endpoint, in the parse's words.
 func (h *DaemonsetHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
-	cfg, err := h.ToApplicationConfig(component, "")
+	query := component.WithImageLevel(oam.ImageLevelAny)
+	cfg, err := h.ToApplicationConfig(&query, "")
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +72,9 @@ func (h *DaemonsetHandler) Endpoints(component *oam.Component) ([]netpol.Endpoin
 // here, whatever the environment policy: see DaemonsetConfig.validate,
 // podTemplateDefaultedZeros and podTemplateLabelSelectorRequired.
 func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	// The images are held to the component's level, which the config keeps for
+	// Generate, where the refusals repeat (go-kure/launcher#1644).
+	level := component.ImageLevel()
 	spec, props, err := decodeKindSpec[appsv1.DaemonSetSpec](component.Properties, "apps/v1 DaemonSetSpec")
 	if err != nil {
 		return nil, err
@@ -87,6 +91,8 @@ func (h *DaemonsetHandler) ToApplicationConfig(component *oam.Component, namespa
 		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
 		Spec:       *spec,
+
+		imageLevel: level,
 	}
 	if _, err := cfg.validate(component.Name); err != nil {
 		return nil, err
@@ -107,6 +113,10 @@ type DaemonsetConfig struct {
 	Metadata  oam.ObjectMetadata
 	Namespace string
 	Spec      appsv1.DaemonSetSpec
+
+	// imageLevel is the level the images were held to at parse, which validate
+	// holds them to again; unset is oam.ImageLevelTagged.
+	imageLevel oam.ImageReferenceLevel
 }
 
 // validate refuses a spec the DaemonSet cannot be emitted from and returns the
@@ -120,7 +130,7 @@ func (c *DaemonsetConfig) validate(component string) (map[string]string, error) 
 	if c.Spec.Selector == nil {
 		return nil, errors.New("selector: required (the label selector over the pods the DaemonSet owns; it must match the template's labels)")
 	}
-	if err := validateControllerPodTemplate(&c.Spec.Template); err != nil {
+	if err := validateControllerPodTemplateAt(&c.Spec.Template, imageLevelOrTagged(c.imageLevel)); err != nil {
 		return nil, err
 	}
 	labelled, err := podTemplateAppLabels(component, c.Spec.Template.Labels)

@@ -54,6 +54,9 @@ func (h *ReplicaSetHandler) PropertySchema() map[string]oam.PropertySchema {
 // an operator, with every other selector apimachinery cannot read
 // (refuseSelectorAgainstAppLabel).
 func (h *ReplicaSetHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	// The images are held to the component's level, which the config keeps for
+	// Generate, where the refusals repeat (go-kure/launcher#1644).
+	level := component.ImageLevel()
 	spec, props, err := decodeKindSpec[appsv1.ReplicaSetSpec](component.Properties, "apps/v1 ReplicaSetSpec")
 	if err != nil {
 		return nil, err
@@ -64,7 +67,7 @@ func (h *ReplicaSetHandler) ToApplicationConfig(component *oam.Component, namesp
 	if err := refuseUnauthoredRequired(props, podTemplateLabelSelectorRequired()); err != nil {
 		return nil, err
 	}
-	cfg := &ReplicaSetConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
+	cfg := &ReplicaSetConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec, imageLevel: level}
 	if _, err := cfg.validate(component.Name); err != nil {
 		return nil, err
 	}
@@ -84,6 +87,10 @@ type ReplicaSetConfig struct {
 	Metadata  oam.ObjectMetadata
 	Namespace string
 	Spec      appsv1.ReplicaSetSpec
+
+	// imageLevel is the level the images were held to at parse, which validate
+	// holds them to again; unset is oam.ImageLevelTagged.
+	imageLevel oam.ImageReferenceLevel
 }
 
 // validate refuses a spec the ReplicaSet cannot be emitted from and returns
@@ -97,7 +104,7 @@ func (c *ReplicaSetConfig) validate(component string) (map[string]string, error)
 	if c.Spec.Selector == nil {
 		return nil, errors.New("selector: required (the label selector over the pods the ReplicaSet owns; it must match the template's labels)")
 	}
-	if err := validateControllerPodTemplate(&c.Spec.Template); err != nil {
+	if err := validateControllerPodTemplateAt(&c.Spec.Template, imageLevelOrTagged(c.imageLevel)); err != nil {
 		return nil, err
 	}
 	labelled, err := podTemplateAppLabels(component, c.Spec.Template.Labels)

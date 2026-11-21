@@ -58,7 +58,13 @@ func podTemplateLabelSelectorRequired() map[string]string {
 // The API's other value rules, restartPolicy among them, are left to the API
 // server.
 func validateBatchPodTemplate(prefix string, t *corev1.PodTemplateSpec) error {
-	return validateAuthoredPodSpec(prefix+"spec.", &t.Spec, false)
+	return validateBatchPodTemplateAt(prefix, t, oam.ImageLevelTagged)
+}
+
+// validateBatchPodTemplateAt is validateBatchPodTemplate holding the images to
+// level (go-kure/launcher#1644).
+func validateBatchPodTemplateAt(prefix string, t *corev1.PodTemplateSpec, level oam.ImageReferenceLevel) error {
+	return validateAuthoredPodSpecAt(prefix+"spec.", &t.Spec, false, level)
 }
 
 // jobTemplateSchema is the schema of a `jobTemplate` property: an open object
@@ -103,7 +109,13 @@ const controllerActiveDeadlineReason = "activeDeadlineSeconds: not supported —
 // The API's other value rules, restartPolicy among them, are left to the API
 // server.
 func validateControllerPodTemplate(t *corev1.PodTemplateSpec) error {
-	if err := validateAuthoredPodSpec("template.spec.", &t.Spec, false); err != nil {
+	return validateControllerPodTemplateAt(t, oam.ImageLevelTagged)
+}
+
+// validateControllerPodTemplateAt is validateControllerPodTemplate holding the
+// images to level (go-kure/launcher#1644).
+func validateControllerPodTemplateAt(t *corev1.PodTemplateSpec, level oam.ImageReferenceLevel) error {
+	if err := validateAuthoredPodSpecAt("template.spec.", &t.Spec, false, level); err != nil {
 		return err
 	}
 	if t.Spec.ActiveDeadlineSeconds != nil {

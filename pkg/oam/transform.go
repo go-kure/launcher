@@ -742,15 +742,18 @@ func (t *Transformer) componentEndpoints(comp *Component, application string, na
 	if err != nil || !ok {
 		return nil, err
 	}
+	// Endpoints read ports and names, never the image: the image is held to its
+	// level where it is emitted (go-kure/launcher#1644), so this asks at the
+	// loosest, on a copy (the caller's component may be its own). An outputs query
+	// takes the level of its own context instead (componentOutputs).
+	query := comp.WithImageLevel(ImageLevelAny)
+	comp = &query
 	var eps []netpol.Endpoint
 	if named, ok := provider.(NamedEndpointProvider); ok {
 		// A fresh allocator per call: what a name is resolved to is asked here,
 		// nothing is claimed.
 		namer := NewNameAllocator()
 		namer.hook = naming
-		// Endpoints read ports and names, never the image: the image is held to its
-		// level where it is emitted (go-kure/launcher#1644), so this asks at the
-		// loosest.
 		eps, err = named.EndpointsNamed(comp, LoweringContext{Component: comp, Namer: namer, application: application, imageLevel: ImageLevelAny})
 	} else if ep, ok := provider.(EndpointProvider); ok {
 		eps, err = ep.Endpoints(comp)
@@ -1318,15 +1321,12 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			component.Properties = filled
 		}
 
-		// A handler that knows levels is asked at the policy's; any other is
-		// built at the default level and held to the policy's below, so it can
-		// be stricter but never looser (go-kure/launcher#1644).
-		var config stack.ApplicationConfig
-		if aware, ok := handler.(LevelAwareHandler); ok {
-			config, err = aware.ToApplicationConfigAt(&component, namespace, ctx.imageLevel)
-		} else {
-			config, err = handler.ToApplicationConfig(&component, namespace)
-		}
+		// The handler reads the policy's image level off the component it is given
+		// and holds the images it parses to it. One that does not read it builds at
+		// the default level, and the policy's level holds its config below, so it
+		// can be stricter but never looser (go-kure/launcher#1644).
+		component.imageLevel = ctx.imageLevel
+		config, err := handler.ToApplicationConfig(&component, namespace)
 		if err != nil {
 			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 		}

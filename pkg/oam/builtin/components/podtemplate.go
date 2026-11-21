@@ -56,6 +56,9 @@ func (h *PodTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 // whatever the environment policy: see validateAuthoredPodSpec,
 // podTemplateDefaultedZeros and podTemplateLabelSelectorRequired.
 func (h *PodTemplateHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	// The images are held to the component's level, which the config keeps for
+	// Generate, where the refusals repeat (go-kure/launcher#1644).
+	level := component.ImageLevel()
 	authored, props, err := decodeKindSpec[podTemplateProperties](component.Properties, "v1 PodTemplate (a podtemplate component authors its `template` only)")
 	if err != nil {
 		return nil, err
@@ -66,7 +69,7 @@ func (h *PodTemplateHandler) ToApplicationConfig(component *oam.Component, names
 	if err := refuseUnauthoredRequired(props, podTemplateLabelSelectorRequired()); err != nil {
 		return nil, err
 	}
-	cfg := &PodTemplateConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Template: authored.Template}
+	cfg := &PodTemplateConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Template: authored.Template, imageLevel: level}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -89,6 +92,10 @@ type PodTemplateConfig struct {
 	Metadata  oam.ObjectMetadata
 	Namespace string
 	Template  corev1.PodTemplateSpec
+
+	// imageLevel is the level the images were held to at parse, which validate
+	// holds them to again; unset is oam.ImageLevelTagged.
+	imageLevel oam.ImageReferenceLevel
 }
 
 // validate refuses a template the PodTemplate cannot be emitted from: what a
@@ -98,7 +105,7 @@ type PodTemplateConfig struct {
 // template: the API server accepts it on a PodTemplate. The API's other value
 // rules are left to the API server.
 func (c *PodTemplateConfig) validate() error {
-	return validateAuthoredPodSpec("template.spec.", &c.Template.Spec, false)
+	return validateAuthoredPodSpecAt("template.spec.", &c.Template.Spec, false, imageLevelOrTagged(c.imageLevel))
 }
 
 // ApplyPolicy holds the template's pod spec to the environment policy, through

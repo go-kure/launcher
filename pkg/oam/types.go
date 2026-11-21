@@ -109,6 +109,13 @@ type Component struct {
 	// object_metadata.go), none before that and on every other component.
 	// Unexported, as objectName is.
 	objectMetadata ObjectMetadata
+	// imageLevel is the image reference level the handler holds the component's
+	// images to (image_reference_level.go): "" on an authored component and on one
+	// built by hand, which reads as ImageLevelTagged. The Transformer sets it on the
+	// copy it hands a handler. Unexported, so a document can neither author nor carry
+	// one, and kept by every copy of the component, so a wrapper that copies the
+	// component it was handed passes the level on (go-kure/launcher#1644).
+	imageLevel ImageReferenceLevel
 }
 
 // Origin returns the component's authored provenance and whether the lowering engine

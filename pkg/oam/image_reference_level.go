@@ -29,6 +29,27 @@ func (l ImageReferenceLevel) Valid() bool {
 	return false
 }
 
+// ImageLevel is the level a handler holds the component's image references to:
+// ImageLevelTagged on a component the Transformer did not hand over under a
+// policy that names a level, whatever else it is. A handler reads it in
+// ToApplicationConfig, so a type that embeds a handler and overrides
+// ToApplicationConfig, then copies the component it is given, passes the level on
+// (go-kure/launcher#1644).
+func (c Component) ImageLevel() ImageReferenceLevel {
+	if c.imageLevel == "" {
+		return ImageLevelTagged
+	}
+	return c.imageLevel
+}
+
+// WithImageLevel returns a copy of the component whose image references a
+// handler holds to level. The Transformer does this for every component it hands
+// a handler; code that drives a handler directly calls it to ask for a level.
+func (c Component) WithImageLevel(level ImageReferenceLevel) Component {
+	c.imageLevel = level
+	return c
+}
+
 // ImageReferencePolicy is an optional interface of a Policy: the level the
 // image references of a document are held to (go-kure/launcher#1644), on
 // containers, init containers, image volumes, rendered charts and the image

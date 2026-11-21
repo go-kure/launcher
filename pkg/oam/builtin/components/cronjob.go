@@ -111,6 +111,9 @@ func (h *CronjobHandler) PropertySchema() map[string]oam.PropertySchema {
 // cronjobDefaultedZeros. The CronJob's name is held to the length the API
 // server creates one under.
 func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	// The images are held to the component's level, which the config keeps for
+	// Generate, where the refusals repeat (go-kure/launcher#1644).
+	level := component.ImageLevel()
 	if err := validateCronJobName(component.ObjectName(), component.Name); err != nil {
 		return nil, err
 	}
@@ -130,6 +133,8 @@ func (h *CronjobHandler) ToApplicationConfig(component *oam.Component, namespace
 		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
 		Spec:       *spec,
+
+		imageLevel: level,
 	}
 	if _, err := cfg.validate(component.Name); err != nil {
 		return nil, err
@@ -162,6 +167,10 @@ type CronjobConfig struct {
 	Metadata  oam.ObjectMetadata
 	Namespace string
 	Spec      batchv1.CronJobSpec
+
+	// imageLevel is the level the images were held to at parse, which validate
+	// holds them to again; unset is oam.ImageLevelTagged.
+	imageLevel oam.ImageReferenceLevel
 }
 
 // validate refuses a spec the CronJob cannot be emitted from and returns the
@@ -187,7 +196,7 @@ func (c *CronjobConfig) validate(component string) (map[string]string, error) {
 	if job.ManualSelector != nil && *job.ManualSelector {
 		return nil, errors.New("jobTemplate.spec.manualSelector: not supported — the API server allows only unset or false on a CronJob's job template, since it generates the selector")
 	}
-	if err := validateBatchPodTemplate("jobTemplate.spec.template.", &job.Template); err != nil {
+	if err := validateBatchPodTemplateAt("jobTemplate.spec.template.", &job.Template, imageLevelOrTagged(c.imageLevel)); err != nil {
 		return nil, err
 	}
 	return podTemplateAppLabelsAt("jobTemplate.spec.template", component, job.Template.Labels)
