@@ -129,9 +129,11 @@ func postgresqlClusterMember(lctx oam.LoweringContext, component *oam.Component)
 // The endpoints are the authored component's: the pooler endpoint names the
 // Pooler the rule emits (`poolerName`, else `<name>-pooler`), which carries its
 // own endpoint as a cnpg-pooler as well. No consumer naming hook is consulted
-// here; EndpointsNamed is this with one.
+// here; EndpointsNamed is this with one. Like every Endpoints, it checks the
+// syntax of an image only (go-kure/launcher#1644).
 func (r PostgresqlRule) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
-	return r.EndpointsNamed(component, oam.LoweringContext{Component: component, Namer: oam.NewNameAllocator()})
+	lctx := oam.LoweringContext{Component: component, Namer: oam.NewNameAllocator()}
+	return r.EndpointsNamed(component, lctx.WithImageLevel(oam.ImageLevelAny))
 }
 
 // cnpgPoolerKind and cnpgDatabaseKind are the kinds the Pooler and Database

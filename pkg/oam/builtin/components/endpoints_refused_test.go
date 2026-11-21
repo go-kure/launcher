@@ -90,6 +90,43 @@ func TestCnpgClusterHandler_EndpointsForPropertiesTheBuildRefuses(t *testing.T) 
 	}
 }
 
+// TestPostgresqlRule_EndpointsChecksTheSyntaxOfAnImageOnly: a direct Endpoints
+// call answers for an image that names no tag or the latest tag, in the main
+// image and in the pooler's, as every other Endpoints does, and still refuses a
+// reference that is no image reference at all (go-kure/launcher#1644).
+func TestPostgresqlRule_EndpointsChecksTheSyntaxOfAnImageOnly(t *testing.T) {
+	r := components.PostgresqlRule{}
+	comp := func(image, poolerImage string) *oam.Component {
+		return &oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{
+			"imageName": image,
+			"pooler":    map[string]any{"enabled": true, "image": poolerImage},
+		}}
+	}
+	for _, tc := range []struct {
+		name, image, poolerImage string
+		wantErr                  bool
+	}{
+		{"no tag", "ghcr.io/example/postgres", "ghcr.io/example/pgbouncer", false},
+		{"the latest tag", "ghcr.io/example/postgres:latest", "ghcr.io/example/pgbouncer:latest", false},
+		{"a pinned image", "ghcr.io/example/postgres:17.2", "ghcr.io/example/pgbouncer:1.23", false},
+		{"no image reference", "not an image!!", "ghcr.io/example/pgbouncer:1.23", true},
+		{"no pooler image reference", "ghcr.io/example/postgres:17.2", "not an image!!", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eps, err := r.Endpoints(comp(tc.image, tc.poolerImage))
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "rejected") {
+					t.Fatalf("Endpoints = %+v, %v\nwant a refusal of the reference", eps, err)
+				}
+				return
+			}
+			if err != nil || len(eps) != 2 {
+				t.Errorf("Endpoints = %+v, %v\nwant the cluster endpoint and the pooler's", eps, err)
+			}
+		})
+	}
+}
+
 // TestPostgresqlRule_EndpointsForAPoolerNamedLikeItsComponent: the lowering
 // refuses a Pooler that would carry the name of the postgresql component it is
 // generated from. EndpointsNamed is handed that one component, so it sees the
