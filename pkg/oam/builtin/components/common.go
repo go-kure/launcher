@@ -6,6 +6,7 @@ import (
 	"math"
 	gopath "path"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -62,6 +63,59 @@ func hasExplicitLatestTag(image string) bool {
 		image = image[:i]
 	}
 	return strings.HasSuffix(image, ":latest")
+}
+
+// versionTag is the tag the version level accepts (go-kure/launcher#1644): an
+// optional v, one to three numeric parts, and an optional suffix of what an OCI
+// tag can hold after a separator (v1.2, 1.2.3-alpine, 1.2.3-rc.1). Loose on
+// purpose; it is no semver validator.
+var versionTag = regexp.MustCompile(`^v?[0-9]+(\.[0-9]+){0,2}([-_.][A-Za-z0-9._-]*)?$`)
+
+// explicitTag is the tag an image reference writes, "" when it writes none. A
+// digest after it is left out first, and the tag is looked for only after the
+// last "/", so a registry port is no tag.
+func explicitTag(image string) string {
+	if i := strings.Index(image, "@"); i >= 0 {
+		image = image[:i]
+	}
+	if i := strings.LastIndex(image, "/"); i >= 0 {
+		image = image[i+1:]
+	}
+	if i := strings.Index(image, ":"); i >= 0 {
+		return image[i+1:]
+	}
+	return ""
+}
+
+// ValidateImageRefAt validates a container image reference against a level
+// (go-kure/launcher#1644). At oam.ImageLevelTagged it is ValidateImageRef, with
+// the same text. At the other levels a refusal names the reference, as
+// ValidateImageRef does, and the level; a caller names the field it came from,
+// as it does for ValidateImageRef. A reference the parser refuses is refused at
+// every level, and a level that is not one of the four is refused, never read
+// as the default: a misspelt level must not loosen the rule.
+func ValidateImageRefAt(image string, level oam.ImageReferenceLevel) error {
+	if level == oam.ImageLevelTagged {
+		return ValidateImageRef(image)
+	}
+	if !level.Valid() {
+		return errors.Errorf("image %q rejected: %q is not an image reference level (any, tagged, version or digest)", image, string(level))
+	}
+	ref, err := name.ParseReference(image)
+	if err != nil {
+		return errors.Errorf("image %q rejected: %w", image, err)
+	}
+	switch level {
+	case oam.ImageLevelDigest:
+		if _, ok := ref.(name.Digest); !ok {
+			return errors.Errorf("image %q rejected: level %q requires a digest (name@sha256:...)", image, string(level))
+		}
+	case oam.ImageLevelVersion:
+		if tag := explicitTag(image); !versionTag.MatchString(tag) {
+			return errors.Errorf("image %q rejected: level %q requires a version tag, such as v1.2 or 1.2.3-alpine", image, string(level))
+		}
+	}
+	return nil
 }
 
 // --- Property type helpers (inlined from the downstream runtime's proputil) ---
