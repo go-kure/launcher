@@ -95,7 +95,7 @@ too, at conversion: a CronJob's name is at most 52 characters, a Job's at most
 The reshaped workload types (`webservice`, `worker`)
 share these fields, projected directly onto real `corev1` types (same
 structural pattern as `ProbeConfig` holding `*corev1.Probe`) rather than a
-hand-rolled parallel schema: `image` (validated — no untagged/`latest`), `env`
+hand-rolled parallel schema: `image` (validated — no untagged/`latest` at the default image level, `tagged`; a policy may name another, see [Policy defaults](../oam/policy-and-capability.md)), `env`
 (`value` or `valueFrom` — mutually exclusive, matching `corev1.EnvVar`'s own
 doc comment ("cannot be used if value is not empty"); `valueFrom` is one of
 `secretKeyRef`, `configMapKeyRef` (both accept `optional`, rejecting a
@@ -634,7 +634,7 @@ rather than dropped. A flat source key (`configMapName`, `secretName`,
 `configMap` needs its `name` and a nested `secret` its `secretName` (as the flat
 keys do), a `csi` source needs its `driver` and a `projected` `configMap` or
 `secret` source its `name`, an `image`
-reference is checked by `ValidateImageRef`, and the label selectors of a
+reference is checked by `ValidateImageRef` (at the policy's image level), and the label selectors of a
 `projected` cluster trust bundle and of an `ephemeral` claim template are held as
 the `pod` kind holds them. `hostPath` and `persistentVolumeClaim` stay on their
 flat routes (`type: hostPath`, `type: pvc`), which own the hostPath gate and the

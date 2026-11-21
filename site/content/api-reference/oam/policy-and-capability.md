@@ -48,6 +48,40 @@ the permissive side, so a consumer that must keep secrets out of documents has t
 interface and answer `false`. A refusal is a `ViolationError` naming the component, of class
 `RefusalExplicitSecret` (below).
 
+`ImageReferencePolicy` (`ImageReferenceLevel() ImageReferenceLevel`) says how exact the
+image references a build emits must be, one of four levels that are not nested:
+
+| Level | Accepts | Refuses |
+|---|---|---|
+| `any` | every reference that parses, an untagged one and `:latest` included | one that does not parse |
+| `tagged` | a tag or a digest | no tag, `:latest`, and `repo:latest@sha256:...` |
+| `version` | a version tag such as `v1.2` or `1.2.3-alpine` | a digest alone, `:latest`, any other tag |
+| `digest` | `name@sha256:...` (`latest@sha256:...` too) | any reference without a digest |
+
+`ImageReferenceLevelOf(policy)` is how it is read. **A policy that does not implement it, or
+answers an empty level, holds `tagged`**, as does no policy at all, which is the rule as it was
+before the interface: no document changes until a consumer asks. A level that is none of the four
+is refused, never read as `tagged`. The level reaches every image a built-in component names: a
+container's, an init container's, a sidecar's, an image volume's reference, the images of the
+CloudNativePG, monitoring and `postgresql` kinds, and the workloads a chart renders. An `Endpoints`
+query checks the syntax of an image only, since an endpoint does not depend on which image runs;
+the build holds the image to the level where it emits it.
+
+A handler reads the level from `Component.ImageLevel()`, which the Transformer sets on its working
+copy of the component before it calls `ToApplicationConfig`, and a lowering rule reads it from
+`LoweringContext.ImageLevel()`. Both read `tagged` where nothing set them. A handler that builds a
+fresh `Component` instead of copying the one it was given loses the level and reads `tagged`:
+that fails closed under `any`, and a config that implements `oam.ImageReferenced`
+(`ImageReferences() []oam.ImageReference`) is held to the stricter levels `version` and `digest`
+by the Transformer's own reading of the config after the handler returns. A custom handler that
+parses images calls `components.ValidateImageRefAt(image, level)`; `ValidateImageRef` stays the
+`tagged` form.
+
+`SourceReferencePolicy` (`SourceReferenceLevel() ImageReferenceLevel`) is the level of an `oci`
+component's `version`, a tag or `sha256:<digest>` that no image rule reads. It defaults to `any`,
+since the component checked nothing before: `tagged` requires a non-empty value that is not `latest`, as it does for an image, `version` a
+version tag or a digest, `digest` a `sha256:` value (`oam.CheckSourceVersion`).
+
 `ObjectKindPolicy` says which kinds of object a build may emit and
 whether it may emit cluster-scoped ones: `AllowedObjectKinds()` (empty allows every kind),
 `ForbiddenObjectKinds()` (a kind on both lists is forbidden) and `AllowClusterScopedObjects()`.

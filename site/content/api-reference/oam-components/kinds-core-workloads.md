@@ -888,7 +888,9 @@ and what `labels` and `annotations` author beside them.
 - An unauthored `containers`. The API's other value rules (an empty list, a
   container without a name, …) are left to the API server.
 - An image without a tag or digest, or tagged `:latest`, on every init and
-  regular container (`ValidateImageRef`), so a container without an image
+  regular container (`ValidateImageRef`; this is the default image level,
+  `tagged`, and a policy may name `any`, `version` or `digest` instead,
+  [Policy defaults](../oam/policy-and-capability.md)), so a container without an image
   too.
 - The same on the `reference` of an image volume (`volumes[0] "ext"
   image.reference: image "…" rejected: …`); a volume that names no

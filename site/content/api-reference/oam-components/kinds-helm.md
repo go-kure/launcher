@@ -1230,7 +1230,8 @@ steps; the transform calls it with `NoopPolicy` when no policy is passed.
   go-kure/launcher#790: a chart that renders one from a registry outside the
   list built before; see *Image volumes* under **pod**), and for every init and
   regular container the registry allowlist, the privileged, HostProcess and
-  capability gates, and `ValidateImageRef` (no untagged image, no `:latest`),
+  capability gates, and `ValidateImageRef` (no untagged image, no `:latest`, at the policy's image level,
+  `tagged` by default),
   which holds the reference of an image volume too (**breaking**,
   go-kure/launcher#790: a chart that renders an untagged or `:latest` one built
   before). Ephemeral containers are refused. The storage a
@@ -1370,6 +1371,13 @@ access key that is set, as written) and a `fluxcd-kustomization` (`path`,
 `healthChecks` when set). No handler is registered for `oci`. The rule runs the
 checks below first, with their `oci:` messages; everything past them is the
 terminals' own.
+
+`version` is also held to the policy's source level (`SourceReferencePolicy`, see
+[Policy defaults](../oam/policy-and-capability.md)), which is `any` where the policy
+names none, so nothing changes until a consumer asks: `tagged` requires a non-empty
+value that is not `latest`, `version` a version tag such as `v1.2` or `1.2.3-alpine` or a `sha256:` digest,
+and `digest` a `sha256:` digest. A refusal reads `oci: version: version "latest"
+rejected: level "digest" requires a digest (sha256:<digest>)`.
 
 ### Properties
 

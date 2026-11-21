@@ -18,6 +18,9 @@ Text in square brackets is added here to say what a moved sentence refers to.
   - go-kure/launcher#794 (a core Secret that the `passthrough` or `manifests` component
     carries, another of them).
   - go-kure/launcher#922 (`ObjectKindPolicy`).
+  - go-kure/launcher#1644 (`ImageReferencePolicy` and `SourceReferencePolicy`: the level rides on
+    the component, which the Transformer sets, so no handler method can bypass it; a config's
+    `ImageReferences` is read a second time at the policy's level).
 
 ### Refusal classes
 
