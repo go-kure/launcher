@@ -152,7 +152,8 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   `environments.yaml`, or a `CapabilityDefinition`) uses the `format` scope (`feat(format):`, `fix(format):`,
   `docs(format):`) so it lands under the
   changelog's Document Format heading, and its commit subject (the only part rendered there)
-  names which documents change.
+  names which documents change. A breaking one (`!` after the type, or a BREAKING CHANGE
+  footer) is marked `**Breaking:**` on its line, in the same heading.
   Until launcher's first stable GA release there is no format stability promise: a fix, a
   feature or a removal may change the output of, or newly reject, a `v1alpha1` document
   without a version-string move or a deprecation period, and the PR description discloses
