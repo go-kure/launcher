@@ -196,8 +196,12 @@ func (t *Transformer) componentOutputs(comp *Component, application string, nami
 // resolved to is asked here, nothing is claimed. It returns the declarations
 // as the provider wrote them and the answers they resolve to. The allocator
 // shares the run state of parent, when there is one. level is the image reference
-// level the context carries to p (empty is the default level).
+// level p is asked at (empty is the default level): the context carries it, and
+// so does comp, which every caller hands over as a copy of its own, so a
+// provider that reads the level off the component and one that reads it off the
+// context see the same one (go-kure/launcher#1644).
 func outputsOf(p OutputProvider, comp *Component, application string, naming func(NameRequest) (string, bool), parent *NameAllocator, level ImageReferenceLevel) ([]OutputDecl, []Output, error) {
+	comp.imageLevel = level
 	namer := NewNameAllocator()
 	namer.hook = naming
 	if parent != nil {

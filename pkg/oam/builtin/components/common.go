@@ -45,6 +45,15 @@ func ValidateImageRefAt(image string, level oam.ImageReferenceLevel) error {
 	return oam.CheckImageReference(image, level)
 }
 
+// imageLevelOrTagged reads the level a config kept from its parse: unset, as on
+// a config built by hand, is oam.ImageLevelTagged (go-kure/launcher#1644).
+func imageLevelOrTagged(l oam.ImageReferenceLevel) oam.ImageReferenceLevel {
+	if l == "" {
+		return oam.ImageLevelTagged
+	}
+	return l
+}
+
 // --- Property type helpers (inlined from the downstream runtime's proputil) ---
 
 // toInt32 reads a whole number of any Go integer kind, or an integral float, that

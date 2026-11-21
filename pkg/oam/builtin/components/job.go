@@ -64,6 +64,9 @@ func (h *JobHandler) PropertySchema() map[string]oam.PropertySchema {
 // API server creates one under and, on an Indexed job, to one its pods can be
 // named after.
 func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	// The images are held to the component's level, which the config keeps for
+	// Generate, where the refusals repeat (go-kure/launcher#1644).
+	level := component.ImageLevel()
 	if err := validateJobName(component.ObjectName(), component.Name); err != nil {
 		return nil, err
 	}
@@ -83,6 +86,8 @@ func (h *JobHandler) ToApplicationConfig(component *oam.Component, namespace str
 		Metadata:   component.ObjectMetadata(),
 		Namespace:  namespace,
 		Spec:       *spec,
+
+		imageLevel: level,
 	}
 	if err := validateJobNameAllowsCompletions(kindObjectName(cfg.ObjectName, component.Name), component.Name, cfg.Spec); err != nil {
 		return nil, err
@@ -106,6 +111,10 @@ type JobConfig struct {
 	Metadata  oam.ObjectMetadata
 	Namespace string
 	Spec      batchv1.JobSpec
+
+	// imageLevel is the level the images were held to at parse, which validate
+	// holds them to again; unset is oam.ImageLevelTagged.
+	imageLevel oam.ImageReferenceLevel
 }
 
 // validate refuses a spec the Job cannot be emitted from and returns the
@@ -115,7 +124,7 @@ type JobConfig struct {
 // (refuseSelectorAgainstAppLabel). The API's other value rules are left to the
 // API server.
 func (c *JobConfig) validate(component string) (map[string]string, error) {
-	if err := validateBatchPodTemplate("template.", &c.Spec.Template); err != nil {
+	if err := validateBatchPodTemplateAt("template.", &c.Spec.Template, imageLevelOrTagged(c.imageLevel)); err != nil {
 		return nil, err
 	}
 	labelled, err := podTemplateAppLabels(component, c.Spec.Template.Labels)

@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
@@ -203,4 +204,70 @@ func TestImageLevel_LoweringRules(t *testing.T) {
 		_, err := ilTransformer().ComponentEndpoints(comp("webservice", ilLatest))
 		ilWant(t, "ComponentEndpoints", ilLatest, err, true)
 	})
+}
+
+// ilPodSpec is a pod spec whose main image is pinned by digest, so that only the
+// field under test can fail, with that field set to image: the main container
+// itself, an init container, or an image volume.
+func ilPodSpec(field, image string, extra map[string]any) map[string]any {
+	spec := map[string]any{"containers": []any{map[string]any{"name": "c", "image": ilPinned}}}
+	switch field {
+	case "container":
+		spec["containers"] = []any{map[string]any{"name": "c", "image": image}}
+	case "init container":
+		spec["initContainers"] = []any{map[string]any{"name": "i", "image": image}}
+	case "image volume":
+		spec["volumes"] = []any{map[string]any{"name": "v", "image": map[string]any{"reference": image}}}
+	}
+	maps.Copy(spec, extra)
+	return spec
+}
+
+// The pod and the controller kinds hold every image of their pod spec to the
+// level: pod, podtemplate, the five controllers, job and cronjob.
+func TestImageLevel_PodAndControllerKinds(t *testing.T) {
+	labels := map[string]any{"app": "web"}
+	template := func(spec map[string]any) map[string]any {
+		return map[string]any{"metadata": map[string]any{"labels": labels}, "spec": spec}
+	}
+	selector := map[string]any{"matchLabels": labels}
+	kinds := []struct {
+		typ   string
+		props func(spec map[string]any) map[string]any
+	}{
+		{"pod", func(spec map[string]any) map[string]any { return spec }},
+		{"podtemplate", func(spec map[string]any) map[string]any { return map[string]any{"template": template(spec)} }},
+		{"deployment", func(spec map[string]any) map[string]any {
+			return map[string]any{"selector": selector, "template": template(spec)}
+		}},
+		{"daemonset", func(spec map[string]any) map[string]any {
+			return map[string]any{"selector": selector, "template": template(spec)}
+		}},
+		{"statefulset", func(spec map[string]any) map[string]any {
+			return map[string]any{"selector": selector, "template": template(spec)}
+		}},
+		{"replicaset", func(spec map[string]any) map[string]any {
+			return map[string]any{"selector": selector, "template": template(spec)}
+		}},
+		{"replicationcontroller", func(spec map[string]any) map[string]any {
+			return map[string]any{"selector": labels, "template": template(spec)}
+		}},
+		{"job", func(spec map[string]any) map[string]any {
+			spec["restartPolicy"] = "OnFailure"
+			return map[string]any{"template": template(spec)}
+		}},
+		{"cronjob", func(spec map[string]any) map[string]any {
+			spec["restartPolicy"] = "OnFailure"
+			return map[string]any{"schedule": "* * * * *", "jobTemplate": map[string]any{"spec": map[string]any{"template": template(spec)}}}
+		}},
+	}
+	for _, k := range kinds {
+		for _, field := range []string{"container", "init container", "image volume"} {
+			t.Run(k.typ+" "+field, func(t *testing.T) {
+				ilReferences(t, func(reference string, policy oam.Policy) error {
+					return ilBuild(k.typ, k.props(ilPodSpec(field, reference, nil)), policy)
+				})
+			})
+		}
+	}
 }

@@ -24,6 +24,14 @@ func (r seenComponentRule) LowerComponent(_ *Component, lctx LoweringContext) (L
 	return LoweringResult{Components: []Component{{Name: "w", Type: "widget"}}}, nil
 }
 
+// Outputs is asked before the rule runs, on a copy of the component and a
+// context of the build.
+func (r seenComponentRule) Outputs(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
+	r.seen["rule outputs, component"] = c.ImageLevel()
+	r.seen["rule outputs, context"] = lctx.ImageLevel()
+	return nil, nil
+}
+
 type seenTraitRule struct{ seen levelSeen }
 
 func (seenTraitRule) TraitType() string { return "probe" }
@@ -74,13 +82,68 @@ func (seenHandler) CanHandle(t string) bool { return t == "widget" }
 func (seenHandler) ToApplicationConfig(_ *Component, _ string) (stack.ApplicationConfig, error) {
 	return &imagedConfig{}, nil
 }
-func (h seenHandler) Outputs(_ *Component, lctx LoweringContext) ([]OutputDecl, error) {
+func (h seenHandler) Outputs(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
 	h.seen["handler outputs"] = lctx.ImageLevel()
+	h.seen["handler outputs, component"] = c.ImageLevel()
 	return nil, nil
 }
 func (h seenHandler) EndpointsNamed(_ *Component, lctx LoweringContext) ([]netpol.Endpoint, error) {
 	h.seen["endpoints"] = lctx.ImageLevel()
 	return nil, nil
+}
+
+// levelOutputsHandler and levelOutputsRule answer an outputs query and record
+// the level they read off the component and off the context.
+type levelOutputsHandler struct{ seen levelSeen }
+
+func (levelOutputsHandler) CanHandle(t string) bool { return t == "lvl-handler" }
+func (levelOutputsHandler) ToApplicationConfig(_ *Component, _ string) (stack.ApplicationConfig, error) {
+	return &imagedConfig{}, nil
+}
+func (h levelOutputsHandler) Outputs(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
+	h.seen["handler, component"] = c.ImageLevel()
+	h.seen["handler, context"] = lctx.ImageLevel()
+	return nil, nil
+}
+
+type levelOutputsRule struct{ seen levelSeen }
+
+func (levelOutputsRule) ComponentType() string { return "lvl-rule" }
+func (levelOutputsRule) LowerComponent(*Component, LoweringContext) (LoweringResult, error) {
+	return LoweringResult{}, nil
+}
+func (r levelOutputsRule) Outputs(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
+	r.seen["rule, component"] = c.ImageLevel()
+	r.seen["rule, context"] = lctx.ImageLevel()
+	return nil, nil
+}
+
+// TestImageLevel_OutputsQueryAsksAtTheLevelOfItsContext: a rule asks the
+// outputs of a component it emits through ComponentOutputsWithin, and the level
+// of its context is the level of that query. A handler-backed provider reads
+// it off the component and a rule-backed one off the context, and both read the
+// same level: only the endpoint query is syntax-only (go-kure/launcher#1644).
+func TestImageLevel_OutputsQueryAsksAtTheLevelOfItsContext(t *testing.T) {
+	for _, level := range []ImageReferenceLevel{ImageLevelAny, ImageLevelVersion, ImageLevelDigest} {
+		t.Run(string(level), func(t *testing.T) {
+			seen := levelSeen{}
+			tr := NewTransformer(map[string]ComponentHandler{"lvl-handler": levelOutputsHandler{seen}}, nil)
+			tr.RegisterComponentLowering(levelOutputsRule{seen})
+			lctx := LoweringContext{Namer: NewNameAllocator(), imageLevel: level}
+			for _, typ := range []string{"lvl-handler", "lvl-rule"} {
+				if _, err := tr.ComponentOutputsWithin(lctx, &Component{Name: "q", Type: typ, Properties: map[string]any{}}, nil); err != nil {
+					t.Fatalf("ComponentOutputsWithin(%s): %v", typ, err)
+				}
+			}
+			for _, reader := range []string{"handler, component", "handler, context", "rule, component", "rule, context"} {
+				if got, ok := seen[reader]; !ok {
+					t.Errorf("%s was not asked", reader)
+				} else if got != level {
+					t.Errorf("%s read level %q, want %q", reader, got, level)
+				}
+			}
+		})
+	}
 }
 
 // TestImageLevel_ReachesEveryCarrier: every context the Transformer builds
@@ -136,7 +199,10 @@ func TestImageLevel_ReachesEveryCarrier(t *testing.T) {
 				t.Fatalf("ComponentEndpoints: %v", err)
 			}
 
-			for _, carrier := range []string{"component rule", "trait rule", "policy rule", "document rule", "raw document rule", "handler outputs"} {
+			// A provider reads the level off its context or off the component it is
+			// handed: in the outputs query of a build, of a rule and of a handler,
+			// both are the policy's level.
+			for _, carrier := range []string{"component rule", "trait rule", "policy rule", "document rule", "raw document rule", "handler outputs", "handler outputs, component", "rule outputs, component", "rule outputs, context"} {
 				if got, ok := seen[carrier]; !ok {
 					t.Errorf("%s was not asked", carrier)
 				} else if got != tc.want {
