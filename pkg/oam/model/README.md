@@ -272,7 +272,15 @@ that the run keeps, so two builds on one rule never share it. A limit that is br
 | `MaxBuildParts` | 500 | Components that all renders of the build give, after `when` and `forEach` | Before the parts of a `forEach` are built |
 | `MaxBuildCost` | 10,000,000 | Actual CEL cost units that all expressions of the build spent | After each expression |
 | `MaxBuildPropertyBytes` | 1 MiB | The size as JSON of the properties of the components and of their traits that the build emitted | After each render |
-| `BuildTimeout` | 1 s | Time from the first model render of the build | Before and after each expression, and inside a long comprehension |
+| `BuildTimeout` | 1 s, or `TransformContext.ModelBuildTimeout` where the caller sets it | Time from the first model render of the build | Before and after each expression, and inside a long comprehension |
+
+A caller sets the time limit of its builds in `TransformContext.ModelBuildTimeout`: zero keeps the
+default `BuildTimeout`, a positive value replaces it, and a negative value is refused when the
+transform (or `LowerRaws`) starts. The limit holds for every render of a build, the query for the outputs of a
+component that the transform makes included, and a refusal names the limit that was in force. It holds
+inside a transform only: a query for the outputs of a model component made outside one
+(`ComponentOutputs`, `ComponentOutputsNamed`) renders under its own budget and keeps the default, because
+neither function takes a transform context. The other limits of a build are constants.
 
 The byte limit is a proxy and is named for what it measures: the size of the emitted properties. The
 exact size of the rendered YAML of the whole build is not checked, because the rule emits components and

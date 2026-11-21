@@ -122,7 +122,7 @@ func (r *Rule) render(comp *oam.Component, lctx oam.LoweringContext) (*expansion
 	}
 	// The limits of the build are kept by the run, so every model of one Transform spends from
 	// the same budget. The context stops a long comprehension at the deadline of the build.
-	budget := lctx.RunState(budgetKey{}, func() any { return newBuildBudget() }).(*buildBudget)
+	budget := lctx.RunState(budgetKey{}, func() any { return newBuildBudget(lctx.ModelBuildTimeout()) }).(*buildBudget)
 	ctx, cancel := context.WithTimeout(context.Background(), max(budget.remaining(), time.Nanosecond))
 	defer cancel()
 	// The application is the name a Naming hook is asked in the build.

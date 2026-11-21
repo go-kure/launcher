@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-kure/kure/pkg/stack"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -14,6 +15,16 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
+
+// checkModelBuildTimeout refuses a negative ModelBuildTimeout. Every entry that takes a
+// TransformContext and starts a build of its own calls it: Transform and LowerRaws, so a
+// negative value never reads as the default.
+func (ctx TransformContext) checkModelBuildTimeout() error {
+	if ctx.ModelBuildTimeout < 0 {
+		return errors.Errorf("invalid TransformContext.ModelBuildTimeout %s: must not be negative", ctx.ModelBuildTimeout)
+	}
+	return nil
+}
 
 // ValidateAndApplyDefaults is implemented by built-in TraitHandlers that accept
 // rendering keys from ClusterProfile. Called at ClusterProfile evaluation time,
@@ -137,6 +148,18 @@ type TransformContext struct {
 	// part. Go lowering rules and authored components never reach it. nil asks
 	// nothing. Non-authorable platform input.
 	EmitHook func(ModelEmit) error
+	// ModelBuildTimeout is the time one build may spend on the renders of its
+	// configuration-defined models, counted from the first (go-kure/launcher#1663).
+	// Zero is the default of the model engine, one second; a negative value is
+	// refused by Transform and LowerRaws. A caller that runs the engine on a loaded host, or that
+	// sizes the limit to its own capacity, sets it. It holds inside a transform: a
+	// query for the outputs of a component made outside one (ComponentOutputs,
+	// ComponentOutputsNamed) keeps the default. The other limits of a build are
+	// constants.
+	// Non-authorable platform input; it travels on the allocator of the run, as
+	// EmitHook does, because the first render of a build can be a query for outputs
+	// made before the component is lowered.
+	ModelBuildTimeout time.Duration
 	// ReservedMetadataKeys names the label and annotation keys the consumer keeps
 	// to itself (go-kure/launcher#790). An entry is a key ("example.com/owner",
 	// "owner"), or a key prefix followed by "/" ("example.com/"), which reserves
@@ -974,6 +997,9 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 	if err := checkNamespaceLabel("flux namespace", ctx.FluxNamespace); err != nil {
 		return nil, nil, err
 	}
+	if err := ctx.checkModelBuildTimeout(); err != nil {
+		return nil, nil, err
+	}
 	// Every binding's rendering is checked once here, used or not: both merge sites
 	// copy it keeping Go types and have no way to refuse a value they cannot copy.
 	if err := checkCapabilityRenderings(ctx.Capabilities); err != nil {
@@ -1010,6 +1036,7 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 	ctx.nameClaims = NewNameAllocator()
 	ctx.nameClaims.hook = ctx.Naming
 	ctx.nameClaims.emit = ctx.EmitHook
+	ctx.nameClaims.modelBuildTimeout = ctx.ModelBuildTimeout
 	docs, err := t.lower(app, ctx)
 	if err != nil {
 		return nil, nil, err

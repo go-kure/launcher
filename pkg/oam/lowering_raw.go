@@ -105,6 +105,9 @@ func (t *Transformer) LowerRaws(raws []json.RawMessage, ctx TransformContext) ([
 // input is claimed, the steps are nil; on error, they are nil and the
 // LoweringError's Chain carries the failing document's steps.
 func (t *Transformer) LowerRawsWithSteps(raws []json.RawMessage, ctx TransformContext) ([]json.RawMessage, []LoweringStep, error) {
+	if err := ctx.checkModelBuildTimeout(); err != nil {
+		return nil, nil, err
+	}
 	if len(t.rawDocLoweringRules) == 0 {
 		return raws, nil, nil // raw-path analogue of the pointer-identity guarantee: nothing to do, nothing touched
 	}
@@ -292,6 +295,7 @@ func (t *Transformer) LowerRawsWithSteps(raws []json.RawMessage, ctx TransformCo
 // (LowerRawsWithSteps).
 func (t *Transformer) lowerRawRound(seed []loweringDoc, ctx TransformContext, preReserved []reservedIdentity) ([]loweringDoc, [][]LoweringStep, error) {
 	namer := NewNameAllocator()
+	namer.modelBuildTimeout = ctx.ModelBuildTimeout
 	for _, r := range preReserved {
 		if err := namer.Reserve(r.name, r.origin); err != nil {
 			return nil, nil, &LoweringError{Origin: r.origin, Cause: err}

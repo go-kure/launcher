@@ -20,7 +20,8 @@ const (
 	// one build emit together. It is a proxy: the build renders YAML later, and that size is not
 	// checked here.
 	MaxBuildPropertyBytes = 1 << 20
-	// BuildTimeout is the time one build may spend on its model renders, counted from the first.
+	// BuildTimeout is the time one build may spend on its model renders, counted from the first,
+	// where the caller sets none (oam.TransformContext.ModelBuildTimeout).
 	BuildTimeout = time.Second
 
 	// interruptCheckFrequency is the number of steps of a comprehension between two checks of the
@@ -47,12 +48,18 @@ type buildBudget struct {
 	cost     int64
 	bytes    int
 	deadline time.Time
+	timeout  time.Duration
 }
 
 type budgetKey struct{}
 
-func newBuildBudget() *buildBudget {
-	return &buildBudget{deadline: buildClock().Add(BuildTimeout)}
+// newBuildBudget starts the budget of a build with the limit the caller set, or BuildTimeout where
+// it set none (zero).
+func newBuildBudget(timeout time.Duration) *buildBudget {
+	if timeout <= 0 {
+		timeout = BuildTimeout
+	}
+	return &buildBudget{deadline: buildClock().Add(timeout), timeout: timeout}
 }
 
 func (b *buildBudget) chargeParts(n int) error {
@@ -99,7 +106,7 @@ func (b *buildBudget) checkDeadline() error {
 		return nil
 	}
 	if buildClock().After(b.deadline) {
-		return errors.Errorf("%w: the build ran longer than %s", ErrLimit, BuildTimeout)
+		return errors.Errorf("%w: the build ran longer than %s", ErrLimit, b.timeout)
 	}
 	return nil
 }
