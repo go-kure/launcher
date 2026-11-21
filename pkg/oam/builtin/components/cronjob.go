@@ -177,7 +177,7 @@ type CronjobConfig struct {
 // labels of the pod template of its job template. The schedule must be one the
 // API server reads, the time zone a named IANA zone, the job template no
 // selector (the API server generates it), the pod template
-// validateBatchPodTemplate, and its labels podTemplateAppLabelsAt. The API's
+// validateBatchPodTemplateAt, and its labels podTemplateAppLabelsAt. The API's
 // other value rules are left to the API server.
 func (c *CronjobConfig) validate(component string) (map[string]string, error) {
 	if c.Spec.Schedule == "" {

@@ -300,6 +300,27 @@ type LoweringContext struct {
 	// the Transformer's policy and copied into every context the engine builds, as
 	// capabilities is. Read it through ImageLevel; empty is the default level.
 	imageLevel ImageReferenceLevel
+	// sourceLevel is the level the policy holds the reference of an OCI source
+	// to, copied as imageLevel is. Read it through SourceLevel.
+	sourceLevel ImageReferenceLevel
+}
+
+// SourceLevel is the level the reference of an OCI source component is held to
+// (go-kure/launcher#1644): the policy's, on a context the Transformer built,
+// and ImageLevelAny on any other, since the reference was checked by nothing
+// before and a rule driven directly keeps that.
+func (l LoweringContext) SourceLevel() ImageReferenceLevel {
+	if l.sourceLevel == "" {
+		return ImageLevelAny
+	}
+	return l.sourceLevel
+}
+
+// WithSourceLevel returns the context with the OCI source level set, for code
+// that drives a rule directly and wants a level other than the default.
+func (l LoweringContext) WithSourceLevel(level ImageReferenceLevel) LoweringContext {
+	l.sourceLevel = level
+	return l
 }
 
 // ImageLevel is the level an image reference the rule emits is held to
@@ -1542,7 +1563,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			if ctx.provenance != nil {
 				compInput = ruleInputFor(comp.Properties, comp.origin, comp.ruleInput)
 			}
-			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, Origin: compOrigin, Namer: namer}
+			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel, Origin: compOrigin, Namer: namer}
 			// What the rule declares as outputs is asked before it runs, on an
 			// allocator of its own and a copy of comp, so nothing the rule does to
 			// either moves the answer. It is held against the names the rule resolves,

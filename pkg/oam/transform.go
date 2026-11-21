@@ -189,6 +189,9 @@ type TransformContext struct {
 	// (go-kure/launcher#1644). Internal only: empty on a caller-constructed ctx,
 	// which reads as the default level.
 	imageLevel ImageReferenceLevel
+	// sourceLevel is SourceReferenceLevelOf(Policy), set beside imageLevel and
+	// copied into the context a component rule is lowered in.
+	sourceLevel ImageReferenceLevel
 	// provenance records which source supplied each property leaf for
 	// TransformWithProvenance. Internal only: nil on every other path, where each
 	// recording step is a no-op; a pointer, so every by-value ctx copy records into
@@ -932,6 +935,7 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 		ctx.Policy = &NoopPolicy{}
 	}
 	ctx.imageLevel = ImageReferenceLevelOf(ctx.Policy)
+	ctx.sourceLevel = SourceReferenceLevelOf(ctx.Policy)
 	ctx.consumedCapabilities = make(map[string]struct{})
 	ctx.subAppDecorations = &[]subAppDecoration{}
 	ctx.traitSubApps = &[]traitSubApps{}

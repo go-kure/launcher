@@ -73,7 +73,7 @@ func containerFills(inits []InitContainerConfig, sidecars []SidecarContainerConf
 
 // claimFills are the `volumes[i].accessModes` paths whose ReadWriteOnce the parser
 // filled. Only a pvc volume that references an existing claim reaches a pod kind
-// (parsePodVolumes refuses one that would generate a claim).
+// (parsePodVolumesAt refuses one that would generate a claim).
 func claimFills(pvcs []PVCConfig) []string {
 	var paths []string
 	for _, pvc := range pvcs {

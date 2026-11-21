@@ -122,7 +122,7 @@ type DaemonsetConfig struct {
 // validate refuses a spec the DaemonSet cannot be emitted from and returns the
 // labels of its pod template. selector must be authored: the Go type cannot
 // omit it, so an unset one would be written as null, and launcher derives none.
-// The template is held to validateControllerPodTemplate, its labels to
+// The template is held to validateControllerPodTemplateAt, its labels to
 // podTemplateAppLabels, and the selector must keep matching the template once
 // the `app` label is on it (refuseSelectorAgainstAppLabel). The API's other
 // value rules are left to the API server.

@@ -59,6 +59,9 @@
 #   pkg/oam/force_warnings.go              appliedObjects, which the collision, kind-policy and
 #                                          label-stamp checks call (the warnings beside it take the trailer)
 #   pkg/oam/handler.go                     exclusiveProperties, the key groups a handler refuses together
+#   pkg/oam/image_reference.go             CheckImageReference and CheckSourceVersion, which decide which image
+#                                          references and oci versions a level accepts (go-kure/launcher#1644)
+#   pkg/oam/image_reference_level.go       the levels and the policy interfaces that select one
 #   pkg/oam/naming_engine.go               which generated names are claimed, so which collisions are refused
 #   pkg/oam/pipeline.go                    TierOrder, the tiers a placement policy may name
 #   pkg/oam/policy.go                      ExplicitSecretsAllowed, which gates the explicit-secret refusals
@@ -149,6 +152,8 @@ ACCEPT_PATHS=(
   pkg/oam/component_label.go
   pkg/oam/force_warnings.go
   pkg/oam/handler.go
+  pkg/oam/image_reference.go
+  pkg/oam/image_reference_level.go
   pkg/oam/naming_engine.go
   pkg/oam/pipeline.go
   pkg/oam/policy.go
