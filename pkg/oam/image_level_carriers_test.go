@@ -13,6 +13,13 @@ import (
 // of each call carried.
 type levelSeen map[string]ImageReferenceLevel
 
+// note records both levels the context of a carrier carries: its image level
+// under the carrier and its source level under the carrier and " (source)".
+func (s levelSeen) note(carrier string, lctx LoweringContext) {
+	s[carrier] = lctx.ImageLevel()
+	s[carrier+" (source)"] = lctx.SourceLevel()
+}
+
 // seenComponentRule, seenTraitRule, seenPolicyRule, seenDocumentRule and
 // seenRawRule are rules at each position that record the level of their
 // context and emit nothing.
@@ -20,7 +27,7 @@ type seenComponentRule struct{ seen levelSeen }
 
 func (seenComponentRule) ComponentType() string { return "probe" }
 func (r seenComponentRule) LowerComponent(_ *Component, lctx LoweringContext) (LoweringResult, error) {
-	r.seen["component rule"] = lctx.ImageLevel()
+	r.seen.note("component rule", lctx)
 	return LoweringResult{Components: []Component{{Name: "w", Type: "widget"}}}, nil
 }
 
@@ -28,7 +35,7 @@ func (r seenComponentRule) LowerComponent(_ *Component, lctx LoweringContext) (L
 // context of the build.
 func (r seenComponentRule) Outputs(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
 	r.seen["rule outputs, component"] = c.ImageLevel()
-	r.seen["rule outputs, context"] = lctx.ImageLevel()
+	r.seen.note("rule outputs, context", lctx)
 	return nil, nil
 }
 
@@ -36,7 +43,7 @@ type seenTraitRule struct{ seen levelSeen }
 
 func (seenTraitRule) TraitType() string { return "probe" }
 func (r seenTraitRule) LowerTrait(_ *Trait, lctx LoweringContext) (LoweringResult, error) {
-	r.seen["trait rule"] = lctx.ImageLevel()
+	r.seen.note("trait rule", lctx)
 	return LoweringResult{Traits: []Trait{{Type: "final", Properties: map[string]any{}}}}, nil
 }
 
@@ -44,7 +51,7 @@ type seenPolicyRule struct{ seen levelSeen }
 
 func (seenPolicyRule) PolicyType() string { return "probe" }
 func (r seenPolicyRule) LowerPolicy(pol *ApplicationPolicy, lctx LoweringContext) (LoweringResult, error) {
-	r.seen["policy rule"] = lctx.ImageLevel()
+	r.seen.note("policy rule", lctx)
 	return LoweringResult{Policies: []ApplicationPolicy{{Name: pol.Name, Type: "final"}}}, nil
 }
 
@@ -52,7 +59,7 @@ type seenDocumentRule struct{ seen levelSeen }
 
 func (seenDocumentRule) Kind() string { return "Probe" }
 func (r seenDocumentRule) LowerDocument(doc *Application, lctx LoweringContext) (LoweringResult, error) {
-	r.seen["document rule"] = lctx.ImageLevel()
+	r.seen.note("document rule", lctx)
 	out := *doc
 	out.Kind = terminalDocumentKind
 	return LoweringResult{Documents: []Application{out}}, nil
@@ -63,7 +70,7 @@ type seenRawRule struct{ seen levelSeen }
 func (seenRawRule) Kind() string                         { return "RawProbe" }
 func (seenRawRule) DecodeDocument(_ []byte) (any, error) { return struct{}{}, nil }
 func (r seenRawRule) LowerDocument(_ any, lctx LoweringContext) (LoweringResult, error) {
-	r.seen["raw document rule"] = lctx.ImageLevel()
+	r.seen.note("raw document rule", lctx)
 	name, err := lctx.Namer.Name("r", "1", lctx.Origin)
 	if err != nil {
 		return LoweringResult{}, err
@@ -83,9 +90,15 @@ func (seenHandler) ToApplicationConfig(_ *Component, _ string) (stack.Applicatio
 	return &imagedConfig{}, nil
 }
 func (h seenHandler) Outputs(c *Component, lctx LoweringContext) ([]OutputDecl, error) {
-	h.seen["handler outputs"] = lctx.ImageLevel()
+	h.seen.note("handler outputs", lctx)
 	h.seen["handler outputs, component"] = c.ImageLevel()
 	return nil, nil
+}
+
+// FillCapabilityDefaults is asked for every component of the build.
+func (h seenHandler) FillCapabilityDefaults(props map[string]any, lctx LoweringContext) (map[string]any, error) {
+	h.seen.note("capability filler", lctx)
+	return props, nil
 }
 func (h seenHandler) EndpointsNamed(_ *Component, lctx LoweringContext) ([]netpol.Endpoint, error) {
 	h.seen["endpoints"] = lctx.ImageLevel()
@@ -146,6 +159,15 @@ func TestImageLevel_OutputsQueryAsksAtTheLevelOfItsContext(t *testing.T) {
 	}
 }
 
+// bothLevelsPolicy is a Policy that names an image level and a source level.
+type bothLevelsPolicy struct {
+	*NoopPolicy
+	image, source ImageReferenceLevel
+}
+
+func (p bothLevelsPolicy) ImageReferenceLevel() ImageReferenceLevel  { return p.image }
+func (p bothLevelsPolicy) SourceReferenceLevel() ImageReferenceLevel { return p.source }
+
 // TestImageLevel_ReachesEveryCarrier: every context the Transformer builds
 // carries the policy's level, whichever position builds it: a component rule,
 // a trait rule, a policy rule, a document rule, a raw document rule, a
@@ -153,14 +175,17 @@ func TestImageLevel_OutputsQueryAsksAtTheLevelOfItsContext(t *testing.T) {
 // reads ports and names (go-kure/launcher#1644). A carrier that is missed reads
 // the default level, so a test that asks under `any` sees it.
 func TestImageLevel_ReachesEveryCarrier(t *testing.T) {
+	// The source level is named apart from the image level, with another value,
+	// so that one cannot stand in for the other.
 	cases := []struct {
-		name   string
-		policy Policy
-		want   ImageReferenceLevel
+		name       string
+		policy     Policy
+		want       ImageReferenceLevel
+		wantSource ImageReferenceLevel
 	}{
-		{"no policy", nil, ImageLevelTagged},
-		{"any", levelPolicy{&NoopPolicy{}, ImageLevelAny}, ImageLevelAny},
-		{"digest", levelPolicy{&NoopPolicy{}, ImageLevelDigest}, ImageLevelDigest},
+		{"no policy", nil, ImageLevelTagged, ImageLevelAny},
+		{"any", bothLevelsPolicy{&NoopPolicy{}, ImageLevelAny, ImageLevelDigest}, ImageLevelAny, ImageLevelDigest},
+		{"digest", bothLevelsPolicy{&NoopPolicy{}, ImageLevelDigest, ImageLevelVersion}, ImageLevelDigest, ImageLevelVersion},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -202,11 +227,19 @@ func TestImageLevel_ReachesEveryCarrier(t *testing.T) {
 			// A provider reads the level off its context or off the component it is
 			// handed: in the outputs query of a build, of a rule and of a handler,
 			// both are the policy's level.
-			for _, carrier := range []string{"component rule", "trait rule", "policy rule", "document rule", "raw document rule", "handler outputs", "handler outputs, component", "rule outputs, component", "rule outputs, context"} {
+			for _, carrier := range []string{"component rule", "trait rule", "policy rule", "document rule", "raw document rule", "handler outputs", "handler outputs, component", "rule outputs, component", "rule outputs, context", "capability filler"} {
 				if got, ok := seen[carrier]; !ok {
 					t.Errorf("%s was not asked", carrier)
 				} else if got != tc.want {
 					t.Errorf("%s carried level %q, want %q", carrier, got, tc.want)
+				}
+			}
+			// The source level reaches the same contexts.
+			for _, carrier := range []string{"component rule", "trait rule", "policy rule", "document rule", "raw document rule", "handler outputs", "rule outputs, context", "capability filler"} {
+				if got, ok := seen[carrier+" (source)"]; !ok {
+					t.Errorf("%s was not asked", carrier)
+				} else if got != tc.wantSource {
+					t.Errorf("%s carried source level %q, want %q", carrier, got, tc.wantSource)
 				}
 			}
 			if got := seen["endpoints"]; got != ImageLevelAny {
