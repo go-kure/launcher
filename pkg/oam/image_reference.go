@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/go-kure/kure/pkg/stack"
 	"github.com/google/go-containerregistry/pkg/name"
 )
 
@@ -23,6 +24,17 @@ type ImageReference struct {
 // stricter than the handler knows is enforced whatever the handler implements.
 type ImageReferenced interface {
 	ImageReferences() []ImageReference
+}
+
+// LevelAwareHandler is an optional interface of a ComponentHandler that can build
+// its config at an image reference level (go-kure/launcher#1644). The Transformer
+// asks it at the level of the policy; ToApplicationConfig, which a caller with no
+// policy reaches, is the same at ImageLevelTagged. A handler without it is built
+// at the default level and held to the policy's by the Transformer afterwards, so
+// it can be stricter than the default but never looser.
+type LevelAwareHandler interface {
+	ComponentHandler
+	ToApplicationConfigAt(component *Component, namespace string, level ImageReferenceLevel) (stack.ApplicationConfig, error)
 }
 
 // versionTag is the tag the version level accepts: an optional v, one to three
