@@ -333,7 +333,7 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "%s: decode", d.origin)
 	}
-	lctx := LoweringContext{capabilities: ctx.Capabilities, Origin: d.origin, Namer: namer}
+	lctx := LoweringContext{capabilities: ctx.Capabilities, imageLevel: ctx.imageLevel, Origin: d.origin, Namer: namer}
 	result, err := d.rule.LowerDocument(decoded, lctx)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "%s", d.origin)

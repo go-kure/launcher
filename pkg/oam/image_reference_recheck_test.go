@@ -89,6 +89,56 @@ func TestTransform_ImageReferencesAreCheckedAtThePolicyLevel(t *testing.T) {
 	}
 }
 
+// levelHandler is a handler that knows levels: it records the level it was asked
+// at, and builds a config that names a reference only a looser level accepts.
+type levelHandler struct {
+	asked, plain *ImageReferenceLevel
+}
+
+func (h *levelHandler) CanHandle(t string) bool { return t == "widget" }
+func (h *levelHandler) ToApplicationConfig(c *Component, ns string) (stack.ApplicationConfig, error) {
+	l := ImageLevelTagged
+	h.plain = &l
+	return h.ToApplicationConfigAt(c, ns, ImageLevelTagged)
+}
+func (h *levelHandler) ToApplicationConfigAt(_ *Component, _ string, level ImageReferenceLevel) (stack.ApplicationConfig, error) {
+	h.asked = &level
+	return &imagedConfig{refs: []ImageReference{{Reference: "nginx:latest"}}}, CheckImageReference("nginx:latest", level)
+}
+
+// TestTransform_LevelAwareHandlerIsAskedAtThePolicyLevel: a handler that knows
+// levels is built at the policy's level, and so can be looser than the default;
+// the Transformer does not ask it at the default level and then hold it to the
+// policy's.
+func TestTransform_LevelAwareHandlerIsAskedAtThePolicyLevel(t *testing.T) {
+	cases := []struct {
+		name    string
+		policy  Policy
+		want    ImageReferenceLevel
+		refused bool
+	}{
+		{"no policy", nil, ImageLevelTagged, true},
+		{"any", levelPolicy{&NoopPolicy{}, ImageLevelAny}, ImageLevelAny, false},
+		{"digest", levelPolicy{&NoopPolicy{}, ImageLevelDigest}, ImageLevelDigest, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &levelHandler{}
+			tr := NewTransformer(map[string]ComponentHandler{"widget": h}, nil)
+			_, err := tr.Transform(makeApp("myapp", makeComponent("web", "widget")), TransformContext{Policy: tc.policy})
+			if h.asked == nil || *h.asked != tc.want {
+				t.Errorf("asked at %v, want %q", h.asked, tc.want)
+			}
+			if h.plain != nil {
+				t.Error("the Transformer called ToApplicationConfig on a handler that knows levels")
+			}
+			if (err != nil) != tc.refused {
+				t.Errorf("err = %v, want refused = %v", err, tc.refused)
+			}
+		})
+	}
+}
+
 // A config that names no image reference is left alone.
 func TestTransform_ConfigWithoutImageReferencesIsNotChecked(t *testing.T) {
 	tr := NewTransformer(map[string]ComponentHandler{"widget": &refusingHandler{}}, nil)

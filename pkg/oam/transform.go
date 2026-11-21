@@ -184,6 +184,11 @@ type TransformContext struct {
 	// Reference type, so every by-value ctx copy through the pipeline shares one
 	// map — same sharing pattern Capabilities/EgressPeers already rely on.
 	consumedCapabilities map[string]struct{}
+	// imageLevel is ImageReferenceLevelOf(Policy), set once by TransformWithPolicy
+	// and copied into every LoweringContext the engine builds, as Capabilities is
+	// (go-kure/launcher#1644). Internal only: empty on a caller-constructed ctx,
+	// which reads as the default level.
+	imageLevel ImageReferenceLevel
 	// provenance records which source supplied each property leaf for
 	// TransformWithProvenance. Internal only: nil on every other path, where each
 	// recording step is a no-op; a pointer, so every by-value ctx copy records into
@@ -743,7 +748,10 @@ func (t *Transformer) componentEndpoints(comp *Component, application string, na
 		// nothing is claimed.
 		namer := NewNameAllocator()
 		namer.hook = naming
-		eps, err = named.EndpointsNamed(comp, LoweringContext{Component: comp, Namer: namer, application: application})
+		// Endpoints read ports and names, never the image: the image is held to its
+		// level where it is emitted (go-kure/launcher#1644), so this asks at the
+		// loosest.
+		eps, err = named.EndpointsNamed(comp, LoweringContext{Component: comp, Namer: namer, application: application, imageLevel: ImageLevelAny})
 	} else if ep, ok := provider.(EndpointProvider); ok {
 		eps, err = ep.Endpoints(comp)
 	} else {
@@ -920,6 +928,7 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 	if ctx.Policy == nil {
 		ctx.Policy = &NoopPolicy{}
 	}
+	ctx.imageLevel = ImageReferenceLevelOf(ctx.Policy)
 	ctx.consumedCapabilities = make(map[string]struct{})
 	ctx.subAppDecorations = &[]subAppDecoration{}
 	ctx.traitSubApps = &[]traitSubApps{}
@@ -1264,7 +1273,7 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// TestObjectName_RenamesTheObjectAlone holds that name and kind.
 		if p, ok := handler.(OutputProvider); ok {
 			probe := probeCopy(component)
-			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming, ctx.nameClaims)
+			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming, ctx.nameClaims, ctx.imageLevel)
 			if err == nil {
 				err = checkHandlerOutputs(&component, handler, decls, outs)
 			}
@@ -1309,7 +1318,15 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			component.Properties = filled
 		}
 
-		config, err := handler.ToApplicationConfig(&component, namespace)
+		// A handler that knows levels is asked at the policy's; any other is
+		// built at the default level and held to the policy's below, so it can
+		// be stricter but never looser (go-kure/launcher#1644).
+		var config stack.ApplicationConfig
+		if aware, ok := handler.(LevelAwareHandler); ok {
+			config, err = aware.ToApplicationConfigAt(&component, namespace, ctx.imageLevel)
+		} else {
+			config, err = handler.ToApplicationConfig(&component, namespace)
+		}
 		if err != nil {
 			return nil, &TransformError{Message: fmt.Sprintf("component %q", component.Name), Cause: err}
 		}
@@ -2224,11 +2241,11 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 // or the sorted keys joined by ",".
 func fillComponentCapabilities(f ComponentCapabilityFiller, props map[string]any, ctx TransformContext, rec *ownerRecorder) (map[string]any, error) {
 	if rec == nil {
-		return f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities})
+		return f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel})
 	}
 	before := indexOf(props)
 	reads := map[string]struct{}{}
-	filled, err := f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: reads})
+	filled, err := f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: reads, imageLevel: ctx.imageLevel})
 	if err != nil {
 		return nil, err
 	}
