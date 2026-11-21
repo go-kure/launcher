@@ -108,6 +108,9 @@ func (t *Transformer) LowerRawsWithSteps(raws []json.RawMessage, ctx TransformCo
 	if len(t.rawDocLoweringRules) == 0 {
 		return raws, nil, nil // raw-path analogue of the pointer-identity guarantee: nothing to do, nothing touched
 	}
+	// The raw pass is a public entry of its own, not reached through
+	// TransformWithPolicy, so it reads the level from the policy it was given.
+	ctx.imageLevel = ImageReferenceLevelOf(ctx.Policy)
 
 	claimed := make([]bool, len(raws))
 	seenKeys := make(map[rawDocKey]int, len(raws))
