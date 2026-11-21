@@ -185,12 +185,12 @@ type TransformContext struct {
 	// map — same sharing pattern Capabilities/EgressPeers already rely on.
 	consumedCapabilities map[string]struct{}
 	// imageLevel is ImageReferenceLevelOf(Policy), set once by TransformWithPolicy
-	// and copied into every LoweringContext the engine builds, as Capabilities is
-	// (go-kure/launcher#1644). Internal only: empty on a caller-constructed ctx,
-	// which reads as the default level.
+	// and copied into every LoweringContext the engine builds from it
+	// (loweringContext), as Capabilities is (go-kure/launcher#1644). Internal only:
+	// empty on a caller-constructed ctx, which reads as the default level.
 	imageLevel ImageReferenceLevel
 	// sourceLevel is SourceReferenceLevelOf(Policy), set beside imageLevel and
-	// copied into the context a component rule is lowered in.
+	// carried by loweringContext as it is.
 	sourceLevel ImageReferenceLevel
 	// provenance records which source supplied each property leaf for
 	// TransformWithProvenance. Internal only: nil on every other path, where each
@@ -2245,11 +2245,13 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 // or the sorted keys joined by ",".
 func fillComponentCapabilities(f ComponentCapabilityFiller, props map[string]any, ctx TransformContext, rec *ownerRecorder) (map[string]any, error) {
 	if rec == nil {
-		return f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel})
+		return f.FillCapabilityDefaults(props, ctx.loweringContext())
 	}
 	before := indexOf(props)
 	reads := map[string]struct{}{}
-	filled, err := f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: reads, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel})
+	lctx := ctx.loweringContext()
+	lctx.consumed = reads
+	filled, err := f.FillCapabilityDefaults(props, lctx)
 	if err != nil {
 		return nil, err
 	}

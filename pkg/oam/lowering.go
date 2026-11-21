@@ -298,11 +298,26 @@ type LoweringContext struct {
 	application string
 	// imageLevel is the level the policy holds an image reference to, set once from
 	// the Transformer's policy and copied into every context the engine builds, as
-	// capabilities is. Read it through ImageLevel; empty is the default level.
+	// capabilities is (TransformContext.loweringContext). Read it through ImageLevel;
+	// empty is the default level.
 	imageLevel ImageReferenceLevel
 	// sourceLevel is the level the policy holds the reference of an OCI source
 	// to, copied as imageLevel is. Read it through SourceLevel.
 	sourceLevel ImageReferenceLevel
+}
+
+// loweringContext is the LoweringContext every lowering call starts from: the fields
+// of ctx a rule may read, and nothing of the element being lowered. A call site sets
+// the fields that are its own (Document, Component, Origin, Namer). Build the
+// context of every lowering position from the transform context here, so a field
+// carried later is carried by all of them.
+//
+// The outputs query (outputsOf) and the endpoints query (componentEndpoints) build
+// their own contexts from a level and not from a transform context, on purpose: they
+// are reachable without one, and they carry no capabilities. A field a query also
+// needs must be carried there too.
+func (ctx TransformContext) loweringContext() LoweringContext {
+	return LoweringContext{capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel}
 }
 
 // SourceLevel is the level the reference of an OCI source component is held to
@@ -1331,7 +1346,8 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		// PR go-kure/launcher#283: the policy loop below stamped Rule unconditionally while the
 		// component loop already guarded against exactly this).
 		originalPolicies := input.Spec.Policies
-		lctx := LoweringContext{Document: input, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel, Origin: origin, Namer: namer}
+		lctx := ctx.loweringContext()
+		lctx.Document, lctx.Origin, lctx.Namer = input, origin, namer
 		result, err := rule.LowerDocument(input, lctx)
 		if err != nil {
 			return nil, false, nil, errors.Wrapf(err, "%s", origin)
@@ -1563,7 +1579,8 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			if ctx.provenance != nil {
 				compInput = ruleInputFor(comp.Properties, comp.origin, comp.ruleInput)
 			}
-			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel, Origin: compOrigin, Namer: namer}
+			lctx := ctx.loweringContext()
+			lctx.Document, lctx.Component, lctx.Origin, lctx.Namer = doc, &comp, compOrigin, namer
 			// What the rule declares as outputs is asked before it runs, on an
 			// allocator of its own and a copy of comp, so nothing the rule does to
 			// either moves the answer. It is held against the names the rule resolves,
@@ -1813,7 +1830,8 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 					traitInput = newRuleInput(resolvedTrait.Properties, inputSources.entries)
 				}
 			}
-			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel, Origin: traitOrigin, Namer: namer}
+			lctx := ctx.loweringContext()
+			lctx.Document, lctx.Component, lctx.Origin, lctx.Namer = doc, &comp, traitOrigin, namer
 			result, err := rule.LowerTrait(&resolvedTrait, lctx)
 			if err != nil {
 				return false, steps, errors.Wrapf(err, "%s", traitOrigin)
@@ -1911,7 +1929,8 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			newPolicies = append(newPolicies, pol)
 			continue
 		}
-		lctx := LoweringContext{Document: doc, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel, Origin: polOrigin, Namer: namer}
+		lctx := ctx.loweringContext()
+		lctx.Document, lctx.Origin, lctx.Namer = doc, polOrigin, namer
 		result, err := rule.LowerPolicy(&pol, lctx)
 		if err != nil {
 			return false, steps, errors.Wrapf(err, "%s", polOrigin)

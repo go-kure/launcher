@@ -337,7 +337,10 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "%s: decode", d.origin)
 	}
-	lctx := LoweringContext{capabilities: ctx.Capabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel, Origin: d.origin, Namer: namer}
+	lctx := ctx.loweringContext()
+	// A read here is not recorded (see above), whatever ctx holds.
+	lctx.consumed = nil
+	lctx.Origin, lctx.Namer = d.origin, namer
 	result, err := d.rule.LowerDocument(decoded, lctx)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "%s", d.origin)
