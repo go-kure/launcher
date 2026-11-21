@@ -292,6 +292,7 @@ func (t *Transformer) LowerRawsWithSteps(raws []json.RawMessage, ctx TransformCo
 // (LowerRawsWithSteps).
 func (t *Transformer) lowerRawRound(seed []loweringDoc, ctx TransformContext, preReserved []reservedIdentity) ([]loweringDoc, [][]LoweringStep, error) {
 	namer := NewNameAllocator()
+	namer.modelBuildTimeout = ctx.ModelBuildTimeout
 	for _, r := range preReserved {
 		if err := namer.Reserve(r.name, r.origin); err != nil {
 			return nil, nil, &LoweringError{Origin: r.origin, Cause: err}

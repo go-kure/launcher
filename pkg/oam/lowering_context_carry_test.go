@@ -36,6 +36,7 @@ func TestLoweringContext_CarriesEveryFieldARuleReads(t *testing.T) {
 		"ReservedMetadataKeys":     "generation input; LoweringContext has no accessor for it",
 		"Naming":                   "travels on the run's NameAllocator (hook), which each site sets as Namer",
 		"EmitHook":                 "travels on the run's NameAllocator (emit), which each site sets as Namer",
+		"ModelBuildTimeout":        "travels on the run's NameAllocator (modelBuildTimeout), which each site sets as Namer",
 		"names":                    "engine state of the generation step",
 		"nameClaims":               "the run's NameAllocator, set at each site as Namer",
 		"provenance":               "engine state of TransformWithProvenance",

@@ -27,28 +27,28 @@ func wantLimit(t *testing.T, err error, substr string) {
 // The edge of each limit: the amount that equals the limit passes and one more fails, and a nil
 // budget, which a direct Eval or Expand has, limits nothing.
 func TestBuildBudget_LimitEdges(t *testing.T) {
-	if err := newBuildBudget().chargeParts(MaxBuildParts); err != nil {
+	if err := newBuildBudget(0).chargeParts(MaxBuildParts); err != nil {
 		t.Errorf("%d parts: %v", MaxBuildParts, err)
 	}
-	b := newBuildBudget()
+	b := newBuildBudget(0)
 	if err := b.chargeParts(MaxBuildParts); err != nil {
 		t.Fatal(err)
 	}
 	wantLimit(t, b.chargeParts(1), "more than 500 parts")
 
-	if err := newBuildBudget().chargeCost(MaxBuildCost); err != nil {
+	if err := newBuildBudget(0).chargeCost(MaxBuildCost); err != nil {
 		t.Errorf("%d cost: %v", MaxBuildCost, err)
 	}
-	b = newBuildBudget()
+	b = newBuildBudget(0)
 	if err := b.chargeCost(MaxBuildCost - 1); err != nil {
 		t.Fatal(err)
 	}
 	wantLimit(t, b.chargeCost(2), "more than 10000000 cost units")
 
-	if err := newBuildBudget().chargeBytes(MaxBuildPropertyBytes); err != nil {
+	if err := newBuildBudget(0).chargeBytes(MaxBuildPropertyBytes); err != nil {
 		t.Errorf("%d bytes: %v", MaxBuildPropertyBytes, err)
 	}
-	b = newBuildBudget()
+	b = newBuildBudget(0)
 	if err := b.chargeBytes(MaxBuildPropertyBytes); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestBuildBudget_LimitEdges(t *testing.T) {
 func TestBuildBudget_Deadline(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	defer SetBuildClock(func() time.Time { return now })()
-	b := newBuildBudget()
+	b := newBuildBudget(0)
 	now = now.Add(BuildTimeout)
 	if err := b.checkDeadline(); err != nil {
 		t.Errorf("at the deadline: %v", err)

@@ -597,10 +597,10 @@ func (c *Compiled) Eval(path string, sc Scope) (any, int64, error) {
 			}
 		}
 		if budget.exhausted() {
-			return nil, cost, siteError(path, compareStopError())
+			return nil, cost, siteError(path, compareStopError(), sc.budget)
 		}
 		if err != nil {
-			return nil, cost, siteError(path, err)
+			return nil, cost, siteError(path, err, sc.budget)
 		}
 		if err := sc.budget.checkDeadline(); err != nil {
 			return nil, cost, errors.Wrapf(err, "model: evaluate %s", path)
@@ -633,9 +633,13 @@ func textSizeError(path string) error {
 	return errors.Errorf("%w: %s: the text holds more than %d bytes", ErrCostLimit, path, maxValueSize)
 }
 
-// siteError names the site in an evaluation failure and marks a cost-limit stop.
-func siteError(path string, err error) error {
+// siteError names the site in an evaluation failure and marks a cost-limit stop. An interrupt
+// names the limit of the build it belongs to, where the evaluation has one.
+func siteError(path string, err error, budget *buildBudget) error {
 	if errors.Is(err, interpreter.InterruptError{}) {
+		if budget != nil {
+			return errors.Errorf("%w: %s: %s (limit %s)", ErrLimit, path, deadlineMessage, budget.timeout)
+		}
 		return errors.Errorf("%w: %s: %s", ErrLimit, path, deadlineMessage)
 	}
 	var stop interpreter.EvalCancelledError

@@ -210,6 +210,7 @@ func outputsOf(p OutputProvider, comp *Component, application string, naming fun
 			parent.runState = map[any]any{}
 		}
 		namer.runState = parent.runState
+		namer.modelBuildTimeout = parent.modelBuildTimeout
 	}
 	decls, err := p.Outputs(comp, LoweringContext{Component: comp, Namer: namer, application: application, imageLevel: level, sourceLevel: sourceLevel})
 	if err != nil {
