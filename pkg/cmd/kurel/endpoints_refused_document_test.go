@@ -113,7 +113,7 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 			name:       "cnpg-cluster: an image without a tag",
 			components: component("cnpg-cluster", "        imageName: ghcr.io/example/postgres\n"),
 			stage:      "transform", want: `imageName: image "ghcr.io/example/postgres" rejected: no tag or digest specified`,
-			answer: endpointRefused,
+			answer: endpointAnswered, limit: limitPolicyAndGeneration,
 		},
 		{
 			name:       "cnpg-cluster: an undeclared property",
@@ -186,7 +186,7 @@ func TestEndpoints_DocumentTheBuildRefuses(t *testing.T) {
 			name:       "webservice: an image tagged latest",
 			components: component("webservice", "        image: ghcr.io/example/web:latest\n"),
 			stage:      "transform", want: `image "ghcr.io/example/web:latest" rejected: :latest tag not allowed`,
-			answer: endpointRefused,
+			answer: endpointAnswered, limit: limitPolicyAndGeneration,
 		},
 		{
 			name:       "webservice: a Deployment name that is no name",

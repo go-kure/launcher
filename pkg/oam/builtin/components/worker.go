@@ -128,7 +128,7 @@ func (WorkerRule) PropertySchema() map[string]oam.PropertySchema {
 // LowerComponent validates comp as a worker and emits the equivalent
 // deployment component (see WorkerRule).
 func (r WorkerRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
-	opinions, err := parseWorker(comp.Name, comp.Properties)
+	opinions, err := parseWorkerAt(comp.Name, comp.Properties, lctx.ImageLevel())
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}
@@ -203,13 +203,19 @@ type workerOpinions struct {
 // deployment component parses the forwarded properties again, with the same
 // helpers.
 func parseWorker(name string, props map[string]any) (workerOpinions, error) {
+	return parseWorkerAt(name, props, oam.ImageLevelTagged)
+}
+
+// parseWorkerAt is parseWorker holding the main image, the init containers',
+// the sidecars' and an image volume's to level (go-kure/launcher#1644).
+func parseWorkerAt(name string, props map[string]any, level oam.ImageReferenceLevel) (workerOpinions, error) {
 	var out workerOpinions
 
 	image, ok := props["image"].(string)
 	if !ok {
 		return out, errors.New("required property 'image' missing or not a string")
 	}
-	if err := ValidateImageRef(image); err != nil {
+	if err := ValidateImageRefAt(image, level); err != nil {
 		return out, err
 	}
 	if _, _, err := parseReplicas(props, 1); err != nil {
@@ -255,14 +261,14 @@ func parseWorker(name string, props map[string]any) (workerOpinions, error) {
 		return out, err
 	}
 
-	parsed, err := parseVolumes(props)
+	parsed, err := parseVolumesAt(props, level)
 	if err != nil {
 		return out, err
 	}
 	if err := checkMainContainerMountPropagation(parsed.Mounts, securityContext); err != nil {
 		return out, err
 	}
-	initContainers, err := parseInitContainers(props)
+	initContainers, err := parseInitContainersAt(props, level)
 	if err != nil {
 		return out, err
 	}
@@ -283,7 +289,7 @@ func parseWorker(name string, props map[string]any) (workerOpinions, error) {
 		return out, err
 	}
 
-	sidecars, err := parseSidecars(props)
+	sidecars, err := parseSidecarsAt(props, level)
 	if err != nil {
 		return out, err
 	}
