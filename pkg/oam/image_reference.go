@@ -1,11 +1,12 @@
 package oam
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
+
+	"github.com/go-kure/launcher/pkg/errors"
 )
 
 // ImageReference is one image reference a config holds, with where it came
@@ -42,11 +43,11 @@ var versionTag = regexp.MustCompile(`^v?[0-9]+(\.[0-9]+){0,2}([-_.][A-Za-z0-9._-
 // must not loosen the rule.
 func CheckImageReference(image string, level ImageReferenceLevel) error {
 	if !level.Valid() {
-		return fmt.Errorf("image %q rejected: %q is not an image reference level (any, tagged, version or digest)", image, string(level))
+		return errors.Errorf("image %q rejected: %q is not an image reference level (any, tagged, version or digest)", image, string(level))
 	}
 	ref, err := name.ParseReference(image)
 	if err != nil {
-		return fmt.Errorf("image %q rejected: %w", image, err)
+		return errors.Wrapf(err, "image %q rejected", image)
 	}
 	switch level {
 	case ImageLevelAny:
@@ -55,24 +56,24 @@ func CheckImageReference(image string, level ImageReferenceLevel) error {
 		switch r := ref.(type) {
 		case name.Digest:
 			if hasExplicitLatestTag(image) {
-				return fmt.Errorf("image %q rejected: :latest tag not allowed; use an explicit version tag or digest", image)
+				return errors.Errorf("image %q rejected: :latest tag not allowed; use an explicit version tag or digest", image)
 			}
 		case name.Tag:
 			if r.TagStr() != "latest" {
 				return nil
 			}
 			if hasExplicitLatestTag(image) {
-				return fmt.Errorf("image %q rejected: :latest tag not allowed; use an explicit version tag or digest", image)
+				return errors.Errorf("image %q rejected: :latest tag not allowed; use an explicit version tag or digest", image)
 			}
-			return fmt.Errorf("image %q rejected: no tag or digest specified; use an explicit version tag or digest", image)
+			return errors.Errorf("image %q rejected: no tag or digest specified; use an explicit version tag or digest", image)
 		}
 	case ImageLevelDigest:
 		if _, ok := ref.(name.Digest); !ok {
-			return fmt.Errorf("image %q rejected: level %q requires a digest (name@sha256:...)", image, string(level))
+			return errors.Errorf("image %q rejected: level %q requires a digest (name@sha256:...)", image, string(level))
 		}
 	case ImageLevelVersion:
 		if !versionTag.MatchString(explicitTag(image)) {
-			return fmt.Errorf("image %q rejected: level %q requires a version tag, such as v1.2 or 1.2.3-alpine", image, string(level))
+			return errors.Errorf("image %q rejected: level %q requires a version tag, such as v1.2 or 1.2.3-alpine", image, string(level))
 		}
 	}
 	return nil
@@ -92,7 +93,7 @@ func CheckImageReference(image string, level ImageReferenceLevel) error {
 // refuses it.
 func CheckSourceVersion(version string, level ImageReferenceLevel) error {
 	if !level.Valid() {
-		return fmt.Errorf("version %q rejected: %q is not an image reference level (any, tagged, version or digest)", version, string(level))
+		return errors.Errorf("version %q rejected: %q is not an image reference level (any, tagged, version or digest)", version, string(level))
 	}
 	digest := len(version) > len(sourceDigestPrefix) && strings.HasPrefix(version, sourceDigestPrefix)
 	switch level {
@@ -100,18 +101,18 @@ func CheckSourceVersion(version string, level ImageReferenceLevel) error {
 		// Nothing is held.
 	case ImageLevelTagged:
 		if version == "" {
-			return fmt.Errorf("version rejected: level %q requires a tag or a digest", string(level))
+			return errors.Errorf("version rejected: level %q requires a tag or a digest", string(level))
 		}
 		if version == "latest" {
-			return fmt.Errorf("version %q rejected: level %q refuses the latest tag; use an explicit version tag or a digest", version, string(level))
+			return errors.Errorf("version %q rejected: level %q refuses the latest tag; use an explicit version tag or a digest", version, string(level))
 		}
 	case ImageLevelVersion:
 		if !digest && !versionTag.MatchString(version) {
-			return fmt.Errorf("version %q rejected: level %q requires a version tag, such as v1.2 or 1.2.3-alpine, or a digest", version, string(level))
+			return errors.Errorf("version %q rejected: level %q requires a version tag, such as v1.2 or 1.2.3-alpine, or a digest", version, string(level))
 		}
 	case ImageLevelDigest:
 		if !digest {
-			return fmt.Errorf("version %q rejected: level %q requires a digest (sha256:<digest>)", version, string(level))
+			return errors.Errorf("version %q rejected: level %q requires a digest (sha256:<digest>)", version, string(level))
 		}
 	}
 	return nil
@@ -155,7 +156,7 @@ func checkImageReferences(config any, level ImageReferenceLevel) error {
 	for _, r := range imaged.ImageReferences() {
 		if err := CheckImageReference(r.Reference, level); err != nil {
 			if r.Field != "" {
-				return fmt.Errorf("%s: %w", r.Field, err)
+				return errors.Wrap(err, r.Field)
 			}
 			return err
 		}
