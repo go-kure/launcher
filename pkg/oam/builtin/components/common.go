@@ -2607,6 +2607,12 @@ func parseAppArmorProfile(v any, label string) (*corev1.AppArmorProfile, error) 
 }
 
 func parseVolumes(props map[string]any) (ParsedVolumes, error) {
+	return parseVolumesAt(props, oam.ImageLevelTagged)
+}
+
+// parseVolumesAt is parseVolumes holding an image volume's reference to level
+// (go-kure/launcher#1644).
+func parseVolumesAt(props map[string]any, level oam.ImageReferenceLevel) (ParsedVolumes, error) {
 	var result ParsedVolumes
 	v, present := authoredValue(props, "volumes")
 	if !present {
@@ -2721,7 +2727,7 @@ func parseVolumes(props map[string]any) (ParsedVolumes, error) {
 		case nestedCase:
 			// The nested form: the source is its upstream object, strictly decoded
 			// (go-kure/launcher#1177, volume_source.go).
-			vol, err := parseNestedVolume(m, volName, volType)
+			vol, err := parseNestedVolumeAt(m, volName, volType, level)
 			if err != nil {
 				return result, err
 			}
@@ -2984,6 +2990,12 @@ func parseClaimReference(m map[string]any, volName, claimName string, volumeMode
 // rather than for a missing size; parseVolumes still reports every malformed
 // shape this lenient scan skips.
 func parsePodVolumes(props map[string]any) (ParsedVolumes, error) {
+	return parsePodVolumesAt(props, oam.ImageLevelTagged)
+}
+
+// parsePodVolumesAt is parsePodVolumes at an image reference level
+// (go-kure/launcher#1644).
+func parsePodVolumesAt(props map[string]any, level oam.ImageReferenceLevel) (ParsedVolumes, error) {
 	if v, present := authoredValue(props, "volumes"); present {
 		vols, _ := v.([]any)
 		for _, el := range vols {
@@ -2997,7 +3009,7 @@ func parsePodVolumes(props map[string]any) (ParsedVolumes, error) {
 			}
 		}
 	}
-	return parseVolumes(props)
+	return parseVolumesAt(props, level)
 }
 
 var validAccessModes = map[string]bool{
@@ -3113,6 +3125,12 @@ func parseAccessModes(m map[string]any) ([]string, error) {
 }
 
 func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
+	return parseInitContainersAt(props, oam.ImageLevelTagged)
+}
+
+// parseInitContainersAt is parseInitContainers holding each image to level
+// (go-kure/launcher#1644).
+func parseInitContainersAt(props map[string]any, level oam.ImageReferenceLevel) ([]InitContainerConfig, error) {
 	raw, _, err := parseObjectList(props, "initContainers")
 	if err != nil {
 		return nil, err
@@ -3157,7 +3175,7 @@ func parseInitContainers(props map[string]any) ([]InitContainerConfig, error) {
 			return nil, errors.Errorf("%s: image is required", label)
 		}
 		ic.Image = img
-		if err := ValidateImageRef(ic.Image); err != nil {
+		if err := ValidateImageRefAt(ic.Image, level); err != nil {
 			return nil, errors.Errorf("initContainers[%d] %q: %w", i, ic.Name, err)
 		}
 		cmd, err := parseCommand(m)
@@ -3248,6 +3266,12 @@ func authoredRestartable(raw map[string]any) bool {
 }
 
 func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
+	return parseSidecarsAt(props, oam.ImageLevelTagged)
+}
+
+// parseSidecarsAt is parseSidecars holding each image to level
+// (go-kure/launcher#1644).
+func parseSidecarsAt(props map[string]any, level oam.ImageReferenceLevel) ([]SidecarContainerConfig, error) {
 	raw, _, err := parseObjectList(props, "sidecars")
 	if err != nil {
 		return nil, err
@@ -3277,7 +3301,7 @@ func parseSidecars(props map[string]any) ([]SidecarContainerConfig, error) {
 			return nil, errors.Errorf("%s: image is required", label)
 		}
 		sc.Image = img
-		if err := ValidateImageRef(sc.Image); err != nil {
+		if err := ValidateImageRefAt(sc.Image, level); err != nil {
 			return nil, errors.Errorf("sidecars[%d] %q: %w", i, sc.Name, err)
 		}
 		cmd, err := parseCommand(m)

@@ -112,11 +112,15 @@ func (WebserviceRule) ComponentType() string { return "webservice" }
 // platform consumer synthesize generic app→app connections whose target is a webservice, the same
 // way it does for a postgresql target. The webservice's single `port` property drives both the
 // container port and the Service port (TargetPort == Port), so there is one endpoint per component.
+//
+// Endpoints checks the image's syntax only (oam.ImageLevelAny): it reads ports
+// and names and never emits the image, and the level of the policy is enforced
+// where the image is emitted (go-kure/launcher#1644).
 func (WebserviceRule) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
 	// Endpoints are collected separately from the build, so the rule's own
 	// parse runs here too: a component it refuses has no endpoint, in the
 	// parse's words.
-	opinions, err := parseWebservice(component)
+	opinions, err := parseWebserviceAt(component, oam.ImageLevelAny)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +190,7 @@ func webserviceContainerPorts(port int32) []corev1.ContainerPort {
 // LowerComponent validates comp as a webservice and emits the equivalent
 // deployment and service components (see WebserviceRule).
 func (r WebserviceRule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oam.LoweringResult, error) {
-	opinions, err := parseWebservice(comp)
+	opinions, err := parseWebserviceAt(comp, lctx.ImageLevel())
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}
@@ -286,6 +290,13 @@ type webserviceOpinions struct {
 // with the same helpers. The component name is its Service's name, so it is
 // checked against the Service-name rule first (validateComponentServiceName).
 func parseWebservice(comp *oam.Component) (webserviceOpinions, error) {
+	return parseWebserviceAt(comp, oam.ImageLevelTagged)
+}
+
+// parseWebserviceAt is parseWebservice holding the main image, the init
+// containers', the sidecars' and an image volume's to level
+// (go-kure/launcher#1644).
+func parseWebserviceAt(comp *oam.Component, level oam.ImageReferenceLevel) (webserviceOpinions, error) {
 	out := webserviceOpinions{port: 80}
 	if err := validateComponentServiceName(comp.Name); err != nil {
 		return out, err
@@ -296,7 +307,7 @@ func parseWebservice(comp *oam.Component) (webserviceOpinions, error) {
 	if !ok {
 		return out, errors.New("required property 'image' missing or not a string")
 	}
-	if err := ValidateImageRef(image); err != nil {
+	if err := ValidateImageRefAt(image, level); err != nil {
 		return out, err
 	}
 	if p, present, err := parsePortField(props, "port", "port", 1); err != nil {
@@ -348,14 +359,14 @@ func parseWebservice(comp *oam.Component) (webserviceOpinions, error) {
 		return out, err
 	}
 
-	parsed, err := parseVolumes(props)
+	parsed, err := parseVolumesAt(props, level)
 	if err != nil {
 		return out, err
 	}
 	if err := checkMainContainerMountPropagation(parsed.Mounts, securityContext); err != nil {
 		return out, err
 	}
-	initContainers, err := parseInitContainers(props)
+	initContainers, err := parseInitContainersAt(props, level)
 	if err != nil {
 		return out, err
 	}
@@ -376,7 +387,7 @@ func parseWebservice(comp *oam.Component) (webserviceOpinions, error) {
 		return out, err
 	}
 
-	sidecars, err := parseSidecars(props)
+	sidecars, err := parseSidecarsAt(props, level)
 	if err != nil {
 		return out, err
 	}

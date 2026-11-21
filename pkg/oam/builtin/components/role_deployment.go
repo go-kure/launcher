@@ -110,16 +110,29 @@ func (h *RoleDeploymentHandler) PropertySchema() map[string]oam.PropertySchema {
 // from the build, so the handler's own parse runs here too: a component it
 // refuses has no endpoint, in the parse's words, whether or not it declares
 // ports.
+//
+// Endpoints checks image syntax only (oam.ImageLevelAny): it reads ports and
+// never emits the image, and the policy's level is enforced where the image is
+// emitted (go-kure/launcher#1644).
 func (h *RoleDeploymentHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
-	cfg, err := h.ToApplicationConfig(component, "")
+	cfg, err := h.ToApplicationConfigAt(component, "", oam.ImageLevelAny)
 	if err != nil {
 		return nil, err
 	}
 	return containerPortEndpoints(component.Name, cfg.(*RoleDeploymentConfig).Ports), nil
 }
 
-// ToApplicationConfig converts an OAM deployment component to a RoleDeploymentConfig.
+// ToApplicationConfig converts an OAM deployment component to a RoleDeploymentConfig,
+// holding its image references to the default level (oam.ImageLevelTagged).
 func (h *RoleDeploymentHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	return h.ToApplicationConfigAt(component, namespace, oam.ImageLevelTagged)
+}
+
+// ToApplicationConfigAt is ToApplicationConfig holding every image reference
+// the component authors (the main image, the init containers', the sidecars'
+// and an image volume's) to level: the Transformer calls it with the policy's
+// (oam.LevelAwareHandler, go-kure/launcher#1644).
+func (h *RoleDeploymentHandler) ToApplicationConfigAt(component *oam.Component, namespace string, level oam.ImageReferenceLevel) (stack.ApplicationConfig, error) {
 	config := &RoleDeploymentConfig{
 		Name:       component.Name,
 		ObjectName: componentObjectName(component),
@@ -147,7 +160,7 @@ func (h *RoleDeploymentHandler) ToApplicationConfig(component *oam.Component, na
 	if !ok {
 		return nil, errors.New("required property 'image' missing or not a string")
 	}
-	if err := ValidateImageRef(image); err != nil {
+	if err := ValidateImageRefAt(image, level); err != nil {
 		return nil, err
 	}
 	config.Image = image
@@ -233,7 +246,7 @@ func (h *RoleDeploymentHandler) ToApplicationConfig(component *oam.Component, na
 		return nil, err
 	}
 
-	parsed, err := parsePodVolumes(props)
+	parsed, err := parsePodVolumesAt(props, level)
 	if err != nil {
 		return nil, err
 	}
@@ -245,13 +258,13 @@ func (h *RoleDeploymentHandler) ToApplicationConfig(component *oam.Component, na
 	config.VolumeDevices = parsed.Devices
 	config.PVCs = parsed.PVCs
 
-	initContainers, err := parseInitContainers(props)
+	initContainers, err := parseInitContainersAt(props, level)
 	if err != nil {
 		return nil, err
 	}
 	config.InitContainers = initContainers
 
-	sidecars, err := parseSidecars(props)
+	sidecars, err := parseSidecarsAt(props, level)
 	if err != nil {
 		return nil, err
 	}

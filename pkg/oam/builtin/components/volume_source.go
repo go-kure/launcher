@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/go-kure/launcher/pkg/errors"
+	"github.com/go-kure/launcher/pkg/oam"
 )
 
 // The nested form of a `volumes` entry (go-kure/launcher#1177). The flat
@@ -113,6 +114,12 @@ func validateVolumeSourceSelectors(vs *corev1.VolumeSource) error {
 
 // parseNestedVolume reads a nested-form entry into its corev1.Volume.
 func parseNestedVolume(m map[string]any, volName, volType string) (corev1.Volume, error) {
+	return parseNestedVolumeAt(m, volName, volType, oam.ImageLevelTagged)
+}
+
+// parseNestedVolumeAt is parseNestedVolume holding an image volume's reference
+// to level (go-kure/launcher#1644).
+func parseNestedVolumeAt(m map[string]any, volName, volType string, level oam.ImageReferenceLevel) (corev1.Volume, error) {
 	label := fmt.Sprintf("volume %q: %s", volName, volType)
 	if flat, both := flatSourceKey[volType]; both {
 		if _, flatAuthored := authoredValue(m, flat); flatAuthored {
@@ -185,7 +192,7 @@ func parseNestedVolume(m map[string]any, volName, volType string) (corev1.Volume
 		}
 	}
 	if img := spec.Image; img != nil && img.Reference != "" {
-		if err := ValidateImageRef(img.Reference); err != nil {
+		if err := ValidateImageRefAt(img.Reference, level); err != nil {
 			return corev1.Volume{}, errors.Wrapf(err, "%s: image.reference", label)
 		}
 	}

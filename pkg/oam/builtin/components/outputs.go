@@ -133,7 +133,7 @@ func roleOutputs(comp *oam.Component, lctx oam.LoweringContext, service bool) ([
 // "serviceaccount" unless serviceAccountName names an existing one, and each
 // claim a `pvc` volume generates under "claim_<volume>".
 func (r WebserviceRule) Outputs(comp *oam.Component, lctx oam.LoweringContext) ([]oam.OutputDecl, error) {
-	if _, err := parseWebservice(comp); err != nil {
+	if _, err := parseWebserviceAt(comp, lctx.ImageLevel()); err != nil {
 		return nil, err
 	}
 	return roleOutputs(comp, lctx, true)
@@ -142,7 +142,7 @@ func (r WebserviceRule) Outputs(comp *oam.Component, lctx oam.LoweringContext) (
 // Outputs implements oam.OutputProvider for a worker: a webservice's, without
 // the Service.
 func (r WorkerRule) Outputs(comp *oam.Component, lctx oam.LoweringContext) ([]oam.OutputDecl, error) {
-	if _, err := parseWorker(comp.Name, comp.Properties); err != nil {
+	if _, err := parseWorkerAt(comp.Name, comp.Properties, lctx.ImageLevel()); err != nil {
 		return nil, err
 	}
 	return roleOutputs(comp, lctx, false)
