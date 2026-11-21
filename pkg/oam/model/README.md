@@ -276,7 +276,7 @@ that the run keeps, so two builds on one rule never share it. A limit that is br
 
 A caller sets the time limit of its builds in `TransformContext.ModelBuildTimeout`: zero keeps the
 default `BuildTimeout`, a positive value replaces it, and a negative value is refused when the
-transform starts. The limit holds for every render of a build, the query for the outputs of a
+transform (or `LowerRaws`) starts. The limit holds for every render of a build, the query for the outputs of a
 component that the transform makes included, and a refusal names the limit that was in force. It holds
 inside a transform only: a query for the outputs of a model component made outside one
 (`ComponentOutputs`, `ComponentOutputsNamed`) renders under its own budget and keeps the default, because

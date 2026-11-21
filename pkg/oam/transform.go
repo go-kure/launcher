@@ -16,6 +16,16 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/netpol"
 )
 
+// checkModelBuildTimeout refuses a negative ModelBuildTimeout. Every entry that takes a
+// TransformContext and starts a build of its own calls it: Transform and LowerRaws, so a
+// negative value never reads as the default.
+func (ctx TransformContext) checkModelBuildTimeout() error {
+	if ctx.ModelBuildTimeout < 0 {
+		return errors.Errorf("invalid TransformContext.ModelBuildTimeout %s: must not be negative", ctx.ModelBuildTimeout)
+	}
+	return nil
+}
+
 // ValidateAndApplyDefaults is implemented by built-in TraitHandlers that accept
 // rendering keys from ClusterProfile. Called at ClusterProfile evaluation time,
 // before any Application is processed. See design-capability-schema.md §2.2.
@@ -141,7 +151,7 @@ type TransformContext struct {
 	// ModelBuildTimeout is the time one build may spend on the renders of its
 	// configuration-defined models, counted from the first (go-kure/launcher#1663).
 	// Zero is the default of the model engine, one second; a negative value is
-	// refused by Transform. A caller that runs the engine on a loaded host, or that
+	// refused by Transform and LowerRaws. A caller that runs the engine on a loaded host, or that
 	// sizes the limit to its own capacity, sets it. It holds inside a transform: a
 	// query for the outputs of a component made outside one (ComponentOutputs,
 	// ComponentOutputsNamed) keeps the default. The other limits of a build are
@@ -987,8 +997,8 @@ func (t *Transformer) transform(app *Application, ctx TransformContext, hook *tr
 	if err := checkNamespaceLabel("flux namespace", ctx.FluxNamespace); err != nil {
 		return nil, nil, err
 	}
-	if ctx.ModelBuildTimeout < 0 {
-		return nil, nil, errors.Errorf("invalid TransformContext.ModelBuildTimeout %s: must not be negative", ctx.ModelBuildTimeout)
+	if err := ctx.checkModelBuildTimeout(); err != nil {
+		return nil, nil, err
 	}
 	// Every binding's rendering is checked once here, used or not: both merge sites
 	// copy it keeping Go types and have no way to refuse a value they cannot copy.
