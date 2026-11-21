@@ -26,6 +26,10 @@
 #      git-cliff must be on PATH (mise installs it; CI's docs-build job installs
 #      the pinned release): its Rust regex engine is the one that scrubs a
 #      release's changelog, and no other engine stands in for it
+#   4  not a term scrub: cliff.toml's mark on a breaking commit (go-kure/launcher#1657).
+#      Rendered by git-cliff, a `!` commit, a footer-only BREAKING CHANGE commit and
+#      a `feat(format)!` commit each carry a `**Breaking:** ` prefix inside their own
+#      group (the format one stays under Document Format), and a plain commit does not
 #
 # Run: bash scripts/test/forbidden-terms-test.sh
 set -euo pipefail
@@ -190,6 +194,42 @@ if ((${#bad[@]} == 0)); then
   pass "changelog-scrub (git-cliff $(git-cliff --version | sed 's/^git-cliff //'))"
 else
   flunk changelog-scrub "${bad[@]}"
+fi
+
+# Case 4: cliff.toml's mark on a breaking commit (go-kure/launcher#1657), not a term scrub.
+# A `!` commit, a commit whose only mark is a BREAKING CHANGE footer (so the footer is
+# proved on its own) and a `feat(format)!` commit each render with a `**Breaking:** `
+# prefix inside their own group, once; the format one stays under Document Format. A plain
+# commit renders without it.
+repo4="$WORK/cliff-breaking-repo"
+git init -q "$repo4"
+git -C "$repo4" commit -q --allow-empty -m 'feat: a plain change'
+git -C "$repo4" commit -q --allow-empty -m 'feat(x)!: a bang change'
+git -C "$repo4" commit -q --allow-empty -m 'fix: a footer change' -m 'BREAKING CHANGE: a footer reason'
+git -C "$repo4" commit -q --allow-empty -m 'feat(format)!: a format change'
+changelog4="$WORK/CHANGELOG-breaking.md"
+(cd "$repo4" && git-cliff --config "$ROOT/cliff.toml" --unreleased) >"$changelog4" 2>"$WORK/git-cliff4.err" \
+  || { flunk changelog-breaking "git-cliff failed: $(head -3 "$WORK/git-cliff4.err")"; exit 1; }
+bad=()
+# section HEADING: the lines of one `### ` group of the rendered changelog
+section() { awk -v h="### $1" '/^### /{ on = ($0 == h); next } on' "$changelog4"; }
+while IFS='|' read -r group want; do
+  n="$(grep -cF -- "$want" "$changelog4" || true)"
+  [[ "$n" == 1 ]] || bad+=("'$want' appears $n times in the changelog, want once")
+  section "$group" | grep -qF -- "$want" || bad+=("'$want' is not under '### $group'")
+done <<'EOL'
+Added|- **Breaking:** A bang change
+Fixed|- **Breaking:** A footer change
+Document Format|- **Breaking:** A format change
+Added|- A plain change
+EOL
+if grep -qF -- 'Breaking:** A plain change' "$changelog4"; then
+  bad+=("'A plain change' carries the Breaking prefix")
+fi
+if ((${#bad[@]} == 0)); then
+  pass "changelog-breaking (git-cliff $(git-cliff --version | sed 's/^git-cliff //'))"
+else
+  flunk changelog-breaking "${bad[@]}"
 fi
 
 exit "$fail"
