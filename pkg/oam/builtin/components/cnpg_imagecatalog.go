@@ -43,9 +43,11 @@ func (h *CnpgImageCatalogHandler) PropertySchema() map[string]oam.PropertySchema
 // with cnpg-clusterimagecatalog.
 var cnpgImageCatalogKind = &policyHeldKind[cnpgv1.ImageCatalogSpec]{
 	policyFreeKind: policyFreeKind[cnpgv1.ImageCatalogSpec]{
-		upstream: "postgresql.cnpg.io/v1 ImageCatalogSpec",
-		required: generatedKindRequired("cnpg-imagecatalog"),
-		validate: validateCnpgImageCatalog,
+		upstream:   "postgresql.cnpg.io/v1 ImageCatalogSpec",
+		required:   generatedKindRequired("cnpg-imagecatalog"),
+		validate:   validateCnpgImageCatalog,
+		validateAt: validateCnpgImageCatalogAt,
+		images:     cnpgImageCatalogImageReferences,
 		build: func(name, namespace string, spec *cnpgv1.ImageCatalogSpec) client.Object {
 			catalog := kurecnpg.CreateImageCatalog(name, namespace)
 			spec.DeepCopyInto(&catalog.Spec)
@@ -111,6 +113,12 @@ var cnpgImageCatalogRequiredText = requiredFields(map[string]string{
 // the images the catalog names to the tag rule
 // (validateCnpgImageCatalogImageRefs).
 func validateCnpgImageCatalog(spec *cnpgv1.ImageCatalogSpec) error {
+	return validateCnpgImageCatalogAt(spec, oam.ImageLevelTagged)
+}
+
+// validateCnpgImageCatalogAt is validateCnpgImageCatalog holding the images to
+// the given level (go-kure/launcher#1644).
+func validateCnpgImageCatalogAt(spec *cnpgv1.ImageCatalogSpec, level oam.ImageReferenceLevel) error {
 	majors := make(map[int]int, len(spec.Images))
 	for i, image := range spec.Images {
 		if first, dup := majors[image.Major]; dup {
@@ -125,7 +133,7 @@ func validateCnpgImageCatalog(spec *cnpgv1.ImageCatalogSpec) error {
 		}
 		keys[component.Key] = i
 	}
-	return validateCnpgImageCatalogImageRefs(spec)
+	return validateCnpgImageCatalogImageRefs(spec, level)
 }
 
 // validateCnpgImageCatalogImageRefs holds the images an ImageCatalog's or a
@@ -141,9 +149,9 @@ func validateCnpgImageCatalog(spec *cnpgv1.ImageCatalogSpec) error {
 // A digest without a tag passes, as it does everywhere the rule runs. What
 // CloudNativePG itself requires of a catalog's image is the operator's rule
 // and is left to it.
-func validateCnpgImageCatalogImageRefs(spec *cnpgv1.ImageCatalogSpec) error {
+func validateCnpgImageCatalogImageRefs(spec *cnpgv1.ImageCatalogSpec, level oam.ImageReferenceLevel) error {
 	for i, image := range spec.Images {
-		if err := ValidateImageRef(image.Image); err != nil {
+		if err := ValidateImageRefAt(image.Image, level); err != nil {
 			return errors.Wrap(err, fmt.Sprintf("images[%d].image", i))
 		}
 		for j, extension := range image.Extensions {
@@ -151,17 +159,35 @@ func validateCnpgImageCatalogImageRefs(spec *cnpgv1.ImageCatalogSpec) error {
 			if reference == "" {
 				continue
 			}
-			if err := ValidateImageRef(reference); err != nil {
+			if err := ValidateImageRefAt(reference, level); err != nil {
 				return errors.Wrap(err, fmt.Sprintf("images[%d].extensions[%d].image.reference", i, j))
 			}
 		}
 	}
 	for i, component := range spec.ComponentImages {
-		if err := ValidateImageRef(component.Image); err != nil {
+		if err := ValidateImageRefAt(component.Image, level); err != nil {
 			return errors.Wrap(err, fmt.Sprintf("componentImages[%d].image", i))
 		}
 	}
 	return nil
+}
+
+// cnpgImageCatalogImageReferences lists the three fields
+// validateCnpgImageCatalogImageRefs holds, under the same paths.
+func cnpgImageCatalogImageReferences(spec *cnpgv1.ImageCatalogSpec) []oam.ImageReference {
+	var refs []oam.ImageReference
+	for i, image := range spec.Images {
+		refs = append(refs, oam.ImageReference{Field: fmt.Sprintf("images[%d].image", i), Reference: image.Image})
+		for j, extension := range image.Extensions {
+			if reference := extension.ImageVolumeSource.Reference; reference != "" {
+				refs = append(refs, oam.ImageReference{Field: fmt.Sprintf("images[%d].extensions[%d].image.reference", i, j), Reference: reference})
+			}
+		}
+	}
+	for i, component := range spec.ComponentImages {
+		refs = append(refs, oam.ImageReference{Field: fmt.Sprintf("componentImages[%d].image", i), Reference: component.Image})
+	}
+	return refs
 }
 
 // enforceCnpgImageCatalogPolicy holds an ImageCatalog's or a

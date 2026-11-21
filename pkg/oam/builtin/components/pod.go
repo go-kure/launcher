@@ -1,6 +1,8 @@
 package components
 
 import (
+	"fmt"
+
 	"github.com/go-kure/kure/pkg/kubernetes"
 	"github.com/go-kure/kure/pkg/stack"
 	corev1 "k8s.io/api/core/v1"
@@ -309,6 +311,36 @@ func validateImageVolumeRefsAt(prefix string, ps *corev1.PodSpec, level oam.Imag
 		}
 	}
 	return nil
+}
+
+// podSpecImageReferences lists the images a pod spec names, as
+// validateAuthoredPodSpecAt reads them: each init and regular container's image
+// and each image volume's reference, a field that names none left out. prefix is
+// the spec's path, as there. It is what a config's ImageReferences returns, for
+// the Transformer to hold to the policy's level (go-kure/launcher#1644).
+func podSpecImageReferences(prefix string, ps *corev1.PodSpec) []oam.ImageReference {
+	var refs []oam.ImageReference
+	for i, ctr := range ps.InitContainers {
+		if ctr.Image != "" {
+			refs = append(refs, oam.ImageReference{Field: fmt.Sprintf("%sinitContainers[%d] %q", prefix, i, ctr.Name), Reference: ctr.Image})
+		}
+	}
+	for i, ctr := range ps.Containers {
+		if ctr.Image != "" {
+			refs = append(refs, oam.ImageReference{Field: fmt.Sprintf("%scontainers[%d] %q", prefix, i, ctr.Name), Reference: ctr.Image})
+		}
+	}
+	for i, v := range ps.Volumes {
+		if v.Image != nil && v.Image.Reference != "" {
+			refs = append(refs, oam.ImageReference{Field: fmt.Sprintf("%svolumes[%d] %q image.reference", prefix, i, v.Name), Reference: v.Image.Reference})
+		}
+	}
+	return refs
+}
+
+// ImageReferences implements oam.ImageReferenced (podSpecImageReferences).
+func (c *PodConfig) ImageReferences() []oam.ImageReference {
+	return podSpecImageReferences("", &c.Spec)
 }
 
 // ToApplicationConfig decodes an OAM pod component into a PodConfig, under the

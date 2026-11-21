@@ -302,7 +302,14 @@ func (r PostgresqlRule) Parse(component *oam.Component) (*PostgresqlConfig, erro
 
 // parse is Parse past the naming of the Cluster, which the caller has resolved
 // and checked.
-func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error) {
+func (r PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error) {
+	return r.parseAt(component, oam.ImageLevelTagged)
+}
+
+// parseAt is parse holding the pooler image to the given level
+// (go-kure/launcher#1644). LowerComponent passes the level of its lowering
+// context; Parse, which has no context, holds it to the tagged rule.
+func (PostgresqlRule) parseAt(component *oam.Component, level oam.ImageReferenceLevel) (*PostgresqlConfig, error) {
 	config := &PostgresqlConfig{
 		Name: component.Name,
 	}
@@ -482,7 +489,7 @@ func (PostgresqlRule) parse(component *oam.Component) (*PostgresqlConfig, error)
 			return nil, err
 		}
 		if config.PoolerImage != "" {
-			if err := ValidateImageRef(config.PoolerImage); err != nil {
+			if err := ValidateImageRefAt(config.PoolerImage, level); err != nil {
 				return nil, errors.Wrap(err, "pooler.image")
 			}
 		}

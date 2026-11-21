@@ -139,7 +139,8 @@ func (h *CnpgClusterHandler) PlatformNeedsFor(component *oam.Component) []oam.Pl
 func (h *CnpgClusterHandler) Endpoints(component *oam.Component) ([]netpol.Endpoint, error) {
 	// Endpoints are collected separately from the build, so the build's own
 	// decode and validation run here too. The namespace takes no part in them.
-	if _, err := h.ToApplicationConfig(component, ""); err != nil {
+	query := component.WithImageLevel(oam.ImageLevelAny)
+	if _, err := h.ToApplicationConfig(&query, ""); err != nil {
 		return nil, err
 	}
 	return []netpol.Endpoint{{
@@ -303,11 +304,13 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	if err := refuseUnauthoredRequired(props, cnpgClusterRequired); err != nil {
 		return nil, err
 	}
-	if err := validateCnpgClusterImageRefs(spec); err != nil {
+	level := component.ImageLevel()
+	if err := validateCnpgClusterImageRefsAt(spec, level); err != nil {
 		return nil, err
 	}
 
 	return &CnpgClusterConfig{
+		imageLevel:          level,
 		Name:                component.Name,
 		ObjectName:          componentObjectName(component),
 		Metadata:            component.ObjectMetadata(),
@@ -729,6 +732,28 @@ type CnpgClusterConfig struct {
 	// policyMaxStorageSize is the policy's maximum storage size as ApplyPolicy
 	// saw it, kept for ApplyPostgresqlDefaults, which fills a size after it.
 	policyMaxStorageSize string
+	// imageLevel is the level the images were held to at parse, which Generate
+	// holds them to again; unset is oam.ImageLevelTagged (go-kure/launcher#1644).
+	imageLevel oam.ImageReferenceLevel
+}
+
+// ImageReferences implements oam.ImageReferenced: imageName and the reference of
+// each extension's image volume, which the Transformer holds to the policy's
+// level after the handler has built the config.
+func (c *CnpgClusterConfig) ImageReferences() []oam.ImageReference {
+	var refs []oam.ImageReference
+	if c.Spec.ImageName != "" {
+		refs = append(refs, oam.ImageReference{Field: "imageName", Reference: c.Spec.ImageName})
+	}
+	for i, ext := range c.Spec.PostgresConfiguration.Extensions {
+		if ext.ImageVolumeSource.Reference != "" {
+			refs = append(refs, oam.ImageReference{
+				Field:     fmt.Sprintf("postgresql.extensions[%d].image.reference", i),
+				Reference: ext.ImageVolumeSource.Reference,
+			})
+		}
+	}
+	return refs
 }
 
 // ApplyPolicy applies policy defaults, then enforces policy limits. The order
@@ -993,8 +1018,14 @@ func (c *CnpgClusterConfig) validateStorageSizes() error {
 // imageName CloudNativePG's webhook refuses one, and a tag that is no
 // PostgreSQL version: those are the operator's value rules and are left to it.
 func validateCnpgClusterImageRefs(spec *cnpgv1.ClusterSpec) error {
+	return validateCnpgClusterImageRefsAt(spec, oam.ImageLevelTagged)
+}
+
+// validateCnpgClusterImageRefsAt is validateCnpgClusterImageRefs holding the
+// images to level (go-kure/launcher#1644).
+func validateCnpgClusterImageRefsAt(spec *cnpgv1.ClusterSpec, level oam.ImageReferenceLevel) error {
 	if spec.ImageName != "" {
-		if err := ValidateImageRef(spec.ImageName); err != nil {
+		if err := ValidateImageRefAt(spec.ImageName, level); err != nil {
 			return errors.Wrap(err, "imageName")
 		}
 	}
@@ -1002,7 +1033,7 @@ func validateCnpgClusterImageRefs(spec *cnpgv1.ClusterSpec) error {
 		if ext.ImageVolumeSource.Reference == "" {
 			continue
 		}
-		if err := ValidateImageRef(ext.ImageVolumeSource.Reference); err != nil {
+		if err := ValidateImageRefAt(ext.ImageVolumeSource.Reference, level); err != nil {
 			return errors.Wrap(err, fmt.Sprintf("postgresql.extensions[%d].image.reference", i))
 		}
 	}
@@ -1058,7 +1089,7 @@ func (c *CnpgClusterConfig) Generate(app *stack.Application) ([]*client.Object, 
 	if err := c.validateStorageSizes(); err != nil {
 		return nil, err
 	}
-	if err := validateCnpgClusterImageRefs(&c.Spec); err != nil {
+	if err := validateCnpgClusterImageRefsAt(&c.Spec, imageLevelOrTagged(c.imageLevel)); err != nil {
 		return nil, err
 	}
 	// As in postgresql, checked on the resources the Cluster actually carries:

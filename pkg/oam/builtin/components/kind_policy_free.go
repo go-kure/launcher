@@ -36,6 +36,15 @@ type policyFreeKind[T any] struct {
 	// validate, when set, refuses what the strict decode cannot: a field the
 	// API requires and the author left out or empty.
 	validate func(decoded *T) error
+	// validateAt, when set, is validate for a kind that names images: it is
+	// called in its place with the image level of the component
+	// (oam.Component.ImageLevel), and validate stays the form that holds the
+	// level tagged, for a caller that has no component.
+	validateAt func(decoded *T, level oam.ImageReferenceLevel) error
+	// images, when set, lists the image references decoded names, for the
+	// Transformer's own reading of them at the policy's level
+	// (oam.ImageReferenced). It is set by every kind that sets validateAt.
+	images func(decoded *T) []oam.ImageReference
 	// validateName, when set, refuses what the object's name and decoded
 	// together make invalid in the objects another controller names after it.
 	// name is the one the object takes (oam.Component.ObjectName), and
@@ -115,7 +124,12 @@ func (k *policyFreeKind[T]) config(component *oam.Component) (stack.ApplicationC
 	if err := refuseUnauthoredRequired(authored, k.required); err != nil {
 		return nil, err
 	}
-	if k.validate != nil {
+	switch {
+	case k.validateAt != nil:
+		if err := k.validateAt(decoded, component.ImageLevel()); err != nil {
+			return nil, err
+		}
+	case k.validate != nil:
 		if err := k.validate(decoded); err != nil {
 			return nil, err
 		}
@@ -165,6 +179,15 @@ type policyFreeKindConfig[T any] struct {
 	// (oam.Component.ObjectMetadata).
 	metadata oam.ObjectMetadata
 	decoded  *T
+}
+
+// ImageReferences implements oam.ImageReferenced: the images of the decoded
+// value, none for a kind that names no image.
+func (c *policyFreeKindConfig[T]) ImageReferences() []oam.ImageReference {
+	if c.kind.images == nil {
+		return nil
+	}
+	return c.kind.images(c.decoded)
 }
 
 // ApplyPolicy is a no-op, for any policy: see the top of this file.

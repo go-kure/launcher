@@ -50,11 +50,6 @@ func TestCnpgClusterHandler_EndpointsForPropertiesTheBuildRefuses(t *testing.T) 
 			map[string]any{"replica": map[string]any{"enabled": true}},
 			`replica.source: required`,
 		},
-		{
-			"an image without a tag",
-			map[string]any{"imageName": "ghcr.io/example/postgres"},
-			`imageName: image "ghcr.io/example/postgres" rejected: no tag or digest specified`,
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			comp := &oam.Component{Name: "db", Type: "cnpg-cluster", Properties: tc.props}
@@ -67,6 +62,18 @@ func TestCnpgClusterHandler_EndpointsForPropertiesTheBuildRefuses(t *testing.T) 
 				t.Errorf("Endpoints = %+v, %v\nwant no endpoint and ToApplicationConfig's refusal: %v", eps, err, buildErr)
 			}
 		})
+	}
+
+	// The image reference is the one property Endpoints does not hold to the
+	// build's rule: the endpoint a component answers does not depend on which
+	// image it runs, so an image the build refuses at the tagged level (no tag)
+	// still has its endpoint (go-kure/launcher#1644).
+	untagged := &oam.Component{Name: "db", Type: "cnpg-cluster", Properties: map[string]any{"imageName": "ghcr.io/example/postgres"}}
+	if _, err := h.ToApplicationConfig(untagged, "data"); err == nil || !strings.Contains(err.Error(), `imageName: image "ghcr.io/example/postgres" rejected: no tag or digest specified`) {
+		t.Fatalf("ToApplicationConfig err = %v\nwant the tag refusal", err)
+	}
+	if eps, err := h.Endpoints(untagged); err != nil || len(eps) != 1 {
+		t.Errorf("Endpoints = %+v, %v\nwant the one endpoint of an image that names no tag", eps, err)
 	}
 
 	accepted := &oam.Component{Name: "db", Type: "cnpg-cluster", Properties: map[string]any{

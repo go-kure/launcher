@@ -197,7 +197,11 @@ var thanosRulerKind = &policyHeldKind[monitoringv1.ThanosRulerSpec]{
 		generatedRequired: thanosRulerRequired,
 		defaultedZeros:    monitoringWorkloadDefaultedZeros(nil, thanosRulerDefaultedZeroFields),
 		validate:          validateThanosRuler,
-		validateName:      validateThanosRulerName,
+		validateAt:        validateThanosRulerAt,
+		images: func(spec *monitoringv1.ThanosRulerSpec) []oam.ImageReference {
+			return monitoringImageReferences(thanosRulerWorkload(spec))
+		},
+		validateName: validateThanosRulerName,
 		build: func(name, namespace string, spec *monitoringv1.ThanosRulerSpec) client.Object {
 			ruler := prometheus.CreateThanosRuler(name, namespace)
 			spec.DeepCopyInto(&ruler.Spec)
@@ -319,6 +323,12 @@ var thanosRulerGenerated = map[string][]string{
 // uses the first storage arm set, and an emptyDir where storage is unset
 // (makeStatefulSet, :92-133).
 func validateThanosRuler(spec *monitoringv1.ThanosRulerSpec) error {
+	return validateThanosRulerAt(spec, oam.ImageLevelTagged)
+}
+
+// validateThanosRulerAt is validateThanosRuler holding every image to the given
+// level (go-kure/launcher#1644).
+func validateThanosRulerAt(spec *monitoringv1.ThanosRulerSpec, level oam.ImageReferenceLevel) error {
 	if err := refuseNegativeReplicas(spec.Replicas, "the Prometheus operator copies it into the StatefulSet, which the API refuses with fewer than 0; write 0 or more"); err != nil {
 		return err
 	}
@@ -328,7 +338,7 @@ func validateThanosRuler(spec *monitoringv1.ThanosRulerSpec) error {
 	if err := validateOperatorStorage(spec.Storage); err != nil {
 		return err
 	}
-	if err := validateMonitoringWorkload(thanosRulerWorkload(spec)); err != nil {
+	if err := validateMonitoringWorkloadAt(thanosRulerWorkload(spec), level); err != nil {
 		return err
 	}
 	return validateThanosRulerVersion(spec)

@@ -51,7 +51,7 @@ func (r PostgresqlRule) Outputs(comp *oam.Component, lctx oam.LoweringContext) (
 	if err != nil {
 		return nil, err
 	}
-	c, err := r.parse(comp)
+	c, err := r.parseAt(comp, lctx.ImageLevel())
 	if err != nil {
 		return nil, err
 	}

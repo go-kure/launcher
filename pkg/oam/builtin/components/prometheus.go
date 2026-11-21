@@ -288,7 +288,11 @@ var prometheusKind = &policyHeldKind[monitoringv1.PrometheusSpec]{
 		defaultedZerosFor: func(spec *monitoringv1.PrometheusSpec) defaultedZeroFields {
 			return monitoringWorkloadDefaultedZeros(&corev1.PodSpec{HostNetwork: spec.HostNetwork}, prometheusDefaultedZeroFields)
 		},
-		validate:     validatePrometheus,
+		validate:   validatePrometheus,
+		validateAt: validatePrometheusAt,
+		images: func(spec *monitoringv1.PrometheusSpec) []oam.ImageReference {
+			return monitoringImageReferences(prometheusWorkload(spec))
+		},
 		validateName: validatePrometheusName,
 		build: func(name, namespace string, spec *monitoringv1.PrometheusSpec) client.Object {
 			p := prometheus.CreatePrometheus(name, namespace)
@@ -419,6 +423,12 @@ var prometheusRulesLeft = map[string]string{
 // An externalUrl Prometheus exits on at startup is refused too
 // (refusePrometheusExternalURL).
 func validatePrometheus(spec *monitoringv1.PrometheusSpec) error {
+	return validatePrometheusAt(spec, oam.ImageLevelTagged)
+}
+
+// validatePrometheusAt is validatePrometheus holding every image to the given
+// level (go-kure/launcher#1644).
+func validatePrometheusAt(spec *monitoringv1.PrometheusSpec, level oam.ImageReferenceLevel) error {
 	type part struct {
 		path, use string
 		value     *string
@@ -458,7 +468,7 @@ func validatePrometheus(spec *monitoringv1.PrometheusSpec) error {
 	if err := validateThanosSidecarMounts(spec.Thanos); err != nil {
 		return err
 	}
-	if err := validateMonitoringWorkload(prometheusWorkload(spec)); err != nil {
+	if err := validateMonitoringWorkloadAt(prometheusWorkload(spec), level); err != nil {
 		return err
 	}
 	// The operator writes a startup, a liveness and a readiness probe on the

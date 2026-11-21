@@ -181,8 +181,26 @@ type monitoringWorkload struct {
 // refused where the filled request exceeds it: the operator fills it whatever
 // the limit, and the API refuses a pod whose request exceeds its limit.
 func validateMonitoringWorkload(w monitoringWorkload) error {
+	return validateMonitoringWorkloadAt(w, oam.ImageLevelTagged)
+}
+
+// monitoringImageReferences lists the images the workload names: the ones
+// outside the pod, each container's and each image volume's.
+func monitoringImageReferences(w monitoringWorkload) []oam.ImageReference {
+	var refs []oam.ImageReference
 	for _, image := range w.images {
-		if err := ValidateImageRef(image.value); err != nil {
+		if image.value != "" {
+			refs = append(refs, oam.ImageReference{Field: image.path, Reference: image.value})
+		}
+	}
+	return append(refs, podSpecImageReferences("", &w.pod)...)
+}
+
+// validateMonitoringWorkloadAt is validateMonitoringWorkload holding every
+// image the workload names to the given level (go-kure/launcher#1644).
+func validateMonitoringWorkloadAt(w monitoringWorkload, level oam.ImageReferenceLevel) error {
+	for _, image := range w.images {
+		if err := ValidateImageRefAt(image.value, level); err != nil {
 			return errors.Wrap(err, image.path)
 		}
 	}
@@ -199,7 +217,7 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 			first[c.Name] = i
 			switch {
 			case c.Image != "":
-				if err := ValidateImageRef(c.Image); err != nil {
+				if err := ValidateImageRefAt(c.Image, level); err != nil {
 					return errors.Wrap(err, where)
 				}
 			case len(w.generated[list.name]) == 0:
@@ -278,7 +296,7 @@ func validateMonitoringWorkload(w monitoringWorkload) error {
 	if sc := w.pod.SecurityContext; sc != nil && sc.WindowsOptions != nil && sc.WindowsOptions.HostProcess != nil && *sc.WindowsOptions.HostProcess && !w.pod.HostNetwork {
 		return errors.New("securityContext.windowsOptions.hostProcess: hostNetwork must be true when hostProcess is true; the API refuses the pods the Prometheus operator builds otherwise")
 	}
-	if err := validateImageVolumeRefs("", &w.pod); err != nil {
+	if err := validateImageVolumeRefsAt("", &w.pod, level); err != nil {
 		return err
 	}
 	for _, r := range w.resources {

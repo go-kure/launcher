@@ -26,7 +26,7 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}
-	c, err := r.parse(comp)
+	c, err := r.parseAt(comp, lctx.ImageLevel())
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}
@@ -59,7 +59,7 @@ func (r PostgresqlRule) LowerComponent(comp *oam.Component, lctx oam.LoweringCon
 		return oam.LoweringResult{}, err
 	}
 
-	spec, err := c.clusterSpec()
+	spec, err := c.clusterSpecAt(lctx.ImageLevel())
 	if err != nil {
 		return oam.LoweringResult{}, err
 	}
@@ -540,6 +540,12 @@ func exactNumbers(v any) error {
 // the same text, on the authored values; the Cluster's kind repeats them on the
 // values after the policy.
 func (c *PostgresqlConfig) clusterSpec() (cnpgv1.ClusterSpec, error) {
+	return c.clusterSpecAt(oam.ImageLevelTagged)
+}
+
+// clusterSpecAt is clusterSpec holding the Cluster's image to the given level
+// (go-kure/launcher#1644).
+func (c *PostgresqlConfig) clusterSpecAt(level oam.ImageReferenceLevel) (cnpgv1.ClusterSpec, error) {
 	// ClusterSpec.Instances has Minimum=1.
 	if c.explicitReplicas && c.Replicas < 1 {
 		return cnpgv1.ClusterSpec{}, errors.Errorf("replicas: must be >= 1, got %d", c.Replicas)
@@ -571,10 +577,10 @@ func (c *PostgresqlConfig) clusterSpec() (cnpgv1.ClusterSpec, error) {
 	imageName := c.ImageName
 	if imageName == "" {
 		imageName = fmt.Sprintf("ghcr.io/cloudnative-pg/postgresql:%s", c.Version)
-		if err := ValidateImageRef(imageName); err != nil {
+		if err := ValidateImageRefAt(imageName, level); err != nil {
 			return cnpgv1.ClusterSpec{}, errors.Wrapf(err, "version: %q is refused as the tag of the default image", c.Version)
 		}
-	} else if err := ValidateImageRef(imageName); err != nil {
+	} else if err := ValidateImageRefAt(imageName, level); err != nil {
 		return cnpgv1.ClusterSpec{}, errors.Wrap(err, "imageName")
 	}
 
