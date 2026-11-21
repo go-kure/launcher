@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/util/validation"
 
@@ -375,6 +376,17 @@ func (l LoweringContext) Capability(key string) (CapabilityBinding, bool) {
 	return binding, ok
 }
 
+// ModelBuildTimeout is the time limit of the build the caller set on
+// TransformContext.ModelBuildTimeout (go-kure/launcher#1663): the model engine
+// reads it for the budget of its renders. Zero means the engine's own default,
+// and it is zero where no transform made the allocator.
+func (l LoweringContext) ModelBuildTimeout() time.Duration {
+	if l.Namer == nil {
+		return 0
+	}
+	return l.Namer.modelBuildTimeout
+}
+
 // HasNamingHook reports whether a name ResolveName or ResolveMemberName resolves
 // without an authored name may be the TransformContext.Naming hook's answer
 // rather than the default. A rule that reads another component of Document and
@@ -443,6 +455,12 @@ type NameAllocator struct {
 	// emit is TransformContext.EmitHook on the allocator of a transform, nil on any
 	// other: LoweringContext.EmitModelComponent calls it for a model's component.
 	emit func(ModelEmit) error
+	// modelBuildTimeout is TransformContext.ModelBuildTimeout on the allocator of a
+	// run, zero on any other: LoweringContext.ModelBuildTimeout reads it. It sits
+	// here, with runState, because every context of a run shares the allocator, and
+	// the query for the outputs of a component builds its own context but shares
+	// the run state of its parent.
+	modelBuildTimeout time.Duration
 	// runState is what a rule keeps for the whole run: LoweringContext.RunState.
 	runState map[any]any
 	// lowered holds the object names lowering rules resolved, in the order they
@@ -1126,6 +1144,7 @@ func (t *Transformer) runLowering(seed []loweringDoc, ctx TransformContext) ([]l
 	namer := ctx.nameClaims
 	if namer == nil {
 		namer = NewNameAllocator()
+		namer.modelBuildTimeout = ctx.ModelBuildTimeout
 	}
 	var chain []LoweringStep
 	cur := seed

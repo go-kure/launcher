@@ -152,7 +152,9 @@ model key, the part id, the type as the model wrote it, the name the build gave 
 properties. A hook error fails the transform and names the model and the part. A Go lowering rule
 and an authored component never reach the hook, and a nil hook asks nothing. The model rule keeps the
 limits of the whole build (parts, cost, emitted properties bytes and time) in `LoweringContext.RunState`,
-so that they belong to one transform.
+so that they belong to one transform. A caller sets the time limit of a build in
+`TransformContext.ModelBuildTimeout` (zero is the default of one second, a negative value is refused);
+the model rule reads it through `LoweringContext.ModelBuildTimeout`.
 A component lowering rule seals the traits it writes by hand: they skip the capability merge, the
 missing-binding refusal and the consumption record, and, when the rule's input counted as checked
 (it declares a property schema, or its input was synthesized), the platform-reserved refusal too.
