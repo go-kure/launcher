@@ -149,24 +149,21 @@ spec:
   releaseName: podinfo
   valuesFrom:
   - kind: ConfigMap
-    name: podinfo-values-3f4f090c42
-    valuesKey: values.json
+    name: podinfo-values-938762c9a3
+    valuesKey: values.yaml
   - kind: Secret
     name: podinfo-credentials
 ---
 apiVersion: v1
 data:
-  values.json: |-
-    {
-      "replicaCount": 2,
-      "ui": {
-        "message": "hello"
-      }
-    }
+  values.yaml: |
+    replicaCount: 2
+    ui:
+      message: hello
 kind: ConfigMap
 metadata:
   labels:
     app: podinfo
     launcher.gokure.dev/component: podinfo
-  name: podinfo-values-3f4f090c42
+  name: podinfo-values-938762c9a3
   namespace: default

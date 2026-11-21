@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/util/validation"
+	sigsyaml "sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/components"
@@ -78,11 +79,11 @@ func secretValuesTrait(t *testing.T, release oam.Component) (name, data string) 
 	if len(trait.Properties) != 2 || len(d) != 1 {
 		t.Fatalf("trait has properties %d and stringData entries %d, want exactly name and a one-key stringData", len(trait.Properties), len(d))
 	}
-	data, _ = d["values.json"].(string)
+	data, _ = d["values.yaml"].(string)
 	if data == "" {
-		t.Fatal("trait stringData has no values.json string")
+		t.Fatal("trait stringData has no values.yaml string")
 	}
-	want := map[string]any{"kind": "Secret", "name": name, "valuesKey": "values.json"}
+	want := map[string]any{"kind": "Secret", "name": name, "valuesKey": "values.yaml"}
 	from, _ := release.Properties["valuesFrom"].([]any)
 	found := false
 	for _, entry := range from {
@@ -155,15 +156,22 @@ func TestHelmRule_SecretValues(t *testing.T) {
 		t.Errorf("Secret name %q carries the sensitive value", name)
 	}
 
+	// read as Flux reads a values reference: YAML, numbers kept as text
 	var stored map[string]any
-	dec := json.NewDecoder(strings.NewReader(data))
-	dec.UseNumber()
-	if err := dec.Decode(&stored); err != nil {
+	if err := sigsyaml.Unmarshal([]byte(data), &stored, func(d *json.Decoder) *json.Decoder {
+		d.UseNumber()
+		return d
+	}); err != nil {
 		t.Fatalf("stored secretValues: %v", err)
 	}
 	want := map[string]any{"auth": map[string]any{"password": sensitive}, "pin": json.Number("18446744073709551615")}
 	if !reflect.DeepEqual(stored, want) {
 		t.Errorf("stored secretValues do not decode back to the authored ones")
+	}
+	// the stored text is a YAML values file, the same shape as the values
+	// ConfigMap's, not JSON (which a YAML reader would also accept)
+	if wantText := "auth:\n  password: " + sensitive + "\npin: 18446744073709551615\n"; data != wantText {
+		t.Errorf("stored secretValues text = %q, want %q", data, wantText)
 	}
 }
 

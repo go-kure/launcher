@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -22,6 +21,7 @@ import (
 	kureio "github.com/go-kure/kure/pkg/io"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
 )
@@ -167,15 +167,15 @@ func TestHelmSecretValues_Emitted(t *testing.T) {
 					t.Fatalf("generated %v, want %v", order, wantOrder)
 				}
 
-				// The Secret: one values.json entry holding the secretValues, named for
+				// The Secret: one values.yaml entry holding the secretValues, named for
 				// the digest of those bytes, labelled as the component's.
-				stored := secret.Data["values.json"]
+				stored := secret.Data["values.yaml"]
 				sum := sha256.Sum256(stored)
 				if len(secret.Data) != 1 || secret.Name != "podinfo-secret-values-"+hex.EncodeToString(sum[:])[:10] {
-					t.Errorf("Secret %s with %d entries, want one values.json named for its digest", secret.Name, len(secret.Data))
+					t.Errorf("Secret %s with %d entries, want one values.yaml named for its digest", secret.Name, len(secret.Data))
 				}
 				var got map[string]any
-				if err := json.Unmarshal(stored, &got); err != nil {
+				if err := yaml.Unmarshal(stored, &got); err != nil {
 					t.Fatalf("stored secretValues: %v", err)
 				}
 				if want := map[string]any{"auth": map[string]any{"password": secretSentinel}}; !reflect.DeepEqual(got, want) {
@@ -197,9 +197,9 @@ func TestHelmSecretValues_Emitted(t *testing.T) {
 				for _, vf := range hr.Spec.ValuesFrom {
 					from = append(from, vf.Kind+"/"+vf.Name+"/"+vf.ValuesKey)
 				}
-				wantFrom := []string{"Secret/" + secret.Name + "/values.json", "Secret/creds/"}
+				wantFrom := []string{"Secret/" + secret.Name + "/values.yaml", "Secret/creds/"}
 				if mode == "configMap" {
-					wantFrom = append([]string{"ConfigMap/" + cm.Name + "/values.json"}, wantFrom...)
+					wantFrom = append([]string{"ConfigMap/" + cm.Name + "/values.yaml"}, wantFrom...)
 					if hr.Spec.Values != nil {
 						t.Errorf("HelmRelease still carries inline values %s", hr.Spec.Values.Raw)
 					}

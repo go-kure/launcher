@@ -65,13 +65,18 @@ has no registration-time default for it: `inline` (or no `valuesMode`) keeps
 **`valuesMode: configMap`** with non-empty `values` moves them into a
 `configmap` trait the rule appends to the `helmrelease`, after its authored
 traits, and drops `values` from it. The trait's ConfigMap carries the values
-under the key `values.json`, and a `valuesFrom` entry `{kind: ConfigMap, name:
-<it>, valuesKey: values.json}` is placed before the authored entries, so an
+as a Helm values file under the key `values.yaml`, which is also the key Flux
+assumes when `valuesKey` is unset, and a `valuesFrom` entry `{kind: ConfigMap,
+name: <it>, valuesKey: values.yaml}` is placed before the authored entries, so an
 authored entry wins on a shared key (Flux merges `spec.valuesFrom` in list
-order). The values are serialized once, as indented JSON with sorted keys and
-numbers kept exact (JSON is YAML, which is how Flux reads a values reference);
-those exact bytes are both stored and hashed into the name:
-`<component>-values-<first 10 hex digits of their sha256>`. A name that would
+order). The values are serialized once, as YAML with two-space indent, the keys
+of every map in byte order (capitals first, `a10` before `a2`) and numbers kept
+exact; a string that a YAML 1.1 reader such as Flux's would take for another
+type (`yes`, `1:30`, `0777`, `~`) is quoted, so it comes back as the same
+string. Those exact bytes are both stored and hashed into the name:
+`<component>-values-<first 10 hex digits of their sha256>`. Up to
+go-kure/launcher#1639 the bytes were indented JSON under `values.json`, so
+every such name changed once. A name that would
 exceed 253 bytes is shortened by the one shortening rule
 (`oam.ShortenNameWithSuffix`): the component name is cut to a prefix plus the
 first 10 hex digits of the sha256 of the full component name (8 before
@@ -149,11 +154,11 @@ name a Secret in `valuesFrom`.
 
 *Under `delivery: flux`* the rule appends a `secret` trait to the `helmrelease`,
 after its authored traits and after the values ConfigMap's trait. The trait's
-Secret holds the tree under the key `values.json`, serialized as the values
+Secret holds the tree under the key `values.yaml`, serialized as the values
 ConfigMap's is, and is named `<component>-secret-values-<first 10 hex digits of
 the sha256 of those bytes>`, shortened past 253 bytes by the same rule
 (`oam.ShortenNameWithSuffix`). A `valuesFrom` entry `{kind: Secret, name: <it>,
-valuesKey: values.json}` is placed after the values ConfigMap's entry and before
+valuesKey: values.yaml}` is placed after the values ConfigMap's entry and before
 the authored entries, so the order is: values ConfigMap, values Secret,
 authored. No value of `secretValues` is written to the HelmRelease or to the
 values ConfigMap. Being an ordinary `secret` trait, it is checked by that trait

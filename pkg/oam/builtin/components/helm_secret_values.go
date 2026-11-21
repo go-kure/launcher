@@ -66,9 +66,9 @@ func helmSecretValuesTrait(values any, secretValues map[string]any, name func(di
 			return nil, nil, err
 		}
 	}
-	data, err := json.MarshalIndent(secret, "", "  ")
+	data, err := helmValuesYAML(secret)
 	if err != nil {
-		return nil, nil, errors.Errorf("%s: %s is not representable as JSON", helmType, helmSecretValuesKey)
+		return nil, nil, errors.Errorf("%s: %s is not representable as YAML", helmType, helmSecretValuesKey)
 	}
 	sum := sha256.Sum256(data)
 	// The resolver's messages name a name and a role, never a value.

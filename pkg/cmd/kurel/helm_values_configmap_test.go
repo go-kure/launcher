@@ -104,16 +104,16 @@ func TestHelmValuesConfigMap_Emitted(t *testing.T) {
 		if !maps.Equal(cm.Labels, want) {
 			t.Errorf("fluxNS %q: ConfigMap labels %v, want %v", fluxNS, cm.Labels, want)
 		}
-		data := cm.Data["values.json"]
+		data := cm.Data["values.yaml"]
 		sum := sha256.Sum256([]byte(data))
 		if len(cm.Data) != 1 || cm.Name != "podinfo-values-"+hex.EncodeToString(sum[:])[:10] {
-			t.Errorf("fluxNS %q: ConfigMap %s data %v, want one values.json named for its digest", fluxNS, cm.Name, cm.Data)
+			t.Errorf("fluxNS %q: ConfigMap %s data %v, want one values.yaml named for its digest", fluxNS, cm.Name, cm.Data)
 		}
 		if hr.Spec.Values != nil {
 			t.Errorf("fluxNS %q: HelmRelease still carries inline values %s", fluxNS, hr.Spec.Values.Raw)
 		}
 		if vf := hr.Spec.ValuesFrom; len(vf) != 2 || vf[0].Kind != "ConfigMap" || vf[0].Name != cm.Name ||
-			vf[0].ValuesKey != "values.json" || vf[1].Name != "creds" {
+			vf[0].ValuesKey != "values.yaml" || vf[1].Name != "creds" {
 			t.Errorf("fluxNS %q: valuesFrom %+v, want the ConfigMap then creds", fluxNS, vf)
 		}
 

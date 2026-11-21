@@ -689,8 +689,9 @@ Explicit values are written into a Secret by `secretValues` under Flux delivery 
   has no such property: an author using the kind names a Secret in `valuesFrom`.
 - **Flux delivery:** the `helm` rule appends a `secret` trait to the `helmrelease`
   (`helmSecretValuesTrait`, `pkg/oam/builtin/components/helm_secret_values.go`). Its
-  Secret holds the tree under the key `values.json`, serialized as the values ConfigMap's
-  is, and is named `<component>-secret-values-<hash>`: ten hex digits of the sha256 of
+  Secret holds the tree under the key `values.yaml`, serialized as the values ConfigMap's
+  is (YAML, keys of every map in byte order, numbers kept exact; go-kure/launcher#1639
+  replaced the JSON under `values.json`), and is named `<component>-secret-values-<hash>`: ten hex digits of the sha256 of
   those bytes, shortened by the rule of §3.3. It is in the HelmRelease's namespace and
   follows it into the Flux namespace, as the values ConfigMap does. The `valuesFrom` order
   is: values ConfigMap, values Secret, authored entries. No value of the tree is written
