@@ -194,7 +194,11 @@ var alertmanagerKind = &policyHeldKind[monitoringv1.AlertmanagerSpec]{
 		defaultedZerosFor: func(spec *monitoringv1.AlertmanagerSpec) defaultedZeroFields {
 			return monitoringWorkloadDefaultedZeros(&corev1.PodSpec{HostNetwork: spec.HostNetwork}, alertmanagerDefaultedZeroFields)
 		},
-		validate:     validateAlertmanager,
+		validate:   validateAlertmanager,
+		validateAt: validateAlertmanagerAt,
+		images: func(spec *monitoringv1.AlertmanagerSpec) []oam.ImageReference {
+			return monitoringImageReferences(alertmanagerWorkload(spec))
+		},
 		validateName: validateAlertmanagerName,
 		build: func(name, namespace string, spec *monitoringv1.AlertmanagerSpec) client.Object {
 			alertmanager := prometheus.CreateAlertmanager(name, namespace)
@@ -292,6 +296,12 @@ var alertmanagerRulesLeft = map[string]string{
 // prometheus-operator v0.94.1). A value that does not parse is left to the
 // API's own pattern, as the operator leaves it.
 func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
+	return validateAlertmanagerAt(spec, oam.ImageLevelTagged)
+}
+
+// validateAlertmanagerAt is validateAlertmanager holding every image to the
+// given level (go-kure/launcher#1644).
+func validateAlertmanagerAt(spec *monitoringv1.AlertmanagerSpec, level oam.ImageReferenceLevel) error {
 	for _, field := range []fieldValue{{"baseImage", spec.BaseImage}, {"sha", spec.SHA}, {"tag", spec.Tag}} {
 		if field.value != "" {
 			return errors.Errorf("%s: not authorable: the Prometheus operator deprecates the field, and composes the image it yields outside what the object states; use image", field.path)
@@ -342,7 +352,7 @@ func validateAlertmanager(spec *monitoringv1.AlertmanagerSpec) error {
 	if err := validateAlertmanagerTLS(spec); err != nil {
 		return err
 	}
-	if err := validateMonitoringWorkload(alertmanagerWorkload(spec)); err != nil {
+	if err := validateMonitoringWorkloadAt(alertmanagerWorkload(spec), level); err != nil {
 		return err
 	}
 	// The operator writes a liveness and a readiness probe on the

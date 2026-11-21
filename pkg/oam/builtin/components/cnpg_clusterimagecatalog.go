@@ -39,9 +39,11 @@ func (h *CnpgClusterImageCatalogHandler) PropertySchema() map[string]oam.Propert
 // cnpgImageCatalogKind is, for the cluster-scoped object.
 var cnpgClusterImageCatalogKind = &policyHeldKind[cnpgv1.ImageCatalogSpec]{
 	policyFreeKind: policyFreeKind[cnpgv1.ImageCatalogSpec]{
-		upstream: "postgresql.cnpg.io/v1 ImageCatalogSpec",
-		required: generatedKindRequired("cnpg-clusterimagecatalog"),
-		validate: validateCnpgImageCatalog,
+		upstream:   "postgresql.cnpg.io/v1 ImageCatalogSpec",
+		required:   generatedKindRequired("cnpg-clusterimagecatalog"),
+		validate:   validateCnpgImageCatalog,
+		validateAt: validateCnpgImageCatalogAt,
+		images:     cnpgImageCatalogImageReferences,
 		build: func(name, _ string, spec *cnpgv1.ImageCatalogSpec) client.Object {
 			catalog := kurecnpg.CreateClusterImageCatalog(name)
 			spec.DeepCopyInto(&catalog.Spec)

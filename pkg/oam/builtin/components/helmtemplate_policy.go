@@ -140,17 +140,20 @@ func enforceRenderedObjectPolicy(obj client.Object, p oam.Policy) error {
 	if err := enforcePodTemplatePolicy(path, ps, p); err != nil {
 		return err
 	}
+	// The rendered images are held to the policy's own level
+	// (go-kure/launcher#1644): a chart's render has no component to carry one.
+	level := oam.ImageReferenceLevelOf(p)
 	for i, ctr := range ps.InitContainers {
-		if err := ValidateImageRef(ctr.Image); err != nil {
+		if err := ValidateImageRefAt(ctr.Image, level); err != nil {
 			return errors.Wrapf(err, "%s.initContainers[%d] %q", path, i, ctr.Name)
 		}
 	}
 	for i, ctr := range ps.Containers {
-		if err := ValidateImageRef(ctr.Image); err != nil {
+		if err := ValidateImageRefAt(ctr.Image, level); err != nil {
 			return errors.Wrapf(err, "%s.containers[%d] %q", path, i, ctr.Name)
 		}
 	}
-	return validateImageVolumeRefs(path+".", ps)
+	return validateImageVolumeRefsAt(path+".", ps, level)
 }
 
 // enforceRenderedClaims holds the storage a rendered claim requests to the

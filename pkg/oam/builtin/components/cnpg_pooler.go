@@ -74,7 +74,8 @@ func (h *CnpgPoolerHandler) Endpoints(component *oam.Component) ([]netpol.Endpoi
 	// decode and validation run here too: the Pooler's name, the decode of its
 	// spec, and the cluster reference that is the Pooler's own name among
 	// them. The namespace takes no part in them.
-	if _, err := h.ToApplicationConfig(component, ""); err != nil {
+	query := component.WithImageLevel(oam.ImageLevelAny)
+	if _, err := h.ToApplicationConfig(&query, ""); err != nil {
 		return nil, err
 	}
 	return []netpol.Endpoint{{
@@ -154,7 +155,7 @@ func (h *CnpgPoolerHandler) ToApplicationConfig(component *oam.Component, namesp
 	if err := refuseUncarriedSpecValues(props, spec, cnpgDefaultedZeros(cnpgPoolerDefaultedZeroFields)); err != nil {
 		return nil, err
 	}
-	cfg := &CnpgPoolerConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec}
+	cfg := &CnpgPoolerConfig{Name: component.Name, ObjectName: componentObjectName(component), Metadata: component.ObjectMetadata(), Namespace: namespace, Spec: *spec, imageLevel: component.ImageLevel()}
 	if err := cfg.validate(name); err != nil {
 		return nil, err
 	}
@@ -205,6 +206,26 @@ type CnpgPoolerConfig struct {
 	Metadata  oam.ObjectMetadata
 	Namespace string
 	Spec      cnpgv1.PoolerSpec
+
+	// imageLevel is the level the images were held to at parse, which validate
+	// holds them to again; unset is oam.ImageLevelTagged (go-kure/launcher#1644).
+	imageLevel oam.ImageReferenceLevel
+}
+
+// ImageReferences implements oam.ImageReferenced: pgbouncer.image and, in the
+// template, each init and regular container's image and each image volume's
+// reference, which the Transformer holds to the policy's level after the handler
+// has built the config. A field that names no image is not listed, as
+// validateImageRefs does not check it.
+func (c *CnpgPoolerConfig) ImageReferences() []oam.ImageReference {
+	var refs []oam.ImageReference
+	if pgb := c.Spec.PgBouncer; pgb != nil && pgb.Image != "" {
+		refs = append(refs, oam.ImageReference{Field: "pgbouncer.image", Reference: pgb.Image})
+	}
+	if t := c.Spec.Template; t != nil {
+		refs = append(refs, podSpecImageReferences("template.spec.", &t.Spec)...)
+	}
+	return refs
 }
 
 // validate refuses a spec the Pooler CRD or CloudNativePG's webhook would
@@ -325,8 +346,9 @@ func (c *CnpgPoolerConfig) namesPgBouncerImage() bool {
 // (validateAuthoredPodSpec). Under a list, ApplyPolicy refuses a Pooler that
 // names no PgBouncer image at all.
 func (c *CnpgPoolerConfig) validateImageRefs() error {
+	level := imageLevelOrTagged(c.imageLevel)
 	if pgb := c.Spec.PgBouncer; pgb != nil && pgb.Image != "" {
-		if err := ValidateImageRef(pgb.Image); err != nil {
+		if err := ValidateImageRefAt(pgb.Image, level); err != nil {
 			return errors.Wrap(err, "pgbouncer.image")
 		}
 	}
@@ -338,7 +360,7 @@ func (c *CnpgPoolerConfig) validateImageRefs() error {
 		if ctr.Image == "" {
 			continue
 		}
-		if err := ValidateImageRef(ctr.Image); err != nil {
+		if err := ValidateImageRefAt(ctr.Image, level); err != nil {
 			return errors.Wrapf(err, "template.spec.initContainers[%d] %q", i, ctr.Name)
 		}
 	}
@@ -346,11 +368,11 @@ func (c *CnpgPoolerConfig) validateImageRefs() error {
 		if ctr.Image == "" {
 			continue
 		}
-		if err := ValidateImageRef(ctr.Image); err != nil {
+		if err := ValidateImageRefAt(ctr.Image, level); err != nil {
 			return errors.Wrapf(err, "template.spec.containers[%d] %q", i, ctr.Name)
 		}
 	}
-	return validateImageVolumeRefs("template.spec.", &t.Spec)
+	return validateImageVolumeRefsAt("template.spec.", &t.Spec, level)
 }
 
 // Generate emits the Pooler: kure's identity-only constructor plus a deep copy
