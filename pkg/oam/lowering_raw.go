@@ -109,8 +109,9 @@ func (t *Transformer) LowerRawsWithSteps(raws []json.RawMessage, ctx TransformCo
 		return raws, nil, nil // raw-path analogue of the pointer-identity guarantee: nothing to do, nothing touched
 	}
 	// The raw pass is a public entry of its own, not reached through
-	// TransformWithPolicy, so it reads the level from the policy it was given.
+	// TransformWithPolicy, so it reads the levels from the policy it was given.
 	ctx.imageLevel = ImageReferenceLevelOf(ctx.Policy)
+	ctx.sourceLevel = SourceReferenceLevelOf(ctx.Policy)
 
 	claimed := make([]bool, len(raws))
 	seenKeys := make(map[rawDocKey]int, len(raws))
@@ -336,7 +337,7 @@ func (t *Transformer) lowerRawOnce(d loweringDoc, ctx TransformContext, namer *N
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "%s: decode", d.origin)
 	}
-	lctx := LoweringContext{capabilities: ctx.Capabilities, imageLevel: ctx.imageLevel, Origin: d.origin, Namer: namer}
+	lctx := LoweringContext{capabilities: ctx.Capabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel, Origin: d.origin, Namer: namer}
 	result, err := d.rule.LowerDocument(decoded, lctx)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "%s", d.origin)

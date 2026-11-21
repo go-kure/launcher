@@ -131,7 +131,7 @@ func validOutputKey(key string) bool {
 // It consults no TransformContext.Naming hook: a name is the author's or the
 // default. A consumer that sets Naming calls ComponentOutputsNamed.
 func (t *Transformer) ComponentOutputs(comp *Component) ([]Output, error) {
-	return t.componentOutputs(comp, "", nil, nil, false, "")
+	return t.componentOutputs(comp, "", nil, nil, false, "", "")
 }
 
 // ComponentOutputsNamed is ComponentOutputs for a consumer that sets
@@ -147,7 +147,7 @@ func (t *Transformer) ComponentOutputs(comp *Component) ([]Output, error) {
 // objects that collide), and a query made under an application name other than
 // the one the transform asks with is not held against a build.
 func (t *Transformer) ComponentOutputsNamed(application string, comp *Component, naming func(NameRequest) (string, bool)) ([]Output, error) {
-	return t.componentOutputs(comp, application, naming, nil, false, "")
+	return t.componentOutputs(comp, application, naming, nil, false, "", "")
 }
 
 // ComponentOutputsWithin is ComponentOutputsNamed for a rule that asks about a component it
@@ -157,14 +157,14 @@ func (t *Transformer) ComponentOutputsNamed(application string, comp *Component,
 // ask about the next cannot spend more than one build may. It claims nothing, as the other
 // queries do.
 func (t *Transformer) ComponentOutputsWithin(lctx LoweringContext, comp *Component, naming func(NameRequest) (string, bool)) ([]Output, error) {
-	return t.componentOutputs(comp, lctx.Application(), naming, lctx.Namer, true, lctx.imageLevel)
+	return t.componentOutputs(comp, lctx.Application(), naming, lctx.Namer, true, lctx.imageLevel, lctx.sourceLevel)
 }
 
 // componentOutputs answers for comp. parent, when it is not nil, is the allocator of the run the
 // query belongs to: the allocator of the query shares its run state. emitted says comp is one a
-// rule emits (queryProvider). level is the image reference level the provider holds the image to
-// (go-kure/launcher#1644); empty is the default level.
-func (t *Transformer) componentOutputs(comp *Component, application string, naming func(NameRequest) (string, bool), parent *NameAllocator, emitted bool, level ImageReferenceLevel) ([]Output, error) {
+// rule emits (queryProvider). level and sourceLevel are the image and source reference levels the
+// provider holds its references to (go-kure/launcher#1644); empty is the default of each.
+func (t *Transformer) componentOutputs(comp *Component, application string, naming func(NameRequest) (string, bool), parent *NameAllocator, emitted bool, level, sourceLevel ImageReferenceLevel) ([]Output, error) {
 	provider, comp, ok, err := t.queryProvider(comp, application, naming, emitted, declaresOutputs)
 	if err != nil || !ok {
 		return nil, err
@@ -188,7 +188,7 @@ func (t *Transformer) componentOutputs(comp *Component, application string, nami
 	// The provider is asked about a copy: queryProvider hands back the caller's
 	// own component for a rule, and a write to it must not reach the document.
 	probe := probeCopy(*comp)
-	_, outs, err := outputsOf(p, &probe, application, naming, parent, level)
+	_, outs, err := outputsOf(p, &probe, application, naming, parent, level, sourceLevel)
 	return outs, err
 }
 
@@ -199,8 +199,9 @@ func (t *Transformer) componentOutputs(comp *Component, application string, nami
 // level p is asked at (empty is the default level): the context carries it, and
 // so does comp, which every caller hands over as a copy of its own, so a
 // provider that reads the level off the component and one that reads it off the
-// context see the same one (go-kure/launcher#1644).
-func outputsOf(p OutputProvider, comp *Component, application string, naming func(NameRequest) (string, bool), parent *NameAllocator, level ImageReferenceLevel) ([]OutputDecl, []Output, error) {
+// context see the same one. sourceLevel is the source reference level the
+// context carries (go-kure/launcher#1644).
+func outputsOf(p OutputProvider, comp *Component, application string, naming func(NameRequest) (string, bool), parent *NameAllocator, level, sourceLevel ImageReferenceLevel) ([]OutputDecl, []Output, error) {
 	comp.imageLevel = level
 	namer := NewNameAllocator()
 	namer.hook = naming
@@ -210,7 +211,7 @@ func outputsOf(p OutputProvider, comp *Component, application string, naming fun
 		}
 		namer.runState = parent.runState
 	}
-	decls, err := p.Outputs(comp, LoweringContext{Component: comp, Namer: namer, application: application, imageLevel: level})
+	decls, err := p.Outputs(comp, LoweringContext{Component: comp, Namer: namer, application: application, imageLevel: level, sourceLevel: sourceLevel})
 	if err != nil {
 		return nil, nil, err
 	}

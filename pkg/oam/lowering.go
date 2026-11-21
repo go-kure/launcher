@@ -1331,7 +1331,7 @@ func (t *Transformer) lowerDocumentOnce(doc *Application, ctx TransformContext, 
 		// PR go-kure/launcher#283: the policy loop below stamped Rule unconditionally while the
 		// component loop already guarded against exactly this).
 		originalPolicies := input.Spec.Policies
-		lctx := LoweringContext{Document: input, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, Origin: origin, Namer: namer}
+		lctx := LoweringContext{Document: input, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel, Origin: origin, Namer: namer}
 		result, err := rule.LowerDocument(input, lctx)
 		if err != nil {
 			return nil, false, nil, errors.Wrapf(err, "%s", origin)
@@ -1574,7 +1574,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			if p, ok := rule.(OutputProvider); ok && namer != nil {
 				probe := probeCopy(comp)
 				var err error
-				if declared, answered, err = outputsOf(p, &probe, lctx.documentName(), namer.hook, namer, lctx.imageLevel); err != nil {
+				if declared, answered, err = outputsOf(p, &probe, lctx.documentName(), namer.hook, namer, lctx.imageLevel, lctx.sourceLevel); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
 				}
 			}
@@ -1593,7 +1593,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				// named by the hook for the role object (withObjectName), so the query does not
 				// ask for it either. A rule among the emitted components keeps the whole hook.
 				outputsOf := func(c *Component) ([]Output, error) {
-					return t.componentOutputs(c, lctx.documentName(), namer.hook, namer, true, lctx.imageLevel)
+					return t.componentOutputs(c, lctx.documentName(), namer.hook, namer, true, lctx.imageLevel, lctx.sourceLevel)
 				}
 				if err := checkRuleOutputs(compName, declared, answered, namer.lowered[resolvedBefore:], result.Components, outputsOf); err != nil {
 					return false, steps, errors.Wrapf(err, "%s", compOrigin)
@@ -1813,7 +1813,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 					traitInput = newRuleInput(resolvedTrait.Properties, inputSources.entries)
 				}
 			}
-			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, Origin: traitOrigin, Namer: namer}
+			lctx := LoweringContext{Document: doc, Component: &comp, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel, Origin: traitOrigin, Namer: namer}
 			result, err := rule.LowerTrait(&resolvedTrait, lctx)
 			if err != nil {
 				return false, steps, errors.Wrapf(err, "%s", traitOrigin)
@@ -1911,7 +1911,7 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 			newPolicies = append(newPolicies, pol)
 			continue
 		}
-		lctx := LoweringContext{Document: doc, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, Origin: polOrigin, Namer: namer}
+		lctx := LoweringContext{Document: doc, capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel, Origin: polOrigin, Namer: namer}
 		result, err := rule.LowerPolicy(&pol, lctx)
 		if err != nil {
 			return false, steps, errors.Wrapf(err, "%s", polOrigin)

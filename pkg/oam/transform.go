@@ -1280,7 +1280,7 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 		// TestObjectName_RenamesTheObjectAlone holds that name and kind.
 		if p, ok := handler.(OutputProvider); ok {
 			probe := probeCopy(component)
-			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming, ctx.nameClaims, ctx.imageLevel)
+			decls, outs, err := outputsOf(p, &probe, app.Metadata.Name, ctx.Naming, ctx.nameClaims, ctx.imageLevel, ctx.sourceLevel)
 			if err == nil {
 				err = checkHandlerOutputs(&component, handler, decls, outs)
 			}
@@ -2245,11 +2245,11 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 // or the sorted keys joined by ",".
 func fillComponentCapabilities(f ComponentCapabilityFiller, props map[string]any, ctx TransformContext, rec *ownerRecorder) (map[string]any, error) {
 	if rec == nil {
-		return f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel})
+		return f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: ctx.consumedCapabilities, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel})
 	}
 	before := indexOf(props)
 	reads := map[string]struct{}{}
-	filled, err := f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: reads, imageLevel: ctx.imageLevel})
+	filled, err := f.FillCapabilityDefaults(props, LoweringContext{capabilities: ctx.Capabilities, consumed: reads, imageLevel: ctx.imageLevel, sourceLevel: ctx.sourceLevel})
 	if err != nil {
 		return nil, err
 	}
