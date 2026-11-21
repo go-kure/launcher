@@ -1330,6 +1330,12 @@ func (t *Transformer) createApplications(app *Application, namespace string, ctx
 			}
 			recordPolicyDefaults(rec, config)
 		}
+		// The references the config names are held to the policy's level here,
+		// whatever the handler implements, so a level stricter than it knows is
+		// still enforced (go-kure/launcher#1644).
+		if err := checkImageReferences(config, ImageReferenceLevelOf(ctx.Policy)); err != nil {
+			return nil, NewViolationError(component.Name, err)
+		}
 
 		// The steps a lowering rule attached (Component.AfterPolicy) run on the
 		// config the policy has just decided, before any trait of the component.
@@ -1960,6 +1966,9 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 					if err := checkEntryApplications(bundleEntries, entryNames, bundle, entry.component.Name, trait.Type, entryAppStep{policyOf: newApp.Name}); err != nil {
 						return nil, err
 					}
+				}
+				if err := checkImageReferences(newApp.Config, ImageReferenceLevelOf(ctx.Policy)); err != nil {
+					return nil, NewViolationError(entry.component.Name, err)
 				}
 				// What the trait's handler filled, read after the policy as a
 				// component's is: a path the policy filled is the policy's, and
