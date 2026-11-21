@@ -307,7 +307,8 @@ store is applied with the Cluster, as the backup store is.
   and by nothing in this library for any other catalog.
 - The images these kinds name are held to the tag rule the workload kinds
   apply to a container's image (`ValidateImageRef`: a tag or a digest, no
-  `:latest`), with or without a policy (go-kure/launcher#790): `imageName` and
+  `:latest`, at the level the policy names, `tagged` by default;
+  go-kure/launcher#1644), with or without a policy (go-kure/launcher#790): `imageName` and
   each extension reference on `cnpg-cluster`; `pgbouncer.image`, the template's
   container images and its image volumes on `cnpg-pooler`; each image,
   component image and extension reference on `cnpg-imagecatalog` and

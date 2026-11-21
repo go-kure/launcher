@@ -7,7 +7,8 @@ weight: 14
 
 Custom component types implement `oam.ComponentHandler` (`CanHandle` +
 `ToApplicationConfig`) and are registered alongside the built-ins. Exported helpers:
-`ValidateImageRef` (image policy), `BuildPVC` (PVC from a `PVCConfig`), and the
+`ValidateImageRef` (image policy, the `tagged` level) and `ValidateImageRefAt` (the level a
+handler reads from `Component.ImageLevel()`), `BuildPVC` (PVC from a `PVCConfig`), and the
 `persistentvolumeclaim` kind's claim path, `ParseClaimProperties`,
 `ApplyClaimPolicy` and `GenerateClaim`, which the `pvc` trait builds through. A custom
 `Generate()` that builds standalone PVCs from a `PVCConfig` list should qualify their

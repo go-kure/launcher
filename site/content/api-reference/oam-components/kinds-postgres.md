@@ -217,7 +217,8 @@ refused by it.
   3339 time and refuses anything else.
 
 **The tag rule on a catalog's images.** The three fields of a catalog that name
-an image are held to `ValidateImageRef`, as a container's image is, when the
+an image are held to `ValidateImageRef` (at the policy's image level, `tagged` by
+default), as a container's image is, when the
 component is read, with or without a policy: an image's `image`, a component
 image's `image` and the `reference` of an extension's image volume. One without
 a tag or digest, or tagged `:latest` (with a digest too), or one that is no

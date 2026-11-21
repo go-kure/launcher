@@ -624,7 +624,9 @@ what matters here is that no accepted image can carry one: `ValidateImageRef`
 refuses an untagged reference and an explicit `:latest` tag on
 every main, init and sidecar image — including a digest reference that still
 carries the tag (`repo:latest@sha256:...`), which it rejects for exactly this
-reason. A digest reference with *no* tag is the case this argument does not
+reason. That is the default image level, `tagged`: a policy that names `any` lets an image
+carry `latest` through, and the argument holds for the other levels only where they are
+stricter (`version`, `digest`). A digest reference with *no* tag is the case this argument does not
 reach, and no golden covers that form; it is pinned by digest either way, and
 this package does not assert what a cluster defaults for it. The argument is
 about the *parsed* path, which is where `ValidateImageRef` runs

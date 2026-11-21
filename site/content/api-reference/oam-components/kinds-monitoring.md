@@ -382,7 +382,7 @@ well.
 `alertmanager` names an image, which replaces it in the container the operator
 builds, so only the patch's is run and held), the authored image of a listed
 container or init container, and the `reference` of an image volume are held to
-the tag rule (`ValidateImageRef`: `image: image "…" rejected: :latest tag not
+the tag rule (`ValidateImageRef`, at the policy's image level, `tagged` by default: `image: image "…" rejected: :latest tag not
 allowed`), and a resource block's request may not exceed its limit (`resources:
 cpu: request 2 must not exceed limit 1`, `containers[0] "proxy": resources:
 memory: request 2Gi must not exceed limit 1Gi`). The alertmanager container runs
