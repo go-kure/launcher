@@ -1210,6 +1210,32 @@ jobs:
     - name: Install build tools
       run: command -v make &>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends make)
 
+    # The fence step below is a cold `go build` of bin/kurel: in the run that hit the
+    # limit it took 551 of 911 seconds, about 445 of them compiling. The Go build cache
+    # is restored here with the pattern of the `lint` job, under a prefix of its own so
+    # this job's entry is not the lint job's (go-kure/launcher#1658). The gain is a bet
+    # until main's runs show it: read the echoed hit and the restore and fence step
+    # seconds per run, comparing runs of the same speed, never the job's wall time.
+    - name: Compute Go build cache day bucket
+      id: cache-bucket
+      run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Go build cache
+      id: gocache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/.cache/go-build
+        key: ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-docs-fences-${{ hashFiles('go.mod', 'go.sum') }}-day-${{ steps.cache-bucket.outputs.day }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-docs-fences-${{ hashFiles('go.mod', 'go.sum') }}-
+          ${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.version }}-gocache-docs-fences-
+
+    - name: Log Go build cache restore
+      run: |
+        echo "cache-hit=${{ steps.gocache.outputs.cache-hit }}"
+        echo "primary-key=${{ steps.gocache.outputs.cache-primary-key }}"
+        echo "matched-key=${{ steps.gocache.outputs.cache-matched-key }}"
+
     # Own module cache under runner.temp: the Hugo-modules cache below restores
     # into and saves ~/go/pkg/mod, keyed on site/go.sum only. Downloading
     # launcher's modules there would put them under that key — restored over on
@@ -1218,6 +1244,13 @@ jobs:
       env:
         GOMODCACHE: ${{ runner.temp }}/gomod-doc-fences
       run: make check-doc-fences
+
+    - name: Save Go build cache
+      if: success() && steps.gocache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: ~/.cache/go-build
+        key: ${{ steps.gocache.outputs.cache-primary-key }}
 
     - name: Inject front matter
       run: bash site/scripts/inject-frontmatter.sh
