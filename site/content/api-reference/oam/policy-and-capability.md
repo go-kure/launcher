@@ -82,6 +82,24 @@ component's `version`, a tag or `sha256:<digest>` that no image rule reads. It d
 since the component checked nothing before: `tagged` requires a non-empty value that is not `latest`, as it does for an image, `version` a
 version tag or a digest, `digest` a `sha256:` value (`oam.CheckSourceVersion`).
 
+`ContentSourcePolicy` (`ContentSource() oam.ContentSource`) hands the build a caller's source of
+bytes for the `url` of a `crd` or `manifests` component (go-kure/launcher#1669). It is a
+dependency, not a constraint: it rides the policy because the policy is the one per-request input a
+component receives. The source is asked `Lookup` once the url's scheme and host pass the policy, before any
+request, with an `oam.ContentKey` of kind `url` that holds the url exactly as the document gave it. A
+copy is served only if it is within the 5 MiB cap, it records at least one host, every host the caller
+recorded for it (`Content.Hosts`) passes `AllowedRegistries()` (a fetch checks every redirect hop, so a hit
+checks every recorded host; a fetch always records the first host, so a copy with none is a miss), and
+its body parses as manifests; any other answer, an error included, is a miss, and the url is fetched.
+After a fetch that succeeded, `Store` receives the body and every host the request went to, the first and
+each redirect hop, in order. A `Store` error is ignored. A source's own errors never fail a build and
+never change its output. A copy it serves is the caller's word for what the url holds: it can differ from the
+url's current body, and a copy that parses as manifests but that the component then refuses (for a `crd`
+component, a document that is not a CRD) fails the build as the fetched body would. Storing, expiry and which
+copies to trust stay with the caller.
+`ContentKey` and `Content` carry the fields kure's chart content source has, so one source can serve both.
+A policy that does not implement it, and `NoopPolicy`, fetch every url.
+
 `ObjectKindPolicy` says which kinds of object a build may emit and
 whether it may emit cluster-scoped ones: `AllowedObjectKinds()` (empty allows every kind),
 `ForbiddenObjectKinds()` (a kind on both lists is forbidden) and `AllowClusterScopedObjects()`.

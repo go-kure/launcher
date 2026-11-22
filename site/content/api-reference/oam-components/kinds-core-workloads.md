@@ -2413,6 +2413,16 @@ shown, since it can quote the URL, a server-sent header or trailer, or a TLS
 certificate, but it stays the error's cause: `errors.Is` and `errors.As` still
 find it, so a timeout matches `context.DeadlineExceeded`.
 
+A policy that implements `ContentSourcePolicy` can serve a `url` from a stored copy
+instead of the network (go-kure/launcher#1669). The url's scheme and host pass the policy
+first, then the source is asked for the url as the document gave it. A copy is served only
+if it is within the 5 MiB cap, every host recorded for it is in the allowed registries (a
+fetch checks every redirect hop, so a stored copy is checked on every host), and it parses
+as manifests; otherwise the url is fetched, and a fetch that succeeds is handed to the source
+with the hosts it went to. An error of the source never changes the result; a copy it serves
+is the caller's word for what the url holds, and the component checks it as it checks a fetched body. See
+[Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md#policy-defaults--enforcement).
+
 ### Example
 
 - `crd`: No example yet.

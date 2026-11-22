@@ -222,6 +222,10 @@ See [Property schemas and contract metadata](/site/content/api-reference/oam/sch
 
 See [Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md#policy-defaults--enforcement).
 
+A `Policy` can also carry the caller's source of bytes for a manifest `url` through the optional
+`ContentSourcePolicy` (`ContentSourceOf` asks for it): `ContentSource`, `ContentKey` and `Content`
+(go-kure/launcher#1669).
+
 A config reports the defaults it applied so the provenance report can name their source.
 `PolicyDefaultReporter` reports what the policy filled (source `policy`). `BuiltinDefaultReporter`
 reports what launcher's own code filled, at parse or at generation (source `builtin`). A path has

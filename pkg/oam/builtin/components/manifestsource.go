@@ -1,6 +1,7 @@
 package components
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"maps"
@@ -41,6 +42,11 @@ type manifestSource struct {
 	// config's ApplyPolicy so the URL resolver (and its redirect check) has
 	// policy context at fetch time. Empty means unrestricted (no policy).
 	allowedHosts []string
+
+	// content is the caller's source of bytes for the url, stored by the owning
+	// config's ApplyPolicy from the policy's ContentSourcePolicy. Nil means
+	// every url is fetched.
+	content oam.ContentSource
 
 	cached []client.Object // memoized resolve() result
 }
@@ -117,6 +123,8 @@ func validateURLScheme(rawURL string) error {
 
 func (s *manifestSource) setAllowedHosts(hosts []string) { s.allowedHosts = hosts }
 
+func (s *manifestSource) setContentSource(src oam.ContentSource) { s.content = src }
+
 // resolve parses inline YAML or fetches the URL (once, memoized) and returns
 // defensive copies of the resulting objects.
 func (s *manifestSource) resolve() ([]client.Object, error) {
@@ -127,7 +135,7 @@ func (s *manifestSource) resolve() ([]client.Object, error) {
 		case s.inline != "":
 			data = []byte(s.inline)
 		case s.url != "":
-			data, err = fetchURL(s.url, s.allowedHosts)
+			data, err = fetchURL(s.url, s.allowedHosts, s.content, parsesAsManifests)
 			if err != nil {
 				return nil, err
 			}
@@ -154,15 +162,80 @@ func copyObjects(objs []client.Object) []client.Object {
 	return out
 }
 
-// fetchURL retrieves raw manifest YAML over http(s), treating the URL as
-// untrusted: scheme allowlist (initial + every redirect hop), host allowlist
-// re-checked on each redirect, request timeout, non-2xx rejection, and a hard
-// response-size cap. Its errors name the URL only as displayURL renders it.
-func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
+// parsesAsManifests reports whether data decodes as manifest documents, the
+// test a stored copy of a url's body passes before it is served.
+func parsesAsManifests(data []byte) bool {
+	_, err := decodeManifestDocuments(data)
+	return err == nil
+}
+
+// fetchURL returns the manifest YAML at a url. The url's scheme and host pass
+// the policy first, then src, when there is one, is asked for a stored copy. A
+// copy is served only if it is within the size cap, every host the caller
+// recorded for it passes the allowed registries (a fetch checks every redirect
+// hop, so a hit checks every recorded host), and usable accepts it; anything
+// else, a Lookup error included, is a miss and the url is fetched. After a
+// fetch that succeeded, src is handed the body and every host the fetch went
+// to. An error of src never fails the call or changes what it returns; a
+// copy it serves is the caller's word for what the url holds. The url reaches src exactly as given.
+func fetchURL(rawURL string, allowedHosts []string, src oam.ContentSource, usable func([]byte) bool) ([]byte, error) {
 	if err := checkURL(rawURL, allowedHosts); err != nil {
 		return nil, err
 	}
+	key := oam.ContentKey{Kind: "url", URL: rawURL}
+	if src != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+		c, ok, err := src.Lookup(ctx, key)
+		cancel()
+		if err == nil && ok && storedCopyUsable(c, allowedHosts, usable) {
+			return c.Data, nil
+		}
+	}
+	body, hosts, err := getURL(rawURL, allowedHosts)
+	if err != nil {
+		return nil, err
+	}
+	if src != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+		_ = src.Store(ctx, key, oam.Content{Data: body, Hosts: hosts})
+		cancel()
+	}
+	return body, nil
+}
+
+// storedCopyUsable reports whether a copy a source returned may be served in
+// place of a fetch: within the size cap, with at least one recorded host (a
+// fetch here always records the first, so a copy with none was written by
+// someone else), every recorded host allowed, and accepted by usable.
+func storedCopyUsable(c oam.Content, allowedHosts []string, usable func([]byte) bool) bool {
+	if int64(len(c.Data)) > maxManifestBytes || len(c.Hosts) == 0 {
+		return false
+	}
+	for _, host := range c.Hosts {
+		if enforceAllowedURLHosts("https://"+host, allowedHosts) != nil {
+			return false
+		}
+	}
+	return usable(c.Data)
+}
+
+// getURL retrieves raw manifest YAML over http(s), treating the URL as
+// untrusted: scheme allowlist (initial + every redirect hop), host allowlist
+// re-checked on each redirect, request timeout, non-2xx rejection, and a hard
+// response-size cap. It also returns every host the request went to, the first
+// and each redirect hop it followed, in order. Its errors name the URL only as
+// displayURL renders it.
+func getURL(rawURL string, allowedHosts []string) ([]byte, []string, error) {
 	shown := displayURL(rawURL)
+	var hosts []string
+	addHost := func(host string) {
+		if host != "" && !slices.Contains(hosts, host) {
+			hosts = append(hosts, host)
+		}
+	}
+	if u, err := url.Parse(rawURL); err == nil {
+		addHost(u.Host)
+	}
 	// redirectRefusal is this function's own refusal of a redirect hop, kept so
 	// it can be reported in place of the client's error, which wraps it. It is
 	// fixed text: the redirect target is the server's, and its scheme, host or
@@ -180,6 +253,7 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 				redirectRefusal = oam.NewPolicyRefusal(oam.RefusalRegistry, "redirect to a host not in allowed registries refused")
 			default:
 				redirectRefusal = nil
+				addHost(req.URL.Host)
 			}
 			return redirectRefusal
 		},
@@ -187,22 +261,22 @@ func fetchURL(rawURL string, allowedHosts []string) ([]byte, error) {
 	resp, err := httpClient.Get(rawURL)
 	if err != nil {
 		if redirectRefusal != nil {
-			return nil, errors.Errorf("manifest source: fetch %q: %w", shown, redirectRefusal)
+			return nil, nil, errors.Errorf("manifest source: fetch %q: %w", shown, redirectRefusal)
 		}
-		return nil, &fetchError{msg: "manifest source: fetch " + strconv.Quote(shown) + ": " + orDefault(failureCause(err), "request failed"), cause: err}
+		return nil, nil, &fetchError{msg: "manifest source: fetch " + strconv.Quote(shown) + ": " + orDefault(failureCause(err), "request failed"), cause: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, errors.Errorf("manifest source: fetch %q: unexpected status %d", shown, resp.StatusCode)
+		return nil, nil, errors.Errorf("manifest source: fetch %q: unexpected status %d", shown, resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes+1))
 	if err != nil {
-		return nil, &fetchError{msg: "manifest source: read " + strconv.Quote(shown) + ": " + orDefault(failureCause(err), "response body could not be read"), cause: err}
+		return nil, nil, &fetchError{msg: "manifest source: read " + strconv.Quote(shown) + ": " + orDefault(failureCause(err), "response body could not be read"), cause: err}
 	}
 	if int64(len(body)) > maxManifestBytes {
-		return nil, errors.Errorf("manifest source: %q response exceeds max size %d bytes", shown, maxManifestBytes)
+		return nil, nil, errors.Errorf("manifest source: %q response exceeds max size %d bytes", shown, maxManifestBytes)
 	}
-	return body, nil
+	return body, hosts, nil
 }
 
 // displayURL renders a fetch URL for an error message from its scheme and host,
@@ -469,6 +543,7 @@ func (c *manifestConfig) ApplyPolicy(p oam.Policy) error {
 	if c.src.url != "" {
 		allowed := p.AllowedRegistries()
 		c.src.setAllowedHosts(allowed)
+		c.src.setContentSource(oam.ContentSourceOf(p))
 		return enforceAllowedURLHosts(c.src.url, allowed)
 	}
 	objs, err := c.objects()
