@@ -208,7 +208,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 		"install":             object("HelmRelease spec.install: Helm install options. Refused under delivery: template."),
 		"upgrade":             object("HelmRelease spec.upgrade: Helm upgrade options. Refused under delivery: template."),
 		"valuesFrom": {Type: oam.PropertyTypeArray, Description: "HelmRelease spec.valuesFrom: ConfigMaps or Secrets supplying values. Refused under delivery: template.", Items: &oam.PropertySchema{
-			Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "One values reference (kind, name, valuesKey, targetPath, optional).",
+			Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "One values reference (kind, name, valuesKey, targetPath, optional, literal). With literal: true the value at targetPath is set as one string, not parsed as Helm --set syntax; it has no effect without targetPath.",
 		}},
 		oam.HookGroupNamePrefixProperty:     str(hookGroupNamePrefixDescription + " Under delivery: template only; refused under delivery: flux, where a HelmRelease installs the chart and no hook-group layout exists."),
 		oam.LayoutKustomizationNameProperty: str(layoutKustomizationNameDescription + " Under delivery: template only; refused under delivery: flux, where the HelmRelease is applied with the bundle and the component has no layout of its own."),

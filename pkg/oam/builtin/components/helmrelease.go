@@ -147,7 +147,7 @@ func (h *HelmReleaseHandler) PropertySchema() map[string]oam.PropertySchema {
 		"test":               object("HelmRelease spec.test: Helm test options."),
 		"rollback":           object("HelmRelease spec.rollback: Helm rollback options."),
 		"uninstall":          object("HelmRelease spec.uninstall: Helm uninstall options."),
-		"valuesFrom":         objects("HelmRelease spec.valuesFrom: ConfigMaps or Secrets supplying values, merged in order.", "One values reference (kind, name, valuesKey, targetPath, optional)."),
+		"valuesFrom":         objects("HelmRelease spec.valuesFrom: ConfigMaps or Secrets supplying values, merged in order.", "One values reference (kind, name, valuesKey, targetPath, optional, literal). With literal: true the value at targetPath is set as one string, not parsed as Helm --set syntax; it has no effect without targetPath."),
 		"values":             object("HelmRelease spec.values: the Helm values tree. Must be representable as JSON."),
 		"commonMetadata":     object("HelmRelease spec.commonMetadata: labels and annotations applied to every rendered object."),
 		"postRenderers":      objects("HelmRelease spec.postRenderers.", "One post renderer (kustomize)."),

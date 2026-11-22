@@ -661,7 +661,10 @@ and a violation is a build error naming the entry's index: `kind` is `Secret` or
 the CRD's pattern (dot-path characters, `\`, `/`, and `[n]` indexes of up to
 five digits). Lengths count characters, as the CRD's `maxLength` does, not
 bytes. Like the other checks these run again in `Generate`, and they cover the
-`valuesFrom` a `helm` component passes through. **Every other required field the
+`valuesFrom` a `helm` component passes through. `literal: true` is not checked: the
+value at `targetPath` is then set as one string instead of being parsed as Helm `--set`
+syntax (so commas, brackets, braces and backslashes in it keep their text), and it has
+no effect without a `targetPath`. **Every other required field the
 type writes unauthored is refused too**, where it is left out under a parent
 that is authored: the `name` of a `dependsOn` entry, of `chartRef` (with its
 `kind`), of a Secret or ConfigMap reference (`kubeConfig`, the chart template's
