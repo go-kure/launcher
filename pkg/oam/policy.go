@@ -1,6 +1,7 @@
 package oam
 
 import (
+	"context"
 	"slices"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -10,7 +11,10 @@ import (
 // and trait handlers. Handlers call its methods; they must not type-assert. A
 // constraint added after the interface was fixed is an optional interface
 // beside it (ExplicitSecretPolicy, ObjectKindPolicy), asked through pkg/oam, so
-// an existing Policy implementation keeps compiling.
+// an existing Policy implementation keeps compiling. An optional interface may
+// also carry a per-request dependency rather than a constraint
+// (ContentSourcePolicy): the policy is the one per-request input a component
+// receives.
 //
 // The 23 typed accessor methods correspond to every piece of data that handlers
 // currently access via the downstream runtime's *api.EnvironmentPolicy. See the finalized design
@@ -89,6 +93,78 @@ type ExplicitSecretPolicy interface {
 func ExplicitSecretsAllowed(policy Policy) bool {
 	p, ok := policy.(ExplicitSecretPolicy)
 	return !ok || p.AllowExplicitSecrets()
+}
+
+// ContentKey names what a ContentSource is asked for. Every field is kept
+// exactly as the library received it, so the source can apply its own rules to a
+// URL that may carry a credential. The fields mirror the key of kure's chart
+// content source (pkg/stack/helm), so one source can serve both.
+type ContentKey struct {
+	// Kind is "url" for the url of a manifests or crd component, and "chart"
+	// for a chart.
+	Kind string
+	// URL is the url as the document gave it. For a chart it is the chart or
+	// repository URL.
+	URL string
+	// Chart is the chart name of an HTTP chart. It is empty for a url.
+	Chart string
+	// Version is the version tag of a chart. It is empty for a url.
+	Version string
+	// Digest is the manifest digest a chart is pinned to. It is empty for a url.
+	Digest string
+}
+
+// Content is a fetched body as a ContentSource stores and returns it.
+type Content struct {
+	// Data is the body: the manifest YAML of a url, the .tgz bytes of a chart.
+	Data []byte
+	// Manifest is the manifest of an OCI chart. It is empty for a url.
+	Manifest []byte
+	// Hosts is every host, with its port where the url names one, a request of
+	// the fetch went to: the first host and each redirect hop of a url. It is
+	// what the caller recorded. The library applies only the check its own
+	// fetch applies, and for a url that is the allowed registries on every hop,
+	// so a stored copy with a host they refuse is not served.
+	Hosts []string
+}
+
+// ContentSource is a caller's store of bodies the library has fetched. It lets a
+// build serve a url from bytes the caller holds, without a request, and tells
+// the caller which hosts a fetch touched, so it can keep that list with the copy.
+type ContentSource interface {
+	// Lookup returns the stored copy of key, or false for none. It is asked
+	// after the url's scheme and host pass the policy, and before any request.
+	// An error is a miss: the library discards its text, since it can repeat the
+	// url.
+	Lookup(ctx context.Context, key ContentKey) (c Content, ok bool, err error)
+	// Store receives a body after a fetch that succeeded. Its error is ignored.
+	// It is not called for a copy Lookup served.
+	Store(ctx context.Context, key ContentKey, c Content) error
+}
+
+// ContentSourcePolicy is an optional interface of a Policy: the caller's source
+// of bytes for the url of a manifests or crd component (go-kure/launcher#1669).
+// An error of the source never fails a build or changes its output: a copy that
+// is missing, refused, over the size cap or not a valid manifest, or a Lookup
+// that fails, is fetched as it would be without a source. A copy it serves is
+// the caller's word for what the url holds and is checked as a fetched body is.
+//
+// A Policy that does not implement it fetches every url, and so does
+// NoopPolicy. Not a constraint: it rides the policy because that is the one
+// per-request input a component receives.
+type ContentSourcePolicy interface {
+	// ContentSource returns the source, or nil for none.
+	ContentSource() ContentSource
+}
+
+// ContentSourceOf returns policy's ContentSource, nil when policy does not
+// implement ContentSourcePolicy or returns none.
+func ContentSourceOf(policy Policy) ContentSource {
+	p, ok := policy.(ContentSourcePolicy)
+	if !ok {
+		return nil
+	}
+	return p.ContentSource()
 }
 
 // ObjectKindPolicy is an optional interface of a Policy: which kinds of object a

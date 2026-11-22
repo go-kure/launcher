@@ -705,6 +705,15 @@ fill for the claim it builds through `ParseClaimProperties`.
 
 Full text: [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-defaults--enforcement-ordering).
 
+**A stored copy of a `url`** (go-kure/launcher#1669). `manifestConfig.ApplyPolicy` keeps the policy's
+`oam.ContentSource` (the optional `ContentSourcePolicy`) beside the allowed registries, and
+`fetchURL` asks it after the url's scheme and host pass the policy and before any request. A copy is
+served only if it is within `maxManifestBytes`, `Content.Hosts` is not empty, every host in it passes the allowed
+registries, and it parses as manifests; any other answer is a miss and the url is fetched with a client
+that records the first host and each redirect hop, which `Store` then receives. An error of the source,
+from `Lookup` or `Store`, never fails a build or changes its output; a copy it serves is the caller's word for
+what the url holds, and the component checks it as it checks a fetched body.
+
 ## Policy refusal classes
 
 See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-refusal-classes).
