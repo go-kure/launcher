@@ -445,6 +445,11 @@ var nullRequiredKinds = []nullRequiredKind{
 				},
 				reason: "the key of the image in the catalog", authored: "pgbouncer", writesZero: true,
 			},
+			{
+				path: "template.spec.evictionResponders[].name", at: "template.spec.evictionResponders[0].name",
+				omitted: poolerWith(map[string]any{"evictionResponders": []any{map[string]any{"priority": 10000}}}),
+				reason:  "the CloudNativePG API requires the name of what this refers to", authored: "example.com/drain", writesZero: true,
+			},
 		},
 	},
 	{
