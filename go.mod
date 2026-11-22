@@ -25,24 +25,24 @@ require (
 	github.com/backube/volsync v0.16.0
 	github.com/blang/semver/v4 v4.0.0
 	github.com/cert-manager/cert-manager v1.21.3
-	github.com/cilium/cilium v1.20.4
+	github.com/cilium/cilium v1.20.5
 	github.com/cloudnative-pg/barman-cloud v0.7.0
-	github.com/cloudnative-pg/cloudnative-pg v1.30.1
+	github.com/cloudnative-pg/cloudnative-pg v1.30.2
 	github.com/cloudnative-pg/machinery v0.6.1
 	github.com/cloudnative-pg/plugin-barman-cloud v0.16.0
 	github.com/controlplaneio-fluxcd/flux-operator v0.62.1
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/external-secrets/external-secrets/apis v0.0.0-20261016092056-a82d14894fbc
-	github.com/fluxcd/helm-controller/api v1.7.1
-	github.com/fluxcd/image-automation-controller/api v1.3.0
-	github.com/fluxcd/image-reflector-controller/api v1.3.0
-	github.com/fluxcd/kustomize-controller/api v1.10.1
-	github.com/fluxcd/notification-controller/api v1.10.0
+	github.com/fluxcd/helm-controller/api v1.7.2
+	github.com/fluxcd/image-automation-controller/api v1.3.1
+	github.com/fluxcd/image-reflector-controller/api v1.3.1
+	github.com/fluxcd/kustomize-controller/api v1.10.2
+	github.com/fluxcd/notification-controller/api v1.10.1
 	github.com/fluxcd/pkg/apis/kustomize v1.23.0
 	github.com/fluxcd/pkg/apis/meta v1.38.0
-	github.com/fluxcd/source-controller/api v1.10.1
+	github.com/fluxcd/source-controller/api v1.10.2
 	github.com/fluxcd/source-watcher/api/v2 v2.3.1
-	github.com/go-kure/kure v0.2.0-rc.2
+	github.com/go-kure/kure v0.2.0-rc.2.0.20261122200136-98654b463d39
 	github.com/google/go-containerregistry v0.22.1
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.95.2
@@ -54,7 +54,7 @@ require (
 	go.universe.tf/metallb v0.16.2
 	golang.org/x/tools v0.52.0
 	gopkg.in/yaml.v3 v3.0.1
-	helm.sh/helm/v4 v4.3.1
+	helm.sh/helm/v4 v4.3.2
 	k8s.io/api v0.37.2
 	k8s.io/apiextensions-apiserver v0.37.2
 	k8s.io/apimachinery v0.37.2
@@ -62,7 +62,7 @@ require (
 	k8s.io/client-go v0.37.2
 	k8s.io/kube-aggregator v0.37.2
 	k8s.io/kube-openapi v0.0.0-20260821135717-be32def86098
-	sigs.k8s.io/controller-runtime v0.25.2
+	sigs.k8s.io/controller-runtime v0.25.3
 	sigs.k8s.io/gateway-api v1.7.0
 	sigs.k8s.io/kustomize/api v0.21.2
 	sigs.k8s.io/kustomize/kyaml v0.21.2
@@ -79,14 +79,14 @@ require (
 	github.com/Masterminds/sprig/v3 v3.3.0 // indirect
 	github.com/ProtonMail/go-crypto v1.5.2 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
-	github.com/avast/retry-go/v5 v5.0.0 // indirect
+	github.com/avast/retry-go/v5 v5.1.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.22.0 // indirect
 	github.com/cilium/hive v1.0.4 // indirect
 	github.com/cilium/lumberjack/v2 v2.4.2 // indirect
-	github.com/cilium/statedb v0.8.4 // indirect
+	github.com/cilium/statedb v0.8.5 // indirect
 	github.com/cilium/stream v0.0.1 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/cloudnative-pg/cnpg-i v0.6.0 // indirect
@@ -96,7 +96,7 @@ require (
 	github.com/emicklei/go-restful/v3 v3.14.0 // indirect
 	github.com/extism/go-sdk v1.7.1 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/fluxcd/flux2/v2 v2.10.0 // indirect
+	github.com/fluxcd/flux2/v2 v2.10.1 // indirect
 	github.com/fluxcd/pkg/apis/acl v0.12.0 // indirect
 	github.com/fluxcd/pkg/envsubst v1.9.0 // indirect
 	github.com/fluxcd/pkg/kustomize v1.44.0 // indirect
@@ -146,7 +146,7 @@ require (
 	github.com/ianlancetaylor/demangle v0.0.0-20240805132620-81f5be970eca // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.6.0 // indirect
+	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.7.0 // indirect
 	github.com/lib/pq v1.12.3 // indirect
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
 	github.com/mackerelio/go-osstat v0.2.7 // indirect
