@@ -714,6 +714,16 @@ that records the first host and each redirect hop, which `Store` then receives. 
 from `Lookup` or `Store`, never fails a build or changes its output; a copy it serves is the caller's word for
 what the url holds, and the component checks it as it checks a fetched body.
 
+**A stored copy of a chart** (go-kure/launcher#1669). `HelmTemplateConfig.ApplyPolicy` takes the
+policy's `oam.ContentSource` after the one host check a chart fetch has (the host of `source.url`) and
+before the render; `chartSource.renderOptions` hands it to kure as `helm.WithContentSource` through the
+adapter `chartContent`, which converts `oam.ContentKey` and `oam.Content` field for field. A stored chart
+is held to what a fetched one is: a fetch is checked once, on `source.url`, so the hosts of `Content.Hosts`
+(a token service, a blob redirect, an archive host) are not compared with the allowed registries. The one
+rule on them is that a copy recording no host is a miss, as for a `url`. Kure applies its own checks to a
+copy (a manifest pinned by digest, the chart layer's digest, a chart that loads); any other answer, an
+error of the source included, is a miss and the chart is fetched.
+
 ## Policy refusal classes
 
 See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-refusal-classes).

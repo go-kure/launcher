@@ -97,8 +97,11 @@ never change its output. A copy it serves is the caller's word for what the url 
 url's current body, and a copy that parses as manifests but that the component then refuses (for a `crd`
 component, a document that is not a CRD) fails the build as the fetched body would. Storing, expiry and which
 copies to trust stay with the caller.
-`ContentKey` and `Content` carry the fields kure's chart content source has, so one source can serve both.
-A policy that does not implement it, and `NoopPolicy`, fetch every url.
+The same source serves the chart of a `helmtemplate` component (key kind `chart`), where a stored chart is
+checked as a fetched one is: once, on the host of `source.url`, and no host of `Content.Hosts` is compared
+with `AllowedRegistries()`; a copy that records none is a miss here too. `ContentKey` and `Content` carry
+the fields kure's chart content source has, so one source can serve both.
+A policy that does not implement it, and `NoopPolicy`, fetch every url and every chart.
 
 `ObjectKindPolicy` says which kinds of object a build may emit and
 whether it may emit cluster-scoped ones: `AllowedObjectKinds()` (empty allows every kind),
