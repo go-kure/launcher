@@ -143,14 +143,17 @@ type ContentSource interface {
 }
 
 // ContentSourcePolicy is an optional interface of a Policy: the caller's source
-// of bytes for the url of a manifests or crd component (go-kure/launcher#1669).
+// of bytes for the url of a manifests or crd component and for the chart of a
+// helmtemplate component (go-kure/launcher#1669).
 // An error of the source never fails a build or changes its output: a copy that
 // is missing, refused, over the size cap or not a valid manifest, or a Lookup
 // that fails, is fetched as it would be without a source. A copy it serves is
-// the caller's word for what the url holds and is checked as a fetched body is.
+// the caller's word for what the url or chart holds and is checked as a fetched
+// body is: a url on every host its fetch went to, a chart on the host of
+// source.url alone, as a chart fetch is checked.
 //
-// A Policy that does not implement it fetches every url, and so does
-// NoopPolicy. Not a constraint: it rides the policy because that is the one
+// A Policy that does not implement it fetches every url and every chart, and so
+// does NoopPolicy. Not a constraint: it rides the policy because that is the one
 // per-request input a component receives.
 type ContentSourcePolicy interface {
 	// ContentSource returns the source, or nil for none.

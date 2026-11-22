@@ -1225,6 +1225,19 @@ steps; the transform calls it with `NoopPolicy` when no policy is passed.
   which is what the Helm registry client pulls from. A refused source fails
   before any request is made: only an allowed source is rendered. No allowlist,
   or an empty one, permits every host.
+- *A stored chart.* A policy that implements `ContentSourcePolicy` can serve the
+  chart from a copy the caller holds instead of the network
+  (go-kure/launcher#1669). The source is asked only after the host check above
+  passed, with the chart as kure builds the key (kind `chart`, the url or the
+  repository url, the chart name and version, the pinned digest). A stored
+  chart is held to what a fetched one is, so the one host check is the one
+  above: the hosts the caller recorded for the copy (a registry's token service,
+  a blob redirect, an archive host) are not compared with the allowed
+  registries. A copy that records no host is a miss. Any other answer, an error
+  of the source included, is a miss, and the chart is fetched and handed to
+  `Store` with its hosts. A copy it serves is the caller's word for what the
+  chart holds; for an OCI chart pinned by digest, kure checks it against the
+  pin.
 - *Every emitted workload.* The chart is then rendered — in the transform, so a
   fetch or render failure is reported there, as that component's policy error —
   and each Pod, PodTemplate, ReplicationController, Deployment, StatefulSet,

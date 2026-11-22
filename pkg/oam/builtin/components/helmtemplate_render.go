@@ -47,7 +47,8 @@ type renderChartFunc = func(chartURL, version string, values map[string]any, opt
 // the release name it uses as .Release.Name, which templateReleaseName has
 // already resolved and checked (empty leaves kure's default, "release"), and
 // the scope the document states for a rendered kind, which the namespace stamp
-// reads (stampRenderedNamespaces).
+// reads (stampRenderedNamespaces). Content is the caller's source of chart
+// bytes, from the policy; nil means every chart is fetched (ApplyPolicy sets it).
 type chartSource struct {
 	URL            string
 	Kind           string // "HelmRepository" or "OCIRepository"
@@ -58,13 +59,16 @@ type chartSource struct {
 	Namespace      string
 	ReleaseName    string
 	ScopeOverrides map[schema.GroupVersionKind]manifest.ScopeResult
+	Content        oam.ContentSource
 }
 
 // renderOptions turns the release name and the namespace into kure render
 // options, each when set. The namespace only sets .Release.Namespace: kure
 // stamps no metadata.namespace, so a chart that omits it still renders
 // namespace-less objects. chartRender.render stamps those afterwards
-// (stampRenderedNamespaces).
+// (stampRenderedNamespaces). A content source, when the policy carries one, is
+// handed to kure as it is (chartContent): the render serves a chart from it
+// instead of the network and hands it each chart it fetched.
 func (s chartSource) renderOptions() []helm.RenderOption {
 	var opts []helm.RenderOption
 	if s.ReleaseName != "" {
@@ -72,6 +76,9 @@ func (s chartSource) renderOptions() []helm.RenderOption {
 	}
 	if s.Namespace != "" {
 		opts = append(opts, helm.WithNamespace(s.Namespace))
+	}
+	if s.Content != nil {
+		opts = append(opts, helm.WithContentSource(chartContent{src: s.Content}))
 	}
 	return opts
 }

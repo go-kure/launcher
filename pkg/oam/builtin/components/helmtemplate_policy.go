@@ -56,6 +56,9 @@ func (c *HelmTemplateConfig) ApplyPolicy(p oam.Policy) error {
 	if err := enforceFluxSourceHost(helmTemplateType, "source.url", src.URL, p); err != nil {
 		return err
 	}
+	// The caller's source of chart bytes is asked only now, after the one host
+	// check a chart fetch has: a stored chart is held to what a fetched one is.
+	src.Content = oam.ContentSourceOf(p)
 	if err := c.render(c.renderChart, helmTemplateType, c.Name, src); err != nil {
 		return err
 	}
