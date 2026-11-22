@@ -3,8 +3,8 @@
 # Each pin below is the git blob id of the committed file. A line naming a term the forbidden-terms
 # guard lists is preceded by an allow-term pragma comment line; an "# upstream" line names upstream's
 # blob id of a file that carries one, which the components tests check with those lines stripped.
-tag api/v1.10.0
-tag-object 8cdb768fe5ea4be57142569fa57806bf842390c7
+tag api/v1.10.1
+tag-object 99e42bf73e24c36ada43e5c2878eb5f63abeeea6
 licence LICENSE 261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64
 file config/crd/bases/notification.toolkit.fluxcd.io_alerts.yaml 799d3f7d9452016ad27e30b276c39c5f69c25b74
 file config/crd/bases/notification.toolkit.fluxcd.io_providers.yaml cd53db1a6e8b1bf76ba90b6e9f0e23aa03c6f8ad
