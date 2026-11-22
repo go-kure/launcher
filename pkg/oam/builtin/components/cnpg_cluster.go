@@ -290,7 +290,7 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	if !explicitInstances {
 		spec.Instances = cnpgClusterDefaultInstances
 	}
-	if err := refuseCnpgClusterAbsentFields(spec); err != nil {
+	if err := refuseBarmanAddressingWithoutCredentials(spec); err != nil {
 		return nil, err
 	}
 	if err := refuseOmittedClusterFields(spec); err != nil {
@@ -321,49 +321,30 @@ func (h *CnpgClusterHandler) ToApplicationConfig(component *oam.Component, names
 	}, nil
 }
 
-// cnpgClusterAbsent is what the refusal of a field the Cluster CRD does not
-// hold says.
-const cnpgClusterAbsent = "no field of the postgresql.cnpg.io/v1 Cluster API: its CRD has no such property"
-
-// refuseCnpgClusterAbsentFields refuses the fields of a barman object store
-// that the linked Go type holds and the Cluster CRD does not: sseCustomerKey
-// of the S3 credentials and s3AddressingStyle, under backup.barmanObjectStore
-// and under each externalClusters[].barmanObjectStore. The strict decode takes
-// them, since it reads the Go type (barman-cloud), and the object would carry a
-// value the API it is written for has no place for: the API server names each
-// as an unknown field, which refuses a request made with strict field
-// validation, and prunes it. The CRD in question is the clusters.yaml of
-// cloudnative-pg v1.30.1; remove this refusal when cloudnative-pg ships a CRD
-// that carries them. TestCnpgClusterHandler_AbsentFromCRD shows each
-// refusal, and the cnpg-cluster row of TestKindComponents_OmittedRequiredAndWrittenDefaults
-// derives the list from the CRD in both directions.
-func refuseCnpgClusterAbsentFields(spec *cnpgv1.ClusterSpec) error {
+// refuseBarmanAddressingWithoutCredentials refuses an s3AddressingStyle on an
+// object store that has no s3Credentials, under backup.barmanObjectStore and
+// under each externalClusters[].barmanObjectStore: the Cluster CRD of
+// cloudnative-pg v1.30.2 holds the rule "s3AddressingStyle requires
+// s3Credentials" (x-kubernetes-validations), and the API server refuses an
+// object that breaks it. The type omits an empty style, so a style that is
+// set was authored.
+func refuseBarmanAddressingWithoutCredentials(spec *cnpgv1.ClusterSpec) error {
 	if spec.Backup != nil {
-		if err := refuseBarmanAbsentFields("backup.barmanObjectStore", spec.Backup.BarmanObjectStore); err != nil {
+		if err := refuseBarmanStoreAddressing("backup.barmanObjectStore", spec.Backup.BarmanObjectStore); err != nil {
 			return err
 		}
 	}
 	for i := range spec.ExternalClusters {
-		if err := refuseBarmanAbsentFields(fmt.Sprintf("externalClusters[%d].barmanObjectStore", i), spec.ExternalClusters[i].BarmanObjectStore); err != nil {
+		if err := refuseBarmanStoreAddressing(fmt.Sprintf("externalClusters[%d].barmanObjectStore", i), spec.ExternalClusters[i].BarmanObjectStore); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// refuseBarmanAbsentFields is refuseCnpgClusterAbsentFields for one store. The
-// same removal condition holds for each of its two fields: remove it when
-// cloudnative-pg ships a Cluster CRD that carries the field (the v1.30.1
-// clusters.yaml has neither).
-func refuseBarmanAbsentFields(path string, store *cnpgv1.BarmanObjectStoreConfiguration) error {
-	if store == nil {
-		return nil
-	}
-	if store.AWS != nil && store.AWS.SSECustomerKey != nil {
-		return errors.Errorf("%s.s3Credentials.sseCustomerKey: %s", path, cnpgClusterAbsent)
-	}
-	if store.S3AddressingStyle != "" {
-		return errors.Errorf("%s.s3AddressingStyle: %s", path, cnpgClusterAbsent)
+func refuseBarmanStoreAddressing(path string, store *cnpgv1.BarmanObjectStoreConfiguration) error {
+	if store != nil && store.S3AddressingStyle != "" && store.AWS == nil {
+		return errors.Errorf("%s.s3AddressingStyle: requires s3Credentials (a rule of the Cluster CRD)", path)
 	}
 	return nil
 }
@@ -1078,7 +1059,7 @@ func (c *CnpgClusterConfig) Generate(app *stack.Application) ([]*client.Object, 
 	if c.Spec.Instances > math.MaxInt32 {
 		return nil, errors.Errorf("instances: must be <= %d, got %d", math.MaxInt32, c.Spec.Instances)
 	}
-	if err := refuseCnpgClusterAbsentFields(&c.Spec); err != nil {
+	if err := refuseBarmanAddressingWithoutCredentials(&c.Spec); err != nil {
 		return nil, err
 	}
 	if err := refuseOmittedClusterFields(&c.Spec); err != nil {

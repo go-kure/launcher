@@ -1019,21 +1019,14 @@ A third such field is not refused:
 `replicationSlots.synchronizeReplicas.enabled`, which the CRD defaults, so the
 API server puts the default (`true`) in the place of the null.
 `TestKindComponents_NullRequired` derives the three from the CRD and shows each
-answer by running the CRD's schema validator on the object. **Four fields the
-linked Go type holds and the Cluster CRD does not are refused when authored**,
-under `backup.barmanObjectStore` and under each
-`externalClusters[].barmanObjectStore`: `s3Credentials.sseCustomerKey` (with its
-`name` and `key`) and `s3AddressingStyle` (for example
-`backup.barmanObjectStore.s3AddressingStyle: no field of the
-postgresql.cnpg.io/v1 Cluster API: its CRD has no such property`). The
-barman-cloud type the strict decode reads is newer than the Cluster CRD of
-cloudnative-pg v1.30.1 (its `clusters.yaml`), which has no property for either,
-so the API server would name each as unknown and prune it. A `null` or an empty
-`s3AddressingStyle` is not authored and builds. The kind's row in
-`TestKindComponents_OmittedRequiredAndWrittenDefaults` derives the eight paths
-from the CRD in both directions, and `TestCnpgClusterHandler_AbsentFromCRD`
-shows each refusal. Remove the refusals when cloudnative-pg ships a CRD that
-carries the fields. **The kind's required list is generated** (see ["Required
+answer by running the CRD's schema validator on the object. The barman-cloud
+fields `s3Credentials.sseCustomerKey` (with its `name` and `key`) and
+`s3AddressingStyle`, under `backup.barmanObjectStore` and under each
+`externalClusters[].barmanObjectStore`, are in the Cluster CRD of cloudnative-pg
+v1.30.2, so the kind takes them like any other field, with the CRD's one
+rule on them: an `s3AddressingStyle` on a store that has no `s3Credentials` is
+refused by its path (`backup.barmanObjectStore.s3AddressingStyle: requires
+s3Credentials (a rule of the Cluster CRD)`). **The kind's required list is generated** (see ["Required
 fields a kind writes unauthored and does not
 refuse"](conventions.md#required-fields-a-kind-writes-unauthored-and-does-not-refuse)):
 every field the Cluster CRD requires that the Go type writes whether or not it
