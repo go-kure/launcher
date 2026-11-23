@@ -60,3 +60,5 @@ unconditionally.
 | `New`, `Errorf` | Create plain/formatted errors. |
 | `Wrap`, `Wrapf` | Wrap an error with context (nil-safe). |
 | `Is`, `As` | `errors.Is`/`errors.As` passthroughs for inspection. |
+
+The package comment in `doc.go` gives the same summary on pkg.go.dev.

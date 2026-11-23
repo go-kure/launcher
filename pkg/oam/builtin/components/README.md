@@ -1048,3 +1048,5 @@ See [Conventions](/site/content/api-reference/oam-components/conventions.md#requ
 ### Every spec field is this package's to write
 
 See [Conventions](/site/content/api-reference/oam-components/conventions.md#every-spec-field-is-this-packages-to-write).
+
+The package comment in `doc.go` gives the one-paragraph summary this page opens with.
