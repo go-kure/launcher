@@ -3,7 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/go-kure/launcher/pkg/errors.svg)](https://pkg.go.dev/github.com/go-kure/launcher/pkg/errors)
 
 The `errors` package provides structured error types and thin wrapping helpers used
-across launcher. Application code uses these helpers instead of calling `fmt.Errorf`
+across launcher. Application code is meant to use these helpers instead of calling `fmt.Errorf`
 directly, so that error wrapping is consistent and machine-inspectable.
 
 ## Structured error types

@@ -4,7 +4,7 @@
 
 Package `options` defines `GlobalOptions` — the global flags shared by all `kurel`
 commands (config file, verbose/debug/strict, output format/file, namespace, dry-run)
-— along with `AddFlags`, `Complete` (Viper binding), and `Validate`.
+— along with `AddFlags`, `Complete` (reads some values from Viper), and `Validate`.
 
 Internal CLI support, not a standalone API. The flags are documented for users in the
 [kurel CLI reference](../../kurel). See

@@ -390,9 +390,11 @@ assume every error out of this package is a `*errors.PatchError`. Check the call
 ### A target that matches no resource
 
 A patch target that names no resource in the base resources is a `*patch.TargetNotFoundError`, from
-`ResolveTargetKey` and from `NewPatchableAppSet`. `Target` holds the target as written, and `Explicit`
-is true when the patch gave it in its own `target` field. Test for it with `errors.As`; the text is for
-people. A target that is ambiguous is a plain error, not this type.
+`ResolveTargetKey` and from `NewPatchableAppSet`. `Target` holds the target as written. `Explicit`
+is true for the `target` of a field patch, whose message reads "explicit target not found", and false
+for a strategic patch's target and for a direct `ResolveTargetKey` lookup, whose message reads "not
+found in base resources". Test for it with `errors.As`; the text is for people. A target that is
+ambiguous is a plain error, not this type.
 
 ```go
 var nf *patch.TargetNotFoundError
