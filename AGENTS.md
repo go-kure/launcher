@@ -4,7 +4,7 @@ This document provides comprehensive guidance for AI agents working on the Launc
 
 ## Project Overview
 
-Launcher is an OAM-native package manager for Kubernetes that ships as the `kurel` CLI. It provides a two-config-set model: a package config (what the application needs) and a site config (how the cluster is configured), resolving them at install time to produce ready-to-apply Kubernetes manifests.
+Launcher is an OAM-native package manager for Kubernetes that ships as the `kurel` CLI. It provides a two-config-set model: a package config (what the application needs) and a site config (how the cluster is configured), resolving them at build time to produce ready-to-apply Kubernetes manifests.
 
 See `docs/design.md` for the full vision and architecture.
 
@@ -19,7 +19,7 @@ See `docs/design.md` for the full vision and architecture.
 ### Architecture
 
 - **Two-config-set model**: Package config (app requirements) + site config (cluster capabilities)
-- **Resolution**: Merge configs at install time → produce Kubernetes manifests
+- **Resolution**: Merge configs at build time → produce Kubernetes manifests
 - **Patch library**: standalone JSONPath-based patching (`pkg/patch`), not part of the build pipeline — explicit, user-invoked resource customization
 - **OAM alignment**: Follows Open Application Model semantics
 
