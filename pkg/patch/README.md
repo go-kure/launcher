@@ -387,6 +387,23 @@ The strategic apply in the `WriteToFile` loop wraps with `%w` as well, so `error
 `errors.As(err, &pe)` finds none. `pkg/patch/patcherror_paths_test.go` pins these paths. Do not
 assume every error out of this package is a `*errors.PatchError`. Check the call path.
 
+### A target that matches no resource
+
+A patch target that names no resource in the base resources is a `*patch.TargetNotFoundError`, from
+`ResolveTargetKey` and from `NewPatchableAppSet`. `Target` holds the target as written, and `Explicit`
+is true when the patch gave it in its own `target` field. Test for it with `errors.As`; the text is for
+people. A target that is ambiguous is a plain error, not this type.
+
+```go
+var nf *patch.TargetNotFoundError
+if errors.As(err, &nf) {
+    // inspect nf.Target, nf.Explicit
+}
+```
+
+`PatchableAppSet.WritePatchedFilesWithOptions` skips a patch file, with a warning, only when the
+failure to build its set is this type, whatever wraps it.
+
 ## Related Packages
 
 - [pkg/oam](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) - the `kurel build` pipeline; independent of this package (see Scope and Status above)

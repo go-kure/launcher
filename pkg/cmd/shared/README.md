@@ -9,4 +9,5 @@ and `NewVersionCommand` (version output). These are wired together by
 [kurel CLI reference](../kurel).
 
 Internal CLI support, not a standalone API. See
-[pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/cmd/shared).
+[pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/cmd/shared),
+where the package comment in `doc.go` gives the same summary.

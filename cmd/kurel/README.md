@@ -5,3 +5,5 @@ Package `main` is the `kurel` binary entrypoint; it simply calls
 
 User-facing CLI usage is documented in the
 [kurel CLI reference](../../pkg/cmd/kurel).
+
+The package comment is in `doc.go`; it gives the same one-line purpose.

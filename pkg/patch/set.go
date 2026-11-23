@@ -215,7 +215,7 @@ func (s *PatchableAppSet) WritePatchedFilesWithOptions(originalPath string, patc
 		patchableSet, err := NewPatchableAppSetWithStructure(docSetCopy, patches)
 		if err != nil {
 			// If the error is about a missing target, skip this patch file with a warning
-			if strings.Contains(err.Error(), "explicit target not found") || strings.Contains(err.Error(), "not found in base resources") {
+			if skipsPatchFile(err) {
 				fmt.Printf("⚠️  Skipping %s: contains patches for resources not present in base YAML\n", patchFile)
 				if debug {
 					fmt.Printf("   Details: %v\n", err)

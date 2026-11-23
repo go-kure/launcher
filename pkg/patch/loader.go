@@ -758,7 +758,7 @@ func ResolveTargetKey(resources []*unstructured.Unstructured, target string) (st
 				return CanonicalResourceKey(r), nil
 			}
 		}
-		return "", errors.Errorf("target %q not found in base resources", target)
+		return "", &TargetNotFoundError{Target: target}
 	}
 
 	// Try kind.name match first (case-insensitive)
@@ -788,7 +788,7 @@ func ResolveTargetKey(resources []*unstructured.Unstructured, target string) (st
 
 	switch len(shortMatches) {
 	case 0:
-		return "", errors.Errorf("target %q not found in base resources", target)
+		return "", &TargetNotFoundError{Target: target}
 	case 1:
 		return CanonicalResourceKey(shortMatches[0]), nil
 	default:
@@ -853,8 +853,9 @@ func resolvePatches(resources []*unstructured.Unstructured, patches []PatchSpec)
 		if spec.Target != "" {
 			resolved, err := ResolveTargetKey(resources, spec.Target)
 			if err != nil {
-				if strings.Contains(err.Error(), "not found in base resources") {
-					return nil, errors.Errorf("explicit target not found: %s", spec.Target)
+				var notFound *TargetNotFoundError
+				if errors.As(err, &notFound) {
+					return nil, &TargetNotFoundError{Target: spec.Target, Explicit: true}
 				}
 				return nil, errors.Wrapf(err, "explicit target %q", spec.Target)
 			}

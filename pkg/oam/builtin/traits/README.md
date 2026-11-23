@@ -1515,3 +1515,5 @@ through `AddCertificateDNSName`, `SetCertificateDuration`,
 `es.Spec.SecretStoreRef` and the upstream `ReplicationSourceResticSpec` /
 `ReplicationSourceTriggerSpec` directly. None of those layers injected a value, so
 the emitted manifests are unchanged.
+
+The package comment in `doc.go` gives the one-paragraph summary this page opens with.

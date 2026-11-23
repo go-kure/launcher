@@ -460,3 +460,5 @@ kurel build ./mypackage --profile profiles/prod.yaml -o out/ \
 # Render the prod environment declared in ./mypackage/environments.yaml
 kurel build ./mypackage --environment prod -o out/
 ```
+
+The package comment in `doc.go` gives the one-paragraph summary of the command's parts.

@@ -8,4 +8,5 @@ commands (config file, verbose/debug/strict, output format/file, namespace, dry-
 
 Internal CLI support, not a standalone API. The flags are documented for users in the
 [kurel CLI reference](../../kurel). See
-[pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/cmd/shared/options).
+[pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/cmd/shared/options),
+where the package comment in `doc.go` gives the same summary.
