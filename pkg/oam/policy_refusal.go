@@ -115,9 +115,11 @@ func NewPolicyRefusal(class RefusalClass, message string) error {
 	return &PolicyRefusal{Class: class, Message: message}
 }
 
-// TargetManifestRefusal is a refusal by the environment policy found in the
-// target.manifest of an ExternalSecret or a ClusterExternalSecret: the object
-// the operator would write. It wraps the PolicyRefusal, so the class a
+// TargetManifestRefusal is the refusal of a Secret in the target.manifest of
+// an ExternalSecret or a ClusterExternalSecret: the object the operator would
+// write. The other refusal of a target.manifest, of a kind the policy reads, is
+// a bare PolicyRefusal of class RefusalUnreadableObject and not this type. It
+// wraps the PolicyRefusal, so the class a
 // ViolationError reports is unchanged (a Secret there is RefusalExplicitSecret,
 // as it is where a document carries one as an object) and errors.As still
 // reaches the refusal. What it adds is where the refusal was found: a consumer
