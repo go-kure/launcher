@@ -43,8 +43,9 @@ Outside the code: `docs/` (design and OAM notes), `examples/` (runnable applicat
 
 **1. `kurel build`, from files to YAML.** The code is `runBuild` in `pkg/cmd/kurel/build.go`.
 
-1. It finds `app.yaml`. If a `kurel.yaml` sits next to it, `oam.ResolveParameters` replaces `${name}` in the
-   text with the values from `--values` and `--set` before anything is parsed.
+1. It finds `app.yaml`. If a `kurel.yaml` sits next to it, `oam.ResolveParameters` reads `app.yaml` as YAML
+   and replaces `${name}` in its values (never in a mapping key) with the values from `--values` and `--set`,
+   before the document is decoded as an application.
 2. `newBuiltinTransformer` makes an `oam.Transformer` and registers every built-in from
    `pkg/oam/builtin/registry`.
 3. `oam.ParseWithExtraTypes` parses the application. `oam.ParseClusterProfile` and
@@ -54,8 +55,9 @@ Outside the code: `docs/` (design and OAM notes), `examples/` (runnable applicat
 5. `Transformer.Transform` rewrites higher-level kinds into base ones (the lowering engine), asks each
    component's handler for its kure objects, applies the policies and traits, and returns a kure
    `*stack.Cluster`.
-6. `oam.GenerateApplications` and `oam.CheckInDocumentCollisions` look for two objects with one identity.
-   kure's `pkg/io` writes the YAML to stdout, to `--output <dir>`, or to the global `-f` file.
+6. `oam.GenerateApplications` asks each application for its objects, and `oam.CheckInDocumentCollisions` looks
+   for two of them with one identity. `runBuild` encodes the objects with kure's `pkg/io` and writes the YAML
+   to stdout, to `--output <dir>`, or to the global `-f` file.
 
 **2. A library consumer.** It does what steps 2 to 6 do, with its own additions.
 
@@ -72,7 +74,7 @@ Outside the code: `docs/` (design and OAM notes), `examples/` (runnable applicat
 
 1. `kurel.yaml` declares the parameters of a package.
 2. Values come from `--values`; each `--set key=value` overrides the same key.
-3. `oam.ResolveParameters` substitutes them into `app.yaml` before parsing.
+3. `oam.ResolveParameters` substitutes them into the values of `app.yaml` before it is decoded.
 4. `--environment NAME` reads `environments.yaml` and names the profile and values files. A path may not
    leave the directory of that file.
 
@@ -109,7 +111,9 @@ Outside the code: `docs/` (design and OAM notes), `examples/` (runnable applicat
 - **What a consumer extends.** `ComponentHandler` and `TraitHandler` (`pkg/oam/handler.go`),
   `PolicyHandler` (`pkg/oam/pipeline.go`), the lowering rule interfaces (`pkg/oam/lowering.go`), the `Policy`
   interface (`pkg/oam/policy.go`) and `PolicyResult.Extensions`.
-- **Output.** One YAML stream. No OCI artifact and no delivery object.
+- **Output.** One YAML stream. No OCI artifact, and launcher wraps the application in no delivery object of its
+  own. A Flux object an author writes as a component is generated like any other component
+  ([docs/delivery-scope.md](docs/delivery-scope.md)).
 - **Releases.** Signed `kurel` binaries from the release workflow, never from a hand-pushed tag.
 
 ## Where to start reading
