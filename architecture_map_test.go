@@ -42,9 +42,10 @@ func TestArchitectureMapListsEveryPackage(t *testing.T) {
 	}
 }
 
-// TestParseMapRows pins what the guard reads: table rows of the Map section only, a
-// path named twice is a problem, and a comment or code block inside the Map section
-// is refused, because the guard reads tables and nothing else.
+// TestParseMapRows pins what the guard reads: table rows of the Map section only,
+// and a path named twice is a problem. A comment or a code block anywhere in the
+// file is refused, because the guard reads tables and nothing else, and a block
+// can hide rows from a reader without hiding them from the guard.
 func TestParseMapRows(t *testing.T) {
 	doc := strings.Join([]string{
 		"## Elsewhere",
@@ -72,36 +73,37 @@ func TestParseMapRows(t *testing.T) {
 	}
 
 	for _, hidden := range []string{
-		"<!--",
-		"text <!-- | `pkg/inline` | hidden | -->",
-		"```",
-		"````markdown",
-		"~~~",
+		"<!--\n## Map\n| `pkg/real` | a row |\n-->",
+		"<!-- one line -->\n## Map\n| `pkg/real` | a row |",
+		"## Map\ntext <!-- | `pkg/inline` | hidden | -->",
+		"## Map\n```\n| `pkg/real` | a row |\n```",
+		"## Map\n````markdown\n| `pkg/real` | a row |\n````",
+		"## Map\n~~~\n| `pkg/real` | a row |\n~~~",
 	} {
-		_, problems := parseMapRows("## Map\n" + hidden + "\n| `pkg/real` | a row |")
-		if len(problems) != 1 || !strings.Contains(problems[0], "comment or code block") {
-			t.Errorf("a Map section holding %q: problems = %v, want one about a comment or code block", hidden, problems)
+		_, problems := parseMapRows(hidden)
+		if len(problems) == 0 || !strings.Contains(problems[0], "comment or code block") {
+			t.Errorf("document %q: problems = %v, want one about a comment or code block", hidden, problems)
 		}
 	}
 }
 
 // parseMapRows returns the paths named in the Map section of a Markdown document,
 // and a message for each problem it finds: a path named twice, or a comment or code
-// block inside the section (the guard would count a row such a block hides).
+// block anywhere in the document.
 func parseMapRows(doc string) (rows map[string]bool, problems []string) {
 	rows = map[string]bool{}
 	inMap := false
 	for _, line := range strings.Split(doc, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(line, "<!--") || strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			problems = append(problems, "ARCHITECTURE.md holds a comment or code block; the guard reads tables only: "+trimmed)
+			continue
+		}
 		if strings.HasPrefix(line, "## ") {
 			inMap = strings.TrimSpace(strings.TrimPrefix(line, "## ")) == "Map"
 			continue
 		}
 		if !inMap {
-			continue
-		}
-		trimmed := strings.TrimSpace(line)
-		if strings.Contains(line, "<!--") || strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			problems = append(problems, "the Map section holds a comment or code block; the guard reads tables only: "+trimmed)
 			continue
 		}
 		if m := mapRow.FindStringSubmatch(line); m != nil {
