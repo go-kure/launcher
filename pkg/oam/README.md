@@ -245,10 +245,11 @@ See [Policy defaults and capability system](/site/content/api-reference/oam/poli
 Which properties of the built-in types declare a class is under
 [Declared bounds](/site/content/api-reference/oam/policy-and-capability.md#declared-bounds).
 
-A refusal found in the `target.manifest` of an `externalsecret` or `clusterexternalsecret` is an
-`*oam.TargetManifestRefusal` around the `PolicyRefusal`: the class is the refusal's own, and
-`errors.As` finds the type, so a consumer never reads the message to tell it from the same
-refusal elsewhere.
+The refusal of a Secret in the `target.manifest` of an `externalsecret` or `clusterexternalsecret`
+is an `*oam.TargetManifestRefusal` around the `PolicyRefusal`: the class is still
+`RefusalExplicitSecret`, and `errors.As` finds the type, so a consumer never reads the message to
+tell it from the same refusal elsewhere. The other refusal of a `target.manifest`, of a kind the
+policy reads, is a bare `PolicyRefusal` of class `RefusalUnreadableObject`.
 
 ## Capability system
 
