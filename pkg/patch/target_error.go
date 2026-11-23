@@ -17,8 +17,10 @@ func skipsPatchFile(err error) bool {
 // TargetNotFoundError reports that a patch target names no resource in the base
 // resources. Test for it with errors.As; its text is for people to read.
 //
-// Explicit is true when the patch gave the target itself (PatchSpec.Target)
-// rather than leaving it to be found from the path.
+// Explicit is true for the target of a field patch, the form whose message
+// reads "explicit target not found". The target of a strategic patch, though
+// it too must be given, and a target looked up directly with ResolveTargetKey,
+// report false and keep the message "not found in base resources".
 type TargetNotFoundError struct {
 	Target   string
 	Explicit bool
