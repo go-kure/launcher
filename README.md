@@ -19,7 +19,7 @@ launcher is pre-release: output, names and the library contract may change.
 | Delivery (Flux Kustomizations, health checks, reconciliation settings) | Not launcher's job. A downstream consumer that calls the library owns it. |
 | A `--policy` flag on `kurel build`, a `kurel` patch command | Not implemented. |
 
-See [docs/delivery-scope.md](docs/delivery-scope.md) for the layer roles and [docs/design.md](docs/design.md) for the full design and vision.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for a map of the code, [docs/delivery-scope.md](docs/delivery-scope.md) for the layer roles and [docs/design.md](docs/design.md) for the full design and vision.
 
 ## Installation
 
