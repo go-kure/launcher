@@ -212,6 +212,17 @@ fetch failure is a refusal by the policy all the same, a redirect to a host outs
 registries: its error holds a `PolicyRefusal` of class `RefusalRegistry`, which `errors.As`
 reaches, under no `ViolationError`.
 
+**A refusal in a `target.manifest`.** An `externalsecret` or a `clusterexternalsecret` may name the
+object the operator would write, and that object is held to the policy as `passthrough` holds one.
+A Secret there is refused with the class `RefusalExplicitSecret`, the same as a Secret a document
+carries as an object. The refusal is a `*TargetManifestRefusal` around the `PolicyRefusal`: its
+`At` is empty for an `externalsecret` and `externalSecretSpec.` for a `clusterexternalsecret`, and
+its `Error()` is `At`, then `target.manifest: `, then the refusal's text, which is the text the
+refusal had before the type existed. A consumer that gives other advice for this Secret than for
+one the document carries finds it with `errors.As`, never by reading the message. The other refusal
+of a `target.manifest`, an object of a kind the policy reads, keeps its class
+`RefusalUnreadableObject` and is not this type.
+
 **A consumer's own `Enforceable`** returns `NewPolicyRefusal(class, message)`, bare or wrapped
 with `%w`, for its violation to carry the class: one of the constants above or a value of its
 own, which the library passes on as given. The class of a violation is that of the first

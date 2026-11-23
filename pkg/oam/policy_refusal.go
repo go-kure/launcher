@@ -115,6 +115,30 @@ func NewPolicyRefusal(class RefusalClass, message string) error {
 	return &PolicyRefusal{Class: class, Message: message}
 }
 
+// TargetManifestRefusal is a refusal by the environment policy found in the
+// target.manifest of an ExternalSecret or a ClusterExternalSecret: the object
+// the operator would write. It wraps the PolicyRefusal, so the class a
+// ViolationError reports is unchanged (a Secret there is RefusalExplicitSecret,
+// as it is where a document carries one as an object) and errors.As still
+// reaches the refusal. What it adds is where the refusal was found: a consumer
+// that gives its own users other advice for a Secret the operator would write
+// than for one the document carries finds it with errors.As, and never by
+// reading the message.
+//
+// Its text is the refusal's, preceded by the path: At, then "target.manifest: ".
+type TargetManifestRefusal struct {
+	// At is where the spec starts in the component's properties: empty for an
+	// externalsecret, and "externalSecretSpec." for a clusterexternalsecret. It
+	// ends in a dot because it is a prefix of the path in the text.
+	At string
+	// Cause is the refusal, a PolicyRefusal or an error that wraps one.
+	Cause error
+}
+
+func (e *TargetManifestRefusal) Error() string { return e.At + "target.manifest: " + e.Cause.Error() }
+
+func (e *TargetManifestRefusal) Unwrap() error { return e.Cause }
+
 // NewViolationError returns the violation of a component whose Enforceable
 // refused with cause. Its Class is that of the first PolicyRefusal in the
 // cause chain, and RefusalUnclassified when the chain holds none. The

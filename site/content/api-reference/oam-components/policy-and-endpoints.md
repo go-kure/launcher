@@ -152,6 +152,9 @@ The classes, what each covers and what stays unclassified are in
   `secretValues`, a `certificate`'s keystore password (`keystores.jks.password`,
   `keystores.pkcs12.password`), and in a `secretstore` or a `clustersecretstore` a
   credential written as a `value` and the data of the `fake` provider.
+  A Secret named in the `target.manifest` of an `externalsecret` or `clusterexternalsecret` has the
+  same class and is an `*oam.TargetManifestRefusal`, which `errors.As` finds: a consumer tells it
+  from the other refusals of this class by the type, never by the message.
 - **A source host is `oam.RefusalRegistry`,** as an image's registry is: the `url` of a
   `manifests` or `crd` source, a `helmtemplate` chart source, the Flux source kinds, an
   `oci://` url that does not name its registry, and a `bucket` endpoint on Amazon S3.

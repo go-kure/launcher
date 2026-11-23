@@ -728,6 +728,10 @@ error of the source included, is a miss and the chart is fetched.
 
 See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#policy-refusal-classes).
 
+A refusal of the object an `externalsecret` or `clusterexternalsecret` would write (its
+`target.manifest`) is an `*oam.TargetManifestRefusal`: the Secret there keeps the class
+`oam.RefusalExplicitSecret`, and `errors.As` finds the type.
+
 The workload types that keep the reshaped form and the kinds that take a pod as the API type publish, in
 `boundedBy`, which classes an authored value at a property can cause (`bounds.go`,
 go-kure/launcher#1580). No schema fragment carries a bound: each type states its own.
