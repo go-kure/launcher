@@ -563,7 +563,7 @@ func enforceTargetManifest(spec *esv1.ExternalSecretSpec, at string, p oam.Polic
 	written.SetAPIVersion(manifest.APIVersion)
 	written.SetKind(manifest.Kind)
 	if err := enforceExplicitSecretObject(written, p); err != nil {
-		return errors.Wrapf(err, "%starget.manifest", at)
+		return &oam.TargetManifestRefusal{At: at, Cause: err}
 	}
 	if policyReadsKind(written.GroupVersionKind()) {
 		return oam.NewPolicyRefusal(oam.RefusalUnreadableObject, fmt.Sprintf("%starget.manifest: the operator would write a %s, a kind the environment policy checks, and what the object would hold is not known at build, so it cannot be checked against environment policy", at, manifest.Kind))
