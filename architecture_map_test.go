@@ -21,9 +21,9 @@ func TestArchitectureMapListsEveryPackage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read ARCHITECTURE.md: %v", err)
 	}
-	documented, dupes := parseMapRows(string(data))
-	for _, d := range dupes {
-		t.Errorf("the Map of ARCHITECTURE.md names %s twice", d)
+	documented, problems := parseMapRows(string(data))
+	for _, p := range problems {
+		t.Error(p)
 	}
 	if len(documented) == 0 {
 		t.Fatal("no Map rows found in ARCHITECTURE.md: the table format changed, or the file moved")
@@ -42,83 +42,56 @@ func TestArchitectureMapListsEveryPackage(t *testing.T) {
 	}
 }
 
-// TestParseMapRows pins what counts as a row: only a table line in the Map section,
-// never one inside an HTML comment or a fenced code block, and a path named twice
-// is reported.
+// TestParseMapRows pins what the guard reads: table rows of the Map section only, a
+// path named twice is a problem, and a comment or code block inside the Map section
+// is refused, because the guard reads tables and nothing else.
 func TestParseMapRows(t *testing.T) {
 	doc := strings.Join([]string{
 		"## Elsewhere",
 		"| `pkg/other` | not in the Map |",
 		"## Map",
 		"| `pkg/real` | a row |",
-		"<!--",
-		"| `pkg/commented` | hidden in a comment |",
-		"-->",
-		"<!-- | `pkg/inline` | hidden in one line | -->",
-		"```",
-		"| `pkg/fenced` | inside a code block |",
-		"```",
-		"~~~markdown",
-		"| `pkg/tilde` | inside a tilde block |",
-		"~~~",
 		"|  `cmd/tool`  | a row with wider cell spacing |",
 		"| `pkg/real` | the same path again |",
 		"## After",
 		"| `pkg/after` | not in the Map |",
 	}, "\n")
-
-	rows, dupes := parseMapRows(doc)
-
+	rows, problems := parseMapRows(doc)
 	for _, want := range []string{"pkg/real", "cmd/tool"} {
 		if !rows[want] {
 			t.Errorf("row %s was not found", want)
 		}
 	}
-	for _, not := range []string{"pkg/other", "pkg/commented", "pkg/inline", "pkg/fenced", "pkg/tilde", "pkg/after"} {
+	for _, not := range []string{"pkg/other", "pkg/after"} {
 		if rows[not] {
 			t.Errorf("%s was counted as a Map row", not)
 		}
 	}
-	if len(dupes) != 1 || dupes[0] != "pkg/real" {
-		t.Errorf("duplicates = %v, want [pkg/real]", dupes)
+	if len(problems) != 1 || !strings.Contains(problems[0], "pkg/real") {
+		t.Errorf("problems = %v, want one naming pkg/real twice", problems)
+	}
+
+	for _, hidden := range []string{
+		"<!--",
+		"text <!-- | `pkg/inline` | hidden | -->",
+		"```",
+		"````markdown",
+		"~~~",
+	} {
+		_, problems := parseMapRows("## Map\n" + hidden + "\n| `pkg/real` | a row |")
+		if len(problems) != 1 || !strings.Contains(problems[0], "comment or code block") {
+			t.Errorf("a Map section holding %q: problems = %v, want one about a comment or code block", hidden, problems)
+		}
 	}
 }
 
 // parseMapRows returns the paths named in the Map section of a Markdown document,
-// and the paths it names more than once. Text inside an HTML comment or a fenced
-// code block is not part of the table.
-func parseMapRows(doc string) (rows map[string]bool, dupes []string) {
+// and a message for each problem it finds: a path named twice, or a comment or code
+// block inside the section (the guard would count a row such a block hides).
+func parseMapRows(doc string) (rows map[string]bool, problems []string) {
 	rows = map[string]bool{}
-	inMap, inComment := false, false
-	fence := "" // the delimiter that opened the current code block, or ""
+	inMap := false
 	for _, line := range strings.Split(doc, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if inComment {
-			if strings.Contains(line, "-->") {
-				inComment = false
-			}
-			continue
-		}
-		if fence != "" {
-			if strings.HasPrefix(trimmed, fence) {
-				fence = ""
-			}
-			continue
-		}
-		if strings.HasPrefix(trimmed, "```") {
-			fence = "```"
-			continue
-		}
-		if strings.HasPrefix(trimmed, "~~~") {
-			fence = "~~~"
-			continue
-		}
-		if strings.HasPrefix(trimmed, "<!--") {
-			if !strings.Contains(trimmed, "-->") {
-				inComment = true
-			}
-			continue
-		}
 		if strings.HasPrefix(line, "## ") {
 			inMap = strings.TrimSpace(strings.TrimPrefix(line, "## ")) == "Map"
 			continue
@@ -126,14 +99,19 @@ func parseMapRows(doc string) (rows map[string]bool, dupes []string) {
 		if !inMap {
 			continue
 		}
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(line, "<!--") || strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			problems = append(problems, "the Map section holds a comment or code block; the guard reads tables only: "+trimmed)
+			continue
+		}
 		if m := mapRow.FindStringSubmatch(line); m != nil {
 			if rows[m[1]] {
-				dupes = append(dupes, m[1])
+				problems = append(problems, "the Map of ARCHITECTURE.md names "+m[1]+" twice")
 			}
 			rows[m[1]] = true
 		}
 	}
-	return rows, dupes
+	return rows, problems
 }
 
 // goDirs returns every directory under pkg/ and cmd/ that holds a non-test Go
