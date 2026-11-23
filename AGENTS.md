@@ -25,29 +25,19 @@ See `docs/design.md` for the full vision and architecture.
 
 ## Repository Structure
 
-```
-launcher/
-├── cmd/
-│   └── kurel/        # kurel CLI binary entrypoint (package main)
-├── pkg/
-│   ├── cmd/
-│   │   ├── kurel/    # kurel command tree (build, config, completion, version)
-│   │   └── shared/   # shared CLI builders + global options
-│   ├── errors/       # structured error types + wrapping helpers
-│   ├── oam/          # OAM model, parser, transformer (+ builtin/ handlers, netpol/)
-│   └── patch/        # JSONPath-based patching (TOML/YAML, strategic merge), standalone
-├── docs/             # Documentation (design.md, oam/ specs, github-workflows, shared-workflows)
-├── examples/         # Runnable example applications and cluster profiles
-├── site/             # Hugo docs site (docs-map.yaml, scripts/, content/)
-├── .github/
-│   └── workflows/    # CI, deploy-docs, release, pr-review
-├── renovate.json     # Renovate config (extends the shared go-kure/.github preset)
-├── .claude/          # Claude Code configuration
-├── mise.toml         # Tool versions and tasks
-├── Makefile          # Build system
-├── AGENTS.md         # This file
-└── DEVELOPMENT.md    # Development workflow guide
-```
+The package map (every directory under `pkg/` and `cmd/`, what it owns and what it must not do) is in
+[ARCHITECTURE.md](ARCHITECTURE.md), together with how data moves through a build, the rules the code
+keeps and where each is enforced. A test fails when a package has no row there, so add a row in the same
+change that adds a package.
+
+Outside the code:
+
+- `docs/`: design notes, OAM specs, workflow references
+- `examples/`: runnable example applications and cluster profiles
+- `site/`: the Hugo documentation site (`docs-map.yaml`, `scripts/`, `content/`)
+- `.github/workflows/`: CI, deploy-docs, release, pr-review
+- `renovate.json`, `mise.toml`, `Makefile`: dependency, tool and build configuration
+- `AGENTS.md` (this file), `.claude/`, `DEVELOPMENT.md`: contributor and agent guidance
 
 ## Development Workflow
 
@@ -224,14 +214,11 @@ return errors.Errorf("invalid value: %s", val)
 
 ### Logging
 
-Always use pkg/logger for logging:
-
-```go
-import "github.com/go-kure/launcher/pkg/logger"
-
-logger.Info("message", "key", value)
-logger.Error("message", "error", err)
-```
+Launcher has no logging package of its own (only `pkg/patch` uses kure's `pkg/logger`). Library code under `pkg/oam` writes nothing to stdout or stderr: it
+reports a non-fatal warning through the callback set with `Transformer.SetWarningHandler`, and the CLI
+decides where the message goes (`pkg/cmd/kurel/build.go` prints it to `cmd.ErrOrStderr()`). The `build`
+command writes through `cmd.OutOrStdout()` and `cmd.ErrOrStderr()`, so a test can capture its output; use
+the same in new commands. `config view`, `version` and `completion` still write to the process streams.
 
 ### Testing Patterns
 
@@ -491,6 +478,7 @@ The go-kure org governance, design documents, and community files are maintained
 ## Questions?
 
 Refer to:
-1. `DEVELOPMENT.md` - Detailed development workflow
-2. `docs/design.md` - Full design document and vision
-3. `docs/github-workflows.md` - GitHub Actions workflow reference
+1. `ARCHITECTURE.md` - Package map, data flows, the rules the code keeps
+2. `DEVELOPMENT.md` - Detailed development workflow
+3. `docs/design.md` - Full design document and vision
+4. `docs/github-workflows.md` - GitHub Actions workflow reference
