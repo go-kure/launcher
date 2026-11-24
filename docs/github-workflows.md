@@ -61,6 +61,13 @@ concurrency:
   cancel-in-progress: true
 ```
 
+A bot pull request starts one run when it opens and one for each label added right after (`labeled`
+is a trigger), so the earlier runs are cancelled within seconds. The `build` gate does not start in
+a run cancelled before it (`if: ${{ !cancelled() }}`), so a superseded run reports `build` as
+cancelled and not failed; a `build` that already finished keeps its result. A failed job still runs
+the gate and it still fails; a job skipped where the script allows it stays accepted, as before
+(go-kure/.github#398).
+
 ### Job Dependency Graph
 
 ```
@@ -164,7 +171,7 @@ self-test (`make test-verify-merge`).
 | `build-binaries` | `Build kurel` | 10 min | changes, test | Build `kurel` linux/amd64 binary; uploaded as artifact |
 | `docs-build` | `docs-build` | 25 min | changes | Hugo site build for docs; go build (fence check) + Hugo caches; runs the shared No-Downstream-References guard (`check-forbidden-terms` action, `--full-tree`) + a vendored-copy drift check + the forbidden-terms self-test of the CRD vendor scripts' matcher and `cliff.toml`'s scrub, run with git-cliff installed at `mise.toml`'s pin by the release installer from the same go-kure/.github checkout (`make test-forbidden-terms`) + the canonical `check-doc-sync`/`check-links` actions (structure + rendered-link check) + the documentation YAML fence check (`make check-doc-fences`) + the source-revision check on the built site (`make check-revision-shown`) + the API-reference anchor and fragment-link check on the built site (`make check-api-anchors`) |
 | `pin-impact` | `pin-impact` | 3 min | — | On a merge-queue run, only checks that every `go-kure/.github` reference in the merged tree pins the same commit. On a PR, renders and gates on the real impact of a `go-kure/.github` pin bump: resolves each referenced action's `$GITHUB_ACTION_PATH` script (and the siblings those `source` or run), intersects against the compare diff, fails if a consumed path changed and refuses any shape it cannot resolve (go-kure/launcher#358) |
-| `build` | `build` | 1 min | changes, validate, test, build-binaries, docs-build, coverage-check, action-pins, security, pin-impact, issue-refs | Aggregation gate |
+| `build` | `build` | 1 min | changes, validate, test, build-binaries, docs-build, coverage-check, action-pins, security, pin-impact, issue-refs | Aggregation gate (`if: ${{ !cancelled() }}`, so it does not start in a run cancelled before it) |
 | `cross-platform` | `Cross-Platform Build` | 15 min | build-binaries | Matrix: linux × amd64/arm64 (main + release/* only) |
 | `validate-manifests` | `validate-manifests` | 10 min | changes | `kurel build` + `flux schema validate` against the `default` (embedded) and `ecosystem` (schemas.fluxoperator.dev) catalogs for a representative `examples/*.yaml` subset; `continue-on-error: true`, not in `build`'s gate (go-kure/launcher#292) |
 | `analyze-changes` | `Analyze Changes` | 5 min | — | Changed files summary, breaking change warning for pkg/ (PR only) |
