@@ -56,9 +56,9 @@ spec:
 | `spec.values` | Ordered list of `{name, expr}`. A value reads inputs and earlier values only. Each name is a CEL identifier and is unique. |
 | `spec.outputs` | Required: the key must be there, and a model with no `outputs` (left out, or `null`) is refused when it is registered, naming the model. `outputs: {}` says the model publishes nothing. Otherwise a map of output key to exactly one `${ }` hole that is one read of the name of a record of a part, `${ parts.<id>.name }` or `${ parts.<id>.<key>.name }` (see `parts[].id`); text around the hole, a computed name, a read of a record itself and a part with `when` or `forEach` are refused when the model compiles, and the error names `spec.outputs.<key>` and the two forms. A key is a CEL identifier and is neither `name` nor `kind`. The model publishes each as an output of its own component, with the kind and the name its part publishes: a model part in another model reads it as `parts.<id>.<key>.name`. The build holds each against the component the part emitted. Computed outputs are not supported: a string carries no provenance, so the build could not tell two objects of one name apart. |
 | `spec.parts` | At least one part. A model that expands to nothing is an error. |
-| `parts[].id` | A CEL identifier, unique in the model. A later part reads the outputs of the part as records. The part's own object is `parts.<id>.name`, and every other output the part declares is a record under its key, `parts.<id>.<key>.name`: for a `postgresql` part, `parts.<id>.cluster.name` and `parts.<id>.app_secret.name`. Only the name of a record can be read: `parts.<id>`, a record without `.name`, and any other field fail when `Expand` runs, and the error names the site, the read and what the part declares. A part reads only an earlier part, and never a part with `when` or `forEach`. A read of any other part, or of the part itself, fails when the model compiles, and the error names the site and the part. A key the part does not declare fails when `Expand` runs, and the error names the site, the part and the key. |
+| `parts[].id` | A CEL identifier, unique in the model. A later part reads the outputs of the part as records. The part's own object is `parts.<id>.name`, and every other output the part declares is a record under its key, `parts.<id>.<key>.name`: for a `postgresql` part, `parts.<id>.cluster.name` and `parts.<id>.app_secret.name`. Only the name of a record can be read: `parts.<id>`, a record without `.name`, and any other field fail when `Expand` runs, and the error names the site, the read and what the part declares. A part reads only an earlier part, and never a part with `forEach`. An earlier part with a `when` is read only where its `when` holds (see `parts[].when`). A read of any other part, or of the part itself, fails when the model compiles, and the error names the site and the part. A key the part does not declare fails when `Expand` runs, and the error names the site, the part and the key. |
 | `parts[].type`, `traits[].type` | A full identity, `name@version`. A short name and a missing version are refused. |
-| `parts[].when` | Optional. Exactly one `${ }` hole that gives a bool. The part is emitted only when it is true. It does not see the loop variable. |
+| `parts[].when` | Optional. Exactly one `${ }` hole that gives a bool. The part is emitted only when it is true. It does not see the loop variable. A later part reads this part only where the `when` holds, and `Compile` checks it, so a model that registers is safe for every input set. Two places qualify: the true branch of a conditional whose test holds every top-level `&&` term of the `when` (`${ inputs.db ? parts.db.name : null }` for `when: ${ inputs.db }`, and `inputs.db && inputs.x` also holds it), and any site of a part whose own `when` holds them, except that `when` itself. Terms are compared as CEL text, ignoring parentheses and order: a `when` built from a comprehension holds nothing, and a conditional inside the body of a comprehension or a `cel.bind` grants nothing (its range and its initializer are outside that scope, so a conditional there grants as usual). Any other read is refused when the model compiles, and so is a read of a part whose `when` can give null: an optional input read as it is, in a conditional or not, or a value that holds one. Write `inputs.x == true`. The check reads the text of the `when` and fails closed: a chain of `&&`, a comparison, `||`, `!`, `in`, a string test, a bool literal, a required or defaulted bool input, and a conditional or a value built only of those are known not to give null; anything else is refused as a read. A `when` that reads a name other than `inputs`, `self`, `values` and `parts` (the type name `bool`, which a loop variable of that name hides) is no guard either, because the same text could mean another condition in the reader. A skipped part has no outputs, so the branch that reads it is never evaluated, and a key the part does not declare fails only in a build that emits the part. |
 | `parts[].forEach` | Optional `{as, in}`. `in` is exactly one `${ }` hole that gives a list. `as` is the loop variable, a CEL identifier. A filter per element goes in `in`. |
 | `parts[].name`, `properties`, `annotations` | Optional. Strings may hold `${ }` expressions. `name` is a string template. |
 
@@ -143,6 +143,11 @@ An optional input has no default and is not required. It is null when absent. Te
 field. A null input in an operator or a method call, such as `inputs.x + 'a'`, compiles and fails
 at run time.
 
+A key of an object input is tested with `in`: `'key' in inputs.obj`, and
+`'key' in inputs.obj ? inputs.obj.key : null` reads it. `inputs.obj.key == null` is not the same
+test: it fails with `no such key: key` when the key is absent, and is true only when the key is
+present with a null value.
+
 A value that is exactly one reference to an input or to an earlier value has the declared type
 of that reference. If the input is optional, the value is also nullable, so `values.x == null`
 compiles. Any other expression has the type that the checker reports. The checker drops the
@@ -187,17 +192,17 @@ path, so a map that holds both is refused.
 `Compile` returns the first failure, which wraps `ErrInvalid` and names the site. The order is the
 values, then for each part: `when`, `forEach.in`, `name`, the properties (keys sorted at every
 level), the trait properties and the annotations. The scope of a site is the inputs, `self`, the
-earlier values, the earlier parts that have no `when` and no `forEach` (`parts.<id>`) and, for `name`, the properties, the traits and the annotations of a `forEach`
+earlier values, the earlier parts that have no `forEach` (`parts.<id>`; one with a `when` only where its `when` holds) and, for `name`, the properties, the traits and the annotations of a `forEach`
 part, the loop variable. `when` and `forEach.in` do not see the loop variable. The loop variable
 has the element type of `forEach.in`.
 
 **Parts.** `Compiled.Expand(tr, scope, naming, partName)` evaluates the values, then each part in document
 order. A part whose `when` is false emits nothing. A part with `forEach` emits one component for
-each element. A part without a `name` takes its id. After it builds a part that has no `when` and
-no `forEach`, `Expand` asks the Transformer for the outputs of that component
+each element. A part without a `name` takes its id. After it builds a part that has no
+`forEach`, `Expand` asks the Transformer for the outputs of that component
 (`ComponentOutputsNamed`, with `naming` as the Naming hook) and stores each as a record under the
 part id: the part's own object (key `object`) is `name`, and every other output is a record
-`{name}` under its key. A later part reads `parts.<id>.name` or `parts.<id>.<key>.name`, so the name
+`{name}` under its key. A part that its `when` skips gets no query and no record. A later part reads `parts.<id>.name` or `parts.<id>.<key>.name`, so the name
 follows an authored object name and the Naming hook, as the name of the built object does. The Go
 API keeps the whole answer (`oam.Output`: key, kind, name). `tr` must declare the type
 identities of the parts (`registry.DeclareTypes`): a type that does not resolve declares no output,
