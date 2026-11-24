@@ -74,6 +74,8 @@ func TestCompile_AcceptsAGuardedRead(t *testing.T) {
 		"a comprehension in the guarded branch": {"inputs.db", "${ inputs.db ? ['a', 'b'].map(s, s + parts.db.name) : [] }"},
 		// The initializer of a bind runs outside the scope of the new variable, so a test there is read as usual.
 		"a bind initializer": {"inputs.db", "${ cel.bind(n, inputs.db ? parts.db.name : 'none', n) }"},
+		// A leading dot names the model's own variable, so it is no other name.
+		"a leading dot on the name": {".inputs.db", "${ .inputs.db ? parts.db.name : 'none' }"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := compileDoc(t, guardedDoc(condDB(tc.when)+reader("", tc.expr))); err != nil {
@@ -179,6 +181,10 @@ func TestCompile_RefusesAReadOfAPartWhoseWhenCanBeNull(t *testing.T) {
 	}
 	t.Run("an optional input", func(t *testing.T) {
 		err := compileDoc(t, guardedDoc(condDB("inputs.opt")+reader("", "${ inputs.opt ? parts.db.name : null }")))
+		wantInvalid(t, err, "spec.parts[1].properties.data.x", "parts.db", "can be null", "== true")
+	})
+	t.Run("an optional input with a leading dot", func(t *testing.T) {
+		err := compileDoc(t, guardedDoc(condDB(".inputs.opt")+reader("", "${ .inputs.opt ? parts.db.name : null }")))
 		wantInvalid(t, err, "spec.parts[1].properties.data.x", "parts.db", "can be null", "== true")
 	})
 	t.Run("a value that holds an optional input", func(t *testing.T) {

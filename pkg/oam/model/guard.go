@@ -224,7 +224,7 @@ func (n nullScope) mayBeNull(e celast.Expr) bool {
 func qualifiedName(e celast.Expr) (string, bool) {
 	switch e.Kind() {
 	case celast.IdentKind:
-		return e.AsIdent(), true
+		return strings.TrimPrefix(e.AsIdent(), "."), true
 	case celast.SelectKind:
 		sel := e.AsSelect()
 		if sel.IsTestOnly() {
@@ -261,7 +261,7 @@ func pureTerms(terms []celast.Expr) bool {
 		celast.PreOrderVisit(t, celast.NewExprVisitor(func(e celast.Expr) {
 			switch e.Kind() {
 			case celast.IdentKind:
-				if !scopeNames[strings.TrimPrefix(strings.SplitN(e.AsIdent(), ".", 3)[0], ".")] {
+				if !scopeNames[strings.SplitN(strings.TrimPrefix(e.AsIdent(), "."), ".", 2)[0]] {
 					pure = false
 				}
 			case celast.ComprehensionKind, celast.MapKind, celast.StructKind, celast.UnspecifiedExprKind:
