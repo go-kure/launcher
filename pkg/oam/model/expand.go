@@ -15,10 +15,11 @@ import (
 
 // partRead is one read below `parts.<part>` in a site: keys is the select chain after the
 // part id (`service`, `name` for `parts.app.service.name`), and empty for a read of the part
-// itself.
+// itself. conditional is set for a part that has a when.
 type partRead struct {
-	part string
-	keys []string
+	part        string
+	keys        []string
+	conditional bool
 }
 
 // text is the read as the document wrote it.
@@ -88,7 +89,10 @@ func consumeChain(e celast.Expr, seen map[int64]bool) {
 
 // appendPartReads adds each read below `parts.<part>` in ast to reads, once, as the longest
 // chain: `parts.db.app_secret.name` is one read, and not also `parts.db.app_secret`.
-func appendPartReads(reads []partRead, ast *cel.Ast) []partRead {
+//
+// A read of a part in conds is marked conditional: the form scan proved that the part is emitted
+// wherever the read is evaluated, so a scope that holds no outputs of it means the read is not reached.
+func appendPartReads(reads []partRead, ast *cel.Ast, conds map[string]condPart) []partRead {
 	seen := map[int64]bool{}
 	celast.PreOrderVisit(ast.NativeRep().Expr(), celast.NewExprVisitor(func(e celast.Expr) {
 		if seen[e.ID()] {
@@ -103,7 +107,8 @@ func appendPartReads(reads []partRead, ast *cel.Ast) []partRead {
 			return
 		}
 		consumeChain(e, seen)
-		r := partRead{part: part, keys: keys}
+		_, conditional := conds[part]
+		r := partRead{part: part, keys: keys, conditional: conditional}
 		// Compared by segment: `parts.db['a.b']` and `parts.db.a.b` print alike and differ.
 		for _, old := range reads {
 			if old.part == r.part && slices.Equal(old.keys, r.keys) {
@@ -171,6 +176,11 @@ func recordText(e celast.Expr) bool {
 func (s *site) checkPartReads(path string, parts map[string]map[string]any) error {
 	for _, r := range s.reads {
 		bound, ok := parts[r.part]
+		if !ok && r.conditional {
+			// The form scan allowed the read only where the part's when holds, so the part was
+			// skipped and the branch that reads it is not evaluated.
+			continue
+		}
 		if !ok {
 			return errors.Errorf("model: evaluate %s: %s: the scope holds no outputs of part %q", path, r.text(), r.part)
 		}
@@ -217,12 +227,14 @@ func declaredFields(m map[string]any) string {
 }
 
 // Expand evaluates the model in document order into the components its parts emit, and binds
-// `parts.<part>` as it goes: after a part that has no when and no forEach is built, the
+// `parts.<part>` as it goes: after a part that has no forEach is built, the
 // Transformer is asked for its outputs (Transformer.ComponentOutputsNamed, with naming as the
 // consumer's Naming hook) and each is bound as a record, `parts.<part>.name` for the part's own
 // object and `parts.<part>.<key>.name` for another output, whose `name` is what a later part
-// reads. A part reads only an earlier part of that kind (Compile refuses any other read), and
-// only a record the part declares (Expand refuses it, naming the site, the part and the key).
+// reads. A part whose when is false is not built, so it is not asked and binds nothing. A part
+// reads only an earlier part with no forEach, and one with a when only where the when holds
+// (Compile refuses any other read), and only a record the part declares (Expand refuses it,
+// naming the site, the part and the key).
 //
 // The values are evaluated first, from sc.Inputs and sc.Self. sc.Values, sc.Loop and sc.Parts
 // are not read. A part whose when is false emits nothing. A part with forEach emits one
@@ -357,7 +369,7 @@ func (c *Compiled) expandPart(tr *oam.Transformer, base string, p Part, sc Scope
 			}
 			comp.Name = name
 		}
-		if p.ForEach == nil && p.When == "" {
+		if p.ForEach == nil {
 			query := sc.queryOutputs
 			if query == nil {
 				query = func(c *oam.Component, n func(oam.NameRequest) (string, bool)) ([]oam.Output, error) {

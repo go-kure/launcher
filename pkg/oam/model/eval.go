@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"cel.dev/cel-go/cel"
+	celast "cel.dev/cel-go/common/ast"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
@@ -135,7 +136,7 @@ func Compile(m *Model) (*Compiled, error) { return CreateCache().Compile(m) }
 // the values, then for each part: when, forEach.in, name, the properties (keys sorted at
 // every level), the trait properties and the annotations.
 func (c *Cache) Compile(m *Model) (*Compiled, error) {
-	w := &walker{cache: c, key: m.Key(), declared: scopeTypes(m), notYet: map[string]bool{}, sites: map[string]*site{}}
+	w := &walker{cache: c, key: m.Key(), declared: scopeTypes(m), notYet: map[string]bool{}, conds: map[string]condPart{}, nulls: map[string]bool{}, sites: map[string]*site{}}
 	for _, v := range m.Spec.Values {
 		w.notYet[v.Name] = true
 	}
@@ -148,17 +149,22 @@ func (c *Cache) Compile(m *Model) (*Compiled, error) {
 		if err := w.declare("values."+v.Name, s.out); err != nil {
 			return nil, errors.Wrapf(err, "model: declare value %q", v.Name)
 		}
+		if err := w.recordValue("spec.values["+strconv.Itoa(i)+"].expr", v); err != nil {
+			return nil, err
+		}
 	}
-	// A part reads the outputs of an earlier part that has no when and no forEach: a
-	// skipped or repeated part has no one answer. Every other part is refused by name.
+	// A part reads the outputs of an earlier part that has no forEach: a repeated part has no one
+	// answer. An earlier part with a when is read only where its when holds (guard.go), because a
+	// skipped part has no outputs. Every other part is refused by name.
 	for _, p := range m.Spec.Parts {
 		w.notYet["parts."+p.ID] = true
 	}
 	for i, p := range m.Spec.Parts {
-		if err := w.part("spec.parts["+strconv.Itoa(i)+"]", p); err != nil {
+		base := "spec.parts[" + strconv.Itoa(i) + "]"
+		if err := w.part(base, p); err != nil {
 			return nil, err
 		}
-		if p.When != "" || p.ForEach != nil {
+		if p.ForEach != nil {
 			continue
 		}
 		delete(w.notYet, "parts."+p.ID)
@@ -167,6 +173,11 @@ func (c *Cache) Compile(m *Model) (*Compiled, error) {
 		// part declares (checkPartReads).
 		if err := w.declare("parts."+p.ID, cel.DynType); err != nil {
 			return nil, errors.Wrapf(err, "model: declare part %q", p.ID)
+		}
+		if p.When != "" {
+			if err := w.recordWhen(base, p); err != nil {
+				return nil, err
+			}
 		}
 	}
 	outputs, err := w.outputs(m.Spec.Outputs)
@@ -212,7 +223,7 @@ func (w *walker) outputs(outputs map[string]string) ([]outputSite, error) {
 		if err != nil {
 			return nil, err
 		}
-		ast, _, err := checkHole(env, path, inner, w.notYet, w.declared)
+		ast, _, err := checkHole(env, path, inner, w.forms(), w.declared)
 		if err != nil {
 			return nil, err
 		}
@@ -239,15 +250,70 @@ type siteSpec struct {
 	check    func(out *cel.Type) error
 }
 
-// walker compiles the sites of one model. The CEL environment is built on the first site
-// that is not in the cache, so a model that is fully cached builds none.
+// walker compiles the sites of one model. The CEL environment is built on the first site that is
+// not in the cache, and by whatever reads the text of an expression again: a value, a when
+// (recordValue, whenTerms) and an output, so a cached model that has one of them builds it too.
 type walker struct {
 	cache    *Cache
 	key      string
 	declared map[string]*cel.Type // the scope variables and the values so far
 	notYet   map[string]bool      // the values that are not computed at this point
+	conds    map[string]condPart  // the earlier parts that have a when and no forEach
+	nulls    map[string]bool      // for each value: whether its own expression can give null
+	allowed  map[string]bool      // the parts whose when the when of the part being walked holds
 	env      *cel.Env
 	sites    map[string]*site
+}
+
+// forms is what the form scan needs to know at this point of the walk.
+func (w *walker) forms() *formScope {
+	return &formScope{notYet: w.notYet, conds: w.conds, allowed: w.allowed}
+}
+
+// nullScope is what mayBeNull needs at this point of the walk.
+func (w *walker) nullScope() nullScope {
+	return nullScope{declared: w.declared, values: w.nulls}
+}
+
+// recordWhen notes the when of an earlier part, which a later part reads only where it holds.
+// A when that can give null (nullScope.mayBeNull: an optional input read as it is, in a conditional
+// or a value, or not) is skipped by the build as false, and the same value as a conditional test
+// cannot be read at all.
+func (w *walker) recordWhen(base string, p Part) error {
+	terms, err := w.whenTerms(base+".when", p.When)
+	if err != nil {
+		return err
+	}
+	// A chain of && gives a bool or fails, so only a when that is one term can give null.
+	w.conds[p.ID] = condPart{terms: terms, nullable: len(terms) == 1 && w.nullScope().mayBeNull(terms[0]), pure: pureTerms(terms)}
+	return nil
+}
+
+// recordValue notes whether the expression of a value can give null, which its checked type does not say.
+func (w *walker) recordValue(path string, v Value) error {
+	env, err := w.baseEnv()
+	if err != nil {
+		return err
+	}
+	root, err := holeRoot(env, v.Expr)
+	if err != nil {
+		return invalid(path, "%s", err)
+	}
+	w.nulls["values."+v.Name] = w.nullScope().mayBeNull(root)
+	return nil
+}
+
+// whenTerms parses a when again, as the form scan reads it, and returns its top-level && terms.
+func (w *walker) whenTerms(path, when string) ([]celast.Expr, error) {
+	env, err := w.baseEnv()
+	if err != nil {
+		return nil, err
+	}
+	root, err := holeRoot(env, when)
+	if err != nil {
+		return nil, invalid(path, "%s", err)
+	}
+	return andTerms(root), nil
 }
 
 // declare adds a variable to the scope of the sites that follow.
@@ -327,7 +393,7 @@ func (w *walker) build(path, text string, spec siteSpec) (*site, error) {
 			s.segs = append(s.segs, segment{text: p.text})
 			continue
 		}
-		ast, out, err := checkHole(env, path, p.text, w.notYet, w.declared)
+		ast, out, err := checkHole(env, path, p.text, w.forms(), w.declared)
 		if err != nil {
 			return nil, err
 		}
@@ -345,7 +411,7 @@ func (w *walker) build(path, text string, spec siteSpec) (*site, error) {
 		if s.single {
 			s.out = out
 		}
-		s.reads = appendPartReads(s.reads, ast)
+		s.reads = appendPartReads(s.reads, ast, w.conds)
 		prog, err := env.Program(ast, cel.CostLimit(maxExpressionCost), cel.CustomDecorator(compareDecorator), cel.CustomDecorator(chargeDecorator), cel.InterruptCheckFrequency(interruptCheckFrequency))
 		if err != nil {
 			return nil, invalid(path, "%s", err)
@@ -362,6 +428,9 @@ func (w *walker) build(path, text string, spec siteSpec) (*site, error) {
 
 // part compiles the sites of one part.
 func (w *walker) part(base string, p Part) error {
+	// The part's own when reads no part by its own guard: the sites below it run only when it is true.
+	w.allowed = nil
+	defer func() { w.allowed = nil }()
 	if p.When != "" {
 		_, err := w.site(base+".when", p.When, siteSpec{strict: true, check: func(out *cel.Type) error {
 			if out.Kind() != types.BoolKind {
@@ -372,6 +441,11 @@ func (w *walker) part(base string, p Part) error {
 		if err != nil {
 			return err
 		}
+		terms, err := w.whenTerms(base+".when", p.When)
+		if err != nil {
+			return err
+		}
+		w.allowed = w.forms().allowedBy(terms)
 	}
 	var spec siteSpec
 	if p.ForEach != nil {

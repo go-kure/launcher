@@ -142,18 +142,18 @@ func compileHole(env *cel.Env, path, src string, notYet map[string]bool, declare
 	if err != nil {
 		return nil, invalid(path, "%s", err)
 	}
-	_, out, err := checkHole(env, path, inner, notYet, declared)
+	_, out, err := checkHole(env, path, inner, &formScope{notYet: notYet}, declared)
 	return out, err
 }
 
 // checkHole parses, form-checks and type-checks the CEL source inner of one hole. It
 // returns the checked expression, for a program, and the type as compileHole defines it.
-func checkHole(env *cel.Env, path, inner string, notYet map[string]bool, declared map[string]*cel.Type) (*cel.Ast, *cel.Type, error) {
+func checkHole(env *cel.Env, path, inner string, forms *formScope, declared map[string]*cel.Type) (*cel.Ast, *cel.Type, error) {
 	parsed, iss := env.Parse(inner)
 	if iss != nil && iss.Err() != nil {
 		return nil, nil, invalid(path, "%s", iss.Err())
 	}
-	if msg := refuseForm(parsed, notYet); msg != "" {
+	if msg := refuseForm(parsed, forms); msg != "" {
 		return nil, nil, invalid(path, "%s", msg)
 	}
 	checked, iss := env.Check(parsed)
@@ -172,25 +172,28 @@ func checkHole(env *cel.Env, path, inner string, notYet map[string]bool, declare
 // It returns the first reason, or the empty string.
 //
 // has() is refused. An input is a qualified variable and not a map field, so has() has
-// nothing to test. A model tests an optional input with `== null`.
+// nothing to test. A model tests an optional input with `== null`, and a key of an object
+// input with `'key' in inputs.obj`.
 //
 // A read of a value that is not computed yet (a later value, or the value itself) would
 // otherwise fail as an undeclared `values`, which hides the cause. The walk follows the
 // scope of a bind or comprehension variable named `values`, which hides the model's
 // values the way the checker does: the range and the initializer of a comprehension are
 // outside it, the condition, the step and (for the accumulator) the result are inside.
-func refuseForm(parsed *cel.Ast, notYet map[string]bool) string {
-	return scanForm(parsed.NativeRep().Expr(), false, notYet)
+//
+// A read of an earlier part that has a when is refused unless the when holds there (guard.go).
+func refuseForm(parsed *cel.Ast, forms *formScope) string {
+	return scanForm(parsed.NativeRep().Expr(), scanState{}, forms)
 }
 
-// scanForm walks e. shadowed is true inside the scope of a local variable named values.
-func scanForm(e celast.Expr, shadowed bool, notYet map[string]bool) string {
+// scanForm walks e from the position st.
+func scanForm(e celast.Expr, st scanState, forms *formScope) string {
 	if e == nil {
 		return ""
 	}
 	first := func(exprs ...celast.Expr) string {
 		for _, x := range exprs {
-			if msg := scanForm(x, shadowed, notYet); msg != "" {
+			if msg := scanForm(x, st, forms); msg != "" {
 				return msg
 			}
 		}
@@ -200,14 +203,17 @@ func scanForm(e celast.Expr, shadowed bool, notYet map[string]bool) string {
 	case celast.SelectKind:
 		sel := e.AsSelect()
 		if sel.IsTestOnly() {
-			return "has() is not available in celEnv 1: compare an optional input with null (inputs.x == null)"
+			return "has() is not available in celEnv 1: compare an optional input with null (inputs.x == null), and test a key of an object input with 'key' in inputs.obj"
 		}
 		op := sel.Operand()
-		if !shadowed && op.Kind() == celast.IdentKind && op.AsIdent() == "values" && notYet[sel.FieldName()] {
+		if !st.hidesValues && op.Kind() == celast.IdentKind && op.AsIdent() == "values" && forms.notYet[sel.FieldName()] {
 			return "values." + sel.FieldName() + " is not computed yet: a value reads inputs and earlier values only"
 		}
-		if !shadowed && op.Kind() == celast.IdentKind && op.AsIdent() == "parts" && notYet["parts."+sel.FieldName()] {
-			return "parts." + sel.FieldName() + " is not readable here: a part reads only an earlier part that has no when and no forEach"
+		// A leading dot names the global even where a local variable hides it.
+		if op.Kind() == celast.IdentKind && (op.AsIdent() == ".parts" || !st.hidesParts && op.AsIdent() == "parts") {
+			if msg := forms.refusePartRead(sel.FieldName(), st); msg != "" {
+				return msg
+			}
 		}
 		return first(op)
 	case celast.CallKind:
@@ -216,6 +222,23 @@ func scanForm(e celast.Expr, shadowed bool, notYet map[string]bool) string {
 			if msg := first(call.Target()); msg != "" {
 				return msg
 			}
+		}
+		if args := call.Args(); call.FunctionName() == "_?_:_" && len(args) == 3 {
+			// The true branch runs only when the test is true, so it may read every part whose
+			// when the test holds. A test inside the body of a comprehension or a bind grants
+			// none: a local variable there can hide a name the test reads. The range and the initial
+			// value (a bind's initializer) run outside that scope and grant as usual.
+			yes := st
+			if !st.inComp {
+				yes.guarded = forms.guardedBy(st.guarded, args[0])
+			}
+			if msg := scanForm(args[0], st, forms); msg != "" {
+				return msg
+			}
+			if msg := scanForm(args[1], yes, forms); msg != "" {
+				return msg
+			}
+			return scanForm(args[2], st, forms)
 		}
 		return first(call.Args()...)
 	case celast.ListKind:
@@ -241,15 +264,15 @@ func scanForm(e celast.Expr, shadowed bool, notYet map[string]bool) string {
 			return msg
 		}
 		hides := func(name string) bool { return c.IterVar() == name || c.IterVar2() == name || c.AccuVar() == name }
-		inLoop := shadowed || hides("values") || hides("parts")
-		inResult := shadowed || c.AccuVar() == "values" || c.AccuVar() == "parts"
-		if msg := scanForm(c.LoopCondition(), inLoop, notYet); msg != "" {
+		inLoop := scanState{hidesValues: st.hidesValues || hides("values"), hidesParts: st.hidesParts || hides("parts"), inComp: true, guarded: st.guarded}
+		inResult := scanState{hidesValues: st.hidesValues || c.AccuVar() == "values", hidesParts: st.hidesParts || c.AccuVar() == "parts", inComp: true, guarded: st.guarded}
+		if msg := scanForm(c.LoopCondition(), inLoop, forms); msg != "" {
 			return msg
 		}
-		if msg := scanForm(c.LoopStep(), inLoop, notYet); msg != "" {
+		if msg := scanForm(c.LoopStep(), inLoop, forms); msg != "" {
 			return msg
 		}
-		return scanForm(c.Result(), inResult, notYet)
+		return scanForm(c.Result(), inResult, forms)
 	}
 	return ""
 }
