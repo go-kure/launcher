@@ -297,9 +297,9 @@ func loweredTypes() map[string]loweredType {
 // show.
 func ociKeySamples() map[string]loweringKeySample {
 	// A key of the source identity moves sourceRef only where another component
-	// shares the source it leaves.
+	// shares, or comes to share, the source.
 	sourceRefNeedsPeers := map[reportedAt]string{
-		{"fluxcd-kustomization", "", "sourceRef"}: "moves it only by ending the sharing of a source with another component; TestLoweringKeys_OCISharedSourceMovesSourceRef holds it",
+		{"fluxcd-kustomization", "", "sourceRef"}: "moves it only by starting or ending the sharing of a source with another component; TestLoweringKeys_OCISharedSourceMovesSourceRef holds it",
 	}
 	return map[string]loweringKeySample{
 		// Every key of source the rule hands on or builds from, together: the report
@@ -423,10 +423,12 @@ func ociLowered(t *testing.T, a, b oam.Component) map[string]oam.Component {
 
 // Two oci components of one document that name no source and have the same
 // identity share one: the Kustomization of each names it. A key that is part of
-// the identity (version, interval) makes the component stop sharing when it
-// differs, and its Kustomization then names the source it keeps to itself, so
-// the key moves sourceRef. The map declares that place, and the single-component
-// guard above cannot see the move, because it lowers with no document.
+// the identity (version, interval) changes whether they share: authored on one
+// of two sharing components it ends the sharing, and the Kustomization then names
+// the source that component keeps to itself; authored on both, they share again.
+// Either way the key moves sourceRef. The map declares that place, and the
+// single-component guard above cannot see the move, because it lowers with no
+// document.
 func TestLoweringKeys_OCISharedSourceMovesSourceRef(t *testing.T) {
 	lt := loweredTypes()["oci"]
 	keys := keyedRules()["oci"].LoweringKeys()
@@ -435,28 +437,41 @@ func TestLoweringKeys_OCISharedSourceMovesSourceRef(t *testing.T) {
 		c.Name = name
 		return c
 	}
-	sourceRefOf := func(t *testing.T, props map[string]any) string {
+	// sourceRefOf lowers b beside a and returns the source its Kustomization
+	// names. That source is emitted beside it, under the same name.
+	sourceRefOf := func(t *testing.T, a, b map[string]any) string {
 		t.Helper()
-		got := ociLowered(t, named(maps.Clone(lt.base), "a"), named(props, "b"))
+		got := ociLowered(t, named(a, "a"), named(b, "b"))
 		ref, _ := got["fluxcd-kustomization"].Properties["sourceRef"].(map[string]any)
 		name, _ := ref["name"].(string)
+		src, emitted := got["ocirepository"]
+		if !emitted || src.ObjectName() != name {
+			t.Errorf("sourceRef.name = %q, and the ocirepository emitted with it is %q (emitted: %v)", name, src.ObjectName(), emitted)
+		}
 		return name
 	}
-	shared := sourceRefOf(t, maps.Clone(lt.base))
+	with := func(key string, value any) map[string]any {
+		props := maps.Clone(lt.base)
+		props[key] = value
+		return props
+	}
+	shared := sourceRefOf(t, lt.base, lt.base)
 	if shared == "" || shared == "b" {
 		t.Fatalf("two components of one identity: sourceRef.name = %q, want the shared source's name", shared)
 	}
 	for key, value := range map[string]any{"version": "2.0.0", "interval": "10m"} {
 		t.Run(key, func(t *testing.T) {
-			props := maps.Clone(lt.base)
-			props[key] = value
-			if got := sourceRefOf(t, props); got != "b" {
+			if got := sourceRefOf(t, lt.base, with(key, value)); got != "b" {
 				t.Errorf("authoring %q on one of two sharing components: sourceRef.name = %q, want its own source %q", key, got, "b")
+			}
+			// The same key on both makes them share again, under the name they shared by.
+			if got := sourceRefOf(t, with(key, value), with(key, value)); got == "b" || got == "" {
+				t.Errorf("authoring %q on both components: sourceRef.name = %q, want a shared source", key, got)
 			}
 			if !slices.ContainsFunc(keys[key], func(p oam.LoweredKey) bool {
 				return p.Member == "fluxcd-kustomization" && p.Path == "sourceRef"
 			}) {
-				t.Errorf("%q moves sourceRef when sharing breaks, and the key map does not declare it: %v", key, keys[key])
+				t.Errorf("%q moves sourceRef when the sharing of a source changes, and the key map does not declare it: %v", key, keys[key])
 			}
 		})
 	}
