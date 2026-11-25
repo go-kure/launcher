@@ -22,8 +22,9 @@ import (
 // key map, each with its reason (go-kure/launcher#1601 carries them). A rule's
 // map comes from the function the rule forwards with where it has one; the
 // places of the keys it builds are declared beside the rule and held to what it
-// emits by the tests below, in both directions, which is what #1580 asks of a
-// map: https://github.com/go-kure/launcher/issues/1580#issuecomment-6903630690
+// emits by the tests below, in both directions. That is what
+// go-kure/launcher#1580 asks of a map, and its comment
+// https://github.com/go-kure/launcher/issues/1580#issuecomment-6903630690
 // rejects only "a hand-kept table with nothing behind it".
 var rulesWithoutKeyMap = map[string]string{
 	"helm":       "not built yet: it hands some keys on as written, a set that depends on the delivery mode, can rewrite two of them (a values ConfigMap), and builds a Flux source and the traits that carry the values from moved and re-shaped keys",
