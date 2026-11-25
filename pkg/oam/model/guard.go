@@ -52,7 +52,7 @@ func (f *formScope) refusePartRead(id string, st scanState) string {
 		return "parts." + id + " is not readable here: its when reads a name other than inputs, self, values and parts, so no test can be shown to be the same condition"
 	}
 	if !st.guarded[id] && !f.allowed[id] {
-		return "parts." + id + " is not readable here: it has a when, so read it only in the true branch of a conditional whose test holds that when (cond ? parts." + id + ".name : null), or in a part whose own when holds it"
+		return "parts." + id + " is not readable here: it has a when, so read it only in the true branch of a conditional whose test holds that when, or in a part whose own when holds it: for a whole value write (cond ? parts." + id + ".name : null), and for text around a hole write (cond ? parts." + id + ".name : 'none'), which gives 'none' when the part is skipped, because null in text is an error"
 	}
 	if c.nullable {
 		return "parts." + id + " has a when that can be null (an optional input): write it as a comparison, such as inputs.x == true, so the test is true or false"

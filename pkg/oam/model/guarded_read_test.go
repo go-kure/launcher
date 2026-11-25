@@ -139,6 +139,20 @@ func TestCompile_RefusesAnUnguardedReadOfAPartWithAWhen(t *testing.T) {
 	}
 }
 
+// Null is an error in text around a hole, so the refusal names two forms: a null else branch for
+// a whole value, and a string else branch for text, which gives its string when the part is skipped.
+func TestCompile_TheRefusalNamesAFormForAWholeValueAndAFormForText(t *testing.T) {
+	err := compileDoc(t, guardedDoc(condDB("inputs.db")+reader("", "host-${ parts.db.name }")))
+	wantInvalid(t, err, "spec.parts[1].properties.data.x", "parts.db", "not readable",
+		"? parts.db.name : null)", "? parts.db.name : 'none')", "skipped")
+}
+
+// The null form the refusal names for a whole value stays refused in text around a hole.
+func TestCompile_ANullElseBranchIsRefusedInTextAroundAHole(t *testing.T) {
+	err := compileDoc(t, guardedDoc(condDB("inputs.db")+reader("", "host-${ inputs.db ? parts.db.name : null }")))
+	wantInvalid(t, err, "spec.parts[1].properties.data.x", "not allowed in text")
+}
+
 // 1 and 1.0 are equal in CEL and are not the same condition: 1 / 2 is 0 and 1.0 / 2.0 is 0.5.
 // 0.0 and -0.0 are equal in CEL and divide to different infinities.
 func TestCompile_ALiteralThatDiffersIsNoGuardInAReadersWhen(t *testing.T) {
