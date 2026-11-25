@@ -814,11 +814,32 @@ ReadWriteOnce), on a component that authors no `strategy`, gives the deployment 
 `strategy` of another type is refused. A claim that is only ReadOnlyMany does
 neither.
 
-`helm`, `postgresql` and `oci` publish no map. `postgresql` and `oci` build their
-members from moved and re-shaped keys. `helm` hands some keys on as written, a set
-that depends on the delivery mode, and builds the rest of its members from moved and
-re-shaped keys; its map is not built here. A component type defined by a model
-publishes none either.
+`oci` publishes a map. It has no loop over its schema, so the places are declared beside
+the code that builds its two members, and a test that authors every key holds them to
+what the rule emits: a place the key does not change fails, and so does a change at a
+place the map does not declare. The registry access keys of `source` come from the slice
+the rule reads them by. No place is `Unchanged` below `source`, because
+`source.secretRef.name` lands at `secretRef.name`:
+
+| Key | Lands at | Unchanged |
+|-----|----------|-----------|
+| `source` | `ocirepository` `url` and each access key (`secretRef`, `provider`, `insecure`, `certSecretRef`, `proxySecretRef`, `serviceAccountName`); `fluxcd-kustomization` `sourceRef` | no |
+| `version` | `ocirepository` `ref` (a tag as `ref.tag`, a `sha256:` digest as `ref.digest`) | no |
+| `interval` | `ocirepository` `interval` and `fluxcd-kustomization` `interval` | yes |
+| `path`, `prune`, `targetNamespace`, `wait` | `fluxcd-kustomization`, the same key | yes |
+| `healthChecks` | `fluxcd-kustomization` `healthChecks`, each entry rebuilt from its four fields | no |
+| `kustomizationName` | no place: it names the Kustomization object | |
+
+The map names member types, not instances. With `source.name` written, or a source two
+or more `oci` components share, the `ocirepository` is a component of its own and the
+`fluxcd-kustomization` is no member of a group with it, so the `source` places on
+`ocirepository` name that component. The `source` sub-keys are one key of the map: a
+reader cannot tell `source.url` from `source.secretRef` by it.
+
+`helm` and `postgresql` publish no map. `postgresql` builds its members from moved and
+re-shaped keys. `helm` hands some keys on as written, a set that depends on the delivery
+mode, and builds the rest of its members from moved and re-shaped keys; its map is not
+built here. A component type defined by a model publishes none either.
 
 `ComponentLoweringKeys()` returns a copy: writing to it changes no rule's map.
 

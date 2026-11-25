@@ -19,14 +19,15 @@ import (
 // provenance report of such a document speaks there.
 
 // rulesWithoutKeyMap names the built-in component lowering rules that publish no
-// key map, each with its reason. They are recorded as open on
-// https://github.com/go-kure/launcher/issues/1580#issuecomment-6903630690. A
-// rule gets a map only when the map can come from the function the rule itself
-// forwards with; a table kept beside the rule by hand would drift from it.
+// key map, each with its reason (go-kure/launcher#1601 carries them). A rule's
+// map comes from the function the rule forwards with where it has one; the
+// places of the keys it builds are declared beside the rule and held to what it
+// emits by the tests below, in both directions, which is what #1580 asks of a
+// map: https://github.com/go-kure/launcher/issues/1580#issuecomment-6903630690
+// rejects only "a hand-kept table with nothing behind it".
 var rulesWithoutKeyMap = map[string]string{
 	"helm":       "not built yet: it hands some keys on as written, a set that depends on the delivery mode, can rewrite two of them (a values ConfigMap), and builds a Flux source and the traits that carry the values from moved and re-shaped keys",
 	"postgresql": "no forwarding loop: it splits the component into five CloudNativePG member types and two policies, under their own property spellings",
-	"oci":        "no forwarding loop: it builds a source and the Kustomization that reconciles it from moved keys",
 }
 
 // keyedRules returns the built-in component lowering rules that publish a key
@@ -63,7 +64,13 @@ func TestLoweringKeys_EveryBuiltinRuleHasAMapOrAReason(t *testing.T) {
 			t.Errorf("rulesWithoutKeyMap names %q, which is not a built-in component lowering rule", name)
 		}
 	}
-	if got, want := slices.Sorted(maps.Keys(keyed)), []string{"webservice", "worker"}; !slices.Equal(got, want) {
+	// The keyed set is the registered rules less the named exceptions, so a rule
+	// leaves rulesWithoutKeyMap by publishing a map and by nothing else.
+	want := slices.DeleteFunc(slices.Sorted(maps.Keys(registry.ComponentLoweringRules())), func(name string) bool {
+		_, exempt := rulesWithoutKeyMap[name]
+		return exempt
+	})
+	if got := slices.Sorted(maps.Keys(keyed)); !slices.Equal(got, want) {
 		t.Errorf("rules that publish a key map = %v, want %v", got, want)
 	}
 }
@@ -73,12 +80,9 @@ func TestLoweringKeys_EveryBuiltinRuleHasAMapOrAReason(t *testing.T) {
 // it lowers into.
 func TestLoweringKeys_EverySchemaKeyHasAnEntry(t *testing.T) {
 	keyed := keyedRules()
-	for _, typ := range []string{"webservice", "worker"} {
+	for _, typ := range slices.Sorted(maps.Keys(keyed)) {
 		t.Run(typ, func(t *testing.T) {
-			d, ok := keyed[typ]
-			if !ok {
-				t.Fatalf("rule %q does not implement oam.LoweringKeyDeclarer", typ)
-			}
+			d := keyed[typ]
 			schema := d.(oam.PropertySchemaProvider).PropertySchema()
 			keys := d.LoweringKeys()
 			if got, want := slices.Sorted(maps.Keys(keys)), slices.Sorted(maps.Keys(schema)); !slices.Equal(got, want) {
@@ -122,6 +126,10 @@ type loweringKeySample struct {
 	// removesMember names a member the rule no longer emits when this value is
 	// authored, so its entries leave the report. Read both ways, as alsoFills is.
 	removesMember string
+	// notWritten names, for an object key whose schema declares sub-properties,
+	// each one the value leaves out, with the reason: a sub-property the rule
+	// refuses beside another one the value writes. Read both ways, as alsoFills is.
+	notWritten map[string]string
 }
 
 // hostNamespacePolicy is defaultsPolicy allowing the host namespaces, so a
@@ -230,6 +238,191 @@ func loweringKeySamples() map[string]loweringKeySample {
 			{"role-deployment", "", "strategy.type"}: oam.SourceBuiltin,
 		}},
 		"workingDir": {value: "/srv"},
+	}
+}
+
+// loweredType is what the behavioural guard needs to know of one lowered type:
+// how to build a component of it, the document every sample starts from, and a
+// sample for every key of its schema.
+type loweredType struct {
+	// build makes the component the rule is handed from a set of properties.
+	build func(props map[string]any) oam.Component
+	// base holds the properties every document of the type carries: the required
+	// keys. A sample of a required key replaces its value, so the baseline and
+	// the authored document differ at that key alone.
+	base    map[string]any
+	samples map[string]loweringKeySample
+	// subProperties says the sample of every object key writes each sub-property
+	// its schema declares (TestLoweringKeys_SamplesWriteEverySubProperty). A role
+	// type opts out: it hands an object key to its deployment member whole, by
+	// the function that decides which keys it forwards, so no sub-property can
+	// land elsewhere; the keys it builds are held by their `lands` rows.
+	subProperties bool
+}
+
+// loweredTypes holds a loweredType for every rule that publishes a key map.
+// TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces fails for a rule with
+// none.
+func loweredTypes() map[string]loweredType {
+	role := func(typ string) loweredType {
+		return loweredType{
+			// workload writes the `image` every role document carries.
+			build:   func(props map[string]any) oam.Component { return workload("app", typ, props) },
+			samples: loweringKeySamples(),
+		}
+	}
+	return map[string]loweredType{
+		"webservice": role("webservice"),
+		"worker":     role("worker"),
+		"oci": {
+			build: func(props map[string]any) oam.Component {
+				return oam.Component{Name: "app", Type: "oci", Properties: props}
+			},
+			base:          map[string]any{"source": map[string]any{"url": "oci://registry.example.org/base"}, "version": "1.0.0"},
+			samples:       ociKeySamples(),
+			subProperties: true,
+		},
+	}
+}
+
+// ociKeySamples holds a sample for every key of the oci schema. The values differ
+// from the base document's and from each default, so a key the rule ignored would
+// show.
+func ociKeySamples() map[string]loweringKeySample {
+	return map[string]loweringKeySample{
+		// Every key of source the rule hands on or builds from, together: the report
+		// of each declared place needs the value that changes it.
+		"source": {value: map[string]any{
+			"url":                "oci://registry.example.org/other",
+			"objectName":         "src",
+			"secretRef":          map[string]any{"name": "creds"},
+			"certSecretRef":      map[string]any{"name": "ca"},
+			"proxySecretRef":     map[string]any{"name": "proxy"},
+			"provider":           "aws",
+			"insecure":           true,
+			"serviceAccountName": "puller",
+		}, notWritten: map[string]string{
+			"name": "refused beside source.objectName, which the value writes; TestLoweringKeys_OCINamedSourceIsAComponentOfItsOwn writes it",
+		}},
+		"kustomizationName": {value: "delivery"},
+		"version":           {value: "2.0.0"},
+		"path":              {value: "./deploy"},
+		"prune":             {value: false},
+		"interval":          {value: "10m"},
+		"targetNamespace":   {value: "apps"},
+		"wait":              {value: true},
+		"healthChecks":      {value: []any{map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "name": "app", "namespace": "apps"}}},
+	}
+}
+
+// subPropertiesOf returns the sub-properties a schema declares for an object, or
+// for each entry of a list of objects. An object that declares none (an open one)
+// has none to read.
+func subPropertiesOf(s oam.PropertySchema) []string {
+	props := s.Properties
+	if len(props) == 0 && s.Items != nil {
+		props = s.Items.Properties
+	}
+	return slices.Sorted(maps.Keys(props))
+}
+
+// writtenSubProperties returns the keys v writes: the keys of an object, or the
+// keys of every entry of a list of objects.
+func writtenSubProperties(v any) map[string]bool {
+	out := map[string]bool{}
+	switch x := v.(type) {
+	case map[string]any:
+		for k := range x {
+			out[k] = true
+		}
+	case []any:
+		for _, e := range x {
+			maps.Copy(out, writtenSubProperties(e))
+		}
+	}
+	return out
+}
+
+// The guard above reads only what a sample writes: a sub-property the sample
+// leaves out is a place nothing proved. So a sample of an object key writes every
+// sub-property the schema declares, or lists it in notWritten with the reason,
+// and an entry there that the value writes, or the schema does not declare, is
+// stale. Sub-properties below the first level, and an object that declares none,
+// are the limit: they are not read.
+func TestLoweringKeys_SamplesWriteEverySubProperty(t *testing.T) {
+	types := loweredTypes()
+	keyed := keyedRules()
+	for _, typ := range slices.Sorted(maps.Keys(keyed)) {
+		lt, ok := types[typ]
+		if !ok || !lt.subProperties {
+			continue // the first is named by TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces; the second is a role type
+		}
+		schema := keyed[typ].(oam.PropertySchemaProvider).PropertySchema()
+		for _, key := range slices.Sorted(maps.Keys(schema)) {
+			subs := subPropertiesOf(schema[key])
+			sample, ok := lt.samples[key]
+			if !ok {
+				continue // the same test names a key with no sample
+			}
+			t.Run(typ+"/"+key, func(t *testing.T) {
+				written := writtenSubProperties(sample.value)
+				for _, sub := range subs {
+					_, listed := sample.notWritten[sub]
+					switch {
+					case !written[sub] && !listed:
+						t.Errorf("the sample of %q leaves out the sub-property %q and gives no reason: write it, or list it in notWritten", key, sub)
+					case written[sub] && listed:
+						t.Errorf("the sample of %q writes %q and lists it in notWritten: remove the entry", key, sub)
+					}
+				}
+				for sub, reason := range sample.notWritten {
+					if !slices.Contains(subs, sub) {
+						t.Errorf("notWritten of %q names %q, which the schema does not declare", key, sub)
+					}
+					if strings.TrimSpace(reason) == "" {
+						t.Errorf("notWritten of %q lists %q with no reason", key, sub)
+					}
+				}
+			})
+		}
+	}
+}
+
+// With source.name written, or a source another oci component shares, the
+// ocirepository is a component of its own, named for the source, and the
+// fluxcd-kustomization is no member of a group with it. The key map names member
+// types, not instances, so its source places name that component and not a
+// sibling of this one: the limit the docs state. This pins the shape, so a rule
+// that changes it fails here and the docs are read again.
+func TestLoweringKeys_OCINamedSourceIsAComponentOfItsOwn(t *testing.T) {
+	lt := loweredTypes()["oci"]
+	props := maps.Clone(lt.base)
+	props["source"] = map[string]any{"url": "oci://registry.example.org/base", "name": "shared-source"}
+	comp := lt.build(props)
+	ctx := oam.LoweringContext{
+		Document: &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{comp}}},
+		Namer:    oam.NewNameAllocator(),
+		Origin:   oam.Origin{Document: "doc", DocumentKind: "Application", Namespace: "default"},
+	}
+	res, err := registry.ComponentLoweringRules()["oci"].LowerComponent(&comp, ctx)
+	if err != nil {
+		t.Fatalf("LowerComponent: %v", err)
+	}
+	got := map[string]string{} // member type -> component name
+	for _, c := range res.Components {
+		got[c.Type] = c.Name
+	}
+	want := map[string]string{"ocirepository": "shared-source", "fluxcd-kustomization": "app"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("components by type = %v, want %v", got, want)
+	}
+	for _, c := range res.Components {
+		if c.Type != "fluxcd-kustomization" {
+			continue
+		}
+		if ref, _ := c.Properties["sourceRef"].(map[string]any); ref["name"] != "shared-source" {
+			t.Errorf("sourceRef = %v, want it to name shared-source", ref)
+		}
 	}
 }
 
@@ -413,12 +606,11 @@ func TestLoweringKeys_AuthoredKeyLandsWhereDeclared(t *testing.T) {
 // alone, with no engine and no policy, and returns every leaf of what the rule
 // emits by place, and each member's properties by member type. An attached trait
 // is a place of its own (path ""), so one that holds no property is still seen.
-func loweredLeaves(t *testing.T, typ string, props map[string]any) (map[reportedAt]any, map[string]map[string]any) {
+func loweredLeaves(t *testing.T, typ string, comp oam.Component) (map[reportedAt]any, map[string]map[string]any) {
 	t.Helper()
-	comp := workload("app", typ, props)
 	res, err := registry.ComponentLoweringRules()[typ].LowerComponent(&comp, oam.LoweringContext{})
 	if err != nil {
-		t.Fatalf("LowerComponent(%s, %v): %v", typ, props, err)
+		t.Fatalf("LowerComponent(%s, %v): %v", typ, comp.Properties, err)
 	}
 	leaves := map[reportedAt]any{}
 	members := map[string]map[string]any{}
@@ -470,40 +662,49 @@ func flattenLeaves(out map[reportedAt]any, member, trait, path string, v any) {
 // with and without a key, except one: `serviceAccountName` names an existing
 // account, so the generated one is gone, and that key lands nowhere on it.
 func TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces(t *testing.T) {
-	samples := loweringKeySamples()
+	types := loweredTypes()
 	keyed := keyedRules()
-	for _, typ := range []string{"webservice", "worker"} {
-		d, ok := keyed[typ]
+	// Ranged over the rules that publish a map, so a type with no sample table
+	// fails here and never leaves the test with nothing to check.
+	for _, typ := range slices.Sorted(maps.Keys(keyed)) {
+		d := keyed[typ]
+		lt, ok := types[typ]
 		if !ok {
-			t.Errorf("rule %q does not implement oam.LoweringKeyDeclarer", typ)
+			t.Errorf("rule %q publishes a key map and has no row in loweredTypes", typ)
 			continue
 		}
 		schema := d.(oam.PropertySchemaProvider).PropertySchema()
 		keys := d.LoweringKeys()
 		for _, key := range slices.Sorted(maps.Keys(schema)) {
 			t.Run(typ+"/"+key, func(t *testing.T) {
-				sample, ok := samples[key]
+				sample, ok := lt.samples[key]
 				if !ok {
-					t.Fatalf("no sample for key %q; add a row to loweringKeySamples", key)
+					t.Fatalf("no sample for key %q of %q; add a row to its samples", key, typ)
 				}
 				places := keys[key]
 				declared := func(at reportedAt) bool {
 					return slices.ContainsFunc(places, func(p oam.LoweredKey) bool { return within(at, p) })
 				}
 
-				authored := maps.Clone(sample.with)
-				if authored == nil {
-					authored = map[string]any{}
+				// The baseline holds the type's base document and the keys the value is
+				// only valid beside; the authored document adds the key under test to
+				// it, over the base's own value for a required key.
+				baseline := maps.Clone(lt.base)
+				if baseline == nil {
+					baseline = map[string]any{}
 				}
+				maps.Copy(baseline, sample.with)
+				authored := maps.Clone(baseline)
 				authored[key] = sample.value
-				got, members := loweredLeaves(t, typ, authored)
-				base, baseMembers := loweredLeaves(t, typ, sample.with)
+				got, members := loweredLeaves(t, typ, lt.build(authored))
+				base, baseMembers := loweredLeaves(t, typ, lt.build(baseline))
 
-				// The members are the same with and without the key, except the
-				// generated account a serviceAccountName replaces.
+				// The members are the same with and without the key, except the one
+				// the sample says the key removes (a serviceAccountName replaces the
+				// generated account).
 				wantMembers := slices.Sorted(maps.Keys(baseMembers))
-				if key == "serviceAccountName" {
-					wantMembers = slices.DeleteFunc(wantMembers, func(m string) bool { return m == "serviceaccount" })
+				if sample.removesMember != "" {
+					wantMembers = slices.DeleteFunc(wantMembers, func(m string) bool { return m == sample.removesMember })
 				}
 				if gotMembers := slices.Sorted(maps.Keys(members)); !slices.Equal(gotMembers, wantMembers) {
 					t.Fatalf("authoring %q: the rule emits members %v, want %v", key, gotMembers, wantMembers)

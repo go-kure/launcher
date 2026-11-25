@@ -73,7 +73,7 @@ members the rule emits. `webservice` and `worker` publish where each of their ke
 [Lowering keys](schemas-and-contract.md#lowering-keys)), so a fill at a member's path maps
 back to the key an author writes. A probe row names the member in `Fill.Member`.
 
-`helm`, `postgresql`, `oci` and the `expose` trait rule publish no such map yet
+`oci` publishes the same map. `helm`, `postgresql` and the `expose` trait rule publish no such map yet
 (go-kure/launcher#1601). Their fills are read at the member's path. The `postgresql` probe
 names the place of each declared default itself (`Probe.DefaultPlaces`).
 
@@ -132,8 +132,8 @@ probes. Neither is a claim about every fill.
   on [Transform, extension and lowering](transform-and-lowering.md#transform--extension).
 - A name the consumer's `Naming` hook gave has no entry: the report has no source kind for
   the hook.
-- A component type defined by a model publishes no key map, and neither do the four rules
-  named above.
+- A component type defined by a model publishes no key map, and neither do the three rules
+  named above (`helm`, `postgresql` and the `expose` trait rule).
 
 ## Which refusal an authored value can cause
 
