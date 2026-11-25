@@ -825,8 +825,8 @@ place is `Unchanged` below `source`, because `source.secretRef.name` lands at
 | Key | Lands at | Unchanged |
 |-----|----------|-----------|
 | `source` | `ocirepository` `url` and each access key (`secretRef`, `provider`, `insecure`, `certSecretRef`, `proxySecretRef`, `serviceAccountName`); `fluxcd-kustomization` `sourceRef` | no |
-| `version` | `ocirepository` `ref` (a tag as `ref.tag`, a `sha256:` digest as `ref.digest`); `fluxcd-kustomization` `sourceRef`, only where it starts or ends the sharing of a source with another component | no |
-| `interval` | `ocirepository` `interval` and `fluxcd-kustomization` `interval`; `sourceRef`, only where it starts or ends the sharing of a source with another component | yes for the two intervals |
+| `version` | `ocirepository` `ref` (a tag as `ref.tag`, a `sha256:` digest as `ref.digest`); `fluxcd-kustomization` `sourceRef`, when the key changes which source the Kustomization names: the key is part of the identity a shared source is named by | no |
+| `interval` | `ocirepository` `interval` and `fluxcd-kustomization` `interval`; `sourceRef`, when the key changes which source the Kustomization names, as `version` does | yes for the two intervals |
 | `path`, `prune`, `targetNamespace`, `wait` | `fluxcd-kustomization`, the same key | yes |
 | `healthChecks` | `fluxcd-kustomization` `healthChecks`, each entry rebuilt from its four fields | no |
 | `kustomizationName` | no place: it names the Kustomization object | |
