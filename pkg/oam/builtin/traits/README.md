@@ -177,7 +177,8 @@ not the app — chooses the implementation:
   nginx `auth-url` / `auth-signin` / `auth-response-headers` annotations from the capability's
   `authURL` / `authSigninURL` / `authResponseHeaders` (`authSigninURL` is override-able inline;
   `authURL` must be a bare base URL). `allowedGroups` must be non-empty, and the capability must
-  supply `authURL` or the trait is rejected.
+  supply `authURL` or the trait is rejected. That refusal is an `*oam.CapabilityError` with
+  `Capability` `expose`, the trait type, even when the matched binding is `expose.<scope>`.
   **The annotations expose writes** (go-kure/launcher#790). On the ingress path the rule
   writes up to six annotations: `cert-manager.io/cluster-issuer`, and under
   `nginx.ingress.kubernetes.io/` the keys `ssl-redirect`, `force-ssl-redirect`, `auth-url`,
