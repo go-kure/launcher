@@ -108,6 +108,15 @@ func TestExposeRule_Ingress_ExtAuth_MissingURL_Rejected(t *testing.T) {
 	if !stderrors.As(err, &ve) {
 		t.Fatalf("want *ValidationError (ext-auth not offered), got %v", err)
 	}
+	// The refusal names the expose capability, so it carries that key
+	// (go-kure/launcher#1687) and its text is what it was.
+	var ce *oam.CapabilityError
+	if !stderrors.As(err, &ce) || ce.Capability != "expose" {
+		t.Fatalf("want an *oam.CapabilityError with key %q in %T: %v", "expose", err, err)
+	}
+	if want := "ext-auth is not offered on this platform (the expose capability has no authURL)"; ve.Message != want || err.Error() != ve.Error() {
+		t.Errorf("message = %q, text = %q; want message %q and the text the ValidationError has", ve.Message, err.Error(), want)
+	}
 }
 
 func TestExposeRule_Ingress_ExtAuth_EmptyGroups_Rejected(t *testing.T) {
