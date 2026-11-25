@@ -41,10 +41,12 @@ var ErrComponentLabelValue = errors.New("oam: label value is not the component's
 // *PropertyError, a *PolicyRefusal under a *ViolationError, a *TransformError, a
 // plain error or one that wraps ErrMissingCapability.
 //
-// Capability is a ClusterProfile capability key, "<type>" or "<type>.<scope>". In the
-// three refusals by the environment policy's capability lists (forbidden, allowed,
-// required) it is the trait type the list names, which their text also calls a
-// capability. The refusal is Err, and Error returns its text unchanged, so a refusal
+// Capability is a ClusterProfile capability key, "<type>" or "<type>.<scope>". Four
+// refusals name a trait type instead, as their text does, because they cannot see which
+// binding matched: the three by the environment policy's capability lists (forbidden,
+// allowed, required) and the expose rule's "ext-auth is not offered" refusal, whose
+// Capability is "expose" even when the binding that matched is "expose.<scope>". The
+// refusal is Err, and Error returns its text unchanged, so a refusal
 // reads as it did before the wrapper and errors.Is and errors.As still reach it.
 type CapabilityError struct {
 	Capability string

@@ -119,6 +119,58 @@ func TestExposeRule_Ingress_ExtAuth_MissingURL_Rejected(t *testing.T) {
 	}
 }
 
+// The refusal's key is the trait type, never the scoped binding the trait merged: the
+// rule cannot see which binding matched, and its text names "the expose capability".
+// Here `expose.internal` is the binding that matches and has no authURL, while
+// `expose` has one; the key is "expose" in both readings of the text
+// (go-kure/launcher#1687).
+func TestExposeRule_Ingress_ExtAuth_Scoped_MissingURL_KeyIsTheTraitType(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterBuiltinTraitLowering(traits.ExposeRule{})
+	tr.RegisterBuiltinTrait("ingress", &traits.IngressHandler{})
+	tr.RegisterBuiltinTrait("httproute", &traits.HTTPRouteHandler{})
+	ctx := oam.TransformContext{
+		Namespace: "default",
+		Capabilities: map[string]oam.CapabilityBinding{
+			"expose": {Rendering: map[string]any{
+				"controllerType":   "ingress",
+				"ingressClassName": "nginx",
+				"authURL":          "http://oauth2-proxy.oauth2-proxy.svc.cluster.local:4180/oauth2/auth",
+			}},
+			"expose.internal": {Rendering: map[string]any{
+				"controllerType":   "ingress",
+				"ingressClassName": "nginx",
+			}},
+		},
+	}
+	app := &oam.Application{
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "myapp", Namespace: "default"},
+		Spec: oam.ApplicationSpec{Components: []oam.Component{{
+			Name:       "web",
+			Type:       "webservice",
+			Properties: map[string]any{"image": "nginx:1.25", "port": 8080},
+			Traits: []oam.Trait{{Type: "expose", Properties: map[string]any{
+				"scope":         "internal",
+				"hostnames":     []any{"a.apps.example.com"},
+				"allowedGroups": []any{"ginsys-admins"},
+			}}},
+		}}},
+	}
+	_, err := tr.Transform(app, ctx)
+	if err == nil {
+		t.Fatal("want ext-auth refused: the scoped binding expose.internal has no authURL")
+	}
+	var ce *oam.CapabilityError
+	if !stderrors.As(err, &ce) || ce.Capability != "expose" {
+		t.Fatalf("want an *oam.CapabilityError with key %q in %T: %v", "expose", err, err)
+	}
+	if !strings.Contains(err.Error(), "ext-auth is not offered on this platform (the expose capability has no authURL)") {
+		t.Errorf("text = %q, want the refusal's own text", err.Error())
+	}
+}
+
 func TestExposeRule_Ingress_ExtAuth_EmptyGroups_Rejected(t *testing.T) {
 	bundle := &stack.Bundle{}
 	trait := exposeIngress(withCapAuth(map[string]any{"allowedGroups": []any{}}))

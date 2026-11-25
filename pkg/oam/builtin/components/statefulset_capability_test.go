@@ -235,6 +235,32 @@ func TestStatefulsetHandler_FillCapabilityDefaults_ClassMustBeAString(t *testing
 	}
 }
 
+// The same refusal, reached through Transform: the *oam.CapabilityError survives the
+// engine's own wrapping of a component handler's fill, with the text it had
+// (go-kure/launcher#1687).
+func TestStatefulsetHandler_FillCapabilityDefaults_ClassMustBeAString_ThroughTransform(t *testing.T) {
+	props := ptObject(t, stsPlain(htPlainPod))
+	props["volumeClaimTemplates"] = []any{stsClaim("data", "1Gi")}
+	app := &oam.Application{
+		APIVersion: oam.SupportedAPIVersion,
+		Kind:       "Application",
+		Metadata:   oam.Metadata{Name: "pkg", Namespace: "default"},
+		Spec:       oam.ApplicationSpec{Components: []oam.Component{{Name: "db", Type: "statefulset", Properties: props}}},
+	}
+	tr := oam.NewTransformer(map[string]oam.ComponentHandler{"statefulset": &components.StatefulsetHandler{}}, nil)
+	_, _, err := tr.TransformWithPolicy(app, oam.TransformContext{Capabilities: pvcBinding(map[string]any{"storageClassName": 3})})
+	if err == nil {
+		t.Fatal("want the non-string storageClassName refused")
+	}
+	var ce *oam.CapabilityError
+	if !errors.As(err, &ce) || ce.Capability != "pvc" {
+		t.Fatalf("want an *oam.CapabilityError with key %q in %T: %v", "pvc", err, err)
+	}
+	if !strings.Contains(err.Error(), `capability "pvc" storageClassName: expected string, got int`) {
+		t.Errorf("text = %q, want it to keep the refusal's own text", err.Error())
+	}
+}
+
 // A shape the parser refuses is left alone by the fill, whatever the binding, and
 // the platform's capability is not read for it: the parse refuses it in its own
 // words, and `pvc` is not recorded as consumed for a template that is not one.

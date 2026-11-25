@@ -298,9 +298,11 @@ wrapped in an `*oam.CapabilityError`, which `errors.As` finds in the error that
 `Transform`, `TransformWithPolicy`, `EvaluateProfile` and
 `ValidateAuthoredPropertiesWithCapabilities` return. Its `Capability` field is the key the text
 names, so a caller that adds context reads the field and never the message. The key is a
-`ClusterProfile` key, `<type>` or `<type>.<scope>`; for the three refusals by the policy's
+`ClusterProfile` key, `<type>` or `<type>.<scope>`. Four refusals carry the trait type instead,
+because they cannot see which binding matched: the three by the policy's
 `ForbiddenCapabilities`, `AllowedCapabilities` and `RequiredCapabilities` lists (class
-`RefusalTraitCapability`) it is the trait type the list names. The error's `Error()` is the text
+`RefusalTraitCapability`), and the `expose` rule's "ext-auth is not offered on this platform"
+refusal, whose key is `expose` even when the binding that matched is `expose.<scope>`. The error's `Error()` is the text
 the refusal had, and `errors.Is` and `errors.As` still reach what it wraps: a `*PropertyError`, a
 `*PolicyRefusal` under its `*ViolationError`, a `*TransformError` and `ErrMissingCapability`.
 **Breaking** only for a caller that compared the returned error with `==` or by type assertion.
