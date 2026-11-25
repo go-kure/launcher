@@ -296,10 +296,11 @@ func loweredTypes() map[string]loweredType {
 // from the base document's and from each default, so a key the rule ignored would
 // show.
 func ociKeySamples() map[string]loweringKeySample {
-	// A key of the source identity moves sourceRef only where another component
-	// shares, or comes to share, the source.
+	// A key of the source identity moves sourceRef through the identity a shared
+	// source is named by, which a lowering of one component alone has no peer to
+	// share.
 	sourceRefNeedsPeers := map[reportedAt]string{
-		{"fluxcd-kustomization", "", "sourceRef"}: "moves it only by starting or ending the sharing of a source with another component; TestLoweringKeys_OCISharedSourceMovesSourceRef holds it",
+		{"fluxcd-kustomization", "", "sourceRef"}: "moves it through the identity a source is shared by, which needs another component; TestLoweringKeys_OCISharedSourceMovesSourceRef holds it",
 	}
 	return map[string]loweringKeySample{
 		// Every key of source the rule hands on or builds from, together: the report
@@ -422,13 +423,13 @@ func ociLowered(t *testing.T, a, b oam.Component) map[string]oam.Component {
 }
 
 // Two oci components of one document that name no source and have the same
-// identity share one: the Kustomization of each names it. A key that is part of
-// the identity (version, interval) changes whether they share: authored on one
-// of two sharing components it ends the sharing, and the Kustomization then names
-// the source that component keeps to itself; authored on both, they share again.
-// Either way the key moves sourceRef. The map declares that place, and the
-// single-component guard above cannot see the move, because it lowers with no
-// document.
+// identity share one, named by that identity: the Kustomization of each names
+// it. A key that is part of the identity (version, interval) changes the source
+// the Kustomization names. Authored on one of the two it ends the sharing, and
+// that component's Kustomization names the source it keeps to itself. Authored
+// on both they still share, under a new name. The map declares the place, and
+// the single-component guard above cannot see the move, because it lowers with
+// no document.
 func TestLoweringKeys_OCISharedSourceMovesSourceRef(t *testing.T) {
 	lt := loweredTypes()["oci"]
 	keys := keyedRules()["oci"].LoweringKeys()
@@ -464,14 +465,15 @@ func TestLoweringKeys_OCISharedSourceMovesSourceRef(t *testing.T) {
 			if got := sourceRefOf(t, lt.base, with(key, value)); got != "b" {
 				t.Errorf("authoring %q on one of two sharing components: sourceRef.name = %q, want its own source %q", key, got, "b")
 			}
-			// The same key on both makes them share again, under the name they shared by.
-			if got := sourceRefOf(t, with(key, value), with(key, value)); got == "b" || got == "" {
-				t.Errorf("authoring %q on both components: sourceRef.name = %q, want a shared source", key, got)
+			// The same key on both leaves them sharing, under a name of the changed
+			// identity: not the first shared name, and not one component's own.
+			if got := sourceRefOf(t, with(key, value), with(key, value)); got == "b" || got == "" || got == shared {
+				t.Errorf("authoring %q on both components: sourceRef.name = %q, want a shared source named differently from %q", key, got, shared)
 			}
 			if !slices.ContainsFunc(keys[key], func(p oam.LoweredKey) bool {
 				return p.Member == "fluxcd-kustomization" && p.Path == "sourceRef"
 			}) {
-				t.Errorf("%q moves sourceRef when the sharing of a source changes, and the key map does not declare it: %v", key, keys[key])
+				t.Errorf("%q moves sourceRef when the identity of a source changes, and the key map does not declare it: %v", key, keys[key])
 			}
 		})
 	}
