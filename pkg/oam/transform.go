@@ -670,10 +670,10 @@ func (t *Transformer) evaluateProfile(profile *ClusterProfile, stamp bool) (*Clu
 			var err error
 			rendering, err = applyDefinitionSchema(rendering, def)
 			if err != nil {
-				return nil, &TransformError{
+				return nil, withCapability(key, &TransformError{
 					Message: fmt.Sprintf("capability %q definition schema", key),
 					Cause:   err,
-				}
+				})
 			}
 			if stamp {
 				steps.schema = indexOf(rendering)
@@ -683,7 +683,7 @@ func (t *Transformer) evaluateProfile(profile *ClusterProfile, stamp bool) (*Clu
 			var err error
 			rendering, err = vad.ValidateAndApplyDefaults(rendering)
 			if err != nil {
-				return nil, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err}
+				return nil, withCapability(key, &TransformError{Message: fmt.Sprintf("capability %q", key), Cause: err})
 			}
 		}
 		evaluated[key] = steps.binding(rendering, stamp)
@@ -1878,11 +1878,12 @@ func (t *Transformer) applyEntryTraits(app *Application, e componentEntry, bundl
 				resolved, matchedKey, matched = resolveCapability(trait, ctx.Capabilities, rec)
 
 				if aware, ok := handler.(CapabilityAware); ok && aware.CapabilityRequired() && !matched {
-					return nil, &TransformError{
+					key := buildCapabilityKey(trait)
+					return nil, withCapability(key, &TransformError{
 						Message: fmt.Sprintf("component %q trait %q: capability %q not found in ClusterProfile",
-							entry.component.Name, trait.Type, buildCapabilityKey(trait)),
+							entry.component.Name, trait.Type, key),
 						Cause: ErrMissingCapability,
-					}
+					})
 				}
 
 				// For custom (non-built-in) traits whose capability rendering resolved in the
@@ -2231,12 +2232,12 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 	p, declares := d.(PropertySchemaProvider)
 	if declares {
 		if err := checkObjectGroups(p.PropertySchema(), exclusiveProperties(d), "properties"); err != nil {
-			return nil, errors.Wrapf(err, "capability %q defaults", key)
+			return nil, withCapability(key, errors.Wrapf(err, "capability %q defaults", key))
 		}
 	}
 	for _, k := range slices.Sorted(maps.Keys(fill)) {
 		if err := checkRenderedValue(fill[k], map[propertyCopyKey]bool{}); err != nil {
-			return nil, errors.Wrapf(err, "capability %q defaults: rendering key %q", key, k)
+			return nil, withCapability(key, errors.Wrapf(err, "capability %q defaults: rendering key %q", key, k))
 		}
 	}
 	copied := copyRendering(fill)
@@ -2253,7 +2254,7 @@ func (t *Transformer) applyComponentCapabilityDefaults(d ComponentCapabilityDefa
 	// at most one.
 	if declares {
 		if err := checkExclusive(exclusiveProperties(d), p.PropertySchema(), out, false, "properties", ""); err != nil {
-			return nil, errors.Wrapf(err, "capability %q defaults", key)
+			return nil, withCapability(key, errors.Wrapf(err, "capability %q defaults", key))
 		}
 	}
 	if rec != nil {
@@ -2316,18 +2317,18 @@ func (t *Transformer) validateCapabilityFill(d ComponentCapabilityDefaults, key 
 		if t.CapabilityValidated(typeName) {
 			return nil
 		}
-		return errors.Errorf("capability %q defaults: nothing validates rendering keys %q: the component handler declares no PropertySchema, and no trait handler or trait lowering rule for type %q validates the rendering (none implements ValidateAndApplyDefaults, and no CapabilityDefinition applies to it); implement PropertySchemaProvider on the component handler, or ValidateAndApplyDefaults on the trait",
-			key, slices.Sorted(maps.Keys(fill)), typeName)
+		return withCapability(key, errors.Errorf("capability %q defaults: nothing validates rendering keys %q: the component handler declares no PropertySchema, and no trait handler or trait lowering rule for type %q validates the rendering (none implements ValidateAndApplyDefaults, and no CapabilityDefinition applies to it); implement PropertySchemaProvider on the component handler, or ValidateAndApplyDefaults on the trait",
+			key, slices.Sorted(maps.Keys(fill)), typeName))
 	}
 	schema := p.PropertySchema()
 	for _, k := range slices.Sorted(maps.Keys(fill)) {
 		field, declared := schema[k]
 		if !declared {
-			return errors.Errorf("capability %q defaults: rendering key %q is not a property the component declares (allowed: %s)", key, k, declaredFields(schema))
+			return withCapability(key, errors.Errorf("capability %q defaults: rendering key %q is not a property the component declares (allowed: %s)", key, k, declaredFields(schema)))
 		}
 		normalized, err := validatePropertyValue(field, fill[k], "properties."+k)
 		if err != nil {
-			return errors.Wrapf(err, "capability %q defaults", key)
+			return withCapability(key, errors.Wrapf(err, "capability %q defaults", key))
 		}
 		fill[k] = normalized
 	}
@@ -2350,7 +2351,7 @@ func checkCapabilityRenderings(capabilities map[string]CapabilityBinding) error 
 				continue
 			}
 			if err := checkRenderedValue(rendering[k], map[propertyCopyKey]bool{}); err != nil {
-				return errors.Wrapf(err, "capability %q rendering key %q", key, k)
+				return withCapability(key, errors.Wrapf(err, "capability %q rendering key %q", key, k))
 			}
 		}
 	}
@@ -2568,7 +2569,7 @@ func enforceCapabilityConstraints(traitTypes []string, policy Policy) error {
 		}
 		for _, t := range traitTypes {
 			if forbiddenSet[t] {
-				return NewPolicyRefusal(RefusalTraitCapability, fmt.Sprintf("capability %q is forbidden by environment policy", t))
+				return withCapability(t, NewPolicyRefusal(RefusalTraitCapability, fmt.Sprintf("capability %q is forbidden by environment policy", t)))
 			}
 		}
 	}
@@ -2580,14 +2581,14 @@ func enforceCapabilityConstraints(traitTypes []string, policy Policy) error {
 		}
 		for _, t := range traitTypes {
 			if !allowedSet[t] {
-				return NewPolicyRefusal(RefusalTraitCapability, fmt.Sprintf("capability %q is not in the allowed list", t))
+				return withCapability(t, NewPolicyRefusal(RefusalTraitCapability, fmt.Sprintf("capability %q is not in the allowed list", t)))
 			}
 		}
 	}
 
 	for _, r := range required {
 		if !used[r] {
-			return NewPolicyRefusal(RefusalTraitCapability, fmt.Sprintf("required capability %q is missing", r))
+			return withCapability(r, NewPolicyRefusal(RefusalTraitCapability, fmt.Sprintf("required capability %q is missing", r)))
 		}
 	}
 

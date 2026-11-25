@@ -1,6 +1,7 @@
 package components
 
 import (
+	"errors"
 	"maps"
 	"math"
 	"reflect"
@@ -2287,6 +2288,14 @@ func TestRoleClaims_CapabilityStorageClassMustBeAString(t *testing.T) {
 	_, err := roleClaims(&oam.Component{Name: "api"}, props, oam.LoweringContext{}.WithCapabilities(caps))
 	if err == nil || !strings.Contains(err.Error(), `capability "pvc" storageClassName: expected string`) {
 		t.Fatalf("err = %v, want a refusal naming the capability key", err)
+	}
+	// The refusal carries that key (go-kure/launcher#1687), and its text is what it was.
+	var ce *oam.CapabilityError
+	if !errors.As(err, &ce) || ce.Capability != "pvc" {
+		t.Fatalf("want an *oam.CapabilityError with key %q in %T: %v", "pvc", err, err)
+	}
+	if want := `capability "pvc" storageClassName: expected string, got map[string]interface {}`; err.Error() != want {
+		t.Errorf("text = %q, want %q", err.Error(), want)
 	}
 }
 

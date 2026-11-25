@@ -304,7 +304,7 @@ func capabilityStorageClass(lctx oam.LoweringContext) (any, error) {
 		return nil, nil
 	}
 	if _, isString := v.(string); !isString {
-		return nil, errors.Errorf("capability \"pvc\" storageClassName: expected string, got %T", v)
+		return nil, &oam.CapabilityError{Capability: "pvc", Err: errors.Errorf("capability \"pvc\" storageClassName: expected string, got %T", v)}
 	}
 	return v, nil
 }

@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -222,6 +223,15 @@ func TestStatefulsetHandler_FillCapabilityDefaults_ClassMustBeAString(t *testing
 	_, err := (&components.StatefulsetHandler{}).FillCapabilityDefaults(props, oam.LoweringContext{}.WithCapabilities(pvcBinding(map[string]any{"storageClassName": 3})))
 	if err == nil || !strings.Contains(err.Error(), `capability "pvc" storageClassName: expected string, got int`) {
 		t.Fatalf("err = %v, want the non-string storageClassName refused", err)
+	}
+	// The refusal carries the capability key it names (go-kure/launcher#1687), and
+	// its text is what it was.
+	var ce *oam.CapabilityError
+	if !errors.As(err, &ce) || ce.Capability != "pvc" {
+		t.Fatalf("want an *oam.CapabilityError with key %q in %T: %v", "pvc", err, err)
+	}
+	if want := `capability "pvc" storageClassName: expected string, got int`; err.Error() != want {
+		t.Errorf("text = %q, want %q", err.Error(), want)
 	}
 }
 

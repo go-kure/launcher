@@ -303,6 +303,7 @@ func requiredWhenError(path, key string, rule *RequiredWhen, capability string) 
 	e := propertyErrorf(PropertyErrorRequired, path, "%q is required when %s", key, cond).withKey(key)
 	if capability != "" {
 		e.msg = fmt.Sprintf("%s; neither the trait nor capability %q's rendering sets it", e.msg, capability)
+		return withCapability(capability, e)
 	}
 	return e
 }
@@ -373,6 +374,7 @@ func requiredError(path, key, capability string) error {
 	e := propertyErrorf(PropertyErrorRequired, path, "%q is required", key).withKey(key)
 	if capability != "" {
 		e.msg = fmt.Sprintf("%s; neither the trait nor capability %q's rendering sets it", e.msg, capability)
+		return withCapability(capability, e)
 	}
 	return e
 }
@@ -477,13 +479,13 @@ func checkExclusive(groups []ExclusiveGroup, schema map[string]PropertySchema, p
 			if capability == "" {
 				return propertyErrorf(PropertyErrorExclusive, path, "%s are mutually exclusive", quotedKeys(set))
 			}
-			return propertyErrorf(PropertyErrorExclusive, path, "%s are mutually exclusive; the trait merged with capability %q's rendering sets them together", quotedKeys(set), capability)
+			return withCapability(capability, propertyErrorf(PropertyErrorExclusive, path, "%s are mutually exclusive; the trait merged with capability %q's rendering sets them together", quotedKeys(set), capability))
 		}
 		if len(set) == 0 && required && group.Required {
 			if capability == "" {
 				return propertyErrorf(PropertyErrorExclusive, path, "exactly one of %s is required", quotedKeys(group.Keys))
 			}
-			return propertyErrorf(PropertyErrorExclusive, path, "exactly one of %s is required; neither the trait nor capability %q's rendering sets one", quotedKeys(group.Keys), capability)
+			return withCapability(capability, propertyErrorf(PropertyErrorExclusive, path, "exactly one of %s is required; neither the trait nor capability %q's rendering sets one", quotedKeys(group.Keys), capability))
 		}
 	}
 	return nil

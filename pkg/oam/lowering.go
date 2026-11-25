@@ -1784,7 +1784,8 @@ func (t *Transformer) lowerDocumentBody(doc *Application, ctx TransformContext, 
 				// ErrMissingCapability, since the rule itself never runs through
 				// applyTraits.
 				if aware, ok := rule.(CapabilityAware); ok && aware.CapabilityRequired() && !matched {
-					return false, steps, errors.Wrapf(ErrMissingCapability, "%s: capability %q not found in ClusterProfile", traitOrigin, buildCapabilityKey(trait))
+					key := buildCapabilityKey(trait)
+					return false, steps, withCapability(key, errors.Wrapf(ErrMissingCapability, "%s: capability %q not found in ClusterProfile", traitOrigin, key))
 				}
 				// For a custom (non-built-in) trait type whose capability rendering
 				// resolved in the profile, warn or (under SetStrictCapabilities) error
