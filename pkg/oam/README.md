@@ -264,7 +264,9 @@ rule goes through `RegisterComponentLowering`, and its emitted traits count.
 A refusal that names a capability in its text is an `*oam.CapabilityError`, which `errors.As`
 finds: its `Capability` field is the key the text names (a `ClusterProfile` key, or for the three
 policy capability lists the trait type they name), so a consumer never reads the message to learn
-it. The text is unchanged, and `errors.Is` and `errors.As` still reach the `*PropertyError`,
+it. Four refusals cannot see the matched binding, the three of the policy's capability lists
+and the expose rule's "ext-auth is not offered" refusal, and they carry the trait type (`expose`, even
+when the binding that matched is `expose.<scope>`). The text is unchanged, and `errors.Is` and `errors.As` still reach the `*PropertyError`,
 `*PolicyRefusal`, `*TransformError` or `ErrMissingCapability` inside
 (go-kure/launcher#1687; details under
 [Capability system](/site/content/api-reference/oam/policy-and-capability.md#capability-system)).
