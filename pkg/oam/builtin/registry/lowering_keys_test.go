@@ -402,35 +402,50 @@ func TestLoweringKeys_SamplesWriteEverySubProperty(t *testing.T) {
 	}
 }
 
-// ociLowered lowers component b of a document of the oci components a and b,
-// through the oci rule with a context that holds the document, and returns the
-// components it emits by type, with each one's name.
-func ociLowered(t *testing.T, a, b oam.Component) map[string]oam.Component {
+// ociLowered lowers the oci components a and b of one document, in that order,
+// through the oci rule with one context, as the engine does, and returns the
+// source each Kustomization names, by component name, and the objects of the
+// sources emitted. Every reference must name an emitted source.
+func ociLowered(t *testing.T, a, b oam.Component) (refs map[string]string, sources []string) {
 	t.Helper()
 	ctx := oam.LoweringContext{
 		Document: &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{a, b}}},
 		Namer:    oam.NewNameAllocator(),
 		Origin:   oam.Origin{Document: "doc", DocumentKind: "Application", Namespace: "default"},
 	}
-	res, err := registry.ComponentLoweringRules()["oci"].LowerComponent(&b, ctx)
-	if err != nil {
-		t.Fatalf("LowerComponent: %v", err)
+	refs = map[string]string{}
+	for _, comp := range []oam.Component{a, b} {
+		res, err := registry.ComponentLoweringRules()["oci"].LowerComponent(&comp, ctx)
+		if err != nil {
+			t.Fatalf("LowerComponent(%s): %v", comp.Name, err)
+		}
+		for _, c := range res.Components {
+			switch c.Type {
+			case "fluxcd-kustomization":
+				ref, _ := c.Properties["sourceRef"].(map[string]any)
+				refs[comp.Name], _ = ref["name"].(string)
+			case "ocirepository":
+				sources = append(sources, c.ObjectName())
+			}
+		}
 	}
-	out := map[string]oam.Component{}
-	for _, c := range res.Components {
-		out[c.Type] = c
+	for name, ref := range refs {
+		if !slices.Contains(sources, ref) {
+			t.Errorf("the Kustomization of %s names the source %q, and the sources emitted are %v", name, ref, sources)
+		}
 	}
-	return out
+	slices.Sort(sources)
+	return refs, sources
 }
 
 // Two oci components of one document that name no source and have the same
-// identity share one, named by that identity: the Kustomization of each names
-// it. A key that is part of the identity (version, interval) changes the source
-// the Kustomization names. Authored on one of the two it ends the sharing, and
-// that component's Kustomization names the source it keeps to itself. Authored
-// on both they still share, under a new name. The map declares the place, and
-// the single-component guard above cannot see the move, because it lowers with
-// no document.
+// identity share one: the document holds one source and the Kustomization of
+// each names it. The version and the interval are part of that identity, so
+// changing either changes the source a Kustomization names. Authored on one of
+// the two it ends the sharing, and each Kustomization names a source of its own.
+// Authored on both they still share, under another name. The map declares the
+// place, and the single-component guard above cannot see the move, because it
+// lowers with no document.
 func TestLoweringKeys_OCISharedSourceMovesSourceRef(t *testing.T) {
 	lt := loweredTypes()["oci"]
 	keys := keyedRules()["oci"].LoweringKeys()
@@ -439,37 +454,27 @@ func TestLoweringKeys_OCISharedSourceMovesSourceRef(t *testing.T) {
 		c.Name = name
 		return c
 	}
-	// sourceRefOf lowers b beside a and returns the source its Kustomization
-	// names. That source is emitted beside it, under the same name.
-	sourceRefOf := func(t *testing.T, a, b map[string]any) string {
-		t.Helper()
-		got := ociLowered(t, named(a, "a"), named(b, "b"))
-		ref, _ := got["fluxcd-kustomization"].Properties["sourceRef"].(map[string]any)
-		name, _ := ref["name"].(string)
-		src, emitted := got["ocirepository"]
-		if !emitted || src.ObjectName() != name {
-			t.Errorf("sourceRef.name = %q, and the ocirepository emitted with it is %q (emitted: %v)", name, src.ObjectName(), emitted)
-		}
-		return name
-	}
 	with := func(key string, value any) map[string]any {
 		props := maps.Clone(lt.base)
 		props[key] = value
 		return props
 	}
-	shared := sourceRefOf(t, lt.base, lt.base)
-	if shared == "" || shared == "b" {
-		t.Fatalf("two components of one identity: sourceRef.name = %q, want the shared source's name", shared)
+	refs, sources := ociLowered(t, named(lt.base, "a"), named(lt.base, "b"))
+	shared := refs["a"]
+	if shared == "" || shared == "a" || shared == "b" || refs["b"] != shared || len(sources) != 1 {
+		t.Fatalf("two components of one identity: references %v, sources %v, want one shared source named by both", refs, sources)
 	}
 	for key, value := range map[string]any{"version": "2.0.0", "interval": "10m"} {
 		t.Run(key, func(t *testing.T) {
-			if got := sourceRefOf(t, lt.base, with(key, value)); got != "b" {
-				t.Errorf("authoring %q on one of two sharing components: sourceRef.name = %q, want its own source %q", key, got, "b")
+			refs, sources := ociLowered(t, named(lt.base, "a"), named(with(key, value), "b"))
+			if refs["a"] != "a" || refs["b"] != "b" || !slices.Equal(sources, []string{"a", "b"}) {
+				t.Errorf("authoring %q on one of two sharing components: references %v, sources %v, want a source of its own for each", key, refs, sources)
 			}
 			// The same key on both leaves them sharing, under a name of the changed
-			// identity: not the first shared name, and not one component's own.
-			if got := sourceRefOf(t, with(key, value), with(key, value)); got == "b" || got == "" || got == shared {
-				t.Errorf("authoring %q on both components: sourceRef.name = %q, want a shared source named differently from %q", key, got, shared)
+			// identity: one source, named by both, and not the first shared name.
+			refs, sources = ociLowered(t, named(with(key, value), "a"), named(with(key, value), "b"))
+			if refs["a"] != refs["b"] || refs["a"] == shared || refs["a"] == "a" || refs["a"] == "b" || len(sources) != 1 {
+				t.Errorf("authoring %q on both components: references %v, sources %v, want one shared source named differently from %q", key, refs, sources, shared)
 			}
 			if !slices.ContainsFunc(keys[key], func(p oam.LoweredKey) bool {
 				return p.Member == "fluxcd-kustomization" && p.Path == "sourceRef"
