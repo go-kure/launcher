@@ -293,6 +293,18 @@ a `CapabilityDefinition` but no trait handler and no trait lowering rule. The sc
 applies its defaults and refuses a rendering that breaks it. Before, such a binding
 passed through unchecked. Built-in types stay exempt.
 
+**The key of a refused capability.** A refusal that names a capability in its text is
+wrapped in an `*oam.CapabilityError`, which `errors.As` finds in the error that
+`Transform`, `TransformWithPolicy`, `EvaluateProfile` and
+`ValidateAuthoredPropertiesWithCapabilities` return. Its `Capability` field is the key the text
+names, so a caller that adds context reads the field and never the message. The key is a
+`ClusterProfile` key, `<type>` or `<type>.<scope>`; for the three refusals by the policy's
+`ForbiddenCapabilities`, `AllowedCapabilities` and `RequiredCapabilities` lists (class
+`RefusalTraitCapability`) it is the trait type the list names. The error's `Error()` is the text
+the refusal had, and `errors.Is` and `errors.As` still reach what it wraps: a `*PropertyError`, a
+`*PolicyRefusal` under its `*ViolationError`, a `*TransformError` and `ErrMissingCapability`.
+**Breaking** only for a caller that compared the returned error with `==` or by type assertion.
+
 ### Capability rendering: types and nulls
 
 A `CapabilityDefinition` rendering property uses the **flat** vocabulary —

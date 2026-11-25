@@ -33,6 +33,36 @@ var ErrReservedMetadataKey = errors.New("oam: metadata key is reserved")
 // four it is, the component, the object, the path, the key and the value.
 var ErrComponentLabelValue = errors.New("oam: label value is not the component's")
 
+// CapabilityError marks a refusal that names a capability in its text, and holds the
+// key the text names, so a caller that adds context to the refusal reads the key from
+// Capability and never from the message (go-kure/launcher#1687). Find one with
+// errors.As in the error Transform, TransformWithPolicy, EvaluateProfile or
+// ValidateAuthoredPropertiesWithCapabilities returns, whatever the refusal is: a
+// *PropertyError, a *PolicyRefusal under a *ViolationError, a *TransformError, a
+// plain error or one that wraps ErrMissingCapability.
+//
+// Capability is a ClusterProfile capability key, "<type>" or "<type>.<scope>". In the
+// three refusals by the environment policy's capability lists (forbidden, allowed,
+// required) it is the trait type the list names, which their text also calls a
+// capability. The refusal is Err, and Error returns its text unchanged, so a refusal
+// reads as it did before the wrapper and errors.Is and errors.As still reach it.
+type CapabilityError struct {
+	Capability string
+	Err        error
+}
+
+func (e *CapabilityError) Error() string { return e.Err.Error() }
+
+func (e *CapabilityError) Unwrap() error { return e.Err }
+
+// withCapability marks err as a refusal that names the capability key. A nil err stays nil.
+func withCapability(key string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &CapabilityError{Capability: key, Err: err}
+}
+
 // TransformError represents a failure in the OAM-to-kure transformation pipeline.
 type TransformError struct {
 	Message string

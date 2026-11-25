@@ -261,6 +261,14 @@ the parts it emits. Launcher's own component rules are exempt, because their tra
 opinions. A library consumer registers those rules with `RegisterBuiltinComponentLowering`. Any other
 rule goes through `RegisterComponentLowering`, and its emitted traits count.
 
+A refusal that names a capability in its text is an `*oam.CapabilityError`, which `errors.As`
+finds: its `Capability` field is the key the text names (a `ClusterProfile` key, or for the three
+policy capability lists the trait type they name), so a consumer never reads the message to learn
+it. The text is unchanged, and `errors.Is` and `errors.As` still reach the `*PropertyError`,
+`*PolicyRefusal`, `*TransformError` or `ErrMissingCapability` inside
+(go-kure/launcher#1687; details under
+[Capability system](/site/content/api-reference/oam/policy-and-capability.md#capability-system)).
+
 ### Capability rendering: types and nulls
 
 See [Policy defaults and capability system](/site/content/api-reference/oam/policy-and-capability.md#capability-rendering-types-and-nulls).
