@@ -326,6 +326,24 @@ func TestExpand_AGuardedReadGivesTheBuildsName(t *testing.T) {
 	})
 }
 
+// The read-write Service of an emitted postgresql part is read in text, and a skipped part gives the
+// string of the else branch.
+func TestExpand_AGuardedReadOfTheServiceInText(t *testing.T) {
+	c := compileOK(t, guardedDoc(condDB("inputs.db")+reader("", "host-${ inputs.db ? parts.db.rw_service.name : 'none' }")))
+	for _, tc := range []struct {
+		db   bool
+		want string
+	}{{true, "host-db-rw"}, {false, "host-none"}} {
+		comps, err := c.Expand(expandTransformer(t), guardedScope(tc.db), nil, nil)
+		if err != nil {
+			t.Fatalf("db=%v: Expand: %v", tc.db, err)
+		}
+		if got := prop(t, comps[len(comps)-1].Properties, "data", "x"); got != tc.want {
+			t.Errorf("db=%v: data.x = %v, want %s", tc.db, got, tc.want)
+		}
+	}
+}
+
 // A part that is not emitted gets no query, no bound outputs and no published entry, and a part
 // that is emitted gets one query.
 func TestExpand_ASkippedPartLeavesNoOutputs(t *testing.T) {

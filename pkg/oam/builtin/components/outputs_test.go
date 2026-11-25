@@ -86,10 +86,10 @@ func TestBuiltinOutputs_KindComponentsDeclareObject(t *testing.T) {
 }
 
 // A postgresql component declares the Cluster, the Secret CloudNativePG
-// generates for the application user (<cluster>-app), and with backup the
-// ObjectStore. The Secret follows the Cluster's name, whether the author or the
-// hook names it.
-func TestBuiltinOutputs_PostgresqlDeclaresClusterSecretAndStore(t *testing.T) {
+// generates for the application user (<cluster>-app), the read-write Service it
+// creates (<cluster>-rw), and with backup the ObjectStore. The Secret and the
+// Service follow the Cluster's name, whether the author or the hook names it.
+func TestBuiltinOutputs_PostgresqlDeclaresClusterSecretServiceAndStore(t *testing.T) {
 	tr := outputsTransformer()
 	comp := &oam.Component{Name: "db", Type: "postgresql", Properties: backupWith(nil, nil)}
 
@@ -98,14 +98,17 @@ func TestBuiltinOutputs_PostgresqlDeclaresClusterSecretAndStore(t *testing.T) {
 		t.Fatalf("ComponentOutputs: %v", err)
 	}
 	m := outputsByKey(t, got)
-	if len(m) != 3 {
-		t.Fatalf("outputs = %v, want cluster, app_secret and objectstore", got)
+	if len(m) != 4 {
+		t.Fatalf("outputs = %v, want cluster, app_secret, rw_service and objectstore", got)
 	}
 	if o := m["cluster"]; o.Kind.Kind != "Cluster" || o.Name != "db" {
 		t.Errorf("cluster = %v, want a Cluster named db", o)
 	}
 	if o := m["app_secret"]; o.Kind != (schema.GroupKind{Kind: "Secret"}) || o.Name != "db-app" {
 		t.Errorf("app_secret = %v, want the Secret db-app", o)
+	}
+	if o := m["rw_service"]; o.Kind != (schema.GroupKind{Kind: "Service"}) || o.Name != "db-rw" {
+		t.Errorf("rw_service = %v, want the Service db-rw", o)
 	}
 	if o := m["objectstore"]; o.Kind.Kind != "ObjectStore" || o.Name != "db" {
 		t.Errorf("objectstore = %v, want an ObjectStore named db", o)
@@ -117,8 +120,8 @@ func TestBuiltinOutputs_PostgresqlDeclaresClusterSecretAndStore(t *testing.T) {
 		t.Fatalf("ComponentOutputs with clusterObjectName: %v", err)
 	}
 	m = outputsByKey(t, got)
-	if m["cluster"].Name != "pg" || m["app_secret"].Name != "pg-app" {
-		t.Errorf("authored clusterObjectName: cluster %q, app_secret %q; want pg, pg-app", m["cluster"].Name, m["app_secret"].Name)
+	if m["cluster"].Name != "pg" || m["app_secret"].Name != "pg-app" || m["rw_service"].Name != "pg-rw" {
+		t.Errorf("authored clusterObjectName: cluster %q, app_secret %q, rw_service %q; want pg, pg-app, pg-rw", m["cluster"].Name, m["app_secret"].Name, m["rw_service"].Name)
 	}
 
 	got, err = tr.ComponentOutputsNamed("app", &oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{}}, hookNaming(oam.NameRolePostgresqlCluster))
@@ -126,8 +129,8 @@ func TestBuiltinOutputs_PostgresqlDeclaresClusterSecretAndStore(t *testing.T) {
 		t.Fatalf("ComponentOutputsNamed: %v", err)
 	}
 	m = outputsByKey(t, got)
-	if m["cluster"].Name != "h-db" || m["app_secret"].Name != "h-db-app" {
-		t.Errorf("hooked: cluster %q, app_secret %q; want h-db, h-db-app", m["cluster"].Name, m["app_secret"].Name)
+	if m["cluster"].Name != "h-db" || m["app_secret"].Name != "h-db-app" || m["rw_service"].Name != "h-db-rw" {
+		t.Errorf("hooked: cluster %q, app_secret %q, rw_service %q; want h-db, h-db-app, h-db-rw", m["cluster"].Name, m["app_secret"].Name, m["rw_service"].Name)
 	}
 	if _, has := m["objectstore"]; has {
 		t.Errorf("a component with no backup declares an objectstore: %v", got)
@@ -135,7 +138,7 @@ func TestBuiltinOutputs_PostgresqlDeclaresClusterSecretAndStore(t *testing.T) {
 }
 
 // With recovery.secret.name the operator uses that Secret and generates none,
-// so app_secret is not declared.
+// so app_secret is not declared. It still creates the read-write Service.
 func TestBuiltinOutputs_PostgresqlRecoverySecretDropsAppSecret(t *testing.T) {
 	tr := outputsTransformer()
 	comp := &oam.Component{Name: "db", Type: "postgresql", Properties: map[string]any{
@@ -152,6 +155,9 @@ func TestBuiltinOutputs_PostgresqlRecoverySecretDropsAppSecret(t *testing.T) {
 	if m["cluster"].Name != "db" {
 		t.Errorf("cluster = %v, want db", m["cluster"])
 	}
+	if m["rw_service"].Name != "db-rw" {
+		t.Errorf("rw_service = %v, want the Service db-rw", m["rw_service"])
+	}
 }
 
 // A declaration that fails to parse is the lowering's error, not an empty list.
@@ -165,8 +171,8 @@ func TestBuiltinOutputs_PostgresqlRefusesWhatTheLoweringRefuses(t *testing.T) {
 
 // What the component declares is what the build generates: each queried output
 // names an object of its kind the build produced, under a hook, an authored name
-// and a backup. app_secret is the one output the build does not generate:
-// CloudNativePG does, from the Cluster.
+// and a backup. app_secret and rw_service are the two outputs the build does
+// not generate: CloudNativePG does, from the Cluster.
 func TestBuiltinOutputs_BuildAgreesWithTheDeclaration(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -185,7 +191,7 @@ func TestBuiltinOutputs_BuildAgreesWithTheDeclaration(t *testing.T) {
 				Metadata: oam.Metadata{Name: "shop", Namespace: "demo"},
 				Spec:     oam.ApplicationSpec{Components: []oam.Component{{Name: "db", Type: "postgresql", Properties: tc.props}}},
 			}
-			requireOutputsBuilt(t, outputsTransformer(), app, tc.naming, "app_secret")
+			requireOutputsBuilt(t, outputsTransformer(), app, tc.naming, "app_secret", "rw_service")
 		})
 	}
 }

@@ -36,13 +36,15 @@ func recordReader(expr string) string { return recordReadHeader + expr + "\"\n" 
 // outputs, with an indexed key, and inside text, each gives the name the build gives.
 func TestRecordRead_ReadsTheNameOfARecord(t *testing.T) {
 	for name, tc := range map[string]struct{ expr, want string }{
-		"own object":         {`${ parts.creds.name }`, "creds"},
-		"other output":       {`${ parts.app.service.name }`, "app"},
-		"literal index":      {`${ parts.app['service'].name }`, "app"},
-		"derived output":     {`${ parts.db.app_secret.name }`, "db-app"},
-		"inside text":        {`secret-${ parts.creds.name }`, "secret-creds"},
-		"in an expression":   {`${ parts.creds.name + '-x' }`, "creds-x"},
-		"the name of a name": {`${ parts.app.deployment.name }`, "app"},
+		"own object":          {`${ parts.creds.name }`, "creds"},
+		"other output":        {`${ parts.app.service.name }`, "app"},
+		"literal index":       {`${ parts.app['service'].name }`, "app"},
+		"derived output":      {`${ parts.db.app_secret.name }`, "db-app"},
+		"read-write Service":  {`${ parts.db.rw_service.name }`, "db-rw"},
+		"the Service in text": {`host-${ parts.db.rw_service.name }`, "host-db-rw"},
+		"inside text":         {`secret-${ parts.creds.name }`, "secret-creds"},
+		"in an expression":    {`${ parts.creds.name + '-x' }`, "creds-x"},
+		"the name of a name":  {`${ parts.app.deployment.name }`, "app"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			comps := expandOK(t, compileParts(t, recordReader(tc.expr)), nil)
