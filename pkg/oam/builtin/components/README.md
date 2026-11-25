@@ -750,7 +750,9 @@ See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-com
 Every kind component (a type that takes `objectName`) publishes its one object as the output
 `object`: the engine does it, so a handler declares nothing, and a new type cannot join the
 registry without it (`TestOutputs_EveryObjectTypePublishesItsRecord`). `postgresql`,
-`webservice` and `worker` declare the objects they lower into.
+`webservice` and `worker` declare the objects they lower into. `postgresql` also declares the
+two objects CloudNativePG creates from its Cluster, derived from the Cluster's name: the
+application Secret (`app_secret`) and the read-write Service (`rw_service`).
 
 See [Policy defaults, endpoints and outputs](/site/content/api-reference/oam-components/policy-and-endpoints.md#declared-outputs).
 

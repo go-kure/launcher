@@ -284,7 +284,8 @@ One shared schema and parser serve the three types.
 
 Every type that generates one object named after the component (a kind component: every
 type that takes `objectName`) publishes it as the output `object`, and `postgresql`,
-`webservice` and `worker` implement `oam.OutputProvider` for the objects they lower into: the
+`webservice` and `worker` implement `oam.OutputProvider` for the objects they lower into, and
+`postgresql` also for the Secret and the Service CloudNativePG creates from its Cluster: the
 names of the objects a component generates, read through
 `Transformer.ComponentOutputs` before the document is built, and held by the build against
 the names it gives (see "Outputs" in `site/content/api-reference/oam/names-and-overrides.md`). A name is the author's property,
