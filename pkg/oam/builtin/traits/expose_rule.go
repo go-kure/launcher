@@ -458,11 +458,11 @@ func setAuthAnnotations(props map[string]any, platform *exposeAnnotations) error
 		}
 	}
 	if authURL == "" {
-		return &errors.ValidationError{
+		return &oam.CapabilityError{Capability: "expose", Err: &errors.ValidationError{
 			Field:     "allowedGroups",
 			Component: component,
 			Message:   "ext-auth is not offered on this platform (the expose capability has no authURL)",
-		}
+		}}
 	}
 
 	if err := platform.set(authURLAnnotation, authURL+"?allowed_groups="+strings.Join(groups, ","),
