@@ -98,7 +98,8 @@ A `worker` with an authored `serviceAccountName` emits its `role-deployment` alo
 then names no member: the same places are read under the plain owner. `oci` publishes a
 map too: its rule has no loop over its schema, so the places are declared beside the code
 that builds its two members (`oci_keys.go`) and held to what the rule emits by a test that
-authors every key. The access keys of `source` come from the slice the rule reads them by.
+authors every key. The access keys of `source` are listed once, in the slice the schema
+and the map both read; the lowering names each of them again.
 `helm` and `postgresql` publish no map. `postgresql` builds its members from moved and
 re-shaped keys. `helm` hands some keys on as written, a set that depends on the delivery
 mode, and builds the rest of its members from moved and re-shaped keys; its map is not

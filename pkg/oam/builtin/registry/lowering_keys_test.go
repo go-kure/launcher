@@ -130,6 +130,12 @@ type loweringKeySample struct {
 	// each one the value leaves out, with the reason: a sub-property the rule
 	// refuses beside another one the value writes. Read both ways, as alsoFills is.
 	notWritten map[string]string
+	// needsPeers names each declared place the key moves only in a document
+	// that holds another component, with the reason and the test that holds it.
+	// The comparison here lowers one component alone, so it cannot see such a
+	// place move: it skips the place, and fails if the place does move alone,
+	// where the entry is stale.
+	needsPeers map[reportedAt]string
 }
 
 // hostNamespacePolicy is defaultsPolicy allowing the host namespaces, so a
@@ -252,12 +258,13 @@ type loweredType struct {
 	// the authored document differ at that key alone.
 	base    map[string]any
 	samples map[string]loweringKeySample
-	// subProperties says the sample of every object key writes each sub-property
-	// its schema declares (TestLoweringKeys_SamplesWriteEverySubProperty). A role
-	// type opts out: it hands an object key to its deployment member whole, by
-	// the function that decides which keys it forwards, so no sub-property can
-	// land elsewhere; the keys it builds are held by their `lands` rows.
-	subProperties bool
+	// forwardsWhole exempts the type from
+	// TestLoweringKeys_SamplesWriteEverySubProperty, which every other type
+	// meets. It is true for a role type only: it hands an object key to its
+	// deployment member whole, by the function that decides which keys it
+	// forwards, so no sub-property can land elsewhere; the keys it builds are
+	// held by their `lands` rows.
+	forwardsWhole bool
 }
 
 // loweredTypes holds a loweredType for every rule that publishes a key map.
@@ -267,8 +274,9 @@ func loweredTypes() map[string]loweredType {
 	role := func(typ string) loweredType {
 		return loweredType{
 			// workload writes the `image` every role document carries.
-			build:   func(props map[string]any) oam.Component { return workload("app", typ, props) },
-			samples: loweringKeySamples(),
+			build:         func(props map[string]any) oam.Component { return workload("app", typ, props) },
+			samples:       loweringKeySamples(),
+			forwardsWhole: true,
 		}
 	}
 	return map[string]loweredType{
@@ -278,9 +286,8 @@ func loweredTypes() map[string]loweredType {
 			build: func(props map[string]any) oam.Component {
 				return oam.Component{Name: "app", Type: "oci", Properties: props}
 			},
-			base:          map[string]any{"source": map[string]any{"url": "oci://registry.example.org/base"}, "version": "1.0.0"},
-			samples:       ociKeySamples(),
-			subProperties: true,
+			base:    map[string]any{"source": map[string]any{"url": "oci://registry.example.org/base"}, "version": "1.0.0"},
+			samples: ociKeySamples(),
 		},
 	}
 }
@@ -289,6 +296,11 @@ func loweredTypes() map[string]loweredType {
 // from the base document's and from each default, so a key the rule ignored would
 // show.
 func ociKeySamples() map[string]loweringKeySample {
+	// A key of the source identity moves sourceRef only where another component
+	// shares the source it leaves.
+	sourceRefNeedsPeers := map[reportedAt]string{
+		{"fluxcd-kustomization", "", "sourceRef"}: "moves it only by ending the sharing of a source with another component; TestLoweringKeys_OCISharedSourceMovesSourceRef holds it",
+	}
 	return map[string]loweringKeySample{
 		// Every key of source the rule hands on or builds from, together: the report
 		// of each declared place needs the value that changes it.
@@ -305,10 +317,10 @@ func ociKeySamples() map[string]loweringKeySample {
 			"name": "refused beside source.objectName, which the value writes; TestLoweringKeys_OCINamedSourceIsAComponentOfItsOwn writes it",
 		}},
 		"kustomizationName": {value: "delivery"},
-		"version":           {value: "2.0.0"},
+		"version":           {value: "2.0.0", needsPeers: sourceRefNeedsPeers},
 		"path":              {value: "./deploy"},
 		"prune":             {value: false},
-		"interval":          {value: "10m"},
+		"interval":          {value: "10m", needsPeers: sourceRefNeedsPeers},
 		"targetNamespace":   {value: "apps"},
 		"wait":              {value: true},
 		"healthChecks":      {value: []any{map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "name": "app", "namespace": "apps"}}},
@@ -354,8 +366,8 @@ func TestLoweringKeys_SamplesWriteEverySubProperty(t *testing.T) {
 	keyed := keyedRules()
 	for _, typ := range slices.Sorted(maps.Keys(keyed)) {
 		lt, ok := types[typ]
-		if !ok || !lt.subProperties {
-			continue // the first is named by TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces; the second is a role type
+		if !ok || lt.forwardsWhole {
+			continue // a missing row is named by TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces
 		}
 		schema := keyed[typ].(oam.PropertySchemaProvider).PropertySchema()
 		for _, key := range slices.Sorted(maps.Keys(schema)) {
@@ -388,12 +400,75 @@ func TestLoweringKeys_SamplesWriteEverySubProperty(t *testing.T) {
 	}
 }
 
+// ociLowered lowers component b of a document of the oci components a and b,
+// through the oci rule with a context that holds the document, and returns the
+// components it emits by type, with each one's name.
+func ociLowered(t *testing.T, a, b oam.Component) map[string]oam.Component {
+	t.Helper()
+	ctx := oam.LoweringContext{
+		Document: &oam.Application{Spec: oam.ApplicationSpec{Components: []oam.Component{a, b}}},
+		Namer:    oam.NewNameAllocator(),
+		Origin:   oam.Origin{Document: "doc", DocumentKind: "Application", Namespace: "default"},
+	}
+	res, err := registry.ComponentLoweringRules()["oci"].LowerComponent(&b, ctx)
+	if err != nil {
+		t.Fatalf("LowerComponent: %v", err)
+	}
+	out := map[string]oam.Component{}
+	for _, c := range res.Components {
+		out[c.Type] = c
+	}
+	return out
+}
+
+// Two oci components of one document that name no source and have the same
+// identity share one: the Kustomization of each names it. A key that is part of
+// the identity (version, interval) makes the component stop sharing when it
+// differs, and its Kustomization then names the source it keeps to itself, so
+// the key moves sourceRef. The map declares that place, and the single-component
+// guard above cannot see the move, because it lowers with no document.
+func TestLoweringKeys_OCISharedSourceMovesSourceRef(t *testing.T) {
+	lt := loweredTypes()["oci"]
+	keys := keyedRules()["oci"].LoweringKeys()
+	named := func(props map[string]any, name string) oam.Component {
+		c := lt.build(props)
+		c.Name = name
+		return c
+	}
+	sourceRefOf := func(t *testing.T, props map[string]any) string {
+		t.Helper()
+		got := ociLowered(t, named(maps.Clone(lt.base), "a"), named(props, "b"))
+		ref, _ := got["fluxcd-kustomization"].Properties["sourceRef"].(map[string]any)
+		name, _ := ref["name"].(string)
+		return name
+	}
+	shared := sourceRefOf(t, maps.Clone(lt.base))
+	if shared == "" || shared == "b" {
+		t.Fatalf("two components of one identity: sourceRef.name = %q, want the shared source's name", shared)
+	}
+	for key, value := range map[string]any{"version": "2.0.0", "interval": "10m"} {
+		t.Run(key, func(t *testing.T) {
+			props := maps.Clone(lt.base)
+			props[key] = value
+			if got := sourceRefOf(t, props); got != "b" {
+				t.Errorf("authoring %q on one of two sharing components: sourceRef.name = %q, want its own source %q", key, got, "b")
+			}
+			if !slices.ContainsFunc(keys[key], func(p oam.LoweredKey) bool {
+				return p.Member == "fluxcd-kustomization" && p.Path == "sourceRef"
+			}) {
+				t.Errorf("%q moves sourceRef when sharing breaks, and the key map does not declare it: %v", key, keys[key])
+			}
+		})
+	}
+}
+
 // With source.name written, or a source another oci component shares, the
 // ocirepository is a component of its own, named for the source, and the
 // fluxcd-kustomization is no member of a group with it. The key map names member
 // types, not instances, so its source places name that component and not a
-// sibling of this one: the limit the docs state. This pins the shape, so a rule
-// that changes it fails here and the docs are read again.
+// sibling of this one: the limit the docs state. This pins the member types and
+// names and the Kustomization's sourceRef, so a rule that changes them fails here
+// and the docs are read again. It does not pin the order the two apply in.
 func TestLoweringKeys_OCINamedSourceIsAComponentOfItsOwn(t *testing.T) {
 	lt := loweredTypes()["oci"]
 	props := maps.Clone(lt.base)
@@ -730,7 +805,14 @@ func TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces(t *testing.T) {
 					}
 				}
 				for _, p := range places {
-					if !slices.ContainsFunc(changed, func(at reportedAt) bool { return within(at, p) }) {
+					moved := slices.ContainsFunc(changed, func(at reportedAt) bool { return within(at, p) })
+					if _, peers := sample.needsPeers[reportedAt{p.Member, p.Trait, p.Path}]; peers {
+						if moved {
+							t.Errorf("authoring %q moves %v on its own, and the sample lists it as needing peers: remove the entry", key, p)
+						}
+						continue
+					}
+					if !moved {
 						t.Errorf("authoring %q changed nothing at the declared place %v", key, p)
 					}
 					if !p.Unchanged {

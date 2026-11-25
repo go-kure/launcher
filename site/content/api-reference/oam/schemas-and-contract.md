@@ -817,15 +817,16 @@ neither.
 `oci` publishes a map. It has no loop over its schema, so the places are declared beside
 the code that builds its two members, and a test that authors every key holds them to
 what the rule emits: a place the key does not change fails, and so does a change at a
-place the map does not declare. The registry access keys of `source` come from the slice
-the rule reads them by. No place is `Unchanged` below `source`, because
-`source.secretRef.name` lands at `secretRef.name`:
+place the map does not declare. The registry access keys of `source` are listed once, in
+the slice the schema and the map both read; the lowering names each of them again. No
+place is `Unchanged` below `source`, because `source.secretRef.name` lands at
+`secretRef.name`:
 
 | Key | Lands at | Unchanged |
 |-----|----------|-----------|
 | `source` | `ocirepository` `url` and each access key (`secretRef`, `provider`, `insecure`, `certSecretRef`, `proxySecretRef`, `serviceAccountName`); `fluxcd-kustomization` `sourceRef` | no |
-| `version` | `ocirepository` `ref` (a tag as `ref.tag`, a `sha256:` digest as `ref.digest`) | no |
-| `interval` | `ocirepository` `interval` and `fluxcd-kustomization` `interval` | yes |
+| `version` | `ocirepository` `ref` (a tag as `ref.tag`, a `sha256:` digest as `ref.digest`); `fluxcd-kustomization` `sourceRef`, only where it ends the sharing of a source | no |
+| `interval` | `ocirepository` `interval` and `fluxcd-kustomization` `interval`; `sourceRef`, only where it ends the sharing of a source | yes for the two intervals |
 | `path`, `prune`, `targetNamespace`, `wait` | `fluxcd-kustomization`, the same key | yes |
 | `healthChecks` | `fluxcd-kustomization` `healthChecks`, each entry rebuilt from its four fields | no |
 | `kustomizationName` | no place: it names the Kustomization object | |

@@ -13,10 +13,11 @@ const (
 // component lands in the ocirepository and fluxcd-kustomization members.
 //
 // The rule has no loop over its schema, so the places are declared here, beside
-// sourceProperties and kustomizationProperties, which build the two members; the
-// one forwarded set, the registry access keys of source, comes from
-// ociSourceAccessKeys, the slice sourceProperties reads them by. What the rule
-// emits holds the declaration to account: the test of
+// sourceProperties and kustomizationProperties, which build the two members. The
+// access keys of source are listed once, in ociSourceAccessKeys, which the
+// schema and this map read; sourceProperties and parseSourceAccess name each of
+// them again, so the list is shared with the schema and not with the lowering.
+// What the rule emits holds the declaration to account: the test of
 // pkg/oam/builtin/registry authors every key and fails for a place the key does
 // not change and for a change at a place it does not declare, in either
 // direction (go-kure/launcher#1580, comment 6903630690: places declared beside
@@ -34,15 +35,20 @@ func (OCIRule) LoweringKeys() map[string][]oam.LoweredKey {
 		source = append(source, oam.LoweredKey{Member: ociSourceMember, Path: key})
 	}
 	source = append(source, oam.LoweredKey{Member: ociKustomizationMember, Path: "sourceRef"})
+	// Two components that share a source name it by its identity: the url, the
+	// version, the interval and the access keys. A component whose version or
+	// interval differs from the other's stops sharing, and its Kustomization then
+	// names the source it keeps to itself, so both keys can move sourceRef.
+	sourceRef := oam.LoweredKey{Member: ociKustomizationMember, Path: "sourceRef"}
 	return map[string][]oam.LoweredKey{
 		"source": source,
 		// Names the Kustomization object; it is no property of a member.
 		"kustomizationName": nil,
 		// A tag becomes ref.tag, a sha256: digest ref.digest.
-		"version":         {{Member: ociSourceMember, Path: "ref"}},
+		"version":         {{Member: ociSourceMember, Path: "ref"}, sourceRef},
 		"path":            {{Member: ociKustomizationMember, Path: "path", Unchanged: true}},
 		"prune":           {{Member: ociKustomizationMember, Path: "prune", Unchanged: true}},
-		"interval":        {{Member: ociSourceMember, Path: "interval", Unchanged: true}, {Member: ociKustomizationMember, Path: "interval", Unchanged: true}},
+		"interval":        {{Member: ociSourceMember, Path: "interval", Unchanged: true}, {Member: ociKustomizationMember, Path: "interval", Unchanged: true}, sourceRef},
 		"targetNamespace": {{Member: ociKustomizationMember, Path: "targetNamespace", Unchanged: true}},
 		"wait":            {{Member: ociKustomizationMember, Path: "wait", Unchanged: true}},
 		// Each entry is rebuilt from its four fields.
