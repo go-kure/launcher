@@ -14,6 +14,7 @@ import (
 const (
 	outputKeyCluster     = "cluster"
 	outputKeyAppSecret   = "app_secret"
+	outputKeyRWService   = "rw_service"
 	outputKeyObjectStore = "objectstore"
 )
 
@@ -31,6 +32,10 @@ const (
 // (pkg/oam/README.md, the Cluster name warning).
 const cnpgAppSecretSuffix = "-app"
 
+// cnpgRWServiceSuffix is what CloudNativePG appends to the Cluster's name for
+// the read-write Service it creates (cloudnative-pg api/v1, ServiceReadWriteSuffix).
+const cnpgRWServiceSuffix = "-rw"
+
 // A kind component (oam.ComponentObjectProvider) declares no outputs here: the
 // engine publishes its one object under oam.ObjectOutputKey for every such type
 // (go-kure/launcher#1643). A type with more to publish declares its own.
@@ -44,6 +49,10 @@ const cnpgAppSecretSuffix = "-app"
 //     not when recovery.secret.name is set: the operator then uses that Secret
 //     and generates none. It is not in the built application, so it is derived
 //     from the Cluster's name, which the build holds.
+//   - "rw_service": the read-write Service the operator creates,
+//     <cluster>-rw. It is always declared, because the component offers no
+//     setting that disables the default Services. Like the Secret it is not
+//     in the built application, so it is derived from the Cluster's name.
 //   - "objectstore": the backup's ObjectStore, when backup is set, named by
 //     postgresqlObjectStoreMember as LowerComponent names it.
 func (r PostgresqlRule) Outputs(comp *oam.Component, lctx oam.LoweringContext) ([]oam.OutputDecl, error) {
@@ -66,6 +75,10 @@ func (r PostgresqlRule) Outputs(comp *oam.Component, lctx oam.LoweringContext) (
 			Derive: func(clusterName string) string { return clusterName + cnpgAppSecretSuffix },
 		})
 	}
+	decls = append(decls, oam.OutputDecl{
+		Key: outputKeyRWService, Kind: schema.GroupKind{Kind: "Service"}, From: outputKeyCluster,
+		Derive: func(clusterName string) string { return clusterName + cnpgRWServiceSuffix },
+	})
 	if c.Backup != nil {
 		store, err := postgresqlObjectStoreMember(comp, lctx, c.Backup)
 		if err != nil {

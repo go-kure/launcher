@@ -302,14 +302,16 @@ rules only `postgresql`, `webservice` and `worker` declare outputs.
 | every kind component (`configmap`, `secret`, `deployment`, `cnpg-cluster`, and the rest of the types that take `objectName`) | `object` | the object the type declares | `objectName`, else the Naming hook's, else the component name |
 | `postgresql` | `cluster` | Cluster | `clusterObjectName`, else the component name |
 | `postgresql` | `app_secret` | Secret `<cluster>-app` | derived from `cluster`; **absent** when `recovery.secret.name` is set, because CloudNativePG then uses that Secret and generates none |
+| `postgresql` | `rw_service` | Service `<cluster>-rw` | derived from `cluster`; always present, because the component offers no setting that disables the operator's default Services |
 | `postgresql` | `objectstore` | ObjectStore | present when `backup` is set; `backup.objectStoreObjectName`, else the component name |
 | `webservice`, `worker` | `deployment` | Deployment | `deploymentObjectName`, else the component name |
 | `webservice` | `service` | Service | `serviceObjectName`, else the component name |
 | `webservice`, `worker` | `serviceaccount` | ServiceAccount | `serviceAccountObjectName`, else the component name; **absent** when `serviceAccountName` names an existing account |
 | `webservice`, `worker` | `claim_<volume>` | PersistentVolumeClaim | one per `pvc` volume that sets no `claimName`: the volume's `claimObjectName`, else `<component>-<volume>` with each hyphen in either part written `--`; hyphens in the key become underscores |
 
-`app_secret` is the one derived output: the operator creates the Secret, so it is not in the
-built application and no object of the build holds it. The build still re-applies the
+`app_secret` and `rw_service` are the derived outputs: the operator creates the Secret and the
+Service, so neither is in the built application and no object of the build holds it. The
+`-ro` and `-r` Services and the Services of a connection pooler are not declared. The build still re-applies the
 derivation to the held cluster name and fails if the output was answered another name. The
 inline object store of `recovery.source` is not declared. A claim's name is resolved without the ClusterProfile `pvc` capability, which
 chooses its storage class and no name, so the query records no consumed capability key.
