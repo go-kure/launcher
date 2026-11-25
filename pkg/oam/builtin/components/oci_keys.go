@@ -35,10 +35,12 @@ func (OCIRule) LoweringKeys() map[string][]oam.LoweredKey {
 		source = append(source, oam.LoweredKey{Member: ociSourceMember, Path: key})
 	}
 	source = append(source, oam.LoweredKey{Member: ociKustomizationMember, Path: "sourceRef"})
-	// A source two components share is named by its identity: the url, the
-	// version, the interval and the access keys. Changing the version or the
-	// interval changes that name, or ends or starts the sharing, so the source the
-	// Kustomization names can change with either key.
+	// Two components that write no source.name and have the same identity share a
+	// source, and name it by that identity: the url, the version, the effective
+	// interval and the access keys. Changing the version, or the interval to
+	// another effective value (60m and 1h are one), changes that name or ends or
+	// starts the sharing, so the source the Kustomization names can change with
+	// either key. A source that source.name names keeps its name.
 	sourceRef := oam.LoweredKey{Member: ociKustomizationMember, Path: "sourceRef"}
 	return map[string][]oam.LoweredKey{
 		"source": source,

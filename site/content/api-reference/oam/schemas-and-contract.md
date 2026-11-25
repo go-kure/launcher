@@ -825,8 +825,8 @@ place is `Unchanged` below `source`, because `source.secretRef.name` lands at
 | Key | Lands at | Unchanged |
 |-----|----------|-----------|
 | `source` | `ocirepository` `url` and each access key (`secretRef`, `provider`, `insecure`, `certSecretRef`, `proxySecretRef`, `serviceAccountName`); `fluxcd-kustomization` `sourceRef` | no |
-| `version` | `ocirepository` `ref` (a tag as `ref.tag`, a `sha256:` digest as `ref.digest`); `fluxcd-kustomization` `sourceRef`, when the key changes which source the Kustomization names: the key is part of the identity a shared source is named by | no |
-| `interval` | `ocirepository` `interval` and `fluxcd-kustomization` `interval`; `sourceRef`, when the key changes which source the Kustomization names, as `version` does | yes for the two intervals |
+| `version` | `ocirepository` `ref` (a tag as `ref.tag`, a `sha256:` digest as `ref.digest`); `fluxcd-kustomization` `sourceRef`, when the key changes which source the Kustomization names: two components that write no `source.name` and have one identity share a source named by it, and the version is part of that identity | no |
+| `interval` | `ocirepository` `interval` and `fluxcd-kustomization` `interval`; `sourceRef`, when the key changes which source the Kustomization names, as `version` does (the effective interval is in the identity, so `60m` and `1h` change nothing) | yes for the two intervals |
 | `path`, `prune`, `targetNamespace`, `wait` | `fluxcd-kustomization`, the same key | yes |
 | `healthChecks` | `fluxcd-kustomization` `healthChecks`, each entry rebuilt from its four fields | no |
 | `kustomizationName` | no place: it names the Kustomization object | |
