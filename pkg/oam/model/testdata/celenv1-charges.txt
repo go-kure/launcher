@@ -2,7 +2,7 @@
 -_: scalar-out
 @in: scalar-out
 @not_strictly_false: scalar-out
-@sortByAssociatedKeys: bounded (budgetedSort in charge.go charges the bytes of the keys before it sorts)
+@sortByAssociatedKeys: bounded (budgetedSort in charge.go pays for the keys and their bytes before it sorts)
 _!=_: scalar-out
 _%_: scalar-out
 _&&_: scalar-out
@@ -31,7 +31,7 @@ duration: scalar-out
 dyn: bounded (gives its operand)
 endsWith: scalar-out
 flatten: amplifying (budgetedFlatten in equality.go spends one step for each element)
-format: amplifying (budgetedFormat in charge.go refuses a result its operands can print above 1000000 bytes before it builds it; TestChargeFormatStopsBeforeTheAllocation)
+format: amplifying (budgetedFormat in charge.go refuses a result its operands can print above 1000000 bytes before it builds it, and pays what they can print before it runs; TestChargeFormatStopsBeforeTheAllocation, TestBudgetStopsTheThreeCalls)
 getDate: scalar-out
 getDayOfMonth: scalar-out
 getDayOfWeek: scalar-out
@@ -51,10 +51,10 @@ lists.range: amplifying (cel-go caps it at 1000000 elements and charges it by si
 lowerAscii: bounded (same size as its operand)
 matches: bounded (budgetedMatches in charge.go refuses a match that cel-go would charge over the cost limit before it runs; TestMatchesIsRefusedBeforeItRuns)
 replace: amplifying (budgetedReplace in charge.go stops before it builds a result over the cap; TestChargeReplaceStopsBeforeTheAllocation)
-reverse: bounded (same elements as its operand)
+reverse: bounded (same elements as its operand; chargedCall in charge.go pays a step for each element of a reversed list; TestBudgetStopsTheThreeCalls)
 size: scalar-out
 slice: bounded (no more elements than its operand)
-sort: bounded (budgetedSort in charge.go charges the bytes of the keys before it sorts)
+sort: bounded (budgetedSort in charge.go pays for the keys and their bytes before it sorts; TestBudgetStopsTheThreeCalls)
 split: bounded (no more bytes than its operand)
 startsWith: scalar-out
 string: bounded (same size as its operand, or a number)

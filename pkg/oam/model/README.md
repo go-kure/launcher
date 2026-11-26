@@ -385,9 +385,20 @@ identifier read by size, against the same budget of 1,000,000 steps as the compa
 value costs one step for each 1,024 bytes. No string or bytes value may hold more than 1,000,000 bytes,
 and no list or map more than 1,000,000 elements: a value at the cap is allowed, and a value over it stops
 the evaluation with `ErrCostLimit`. A list or a map costs nothing more, because cel-go charges a call by
-the element count of its operands. The keys of `sort` and `sortBy` cost the bytes of the string and
-bytes elements they hold, because a sort compares them by content. The charge comes before the sort runs,
-so a sort that fails after it compared, in `xs.sort() == [] || true`, is paid for too. `join` checks that every element is a
+the element count of its operands where it knows the overload. Three calls copy what their operands hold
+and pay for it themselves. cel-go charges a `sort` or a `reverse` one step when the type does not pick one
+overload (a `dyn` element for `sort`, a `dyn` receiver for `reverse`, because a string has a `reverse` too),
+and the lists extension then never reads the elements. A `reverse` of a list pays one step for each
+element, after it ran: it cannot fail on a list, and one copy holds at most 1,000,000 elements. A `sort`
+or `sortBy` of n keys pays n times the number of bits of n, about n log2 n, which is the number of
+comparisons it makes. Its keys also cost the bytes of the string and bytes elements they hold, because a
+sort compares them by content. **So one `sort` of a list whose type is not fully known when the model
+compiles holds at most 62,500 elements**, where nothing else in the evaluation spends: 62,500 keys have 16
+bits and pay 1,000,000 steps (a test pins 62,500 and 62,501). cel-go charges a sort of a known type by the
+square of its length and refuses it far below that, and the cost limit refuses a `sortBy` of that length
+too. A `format` copies the strings inside its argument list, which no read has charged, so it pays the
+most its arguments can print (see "Format"), one step for each 1,024 bytes. `sort` and `format` pay before
+they run, so a call that fails after it worked, in `xs.sort() == [] || true`, is paid for too. `join` checks that every element is a
 string before it writes the first byte, so a join that fails copies nothing, and it checks its buffer
 before each write, against the bytes that the next write adds (the first element has no separator before it).
 `replace` is replaced by a version that computes the size of its result from the number of matches
@@ -409,32 +420,27 @@ on a computed value. Three rows of the comparison test guard the name: `[1, 1.0]
 `[1u, 1][0] == [1u, 1][1]` and `[[1], {'a': 1}][0] == [[1], {'a': 1}][1]` must report the cost of cel-go
 (25, 25 and 105, and 27, 27 and 107 without the skip). A cel-go version that renames the type fails them.
 
-**Known limits: calls that work and then fail, or that cel-go cannot cost.** Three members of this class
-are open.
-- A `format` that copies a long string argument and then fails on a later clause is charged nothing for
-  the copy, because the charge reads the result and a failure has none. The argument list must be
-  bound outside the loop, because the compiler rejects a literal list that does not fit the format:
-  `cel.bind(args, [inputs.image, 'x'], lists.range(2000).all(i, '%s%d'.format(args) == '' || true))`
-  with a 1,000,000-byte `inputs.image` gives `true` and allocates about 5.7 GB in 1.6 s below both
-  budgets.
-- A `sort` or a `reverse` whose type is not fully known when the model compiles has an ambiguous
-  overload, so cel-go charges it one step and the lists extension never reads its elements. For `sort`
-  the cause is an unknown element type (a `dyn` element); for `reverse` it is a receiver of type `dyn`,
-  because a string has a `reverse` too. A `sort` of `[0, 'bad'] + lists.range(10000)`: 2,000 sorts give
-  `true` at a cost of 22,044, allocating about 1 GB in 3 s. A `reverse` of a list read from a mixed map,
-  `cel.bind(xs, {'xs': lists.range(10000), 'other': 0}.xs, lists.range(2000).all(i, xs.reverse().size() == 10000))`:
-  `true` at a cost of 26,065, allocating about 1.4 GB in 0.8 s. A `sort` or `reverse` of a typed list
-  is stopped, and so is `reverse` of the `list(dyn)` in the `sort` example. A `dyn` receiver of `slice`
-  (one overload, which charges its output), `distinct`, `flatten` or `==` is stopped by the cost limit
-  or the budget in the same loop, and `size`, `in`, an index and `+` copy nothing.
+**What the budgets bound.** A call that copies or compares the contents of a value pays for them, also
+when it fails afterwards, and a test pins each such call found so far (`sort`, `sortBy`, `reverse`,
+`join`, `replace`, `format`, the comparisons, `flatten` and the keys of a result copy). A test runs every
+function of the environment that takes a list, with `==` and `!=`, on a list whose type is not fully known
+or on operands that make it fail, and fails on a new one that has no row. The size of a successful
+`format` result is bounded by the check above.
 
-Every other member of this class found so far is bounded (`sortBy`, `join`, `replace`, `format`, comparisons,
-`flatten`, the keys of a typed `sort` and the keys of a result copy), and a test pins each. These
-limits are not reachable today, because no code registers a model's CEL for evaluation by default.
-The list may not be complete; go-kure/launcher#1461 holds the current set. It stays open for them: the fix is to charge the bytes and the elements of a
-container on every read, so that no call needs its own charge. **go-kure/launcher#1461 must close
-before step 4a of go-kure/launcher#1261 or any public wiring of the evaluator.** The size of a
-successful `format` result is bounded by the check above.
+**The budgets bound the work of an evaluation, not the memory it allocates in total.** A step pays for
+about 1,024 bytes, so an evaluation reads about 1 GB of strings before the budget stops it, and a call
+can allocate several times what it reads. These figures are totals over a whole evaluation, and not
+memory held at once. Three loops over a string of 999,990 bytes, each run until the budget refused it
+(a development host, the largest heap sampled every 2 ms):
+
+| Loop | Allocated in total | Largest sampled heap |
+|---|---|---|
+| A `format` that copies the string and then fails | 2,946 MB | 48 MB |
+| A `reverse` of the string, its type unknown | 2,443 MB | 35 MB |
+| A `getHours` with the string as its time zone | 7,897 MB | 48 MB |
+
+A build also has a deadline, which stops a long comprehension (see "Limits of a whole build"). A direct
+`Eval` has none. One call is not interrupted, and no limit bounds the memory an evaluation holds.
 
 **Result size.** The Go copy of a single-hole result holds at most 1,000,000 units, counted at every
 depth. A list element or a map entry is one unit, and so is each byte of a bytes value. A map key

@@ -2,6 +2,7 @@ package model
 
 import (
 	"math"
+	"math/bits"
 	"sort"
 	"strings"
 	"sync"
@@ -26,14 +27,25 @@ import (
 // chargeDecorator closes the class with one rule. Every call result and every identifier read
 // is charged against the budget of the comparisons: a string or bytes value costs one step for
 // each 1,024 bytes, and no string, bytes value, list or map may hold more than maxValueSize
-// bytes or elements. A list or map costs nothing more, because cel-go charges a call by the
-// element count of its operands. The one exception is the keys of sort and sortBy, which cost
-// the bytes of the string and bytes elements they hold: a sort compares them by content and
-// cel-go counts each as one element. The charge comes before the sort runs, so a sort that
-// fails after it compared is paid for too. The calls that build a big output from small operands
-// check it before they build it: join (equality.go), replace and lists.range, which cel-go caps
-// itself. indexOf, lastIndexOf and matches check the work of their loops before they run.
-// testdata/celenv1-charges.txt names a class for every function of the pinned environment.
+// bytes or elements. Reading a list or map costs nothing more, because cel-go charges a call by
+// the element count of its operands where it knows the overload.
+//
+// Three calls copy what their operands hold and pay for it themselves (go-kure/launcher#1706).
+// cel-go charges a sort or a reverse one step when the type does not pick one overload. A reverse
+// of a list pays one step for each element. A sort of n keys pays n times the number of bits of n,
+// about n log2 n, which is the number of comparisons it makes and each comparison reads values.
+// The keys of sort and sortBy also cost the bytes of the string and bytes elements they hold: a
+// sort compares them by content and cel-go counts each as one element. A format copies the strings
+// inside its argument list, which no read has charged, so it pays the most it can print, one step
+// for each 1,024 bytes. sort and format pay before they
+// run, so a call that fails after it worked is paid for too. reverse pays after it ran: it cannot
+// fail on a list, and one copy holds at most maxValueSize elements.
+//
+// The calls that build a big output from small operands check it before they build it: join
+// (equality.go), replace and lists.range, which cel-go caps itself. indexOf, lastIndexOf and
+// matches check the work of their loops before they run. testdata/celenv1-charges.txt names a
+// class for every function of the pinned environment, and TestBudgetCoversEveryCallThatTakesAList
+// runs each one that takes a list.
 //
 // `&&`, `||`, the conditional and a comprehension are no calls, so no node of them is wrapped and
 // they stay lazy: a wrapped result is charged only when its node ran.
@@ -92,6 +104,13 @@ func (b *compareBudget) charge(v ref.Val, scan bool) ref.Val {
 	return v
 }
 
+// pay spends steps on the budget and stops the evaluation when the budget is gone.
+func (b *compareBudget) pay(steps int) {
+	if b.left -= steps; b.left < 0 {
+		chargeStop()
+	}
+}
+
 // chargeDecorator wraps every call and every identifier read, so that the result is charged.
 func chargeDecorator(i interpreter.Interpretable) (interpreter.Interpretable, error) {
 	switch x := i.(type) {
@@ -133,7 +152,16 @@ type chargedCall struct {
 }
 
 func (c *chargedCall) Exec(f *interpreter.ExecutionFrame) ref.Val {
-	return budgetOf(f).charge(c.InterpretableCall.Exec(f), false)
+	v := c.InterpretableCall.Exec(f)
+	b := budgetOf(f)
+	// the reverse of a list, which cel-go charges one step where the receiver may be a string too;
+	// the reverse of a string gives a string, which is charged by its bytes below
+	if list, ok := v.(traits.Lister); ok && c.Function() == "reverse" {
+		if sz, ok := list.Size().(types.Int); ok {
+			b.pay(int(sz))
+		}
+	}
+	return b.charge(v, false)
 }
 
 func (c *chargedCall) Eval(a interpreter.Activation) ref.Val {
@@ -232,8 +260,8 @@ func (e *budgetedReplace) run(vals []ref.Val) ref.Val {
 // call returns, so a string of 1,000,000 bytes and a search text of 500,000 ran 250 billion
 // comparisons before it stopped. The node evaluates its own operands, as budgetedReplace does,
 // refuses the search that cel-go would refuse once it had run, and gives the result that cel-go
-// gives (ext/strings.go, indexOfOffset and lastIndexOfOffset). It covers these two functions only:
-// the general mechanism belongs to the redesign of the charge in go-kure/launcher#1461.
+// gives (ext/strings.go, indexOfOffset and lastIndexOfOffset). It covers these two functions
+// only.
 type budgetedSearch struct {
 	interpreter.InterpretableCall
 }
@@ -313,7 +341,9 @@ func (e *budgetedMatches) run(vals []ref.Val) ref.Val {
 // every clause into a string and charges the result after it exists, so a list of 150 references to
 // a string of 400,000 bytes built 60,000,000 bytes, and a shared nested list printed once for each
 // value it holds (go-kure/launcher#1462). The node evaluates its own operands once, as budgetedReplace
-// does, adds the most each argument can print, and stops when that bound passes maxValueSize. The
+// does, adds the most each argument can print, and stops when that bound passes maxValueSize. It
+// then pays the bound, before cel-go prints: cel-go copies each argument into the result clause by
+// clause, so a format that fails on a later clause has copied and has no result to charge. The
 // result is cel-go's own: the node runs `s.format(a)` as a program of the same environment, without
 // this decorator, on the operands it already holds. The bound is loose, so a format whose result
 // is within the slack of maxValueSize can be refused though it would fit (printer.bound).
@@ -334,7 +364,8 @@ func (e *budgetedFormat) run(f *interpreter.ExecutionFrame, vals []ref.Val) ref.
 	// with its own error text and builds nothing, so the cost it reports is its own.
 	if str, ok := vals[0].(types.String); ok {
 		if list, ok := vals[1].(traits.Lister); ok {
-			formatBound(str, list, budgetOf(f))
+			b := budgetOf(f)
+			b.pay(formatBound(str, list, b) / compareBytesPerStep)
 		}
 	}
 	prog, err := formatProgram()
@@ -508,7 +539,8 @@ func searchRunes(runes, subrunes []rune, off int, last bool) ref.Val {
 // compares the keys by content until it finds one that cannot be compared and then fails, and
 // the charge of a result never sees a sort that failed, so `xs.sort() == [] || true` on a list
 // of two long strings and an int compared both strings for no step. The node evaluates its own
-// operands, as budgetedJoin does, charges the bytes of the keys, and sorts as cel-go does
+// operands, as budgetedJoin does, pays for the comparisons of the keys and for their bytes, and
+// sorts as cel-go does
 // (ext/lists.go, sortListByAssociatedKeys). For sort the keys are the list itself, and for
 // sortBy they are the second operand.
 type budgetedSort struct {
@@ -535,7 +567,11 @@ func (e *budgetedSort) run(f *interpreter.ExecutionFrame, vals []ref.Val) ref.Va
 	if !ok {
 		return types.NewErr("no such overload: %v.%s", vals[0].Type(), e.Function())
 	}
-	budgetOf(f).charge(keys, true)
+	b := budgetOf(f)
+	if sz, ok := keys.Size().(types.Int); ok {
+		b.pay(int(sz) * bits.Len(uint(sz)))
+	}
+	b.charge(keys, true)
 	return sortByKeys(list, keys)
 }
 
