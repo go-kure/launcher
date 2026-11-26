@@ -15,7 +15,7 @@ The implementation, history and tests of each section below are on the
 | `ParseClusterProfile` | Parse a `ClusterProfile`. `spec.kubernetesVersion`, when set, must be `1.N`, `v1.N` or `v1.N.P`; see `ValidateAuthoredPropertiesForTarget`. `spec.featureGates` (gate name to bool) overrides a gate's state; a name the gate table lacks is refused, and the map needs `spec.kubernetesVersion`; see `ValidateAuthoredPropertiesForTargetWithGates`. |
 | `LoadCapabilityDefinitions` | Load `CapabilityDefinition`s for capability validation. |
 | `ParseWithExtraTraitTypes` | Parse allowing additional (custom) trait types. |
-| `ParseWithExtraTypes` | Parse allowing custom trait types **and** a `LowerableTypes` set — the document kinds, component types, trait types and policy types claimed by a transformer's registered lowering rules, and the policy types it has a handler for. |
+| `ParseWithExtraTypes` | Parse allowing custom trait types **and** a `LowerableTypes` set — the document kinds, component types, trait types and policy types claimed by a transformer's registered lowering rules, the policy types it has a handler for, and the component types it was given with `RegisterAuthoredComponent`. |
 
 Standalone parsing validates each trait's `type` against this package's own allowlist
 of built-in trait types (the `security-context`, `topology-spread`, `force-replace` and
@@ -69,6 +69,12 @@ registry has the same shape and the same failure mode: `traitComponentRestrictio
 (which traits a component type accepts; `scaler` is restricted to `webservice`, `worker`,
 `deployment`, `statefulset` and `role-deployment`, the member type the two roles lower into
 that no document authors, and `disruption` to the same five).
+
+**A library caller's own component type** does not go on that list. The caller registers
+the handler with `Transformer.RegisterAuthoredComponent` in place of `RegisterComponent`,
+and parses with `ParseWithExtraTypes` and that transformer's `LowerableTypes()`. A type
+registered with `RegisterComponent` alone stays refused. The trait restrictions apply to
+an authored type at parse: a `scaler` on it is refused.
 
 **A `scaler` refuses authored `replicas`**. The
 HorizontalPodAutoscaler owns the replica count, so the scaler builds the Deployment or
