@@ -67,6 +67,48 @@ func TestComponentLoweringKeys_ResultIsTheCallersOwn(t *testing.T) {
 	}
 }
 
+// keyedTraitRule is a trait lowering rule with a key map. Only its claimed type
+// and its map are read here.
+type keyedTraitRule struct {
+	TraitLoweringRule
+	typ  string
+	keys map[string][]LoweredKey
+}
+
+func (r keyedTraitRule) TraitType() string                     { return r.typ }
+func (r keyedTraitRule) LoweringKeys() map[string][]LoweredKey { return r.keys }
+
+// A trait rule's map is published under the trait type it claims, by
+// TraitLoweringKeys alone, as a copy.
+func TestTraitLoweringKeys_PublishesACopyOfDeclaredMaps(t *testing.T) {
+	tr := NewTransformer(nil, nil)
+	if got := tr.TraitLoweringKeys(); got == nil || len(got) != 0 {
+		t.Fatalf("TraitLoweringKeys() with no rule = %#v, want an empty non-nil map", got)
+	}
+
+	keys := func() map[string][]LoweredKey {
+		return map[string][]LoweredKey{
+			"host": {{Trait: "kind-t", Path: "host", When: []LoweredWhen{{Key: "controller", Values: []string{"a"}}}}},
+			"name": nil,
+		}
+	}
+	tr.RegisterTraitLowering(keyedTraitRule{typ: "routed", keys: keys()})
+
+	first := tr.TraitLoweringKeys()
+	want := map[string]map[string][]LoweredKey{"routed": keys()}
+	if !reflect.DeepEqual(first, want) {
+		t.Fatalf("TraitLoweringKeys() = %#v\nwant %#v", first, want)
+	}
+	if got := tr.ComponentLoweringKeys(); len(got) != 0 {
+		t.Errorf("ComponentLoweringKeys() = %#v, want no trait rule in it", got)
+	}
+	first["routed"]["host"][0].When[0].Values[0] = "changed"
+	first["routed"]["host"][0].Path = "changed"
+	if got := tr.TraitLoweringKeys(); !reflect.DeepEqual(got, want) {
+		t.Errorf("TraitLoweringKeys() after a caller wrote to an earlier result = %#v\nwant %#v", got, want)
+	}
+}
+
 // A place applies when all of its conditions hold. An empty string in a
 // condition's values matches a property left out or written null, and a key
 // matches a property in any letter case.

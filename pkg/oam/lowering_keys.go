@@ -5,18 +5,23 @@ import (
 	"strings"
 )
 
-// LoweredKey is one place the value of a property of a lowered component type
-// lands in the components its lowering rule emits. The provenance report
-// (TransformWithProvenance) has no entry for the lowered component itself: it
-// speaks at these places.
+// LoweredKey is one place the value of a property of a lowered component or trait
+// type lands in what its lowering rule emits. The provenance report
+// (TransformWithProvenance) has no entry for the lowered type itself: it speaks
+// at these places.
 type LoweredKey struct {
 	// Member is the component type of the emitted member the value lands on. It
 	// is PropertySource.Member inside a same-name sibling group. Outside one the
 	// report names the component with no member: the place is the same, read
 	// under the plain owner.
+	//
+	// On a place of a trait lowering rule Member is empty: the emitted trait sits
+	// on whichever member of the component holds it, so the place is matched by
+	// component, trait type and path, whatever member the report names.
 	Member string `json:"member" yaml:"member"`
-	// Trait is the type of a trait the rule attaches to that member, when the
-	// value lands in a trait; empty when it lands in the member's own properties.
+	// Trait is the type of the trait the value lands in: a trait a component rule
+	// attaches to that member, or the trait a trait rule emits. It is empty when
+	// the value lands in a member's own properties.
 	Trait string `json:"trait,omitempty" yaml:"trait,omitempty"`
 	// Path is the path the value lands at, in the member's properties or the
 	// trait's, in the spelling PropertySource.Path uses. Empty for a trait the
@@ -34,18 +39,21 @@ type LoweredKey struct {
 	When []LoweredWhen `json:"when,omitempty" yaml:"when,omitempty"`
 }
 
-// LoweredWhen is one condition of a LoweredKey: the component's property Key
-// holds one of Values. An empty string in Values also matches a component that
-// leaves Key out or writes it as null.
+// LoweredWhen is one condition of a LoweredKey: the property Key of the lowered
+// component or trait holds one of Values. An empty string in Values also matches
+// when Key is left out or written as null.
 type LoweredWhen struct {
 	Key    string   `json:"key" yaml:"key"`
 	Values []string `json:"values" yaml:"values"`
 }
 
-// LiveFor reports whether the place applies to a component with the authored
-// properties props: every condition of When holds. A condition's key matches a
-// property in any letter case, as a rule's decode does, and a property that
-// holds anything but a string or null matches no value.
+// LiveFor reports whether the place applies to the properties props: every
+// condition of When holds. For a component's place props are the component's
+// authored properties. For a trait rule's place they are the trait's properties
+// after the capability merge, since a condition may read a value the platform's
+// rendering supplies (the expose rule's controllerType). A condition's key
+// matches a property in any letter case, and a property that holds anything but
+// a string or null matches no value.
 func (k LoweredKey) LiveFor(props map[string]any) bool {
 	for _, w := range k.When {
 		value := ""
@@ -79,10 +87,10 @@ func cloneLoweredKeys(places []LoweredKey) []LoweredKey {
 	return out
 }
 
-// LoweringKeyDeclarer is an optional interface for a component lowering rule
-// that implements PropertySchemaProvider. It declares, for every key of the
+// LoweringKeyDeclarer is an optional interface for a component or trait lowering
+// rule that implements PropertySchemaProvider. It declares, for every key of the
 // rule's schema, the places its value lands (LoweredKey); a key that reaches no
-// property of an emitted component, one that only names an object for example,
+// property of what the rule emits, one that only names an object for example,
 // maps to none.
 //
 // The declaration is structure, not a report: it says where to read, never
@@ -100,9 +108,21 @@ type LoweringKeyDeclarer interface {
 // that does not implement it is omitted: its type publishes no map. The result
 // is always non-nil and the caller's own: writing to it reaches no rule.
 func (t *Transformer) ComponentLoweringKeys() map[string]map[string][]LoweredKey {
+	return loweringKeysOf(t.componentLoweringRules)
+}
+
+// TraitLoweringKeys is ComponentLoweringKeys for the registered trait lowering
+// rules, by the trait type each claims.
+func (t *Transformer) TraitLoweringKeys() map[string]map[string][]LoweredKey {
+	return loweringKeysOf(t.traitLoweringRules)
+}
+
+// loweringKeysOf returns a copy of the key map of every rule that implements
+// LoweringKeyDeclarer, by the type it is registered under.
+func loweringKeysOf[R any](rules map[string]R) map[string]map[string][]LoweredKey {
 	out := make(map[string]map[string][]LoweredKey)
-	for name, r := range t.componentLoweringRules {
-		d, ok := r.(LoweringKeyDeclarer)
+	for name, r := range rules {
+		d, ok := any(r).(LoweringKeyDeclarer)
 		if !ok {
 			continue
 		}

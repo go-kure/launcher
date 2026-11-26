@@ -270,6 +270,18 @@ type loweredType struct {
 	// the rule emits, each with the reason.
 	variants map[string][]keyVariant
 	switches map[string]string
+	// lower lowers the type with the properties it is given, for a trait rule.
+	// Nil for a component type, which build and loweredLeaves lower.
+	lower func(t *testing.T, props map[string]any) (map[reportedAt]any, map[string]map[string]any)
+}
+
+// leaves lowers a document of the type with props through its rule alone.
+func (lt loweredType) leaves(t *testing.T, typ string, props map[string]any) (map[reportedAt]any, map[string]map[string]any) {
+	t.Helper()
+	if lt.lower != nil {
+		return lt.lower(t, props)
+	}
+	return loweredLeaves(t, typ, lt.build(props))
 }
 
 // lowerContext is the context a rule is handed to lower one document.
@@ -390,7 +402,9 @@ func writtenSubProperties(v any) map[string]bool {
 // are the limit: they are not read.
 func TestLoweringKeys_SamplesWriteEverySubProperty(t *testing.T) {
 	types := loweredTypes()
+	types["expose"] = exposeLoweredType()
 	keyed := keyedRules()
+	maps.Copy(keyed, keyedTraitRules())
 	for _, typ := range slices.Sorted(maps.Keys(keyed)) {
 		lt, ok := types[typ]
 		if !ok || lt.forwardsWhole {

@@ -773,8 +773,8 @@ Path, Unchanged, When }`:
   below the key is then the same path below `Path`, and the report calls an authored
   value there `copied`. When false the rule reads the key itself and may build what
   lands there, in another shape.
-- `When` lists conditions on the component's authored properties, each a key and the
-  values it may hold. All must hold for the place to apply (`LoweredKey.LiveFor`), and an
+- `When` lists conditions on the component's authored properties (for a trait rule, see
+  `expose` below), each a key and the values it may hold. All must hold for the place to apply (`LoweredKey.LiveFor`), and an
   empty list applies to every component. An empty string among the values also matches a
   key left out or written null, and a key matches a property in any letter case.
 
@@ -887,6 +887,33 @@ The map names member types, not instances. The Cluster and the backup store carr
 component's name; the pooler, each database and scheduled backup and an inline recovery
 store are components of their own. With no `backup` the report names the Cluster with no
 member, so its places are read under the plain owner.
+
+The `expose` trait rule publishes a map too. `Transformer.TraitLoweringKeys()` returns
+the maps of the registered trait lowering rules by the trait type each claims, as a
+copy. On these places `Trait` is the trait the rule emits, `ingress` or `httproute`,
+`Path` is a path in that trait's properties, and `Member` is empty: match the
+component, the trait type and the path, whatever member the report names. Every place
+has a condition on `controllerType`. The platform's capability rendering supplies that
+key, so pass `LiveFor` the trait's properties after the capability merge.
+
+| Key | `controllerType: ingress`, on `ingress` | `controllerType: gateway`, on `httproute` |
+|-----|-----------------------------------------|-------------------------------------------|
+| `annotations`, `name`, `scope`, `servicePort`, `serviceName`, `networkPolicy` | same key | same key |
+| `rules` | `rules`, `managedTLS.hosts` | `rules` |
+| `hostnames` | `rules`, `managedTLS.hosts` | `hostnames`, `rules` |
+| `ingressClassName` | same key | no place |
+| `certManagerClusterIssuer` | `platformAnnotations`, `managedTLS` | no place |
+| `secretName` | `managedTLS.secretName` | no place |
+| `sslRedirect`, `forceSslRedirect`, `allowedGroups`, `authURL`, `authSigninURL`, `authResponseHeaders` | `platformAnnotations` | no place |
+| `gatewayName`, `gatewayNamespace` | no place | `parentRefs` |
+| `controllerType`, `allowedHostnameWildcard` | no place | no place |
+
+`Unchanged` are the places under the key's own name. A live place is where the value
+can land, not a promise that the trait holds it: `managedTLS` is built only with a
+`certManagerClusterIssuer`; `authURL`, `authSigninURL` and `authResponseHeaders` write
+nothing without `allowedGroups`; and `hostnames` build `rules` only where `rules` is
+left out. `platformAnnotations` is one path for these annotations. A place names no
+trait index, so two traits of one emitted type on one component are not told apart.
 
 A component type defined by a model publishes no map.
 
