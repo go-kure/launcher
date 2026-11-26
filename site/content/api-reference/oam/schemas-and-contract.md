@@ -908,7 +908,9 @@ key, so pass `LiveFor` the trait's properties after the capability merge.
 | `gatewayName`, `gatewayNamespace` | no place | `parentRefs` |
 | `controllerType`, `allowedHostnameWildcard` | no place | no place |
 
-`Unchanged` are the places under the key's own name. A live place is where the value
+`Unchanged` are the places under the key's own name. Where the rule keeps a key that has
+no place under the `controllerType` on the trait it emits, the transform refuses that
+trait, whose schema has no such property. A live place is where the value
 can land, not a promise that the trait holds it: `managedTLS` is built only with a
 `certManagerClusterIssuer`; `authURL`, `authSigninURL` and `authResponseHeaders` write
 nothing without `allowedGroups`; and `hostnames` build `rules` only where `rules` is
