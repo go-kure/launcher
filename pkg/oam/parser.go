@@ -91,6 +91,10 @@ func ParseWithExtraTraitTypes(data []byte, extraTraitTypes []string) (*Applicati
 // sees it. Pass Transformer.LowerableTypes() from the transformer that will lower the
 // parsed document.
 //
+// The set also carries the component types that transformer was given with
+// RegisterAuthoredComponent. Such a type is dispatchable, so the check of which
+// component types a trait supports applies to it here.
+//
 // The channel is strictly additive and per position: with an empty LowerableTypes this
 // is ParseWithExtraTraitTypes exactly, and a name claimed for one position never
 // widens another. Decoding is unchanged — still strict, KnownFields(true) — so a kind
@@ -111,7 +115,7 @@ func ParseWithExtraTypes(data []byte, extraTraitTypes []string, lowerable Lowera
 		custom[t] = true
 	}
 
-	if err := validateWithExtraTypes(&app, custom, nil, toTypeSet(lowerable.policyHandlerTypes), lowerable); err != nil {
+	if err := validateWithExtraTypes(&app, custom, toTypeSet(lowerable.authoredHandlerTypes), toTypeSet(lowerable.policyHandlerTypes), lowerable); err != nil {
 		return nil, err
 	}
 

@@ -338,6 +338,9 @@ type Transformer struct {
 	// the position's types are declared; every handler and rule stays keyed by
 	// its plain type name above.
 	componentTypes, traitTypes, policyTypes *typeIndex
+
+	// authoredComponentTypes is the types registered with RegisterAuthoredComponent.
+	authoredComponentTypes map[string]bool
 }
 
 // NewTransformer creates a Transformer pre-loaded with component and trait handlers.
@@ -383,6 +386,19 @@ func (t *Transformer) RegisterComponent(typeName string, h ComponentHandler) {
 		panic("oam: component handler does not claim type " + typeName)
 	}
 	t.componentHandlers[typeName] = h
+}
+
+// RegisterAuthoredComponent is RegisterComponent for a component type of the caller's
+// own that a document may name: ParseWithExtraTypes, given this transformer's
+// LowerableTypes, accepts it (go-kure/launcher#1703). RegisterComponent alone does
+// not, so that a handler such as role-deployment, which only a lowering rule's output
+// may name, does not become authorable by being registered.
+func (t *Transformer) RegisterAuthoredComponent(typeName string, h ComponentHandler) {
+	t.RegisterComponent(typeName, h)
+	if t.authoredComponentTypes == nil {
+		t.authoredComponentTypes = make(map[string]bool)
+	}
+	t.authoredComponentTypes[typeName] = true
 }
 
 // RegisterTrait registers a trait handler under the given type name.

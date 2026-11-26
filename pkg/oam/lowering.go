@@ -4,7 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -1053,6 +1055,12 @@ type LowerableTypes struct {
 	// them as it accepts validPolicyTypes. Set only by Transformer.LowerableTypes.
 	policyHandlerTypes []string
 
+	// authoredHandlerTypes is the component types registered with
+	// Transformer.RegisterAuthoredComponent. They are terminal, so they are not in
+	// ComponentTypes: Parse accepts one without deferring the check of which
+	// component types a trait supports. Set only by Transformer.LowerableTypes.
+	authoredHandlerTypes []string
+
 	// identities is the type identities a Transformer declared (typeid.go), so that
 	// Parse accepts an authored `name@version` or qualified name as the type it
 	// resolves to. Set only by Transformer.LowerableTypes; nil, as in a literal, is
@@ -1096,6 +1104,8 @@ func (t *Transformer) LowerableTypes() LowerableTypes {
 	for k := range t.policyHandlers {
 		lt.policyHandlerTypes = append(lt.policyHandlerTypes, k)
 	}
+	// An authored component handler's type is terminal too, and carried apart likewise.
+	lt.authoredHandlerTypes = slices.Collect(maps.Keys(t.authoredComponentTypes))
 	return lt
 }
 

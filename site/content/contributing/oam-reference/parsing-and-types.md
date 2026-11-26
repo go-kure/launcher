@@ -20,7 +20,11 @@ Text in square brackets is added here to say what a moved sentence refers to.
 - **History:**
   - go-kure/launcher#1179 (a `scaler` refuses authored `replicas`).
   - go-kure/launcher#783 (tiers are declared, never derived from a type).
+  - go-kure/launcher#1703 (`RegisterAuthoredComponent`).
 - **Tests:**
+  - `pkg/oam/authored_component_test.go` holds the reference's paragraph on a library caller's
+    own component type: such a type parses and transforms, one registered with
+    `RegisterComponent` alone is refused, and a `scaler` on an authored one is refused at parse.
   - `pkg/cmd/kurel`'s `TestBuiltinComponentHandlers_AcceptedByParser` is the guard: it
     parses a minimal document for every registered built-in type through
     `ParseWithExtraTypes`, the same entry point `kurel build` uses. ["the guard" is the guard
