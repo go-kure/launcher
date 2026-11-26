@@ -42,6 +42,11 @@ trait/expose@v1alpha1 lowers into trait type "httproute", which is not registere
 **Breaking library change**: a consumer that registered `ExposeRule` with one of the two
 handlers only now fails at the first transform.
 
+The `expose` rule also implements `oam.LoweringKeyDeclarer`: it publishes where the value of
+each of its properties lands on the trait it emits, read through
+`Transformer.TraitLoweringKeys()`
+([Lowering keys](/site/content/api-reference/oam/schemas-and-contract.md#lowering-keys)).
+
 Capability-injected fields are **not** marked `Required` in a handler's schema, because
 they are supplied by capability rendering (validated in `ValidateAndApplyDefaults`), not by
 the OAM author — e.g. `expose.controllerType` and the parent `certificate.issuerRef` are

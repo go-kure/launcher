@@ -178,8 +178,8 @@ func loweredVariants(t *testing.T, typ, key string, lt loweredType, places []oam
 		t.Run(v.name, func(t *testing.T) {
 			authored := maps.Clone(v.base)
 			authored[key] = v.value
-			got, members := loweredLeaves(t, typ, lt.build(authored))
-			base, baseMembers := loweredLeaves(t, typ, lt.build(v.base))
+			got, members := lt.leaves(t, typ, authored)
+			base, baseMembers := lt.leaves(t, typ, v.base)
 			if g, w := slices.Sorted(maps.Keys(members)), slices.Sorted(maps.Keys(baseMembers)); !slices.Equal(g, w) {
 				t.Fatalf("authoring %q: the rule emits members %v, want %v", key, g, w)
 			}

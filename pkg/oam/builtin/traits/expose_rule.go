@@ -161,13 +161,11 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 
 	controllerType, _ := trait.Properties["controllerType"].(string)
 	props := maps.Clone(trait.Properties)
-	delete(props, "controllerType")
 
-	// Consume the platform capability keys; they are handled here, not downstream.
+	// The platform capability keys are handled here, not downstream: each branch
+	// drops them, with the other keys it consumes, before it emits (dropConsumed).
 	issuer, _ := props["certManagerClusterIssuer"].(string)
 	wildcard, _ := props["allowedHostnameWildcard"].(string)
-	delete(props, "certManagerClusterIssuer")
-	delete(props, "allowedHostnameWildcard")
 
 	// The annotations the rule writes itself reach the ingress trait apart from
 	// the authored ones, as its platformAnnotations, and the TLS entry it manages
@@ -194,7 +192,6 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 				props["rules"] = expandHostnamesToIngressRules(shorthand)
 			}
 		}
-		delete(props, "hostnames")
 		// Validate every host that appears — the rules' hosts and any shorthand
 		// hostnames — against the platform wildcard, even when both are present.
 		if err := validateHostnames(uniqueStrings(append(ruleHosts(props), shorthand...)), wildcard, componentName); err != nil {
@@ -222,8 +219,6 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 			}
 			secretName = s
 		}
-		delete(props, "secretName")
-		delete(props, "tls")
 		authoredAnnotations, _ := props["annotations"].(map[string]any)
 		platform := &exposeAnnotations{component: componentName, authored: authoredAnnotations}
 		var managed map[string]any
@@ -257,6 +252,7 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 		if err := setAuthAnnotations(props, platform); err != nil {
 			return oam.LoweringResult{}, err
 		}
+		dropConsumed(props, controllerType)
 		emitted := oam.Trait{Type: "ingress", Properties: props}
 		if len(platform.written) > 0 {
 			// Recorded as rendered, so the ingress trait's D3 check accepts the
@@ -306,8 +302,7 @@ func (ExposeRule) LowerTrait(trait *oam.Trait, lctx oam.LoweringContext) (oam.Lo
 		}
 		gatewayName, _ := props["gatewayName"].(string)
 		gatewayNamespace, _ := props["gatewayNamespace"].(string)
-		delete(props, "gatewayName")
-		delete(props, "gatewayNamespace")
+		dropConsumed(props, controllerType)
 		props["parentRefs"] = []any{synthesizeParentRef(gatewayName, gatewayNamespace)}
 		return oam.LoweringResult{Traits: []oam.Trait{{Type: "httproute", Properties: props}}}, nil
 	default:
@@ -403,8 +398,8 @@ func expandHostnamesToIngressRules(hostnames []string) []any {
 // the capability-rendered platform default (override-able inline). The typed value
 // is authoritative: a raw annotation of the same key with another value is refused
 // (exposeAnnotations.set). When the property is absent, an existing raw annotation
-// is left untouched. The property keys are consumed here so they never reach
-// IngressHandler.
+// is left untouched. The rule drops both property keys before it emits
+// (dropConsumed), so they never reach IngressHandler.
 func setSSLRedirectAnnotations(props map[string]any, platform *exposeAnnotations) error {
 	if v, ok := boolProp(props, "sslRedirect"); ok {
 		if err := platform.set(sslRedirectAnnotation, strconv.FormatBool(v), "the sslRedirect property (its own, else the capability's default)"); err != nil {
@@ -416,8 +411,6 @@ func setSSLRedirectAnnotations(props map[string]any, platform *exposeAnnotations
 			return err
 		}
 	}
-	delete(props, "sslRedirect")
-	delete(props, "forceSslRedirect")
 	return nil
 }
 
@@ -433,18 +426,14 @@ func boolProp(props map[string]any, key string) (val, ok bool) {
 // authResponseHeaders are platform-reserved; authSigninURL is override-able inline);
 // allowedGroups is authored, order preserved. The typed values are authoritative: a
 // raw annotation of the same key with another value is refused
-// (exposeAnnotations.set). All auth-* keys are consumed here so they never reach
-// IngressHandler.
+// (exposeAnnotations.set). The rule drops all auth-* keys before it emits
+// (dropConsumed), so they never reach IngressHandler.
 func setAuthAnnotations(props map[string]any, platform *exposeAnnotations) error {
 	component := platform.component
 	rawGroups, hasGroups := props["allowedGroups"]
 	authURL, _ := props["authURL"].(string)
 	signin, _ := props["authSigninURL"].(string)
 	respHeaders, _ := props["authResponseHeaders"].(string)
-	delete(props, "allowedGroups")
-	delete(props, "authURL")
-	delete(props, "authSigninURL")
-	delete(props, "authResponseHeaders")
 
 	if !hasGroups {
 		return nil // no ext-auth requested; discard any capability-injected auth-* keys
