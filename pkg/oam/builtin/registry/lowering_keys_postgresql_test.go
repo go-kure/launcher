@@ -1,6 +1,7 @@
 package registry_test
 
 import (
+	"maps"
 	"reflect"
 	"slices"
 	"testing"
@@ -127,6 +128,43 @@ func postgresqlKeyVariants() map[string][]keyVariant {
 				databaseAt("databaseReclaimPolicy"), databaseAt("extensions"),
 			},
 		}},
+	}
+}
+
+// Setting a key where the document had none changes the Cluster only at the
+// key's live places. Some variants above start from a smaller value of the same
+// key, which cannot show what the key's presence alone does, so each variant is
+// read here against its document without the key. An empty object is no value
+// and is not compared: the Cluster holds one where nothing was set.
+func TestLoweringKeys_PostgresqlPresenceChangesOnlyDeclaredPlaces(t *testing.T) {
+	lt := loweredTypes()["postgresql"]
+	keys := keyedRules()["postgresql"].LoweringKeys()
+	for key, variants := range postgresqlKeyVariants() {
+		for _, v := range variants {
+			t.Run(key+"/"+v.name, func(t *testing.T) {
+				without := maps.Clone(v.base)
+				delete(without, key)
+				with := maps.Clone(v.base)
+				with[key] = v.value
+				// The Cluster's leaves outside the places the key is declared at.
+				rest := func(props map[string]any) map[reportedAt]any {
+					leaves, _ := loweredLeaves(t, "postgresql", lt.build(props))
+					maps.DeleteFunc(leaves, func(at reportedAt, value any) bool {
+						object, isObject := value.(map[string]any)
+						return at.member != "cnpg-cluster" || isObject && len(object) == 0 ||
+							slices.ContainsFunc(keys[key], func(p oam.LoweredKey) bool { return p.LiveFor(with) && within(at, p) })
+					})
+					return leaves
+				}
+				before, after := rest(without), rest(with)
+				if len(before) == 0 {
+					t.Fatal("the Cluster holds nothing outside the key's places, so nothing was compared")
+				}
+				if !reflect.DeepEqual(before, after) {
+					t.Errorf("setting %q changed the Cluster outside its places:\nwithout %v\nwith    %v", key, before, after)
+				}
+			})
+		}
 	}
 }
 
