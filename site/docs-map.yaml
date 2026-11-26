@@ -215,6 +215,7 @@ extra_mounts:
   - {source: docs/oam/options-package-composition.md, target: concepts/oam-package-composition.md, title: Package Composition, weight: 70}
   - {source: docs/oam/design-capability-schema.md, target: concepts/oam-capability-schema.md, title: Capability Schema, weight: 55}
   - {source: docs/oam/design-external-secret-data-shorthand.md, target: concepts/oam-external-secret-shorthand.md, title: External Secret Shorthand, weight: 80}
+  - {source: docs/oam/research-helm-chart-patterns.md, target: concepts/research-helm-chart-patterns.md, title: Helm Chart Pattern Survey, weight: 90}
   - {source: DEVELOPMENT.md, target: contributing/guide.md, title: Development Guide, weight: 10}
   # Vendored byte-identical from go-kure/.github's standards/release-process.md
   # by scripts/vendor-guard.sh; edit it there, not here.
