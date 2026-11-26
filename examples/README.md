@@ -56,6 +56,25 @@ below.
 | [gateway-certmanager-aws.yaml](cluster-profiles/gateway-certmanager-aws.yaml) | `prod-gateway` | expose (Gateway API), expose.internal (internal gateway), certificate (internal CA), external-secret (AWS Secrets Manager) | production with Gateway API and AWS |
 | [custom-capability.yaml](cluster-profiles/custom-capability.yaml) | `staging-with-redis-sidecar` | expose (NGINX), redis-sidecar (custom) | custom-capability library example only |
 
+## Custom component model example
+
+Directory: [`custom-model/`](custom-model/)
+
+```bash
+bin/kurel build examples/custom-model --profile examples/cluster-profiles/minimal.yaml
+```
+
+| File | Purpose |
+|------|---------|
+| [`app.yaml`](custom-model/app.yaml) | Application whose one component has a model's type, `queue-consumers.example.org@v1` |
+| [`models/01-queue-consumer.yaml`](custom-model/models/01-queue-consumer.yaml) | A component model: a ConfigMap and a worker that reads the queue name from it |
+| [`models/02-queue-consumers.yaml`](custom-model/models/02-queue-consumers.yaml) | A model that names the first one, once for each queue |
+
+A component model adds a component type without Go code. `kurel build` loads every `*.yaml` file
+of the package's `models/` directory in name order, then each `--model <file>`, so a model that
+names another sorts after it. [Component models](../pkg/cmd/kurel/README.md#component-models)
+describes the load order, the refusals and the limits a model is evaluated under.
+
 ## Custom capability extension example
 
 Directory: [`custom-capability/`](custom-capability/)
@@ -123,6 +142,7 @@ transformer.SetCapabilityDefs(capDefs)
 ### Future work
 
 The `passthrough` component type (see example 15) already emits arbitrary CRDs and
-non-standard objects with no Go handler. Broader config-driven extensibility — custom
-*traits* and template/plugin-rendered components without Go code — is tracked in
+non-standard objects with no Go handler, and a [component model](#custom-component-model-example)
+adds a component type as data. Broader config-driven extensibility — custom *traits* and
+component types checked against a CRD, without Go code — is tracked in
 [issue go-kure/launcher#102](https://github.com/go-kure/launcher/issues/102).

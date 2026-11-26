@@ -1,0 +1,13 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: order-processing
+spec:
+  components:
+  - name: shop
+    type: queue-consumers.example.org@v1
+    properties:
+      image: myregistry/consumer:v1.0.0
+      queues:
+      - orders
+      - invoices

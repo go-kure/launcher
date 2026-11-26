@@ -1,0 +1,32 @@
+# A component model: the type queue-consumer.example.org@v1 is one ConfigMap and
+# one worker that reads the queue name from it. See pkg/oam/model/README.md.
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Model
+metadata:
+  name: queue-consumer.example.org
+  version: v1
+spec:
+  celEnv: "1"
+  inputs:
+    image: {type: string, required: true}
+    queue: {type: string, required: true}
+    replicas: {type: integer, default: 1}
+  outputs: {}
+  parts:
+    - id: settings
+      type: configmap@v1
+      properties:
+        data:
+          queue: "${inputs.queue}"
+    - id: app
+      type: worker.launcher.gokure.dev@v1
+      properties:
+        image: "${inputs.image}"
+        replicas: "${inputs.replicas}"
+        env:
+          - name: QUEUE
+            valueFrom:
+              configMapKeyRef:
+                # The name the build gives the ConfigMap of the part above.
+                name: "${parts.settings.name}"
+                key: queue
