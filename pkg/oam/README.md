@@ -97,6 +97,12 @@ See [Names and overrides](/site/content/api-reference/oam/names-and-overrides.md
 
 See [Parsing and type identity](/site/content/api-reference/oam/parsing-and-types.md#parsing).
 
+A library caller's own component type is registered with `Transformer.RegisterAuthoredComponent`
+instead of `RegisterComponent`, so that `ParseWithExtraTypes` with that transformer's
+`LowerableTypes()` accepts it (go-kure/launcher#1703). A type registered with `RegisterComponent`
+alone stays refused. The rule is under
+[Parsing and type identity](/site/content/api-reference/oam/parsing-and-types.md#parsing).
+
 ### Component type allowlist
 
 See [Parsing and type identity](/site/content/api-reference/oam/parsing-and-types.md#component-type-allowlist).
