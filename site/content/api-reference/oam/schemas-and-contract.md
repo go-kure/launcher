@@ -760,7 +760,7 @@ A lowered component type has no entry of its own in the provenance report
 report speaks at the members' paths. A component lowering rule that implements
 `LoweringKeyDeclarer` says where to read. `LoweringKeys()` returns, for every key of
 the rule's schema, the places its value lands, each a `LoweredKey{ Member, Trait,
-Path, Unchanged }`:
+Path, Unchanged, When }`:
 
 - `Member` is the component type of the emitted member, which is the report's
   `Member` inside a same-name sibling group. A rule that emits one component for an
@@ -773,6 +773,10 @@ Path, Unchanged }`:
   below the key is then the same path below `Path`, and the report calls an authored
   value there `copied`. When false the rule reads the key itself and may build what
   lands there, in another shape.
+- `When` lists conditions on the component's authored properties, each a key and the
+  values it may hold. All must hold for the place to apply (`LoweredKey.LiveFor`), and an
+  empty list applies to every component. An empty string among the values also matches a
+  key left out or written null.
 
 A key that reaches no property of a member maps to no place.
 `Transformer.ComponentLoweringKeys()` returns the maps of the registered rules by
@@ -825,8 +829,8 @@ place is `Unchanged` below `source`, because `source.secretRef.name` lands at
 | Key | Lands at | Unchanged |
 |-----|----------|-----------|
 | `source` | `ocirepository` `url` and each access key (`secretRef`, `provider`, `insecure`, `certSecretRef`, `proxySecretRef`, `serviceAccountName`); `fluxcd-kustomization` `sourceRef` | no |
-| `version` | `ocirepository` `ref` (a tag as `ref.tag`, a `sha256:` digest as `ref.digest`); `fluxcd-kustomization` `sourceRef`, when the key changes which source the Kustomization names: two components that write no `source.name` and have one identity share a source named by it, and the version is part of that identity | no |
-| `interval` | `ocirepository` `interval` and `fluxcd-kustomization` `interval`; `sourceRef`, when the key changes which source the Kustomization names, as `version` does (the effective interval is in the identity, so `60m` and `1h` change nothing) | yes for the two intervals |
+| `version` | `ocirepository` `ref` (a tag as `ref.tag`, a `sha256:` digest as `ref.digest`); `fluxcd-kustomization` `sourceRef`, when the key changes which source the Kustomization names | no |
+| `interval` | `ocirepository` `interval` and `fluxcd-kustomization` `interval`; `sourceRef`, when the key changes which source the Kustomization names | yes for the two intervals |
 | `path`, `prune`, `targetNamespace`, `wait` | `fluxcd-kustomization`, the same key | yes |
 | `healthChecks` | `fluxcd-kustomization` `healthChecks`, each entry rebuilt from its four fields | no |
 | `kustomizationName` | no place: it names the Kustomization object | |
@@ -834,13 +838,35 @@ place is `Unchanged` below `source`, because `source.secretRef.name` lands at
 The map names member types, not instances. With `source.name` written, or a source two
 or more `oci` components share, the `ocirepository` is a component of its own and the
 `fluxcd-kustomization` is no member of a group with it, so the `source` places on
-`ocirepository` name that component. The `source` sub-keys are one key of the map: a
-reader cannot tell `source.url` from `source.secretRef` by it.
+`ocirepository` name that component. The report then names the Kustomization with no
+member, and its places are read under the plain owner. The `source` sub-keys are one key
+of the map: a reader cannot tell `source.url` from `source.secretRef` by it.
 
-`helm` and `postgresql` publish no map. `postgresql` builds its members from moved and
-re-shaped keys. `helm` hands some keys on as written, a set that depends on the delivery
-mode, and builds the rest of its members from moved and re-shaped keys; its map is not
-built here. A component type defined by a model publishes none either.
+`helm` publishes a map. Every place carries a condition on `delivery`, and some also one
+on `valuesMode`:
+
+| Key | `delivery: flux` (the default) | `delivery: template` |
+|-----|--------------------------------|----------------------|
+| `interval`, `targetNamespace`, `driftDetection`, `install`, `upgrade` | `helmrelease`, same key | no place |
+| `releaseName` | `helmrelease`, same key | `helmtemplate`, same key |
+| `values` | `helmrelease` `values`; under `valuesMode: configMap` a `configmap` trait on it, and `valuesFrom` | `helmtemplate` `values` |
+| `valuesFrom` | `helmrelease` `valuesFrom` | no place |
+| `secretValues` | a `secret` trait on `helmrelease`, and `valuesFrom` | `helmtemplate` `secretValues` |
+| `valuesConfigMapName` (`valuesMode: configMap`), `valuesSecretName` | the trait's `name`, and `valuesFrom` | no place |
+| `chart` | `helmrelease` `chart.spec.chart` | `helmtemplate` `chart` |
+| `version` | `helmrelease` `chart.spec.version`; for an OCI source `ocirepository` `ref` and `helmrelease` `chartRef` | `helmtemplate` `version` |
+| `source` | the source member's `url`, `ref`, `endpoint`, `bucketName`, `provider`, `region`, `prefix`; `helmrelease` `chart.spec.sourceRef` or `chartRef` | `helmtemplate` `source` |
+| `hookGroupNamePrefix`, `layoutKustomizationName`, `scopeOverrides` | no place | `helmtemplate`, same key |
+| `delivery`, `valuesMode`, `helmReleaseName`, `endpoints` | no place | no place |
+
+`Unchanged` are the `helmtemplate` places other than `source`, and the `helmrelease`
+places `interval`, `targetNamespace`, `driftDetection`, `install`, `upgrade`,
+`releaseName` and `values`. Which source member a document holds follows the source's
+kind, which no condition names. A generated source is a component of its own, so its
+places name that component.
+
+`postgresql` publishes no map: it builds its members from moved and re-shaped keys. A
+component type defined by a model publishes none either.
 
 `ComponentLoweringKeys()` returns a copy: writing to it changes no rule's map.
 

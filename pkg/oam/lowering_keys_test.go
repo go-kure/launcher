@@ -24,6 +24,7 @@ func TestComponentLoweringKeys_PublishesDeclaredMapsOnly(t *testing.T) {
 	keys := map[string][]LoweredKey{
 		"image": {{Member: "kind-a", Path: "image", Unchanged: true}},
 		"port":  {{Member: "kind-a", Path: "ports[0].containerPort"}, {Member: "kind-b", Path: "ports[0].port"}},
+		"mode":  {{Member: "kind-a", Path: "mode", When: []LoweredWhen{{Key: "delivery", Values: []string{"", "flux"}}}}},
 		"name":  nil,
 	}
 	tr.RegisterComponentLowering(keyedComponentRule{
@@ -38,28 +39,59 @@ func TestComponentLoweringKeys_PublishesDeclaredMapsOnly(t *testing.T) {
 	}
 }
 
-// The result is the caller's own: writing to it reaches neither the rule's map
-// nor the next caller's result.
+// The result is the caller's own: writing to it, its conditions included, reaches
+// neither the rule's map nor the next caller's result.
 func TestComponentLoweringKeys_ResultIsTheCallersOwn(t *testing.T) {
+	keys := func() map[string][]LoweredKey {
+		return map[string][]LoweredKey{
+			"image": {{Member: "kind-a", Path: "image", Unchanged: true, When: []LoweredWhen{{Key: "delivery", Values: []string{"flux"}}}}},
+			"name":  nil,
+		}
+	}
 	tr := NewTransformer(nil, nil)
 	tr.RegisterComponentLowering(keyedComponentRule{
 		targetComponentRule: targetComponentRule{typ: "role", emit: []string{"kind-a"}},
-		keys: map[string][]LoweredKey{
-			"image": {{Member: "kind-a", Path: "image", Unchanged: true}},
-			"name":  nil,
-		},
+		keys:                keys(),
 	})
 
 	first := tr.ComponentLoweringKeys()
+	first["role"]["image"][0].When[0].Values[0] = "changed"
+	first["role"]["image"][0].When[0].Key = "changed"
 	first["role"]["image"][0].Path = "changed"
 	delete(first["role"], "name")
 	first["role"]["added"] = nil
 
-	want := map[string]map[string][]LoweredKey{"role": {
-		"image": {{Member: "kind-a", Path: "image", Unchanged: true}},
-		"name":  nil,
-	}}
+	want := map[string]map[string][]LoweredKey{"role": keys()}
 	if got := tr.ComponentLoweringKeys(); !reflect.DeepEqual(got, want) {
 		t.Errorf("ComponentLoweringKeys() after a caller wrote to an earlier result = %#v\nwant %#v", got, want)
+	}
+}
+
+// A place applies when all of its conditions hold. An empty string in a
+// condition's values matches a property left out or written null.
+func TestLoweredKey_LiveFor(t *testing.T) {
+	delivery := LoweredWhen{Key: "delivery", Values: []string{"", "flux"}}
+	mode := LoweredWhen{Key: "valuesMode", Values: []string{"configMap"}}
+	var typedNil *string
+	for name, tc := range map[string]struct {
+		when  []LoweredWhen
+		props map[string]any
+		want  bool
+	}{
+		"no condition":          {nil, map[string]any{"delivery": "template"}, true},
+		"key left out":          {[]LoweredWhen{delivery}, nil, true},
+		"key null":              {[]LoweredWhen{delivery}, map[string]any{"delivery": nil}, true},
+		"key typed null":        {[]LoweredWhen{delivery}, map[string]any{"delivery": typedNil}, true},
+		"listed value":          {[]LoweredWhen{delivery}, map[string]any{"delivery": "flux"}, true},
+		"other value":           {[]LoweredWhen{delivery}, map[string]any{"delivery": "template"}, false},
+		"not a string":          {[]LoweredWhen{delivery}, map[string]any{"delivery": 1}, false},
+		"left out, not listed":  {[]LoweredWhen{mode}, nil, false},
+		"both hold":             {[]LoweredWhen{delivery, mode}, map[string]any{"valuesMode": "configMap"}, true},
+		"only the first holds":  {[]LoweredWhen{delivery, mode}, map[string]any{"delivery": "flux"}, false},
+		"only the second holds": {[]LoweredWhen{delivery, mode}, map[string]any{"delivery": "template", "valuesMode": "configMap"}, false},
+	} {
+		if got := (LoweredKey{When: tc.when}).LiveFor(tc.props); got != tc.want {
+			t.Errorf("%s: LiveFor(%v) = %v, want %v", name, tc.props, got, tc.want)
+		}
 	}
 }

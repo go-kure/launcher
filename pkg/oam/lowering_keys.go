@@ -27,6 +27,50 @@ type LoweredKey struct {
 	// rule built rendered, whether the author wrote the key or left it to the
 	// rule's default.
 	Unchanged bool `json:"unchanged,omitempty" yaml:"unchanged,omitempty"`
+	// When limits the place to components whose properties meet every one of
+	// the conditions: all must hold. Empty means every component.
+	When []LoweredWhen `json:"when,omitempty" yaml:"when,omitempty"`
+}
+
+// LoweredWhen is one condition of a LoweredKey: the component's property Key
+// holds one of Values. An empty string in Values also matches a component that
+// leaves Key out or writes it as null.
+type LoweredWhen struct {
+	Key    string   `json:"key" yaml:"key"`
+	Values []string `json:"values" yaml:"values"`
+}
+
+// LiveFor reports whether the place applies to a component with the authored
+// properties props: every condition of When holds. A condition's property that
+// holds anything but a string or null matches no value.
+func (k LoweredKey) LiveFor(props map[string]any) bool {
+	for _, w := range k.When {
+		value := ""
+		if v, ok := props[w.Key]; ok && !IsNullValue(v) {
+			s, isString := v.(string)
+			if !isString {
+				return false
+			}
+			value = s
+		}
+		if !slices.Contains(w.Values, value) {
+			return false
+		}
+	}
+	return true
+}
+
+// cloneLoweredKeys copies places with their conditions, so that a caller's
+// write reaches no rule.
+func cloneLoweredKeys(places []LoweredKey) []LoweredKey {
+	out := slices.Clone(places)
+	for i := range out {
+		out[i].When = slices.Clone(out[i].When)
+		for j := range out[i].When {
+			out[i].When[j].Values = slices.Clone(out[i].When[j].Values)
+		}
+	}
+	return out
 }
 
 // LoweringKeyDeclarer is an optional interface for a component lowering rule
@@ -36,7 +80,7 @@ type LoweredKey struct {
 // maps to none.
 //
 // The declaration is structure, not a report: it says where to read, never
-// which source supplied the value there. A place holds an entry whether the
+// which source supplied the value there. An entry at a place is there whether the
 // author wrote the key or the rule, the policy or a built-in default filled it.
 // At a place the rule builds, the report gives an authored key and the rule's
 // default the same source, so whether the author wrote the key is read from the
@@ -59,7 +103,7 @@ func (t *Transformer) ComponentLoweringKeys() map[string]map[string][]LoweredKey
 		declared := d.LoweringKeys()
 		keys := make(map[string][]LoweredKey, len(declared))
 		for key, places := range declared {
-			keys[key] = slices.Clone(places)
+			keys[key] = cloneLoweredKeys(places)
 		}
 		out[name] = keys
 	}

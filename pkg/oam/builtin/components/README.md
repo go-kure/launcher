@@ -100,10 +100,10 @@ map too: its rule has no loop over its schema, so the places are declared beside
 that builds its two members (`oci_keys.go`) and held to what the rule emits by a test that
 authors every key. The access keys of `source` are listed once, in the slice the schema
 and the map both read; the lowering names each of them again.
-`helm` and `postgresql` publish no map. `postgresql` builds its members from moved and
-re-shaped keys. `helm` hands some keys on as written, a set that depends on the delivery
-mode, and builds the rest of its members from moved and re-shaped keys; its map is not
-built here. The map says where to read, never which source
+`helm` publishes one (`helm_keys.go`) whose places are conditional on `delivery`, some
+also on `valuesMode`: the forwarded keys come from the slices the rule forwards and
+refuses with, and the rest are declared beside it. `postgresql` publishes no map: it builds
+its members from moved and re-shaped keys. The map says where to read, never which source
 supplied the value: an omitted `port` and an authored one are both `rendered` at
 `ports[0].containerPort`, and no report tells them apart: whether the author wrote such a
 key is read from the document.
