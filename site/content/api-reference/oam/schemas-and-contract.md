@@ -763,9 +763,9 @@ the rule's schema, the places its value lands, each a `LoweredKey{ Member, Trait
 Path, Unchanged, When }`:
 
 - `Member` is the component type of the emitted member, which is the report's
-  `Member` inside a same-name sibling group. A rule that emits one component for an
-  input leaves no group, and the report then names that component with no member: a
-  `worker` with an authored `serviceAccountName` is read under the plain owner.
+  `Member` inside a same-name sibling group. A rule that emits no other component under
+  the input's name leaves no group, and the report then names that component with no
+  member: a `worker` with an authored `serviceAccountName` is read under the plain owner.
 - `Trait` is the type of a trait the rule attaches to that member, when the value
   lands in a trait.
 - `Path` is the path in the member's properties or the trait's.
@@ -849,7 +849,7 @@ on `valuesMode`:
 |-----|--------------------------------|----------------------|
 | `interval`, `targetNamespace`, `driftDetection`, `install`, `upgrade` | `helmrelease`, same key | no place |
 | `releaseName` | `helmrelease`, same key | `helmtemplate`, same key |
-| `values` | `helmrelease` `values`; under `valuesMode: configMap` a `configmap` trait on it, and `valuesFrom` | `helmtemplate` `values` |
+| `values` | `helmrelease` `values` (`valuesMode` unset or `inline`); under `valuesMode: configMap` a `configmap` trait on it, and `valuesFrom` | `helmtemplate` `values` |
 | `valuesFrom` | `helmrelease` `valuesFrom` | no place |
 | `secretValues` | a `secret` trait on `helmrelease`, and `valuesFrom` | `helmtemplate` `secretValues` |
 | `valuesConfigMapName` (`valuesMode: configMap`), `valuesSecretName` | the trait's `name`, and `valuesFrom` | no place |
@@ -863,7 +863,8 @@ on `valuesMode`:
 places `interval`, `targetNamespace`, `driftDetection`, `install`, `upgrade`,
 `releaseName` and `values`. Which source member a document holds follows the source's
 kind, which no condition names. A generated source is a component of its own, so its
-places name that component.
+places name that component. The report names the `helmrelease` or `helmtemplate` with no
+member, so its places are read under the plain owner.
 
 `postgresql` publishes no map: it builds its members from moved and re-shaped keys. A
 component type defined by a model publishes none either.

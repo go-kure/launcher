@@ -102,7 +102,9 @@ authors every key. The access keys of `source` are listed once, in the slice the
 and the map both read; the lowering names each of them again.
 `helm` publishes one (`helm_keys.go`) whose places are conditional on `delivery`, some
 also on `valuesMode`: the forwarded keys come from the slices the rule forwards and
-refuses with, and the rest are declared beside it. `postgresql` publishes no map: it builds
+refuses with, and the rest are declared beside it. The report names the `helmrelease` or
+`helmtemplate` with no member, so its places are read under the plain owner. `postgresql`
+publishes no map: it builds
 its members from moved and re-shaped keys. The map says where to read, never which source
 supplied the value: an omitted `port` and an authored one are both `rendered` at
 `ports[0].containerPort`, and no report tells them apart: whether the author wrote such a

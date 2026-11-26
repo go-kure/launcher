@@ -293,6 +293,10 @@ func unchangedPlacesAreCopied(t *testing.T) {
 							!within(reportedAt{p.Member, e.Trait, e.Path}, p) {
 							continue
 						}
+						// helm forms no same-name group, so its entries name no member.
+						if typ == "helm" && e.Member != "" {
+							t.Errorf("helm: the entry at %s is under member %q, want none", e.Path, e.Member)
+						}
 						if e.Source.Kind == oam.SourceRendered {
 							t.Errorf("%s: %q is declared unchanged at %v, but the rule built the value at %s", typ, key, p, e.Path)
 						}
@@ -355,8 +359,43 @@ func TestLoweringKeys_HelmConditionsAndUnchanged(t *testing.T) {
 // A generated helm source is a component of its own: named by source.name, or
 // shared by the helm components of one identity. The map names member types, not
 // instances, so its source places name that component. This pins the names and
-// the references, as TestLoweringKeys_OCINamedSourceIsAComponentOfItsOwn does.
+// the references, as TestLoweringKeys_OCINamedSourceIsAComponentOfItsOwn does,
+// and that helm forms no same-name group under either delivery.
 func TestLoweringKeys_HelmSourceIsAComponentOfItsOwn(t *testing.T) {
+	t.Run("no same-name group", func(t *testing.T) {
+		for _, delivery := range []string{"flux", "template"} {
+			comp := oam.Component{Name: "app", Type: "helm", Properties: map[string]any{
+				"chart": "web", "delivery": delivery, "source": map[string]any{"url": "https://charts.example.org/base"},
+			}}
+			res, err := registry.ComponentLoweringRules()["helm"].LowerComponent(&comp, lowerContext())
+			if err != nil {
+				t.Fatalf("LowerComponent(%s): %v", delivery, err)
+			}
+			named := 0
+			for _, c := range res.Components {
+				if c.Name == "app" {
+					named++
+				}
+			}
+			if named != 1 {
+				t.Errorf("delivery %s: %d components carry the input's name, want 1", delivery, named)
+			}
+		}
+		// The report of the flux document, its release and its source alike.
+		prov, _ := policyProvenanceFor(t, &defaultsPolicy{}, oam.Component{Name: "app", Type: "helm", Properties: map[string]any{
+			"chart": "web", "source": map[string]any{"url": "https://charts.example.org/base"},
+		}})
+		owners := map[string]bool{}
+		for _, e := range prov.Entries {
+			owners[e.Component] = true
+			if e.Member != "" {
+				t.Errorf("entry %s of %q is under member %q, want none", e.Path, e.Component, e.Member)
+			}
+		}
+		if !owners["app"] || len(owners) < 2 {
+			t.Errorf("the report holds entries of %v, want the release and its source", owners)
+		}
+	})
 	lower := func(t *testing.T, ctx oam.LoweringContext, name string, source map[string]any) (sources []string, ref any) {
 		t.Helper()
 		comp := oam.Component{Name: name, Type: "helm", Properties: map[string]any{"chart": "web", "source": source}}
