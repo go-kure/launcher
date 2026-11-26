@@ -2,7 +2,6 @@ package model
 
 import (
 	"math"
-	"math/bits"
 	"sort"
 	"strings"
 	"sync"
@@ -569,7 +568,10 @@ func (e *budgetedSort) run(f *interpreter.ExecutionFrame, vals []ref.Val) ref.Va
 	}
 	b := budgetOf(f)
 	if sz, ok := keys.Size().(types.Int); ok {
-		b.pay(int(sz) * bits.Len(uint(sz)))
+		// n times the number of bits of n, one n for each halving of a copy of n
+		for k := int(sz); k > 0; k >>= 1 {
+			b.pay(int(sz))
+		}
 	}
 	b.charge(keys, true)
 	return sortByKeys(list, keys)
