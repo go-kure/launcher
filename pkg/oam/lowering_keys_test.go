@@ -68,7 +68,8 @@ func TestComponentLoweringKeys_ResultIsTheCallersOwn(t *testing.T) {
 }
 
 // A place applies when all of its conditions hold. An empty string in a
-// condition's values matches a property left out or written null.
+// condition's values matches a property left out or written null, and a key
+// matches a property in any letter case.
 func TestLoweredKey_LiveFor(t *testing.T) {
 	delivery := LoweredWhen{Key: "delivery", Values: []string{"", "flux"}}
 	mode := LoweredWhen{Key: "valuesMode", Values: []string{"configMap"}}
@@ -89,6 +90,8 @@ func TestLoweredKey_LiveFor(t *testing.T) {
 		"both hold":             {[]LoweredWhen{delivery, mode}, map[string]any{"valuesMode": "configMap"}, true},
 		"only the first holds":  {[]LoweredWhen{delivery, mode}, map[string]any{"delivery": "flux"}, false},
 		"only the second holds": {[]LoweredWhen{delivery, mode}, map[string]any{"delivery": "template", "valuesMode": "configMap"}, false},
+		"key in another case":   {[]LoweredWhen{delivery}, map[string]any{"Delivery": "template"}, false},
+		"another case, listed":  {[]LoweredWhen{mode}, map[string]any{"ValuesMode": "configMap"}, true},
 	} {
 		if got := (LoweredKey{When: tc.when}).LiveFor(tc.props); got != tc.want {
 			t.Errorf("%s: LiveFor(%v) = %v, want %v", name, tc.props, got, tc.want)
