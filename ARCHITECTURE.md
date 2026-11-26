@@ -24,7 +24,8 @@ Every directory under `pkg/` and `cmd/` that holds Go source has one row. A test
 | `pkg/cmd/shared/options` | The global flags (`--config`, `--verbose`, `--debug`, `--strict`, `--output-file`, `--namespace`, ...). | Be used as a standalone API. | [README](pkg/cmd/shared/options/README.md) |
 | `pkg/errors` | Structured error types and wrapping helpers. | | [README](pkg/errors/README.md) |
 | `pkg/oam` | The core: data model, parser, validator, lowering engine, `Transformer`, `Policy`. | Import the built-in handlers; write to stdout or stderr; exit. | [README](pkg/oam/README.md) |
-| `pkg/oam/model` | Component models defined in YAML and CEL: load, compile, expand. A library feature; `kurel` does not use it. | | [README](pkg/oam/model/README.md) |
+| `pkg/oam/model` | Component models defined in YAML and CEL: load, compile, expand. On this spike branch `kurel build` loads them from `definitions/`. | | [README](pkg/oam/model/README.md) |
+| `pkg/oam/definition` | Spike (go-kure/launcher#102): a component type declared by a pinned CRD. | Be treated as a supported API. | [README](pkg/oam/definition/README.md) |
 | `pkg/oam/netpol` | Shared NetworkPolicy types. They live outside `pkg/oam` so that the engine and the routing traits can both import them without a cycle. | | [README](pkg/oam/netpol/README.md) |
 | `pkg/oam/builtin` | Schema types for the built-in capabilities, and strict decoding of their properties. | | [README](pkg/oam/builtin/README.md) |
 | `pkg/oam/builtin/components` | The handlers of the built-in terminal component types, each building kure objects, and the lowering rules for `webservice`, `worker`, `helm`, `postgresql` and `oci`, which rewrite those types into terminal ones (the registry lists the two sets apart). | | [README](pkg/oam/builtin/components/README.md) |

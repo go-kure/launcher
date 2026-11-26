@@ -104,10 +104,24 @@ func TestBuildCommand_CustomComponentRefusals(t *testing.T) {
 	}
 }
 
-// Without the definitions directory the type is unknown, as it is today.
+// Without the definitions directory the type is unknown, as it is today. The
+// model's component is cut first: its qualified type would be refused before the
+// defined one, with another message.
 func TestBuildCommand_CustomComponentNeedsItsDefinition(t *testing.T) {
 	_, _, err := buildCustomComponent(t, func(dir string) {
 		if err := os.RemoveAll(filepath.Join(dir, "definitions")); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "app.yaml")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		direct, _, found := strings.Cut(string(data), "  # The same type reached")
+		if !found {
+			t.Fatal("app.yaml does not hold the model component's comment")
+		}
+		if err := os.WriteFile(path, []byte(direct), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	})
