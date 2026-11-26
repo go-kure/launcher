@@ -763,9 +763,9 @@ the rule's schema, the places its value lands, each a `LoweredKey{ Member, Trait
 Path, Unchanged, When }`:
 
 - `Member` is the component type of the emitted member, which is the report's
-  `Member` inside a same-name sibling group. A rule that emits no other component under
-  the input's name leaves no group, and the report then names that component with no
-  member: a `worker` with an authored `serviceAccountName` is read under the plain owner.
+  `Member` inside a same-name sibling group. Outside one the report names the component
+  with no member: a `worker` with an authored `serviceAccountName` is read under the plain
+  owner.
 - `Trait` is the type of a trait the rule attaches to that member, when the value
   lands in a trait.
 - `Path` is the path in the member's properties or the trait's.

@@ -11,10 +11,9 @@ import (
 // speaks at these places.
 type LoweredKey struct {
 	// Member is the component type of the emitted member the value lands on. It
-	// is PropertySource.Member inside a same-name sibling group. A rule that
-	// emits no other component under the input's name leaves no group, and the
-	// report then names that component with no member: the place is the same,
-	// read under the plain owner.
+	// is PropertySource.Member inside a same-name sibling group. Outside one the
+	// report names the component with no member: the place is the same, read
+	// under the plain owner.
 	Member string `json:"member" yaml:"member"`
 	// Trait is the type of a trait the rule attaches to that member, when the
 	// value lands in a trait; empty when it lands in the member's own properties.

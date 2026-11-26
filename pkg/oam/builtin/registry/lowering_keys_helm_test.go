@@ -371,14 +371,14 @@ func TestLoweringKeys_HelmSourceIsAComponentOfItsOwn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LowerComponent(%s): %v", delivery, err)
 			}
-			named := 0
+			names := map[string]int{}
 			for _, c := range res.Components {
-				if c.Name == "app" {
-					named++
-				}
+				names[c.Name]++
 			}
-			if named != 1 {
-				t.Errorf("delivery %s: %d components carry the input's name, want 1", delivery, named)
+			for name, n := range names {
+				if n != 1 {
+					t.Errorf("delivery %s: %d components are named %q, want 1", delivery, n, name)
+				}
 			}
 		}
 		// The report of the flux document, its release and its source alike.
