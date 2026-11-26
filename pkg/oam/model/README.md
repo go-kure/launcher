@@ -5,7 +5,12 @@
 Package `model` defines the document format of a configuration-defined component model
 (go-kure/launcher#1261). A model is a YAML document. It declares inputs, computes values with
 CEL, and lists the parts (components and traits) that a component of the model type expands to.
-A user can add a component type without writing Go.
+A user can add a component type without writing Go. `kurel build` loads models from a
+package's `models/` directory and from `--model` files (see the
+[kurel CLI reference](https://pkg.go.dev/github.com/go-kure/launcher/pkg/cmd/kurel)). Loading
+models there relies on the evaluation budget: every call that copies a value pays for it,
+including `format`, `sort` and `reverse`. The budget bounds the work of an evaluation, and not
+the memory it allocates in total (see "What the budgets bound").
 
 This release step covers the format, the CEL environment and the evaluation of one expression.
 `model.Load` decodes a document and checks its shape. It does not compile or run any expression.
@@ -16,7 +21,8 @@ lowers a component of that type into the parts. The emit hook and the limits of 
 in. A trait a model writes on a part is resolved like an authored one: `Rule` implements
 `oam.AuthoredTraitEmitter`, so the engine merges the capability rendering into it, refuses a
 missing binding and a platform-reserved value, and records the consumed capability. The hostile
-corpus arrives in a later step of go-kure/launcher#1261. A document that loads today keeps its meaning then.
+corpus is in too: `rule_hostile_expr_test.go` for the limits of one expression and
+`rule_hostile_build_test.go` for the limits of one build.
 
 ## Document
 

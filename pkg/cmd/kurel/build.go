@@ -32,6 +32,7 @@ type buildOptions struct {
 	valuesPath         string
 	setValues          []string // "key=value" strings from --set
 	capabilityDefPaths []string
+	modelPaths         []string // --model: component model files, after <app dir>/models
 	strictCapabilities bool
 	environment        string // --environment: a name resolved to profilePath/valuesPath
 	environmentsPath   string // --environments: the file declaring those names
@@ -60,6 +61,7 @@ kurel.yaml for parameterized packages). Output is written to stdout (default) or
 	cmd.Flags().StringVar(&opts.valuesPath, "values", "", "path to values YAML file")
 	cmd.Flags().StringArrayVar(&opts.setValues, "set", nil, "set a parameter value (key=value, repeatable)")
 	cmd.Flags().StringArrayVar(&opts.capabilityDefPaths, "capability-def", nil, "CapabilityDefinition file (repeatable)")
+	cmd.Flags().StringArrayVar(&opts.modelPaths, "model", nil, "component model file, loaded after the package's models/ directory in the order given (repeatable)")
 	cmd.Flags().BoolVar(&opts.strictCapabilities, "strict-capabilities", false, "error instead of warn on unvalidated custom capabilities")
 
 	cmd.Flags().StringVar(&opts.environment, "environment", "", "named environment whose profile and values replace --profile/--values")
@@ -150,6 +152,10 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	}
 
 	transformer := newBuiltinTransformer()
+	// Before LowerableTypes is read below, so parse accepts a model's type.
+	if err := loadModels(transformer, filepath.Join(appDir, modelsDirName), opts.modelPaths); err != nil {
+		return errors.Wrap(err, "loading component models")
+	}
 
 	app, err := oam.ParseWithExtraTypes(appData, customTraitTypes, transformer.LowerableTypes())
 	if err != nil {

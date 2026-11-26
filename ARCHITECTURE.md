@@ -24,7 +24,7 @@ Every directory under `pkg/` and `cmd/` that holds Go source has one row. A test
 | `pkg/cmd/shared/options` | The global flags (`--config`, `--verbose`, `--debug`, `--strict`, `--output-file`, `--namespace`, ...). | Be used as a standalone API. | [README](pkg/cmd/shared/options/README.md) |
 | `pkg/errors` | Structured error types and wrapping helpers. | | [README](pkg/errors/README.md) |
 | `pkg/oam` | The core: data model, parser, validator, lowering engine, `Transformer`, `Policy`. | Import the built-in handlers; write to stdout or stderr; exit. | [README](pkg/oam/README.md) |
-| `pkg/oam/model` | Component models defined in YAML and CEL: load, compile, expand. A library feature; `kurel` does not use it. | | [README](pkg/oam/model/README.md) |
+| `pkg/oam/model` | Component models defined in YAML and CEL: load, compile, expand. `kurel build` loads them from a package's `models/` directory and from `--model` files. | | [README](pkg/oam/model/README.md) |
 | `pkg/oam/netpol` | Shared NetworkPolicy types. They live outside `pkg/oam` so that the engine and the routing traits can both import them without a cycle. | | [README](pkg/oam/netpol/README.md) |
 | `pkg/oam/builtin` | Schema types for the built-in capabilities, and strict decoding of their properties. | | [README](pkg/oam/builtin/README.md) |
 | `pkg/oam/builtin/components` | The handlers of the built-in terminal component types, each building kure objects, and the lowering rules for `webservice`, `worker`, `helm`, `postgresql` and `oci`, which rewrite those types into terminal ones (the registry lists the two sets apart). | | [README](pkg/oam/builtin/components/README.md) |
@@ -107,7 +107,8 @@ Outside the code: `docs/` (design and OAM notes), `examples/` (runnable applicat
 - **Documents.** All use `apiVersion: launcher.gokure.dev/v1alpha1`. `Application` (`app.yaml`,
   `pkg/oam/parser.go`), `Package` (`kurel.yaml`, `pkg/oam/package.go`), `ClusterProfile`
   (`pkg/oam/profile.go`), `EnvironmentSet` (`environments.yaml`, `pkg/cmd/kurel/environment.go`),
-  `CapabilityDefinition` (`pkg/oam/capability.go`), and `Model` (`pkg/oam/model`, library only).
+  `CapabilityDefinition` (`pkg/oam/capability.go`), and `Model` (`pkg/oam/model`; `kurel build` loads
+  it through `pkg/cmd/kurel/models.go`).
 - **What a consumer extends.** `ComponentHandler` and `TraitHandler` (`pkg/oam/handler.go`),
   `PolicyHandler` (`pkg/oam/pipeline.go`), the lowering rule interfaces (`pkg/oam/lowering.go`), the `Policy`
   interface (`pkg/oam/policy.go`) and `PolicyResult.Extensions`.

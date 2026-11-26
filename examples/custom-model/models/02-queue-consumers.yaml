@@ -1,0 +1,26 @@
+# A model that names another model: one queue-consumer for each queue. It loads
+# after 01-queue-consumer.yaml, because the files load in name order.
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Model
+metadata:
+  name: queue-consumers.example.org
+  version: v1
+spec:
+  celEnv: "1"
+  inputs:
+    image: {type: string, required: true}
+    queues:
+      type: array
+      required: true
+      items: {type: string}
+  outputs: {}
+  parts:
+    - id: consumer
+      name: "${ queue }"
+      type: queue-consumer.example.org@v1
+      forEach:
+        as: queue
+        in: "${ inputs.queues }"
+      properties:
+        image: "${inputs.image}"
+        queue: "${ queue }"

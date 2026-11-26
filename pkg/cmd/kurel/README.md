@@ -243,7 +243,9 @@ runs first, and its `LowerableTypes()` (the kinds/component-types/trait-types cl
 by its registered lowering rules — `worker`, `webservice`, `postgresql`, `helm`, `oci` and
 `expose` today) is passed into
 `oam.ParseWithExtraTypes` alongside the `--capability-def`-supplied custom trait
-types. See the [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s
+types. The [component models](#component-models) of the build are registered on the
+transformer first, so a model's type is among them. See the
+[OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s
 Parsing and Lowering sections for the general mechanism.
 
 Once the application is parsed and the profile evaluated, `build` calls
@@ -326,6 +328,7 @@ component, and a late component making the source a Flux object names, are admit
 | `--values` | Path to a values YAML file (requires a `kurel.yaml` package). The only flag that can supply an `array` or `object` parameter. |
 | `--set key=value` | Set a parameter value (repeatable; requires `kurel.yaml`). Scalars only: an `array` or `object` parameter set this way is refused; use `--values` or the parameter's default. |
 | `--capability-def` | Additional `CapabilityDefinition` file (repeatable). |
+| `--model` | [Component model](#component-models) file (repeatable). Loaded after the package's `models/` directory, in the order given. |
 | `--strict-capabilities` | Error (instead of warn) on unvalidated custom capabilities. |
 
 With `--output`, the written file is named `<app.Metadata.Name>.yaml` inside that
@@ -334,6 +337,57 @@ rejects any Application whose name fails `validation.IsDNS1123Subdomain` (see th
 [OAM model](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam)'s Parsing
 section) before `build` ever reaches the write step, so the filename can't carry a
 `/` or `..` path-traversal segment.
+
+### Component models
+
+A component model is a YAML document of `kind: Model` that adds a component type: it
+declares inputs, computes values with CEL and lists the components and traits it expands
+to. [Component Models](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/model)
+describes the format. `build` loads models from two places (go-kure/launcher#1570):
+
+1. the `models/` directory next to `app.yaml`: every `*.yaml` file in it, in file name
+   order. Subdirectories and other files are not read. No `models/` directory is fine.
+2. each `--model <file>`, in the order given.
+
+```
+my-app/
+├── app.yaml
+└── models/
+    ├── 01-queue-consumer.yaml     # Model
+    └── 02-queue-consumers.yaml    # Model that names the first
+```
+
+```yaml
+spec:
+  components:
+  - name: shop
+    type: queue-consumers.example.org@v1
+    properties: {image: myregistry/consumer:v1.0.0, queues: [orders, invoices]}
+```
+
+A model may name only a model loaded before it, so order the file names, or the flags,
+that way. All of `models/` loads before the first `--model` file: a `--model` file may
+name a model of the directory, and not the reverse. The model's inputs are the schema of
+the component's properties. A model file is read as written: `kurel.yaml` parameters are
+not substituted in it.
+
+Every `*.yaml` file in `models/` must be a model. A bad model refuses the build with the
+library's reason and the file's path: an unknown field, another `kind`, a part type that
+is not declared (yet), a type that is already declared. One model identity given twice,
+even as the same file through both places, is refused as already registered. A missing
+`--model` file is an error, and so is a `models` that is not a directory. A `Model`
+placed in `definitions/` is not loaded: that directory is read for
+`CapabilityDefinition` files only.
+
+`build` evaluates the CEL expressions a model holds, under the library's cost, time and
+size limits (see [Component Models](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/model)).
+**Loading model files relies on that evaluation budget**: every call that copies a value
+pays for it, including `format`, `sort` and `reverse`. The budget bounds the work of an
+evaluation, and not the memory it allocates in total, so the limits are not a memory limit
+of the process.
+
+[`examples/custom-model`](https://github.com/go-kure/launcher/tree/main/examples/custom-model)
+is a package with two models.
 
 ### Named environments
 

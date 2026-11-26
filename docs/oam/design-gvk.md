@@ -33,13 +33,16 @@ All launcher-native input files share a single API group and version:
 | `kurel.yaml` | `launcher.gokure.dev/v1alpha1` | `Package` |
 | `cluster.yaml` | `launcher.gokure.dev/v1alpha1` | `ClusterProfile` |
 | any `*.yaml` under a package's `definitions/` directory, or passed via `--capability-def` | `launcher.gokure.dev/v1alpha1` | `CapabilityDefinition` |
+| any `*.yaml` under a package's `models/` directory, or passed via `--model` | `launcher.gokure.dev/v1alpha1` | `Model` |
 | `environments.yaml` next to `app.yaml`, or passed via `--environments` | `launcher.gokure.dev/v1alpha1` | `EnvironmentSet` |
 
 These documents form one coherent API family. They are not split across groups or
 versions because they belong to the same ownership and lifecycle domain:
 `Application` is what to run, `Package` is how it is packaged, `ClusterProfile` is how
 the target platform resolves capabilities for it, `CapabilityDefinition` declares the
-rendering schema for a custom (non-builtin) trait type, and `EnvironmentSet` names the
+rendering schema for a custom (non-builtin) trait type, `Model` defines a component type
+as data ([Component Models](https://github.com/go-kure/launcher/blob/main/pkg/oam/model/README.md)),
+and `EnvironmentSet` names the
 profile+values pairs `kurel build --environment` selects between. `EnvironmentSet` is a
 deployer input read only by the `kurel` CLI, not part of a package; its format is
 described in the kurel CLI reference's
