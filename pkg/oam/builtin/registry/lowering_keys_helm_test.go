@@ -11,10 +11,10 @@ import (
 	"github.com/go-kure/launcher/pkg/oam/builtin/registry"
 )
 
-// keyVariant is one document shape of a type whose places are conditional: the
-// properties without the key, and the value that authors it. moves names the
-// declared places the key changes there, and idle the places that are live, on a
-// member the rule emits, and that it leaves alone. The two are all of them.
+// keyVariant is one document shape: the properties the comparison starts from,
+// and the value the key is set to over them. moves names the declared places the
+// key changes there, and idle the places that are live, on a member the rule
+// emits, and that it leaves alone. The two are all of them.
 type keyVariant struct {
 	name  string
 	base  map[string]any
@@ -156,8 +156,8 @@ func helmKeyVariants() map[string][]keyVariant {
 }
 
 // loweredVariants is the guard of
-// TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces for a type whose places
-// are conditional. In each variant the key changes the places of moves and no
+// TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces for a type with
+// variants. In each variant the key changes the places of moves and no
 // other, each declared and live, and moves and idle are all the live places of
 // the members emitted. Over the variants of a key, moves covers every declared
 // place, so a place nothing reaches fails.

@@ -128,7 +128,7 @@ func CheckDeclaredDefaults(tr *oam.Transformer, probes []Probe) []string {
 					add("%s, and writing it changes the generated objects: the default is not what the handler applies; if the cluster applies it, list the path in the probe's LeftToCluster with the reason", label)
 					continue
 				}
-				reported := reportedAt(prov, d.component, placesOf(keys[d.typ], p, d.path))
+				reported := reportedAt(prov, d.component, placesOf(keys[d.typ], comp.Properties, d.path))
 				_, unreported := p.Unreported[d.path]
 				switch {
 				case unreported && reported:
@@ -156,20 +156,20 @@ func CheckDeclaredDefaults(tr *oam.Transformer, probes []Probe) []string {
 // place is one place the report can name a declared default at.
 type place struct{ member, trait, path string }
 
-// placesOf returns the places a declared default lands: every place of the
-// lowering key map where the type publishes one, the probe's DefaultPlaces where
-// it names the path, and the authored path itself otherwise.
-func placesOf(typeKeys map[string][]oam.LoweredKey, p Probe, path string) []place {
+// placesOf returns the places a declared default of a component with the
+// authored properties props lands: where the type publishes a lowering key map,
+// each place of the key that is live for props (oam.LoweredKey.LiveFor), and the
+// authored path itself otherwise.
+func placesOf(typeKeys map[string][]oam.LoweredKey, props map[string]any, path string) []place {
 	key, _, _ := strings.Cut(path, ".")
 	if places, ok := typeKeys[key]; ok {
 		out := make([]place, 0, len(places))
 		for _, l := range places {
-			out = append(out, place{l.Member, l.Trait, l.Path})
+			if l.LiveFor(props) {
+				out = append(out, place{l.Member, l.Trait, l.Path})
+			}
 		}
 		return out
-	}
-	if to, ok := p.DefaultPlaces[path]; ok {
-		return []place{{"", "", to}}
 	}
 	return []place{{"", "", path}}
 }
@@ -179,8 +179,17 @@ func placesOf(typeKeys map[string][]oam.LoweredKey, p Probe, path string) []plac
 // place's path counts for it, because provenance records leaves: a nested default
 // under a key the rule builds (affinity) is therefore read as "some leaf below
 // affinity", which is weaker than its own leaf, and the findings say so.
+//
+// Where no entry of the component names a member, a place is matched without its
+// member: the report speaks under the plain owner there (oam.LoweredKey.Member).
 func reportedAt(p *oam.Provenance, component string, places []place) bool {
+	grouped := slices.ContainsFunc(p.Entries, func(e oam.PropertySource) bool {
+		return e.Component == component && e.Member != ""
+	})
 	for _, pl := range places {
+		if !grouped {
+			pl.member = ""
+		}
 		if !reportedAtOne(p, component, pl) {
 			return false
 		}

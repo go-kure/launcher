@@ -73,10 +73,6 @@ type Probe struct {
 	// nothing there; the entry fails when writing the default is accepted, or is
 	// refused with other text.
 	NotAuthorable map[string]string
-	// DefaultPlaces maps the path of a declared default to the path the report
-	// speaks at, for a type that lowers and publishes no key map (postgresql: the
-	// authored storageSize lands at storage.size of the cluster).
-	DefaultPlaces map[string]string
 }
 
 // Run transforms comps as one application under p and returns the provenance

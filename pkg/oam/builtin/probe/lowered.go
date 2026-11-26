@@ -33,10 +33,8 @@ func loweredProbes() []Probe {
 				{Component: "db", Path: "instances", WithPolicy: oam.SourcePolicy},
 				{Component: "db", Path: "storage.size", WithPolicy: oam.SourcePolicy, WithoutPolicy: oam.SourceBuiltin},
 			}, withPolicyOnly(resourceFills("db", ""))),
-			DefaultPlaces: map[string]string{"storageSize": "storage.size", "replicas": "instances"},
 			Unreported: map[string]string{
 				"provider": "the report holds no entry for it",
-				"version":  "the report holds no entry for it",
 				"replicas": "the report holds instances only under a policy default; without one the default of 1 is not reported",
 			}},
 	}
