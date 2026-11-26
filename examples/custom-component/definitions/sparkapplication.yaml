@@ -1,0 +1,12 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: ComponentDefinition
+metadata:
+  # The component type app.yaml authors.
+  name: spark-application
+spec:
+  emits:
+    apiVersion: sparkoperator.k8s.io/v1beta2
+    kind: SparkApplication
+  schema:
+    crd: crds/sparkoperator.k8s.io_sparkapplications.yaml
+    sha256: 0f6a7d761ab9b53ddb8eebbf6b2b906b0e3fb9ffd63559cb90d18d6357e535be

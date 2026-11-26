@@ -1,0 +1,33 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: analytics
+  namespace: analytics
+spec:
+  components:
+  # The defined type used directly: the properties are the CR's spec.
+  - name: pi
+    type: spark-application
+    properties:
+      type: Scala
+      mode: cluster
+      sparkVersion: "3.5.3"
+      image: docker.io/library/spark:3.5.3
+      mainClass: org.apache.spark.examples.SparkPi
+      mainApplicationFile: local:///opt/spark/examples/jars/spark-examples_2.12-3.5.3.jar
+      driver:
+        cores: 1
+        memory: 512m
+        serviceAccount: spark
+      executor:
+        cores: 1
+        memory: 512m
+        instances: 1
+  # The same type reached through a model, which fills the rest.
+  - name: nightly
+    type: sparkbatch.example.gokure.dev@v1
+    properties:
+      image: docker.io/library/spark:3.5.3
+      mainClass: org.apache.spark.examples.SparkPi
+      jar: local:///opt/spark/examples/jars/spark-examples_2.12-3.5.3.jar
+      executors: 4

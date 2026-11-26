@@ -1,0 +1,32 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Model
+metadata:
+  name: sparkbatch.example.gokure.dev
+  version: v1
+spec:
+  celEnv: "1"
+  inputs:
+    image: {type: string, required: true}
+    mainClass: {type: string, required: true}
+    jar: {type: string, required: true}
+    executors: {type: integer, default: 2}
+  outputs: {}
+  parts:
+    - id: app
+      # The identity of the type definitions/sparkapplication.yaml declares.
+      type: sparkapplication.sparkoperator.k8s.io@v1beta2
+      properties:
+        type: Scala
+        mode: cluster
+        sparkVersion: "3.5.3"
+        image: "${inputs.image}"
+        mainClass: "${inputs.mainClass}"
+        mainApplicationFile: "${inputs.jar}"
+        driver:
+          cores: 1
+          memory: 512m
+          serviceAccount: spark
+        executor:
+          cores: 1
+          memory: 512m
+          instances: "${inputs.executors}"

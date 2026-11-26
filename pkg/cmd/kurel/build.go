@@ -150,6 +150,10 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	}
 
 	transformer := newBuiltinTransformer()
+	// Before LowerableTypes is read, so parse accepts the declared types.
+	if err := loadTypeDocuments(transformer, filepath.Join(appDir, "definitions")); err != nil {
+		return errors.Wrap(err, "loading type definitions")
+	}
 
 	app, err := oam.ParseWithExtraTypes(appData, customTraitTypes, transformer.LowerableTypes())
 	if err != nil {

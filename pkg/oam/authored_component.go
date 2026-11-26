@@ -7,4 +7,8 @@ package oam
 // registered.
 func (t *Transformer) RegisterAuthoredComponent(typeName string, h ComponentHandler) {
 	t.RegisterComponent(typeName, h)
+	if t.authoredComponentTypes == nil {
+		t.authoredComponentTypes = make(map[string]bool)
+	}
+	t.authoredComponentTypes[typeName] = true
 }

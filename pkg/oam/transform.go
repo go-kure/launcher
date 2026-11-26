@@ -338,6 +338,10 @@ type Transformer struct {
 	// the position's types are declared; every handler and rule stays keyed by
 	// its plain type name above.
 	componentTypes, traitTypes, policyTypes *typeIndex
+
+	// authoredComponentTypes is the types registered with
+	// RegisterAuthoredComponent (authored_component.go).
+	authoredComponentTypes map[string]bool
 }
 
 // NewTransformer creates a Transformer pre-loaded with component and trait handlers.

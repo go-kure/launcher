@@ -1053,6 +1053,11 @@ type LowerableTypes struct {
 	// them as it accepts validPolicyTypes. Set only by Transformer.LowerableTypes.
 	policyHandlerTypes []string
 
+	// authoredHandlerTypes is the component types registered with
+	// RegisterAuthoredComponent. Each is terminal, so Parse accepts it without
+	// deferring the trait restriction check. Set only by Transformer.LowerableTypes.
+	authoredHandlerTypes []string
+
 	// identities is the type identities a Transformer declared (typeid.go), so that
 	// Parse accepts an authored `name@version` or qualified name as the type it
 	// resolves to. Set only by Transformer.LowerableTypes; nil, as in a literal, is
@@ -1095,6 +1100,9 @@ func (t *Transformer) LowerableTypes() LowerableTypes {
 	lt.policyHandlerTypes = make([]string, 0, len(t.policyHandlers))
 	for k := range t.policyHandlers {
 		lt.policyHandlerTypes = append(lt.policyHandlerTypes, k)
+	}
+	for k := range t.authoredComponentTypes {
+		lt.authoredHandlerTypes = append(lt.authoredHandlerTypes, k)
 	}
 	return lt
 }
