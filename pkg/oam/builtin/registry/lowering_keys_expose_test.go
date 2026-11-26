@@ -207,9 +207,74 @@ func exposeKeyVariants() map[string][]keyVariant {
 	}
 }
 
-// TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces for the trait rule: for
-// every key, what the emitted trait holds changes at the declared places that are
-// live and at no other.
+// A key with no place under a controllerType reaches no trait of a document that
+// builds: handed the key there, the rule emits the same trait, or refuses, or
+// keeps a property the emitted trait's schema does not have, which the transform
+// refuses. The last group is listed, so a key that joins or leaves it fails.
+func TestLoweringKeys_ExposeKeyWithNoPlaceReachesNoTrait(t *testing.T) {
+	d, ok := keyedTraitRules()["expose"]
+	if !ok {
+		t.Fatal(`trait rule "expose" does not implement oam.LoweringKeyDeclarer`)
+	}
+	keys := d.LoweringKeys()
+	bindings := map[string]map[string]any{
+		"ingress": {"controllerType": "ingress", "ingressClassName": "nginx"},
+		"gateway": {"controllerType": "gateway", "gatewayName": "gw", "gatewayNamespace": "gateways"},
+	}
+	refusedByTransform := map[string][]string{
+		"ingress": {"gatewayName", "gatewayNamespace"},
+		"gateway": {"authResponseHeaders", "authURL", "ingressClassName"},
+	}
+	for _, controllerType := range slices.Sorted(maps.Keys(bindings)) {
+		binding := bindings[controllerType]
+		var kept []string
+		for _, key := range slices.Sorted(maps.Keys(keys)) {
+			if key == "controllerType" || slices.ContainsFunc(keys[key], func(p oam.LoweredKey) bool { return p.LiveFor(binding) }) {
+				continue
+			}
+			variants := exposeKeyVariants()[key]
+			if len(variants) == 0 {
+				t.Fatalf("no variant gives a value for %q", key)
+			}
+			// A value the binding does not hold already.
+			var value any = "other-value"
+			if _, isString := variants[0].value.(string); !isString {
+				value = variants[0].value
+			}
+			with := maps.Clone(binding)
+			with[key] = value
+			ctx := lowerContext()
+			ctx.Component = &oam.Component{Name: "app", Type: "webservice"}
+			rule := registry.TraitLoweringRules()["expose"]
+			got, err := rule.LowerTrait(&oam.Trait{Type: "expose", Properties: with}, ctx)
+			if err != nil {
+				continue
+			}
+			base, err := rule.LowerTrait(&oam.Trait{Type: "expose", Properties: binding}, ctx)
+			if err != nil {
+				t.Fatalf("LowerTrait(%v): %v", binding, err)
+			}
+			if reflect.DeepEqual(got.Traits[0].Properties, base.Traits[0].Properties) {
+				continue
+			}
+			kept = append(kept, key)
+			comp := oam.Component{Name: "app", Type: "webservice", Properties: map[string]any{"image": "ghcr.io/org/app:v1"},
+				Traits: []oam.Trait{{Type: "expose", Properties: map[string]any{"hostnames": []any{"a.example.org"}}}}}
+			_, _, err = probe.RunWith(newTransformer(), []oam.Component{comp}, probe.NoPolicy(),
+				map[string]oam.CapabilityBinding{"expose": {Rendering: with}})
+			if want := `unsupported field "` + key + `"`; err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: %q is kept on the emitted trait and has no place; the transform answers %v, want %s", controllerType, key, err, want)
+			}
+		}
+		if !slices.Equal(kept, refusedByTransform[controllerType]) {
+			t.Errorf("%s: keys the rule keeps with no place = %v, want %v", controllerType, kept, refusedByTransform[controllerType])
+		}
+	}
+}
+
+// TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces for the trait rule: in
+// each variant of every key, what the emitted trait holds changes at the declared
+// places that are live and at no other.
 func TestLoweringKeys_TraitValueReachesTheDeclaredPlaces(t *testing.T) {
 	d, ok := keyedTraitRules()["expose"]
 	if !ok {
