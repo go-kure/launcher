@@ -27,7 +27,6 @@ import (
 // https://github.com/go-kure/launcher/issues/1580#issuecomment-6903630690
 // rejects only "a hand-kept table with nothing behind it".
 var rulesWithoutKeyMap = map[string]string{
-	"helm":       "not built yet: it hands some keys on as written, a set that depends on the delivery mode, can rewrite two of them (a values ConfigMap), and builds a Flux source and the traits that carry the values from moved and re-shaped keys",
 	"postgresql": "no forwarding loop: it splits the component into five CloudNativePG member types and two policies, under their own property spellings",
 }
 
@@ -266,6 +265,19 @@ type loweredType struct {
 	// forwards, so no sub-property can land elsewhere; the keys it builds are
 	// held by their `lands` rows.
 	forwardsWhole bool
+	// variants replaces samples, per key, for a type whose places are
+	// conditional (LoweredKey.When), and switches names its keys that declare no
+	// place because they choose what the rule emits, each with the reason.
+	variants map[string][]keyVariant
+	switches map[string]string
+}
+
+// lowerContext is the context a rule is handed to lower one document.
+func lowerContext() oam.LoweringContext {
+	return oam.LoweringContext{
+		Namer:  oam.NewNameAllocator(),
+		Origin: oam.Origin{Document: "doc", DocumentKind: "Application", Namespace: "default"},
+	}
 }
 
 // loweredTypes holds a loweredType for every rule that publishes a key map.
@@ -281,6 +293,13 @@ func loweredTypes() map[string]loweredType {
 		}
 	}
 	return map[string]loweredType{
+		"helm": {
+			build: func(props map[string]any) oam.Component {
+				return oam.Component{Name: "app", Type: "helm", Properties: props}
+			},
+			variants: helmKeyVariants(),
+			switches: helmSwitches,
+		},
 		"webservice": role("webservice"),
 		"worker":     role("worker"),
 		"oci": {
@@ -375,11 +394,15 @@ func TestLoweringKeys_SamplesWriteEverySubProperty(t *testing.T) {
 		for _, key := range slices.Sorted(maps.Keys(schema)) {
 			subs := subPropertiesOf(schema[key])
 			sample, ok := lt.samples[key]
-			if !ok {
+			if !ok && len(lt.variants[key]) == 0 {
 				continue // the same test names a key with no sample
 			}
 			t.Run(typ+"/"+key, func(t *testing.T) {
 				written := writtenSubProperties(sample.value)
+				// The variants of a key write its sub-properties between them.
+				for _, v := range lt.variants[key] {
+					maps.Copy(written, writtenSubProperties(v.value))
+				}
 				for _, sub := range subs {
 					_, listed := sample.notWritten[sub]
 					switch {
@@ -427,6 +450,11 @@ func ociLowered(t *testing.T, a, b oam.Component) (refs map[string]string, sourc
 			case "ocirepository":
 				sources = append(sources, c.ObjectName())
 			}
+		}
+	}
+	for _, name := range []string{a.Name, b.Name} {
+		if refs[name] == "" {
+			t.Errorf("no source is named by a Kustomization of %s", name)
 		}
 	}
 	for name, ref := range refs {
@@ -522,6 +550,28 @@ func TestLoweringKeys_OCINamedSourceIsAComponentOfItsOwn(t *testing.T) {
 			t.Errorf("sourceRef = %v, want it to name shared-source", ref)
 		}
 	}
+	// The report names such a Kustomization with no member, for a named source
+	// and for two components that share one.
+	other := lt.build(lt.base)
+	other.Name = "other"
+	for name, doc := range map[string][]oam.Component{"named": {comp}, "shared": {lt.build(lt.base), other}} {
+		prov, _ := policyProvenanceFor(t, &defaultsPolicy{}, doc...)
+		for _, c := range doc {
+			n := 0
+			for _, e := range prov.Entries {
+				if e.Component != c.Name {
+					continue
+				}
+				n++
+				if e.Member != "" {
+					t.Errorf("%s: entry %s of %q is under member %q, want none", name, e.Path, c.Name, e.Member)
+				}
+			}
+			if n == 0 {
+				t.Errorf("%s: the report holds no entry of %q", name, c.Name)
+			}
+		}
+	}
 }
 
 // reportedAt is where one entry of the report sits, in a key map's terms.
@@ -579,7 +629,10 @@ func within(r reportedAt, p oam.LoweredKey) bool {
 // The comparison is against the same document without the key, so only what the
 // key moved is read. `image` is required and has no such baseline: for it every
 // copied entry of the report must sit at its place.
+//
+// oci and helm are held on their Unchanged places only (unchangedPlacesAreCopied).
 func TestLoweringKeys_AuthoredKeyLandsWhereDeclared(t *testing.T) {
+	t.Run("unchanged", unchangedPlacesAreCopied)
 	samples := loweringKeySamples()
 	keyed := keyedRules()
 	// Named, not ranged over keyed: a rule that lost its map must fail here,
@@ -706,7 +759,7 @@ func TestLoweringKeys_AuthoredKeyLandsWhereDeclared(t *testing.T) {
 // is a place of its own (path ""), so one that holds no property is still seen.
 func loweredLeaves(t *testing.T, typ string, comp oam.Component) (map[reportedAt]any, map[string]map[string]any) {
 	t.Helper()
-	res, err := registry.ComponentLoweringRules()[typ].LowerComponent(&comp, oam.LoweringContext{})
+	res, err := registry.ComponentLoweringRules()[typ].LowerComponent(&comp, lowerContext())
 	if err != nil {
 		t.Fatalf("LowerComponent(%s, %v): %v", typ, comp.Properties, err)
 	}
@@ -721,6 +774,25 @@ func loweredLeaves(t *testing.T, typ string, comp oam.Component) (map[reportedAt
 		}
 	}
 	return leaves, members
+}
+
+// changedLeaves returns the places whose leaf differs from base to got: a leaf
+// that is new or has another value, and one that is gone from a member got still
+// holds.
+func changedLeaves(got, base map[reportedAt]any, members map[string]map[string]any) []reportedAt {
+	var changed []reportedAt
+	for at, v := range got {
+		if was, had := base[at]; !had || !reflect.DeepEqual(was, v) {
+			changed = append(changed, at)
+		}
+	}
+	for at := range base {
+		_, emitted := members[at.member]
+		if _, still := got[at]; emitted && !still {
+			changed = append(changed, at)
+		}
+	}
+	return changed
 }
 
 // flattenLeaves records every leaf below v under its path, in the spelling
@@ -775,6 +847,10 @@ func TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces(t *testing.T) {
 		keys := d.LoweringKeys()
 		for _, key := range slices.Sorted(maps.Keys(schema)) {
 			t.Run(typ+"/"+key, func(t *testing.T) {
+				if lt.variants != nil {
+					loweredVariants(t, typ, key, lt, keys[key])
+					return
+				}
 				sample, ok := lt.samples[key]
 				if !ok {
 					t.Fatalf("no sample for key %q of %q; add a row to its samples", key, typ)
@@ -808,19 +884,7 @@ func TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces(t *testing.T) {
 					t.Fatalf("authoring %q: the rule emits members %v, want %v", key, gotMembers, wantMembers)
 				}
 
-				var changed []reportedAt
-				for at, v := range got {
-					if was, had := base[at]; !had || !reflect.DeepEqual(was, v) {
-						changed = append(changed, at)
-					}
-				}
-				for at := range base {
-					_, emitted := members[at.member]
-					if _, still := got[at]; emitted && !still {
-						changed = append(changed, at)
-					}
-				}
-
+				changed := changedLeaves(got, base, members)
 				for _, at := range changed {
 					if !declared(at) {
 						t.Errorf("authoring %q changed member %q trait %q path %q (%v, was %v), which the key map does not declare for it (%v)",
@@ -877,7 +941,7 @@ func TestLoweringKeys_SingleMemberWorkerIsReadUnderThePlainOwner(t *testing.T) {
 	plain := entriesOf(prov, owner{component: "app"})
 	for _, key := range []string{"image", "replicas", "serviceAccountName"} {
 		want := []oam.LoweredKey{{Member: "role-deployment", Path: key, Unchanged: true}}
-		if got := d.LoweringKeys()[key]; !slices.Equal(got, want) {
+		if got := d.LoweringKeys()[key]; !reflect.DeepEqual(got, want) {
 			t.Errorf("LoweringKeys()[%q] = %v, want %v", key, got, want)
 		}
 		if src, found := plain[key]; !found || src.Kind != oam.SourceCopied || src.From != oam.SourceAuthored {
