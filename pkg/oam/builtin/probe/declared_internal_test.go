@@ -27,3 +27,25 @@ func TestPlacesOf_DropsPlacesNotLive(t *testing.T) {
 		}
 	}
 }
+
+// Where the entries of a component name a member, a place is met by an entry of
+// its own member only. Where none names one, the place is read without its
+// member.
+func TestReportedAt_MatchesTheMemberOfAGroup(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		member string
+		want   bool
+	}{
+		{"an entry of another member", "other", false},
+		{"an entry of the member", "member", true},
+		{"an entry with no member", "", true},
+	} {
+		report := &oam.Provenance{Entries: []oam.PropertySource{
+			{Component: "app", Member: tc.member, Path: "image", Source: oam.Source{Kind: oam.SourceRendered}},
+		}}
+		if got := reportedAt(report, "app", []place{{"member", "", "image"}}); got != tc.want {
+			t.Errorf("%s: reportedAt = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
