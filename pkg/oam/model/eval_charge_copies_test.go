@@ -107,8 +107,8 @@ func TestBudgetCoversEveryCallThatTakesAList(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, fn := range env.Functions() {
-		// cel.@block is what the compiler makes of cel.bind and gives its body, and a disabled
-		// declaration cannot be called
+		// cel.@block is an internal construct of cel-go's optimizer that gives its body and runs
+		// no call of its own, and a disabled declaration cannot be called
 		if name == "cel.@block" || fn.IsDeclarationDisabled() {
 			continue
 		}
