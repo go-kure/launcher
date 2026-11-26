@@ -272,9 +272,8 @@ func TestLoweringKeys_ExposeKeyWithNoPlaceReachesNoTrait(t *testing.T) {
 	}
 }
 
-// TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces for the trait rule: in
-// each variant of every key, what the emitted trait holds changes at the declared
-// places that are live and at no other.
+// TestLoweringKeys_AuthoredValueReachesTheDeclaredPlaces for the trait rule: the
+// expose variants run through the same loweredVariants.
 func TestLoweringKeys_TraitValueReachesTheDeclaredPlaces(t *testing.T) {
 	d, ok := keyedTraitRules()["expose"]
 	if !ok {
