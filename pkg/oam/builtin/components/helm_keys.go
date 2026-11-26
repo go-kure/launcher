@@ -32,10 +32,12 @@ func (HelmRule) LoweringKeys() map[string][]oam.LoweredKey {
 	valuesMode := func(values ...string) oam.LoweredWhen {
 		return oam.LoweredWhen{Key: "valuesMode", Values: values}
 	}
-	flux := []oam.LoweredWhen{delivery("", "flux")}
-	inline := []oam.LoweredWhen{delivery("", "flux"), valuesMode("", "inline")}
-	configMap := []oam.LoweredWhen{delivery("", "flux"), valuesMode("configMap")}
-	template := []oam.LoweredWhen{delivery("template")}
+	// Each place gets conditions of its own: a caller's write to one place's
+	// reaches no other.
+	flux := func() []oam.LoweredWhen { return []oam.LoweredWhen{delivery("", "flux")} }
+	inline := func() []oam.LoweredWhen { return append(flux(), valuesMode("", "inline")) }
+	configMap := func() []oam.LoweredWhen { return append(flux(), valuesMode("configMap")) }
+	template := func() []oam.LoweredWhen { return []oam.LoweredWhen{delivery("template")} }
 
 	// The release's own places: a property it holds, and a trait it carries.
 	release := func(path string, when []oam.LoweredWhen) oam.LoweredKey {
@@ -45,16 +47,16 @@ func (HelmRule) LoweringKeys() map[string][]oam.LoweredKey {
 		return oam.LoweredKey{Member: helmReleaseMember, Trait: typ, Path: path, When: when}
 	}
 	source := func(member, path string) oam.LoweredKey {
-		return oam.LoweredKey{Member: member, Path: path, When: flux}
+		return oam.LoweredKey{Member: member, Path: path, When: flux()}
 	}
 	// The terminal under delivery: template takes the key under its own name,
 	// as written.
 	rendered := func(key string) oam.LoweredKey {
-		return oam.LoweredKey{Member: helmTemplateType, Path: key, Unchanged: true, When: template}
+		return oam.LoweredKey{Member: helmTemplateType, Path: key, Unchanged: true, When: template()}
 	}
 	// The release names a generated source through one of two properties, by the
 	// source's kind.
-	sourceRefs := []oam.LoweredKey{release("chart.spec.sourceRef", flux), release("chartRef", flux)}
+	sourceRefs := []oam.LoweredKey{release("chart.spec.sourceRef", flux()), release("chartRef", flux())}
 
 	keys := map[string][]oam.LoweredKey{
 		// A switch: it chooses the members, and is no property of one.
@@ -66,8 +68,8 @@ func (HelmRule) LoweringKeys() map[string][]oam.LoweredKey {
 		// Launcher's own declaration, split off before the lowering.
 		chartEndpointsKey: nil,
 
-		"chart":   {release("chart.spec.chart", flux), rendered("chart")},
-		"version": {release("chart.spec.version", flux), source(helmOCIMember, "ref"), release("chartRef", flux), rendered("version")},
+		"chart":   {release("chart.spec.chart", flux()), rendered("chart")},
+		"version": {release("chart.spec.version", flux()), source(helmOCIMember, "ref"), release("chartRef", flux()), rendered("version")},
 		"source": slices.Concat([]oam.LoweredKey{
 			source(helmRepositoryMember, "url"),
 			source(helmOCIMember, "url"),
@@ -79,18 +81,18 @@ func (HelmRule) LoweringKeys() map[string][]oam.LoweredKey {
 			source(helmBucketMember, "provider"),
 			source(helmBucketMember, "region"),
 			source(helmBucketMember, "prefix"),
-		}, sourceRefs, []oam.LoweredKey{{Member: helmTemplateType, Path: "source", When: template}}),
+		}, sourceRefs, []oam.LoweredKey{{Member: helmTemplateType, Path: "source", When: template()}}),
 
-		helmSecretValuesKey:   {trait(helmSecretTrait, "", flux), release("valuesFrom", flux), rendered(helmSecretValuesKey)},
-		"valuesConfigMapName": {trait(helmConfigMapTrait, "name", configMap), release("valuesFrom", configMap)},
-		"valuesSecretName":    {trait(helmSecretTrait, "name", flux), release("valuesFrom", flux)},
+		helmSecretValuesKey:   {trait(helmSecretTrait, "", flux()), release("valuesFrom", flux()), rendered(helmSecretValuesKey)},
+		"valuesConfigMapName": {trait(helmConfigMapTrait, "name", configMap()), release("valuesFrom", configMap())},
+		"valuesSecretName":    {trait(helmSecretTrait, "name", flux()), release("valuesFrom", flux())},
 
 		oam.HookGroupNamePrefixProperty:     {rendered(oam.HookGroupNamePrefixProperty)},
 		oam.LayoutKustomizationNameProperty: {rendered(oam.LayoutKustomizationNameProperty)},
 		scopeOverridesKey:                   {rendered(scopeOverridesKey)},
 	}
 	for _, key := range helmPassthroughKeys {
-		keys[key] = []oam.LoweredKey{{Member: helmReleaseMember, Path: key, Unchanged: true, When: flux}}
+		keys[key] = []oam.LoweredKey{{Member: helmReleaseMember, Path: key, Unchanged: true, When: flux()}}
 		if !slices.Contains(helmFluxOnlyKeys, key) {
 			keys[key] = append(keys[key], rendered(key))
 		}
@@ -98,12 +100,12 @@ func (HelmRule) LoweringKeys() map[string][]oam.LoweredKey {
 	// values stays on the release only inline; under valuesMode: configMap it
 	// moves to a configmap trait that a generated valuesFrom entry names.
 	keys["values"] = []oam.LoweredKey{
-		{Member: helmReleaseMember, Path: "values", Unchanged: true, When: inline},
-		trait(helmConfigMapTrait, "", configMap),
-		release("valuesFrom", configMap),
+		{Member: helmReleaseMember, Path: "values", Unchanged: true, When: inline()},
+		trait(helmConfigMapTrait, "", configMap()),
+		release("valuesFrom", configMap()),
 		rendered("values"),
 	}
 	// The generated entries are put ahead of the authored ones.
-	keys["valuesFrom"] = []oam.LoweredKey{release("valuesFrom", flux)}
+	keys["valuesFrom"] = []oam.LoweredKey{release("valuesFrom", flux())}
 	return keys
 }
