@@ -6,11 +6,12 @@ Read against launcher `43d483e9`, with 120 built-in component types (115 handler
 
 ## Result
 
-Three patterns need Go, each in part:
+Four patterns need Go, each in part:
 
 - **The hash behind a restart on config change.** 13 of 27 application charts hash something in a template (template count); 13 render a checksum annotation on a pod template (render count). A model cannot compute a hash. It can often get the restart without one, by writing the text itself into the pod annotations (see below).
 - **Order between the parts of one model, inside one tier, and hook phases.** 9 of 27 charts render a hook that is not a `helm test` hook, and 13 declare one in a template (14 together). A model can already order its parts across the three deployment tiers; it cannot order two parts of one tier, and a tier has no hook phase.
 - **A config file serialised from structured settings.** At least 10 of 27 (template count).
+- **A grant into each watched namespace.** 5 of 27 charts (a template loops over namespaces and a render holds a RoleBinding). A model part has no namespace field, so a model grants in one namespace only (see below).
 
 The first two models worth writing are a monitored web service and a web app with a volume and a database (see [Candidate models](#candidate-models)).
 
@@ -180,10 +181,13 @@ Where a chart turns a map of settings into a YAML, TOML, INI or JSON file, a mod
 
 The count is a lower bound. A detector matches charts 12, 17, 18, 19, 20, 22, 27, where a file key is filled by a `toYaml` or JSON function. Charts 8, 16, 29 were read by hand and do the same through helpers: Gitea builds the sections of `app.ini` in a helper (`gitea.inline_configuration`, only its definition was read), NATS formats `nats.conf` with its own helper, and Envoy Gateway merges two maps and writes them as YAML. Other charts were not read for this.
 
-### Two model limits that are not chart patterns
+### A grant into each watched namespace
 
-- A trait on a component of a model type is refused. A model that users must extend with `expose` or `scaler` has to take those settings as inputs, or be a Go rule.
-- A model part has no namespace field, and `role` and `rolebinding` write into the application's namespace (`pkg/oam/builtin/components/role.go`, `rolebinding.go`). A grant per watched namespace, which 5 of the charts make, cannot be a model.
+A model part has no namespace field (`pkg/oam/model/types.go`), and `role` and `rolebinding` write into the application's namespace (`pkg/oam/builtin/components/role.go`, `rolebinding.go`). A `forEach` over the namespaces would therefore make 5 grants in one namespace and none in the others.
+
+### A model limit that is not a chart pattern
+
+A trait on a component of a model type is refused. A model that users must extend with `expose` or `scaler` has to take those settings as inputs, or be a Go rule.
 
 ## Candidate models
 
