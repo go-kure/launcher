@@ -776,7 +776,7 @@ Path, Unchanged, When }`:
 - `When` lists conditions on the component's authored properties, each a key and the
   values it may hold. All must hold for the place to apply (`LoweredKey.LiveFor`), and an
   empty list applies to every component. An empty string among the values also matches a
-  key left out or written null.
+  key left out or written null, and a key matches a property in any letter case.
 
 A key that reaches no property of a member maps to no place.
 `Transformer.ComponentLoweringKeys()` returns the maps of the registered rules by

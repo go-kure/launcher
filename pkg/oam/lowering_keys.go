@@ -1,6 +1,9 @@
 package oam
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
 
 // LoweredKey is one place the value of a property of a lowered component type
 // lands in the components its lowering rule emits. The provenance report
@@ -41,12 +44,16 @@ type LoweredWhen struct {
 }
 
 // LiveFor reports whether the place applies to a component with the authored
-// properties props: every condition of When holds. A condition's property that
+// properties props: every condition of When holds. A condition's key matches a
+// property in any letter case, as a rule's decode does, and a property that
 // holds anything but a string or null matches no value.
 func (k LoweredKey) LiveFor(props map[string]any) bool {
 	for _, w := range k.When {
 		value := ""
-		if v, ok := props[w.Key]; ok && !IsNullValue(v) {
+		for name, v := range props {
+			if !strings.EqualFold(name, w.Key) || IsNullValue(v) {
+				continue
+			}
 			s, isString := v.(string)
 			if !isString {
 				return false

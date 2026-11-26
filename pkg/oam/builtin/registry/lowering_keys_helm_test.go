@@ -310,19 +310,29 @@ func unchangedPlacesAreCopied(t *testing.T) {
 	}
 }
 
-// What the docs say of the helm map as a whole: every place is conditional on
-// delivery and on nothing but delivery and valuesMode, and the unchanged places
-// are these.
+// The conditions of every helm place, value for value, and its unchanged places.
+// The variants cannot see a condition that is too broad for a key their mode
+// refuses, or an explicit default it leaves out, so each is stated here: a
+// helmtemplate place applies under delivery: template; the configmap trait, and
+// the valuesFrom entry of values and valuesConfigMapName, under flux with
+// valuesMode: configMap; values on the release under flux with values inline;
+// every other place under flux, the default spelled or left out.
 func TestLoweringKeys_HelmConditionsAndUnchanged(t *testing.T) {
+	flux := oam.LoweredWhen{Key: "delivery", Values: []string{"", "flux"}}
 	var unchanged []string
 	for key, places := range keyedRules()["helm"].LoweringKeys() {
 		for _, p := range places {
-			var conditions []string
-			for _, w := range p.When {
-				conditions = append(conditions, w.Key)
+			want := []oam.LoweredWhen{flux}
+			switch {
+			case p.Member == "helmtemplate":
+				want = []oam.LoweredWhen{{Key: "delivery", Values: []string{"template"}}}
+			case p.Trait == "configmap", p.Path == "valuesFrom" && (key == "values" || key == "valuesConfigMapName"):
+				want = []oam.LoweredWhen{flux, {Key: "valuesMode", Values: []string{"configMap"}}}
+			case key == "values" && p.Path == "values":
+				want = []oam.LoweredWhen{flux, {Key: "valuesMode", Values: []string{"", "inline"}}}
 			}
-			if !slices.Equal(conditions, []string{"delivery"}) && !slices.Equal(conditions, []string{"delivery", "valuesMode"}) {
-				t.Errorf("%s: place %v is conditional on %v", key, p, conditions)
+			if !reflect.DeepEqual(p.When, want) {
+				t.Errorf("%s: place %s %s %q is conditional on %v, want %v", key, p.Member, p.Trait, p.Path, p.When, want)
 			}
 			if p.Unchanged {
 				unchanged = append(unchanged, p.Member+" "+p.Path)
