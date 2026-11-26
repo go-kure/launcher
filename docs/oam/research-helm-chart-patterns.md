@@ -1,6 +1,6 @@
 # Helm chart pattern survey: which component models to ship
 
-Research for go-kure/launcher#1637. It asks which configuration patterns public Helm charts share, which of them a [component model](../../pkg/oam/model/README.md) can express, and which need a Go lowering rule. It proposes models. It builds none, and nothing here is scheduled.
+Research for go-kure/launcher#1637. It asks which configuration patterns public Helm charts share, which of them a [component model](https://github.com/go-kure/launcher/blob/main/pkg/oam/model/README.md) can express, and which need a Go lowering rule. It proposes models. It builds none, and nothing here is scheduled.
 
 Read against launcher `43d483e9`, with 120 built-in component types (115 handlers and 5 lowering rules: `webservice`, `worker`, `helm`, `postgresql`, `oci`) and 18 traits (17 handlers and the `expose` lowering rule). At that commit `kurel` imports no model package, so `kurel build` loads no models (go-kure/launcher#1570), and go-kure/launcher#1706 on expression allocation limits is open.
 
@@ -180,9 +180,10 @@ Where a chart turns a map of settings into a YAML, TOML, INI or JSON file, a mod
 
 The count is a lower bound. A detector matches charts 12, 17, 18, 19, 20, 22, 27, where a file key is filled by a `toYaml` or JSON function. Charts 8, 16, 29 were read by hand and do the same through helpers: Gitea builds the sections of `app.ini` in a helper (`gitea.inline_configuration`, only its definition was read), NATS formats `nats.conf` with its own helper, and Envoy Gateway merges two maps and writes them as YAML. Other charts were not read for this.
 
-### A model limit that is not a chart pattern
+### Two model limits that are not chart patterns
 
-A trait on a component of a model type is refused. A model that users must extend with `expose` or `scaler` has to take those settings as inputs, or be a Go rule.
+- A trait on a component of a model type is refused. A model that users must extend with `expose` or `scaler` has to take those settings as inputs, or be a Go rule.
+- A model part has no namespace field, and `role` and `rolebinding` write into the application's namespace (`pkg/oam/builtin/components/role.go`, `rolebinding.go`). A grant per watched namespace, which 5 of the charts make, cannot be a model.
 
 ## Candidate models
 
@@ -194,10 +195,10 @@ Ranked by what a model would save, then by count. The order is a judgement; the 
 |---|---|---|---|---|---|---|---|
 | 1 | Monitored web service | 21 monitored; 6 with alerts | 11; 3 | `webservice`, `servicemonitor` or `podmonitor`, optional `prometheusrule` | VictoriaMetrics scrape and rule kinds | configuration model | The most frequent combination no single type gives today. |
 | 2 | Web app with volume and database | 8 with volume; 5 with database | 7; 5 | `webservice`, `pvc`, `expose`, `postgresql`, `external-secret` | none for PostgreSQL; there is no MariaDB or MySQL type | configuration model; restart on a config change by a pod annotation, Go for the hash | Joins the most parts by hand: workload, claim, route, database and its credentials. |
-| 3 | Role grants per watched namespace | 5 | 0 | `serviceaccount`, `role` and `rolebinding` under `forEach` | none | configuration model | Small, and needs no Go. |
-| 4 | Webhook server with certificate | 8 | 0 | `deployment`, `service`, `certificate`, a webhook configuration kind | none | configuration model | Mostly operator installs, which `helm` already delivers. |
-| 5 | Replicated stateful store | 8 | 7 | `statefulset`, two `service` parts, `disruption` | none | configuration model; restart on a config change by a pod annotation, Go for the hash | An operator type such as `cnpg-cluster` is the better route where one exists. |
-| 6 | Workload with scheduled backup | 5 | 3 | `cnpg-scheduledbackup` or the `volsync` trait | Velero `Backup`, `Schedule` | covered, except Velero | A model adds little over the existing parts. |
+| 3 | Webhook server with certificate | 8 | 0 | `deployment`, `service`, `certificate`, a webhook configuration kind | none | configuration model | Mostly operator installs, which `helm` already delivers. |
+| 4 | Replicated stateful store | 8 | 7 | `statefulset`, two `service` parts, `disruption` | none | configuration model; restart on a config change by a pod annotation, Go for the hash | An operator type such as `cnpg-cluster` is the better route where one exists. |
+| 5 | Workload with scheduled backup | 5 | 3 | `cnpg-scheduledbackup` or the `volsync` trait | Velero `Backup`, `Schedule` | covered, except Velero | A model adds little over the existing parts. |
+| 6 | Role grants per watched namespace | 5 | 0 | `serviceaccount`, `role` and `rolebinding` | none | **needs Go** | A chart writes a grant into each watched namespace. `role` and `rolebinding` always write into the application's namespace and a model part has no namespace field, so a `forEach` would grant in one namespace only. |
 
 Frequent shapes that need no new model, because existing types already give them:
 
