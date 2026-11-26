@@ -134,7 +134,7 @@ The report does not name every value a trait supplies. Not reported:
 - what the `expose` rule fills before it emits its trait: the emitted trait's properties are reported as the rule's output. The gateway namespace is one case. The rule moves it to `parentRefs[0].namespace` of the `httproute` trait it emits, and the report keeps the source of a rule's input only for a value the output holds at the same path, so the entry reads `rendered` (ref `trait/expose@v1alpha1`, no detail) whoever supplied the namespace: the profile, the `gateway-system` default `EvaluateProfile` writes into the binding (also under `EvaluateProfileWithProvenance`, whose binding records the writer), or the route's own default for a binding that never went through `EvaluateProfile`. The report cannot say that launcher defaulted it;
 - the fills of a trait not listed above. The `enablePDB` of `scaler` left out is no fill: no object holds a value for it.
 
-A lowered component type has no entry of its own in the report: its rule replaces it by members, and the entries are theirs. `webservice`, `worker`, `oci` and `helm` declare where each of their keys lands (`LoweringKeyDeclarer`, [Lowering keys](schemas-and-contract.md#lowering-keys)).
+A lowered component type has no entry of its own in the report: its rule replaces it by members, and the entries are theirs. `webservice`, `worker`, `oci`, `helm` and `postgresql` declare where each of their keys lands (`LoweringKeyDeclarer`, [Lowering keys](schemas-and-contract.md#lowering-keys)).
 
 A `capability` source also has a `Detail` when the profile went through
 `Transformer.EvaluateProfileWithProvenance`, which returns what `EvaluateProfile` returns

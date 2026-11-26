@@ -19,16 +19,15 @@ import (
 // provenance report of such a document speaks there.
 
 // rulesWithoutKeyMap names the built-in component lowering rules that publish no
-// key map, each with its reason (go-kure/launcher#1601 carries them). A rule's
-// map comes from the function the rule forwards with where it has one; the
-// places of the keys it builds are declared beside the rule and held to what it
-// emits by the tests below, in both directions. That is what
-// go-kure/launcher#1580 asks of a map, and its comment
+// key map, each with its reason. It is empty: every built-in component lowering
+// rule publishes one, and a rule that cannot needs a row here. A rule's map
+// comes from the function the rule forwards with where it has one; the places of
+// the keys it builds are declared beside the rule and held to what it emits by
+// the tests below, in both directions. That is what go-kure/launcher#1580 asks
+// of a map, and its comment
 // https://github.com/go-kure/launcher/issues/1580#issuecomment-6903630690
 // rejects only "a hand-kept table with nothing behind it".
-var rulesWithoutKeyMap = map[string]string{
-	"postgresql": "no forwarding loop: it splits the component into five CloudNativePG member types and two policies, under their own property spellings",
-}
+var rulesWithoutKeyMap = map[string]string{}
 
 // keyedRules returns the built-in component lowering rules that publish a key
 // map, by component type.
@@ -266,8 +265,9 @@ type loweredType struct {
 	// held by their `lands` rows.
 	forwardsWhole bool
 	// variants replaces samples, per key, for a type whose places are
-	// conditional (LoweredKey.When), and switches names its keys that declare no
-	// place because they choose what the rule emits, each with the reason.
+	// conditional (LoweredKey.When) or sit on members only some documents emit,
+	// and switches names its keys that declare no place because they choose what
+	// the rule emits, each with the reason.
 	variants map[string][]keyVariant
 	switches map[string]string
 }
@@ -299,6 +299,12 @@ func loweredTypes() map[string]loweredType {
 			},
 			variants: helmKeyVariants(),
 			switches: helmSwitches,
+		},
+		"postgresql": {
+			build: func(props map[string]any) oam.Component {
+				return oam.Component{Name: "app", Type: "postgresql", Properties: props}
+			},
+			variants: postgresqlKeyVariants(),
 		},
 		"webservice": role("webservice"),
 		"worker":     role("worker"),
@@ -630,7 +636,8 @@ func within(r reportedAt, p oam.LoweredKey) bool {
 // key moved is read. `image` is required and has no such baseline: for it every
 // copied entry of the report must sit at its place.
 //
-// oci and helm are held on their Unchanged places only (unchangedPlacesAreCopied).
+// oci and helm are held on their Unchanged places only (unchangedPlacesAreCopied);
+// postgresql declares none.
 func TestLoweringKeys_AuthoredKeyLandsWhereDeclared(t *testing.T) {
 	t.Run("unchanged", unchangedPlacesAreCopied)
 	samples := loweringKeySamples()

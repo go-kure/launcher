@@ -866,8 +866,29 @@ kind, which no condition names. A generated source is a component of its own, so
 places name that component. The report names the `helmrelease` or `helmtemplate` with no
 member, so its places are read under the plain owner.
 
-`postgresql` publishes no map: it builds its members from moved and re-shaped keys. A
-component type defined by a model publishes none either.
+`postgresql` publishes a map. Its rule parses each key and builds its members from the
+result, so no place is `Unchanged`. One place is conditional: `version` reaches
+`imageName` only where `imageName` is unset or empty. The keys land as follows:
+
+| Key | Lands at |
+|-----|----------|
+| `version`, `imageName` | `cnpg-cluster` `imageName` |
+| `storageSize`, `replicas` | `cnpg-cluster` `storage.size`, `instances` |
+| `resources`, `inheritedMetadata`, `monitoring`, `affinity`, `externalClusters`, `bootstrap` | `cnpg-cluster`, same key |
+| `postgresql`, `replication`, `managedRoles` | `cnpg-cluster` `postgresql.parameters`, `postgresql.synchronous`, `managed.roles` |
+| `recovery` | `cnpg-cluster` `bootstrap.recovery`, `externalClusters`; with an inline source, `cnpg-objectstore` `configuration` |
+| `backup` | `cnpg-cluster` `plugins`; `cnpg-objectstore` `configuration`, `retentionPolicy`; `cnpg-scheduledbackup` `schedule`, `immediate`, `suspend`, `target`, `backupOwnerReference` |
+| `pooler` | `cnpg-pooler` `instances`, `type`, `pgbouncer` |
+| `databases` | `cnpg-database` `name`, `owner`, `ensure`, `databaseReclaimPolicy`, `extensions` |
+| `clusterObjectName` | `cluster` of `cnpg-pooler`, `cnpg-database` and `cnpg-scheduledbackup` |
+| `provider`, `poolerName` | no place |
+
+The map names member types, not instances. The Cluster and the backup store carry the
+component's name; the pooler, each database and scheduled backup and an inline recovery
+store are components of their own. With no `backup` the report names the Cluster with no
+member, so its places are read under the plain owner.
+
+A component type defined by a model publishes no map.
 
 `ComponentLoweringKeys()` returns a copy: writing to it changes no rule's map.
 

@@ -58,9 +58,9 @@ claim template) that list no fill. Check B fails on any `policy` or `builtin` en
 list, so a fill that came back to the kind fails there. It also probes the types that lower to other components: `webservice` and `worker`,
 whose entries the report names at the place of their `role-deployment` member (`Fill.Member`),
 and `postgresql`, which the report names at the cluster it builds. For a type that
-publishes a lowering key map check A reads the places of a declared default from it. For
-`postgresql`, which publishes none, the probe's `DefaultPlaces` names them. A default that lands in several
-places needs an entry at each. Provenance records leaves, so a default under a key the rule
+publishes a lowering key map check A reads the places of a declared default from it: those
+live for the probe's component, read under the plain owner where the report names the
+component with no member. A default that lands in several places needs an entry at each. Provenance records leaves, so a default under a key the rule
 builds (`affinity`) is read as "some entry below that key": weaker than its own leaf.
 For `postgresql`, check B compares written values for the four resource rows only; the
 `enablePDB`, `instances` and `storage.size` rows state sources and no value, because the
@@ -72,8 +72,7 @@ probes. Each is listed in its probe's `Unreported` with the reason, and check A 
 an entry there stops being a gap: `topologySpread` on `webservice` and `worker` (the
 document with no policy runs one replica, where the topology-spread trait it switches writes
 no constraints and the report holds no entry; the document with the policy runs two and
-holds it), and `provider`, `version` and, without a policy default, `replicas` on
-`postgresql`.
+holds it), and `provider` and, without a policy default, `replicas` on `postgresql`.
 
 The trait probes put one trait on a raw deployment, with the capability bindings the transform
 runs with (`Probe.Capabilities`), and name the fills the report holds under the trait
