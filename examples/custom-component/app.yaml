@@ -1,0 +1,22 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: reports
+  namespace: analytics
+spec:
+  components:
+  # A component of the type definitions/batchjob.yaml declares. Its properties are the
+  # BatchJob's spec, checked against the pinned CRD.
+  - name: nightly
+    type: batch-job
+    properties:
+      image: registry.example.com/reports:1.4.2
+      mode: batch
+      parallelism: 4
+      port: 8080
+      resources:
+        cpu: 500m
+        memory: 1Gi
+      env:
+      - name: REPORT_DATE
+        value: yesterday
