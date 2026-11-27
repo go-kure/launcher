@@ -325,7 +325,7 @@ The renders hold 56 distinct group and kind pairs: 41 have a built-in type, 15 d
 | `velero.io/Schedule` | 30 |
 | `velero.io/VolumeSnapshotLocation` | 30 |
 
-Templates also declare kinds that no value set switched on. 17 have no built-in type: the 15 below, which may get one, and 2 OpenShift kinds that never will (next table). Only a literal `apiVersion` is read, so the list can be short. Removed and generic kinds (`Endpoints`, `List`, `OAuthRedirectReference`, `policy/PodSecurityPolicy`) are left out.
+Templates also declare kinds that no value set switched on. 17 have no built-in type: the 15 below, which charts declare (the Conclusion says which of them launcher considers), and 2 OpenShift kinds that never will (next table). Only a literal `apiVersion` is read, so the list can be short. Removed and generic kinds (`Endpoints`, `List`, `OAuthRedirectReference`, `policy/PodSecurityPolicy`) are left out.
 
 | Kind | Charts |
 |---|---|
@@ -839,7 +839,7 @@ Serge set four rules for this page on 2026-11-27. VictoriaMetrics is the support
 
 ### Use cases and what serves them
 
-The models are named in words here and defined in the next list.
+Five models and parts are named in words in the table, and the list after it defines each. The workload model is one workload with optional volume, exposure, database, monitoring and backup parts. The generic monitoring part is a scrape and a rule. The generic backup part says what to back up and lowers to CloudNativePG or VolSync. The data store model is a replicated stateful store. The operator install model is a workload with CRDs, RBAC and, for a webhook, a certificate.
 
 | Use case | Served by | Still lacks |
 |---|---|---|
