@@ -17,6 +17,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,6 +28,7 @@ import (
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	structural "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
+	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/listtype"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/pruning"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/validation"
 	utiljson "k8s.io/apimachinery/pkg/util/json"
@@ -91,6 +93,11 @@ func Load(path string) (*Handler, error) {
 	if err := dec.Decode(&doc); err != nil {
 		return nil, errors.Wrapf(err, "parsing component definition %q", path)
 	}
+	// One definition per file: a second document would be dropped unread.
+	var next any
+	if err := dec.Decode(&next); err != io.EOF {
+		return nil, errors.Errorf("component definition %q: the file holds more than one YAML document; one definition goes in each file", path)
+	}
 	h, err := build(&doc, filepath.Dir(path))
 	if err != nil {
 		return nil, errors.Wrapf(err, "component definition %q", path)
@@ -125,6 +132,10 @@ func build(doc *document, dir string) (*Handler, error) {
 	if err := sigsyaml.Unmarshal(raw, &crd); err != nil {
 		return nil, errors.Wrapf(err, "parsing CRD %q", doc.Spec.Schema.CRD)
 	}
+	if crd.APIVersion != apiextv1.SchemeGroupVersion.String() || crd.Kind != "CustomResourceDefinition" {
+		return nil, errors.Errorf("%q is %s %s, not a %s CustomResourceDefinition",
+			doc.Spec.Schema.CRD, crd.APIVersion, crd.Kind, apiextv1.SchemeGroupVersion)
+	}
 	if crd.Spec.Group != group || crd.Spec.Names.Kind != doc.Spec.Emits.Kind {
 		return nil, errors.Errorf("CRD defines %s in group %s, spec.emits names %s in group %s",
 			crd.Spec.Names.Kind, crd.Spec.Group, doc.Spec.Emits.Kind, group)
@@ -157,6 +168,12 @@ func build(doc *document, dir string) (*Handler, error) {
 	spec, ok := internal.Properties["spec"]
 	if !ok {
 		return nil, errors.New("the CRD schema declares no spec")
+	}
+	// The top level is published as a closed set of properties, and the property
+	// check refuses any key outside it before the CRD validator runs.
+	if spec.AdditionalProperties != nil && (spec.AdditionalProperties.Allows || spec.AdditionalProperties.Schema != nil) ||
+		spec.XPreserveUnknownFields != nil && *spec.XPreserveUnknownFields {
+		return nil, errors.New("the CRD's spec is open (additionalProperties or x-kubernetes-preserve-unknown-fields), and a component definition publishes the spec's declared properties only; declare them in the CRD")
 	}
 
 	return &Handler{
@@ -234,33 +251,45 @@ func (h *Handler) ToApplicationConfig(component *oam.Component, namespace string
 		return nil, errors.Errorf("component %q (%s): fields the CRD does not declare: %s",
 			component.Name, h.kind, strings.Join(unknown, ", "))
 	}
-	if errs := validation.ValidateCustomResource(nil, object, h.validator); len(errs) > 0 {
+	// The API server checks list-type map and set uniqueness apart from the schema.
+	errs := validation.ValidateCustomResource(nil, object, h.validator)
+	errs = append(errs, listtype.ValidateListSetsAndMaps(nil, h.structural, object)...)
+	if len(errs) > 0 {
 		return nil, errors.Wrapf(errs.ToAggregate(), "component %q (%s)", component.Name, h.kind)
 	}
 
-	properties := map[string]any{"object": object}
-	if h.clusterScoped {
-		properties["clusterScoped"] = true
-	}
+	// Always stated, false included: unset, passthrough would let its own table of
+	// kinds decide a scope the pinned CRD has already settled.
+	properties := map[string]any{"object": object, "clusterScoped": h.clusterScoped}
 	return (&components.PassthroughHandler{}).ToApplicationConfig(
 		&oam.Component{Name: component.Name, Type: "passthrough", Properties: properties}, namespace)
 }
 
 // Register makes the definition's type authorable on t and declares its identity, so
 // that a model can name the type as a part. It refuses a type name t already holds.
-func Register(t *oam.Transformer, h *Handler) error {
-	// A declared identity or a registered handler holds the name; the second read
-	// covers a handler registered with no identity, which RegisterAuthoredComponent
-	// would meet with a panic.
-	_, err := t.ResolveComponentType(h.typeName)
+func Register(t *oam.Transformer, h *Handler) (err error) {
+	// A declared identity or a registered handler holds the name.
+	_, resolveErr := t.ResolveComponentType(h.typeName)
 	_, registered := t.ComponentHandlerFor(h.typeName)
-	if err == nil || registered {
+	if resolveErr == nil || registered {
 		return errors.Errorf("component definition: the type %q is already declared", h.typeName)
+	}
+	// The identity is also known by its short name, which would take over a type
+	// registered under that name.
+	if _, registered := t.ComponentHandlerFor(h.identity.ShortName()); registered {
+		return errors.Errorf("component definition %q: the short name %q of %s is a type that is already registered", h.typeName, h.identity.ShortName(), h.identity)
 	}
 	ids := map[string]oam.TypeID{h.typeName: h.identity}
 	if err := t.CheckComponentTypes(ids); err != nil {
 		return errors.Wrapf(err, "component definition %q", h.typeName)
 	}
+	// The Transformer panics on a name it holds with no declared identity, such as
+	// a lowering rule a library caller registered.
+	defer func() {
+		if p := recover(); p != nil {
+			err = errors.Errorf("component definition %q: %v", h.typeName, p)
+		}
+	}()
 	t.RegisterAuthoredComponent(h.typeName, h)
 	return errors.Wrapf(t.DeclareComponentTypes(ids), "component definition %q", h.typeName)
 }
