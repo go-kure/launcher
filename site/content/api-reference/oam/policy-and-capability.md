@@ -247,11 +247,13 @@ with no entry is not shown to be free of a bound.
 | `privileged` | `securityContext.privileged` and `securityContext.windowsOptions.hostProcess` of a container; `podSecurityContext.windowsOptions.hostProcess`. |
 | `host-path` | `volumes[].type`: the refusal is of a volume whose type is `hostPath`. |
 | `container-capability` | `securityContext.capabilities.add` of a container. |
-| `registry` | `image` of a container; `volumes[].image`, an open node. |
+| `registry` | `image` of a container; `volumes[].image`, an open node; `url` of `gitrepository` and of `manifests`; `source.url` of `helm`. |
 | `resource-maximum` | `resources.requests` and `resources.limits`, `cpu` and `memory`, of a container; the same four under `podResources`. |
 | `resource-default-limit` | `resources.requests.cpu` and `resources.requests.memory` of a container. |
 | `storage-maximum` | `volumes[].ephemeral`, an open node; `volumes[]` of `webservice` and `worker`, an open node, for the `size` of a `pvc` volume that generates its claim; `volumeClaimTemplates` of `statefulset`, an open node, for the storage request of each claim template; `size` of the `pvc` trait. |
 | `replica-maximum` | `replicas` of `deployment`, `webservice`, `worker`, `statefulset`, `replicaset` and `replicationcontroller`; `maxReplicas` of the `scaler` trait. |
+| `explicit-secret` | `inline` and `url` of `manifests`: a core Secret the source carries. |
+| `unreadable-object` | `inline` and `url` of `manifests`: an object the policy check cannot read. |
 
 The container properties are those of the main container, at the top of the component, and
 the same ones under `initContainers[]` and `sidecars[]`. Where an entry names no type, it
@@ -266,12 +268,25 @@ open nodes, with no path below them. `pod` declares `host-namespace` on `hostNet
 `job`, `replicaset` and `replicationcontroller` declare those seven classes on their one
 `template` node, and `cronjob` on its `jobTemplate` node.
 
-Four classes are declared on no property yet. `trait-capability` and `object-kind` are about
-a type as a whole. `explicit-secret` and `unreadable-object` cannot be caused on the types
-above. Other built-in types do raise them, some from one property (the keystore `password`
-of a `certificate` component, for one) and some for the type as a whole (a `secret`
-component or trait, whatever its properties hold). Those types, like every built-in type
-not named above, declare no bound yet: that says nothing about whether the policy holds
+`gitrepository` declares `registry` on `url`, and `helm` on `source.url`: the source the
+component generates (a HelmRepository, an OCIRepository or a GitRepository, or the
+`helmtemplate` under template delivery) is held to the allowed registries. `manifests`
+declares `registry` on `url`, a redirect to another host included. It declares
+`explicit-secret` and `unreadable-object` on both `inline` and `url`, because the document is
+the value of `inline` and is what `url` names: a core Secret is refused under a policy that
+forbids explicit secrets, and so is an object the check cannot read (a workload in an API
+version the build does not know, an autoscaler whose `maxReplicas` is not an integer).
+The other classes the same check raises on a workload object of a `manifests` source (the
+image, pod security, resource, storage and replica rules) are shared with `passthrough` and
+`helmtemplate` and are declared on none of them yet.
+
+`trait-capability` and `object-kind` are declared on no property: they are about a type as a
+whole, and the second is the transform's check on every application, whatever component
+emitted the object. `explicit-secret` and `unreadable-object` are declared only on
+`manifests`. Other built-in types do raise them, some from one property (the keystore
+`password` of a `certificate` component, for one) and some for the type as a whole (a
+`secret` component or trait, whatever its properties hold). Those types, like every built-in
+type not named above, declare no bound yet: that says nothing about whether the policy holds
 them.
 
 ## Capability system

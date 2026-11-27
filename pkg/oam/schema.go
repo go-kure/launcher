@@ -191,7 +191,10 @@ type PropertySchema struct {
 	// declare, or an array of such items) it lists every class a value at an
 	// undeclared key below the node can cause, with no path; a property the node
 	// does declare carries its own. For an array of open items the list is on the
-	// array where its items declare no property, and on the items where they do.
+	// array where its items declare no property, and on the items where they do. A
+	// string property whose value is a document the handler reads object by object,
+	// or the url that document is fetched from (`inline` and `url` of `manifests`),
+	// lists the classes of the refusals of those objects.
 	//
 	// It is a published fact, not a rule: nothing reads it to accept or refuse a
 	// value, so a document is accepted as it is with or without it. A built-in
