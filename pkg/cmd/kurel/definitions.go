@@ -1,6 +1,8 @@
 package kurel
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -33,13 +35,11 @@ func loadComponentDefinitions(t *oam.Transformer, dir string) error {
 		if err != nil {
 			return errors.Wrapf(err, "reading %q", path)
 		}
-		var probe struct {
-			Kind string `yaml:"kind"`
-		}
-		if err := yaml.Unmarshal(data, &probe); err != nil {
+		isDefinition, err := holdsDefinition(data)
+		if err != nil {
 			return errors.Wrapf(err, "%q: failed to parse YAML", path)
 		}
-		if probe.Kind != definition.Kind {
+		if !isDefinition {
 			continue
 		}
 		h, err := definition.Load(path)
@@ -51,4 +51,24 @@ func loadComponentDefinitions(t *oam.Transformer, dir string) error {
 		}
 	}
 	return nil
+}
+
+// holdsDefinition reports whether any YAML document of data is a
+// ComponentDefinition, so that one in a later document is handed to Load, which
+// refuses the file, and never skipped.
+func holdsDefinition(data []byte) (bool, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	for {
+		var probe struct {
+			Kind string `yaml:"kind"`
+		}
+		if err := dec.Decode(&probe); err == io.EOF {
+			return false, nil
+		} else if err != nil {
+			return false, err
+		}
+		if probe.Kind == definition.Kind {
+			return true, nil
+		}
+	}
 }

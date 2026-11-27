@@ -260,7 +260,7 @@ func TestBuildCommand_ComponentDefinitionFileWithTwoDocuments(t *testing.T) {
 			if err := os.WriteFile(def, append([]byte(other), data...), 0o644); err != nil {
 				t.Fatal(err)
 			}
-		}, "ComponentDefinition"},
+		}, `and "SomethingElse"`},
 		{"two definitions", func(dir string) {
 			def := filepath.Join(dir, "definitions/batchjob.yaml")
 			data, err := os.ReadFile(def)

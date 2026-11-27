@@ -34,4 +34,10 @@ patterns, formats, array items, `additionalProperties`, int-or-string values and
 - CEL rules (`x-kubernetes-validations`) are not evaluated.
 - Defaults are not applied.
 - Only the version the document names is read, from a local file.
+- A property is authored without `null`, which reads as absent, as for every property, so a
+  CRD's `nullable` is not reachable.
+- A CRD whose `spec` is open (`additionalProperties` or `x-kubernetes-preserve-unknown-fields`
+  on `spec` itself) is refused: the published properties are the declared ones. Open
+  properties further down are accepted.
+- A file holds one definition; a second YAML document is refused.
 - No policy reads the pod settings a resource embeds (go-kure/launcher#1705).
