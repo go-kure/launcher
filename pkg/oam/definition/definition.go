@@ -120,7 +120,11 @@ func build(doc *document, dir string) (*Handler, error) {
 		return nil, errors.Errorf("spec.schema.crd %q must be a relative path inside the definition's directory", doc.Spec.Schema.CRD)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(dir, doc.Spec.Schema.CRD))
+	crdPath, err := containedPath(dir, doc.Spec.Schema.CRD)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(crdPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "reading the pinned CRD")
 	}
@@ -188,6 +192,28 @@ func build(doc *document, dir string) (*Handler, error) {
 	}, nil
 }
 
+// containedPath resolves rel inside dir, symlinks included, and refuses a target
+// outside dir: the text of rel was checked local, and a symlink can still lead out.
+func containedPath(dir, rel string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", errors.Wrap(err, "reading the pinned CRD")
+	}
+	base, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", errors.Wrap(err, "reading the pinned CRD")
+	}
+	target, err := filepath.EvalSymlinks(filepath.Join(base, rel))
+	if err != nil {
+		return "", errors.Wrap(err, "reading the pinned CRD")
+	}
+	inner, err := filepath.Rel(base, target)
+	if err != nil || inner == ".." || strings.HasPrefix(inner, ".."+string(filepath.Separator)) {
+		return "", errors.Errorf("spec.schema.crd %q resolves outside the definition's directory", rel)
+	}
+	return target, nil
+}
+
 // topLevelProperties publishes the top level of the CRD's spec. The nested shape is
 // left open here and checked in full by the CRD validator. A property of no declared
 // type (the CRD leaves it to x-kubernetes-preserve-unknown-fields) is published as
@@ -224,13 +250,18 @@ func (h *Handler) PropertySchema() map[string]oam.PropertySchema { return h.prop
 // ToApplicationConfig checks the properties as the custom resource's spec and emits
 // the object through the passthrough handler.
 func (h *Handler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
+	// A component that authors no properties has the empty spec, never a null one.
+	spec := component.Properties
+	if spec == nil {
+		spec = map[string]any{}
+	}
 	// The validator and the pruner read JSON values (int64, float64), not the Go
 	// values a YAML decode gives.
 	encoded, err := json.Marshal(map[string]any{
 		"apiVersion": h.apiVersion,
 		"kind":       h.kind,
 		"metadata":   map[string]any{"name": component.Name},
-		"spec":       component.Properties,
+		"spec":       spec,
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "component %q: encoding the properties", component.Name)
