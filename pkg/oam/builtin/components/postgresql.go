@@ -283,7 +283,7 @@ func (PostgresqlRule) PropertySchema() map[string]oam.PropertySchema {
 	// The name of the Cluster (go-kure/launcher#787); the ObjectStore's is
 	// backup.objectStoreObjectName.
 	schema[postgresqlClusterNameProperty] = oam.PropertySchema{Type: oam.PropertyTypeString, Description: "Name of the generated Cluster, in place of the component name, used as written; a DNS-1035 label of at most 50 characters. The Pooler's, each Database's and each ScheduledBackup's reference to the Cluster and the endpoint selector follow it; the default names of the Pooler, the Databases and the ScheduledBackups keep the component name. CloudNativePG derives the Cluster's Services and Secrets from this name, and the default backup folder (backup.serverName) moves with it. Renaming an existing Cluster creates a new one: the old one is pruned with its data unless it is protected."}
-	return schema
+	return oam.DeclareBounds(schema, postgresqlBounds())
 }
 
 // Parse is postgresql's full parse, the former handler's ToApplicationConfig

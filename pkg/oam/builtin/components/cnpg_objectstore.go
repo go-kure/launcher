@@ -33,11 +33,11 @@ func (h *CnpgObjectStoreHandler) CanHandle(componentType string) bool {
 // whose content is checked by the strict decode, not by this schema.
 func (h *CnpgObjectStoreHandler) PropertySchema() map[string]oam.PropertySchema {
 	const ref = " Decoded strictly into the Barman Cloud plugin API type: see the ObjectStoreSpec reference in the plugin's documentation for its fields."
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"configuration":                {Type: oam.PropertyTypeObject, AdditionalProperties: true, Required: true, Description: "Required. The object store: destinationPath (required), endpointURL, the s3Credentials, azureCredentials or googleCredentials, and the wal and data backup settings." + ref},
 		"retentionPolicy":              {Type: oam.PropertyTypeString, Description: "How long backups are kept, as <n><d|w|m> (for example 30d)."},
 		"instanceSidecarConfiguration": {Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: "Configuration of the plugin sidecar in the Cluster's instance pods: env, resources, retentionPolicyIntervalSeconds, additionalContainerArgs, logLevel. A policy cpu/memory maximum caps its resources." + ref},
-	}
+	}, cnpgObjectStoreBounds())
 }
 
 // cnpgObjectStoreDefaultedZeroFields lists the ObjectStoreSpec fields on which

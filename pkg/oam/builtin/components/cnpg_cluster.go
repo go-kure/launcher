@@ -173,7 +173,7 @@ func (h *CnpgClusterHandler) PropertySchema() map[string]oam.PropertySchema {
 			Items:       &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: itemDesc},
 		}
 	}
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"description":               str("Description of this PostgreSQL cluster."),
 		"inheritedMetadata":         obj("Labels and annotations inherited by every object related to the Cluster."),
 		"imageName":                 str("Container image for the instances, by tag or digest. When omitted, the operator takes the image from imageCatalogRef or, without one, chooses its own. A policy registry allowlist applies to an authored image, and refuses a Cluster that sets neither."),
@@ -229,7 +229,7 @@ func (h *CnpgClusterHandler) PropertySchema() map[string]oam.PropertySchema {
 		"plugins":                   arr("Plugins loaded by the cluster.", "A single plugin configuration."),
 		"probes":                    obj("Configuration of the probes injected into the instance pods."),
 		"primaryLease":              obj("Timings of the Lease used for primary election."),
-	}
+	}, cnpgClusterBounds())
 }
 
 // ToApplicationConfig decodes an OAM cnpg-cluster component into a

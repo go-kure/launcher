@@ -740,15 +740,21 @@ The refusal of a Secret that an `externalsecret` or `clusterexternalsecret` woul
 `oam.RefusalExplicitSecret`, and `errors.As` finds the type. The refusal of a kind the policy reads
 there is a bare `PolicyRefusal` of class `oam.RefusalUnreadableObject`.
 
-The workload types that keep the reshaped form, the kinds that take a pod as the API type, and the
+The workload types that keep the reshaped form, the kinds that take a pod as the API type, the
 source types `helm`, `gitrepository`, `helmrepository`, `ocirepository`, `oci`, `bucket`, `helmrelease`,
-`imagerepository`, `resourcesetinputprovider`, `fluxcd-provider` and `manifests` publish, in
+`imagerepository`, `resourcesetinputprovider` and `manifests`, the `fluxcd-provider` type, `postgresql` and
+the CloudNativePG kinds `cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-imagecatalog` and
+`cnpg-clusterimagecatalog` publish, in
 `boundedBy`, which classes an authored value at a property can cause (`bounds.go`,
 go-kure/launcher#1580, go-kure/launcher#1711). No schema fragment carries a bound: each type states its own.
 The source types declare `registry` on the property that names where they are fetched from (a `bucket`
-also on `provider`, for the gcp host; `helmrelease` on its open `chart` node), `fluxcd-provider` declares
-`explicit-secret` on `address`, and `manifests` declares `explicit-secret` and
-`unreadable-object` on `inline` and `url`; the classes the same check raises on a workload object
+also on `provider`, for the gcp host; `helmrelease` on its open `chart` node), and `manifests` declares
+`explicit-secret` and `unreadable-object` on `inline` and `url`. `fluxcd-provider` is not a source: it
+declares `explicit-secret` on `address`. `postgresql` and the CloudNativePG kinds declare what their
+policy check raises (`cnpg_cluster.go`, `cnpg_pooler.go`, `cnpg_common.go`): `replica-maximum`,
+`resource-maximum`, `storage-maximum` and `registry` on a Cluster's own properties, and the classes of a
+pod, on the one open `template` node, for a Pooler; their structured properties are open nodes, so a class
+sits on the node and a value below it raises it. The classes the same check raises on a workload object
 (shared with `passthrough` and `helmtemplate`) and `object-kind` (the transform's) are declared on none.
 
 ## Pod view of a monitoring workload object (`MonitoringPodSpec`)
