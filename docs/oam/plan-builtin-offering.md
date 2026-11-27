@@ -25,10 +25,10 @@ A configuration model defines a **component** type. The model README says a trai
 
 | Candidate | Proposal | Shape | Reason |
 |---|---|---|---|
-| Workload model: a workload with optional volume, exposure, database, monitoring and backup | Include | Configuration model, with one `mode` input (service, worker or job; decided 2026-11-27, see Models) | It is the most frequent combination that no single type gives (survey, Candidate models). One model with parts switched off replaces a monitored-web-service model and a stateful-web-app model. |
-| Generic monitoring part: a scrape and a rule | Include | Both a part of the workload model and a Go trait (decided 2026-11-27, see Traits) | It serves the most widespread use case in the survey's charts. It lowers to VictoriaMetrics kinds only. |
+| Workload model: a workload with optional volume, exposure, database, monitoring and backup | Include | Configuration model, with one `mode` input (service, worker or job; decided 2026-11-27, see Models); go-kure/launcher#1737 | It is the most frequent combination that no single type gives (survey, Candidate models). One model with parts switched off replaces a monitored-web-service model and a stateful-web-app model. |
+| Generic monitoring part: a scrape and a rule | Include | Both a part of the workload model (go-kure/launcher#1737) and a Go trait (decided 2026-11-27, see Traits; go-kure/launcher#1736) | It serves the most widespread use case in the survey's charts. It lowers to VictoriaMetrics kinds only. |
 | Generic backup part | Include | Lowers to `cnpg-scheduledbackup` for a database and to VolSync for a volume | Decided on 2026-11-27 (see Backups). It needs no new kind. |
-| S3 storage: create a bucket, and consume one | Include, as a base offering (decided 2026-11-27) | Create: backend specific. Consume: one configuration model for every S3 | Two separate concerns, researched on 2026-11-28 (see S3 as a base offering). |
+| S3 storage: create a bucket, and consume one | Include, as a base offering (decided 2026-11-27) | Create: backend specific. Consume: one configuration model for every S3 (go-kure/launcher#1738) | Two separate concerns, researched on 2026-11-28 (see S3 as a base offering). |
 | Data store model | Include, low priority | Configuration model | An operator type is the better route where one exists, so the value is where none does. |
 | Operator install model | Not for now | | `helm` already delivers most of it, so the value is low (survey, Conclusion). The per-namespace grant needs Go. |
 | Many-service application | Not | | It is the worked example of what the mechanism must build. A user writes a model for it. |
@@ -41,7 +41,7 @@ A configuration model defines a **component** type. The model README says a trai
 
 ### Base kinds (built-in types)
 
-- **Proposal:** a kind type or a generic-route definition for each VictoriaMetrics kind the generic monitoring part lowers to: `VMServiceScrape`, `VMPodScrape` and `VMRule`. They have no built-in type today. A generic-route definition is enough for a model to write them (see "What a model part can write").
+- **Decided 2026-11-28:** a generic-route definition, with no Go, for each VictoriaMetrics kind the generic monitoring part lowers to: `VMServiceScrape`, `VMPodScrape` and `VMRule`, shipped in the binary with each CRD pinned to an operator release (go-kure/launcher#1735). They have no built-in type, and a generic-route definition is enough for a model to write them (see "What a model part can write").
 - **Proposal:** the other VictoriaMetrics scrape and configuration kinds (`VMProbe`, `VMNodeScrape`, `VMStaticScrape`, `VMScrapeConfig`, `VMAlertmanagerConfig`) go by hand through the generic route, because no part lowers to them.
 - **Proposal:** the VictoriaMetrics instance kinds (`VMAgent`, `VMAlert`, `VMAlertmanager`, `VMSingle`, `VMCluster`, `VMAuth` and the log and trace families) run pods from settings in the resource. They wait for the pod policy of go-kure/launcher#1705, or a Go type. They are not part of the generic monitoring part (see below).
 - Nothing is proposed as a built-in type for Grafana, Perses, Forecastle, Velero or the low-priority kinds of the survey's list. They are by hand.
@@ -59,7 +59,7 @@ A configuration model expresses what CEL and the model format can: inputs and de
 
 **The workload model's shape, decided 2026-11-27.** Serge, typed and relayed 2026-11-27 23:42:27 CET: "(1) One workload model with a mode input / if we want the simpler model, the one model per mode can be built on top of 1". So one workload model with a `mode` input (service, worker or job) is the base. A model per mode, if one is wanted, is a thin model built on top of it.
 
-Existing Go lowering rules (`webservice`, `worker`, `helm`, `postgresql`, `oci`) are not taken as settled by the survey, and this page does not settle them.
+Existing Go lowering rules (`webservice`, `worker`, `helm`, `postgresql`, `oci`) are not taken as settled by the survey, and this page does not settle them. Serge's answer of 2026-11-28 is that no existing Go type is converted for now (see "What a model part can write").
 
 ### Traits
 
@@ -77,7 +77,13 @@ Read from the code and tried with a model in a local test on 2026-11-27.
 - **A kind that only a generic-route definition declares: yes.** A model part names its type, and that type must be declared when the model registers. Registering a definition declares the kind's identity (`<kind>.<group>@<version>`, such as `vmrule.operator.victoriametrics.com@v1beta1`) so that a model can name it. `kurel build` loads definitions before models. A model whose part named such a kind built the object in the test, and the same model with no definition was refused at registration. So the generic monitoring part needs no built-in type for `VMServiceScrape`, `VMPodScrape` or `VMRule`.
   - The test used the CRDs of the VictoriaMetrics operator as they stand on its default branch on 2026-11-27, not a release. The loader accepts the CRDs of all three kinds, and a model with a scrape part and a rule part built a `VMServiceScrape` and a `VMRule`. It refuses `VMAuth`, because that CRD leaves its `spec` open. That agrees with the proposal that the instance kinds wait.
   - Not tried: the CRDs' own CEL rules, which the loader does not evaluate, and a CRD pinned to a release.
-- **Decided 2026-11-28: a definition and a model reach a user shipped in the binary.** Serge, typed about 00:09 CET and relayed: "shipped in the binary, but ned to confirm / - the list of whet gets built / - what in golang and what as config model". Which items get built, and which of them are Go and which are configuration models, still waits for his confirmation. A follow-up records it. How loading works today: launcher loads definitions only from the application's `definitions/` directory, and models only from its `models/` directory and `--model` files. Nothing is embedded in the binary yet. So every "Include" row that is a model, and the pinned CRDs a monitoring part needs, wait for that embedding to be built.
+- **Decided 2026-11-28: a definition and a model reach a user shipped in the binary.** Serge, typed about 00:09 CET and relayed: "shipped in the binary, but ned to confirm / - the list of whet gets built / - what in golang and what as config model". How loading works today: launcher loads definitions only from the application's `definitions/` directory, and models only from its `models/` directory and `--model` files. Nothing is embedded in the binary yet (go-kure/launcher#1735 builds it). So every "Include" row that is a model, and the pinned CRDs a monitoring part needs, wait for that embedding to be built.
+- **Decided 2026-11-28: the list of what gets built, and what is Go and what is a configuration model.** Serge, typed and relayed about 00:24 CET, answered "yes" to: "Do you confirm the call 6 list as sent, with no conversion of existing Go types for now?" The list:
+  - **Go code:** the mechanism that ships built-in definitions and models in the binary (go-kure/launcher#1735), and a monitoring trait (go-kure/launcher#1736).
+  - **Definitions, no Go:** `VMServiceScrape`, `VMPodScrape` and `VMRule`, each with its CRD pinned to an operator release (go-kure/launcher#1735).
+  - **Configuration models:** the workload model with its monitoring and backup parts (go-kure/launcher#1737); the S3 access model (go-kure/launcher#1738); the data store model (low priority, no issue yet); thin per-mode models only if wanted.
+  - **No existing Go type is converted for now.** A definition over a resource that runs pods carries no policy limits, because the policy check passes a custom resource "whatever it holds: the pods its controller creates are not covered" (go-kure/launcher#1705; `pkg/oam/builtin/components/passthrough.go`, the `ApplyPolicy` comment). A component of a model type cannot carry a trait (`pkg/oam/model/README.md`, "Traits on a model component are not supported").
+- **Decided 2026-11-28: a name clash is refused.** Serge, typed and relayed about 00:26 CET, answered "refused" to: "when an application's definition has the same name as a built-in one, should the clash be refused (the lead's recommendation), yes or no?" So an application's own definition or model that names a shipped type is refused, and a shipped type is never replaced silently.
 - **The `volsync` trait from a model part: yes.** See Backups.
 
 #### Sources for these answers
@@ -176,6 +182,8 @@ Do not confuse the `bucket` component with either. It is Flux's `source.toolkit.
 
 Garage (Deuxfleurs) is the self-hosting candidate. It has no official operator. Two community operators exist, and both manage a bucket and the access to it, as Serge supposed. The facts below were read on 2026-11-28 from each repository and its README. They are not a recommendation: each project has one main contributor (see the Contributors row), and the choice is Serge's.
 
+[Deuxfleurs/garage pull request 994](https://git.deuxfleurs.fr/Deuxfleurs/garage/pulls/994) (git.deuxfleurs.fr), merged 2025-05-22, adds a `GarageNode` CRD to Garage's own repository, with a cookbook page and a kustomization. It adds no other CRD. Read 2026-11-28 from the forge API and the pull request's diff; the rest of the repository was not read for CRDs.
+
 | | rajsinghtech/garage-operator | bmarinov/garage-storage-controller |
 |---|---|---|
 | Repository | [github.com/rajsinghtech/garage-operator](https://github.com/rajsinghtech/garage-operator) | [github.com/bmarinov/garage-storage-controller](https://github.com/bmarinov/garage-storage-controller) |
@@ -246,7 +254,6 @@ None is proposed as a built-in type here. Each can go through the generic route 
 
 None of these is a fact on this page.
 
-- Whether Garage's pull request 994 (a `GarageNode` CRD in Garage's own repository) was merged.
 - The bucket CRD names of the Crossplane, Config Connector and Azure Service Operator routes.
 - The content format of the credentials Secret that Velero reads.
 - Whether the External Secrets Operator can read a Secret that a Garage operator created, so that the consume model could re-format it for another application.
@@ -254,6 +261,6 @@ None of these is a fact on this page.
 
 ## Open questions
 
-None of these is decided here. Questions 1, 3, 4, 5 and 6 of the first draft were answered by Serge on 2026-11-27 and 2026-11-28 and are recorded in the sections above (the Prometheus Operator types, S3, the workload model, the conversion, and how definitions and models reach a user). One thing is still open besides question 2: which items get built, and which are Go and which are configuration models, waits for his confirmation (see "What a model part can write"). The number of question 2 is kept so that earlier references still point at the same question.
+None of these is decided here. Questions 1, 3, 4, 5 and 6 of the first draft were answered by Serge on 2026-11-27 and 2026-11-28 and are recorded in the sections above (the Prometheus Operator types, S3, the workload model, the conversion, and how definitions and models reach a user). He confirmed the list of what gets built, and which items are Go and which are configuration models, on 2026-11-28 (see "What a model part can write"). Question 2 is the only open question. Its number is kept so that earlier references still point at the same question.
 
 - **Question 2: a trait defined without Go.** Serge's answer on where a generic part lives ("3. Both.", see Traits) settles the monitoring part. It does not address this: does launcher want a way to define a trait without Go? A trait is Go today. This is a design question for go-kure/launcher#102, and it is not among his answers.
