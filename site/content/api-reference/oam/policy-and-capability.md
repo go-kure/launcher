@@ -243,17 +243,17 @@ with no entry is not shown to be free of a bound.
 
 | Class | Declared on |
 |---|---|
-| `host-namespace` | `hostNetwork`, `hostPID`, `hostIPC`. |
-| `privileged` | `securityContext.privileged` and `securityContext.windowsOptions.hostProcess` of a container; `podSecurityContext.windowsOptions.hostProcess`; `securityContext` and `podSecurityContext` of `cnpg-cluster`, open nodes. |
-| `host-path` | `volumes[].type`: the refusal is of a volume whose type is `hostPath`. |
-| `container-capability` | `securityContext.capabilities.add` of a container; `securityContext` of `cnpg-cluster`, an open node. |
-| `registry` | `image` of a container; `volumes[].image`, an open node; `url` of `gitrepository`, `helmrepository`, `ocirepository`, `resourcesetinputprovider` and `manifests`; `source.url`, `source.endpoint` and `source.provider` of `helm`; `source.url` of `oci`; `endpoint` and `provider` of `bucket`; `image` of `imagerepository`; `chart` of `helmrelease`, an open node; `imageName` of `postgresql` and `cnpg-cluster`; `pooler` of `postgresql`, `postgresql` of `cnpg-cluster` (the image of an extension) and `pgbouncer` of `cnpg-pooler`, open nodes; `images` and `componentImages` of `cnpg-imagecatalog` and `cnpg-clusterimagecatalog`, open lists. |
-| `resource-maximum` | `resources.requests` and `resources.limits`, `cpu` and `memory`, of a container and of `postgresql`; the same four under `podResources`; `resources` of `cnpg-cluster` and `instanceSidecarConfiguration` of `cnpg-objectstore`, open nodes. |
+| `host-namespace` | `hostNetwork`, `hostPID`, `hostIPC`; `inline` and `url` of `manifests` and `object` of `passthrough`, for a pod in the document (`object` is an open node). |
+| `privileged` | `securityContext.privileged` and `securityContext.windowsOptions.hostProcess` of a container; `podSecurityContext.windowsOptions.hostProcess`; `securityContext` and `podSecurityContext` of `cnpg-cluster`, open nodes; `inline` and `url` of `manifests` and `object` of `passthrough`. |
+| `host-path` | `volumes[].type`: the refusal is of a volume whose type is `hostPath`; `inline` and `url` of `manifests` and `object` of `passthrough`, for a pod volume or a PersistentVolume source. |
+| `container-capability` | `securityContext.capabilities.add` of a container; `securityContext` of `cnpg-cluster`, an open node; `inline` and `url` of `manifests` and `object` of `passthrough`. |
+| `registry` | `image` of a container; `volumes[].image`, an open node; `url` of `gitrepository`, `helmrepository`, `ocirepository`, `resourcesetinputprovider` and `manifests`; `inline` of `manifests` and `object` of `passthrough`, for the image of a pod in the document; `source.url` of `helmtemplate`; `source.url`, `source.endpoint` and `source.provider` of `helm`; `source.url` of `oci`; `endpoint` and `provider` of `bucket`; `image` of `imagerepository`; `chart` of `helmrelease`, an open node; `imageName` of `postgresql` and `cnpg-cluster`; `pooler` of `postgresql`, `postgresql` of `cnpg-cluster` (the image of an extension) and `pgbouncer` of `cnpg-pooler`, open nodes; `images` and `componentImages` of `cnpg-imagecatalog` and `cnpg-clusterimagecatalog`, open lists. |
+| `resource-maximum` | `resources.requests` and `resources.limits`, `cpu` and `memory`, of a container and of `postgresql`; the same four under `podResources`; `resources` of `cnpg-cluster` and `instanceSidecarConfiguration` of `cnpg-objectstore`, open nodes; `inline` and `url` of `manifests` and `object` of `passthrough`. |
 | `resource-default-limit` | `resources.requests.cpu` and `resources.requests.memory` of a container. |
-| `storage-maximum` | `volumes[].ephemeral`, an open node; `volumes[]` of `webservice` and `worker`, an open node, for the `size` of a `pvc` volume that generates its claim; `volumeClaimTemplates` of `statefulset`, an open node, for the storage request of each claim template; `size` of the `pvc` trait; `storageSize` of `postgresql`; `storage`, `walStorage`, `tablespaces` and `ephemeralVolumeSource` of `cnpg-cluster`, open nodes. |
-| `replica-maximum` | `replicas` of `deployment`, `webservice`, `worker`, `statefulset`, `replicaset`, `replicationcontroller` and `postgresql`; `instances` of `cnpg-cluster`; `maxReplicas` of the `scaler` trait. |
-| `explicit-secret` | `inline` and `url` of `manifests`: a core Secret the source carries; `address` of `fluxcd-provider`, where the address is itself a credential. |
-| `unreadable-object` | `inline` and `url` of `manifests`: an object the policy check cannot read. |
+| `storage-maximum` | `volumes[].ephemeral`, an open node; `volumes[]` of `webservice` and `worker`, an open node, for the `size` of a `pvc` volume that generates its claim; `volumeClaimTemplates` of `statefulset`, an open node, for the storage request of each claim template; `size` of the `pvc` trait; `storageSize` of `postgresql`; `storage`, `walStorage`, `tablespaces` and `ephemeralVolumeSource` of `cnpg-cluster`, open nodes; `inline` and `url` of `manifests` and `object` of `passthrough`, for a claim, a PersistentVolume or a pod's ephemeral volume. |
+| `replica-maximum` | `replicas` of `deployment`, `webservice`, `worker`, `statefulset`, `replicaset`, `replicationcontroller` and `postgresql`; `instances` of `cnpg-cluster`; `maxReplicas` of the `scaler` trait; `inline` and `url` of `manifests` and `object` of `passthrough`, for a controller or an autoscaler in the document. |
+| `explicit-secret` | `inline` and `url` of `manifests` and `object` of `passthrough`: a core Secret the document carries; `secretValues` of `helmtemplate`; `address` of `fluxcd-provider`, where the address is itself a credential. |
+| `unreadable-object` | `inline` and `url` of `manifests` and `object` of `passthrough`: an object the policy check cannot read. |
 
 The container properties are those of the main container, at the top of the component, and
 the same ones under `initContainers[]` and `sidecars[]`. Where an entry names no type, it
@@ -282,14 +282,22 @@ that host sits on `provider`, and `helm` declares both as `source.endpoint` and
 name its registry, and of an Amazon S3 endpoint, is the same class on the same property.
 `fluxcd-provider` declares `explicit-secret` on `address`, for a type whose address is the
 credential it posts with, and for an `azureeventhub` address that holds a shared access key.
-`manifests` declares `registry` on `url`, a redirect to another host included. It declares
-`explicit-secret` and `unreadable-object` on both `inline` and `url`, because the document is
-the value of `inline` and is what `url` names: a core Secret is refused under a policy that
-forbids explicit secrets, and so is an object the check cannot read (a workload in an API
-version the build does not know, an autoscaler whose `maxReplicas` is not an integer).
-The other classes the same check raises on a workload object of a `manifests` source (the
-image, pod security, resource, storage and replica rules) are shared with `passthrough` and
-`helmtemplate` and are declared on none of them yet.
+`manifests` declares `registry` on `url`, a redirect to another host included. A document the
+handler reads object by object declares the classes of the refusals of those objects: the
+document is the value of `inline` and is what `url` names, and the `object` of a `passthrough`
+is one object, an open node. Each of the three lists ten classes: a core Secret is refused
+under a policy that forbids explicit secrets (`explicit-secret`), an object the check cannot
+read is refused (`unreadable-object`: a workload in an API version the build does not know, an
+autoscaler whose `maxReplicas` is not an integer), and every other object is held to what a
+chart's rendered objects are held to: the registry, privileged, host namespace, host path,
+capability and resource rules of a pod, the storage a claim asks for and a PersistentVolume's
+capacity and hostPath source, and the replica maximum. The image reference level (an untagged
+image, `:latest`) and the refusal of ephemeral containers are plain errors and no class.
+`helmtemplate` declares `registry` on `source.url` and `explicit-secret` on `secretValues`, the
+two refusals that sit on one property; `helm` under template delivery raises the first through
+it, and its `source.url` row holds for that delivery. The classes of the objects a chart
+renders are declared on neither: the render comes from `source` and `values` together, which no
+property holds alone.
 
 `postgresql` lowers onto a `cnpg-cluster` and, with a pooler, a `cnpg-pooler`, so it declares what
 their policy check raises for the values it writes: `replica-maximum` on `replicas`, `registry` on
@@ -311,8 +319,8 @@ CloudNativePG kinds raise no policy refusal.
 
 `trait-capability` and `object-kind` are declared on no property: they are about a type as a
 whole, and the second is the transform's check on every application, whatever component
-emitted the object. `unreadable-object` is declared only on `manifests`, and
-`explicit-secret` only on `manifests` and `fluxcd-provider`. Other built-in types do raise them, some from one property (the keystore
+emitted the object. `unreadable-object` is declared only on `manifests` and `passthrough`, and
+`explicit-secret` only on `manifests`, `passthrough`, `helmtemplate` and `fluxcd-provider`. Other built-in types do raise them, some from one property (the keystore
 `password` of a `certificate` component, for one) and some for the type as a whole (a
 `secret` component or trait, whatever its properties hold). Those types, like every built-in
 type not named above, declare no bound yet: that says nothing about whether the policy holds

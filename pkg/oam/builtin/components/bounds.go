@@ -118,21 +118,50 @@ func registryBounds(paths ...string) map[string][]oam.RefusalClass {
 	return b
 }
 
+// documentClasses are the classes of the refusals of the objects of a document a
+// handler reads object by object. A core Secret is refused under a policy that
+// forbids explicit secrets (enforceExplicitSecretObject), an object that cannot
+// be read is refused (an unregistered workload version, an autoscaler whose
+// maxReplicas is no integer), and every other object is held to the check a
+// chart's rendered objects are held to (enforceRenderedObjectPolicy): the pod
+// classes of podBounds on a pod, the storage a claim asks for and a
+// PersistentVolume's capacity and hostPath source, and the replica maximum. The
+// image reference level (ValidateImageRefAt) and the refusal of ephemeral
+// containers are plain errors and no class. RefusalObjectKind is the transform's
+// check on every application, which no property carries.
+func documentClasses() []oam.RefusalClass {
+	return slices.Concat(podTemplateBoundsOn("template", false)["template"],
+		[]oam.RefusalClass{oam.RefusalReplicaMaximum, oam.RefusalExplicitSecret, oam.RefusalUnreadableObject})
+}
+
 // manifestsBounds are the bounds of the manifests type. The url is held to the
 // allowed registries, on every redirect hop too. The objects of the source,
-// written inline or fetched from the url, are held to the explicit-secret rule
-// and refused when they cannot be read (enforceManifestPolicy), so both
-// properties list those two classes: the document is the value of inline and is
-// what url names. The classes the same check raises on a workload object (the
-// image, pod security, resource, storage and replica rules) are shared with
-// passthrough and helmtemplate and are not declared yet, and RefusalObjectKind
-// is the transform's check on every application, which no property carries.
+// written inline or fetched from the url, are held to the checks of
+// documentClasses (enforceManifestPolicy), so both properties list those
+// classes: the document is the value of inline and is what url names.
 func manifestsBounds() map[string][]oam.RefusalClass {
-	content := []oam.RefusalClass{oam.RefusalExplicitSecret, oam.RefusalUnreadableObject}
 	return map[string][]oam.RefusalClass{
-		"inline": content,
-		"url":    append([]oam.RefusalClass{oam.RefusalRegistry}, content...),
+		"inline": documentClasses(),
+		"url":    documentClasses(),
 	}
+}
+
+// passthroughBounds are the bounds of the passthrough type: its `object`, an
+// open node, is the one object it emits, held to the checks of documentClasses
+// (enforcePassthroughPolicy).
+func passthroughBounds() map[string][]oam.RefusalClass {
+	return map[string][]oam.RefusalClass{"object": documentClasses()}
+}
+
+// helmTemplateBounds are the bounds of helmtemplate that sit on a property: the
+// host source.url is fetched from, and secretValues, refused under a policy that
+// forbids explicit secrets (HelmTemplateConfig.ApplyPolicy). The classes of the
+// objects the chart renders are not declared: the render comes from source and
+// values together, which no property of the document holds alone.
+func helmTemplateBounds() map[string][]oam.RefusalClass {
+	b := registryBounds("source.url")
+	b["secretValues"] = []oam.RefusalClass{oam.RefusalExplicitSecret}
+	return b
 }
 
 // podTemplateBounds are the bounds of a type that holds its pod below one open

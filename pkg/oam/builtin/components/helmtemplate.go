@@ -48,7 +48,7 @@ func (h *HelmTemplateHandler) CanHandle(componentType string) bool {
 // version, releaseName, values, secretValues and scopeOverrides. A test ties
 // this schema to the struct.
 func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"source": {
 			Type:        oam.PropertyTypeObject,
 			Required:    true,
@@ -70,7 +70,7 @@ func (h *HelmTemplateHandler) PropertySchema() map[string]oam.PropertySchema {
 		oam.HookGroupNamePrefixProperty:     {Type: oam.PropertyTypeString, Description: hookGroupNamePrefixDescription},
 		oam.LayoutKustomizationNameProperty: {Type: oam.PropertyTypeString, Description: layoutKustomizationNameDescription},
 		chartEndpointsKey:                   chartEndpointsSchema(),
-	}
+	}, helmTemplateBounds())
 }
 
 // hookGroupNamePrefixDescription describes hookGroupNamePrefix for the

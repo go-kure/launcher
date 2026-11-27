@@ -1,12 +1,18 @@
 package registry_test
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/probe"
@@ -37,10 +43,14 @@ type boundsPolicy struct {
 
 // boundsContent is a ContentSource that serves a manifests url from a stored
 // body, so a row needs no request: the body of the url it names, else the one
-// kept under "". Every body is recorded as fetched from registry.example.
+// kept under "". A chart is served as boundsChart, whatever its url. Every body
+// is recorded as fetched from registry.example.
 type boundsContent map[string]string
 
 func (c boundsContent) Lookup(_ context.Context, key oam.ContentKey) (oam.Content, bool, error) {
+	if key.Kind == "chart" {
+		return oam.Content{Data: boundsChart(), Hosts: []string{"registry.example"}}, true, nil
+	}
 	body, ok := c[key.URL]
 	if !ok {
 		body, ok = c[""]
@@ -93,12 +103,14 @@ var (
 // boundsStrict is the policy every row starts from: each limit set, nothing
 // allowed.
 func boundsStrict(knobs ...knob) *boundsPolicy {
+	content := boundsContent{"": manifestsConfigMap}
+	for _, d := range documents {
+		content[d.url()] = d.body
+	}
 	p := &boundsPolicy{
 		maxReplicas: i32(3), maxCPU: "2", maxMemory: "1Gi", maxStorage: "10Gi",
 		registries: []string{"registry.example"}, forbiddenCaps: []string{"NET_ADMIN"},
-		content: boundsContent{
-			"": manifestsConfigMap, secretURL: manifestsSecret, unreadableURL: manifestsUnreadable,
-		},
+		content: content,
 	}
 	for _, k := range knobs {
 		if k != nil {
@@ -194,23 +206,93 @@ const (
 	foreignImage = "elsewhere.example/team/app:1.2.3"
 )
 
-// The documents a manifests row works with. manifestsConfigMap is the one a
-// row starts from, inline or served at the url; the other two are what a row
-// changes it to: a core Secret, and an object the policy check cannot read, an
-// autoscaling/v1 HorizontalPodAutoscaler (a version kure's scheme does not
-// register) whose maxReplicas is no integer, which is refused only under a
-// replica maximum.
+// The documents a row of a type that holds a document works with: the value of
+// `inline` or `object`, or what a `url` names. manifestsConfigMap is the one a
+// row starts from, inline or served at the url, or as the object of a
+// passthrough. The others are what a row changes it to (documents): a core
+// Secret, and an object the policy check cannot read, an autoscaling/v1
+// HorizontalPodAutoscaler (a version kure's scheme does not register) whose
+// maxReplicas is no integer, which is refused only under a replica maximum.
 const (
 	manifestsConfigMap  = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\ndata:\n  key: value\n"
 	manifestsSecret     = "apiVersion: v1\nkind: Secret\nmetadata:\n  name: creds\nstringData:\n  key: value\n"
 	manifestsUnreadable = "apiVersion: autoscaling/v1\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: scale\n  namespace: demo\nspec:\n" +
 		"  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: web\n  maxReplicas: many\n"
 
-	// The urls of those two documents, under the one host the strict policy lists.
-	passingURL    = "https://registry.example/settings.yaml"
-	secretURL     = "https://registry.example/creds.yaml"
-	unreadableURL = "https://registry.example/scale.yaml"
+	// The url of the passing document, under the one host the strict policy lists.
+	passingURL = "https://registry.example/settings.yaml"
 )
+
+// document is a document that breaks one class of the check on the objects of a
+// document (enforceRenderedObjectPolicy, with the Secret rule before it): a
+// manifests source, inline or served at its url, and a passthrough object are
+// held to it alike, so each class has one document and three rows. strict is
+// the setting the class needs on the strict policy, relax the one that lifts it.
+type document struct {
+	class         oam.RefusalClass
+	body          string
+	strict, relax knob
+}
+
+// url is where the strict policy's content source serves the document.
+func (d document) url() string { return "https://registry.example/" + string(d.class) + ".yaml" }
+
+// object is the document as the map a passthrough takes.
+func (d document) object() map[string]any {
+	var obj map[string]any
+	if err := yaml.Unmarshal([]byte(d.body), &obj); err != nil {
+		panic("the document of " + string(d.class) + " does not parse: " + err.Error())
+	}
+	return obj
+}
+
+// documents holds the ten classes of the check, one document each. The pod ones
+// differ from the passing container by the one field the class refuses.
+var documents = func() []document {
+	pod := func(container, rest string) string {
+		return "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: app\n    image: " + container + "\n" + rest
+	}
+	return []document{
+		{class: oam.RefusalHostNamespace, body: pod(boundImage, "  hostNetwork: true\n"), relax: allowNetwork},
+		{class: oam.RefusalPrivileged, body: pod(boundImage, "    securityContext:\n      privileged: true\n"), relax: allowPrivileged},
+		{class: oam.RefusalHostPath, body: pod(boundImage, "  volumes:\n  - name: etc\n    hostPath:\n      path: /etc\n"), relax: allowHostPath},
+		{class: oam.RefusalContainerCapability, body: pod(boundImage, "    securityContext:\n      capabilities:\n        add: [NET_ADMIN]\n"), relax: anyCapability},
+		{class: oam.RefusalRegistry, body: pod(foreignImage, ""), relax: anyRegistry},
+		{class: oam.RefusalResourceMaximum, body: pod(boundImage, "    resources:\n      limits:\n        cpu: \"8\"\n"), relax: anyCPU},
+		{class: oam.RefusalStorageMaximum, body: "apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: data\nspec:\n  accessModes: [ReadWriteOnce]\n" +
+			"  resources:\n    requests:\n      storage: 1Ti\n", relax: anyStorage},
+		{class: oam.RefusalReplicaMaximum, body: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 9\n  selector:\n    matchLabels:\n      tier: web\n" +
+			"  template:\n    metadata:\n      labels:\n        tier: web\n    spec:\n      containers:\n      - name: app\n        image: " + boundImage + "\n", relax: anyReplicas},
+		{class: oam.RefusalExplicitSecret, body: manifestsSecret, strict: forbidSecrets, relax: allowSecrets},
+		{class: oam.RefusalUnreadableObject, body: manifestsUnreadable, relax: anyReplicas},
+	}
+}()
+
+// boundsChart is the chart a helmtemplate row renders, as the archive the
+// content source serves: one ConfigMap, which the strict policy passes.
+var boundsChart = sync.OnceValue(func() []byte {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for _, f := range []struct{ name, body string }{
+		{"app/Chart.yaml", "apiVersion: v2\nname: app\nversion: 1.0.0\n"},
+		{"app/templates/settings.yaml", manifestsConfigMap},
+	} {
+		if err := tw.WriteHeader(&tar.Header{Name: f.name, Mode: 0o644, Size: int64(len(f.body))}); err != nil {
+			panic(err)
+		}
+		if _, err := tw.Write([]byte(f.body)); err != nil {
+			panic(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		panic(err)
+	}
+	if err := gz.Close(); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+})
 
 // manifestsFromURL makes the passing document of a manifests row read its
 // source from passingURL, in place of the inline one.
@@ -370,33 +452,53 @@ func podRows(typ, node, prefix string) []boundRow {
 }
 
 // fluxAndManifestsRows are the bounds of the types that hold a source: the host
-// of the url of `helm`, `gitrepository` and `manifests`, and the objects a
-// `manifests` source carries, inline or at its url. The object classes are the
-// two the handler raises from the document itself and no other check does:
-// RefusalObjectKind is the transform's, on every application, and the classes
-// of a workload object are left to the types that share that check.
+// of the url of `helm` (under either delivery), `gitrepository` and `manifests`.
 func fluxAndManifestsRows() []boundRow {
-	secrets := func(change ...set) boundRow {
-		return boundRow{typ: "manifests", path: "inline", class: oam.RefusalExplicitSecret, change: change, strict: forbidSecrets, relax: allowSecrets}
-	}
-	unreadable := func(change ...set) boundRow {
-		return boundRow{typ: "manifests", path: "inline", class: oam.RefusalUnreadableObject, change: change, relax: anyReplicas}
-	}
-	fromURL := func(r boundRow) boundRow {
-		r.path, r.with = "url", manifestsFromURL
-		return r
-	}
 	return []boundRow{
 		{typ: "gitrepository", path: "url", class: oam.RefusalRegistry, relax: anyRegistry,
 			change: []set{{at: "url", value: "https://elsewhere.example/org/repo"}}},
 		{typ: "helm", path: "source.url", class: oam.RefusalRegistry, relax: anyRegistry,
 			change: []set{{at: "source.url", value: "https://elsewhere.example/charts"}}},
+		// Under template delivery helm lowers to helmtemplate, which raises the
+		// refusal when it holds the host of source.url.
+		{typ: "helm", path: "source.url", class: oam.RefusalRegistry, relax: anyRegistry, with: []set{{at: "delivery", value: "template"}},
+			change: []set{{at: "source.url", value: "https://elsewhere.example/charts"}}},
 		{typ: "manifests", path: "url", class: oam.RefusalRegistry, relax: anyRegistry, with: manifestsFromURL,
 			change: []set{{at: "url", value: "https://elsewhere.example/settings.yaml"}}},
-		secrets(set{at: "inline", value: manifestsSecret}),
-		fromURL(secrets(set{at: "url", value: secretURL})),
-		unreadable(set{at: "inline", value: manifestsUnreadable}),
-		fromURL(unreadable(set{at: "url", value: unreadableURL})),
+	}
+}
+
+// documentRows are the bounds of the properties that hold a document the handler
+// reads object by object: `inline` and `url` of `manifests`, and the `object` of
+// a passthrough, an open node. Each carries every class of documents, as one
+// check holds the objects of all three. RefusalObjectKind is the transform's,
+// on every application, and no handler raises it; the classes a chart's rendered
+// objects raise are not declared on helmtemplate, whose render comes from source
+// and values together.
+func documentRows() []boundRow {
+	var rows []boundRow
+	for _, d := range documents {
+		rows = append(rows,
+			boundRow{typ: "manifests", path: "inline", class: d.class, strict: d.strict, relax: d.relax,
+				change: []set{{at: "inline", value: d.body}}},
+			boundRow{typ: "manifests", path: "url", class: d.class, strict: d.strict, relax: d.relax, with: manifestsFromURL,
+				change: []set{{at: "url", value: d.url()}}},
+			boundRow{typ: "passthrough", path: "object", class: d.class, strict: d.strict, relax: d.relax,
+				change: []set{{at: "object", value: d.object()}}},
+		)
+	}
+	return rows
+}
+
+// helmTemplateRows are the bounds of helmtemplate that sit on a property: the
+// host of source.url, held before any request, and secretValues. The chart is
+// served from the content source, so a row needs no request.
+func helmTemplateRows() []boundRow {
+	return []boundRow{
+		{typ: "helmtemplate", path: "source.url", class: oam.RefusalRegistry, relax: anyRegistry,
+			change: []set{{at: "source.url", value: "https://elsewhere.example/charts"}}},
+		{typ: "helmtemplate", path: "secretValues", class: oam.RefusalExplicitSecret, strict: forbidSecrets, relax: allowSecrets,
+			change: []set{{at: "secretValues", value: map[string]any{"password": "hunter2"}}}},
 	}
 }
 
@@ -553,6 +655,8 @@ func boundRows() []boundRow {
 	rows = append(rows, boundRow{typ: "statefulset", path: "volumeClaimTemplates", class: oam.RefusalStorageMaximum,
 		change: []set{{at: "volumeClaimTemplates[].spec.resources.requests.storage", value: "1Ti"}}, relax: anyStorage})
 	rows = append(rows, fluxAndManifestsRows()...)
+	rows = append(rows, documentRows()...)
+	rows = append(rows, helmTemplateRows()...)
 	rows = append(rows, fluxSourceRows()...)
 	rows = append(rows, postgresqlRows()...)
 	rows = append(rows, cnpgClusterRows()...)
@@ -619,6 +723,10 @@ func boundDocument(t *testing.T, trait bool, typ string) (oam.Component, map[str
 		props = map[string]any{"chart": "app", "version": "1.0.0", "source": map[string]any{"url": "https://registry.example/charts"}}
 	case "manifests":
 		props = map[string]any{"inline": manifestsConfigMap}
+	case "passthrough":
+		props = map[string]any{"object": (document{body: manifestsConfigMap}).object()}
+	case "helmtemplate":
+		props = map[string]any{"chart": "app", "version": "1.0.0", "source": map[string]any{"url": "https://registry.example/charts"}}
 	case "bucket":
 		props = map[string]any{"bucketName": "charts", "endpoint": "registry.example"}
 	case "helmrepository":
