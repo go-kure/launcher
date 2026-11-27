@@ -134,10 +134,11 @@ See [Transform, extension and lowering](/site/content/api-reference/oam/transfor
 
 A library caller hands properties to `ComponentHandler.ToApplicationConfig`, `Transformer.Transform` and
 `Transformer.TransformWithPolicy`. It must not change memory it handed over, a pointee inside the properties
-included, until it has used the result. The `passthrough` component copies the maps and slices of its
-properties, and does not copy the target of a pointer, so its `Generate` emits what a pointee holds at that
-call. `RegisterComponent`, `RegisterAuthoredComponent` and `RegisterComponentLowering` panic when a declared
-type already claims the plain name as its short name, as their other collisions do
+included, until it has used the result. The `passthrough` component copies the maps, slices and arrays of its
+properties, and does not copy through a struct or the target of a pointer, so its `Generate` emits what a
+pointee, or a map or slice inside a struct, holds at that call. `RegisterComponent`,
+`RegisterAuthoredComponent` and `RegisterComponentLowering` panic when the plain name resolves to one
+declared type that is registered under another key, as their other collisions do
 (go-kure/launcher#1716; see
 [Declaring and resolving](/site/content/api-reference/oam/parsing-and-types.md#declaring-and-resolving)).
 

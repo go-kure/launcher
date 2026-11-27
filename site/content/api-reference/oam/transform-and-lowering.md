@@ -37,10 +37,11 @@ Extend the system by implementing:
 A library caller hands properties to `ComponentHandler.ToApplicationConfig`, `Transformer.Transform`
 and `Transformer.TransformWithPolicy`. It must not change memory it handed over, a pointee inside the
 properties included, until it has used the result: the objects generated from the returned cluster, or
-from the config `ToApplicationConfig` returned. The `passthrough` component copies the maps and slices of
-its properties, and does not copy the target of a pointer, so its `Generate` emits what a pointee holds at
-that call. `RegisterComponent`, `RegisterAuthoredComponent` and `RegisterComponentLowering` panic when a
-declared type already claims the plain name as its short name, as their other collisions do
+from the config `ToApplicationConfig` returned. The `passthrough` component copies the maps, slices and
+arrays of its properties, and does not copy through a struct or the target of a pointer, so its `Generate`
+emits what a pointee, or a map or slice inside a struct, holds at that call. `RegisterComponent`,
+`RegisterAuthoredComponent` and `RegisterComponentLowering` panic when the plain name resolves to one
+declared type that is registered under another key, as their other collisions do
 (go-kure/launcher#1716; see [Declaring and resolving](parsing-and-types.md#declaring-and-resolving)).
 
 `PolicyResult.Extensions` is a `map[string]any` a consumer's policy handler writes its own
