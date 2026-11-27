@@ -174,7 +174,12 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   differ, and `cliff.toml` drops a header without the colon). When such a
   change leaves the accepted format as it was (a comment, an error message, a refactor), the
   commit body carries `Format-Scope: none (<reason>)` and the reason must not be empty. The
-  guard does not see a semantic change inside a counted file that the path rule cannot tell
+  guard reads the branch's own commits, never a pull request's merge commit: CI runs it on
+  `pull_request.base.sha..pull_request.head.sha` and `make check-format-scope` on
+  `origin/main..HEAD`, and the script skips merge commits. A commit whose body carries
+  `Format-Scope: none (<reason>)` with a non-empty reason satisfies it, so a finding that a commit
+  with that trailer lacks the `(format)` scope was read from a commit outside that range
+  (go-kure/launcher#1728). The guard does not see a semantic change inside a counted file that the path rule cannot tell
   apart (some counted files hold Go-API refusals beside the refusals of an authored document,
   and an edit that touches only the Go-API ones takes the trailer), nor acceptance code outside
   the set (such as a file in a subdirectory of `pkg/oam/` other than `builtin/`, `internal/`,
