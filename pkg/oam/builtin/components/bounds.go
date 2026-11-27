@@ -165,6 +165,30 @@ func persistentVolumeBounds() map[string][]oam.RefusalClass {
 	}
 }
 
+// issuerBounds are the bounds of issuer and clusterissuer (enforceIssuerPolicy):
+// the cpu and memory of the pod an ACME HTTP01 solver starts, written below
+// `acme`, an open node.
+func issuerBounds() map[string][]oam.RefusalClass {
+	return map[string][]oam.RefusalClass{"acme": {oam.RefusalResourceMaximum}}
+}
+
+// secretStoreBounds are the bounds of secretstore and clustersecretstore
+// (enforceSecretStorePolicy): a credential written as the `value` of a union, or
+// as the data of the fake provider, below `provider`, an open node.
+func secretStoreBounds() map[string][]oam.RefusalClass {
+	return map[string][]oam.RefusalClass{"provider": {oam.RefusalExplicitSecret}}
+}
+
+// targetManifestBounds are the bounds of the object an ExternalSecret has the
+// operator write instead of a Secret, `target.manifest` (enforceTargetManifest),
+// on the open node that holds it: `target` of externalsecret, and
+// `externalSecretSpec` of clusterexternalsecret. A core Secret is refused under a
+// policy that forbids explicit secrets; a kind the policy reads is refused under
+// any applied policy, which no limit lifts.
+func targetManifestBounds(node string) map[string][]oam.RefusalClass {
+	return map[string][]oam.RefusalClass{node: {oam.RefusalExplicitSecret, oam.RefusalUnreadableObject}}
+}
+
 // passthroughBounds are the bounds of the passthrough type: its `object`, an
 // open node, is the one object it emits, held to the checks of documentClasses
 // (enforcePassthroughPolicy).

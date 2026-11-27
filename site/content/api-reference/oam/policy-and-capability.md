@@ -248,12 +248,12 @@ with no entry is not shown to be free of a bound.
 | `host-path` | `volumes[].type`: the refusal is of a volume whose type is `hostPath`; `hostPath` and `local` of `persistentvolume`; `inline` and `url` of `manifests` and `object` of `passthrough`, for a pod volume or a PersistentVolume source. |
 | `container-capability` | `securityContext.capabilities.add` of a container; `securityContext` of `cnpg-cluster`, an open node; `inline` and `url` of `manifests` and `object` of `passthrough`. |
 | `registry` | `image` of a container; `volumes[].image`, an open node; `url` of `gitrepository`, `helmrepository`, `ocirepository`, `resourcesetinputprovider`, `manifests` and `crd`; `inline` of `manifests` and `object` of `passthrough`, for the image of a pod in the document; `source.url` of `helmtemplate`; `source.url`, `source.endpoint` and `source.provider` of `helm`; `source.url` of `oci`; `endpoint` and `provider` of `bucket`; `image` of `imagerepository`; `chart` of `helmrelease`, an open node; `imageName` of `postgresql` and `cnpg-cluster`; `pooler` of `postgresql`, `postgresql` of `cnpg-cluster` (the image of an extension) and `pgbouncer` of `cnpg-pooler`, open nodes; `images` and `componentImages` of `cnpg-imagecatalog` and `cnpg-clusterimagecatalog`, open lists. |
-| `resource-maximum` | `resources.requests` and `resources.limits`, `cpu` and `memory`, of a container and of `postgresql`; the same four under `podResources`; `resources` of `cnpg-cluster` and `instanceSidecarConfiguration` of `cnpg-objectstore`, open nodes; `inline` and `url` of `manifests` and `object` of `passthrough`. |
+| `resource-maximum` | `resources.requests` and `resources.limits`, `cpu` and `memory`, of a container and of `postgresql`; the same four under `podResources`; `resources` of `cnpg-cluster` and `instanceSidecarConfiguration` of `cnpg-objectstore`, open nodes; `acme` of `issuer` and `clusterissuer`, an open node, for the cpu and memory of an HTTP01 solver's pod; `inline` and `url` of `manifests` and `object` of `passthrough`. |
 | `resource-default-limit` | `resources.requests.cpu` and `resources.requests.memory` of a container. |
 | `storage-maximum` | `volumes[].ephemeral`, an open node; `volumes[]` of `webservice` and `worker`, an open node, for the `size` of a `pvc` volume that generates its claim; `volumeClaimTemplates` of `statefulset`, an open node, for the storage request of each claim template; `size` of the `pvc` trait and of `persistentvolumeclaim`; `capacity` of `persistentvolume`, an open node, for its `storage` key; `storageSize` of `postgresql`; `storage`, `walStorage`, `tablespaces` and `ephemeralVolumeSource` of `cnpg-cluster`, open nodes; `inline` and `url` of `manifests` and `object` of `passthrough`, for a claim, a PersistentVolume or a pod's ephemeral volume. |
 | `replica-maximum` | `replicas` of `deployment`, `webservice`, `worker`, `statefulset`, `replicaset`, `replicationcontroller` and `postgresql`; `instances` of `cnpg-cluster`; `maxReplicas` of the `scaler` trait and of `horizontalpodautoscaler`; `inline` and `url` of `manifests` and `object` of `passthrough`, for a controller or an autoscaler in the document. |
-| `explicit-secret` | `inline` and `url` of `manifests` and `object` of `passthrough`: a core Secret the document carries; `secretValues` of `helmtemplate`; `address` of `fluxcd-provider`, where the address is itself a credential. |
-| `unreadable-object` | `inline` and `url` of `manifests` and `object` of `passthrough`: an object the policy check cannot read. |
+| `explicit-secret` | `inline` and `url` of `manifests` and `object` of `passthrough`: a core Secret the document carries; `secretValues` of `helmtemplate`; `address` of `fluxcd-provider`, where the address is itself a credential; `password` of `metallb-bgppeer`; `keystores` of `certificate`, an open node, for a keystore password; `provider` of `secretstore` and `clustersecretstore`, an open node, for a credential written as a `value` and for the data of the `fake` provider; `target` of `externalsecret` and `externalSecretSpec` of `clusterexternalsecret`, open nodes, for a core Secret written as `target.manifest`. |
+| `unreadable-object` | `inline` and `url` of `manifests` and `object` of `passthrough`: an object the policy check cannot read; `target` of `externalsecret` and `externalSecretSpec` of `clusterexternalsecret`, open nodes: a workload, a claim, a PersistentVolume or an autoscaler written as `target.manifest`, which the build cannot read because the operator renders it, refused under any applied policy; no limit lifts it. |
 
 The container properties are those of the main container, at the top of the component, and
 the same ones under `initContainers[]` and `sidecars[]`. Where an entry names no type, it
@@ -311,6 +311,21 @@ declares nothing. `persistentvolumeclaim` declares `storage-maximum` on `size`, 
 the property that decides the outcome when `size` is unauthored and the policy's storage default
 is over the maximum.
 
+Eight more kinds hold one decoded spec to the policy and declare the property each refusal sits
+on. `metallb-bgppeer` declares `explicit-secret` on `password`; its other five MetalLB kinds
+raise no policy refusal. `certificate` declares `explicit-secret` on its open `keystores` node, for
+the password of a JKS or PKCS12 keystore written into the object. `issuer` and `clusterissuer`
+declare `resource-maximum` on their open `acme` node, for the cpu and memory limits and requests of
+the pod template of an HTTP01 solver, under `ingress` and under `gatewayHTTPRoute`. `secretstore`
+and `clustersecretstore` declare `explicit-secret` on their open `provider` node, for the `value`
+of a credential union (seven of them) and for the data of the `fake` provider. `externalsecret` and
+`clusterexternalsecret` declare `explicit-secret` and `unreadable-object` on the open node that
+holds `target.manifest`, `target` and `externalSecretSpec`: a core Secret is refused under a policy
+that forbids explicit secrets, and a workload, a claim, a PersistentVolume or an autoscaler is
+refused under any applied policy, because the operator renders the object and the build cannot read
+it; no limit lifts that refusal, and the row that holds it asserts it under a policy that limits
+nothing.
+
 `postgresql` lowers onto a `cnpg-cluster` and, with a pooler, a `cnpg-pooler`, so it declares what
 their policy check raises for the values it writes: `replica-maximum` on `replicas`, `registry` on
 `imageName` and on the open `pooler` node, `resource-maximum` on the four `cpu` and `memory`
@@ -331,9 +346,12 @@ CloudNativePG kinds raise no policy refusal.
 
 `trait-capability` and `object-kind` are declared on no property: they are about a type as a
 whole, and the second is the transform's check on every application, whatever component
-emitted the object. `unreadable-object` is declared only on `manifests` and `passthrough`, and
-`explicit-secret` only on `manifests`, `passthrough`, `helmtemplate` and `fluxcd-provider`. Other built-in types do raise them, some from one property (the keystore
-`password` of a `certificate` component, for one) and some for the type as a whole (a
+emitted the object. `unreadable-object` is declared only on `manifests`, `passthrough`,
+`externalsecret` and `clusterexternalsecret`, and `explicit-secret` only on `manifests`,
+`passthrough`, `helmtemplate`, `fluxcd-provider`, `metallb-bgppeer`, `certificate`, `secretstore`,
+`clustersecretstore`, `externalsecret` and `clusterexternalsecret`. Other built-in types do raise
+them, some from one property (a credential written into the object of a monitoring workload kind,
+for one) and some for the type as a whole (a
 `secret` component or trait, whatever its properties hold). Those types, like every built-in
 type not named above, declare no bound yet: that says nothing about whether the policy holds
 them.

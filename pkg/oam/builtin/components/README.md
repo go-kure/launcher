@@ -743,7 +743,9 @@ there is a bare `PolicyRefusal` of class `oam.RefusalUnreadableObject`.
 The workload types that keep the reshaped form, the kinds that take a pod as the API type, the
 source types `helm`, `gitrepository`, `helmrepository`, `ocirepository`, `oci`, `bucket`, `helmrelease`,
 `imagerepository`, `resourcesetinputprovider` and `manifests`, the `fluxcd-provider` type, `passthrough`,
-`helmtemplate`, `crd`, `horizontalpodautoscaler`, `persistentvolume`, `persistentvolumeclaim`, `postgresql` and
+`helmtemplate`, `crd`, `horizontalpodautoscaler`, `persistentvolume`, `persistentvolumeclaim`, `metallb-bgppeer`,
+`certificate`, `issuer`, `clusterissuer`, `secretstore`, `clustersecretstore`, `externalsecret`,
+`clusterexternalsecret`, `postgresql` and
 the CloudNativePG kinds `cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-imagecatalog` and
 `cnpg-clusterimagecatalog` publish, in
 `boundedBy`, which classes an authored value at a property can cause (`bounds.go`,
@@ -757,6 +759,15 @@ source: it declares `explicit-secret` on `address`. `crd` declares `registry` on
 declares nothing), `horizontalpodautoscaler` `replica-maximum` on `maxReplicas`, `persistentvolume`
 `host-path` on `hostPath` and `local` and `storage-maximum` on its open `capacity` node (the bound applies to
 its `storage` key), and `persistentvolumeclaim` `storage-maximum` on `size` (`persistentVolumeBounds`).
+`metallb-bgppeer` declares `explicit-secret` on `password`, and `certificate` on its open `keystores` node (the
+keystore passwords). `issuer` and `clusterissuer` declare `resource-maximum` on their open `acme` node, for the
+cpu and memory of an HTTP01 solver's pod (`issuerBounds`). `secretstore` and `clustersecretstore` declare
+`explicit-secret` on their open `provider` node, for a credential written as a `value` and for the data of the
+`fake` provider (`secretStoreBounds`). `externalsecret` declares `explicit-secret` and `unreadable-object` on
+its open `target` node, and `clusterexternalsecret` on `externalSecretSpec`, for the object `target.manifest` has
+the operator write (`targetManifestBounds`): a Secret is refused under a policy that forbids explicit secrets,
+and a kind the policy reads is refused under any applied policy, no limit lifting it. The other five MetalLB
+kinds raise no policy refusal and declare nothing.
 `postgresql` and the CloudNativePG kinds declare what their
 policy check raises (`cnpg_cluster.go`, `cnpg_pooler.go`, `cnpg_common.go`): `replica-maximum`,
 `resource-maximum`, `storage-maximum` and `registry` on a Cluster's own properties, and the classes of a

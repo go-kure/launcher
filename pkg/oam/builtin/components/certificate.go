@@ -38,7 +38,7 @@ func (h *CertificateHandler) PropertySchema() map[string]oam.PropertySchema {
 	names := func(what string) *oam.PropertySchema {
 		return &oam.PropertySchema{Type: oam.PropertyTypeString, Description: what}
 	}
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"subject": {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
 			Description: spec + "subject: the requested X.509 subject attributes other than the common name: organizations, countries, organizationalUnits, localities, provinces, streetAddresses, postalCodes, serialNumber. Not together with literalSubject." + decoded + "X509Subject in its API reference.",
@@ -148,7 +148,7 @@ func (h *CertificateHandler) PropertySchema() map[string]oam.PropertySchema {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
 			Description: spec + "nameConstraints: the X.509 name constraints of a CA certificate: critical, permitted and excluded, each with dnsDomains, ipRanges, emailAddresses and uriDomains. An alpha feature, behind cert-manager's NameConstraints feature gate." + decoded + "NameConstraints in its API reference.",
 		},
-	}
+	}, map[string][]oam.RefusalClass{"keystores": {oam.RefusalExplicitSecret}})
 }
 
 // certificateKind is the certificate kind: see policyHeldKind. The API requires

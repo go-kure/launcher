@@ -59,7 +59,7 @@ func (h *MetalLBBGPPeerHandler) PropertySchema() map[string]oam.PropertySchema {
 	flag := func(description string) oam.PropertySchema {
 		return oam.PropertySchema{Type: oam.PropertyTypeBoolean, Description: spec + description}
 	}
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"myASN": {
 			Type: oam.PropertyTypeInteger, Required: true,
 			Description: "Required. " + spec + "myASN: the AS number of the local end of the session. An authored 0 is written.",
@@ -94,7 +94,7 @@ func (h *MetalLBBGPPeerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"vrf":                    text("vrf: the host VRF to which the interface the session uses belongs."),
 		"disableMP":              flag("disableMP: disables MP BGP, so that IPv4 and IPv6 routes are exchanged in separate BGP sessions. Deprecated upstream in favour of dualStackAddressFamily."),
 		"dualStackAddressFamily": flag("dualStackAddressFamily: enables the neighbor for the other IP family too, so that IPv4 prefixes may be advertised and received over an IPv6 session and the reverse."),
-	}
+	}, map[string][]oam.RefusalClass{"password": {oam.RefusalExplicitSecret}})
 }
 
 // metallbBGPPeerDefaultedZeros is the peer's defaulted-zero list for

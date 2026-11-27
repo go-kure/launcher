@@ -33,7 +33,7 @@ func (h *ClusterSecretStoreHandler) CanHandle(componentType string) bool {
 // json name. Structured fields are open objects whose content is checked by
 // the strict decode, not by this schema.
 func (h *ClusterSecretStoreHandler) PropertySchema() map[string]oam.PropertySchema {
-	return secretStoreSchema("ClusterSecretStore")
+	return oam.DeclareBounds(secretStoreSchema("ClusterSecretStore"), secretStoreBounds())
 }
 
 // clusterSecretStoreKind is the clustersecretstore kind: secretStoreKind,

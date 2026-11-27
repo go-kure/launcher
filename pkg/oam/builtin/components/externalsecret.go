@@ -31,7 +31,7 @@ func (h *ExternalSecretHandler) CanHandle(componentType string) bool {
 // json name. Structured fields are open objects whose content is checked by
 // the strict decode, not by this schema.
 func (h *ExternalSecretHandler) PropertySchema() map[string]oam.PropertySchema {
-	return externalSecretSchema()
+	return oam.DeclareBounds(externalSecretSchema(), targetManifestBounds("target"))
 }
 
 // externalSecretKind is the externalsecret kind: see policyHeldKind. validate

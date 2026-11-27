@@ -187,6 +187,10 @@ type boundRow struct {
 	// strict adds a setting the class needs to the strict policy; relax is the
 	// one setting that lifts the refusal.
 	strict, relax knob
+	// unconditional is set where the refusal holds whenever a policy is applied,
+	// oam.NoopPolicy included, so that no policy setting lifts it: the row has no
+	// relax, and asserts the refusal under a policy that limits nothing.
+	unconditional bool
 	// invalidOnceAllowed is set where the changed document is no valid object
 	// even under the relaxed policy: the text of the error it then fails with,
 	// which is no refusal by the policy.
@@ -663,6 +667,76 @@ func coreKindRows() []boundRow {
 	}
 }
 
+// providerKindRows are the bounds of the kinds whose handler holds one decoded
+// spec to the policy for what it carries: the BGP session password, the
+// keystore passwords of a certificate, the cpu and memory of an ACME HTTP01
+// solver's pod, the credentials a secret store holds in the clear, and the object
+// an ExternalSecret has the operator write. Each is an open node (or, for
+// `password`, a string), so the row changes a value below it. A union of a store
+// is shown once, as the seven of them and the fake provider's data are each held
+// by the handler's own tests.
+func providerKindRows() []boundRow {
+	secret := func(typ, path string, with []set, change ...set) boundRow {
+		return boundRow{typ: typ, path: path, class: oam.RefusalExplicitSecret, with: with, change: change,
+			strict: forbidSecrets, relax: allowSecrets}
+	}
+	password := "hunter2"
+	rows := []boundRow{
+		secret("metallb-bgppeer", "password", nil, set{at: "password", value: password}),
+		secret("certificate", "keystores", nil,
+			set{at: "keystores.jks.create", value: true}, set{at: "keystores.jks.password", value: password}),
+		secret("certificate", "keystores", nil,
+			set{at: "keystores.pkcs12.create", value: true}, set{at: "keystores.pkcs12.password", value: password}),
+	}
+	// The solver of an issuer is held in the two places it can carry a pod
+	// template, each with a cpu and a memory row.
+	for _, typ := range []string{"issuer", "clusterissuer"} {
+		for _, route := range []string{"ingress", "gatewayHTTPRoute"} {
+			resources := "acme.solvers[].http01." + route + ".podTemplate.spec.resources."
+			rows = append(rows,
+				boundRow{typ: typ, path: "acme", class: oam.RefusalResourceMaximum, relax: anyCPU,
+					change: []set{{at: resources + "limits.cpu", value: "8"}}},
+				boundRow{typ: typ, path: "acme", class: oam.RefusalResourceMaximum, relax: anyMemory,
+					change: []set{{at: resources + "requests.memory", value: "8Gi"}}},
+			)
+		}
+	}
+	// A store holds the one provider it configures: the passing document names
+	// the Scaleway provider with a secretRef, and the row writes the secret key
+	// as a value in its place.
+	// A row writes into the maps its `with` holds, so each row builds its own.
+	scaleway := func() []set {
+		return []set{{at: "provider", value: map[string]any{"scaleway": map[string]any{
+			"region": "fr-par", "projectId": "project",
+			"accessKey": map[string]any{"value": "access"},
+			"secretKey": map[string]any{"secretRef": map[string]any{"name": "credentials", "key": "secret"}},
+		}}}}
+	}
+	for _, typ := range []string{"secretstore", "clustersecretstore"} {
+		rows = append(rows,
+			secret(typ, "provider", nil, set{at: "provider.fake.data", value: []any{map[string]any{"key": "/db/password", "value": password}}}),
+			secret(typ, "provider", scaleway(), set{at: "provider.scaleway.secretKey", value: map[string]any{"value": password}}),
+		)
+	}
+	// What the operator would write instead of a Secret is an object the build
+	// cannot see: a core Secret is refused under a policy that forbids explicit
+	// secrets, and a kind the policy reads (a workload, a claim, an autoscaler) is
+	// refused under any applied policy, no limit lifting it.
+	for _, target := range []struct{ typ, at string }{
+		{"externalsecret", "target"},
+		{"clusterexternalsecret", "externalSecretSpec.target"},
+	} {
+		path, _, _ := strings.Cut(target.at, ".")
+		manifest := target.at + ".manifest"
+		rows = append(rows,
+			secret(target.typ, path, nil, set{at: manifest, value: map[string]any{"apiVersion": "v1", "kind": "Secret"}}),
+			boundRow{typ: target.typ, path: path, class: oam.RefusalUnreadableObject, unconditional: true,
+				change: []set{{at: manifest, value: map[string]any{"apiVersion": "apps/v1", "kind": "Deployment"}}}},
+		)
+	}
+	return rows
+}
+
 // boundRows lists every tested bound. TestBoundedBy_DeclaredAndTested holds it
 // to what the registered schemas declare, both ways.
 func boundRows() []boundRow {
@@ -692,6 +766,7 @@ func boundRows() []boundRow {
 	rows = append(rows, cnpgClusterRows()...)
 	rows = append(rows, cnpgOtherRows()...)
 	rows = append(rows, coreKindRows()...)
+	rows = append(rows, providerKindRows()...)
 	rows = append(rows,
 		boundRow{trait: true, typ: "scaler", path: "maxReplicas", class: oam.RefusalReplicaMaximum,
 			change: []set{{at: "maxReplicas", value: 9}}, relax: anyReplicas},
@@ -783,6 +858,18 @@ func boundDocument(t *testing.T, trait bool, typ string) (oam.Component, map[str
 		props = map[string]any{"capacity": map[string]any{"storage": "1Gi"}, "accessModes": []any{"ReadWriteOnce"}}
 	case "persistentvolumeclaim":
 		props = map[string]any{"size": "1Gi"}
+	case "metallb-bgppeer":
+		props = map[string]any{"myASN": 64500}
+	case "certificate":
+		props = map[string]any{"secretName": "tls", "issuerRef": map[string]any{"name": "issuer"}}
+	case "issuer", "clusterissuer":
+		props = map[string]any{"acme": map[string]any{"server": "https://acme.example/directory", "privateKeySecretRef": map[string]any{"name": "account"}}}
+	case "secretstore", "clustersecretstore":
+		props = map[string]any{"provider": map[string]any{"fake": map[string]any{"data": []any{}}}}
+	case "externalsecret":
+		props = map[string]any{}
+	case "clusterexternalsecret":
+		props = map[string]any{"externalSecretSpec": map[string]any{}}
 	case "postgresql", "cnpg-cluster":
 		props = map[string]any{"imageName": boundImage}
 	case "cnpg-pooler":
@@ -933,8 +1020,8 @@ func TestBoundedBy_Rows(t *testing.T) {
 				_, _, err := probe.Run(newTransformer(), []oam.Component{comp}, p)
 				return err
 			}
-			if r.relax == nil {
-				t.Fatal("the row relaxes nothing")
+			if r.unconditional == (r.relax != nil) {
+				t.Fatal("a row has a relax or is unconditional, never both and never neither")
 			}
 			// The value the row changes is the one at its declared path, or one
 			// below it where the path is an open node.
@@ -957,6 +1044,16 @@ func TestBoundedBy_Rows(t *testing.T) {
 				t.Fatalf("the change is refused with class %q, want %q: %v", v.Class, r.class, err)
 			}
 
+			if r.unconditional {
+				// No setting lifts the refusal: it holds under a policy that limits nothing.
+				var still *oam.ViolationError
+				var stillRefusal *oam.PolicyRefusal
+				err = run(&oam.NoopPolicy{}, true)
+				if !errors.As(err, &still) || !errors.As(err, &stillRefusal) || still.Class != r.class {
+					t.Errorf("under a policy that limits nothing: %v, want a refusal of class %q", err, r.class)
+				}
+				return
+			}
 			err = run(boundsStrict(r.strict, r.relax), true)
 			refusal = nil
 			switch {
