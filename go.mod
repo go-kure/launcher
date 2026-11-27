@@ -42,7 +42,7 @@ require (
 	github.com/fluxcd/pkg/apis/meta v1.38.0
 	github.com/fluxcd/source-controller/api v1.10.2
 	github.com/fluxcd/source-watcher/api/v2 v2.3.1
-	github.com/go-kure/kure v0.2.0-rc.2.0.20261122200136-98654b463d39
+	github.com/go-kure/kure v0.2.0-rc.2.0.20261126115834-0d6a669fc164
 	github.com/google/go-containerregistry v0.22.1
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.95.2
@@ -56,11 +56,11 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	helm.sh/helm/v4 v4.3.2
 	k8s.io/api v0.37.3
-	k8s.io/apiextensions-apiserver v0.37.2
+	k8s.io/apiextensions-apiserver v0.37.3
 	k8s.io/apimachinery v0.37.3
-	k8s.io/apiserver v0.37.2
+	k8s.io/apiserver v0.37.3
 	k8s.io/client-go v0.37.3
-	k8s.io/kube-aggregator v0.37.2
+	k8s.io/kube-aggregator v0.37.3
 	k8s.io/kube-openapi v0.0.0-20260821135717-be32def86098
 	sigs.k8s.io/controller-runtime v0.25.3
 	sigs.k8s.io/gateway-api v1.7.0
@@ -218,8 +218,8 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	k8s.io/cli-runtime v0.37.2 // indirect
-	k8s.io/component-base v0.37.2 // indirect
+	k8s.io/cli-runtime v0.37.3 // indirect
+	k8s.io/component-base v0.37.3 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/streaming v0.37.3 // indirect
 	k8s.io/utils v0.0.0-20261023123148-ca04ba58ecab // indirect
