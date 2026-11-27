@@ -33,7 +33,7 @@ func (h *OCIRepositoryHandler) CanHandle(componentType string) bool {
 // PropertySchema declares every top-level key of sourcev1.OCIRepositorySpec. A
 // test ties this key set to the struct.
 func (h *OCIRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"url":                fluxSourceRequiredString("OCIRepository spec.url: an oci:// artifact repository URL. When the policy's allowed registries are non-empty, it must be oci://<registry>/<repository> with a registry that is localhost or contains . or : (Flux reads any other first segment as a Docker Hub namespace), and that registry must be in the list. A user or password in it is refused: put the credential in a Secret named by secretRef."),
 		"ref":                fluxSourceObject("OCIRepository spec.ref: the tag, semver range or digest to pull (Flux defaults to the latest tag)."),
 		"layerSelector":      fluxSourceObject("OCIRepository spec.layerSelector: which artifact layer to extract or copy."),
@@ -48,7 +48,7 @@ func (h *OCIRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"ignore":             fluxSourceString("OCIRepository spec.ignore: exclusion patterns in .sourceignore format."),
 		"insecure":           fluxSourceBool("OCIRepository spec.insecure: allow a non-TLS registry."),
 		"suspend":            fluxSourceBool("OCIRepository spec.suspend: stop reconciling the source."),
-	}
+	}, registryBounds("url"))
 }
 
 // ToApplicationConfig decodes the component's properties strictly into a

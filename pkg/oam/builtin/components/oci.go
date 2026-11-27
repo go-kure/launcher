@@ -91,7 +91,7 @@ func (OCIRule) ComponentType() string { return ociType }
 
 // PropertySchema declares the oci component's user-facing properties.
 func (OCIRule) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"source": {
 			Type:        oam.PropertyTypeObject,
 			Required:    true,
@@ -119,7 +119,8 @@ func (OCIRule) PropertySchema() map[string]oam.PropertySchema {
 				},
 			},
 		},
-	}
+		// The ocirepository member holds the url to the allowed registries.
+	}, registryBounds("source.url"))
 }
 
 // ociSourceAccessKeys are the keys of source that set the generated

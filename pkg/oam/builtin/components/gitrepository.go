@@ -57,7 +57,7 @@ func (h *GitRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 			Description: "GitRepository spec.sparseCheckout: the directories to check out.",
 			Items:       &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "One directory."},
 		},
-	}, sourceURLBounds("url"))
+	}, registryBounds("url"))
 }
 
 // ToApplicationConfig decodes the component's properties strictly into a

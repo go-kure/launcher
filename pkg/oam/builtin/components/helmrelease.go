@@ -127,7 +127,7 @@ func (h *HelmReleaseHandler) PropertySchema() map[string]oam.PropertySchema {
 	boolean := func(desc string) oam.PropertySchema {
 		return oam.PropertySchema{Type: oam.PropertyTypeBoolean, Description: desc}
 	}
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"chart":              object("HelmRelease spec.chart: a chart template; `kind` is the kind of the source object helm-controller generates from it. Kind HelmChart (the default) names a chart (`spec.chart`, required) in an existing HelmRepository, GitRepository or Bucket source (`spec.sourceRef`, required); the OCIRepository fields the template inlines are refused, as helm-controller does not read them for a HelmChart. Kind OCIRepository takes the OCIRepository fields, with the chart's `spec.url` (oci://, required) held to the allowed registries, and helm-controller generates the OCIRepository `<namespace>-<name>` in the HelmRelease's namespace; `spec.chart`, `sourceRef`, `valuesFiles` and `ignoreMissingValuesFiles` are refused, `version` takes only `*` and `reconcileStrategy` only ChartVersion, and `spec.timeout` must be under an hour. Exactly one of chart and chartRef is required."),
 		"chartRef":           object("HelmRelease spec.chartRef: a reference to an existing OCIRepository, ExternalArtifact or HelmChart source. Exactly one of chart and chartRef is required."),
 		"interval":           str("HelmRelease spec.interval as a Flux duration: unsigned, units ms, s, m, h, e.g. 10m or 1h30m; 0s or at least 1ms. Defaults to 60m when unset or zero."),
@@ -156,7 +156,9 @@ func (h *HelmReleaseHandler) PropertySchema() map[string]oam.PropertySchema {
 		"healthCheckExprs":   objects("HelmRelease spec.healthCheckExprs: custom CEL health checks.", "One custom health check."),
 		// Not a HelmReleaseSpec field: launcher's own, split off before the decode.
 		chartEndpointsKey: chartEndpointsSchema(),
-	}
+		// The chart is an open node: only a template of kind OCIRepository names a
+		// host, in its spec.url, and that is held to the allowed registries.
+	}, registryBounds("chart"))
 }
 
 // ExclusiveProperties declares exactly one of chart and chartRef, the rule

@@ -216,7 +216,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 		// Launcher's own, under either delivery: split off before the decode and never
 		// forwarded to the terminals, so the lowered output does not change.
 		chartEndpointsKey: chartEndpointsSchema(),
-	}, sourceURLBounds("source.url"))
+	}, registryBounds("source.url", "source.endpoint", "source.provider"))
 }
 
 // helmProperties is what the strict decode checks; helmOwnedKeys are split off

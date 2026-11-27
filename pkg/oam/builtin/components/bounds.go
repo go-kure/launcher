@@ -97,12 +97,25 @@ func podBounds() map[string][]oam.RefusalClass {
 	}
 }
 
-// sourceURLBounds are the bounds of a type whose url or source.url the policy
-// holds to the allowed registries: gitrepository, and helm, whose generated
-// HelmRepository, OCIRepository or GitRepository (and, under template delivery,
-// helmtemplate) raise the refusal. path is the property.
-func sourceURLBounds(path string) map[string][]oam.RefusalClass {
-	return map[string][]oam.RefusalClass{path: {oam.RefusalRegistry}}
+// registryBounds are the bounds of a type that has the policy hold the properties
+// at paths, each an address or an image reference the object is fetched from, to
+// the allowed registries. The types that use it:
+//   - the url of gitrepository, helmrepository, ocirepository and
+//     resourcesetinputprovider, and `source.url` of oci and helm (whose generated
+//     HelmRepository, OCIRepository or GitRepository, and under template delivery
+//     helmtemplate, raise the refusal);
+//   - bucket, and the inline Bucket source of helm (`source.`), on `endpoint` and,
+//     for the gcp provider, on `provider`, whose host Flux does not read from the
+//     endpoint;
+//   - `image` of imagerepository;
+//   - `chart` of helmrelease, an open node: only a chart template of kind
+//     OCIRepository names a host, in its `spec.url`.
+func registryBounds(paths ...string) map[string][]oam.RefusalClass {
+	b := map[string][]oam.RefusalClass{}
+	for _, path := range paths {
+		b[path] = []oam.RefusalClass{oam.RefusalRegistry}
+	}
+	return b
 }
 
 // manifestsBounds are the bounds of the manifests type. The url is held to the
