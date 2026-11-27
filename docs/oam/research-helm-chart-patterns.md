@@ -226,7 +226,7 @@ Each chart was rendered offline with `helm template demo <chart directory> --nam
 
 | Piece | Today | Missing kind | Needs Go |
 |---|---|---|---|
-| 32 to 39 services from one list of names | `forEach` over a list of service names, one `worker` or `webservice` part each. The services block in the values is a map, so the model takes a list input. One render gives at most 50 components (`MaxParts`, `pkg/oam/model/rule.go:12-14`, counted after `when` and `forEach`), which `ocis` fits; the 38-workload `opencloud-microservices` chart, with its claims and config parts, is close to it and was not tested | none | none |
+| 32 to 39 services from one list of names | `forEach` over a list of service names, one `worker` or `webservice` part each. The services block in the values is a map, so the model takes a list input. One render gives at most 50 components (`MaxParts`, `pkg/oam/model/rule.go:12-14`, counted after `when` and `forEach`), and all renders of one build give at most 500 (`MaxBuildParts`, `pkg/oam/model/budget.go:15`). With one part per workload and one per ConfigMap or Secret, `ocis` needs 53 parts (32, 13 and 8) and `opencloud-microservices` 62 (38, 14 and 10), both over the 50 of one render. So the configuration has to be passed in from outside, or the application split into nested models (at most 4 deep, `MaxNestingDepth`, `pkg/oam/model/rule.go:15-17`), each with its own 50. Not tested | none | none |
 | A ConfigMap or Secret per service | `configmap` and `secret` parts; a config file the user writes as text | none | a file written from structured settings |
 | A claim per service, only where it keeps data | `pvc` parts with `when` | none | none |
 | One entry through the proxy | the `expose` trait on one part | none | none |
@@ -373,7 +373,7 @@ Of the Prometheus Operator kinds, 7 have a built-in type (`alertmanager`, `podmo
 - Anything about one real deployment. The running list on go-kure/launcher#1637 counts objects in a production GitOps tree. Those counts and these chart counts are separate evidence and are not added up.
 - Complete pattern counts. A text detector over Go templates can miss a construct written another way. Known cases: chart 8 configures an external database under its own config keys, which the *external one* detector does not match, and generators inside application subcharts are not counted.
 - Anything about what users deploy beyond the charts read. The use cases are judgement tied to chart counts and one worked example. The ownCloud and OpenCloud counts are counts of rendered objects and template files of four charts, and they are not added to the sample's.
-- Whether any proposed model works. None was built or rendered, and a model of the many-service example was not tested against the 50-part limit.
+- Whether any proposed model works. None was built or rendered, and the many-service example was counted against the 50-part limit of one render, not tested against it.
 - Behaviour at install time. Hooks are counted from rendered objects and, separately, from template text; `lookup` only from template text. Nothing was installed. No Helm 3 render was compared.
 
 ## Value sets
@@ -840,7 +840,7 @@ Everything here is judgement. The counts are the page's own, and nothing is buil
 | U4 scheduled job | the `cronjob` type; M1 only if it takes a schedule mode | nothing |
 | U5 database | M4, or an operator type where one exists (`postgresql`, `cnpg-*`) | MariaDB and MySQL |
 | U6 cache and queue | M4; for an operator-run broker, a CRD route | Kafka, RabbitMQ and EMQX operator kinds |
-| U7 multi-service application | no base model: M1 repeated by `forEach`, within the 50 parts of one render (`MaxParts`, `pkg/oam/model/rule.go:12-14`) | a list input for the services, a config file written from structured settings (Go) |
+| U7 multi-service application | no base model: M1 repeated by `forEach`, with the configuration passed in or the application split into nested models, because the flat part count is over the 50 of one render (see the ownCloud example) | a list input for the services, a config file written from structured settings (Go) |
 | U8 monitoring | M2 | the VictoriaMetrics kinds, `AlertmanagerConfig`, `ScrapeConfig`, `PrometheusAgent`, the Grafana operator kinds |
 | U9 backup | M3, which waits on the open question | the Velero kinds |
 | U10 operator or controller install | `helm`, or M5 | a namespace field on a model part, for the per-namespace grant (Go) |
