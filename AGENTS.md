@@ -162,10 +162,11 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   `featuregates.go`, `service_name_gate.go`, `ordering.go`, `flux_namespace_inputs.go`,
   `classify.go`, `sibling_group.go`, `bundle_application_names.go`,
   `cross_document_collisions.go`, `component_label.go`, `force_warnings.go`, `handler.go`,
-  `image_reference.go`, `image_reference_level.go`, `naming_engine.go`, `pipeline.go`, `policy.go`, `scaler_targets.go`, `schema.go` or
+  `contained_path.go`, `image_reference.go`, `image_reference_level.go`, `naming_engine.go`, `pipeline.go`, `policy.go`, `scaler_targets.go`, `schema.go` or
   `shorten_name.go` (go-kure/launcher#1377: each holds a helper that a refusal elsewhere
   calls), or any non-test
-  `.go` file under `pkg/oam/builtin/`, `pkg/oam/internal/` or `pkg/oam/model/` other than
+  `.go` file under `pkg/oam/builtin/`, `pkg/oam/internal/`, `pkg/oam/model/` or
+  `pkg/oam/definition/` other than
   `contract.go`, `doc.go` and files under `testdata/`, must
   use `feat(format)`, `fix(format)`,
   `refactor(format)` or `docs(format)`
@@ -176,8 +177,8 @@ exit `2`, so use it only for pass/fail. See `docs/github-workflows.md` § Which 
   guard does not see a semantic change inside a counted file that the path rule cannot tell
   apart (some counted files hold Go-API refusals beside the refusals of an authored document,
   and an edit that touches only the Go-API ones takes the trailer), nor acceptance code outside
-  the set (such as a file in a subdirectory of `pkg/oam/` other than `builtin/`, `internal/`
-  and `model/`); review is the backstop for both. go-kure/launcher#1362 and
+  the set (such as a file in a subdirectory of `pkg/oam/` other than `builtin/`, `internal/`,
+  `model/` and `definition/`); review is the backstop for both. go-kure/launcher#1362 and
   go-kure/launcher#1367 audited every file directly under `pkg/oam/`. The files left out on
   purpose are the `LEFT_OUT_PATHS` array in `scripts/check-format-scope.sh`, with the reason
   beside each group. Every non-test `.go` file directly under `pkg/oam/` is in exactly one of

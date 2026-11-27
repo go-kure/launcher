@@ -280,13 +280,13 @@ Runs on main and `release/*` branches only (not PRs):
   `service_name_gate.go`, `ordering.go`, `flux_namespace_inputs.go`, `classify.go`,
   `sibling_group.go`, `bundle_application_names.go`, `cross_document_collisions.go` (its
   check function has no caller yet, but its helper `keyedObjects` is live), `component_label.go`,
-  `force_warnings.go`, `handler.go`, `image_reference.go`, `image_reference_level.go`,
+  `force_warnings.go`, `handler.go`, `contained_path.go`, `image_reference.go`, `image_reference_level.go`,
   `naming_engine.go`, `pipeline.go`, `policy.go`,
   `scaler_targets.go`, `schema.go` or `shorten_name.go` (go-kure/launcher#1377: each holds a
   helper that a refusal elsewhere calls), or any non-test
   `.go` file under
-  `pkg/oam/builtin/`, `pkg/oam/internal/` or `pkg/oam/model/` other than `contract.go`, `doc.go`
-  and files under `testdata/`, and its subject does not start with
+  `pkg/oam/builtin/`, `pkg/oam/internal/`, `pkg/oam/model/` or `pkg/oam/definition/` other than
+  `contract.go`, `doc.go` and files under `testdata/`, and its subject does not start with
   `feat(format)`, `fix(format)`, `refactor(format)` or `docs(format)`, followed by an optional `!`,
   a colon and a space (`cliff.toml` drops any other header from the changelog). A commit that
   leaves the accepted format as it was takes a body line `Format-Scope: none (<reason>)`, and the
