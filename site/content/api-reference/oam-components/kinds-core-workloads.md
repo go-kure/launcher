@@ -2061,6 +2061,12 @@ beside it, gives the `expected.yaml` beside it. The fixture test compares the tw
 
 **passthrough** — `object` (full apiVersion/kind/metadata/spec), `clusterScoped`.
 
+**A Go caller must not change memory it handed over until its last `Generate` call.** A
+pointee inside the properties is included. `ToApplicationConfig` copies the maps, slices and
+arrays of `object`, and `Generate` copies them again on each call. A struct's contents and the
+target of a pointer are not copied, so `Generate` emits what they hold at that call, which can
+differ from what `ToApplicationConfig` read (go-kure/launcher#1715).
+
 **`object` must be a single object; a list is rejected.** `Generate` emits the map
 verbatim as one resource and fills in metadata it finds missing: `metadata.name`
 defaults to the component name when it is absent, empty, **or not a string**, and
