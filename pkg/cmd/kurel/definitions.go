@@ -62,9 +62,11 @@ func holdsDefinition(data []byte) (bool, error) {
 		var probe struct {
 			Kind string `yaml:"kind"`
 		}
-		if err := dec.Decode(&probe); err == io.EOF {
+		err := dec.Decode(&probe)
+		if errors.Is(err, io.EOF) {
 			return false, nil
-		} else if err != nil {
+		}
+		if err != nil {
 			return false, err
 		}
 		if probe.Kind == definition.Kind {
