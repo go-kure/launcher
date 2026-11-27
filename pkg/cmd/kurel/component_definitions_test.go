@@ -229,6 +229,28 @@ func TestBuildCommand_ComponentDefinitionKeepsALargeIntegerExact(t *testing.T) {
 	}
 }
 
+// A model whose short name is a defined type's name would take the type over, since
+// an identity resolves before a plain name: the build refuses it, naming both.
+func TestBuildCommand_ComponentDefinitionIsNotShadowedByAModel(t *testing.T) {
+	out, err := buildComponentDefinitionExample(t, func(dir string) {
+		if err := os.MkdirAll(filepath.Join(dir, "models"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		model := "apiVersion: launcher.gokure.dev/v1alpha1\nkind: Model\nmetadata:\n  name: batch-job.example.org\n  version: v1\nspec:\n  celEnv: \"1\"\n  outputs: {}\n  parts:\n  - id: settings\n    type: configmap@v1\n    properties:\n      data:\n        marker: wrong-handler\n"
+		if err := os.WriteFile(filepath.Join(dir, "models", "shadow.yaml"), []byte(model), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err == nil {
+		t.Fatalf("built:\n%s", out)
+	}
+	for _, want := range []string{`"batch-job"`, "batch-job.example.org@v1", "batchjob.example.gokure.dev@v1alpha1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %s", err, want)
+		}
+	}
+}
+
 // A CRD whose spec fields are all optional accepts a component with no properties:
 // its spec is the empty object, never null.
 func TestBuildCommand_ComponentDefinitionWithNoProperties(t *testing.T) {
