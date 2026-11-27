@@ -343,11 +343,20 @@ func Register(t *oam.Transformer, h *Handler) (err error) {
 	if registered {
 		return errors.Errorf("component definition: the type %q is already declared", h.typeName)
 	}
-	// The identity is also known by its qualified name and by its short name, either of which
-	// would take over a type registered under that name.
-	for _, name := range []string{h.identity.Name, h.identity.ShortName()} {
-		if _, registered := t.ComponentHandlerFor(name); registered {
-			return errors.Errorf("component definition %q: the name %q of %s is a type that is already registered", h.typeName, name, h.identity)
+	// The identity is also known by its short name, which would take over a type
+	// registered under that name.
+	short := h.identity.ShortName()
+	if _, registered := t.ComponentHandlerFor(short); registered {
+		return errors.Errorf("component definition %q: the short name %q of %s is a type that is already registered", h.typeName, short, h.identity)
+	}
+	// And by its qualified name, which would take over a plain key of that name that no
+	// declared type claims. A declared type that holds the name is another version of this
+	// one, and CheckComponentTypes judges that.
+	if name := h.identity.Name; name != short {
+		if _, err := t.ResolveComponentType(name); errors.Is(err, oam.ErrTypeReferenceUnknown) {
+			if _, registered := t.ComponentHandlerFor(name); registered {
+				return errors.Errorf("component definition %q: the qualified name %q of %s is a type that is already registered", h.typeName, name, h.identity)
+			}
 		}
 	}
 	ids := map[string]oam.TypeID{h.typeName: h.identity}
