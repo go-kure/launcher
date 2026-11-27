@@ -35,7 +35,7 @@ func (h *HorizontalPodAutoscalerHandler) CanHandle(componentType string) bool {
 // fields are open objects whose content is checked by the strict decode, not
 // by this schema.
 func (h *HorizontalPodAutoscalerHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"scaleTargetRef": {
 			Type: oam.PropertyTypeObject, AdditionalProperties: true, Required: true,
 			Description: "Required. HorizontalPodAutoscaler spec.scaleTargetRef: the object to scale, by kind, name and apiVersion; kind and name are required by the API. Decoded strictly into the Kubernetes API type: see CrossVersionObjectReference in the Kubernetes API reference.",
@@ -60,7 +60,7 @@ func (h *HorizontalPodAutoscalerHandler) PropertySchema() map[string]oam.Propert
 			Type: oam.PropertyTypeObject, AdditionalProperties: true,
 			Description: "HorizontalPodAutoscaler spec.behavior: the scaling rules per direction (scaleUp, scaleDown). Decoded strictly into the Kubernetes API type: see HorizontalPodAutoscalerBehavior in the Kubernetes API reference. An empty policies list in either direction is refused: it is omitted, so the API server's default policies would apply.",
 		},
-	}
+	}, map[string][]oam.RefusalClass{"maxReplicas": {oam.RefusalReplicaMaximum}})
 }
 
 // hpaDefaultedZeros lists the lists of HorizontalPodAutoscalerSpec that the

@@ -103,7 +103,7 @@ var (
 // boundsStrict is the policy every row starts from: each limit set, nothing
 // allowed.
 func boundsStrict(knobs ...knob) *boundsPolicy {
-	content := boundsContent{"": manifestsConfigMap}
+	content := boundsContent{"": manifestsConfigMap, crdURL: crdBody, crdForeignURL: crdBody}
 	for _, d := range documents {
 		content[d.url()] = d.body
 	}
@@ -221,6 +221,13 @@ const (
 
 	// The url of the passing document, under the one host the strict policy lists.
 	passingURL = "https://registry.example/settings.yaml"
+
+	// A `crd` row serves a CustomResourceDefinition at the url it passes and at
+	// the url it changes it to: the default body is a ConfigMap, which the crd
+	// type refuses as no CRD, with no refusal by the policy.
+	crdBody       = "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:\n  name: widgets.example.com\nspec:\n  group: example.com\n  scope: Namespaced\n  names:\n    kind: Widget\n    plural: widgets\n  versions:\n  - name: v1\n    served: true\n    storage: true\n    schema:\n      openAPIV3Schema:\n        type: object\n"
+	crdURL        = "https://registry.example/crds.yaml"
+	crdForeignURL = "https://elsewhere.example/crds.yaml"
 )
 
 // document is a document that breaks one class of the check on the objects of a
@@ -633,6 +640,29 @@ func cnpgOtherRows() []boundRow {
 	return rows
 }
 
+// coreKindRows are the bounds of the kinds that hold one object by policy: the
+// url a `crd` is fetched from, the replica maximum of a HorizontalPodAutoscaler,
+// the node path and the capacity of a PersistentVolume, and the size of a claim.
+// A `crd` inline document is no bound: a CustomResourceDefinition passes the
+// check on the objects of a document. The capacity is an open object, so the
+// bound is on the one key below it that the policy reads, `storage`.
+func coreKindRows() []boundRow {
+	volume := func(path string, class oam.RefusalClass, relax knob, change set) boundRow {
+		return boundRow{typ: "persistentvolume", path: path, class: class, change: []set{change}, relax: relax}
+	}
+	return []boundRow{
+		{typ: "crd", path: "url", class: oam.RefusalRegistry, relax: anyRegistry,
+			change: []set{{at: "url", value: crdForeignURL}}},
+		{typ: "horizontalpodautoscaler", path: "maxReplicas", class: oam.RefusalReplicaMaximum, relax: anyReplicas,
+			change: []set{{at: "maxReplicas", value: 9}}},
+		volume("hostPath", oam.RefusalHostPath, allowHostPath, set{at: "hostPath", value: map[string]any{"path": "/data"}}),
+		volume("local", oam.RefusalHostPath, allowHostPath, set{at: "local", value: map[string]any{"path": "/mnt/disk"}}),
+		volume("capacity", oam.RefusalStorageMaximum, anyStorage, set{at: "capacity.storage", value: "1Ti"}),
+		{typ: "persistentvolumeclaim", path: "size", class: oam.RefusalStorageMaximum, relax: anyStorage,
+			change: []set{{at: "size", value: "1Ti"}}},
+	}
+}
+
 // boundRows lists every tested bound. TestBoundedBy_DeclaredAndTested holds it
 // to what the registered schemas declare, both ways.
 func boundRows() []boundRow {
@@ -661,6 +691,7 @@ func boundRows() []boundRow {
 	rows = append(rows, postgresqlRows()...)
 	rows = append(rows, cnpgClusterRows()...)
 	rows = append(rows, cnpgOtherRows()...)
+	rows = append(rows, coreKindRows()...)
 	rows = append(rows,
 		boundRow{trait: true, typ: "scaler", path: "maxReplicas", class: oam.RefusalReplicaMaximum,
 			change: []set{{at: "maxReplicas", value: 9}}, relax: anyReplicas},
@@ -744,6 +775,14 @@ func boundDocument(t *testing.T, trait bool, typ string) (oam.Component, map[str
 		props = map[string]any{"type": "OCIArtifactTag", "url": "oci://registry.example/org/app"}
 	case "fluxcd-provider":
 		props = map[string]any{"type": "generic"}
+	case "crd":
+		props = map[string]any{"url": crdURL}
+	case "horizontalpodautoscaler":
+		props = map[string]any{"scaleTargetRef": map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "name": "web"}, "maxReplicas": 2}
+	case "persistentvolume":
+		props = map[string]any{"capacity": map[string]any{"storage": "1Gi"}, "accessModes": []any{"ReadWriteOnce"}}
+	case "persistentvolumeclaim":
+		props = map[string]any{"size": "1Gi"}
 	case "postgresql", "cnpg-cluster":
 		props = map[string]any{"imageName": boundImage}
 	case "cnpg-pooler":

@@ -245,13 +245,13 @@ with no entry is not shown to be free of a bound.
 |---|---|
 | `host-namespace` | `hostNetwork`, `hostPID`, `hostIPC`; `inline` and `url` of `manifests` and `object` of `passthrough`, for a pod in the document (`object` is an open node). |
 | `privileged` | `securityContext.privileged` and `securityContext.windowsOptions.hostProcess` of a container; `podSecurityContext.windowsOptions.hostProcess`; `securityContext` and `podSecurityContext` of `cnpg-cluster`, open nodes; `inline` and `url` of `manifests` and `object` of `passthrough`. |
-| `host-path` | `volumes[].type`: the refusal is of a volume whose type is `hostPath`; `inline` and `url` of `manifests` and `object` of `passthrough`, for a pod volume or a PersistentVolume source. |
+| `host-path` | `volumes[].type`: the refusal is of a volume whose type is `hostPath`; `hostPath` and `local` of `persistentvolume`; `inline` and `url` of `manifests` and `object` of `passthrough`, for a pod volume or a PersistentVolume source. |
 | `container-capability` | `securityContext.capabilities.add` of a container; `securityContext` of `cnpg-cluster`, an open node; `inline` and `url` of `manifests` and `object` of `passthrough`. |
-| `registry` | `image` of a container; `volumes[].image`, an open node; `url` of `gitrepository`, `helmrepository`, `ocirepository`, `resourcesetinputprovider` and `manifests`; `inline` of `manifests` and `object` of `passthrough`, for the image of a pod in the document; `source.url` of `helmtemplate`; `source.url`, `source.endpoint` and `source.provider` of `helm`; `source.url` of `oci`; `endpoint` and `provider` of `bucket`; `image` of `imagerepository`; `chart` of `helmrelease`, an open node; `imageName` of `postgresql` and `cnpg-cluster`; `pooler` of `postgresql`, `postgresql` of `cnpg-cluster` (the image of an extension) and `pgbouncer` of `cnpg-pooler`, open nodes; `images` and `componentImages` of `cnpg-imagecatalog` and `cnpg-clusterimagecatalog`, open lists. |
+| `registry` | `image` of a container; `volumes[].image`, an open node; `url` of `gitrepository`, `helmrepository`, `ocirepository`, `resourcesetinputprovider`, `manifests` and `crd`; `inline` of `manifests` and `object` of `passthrough`, for the image of a pod in the document; `source.url` of `helmtemplate`; `source.url`, `source.endpoint` and `source.provider` of `helm`; `source.url` of `oci`; `endpoint` and `provider` of `bucket`; `image` of `imagerepository`; `chart` of `helmrelease`, an open node; `imageName` of `postgresql` and `cnpg-cluster`; `pooler` of `postgresql`, `postgresql` of `cnpg-cluster` (the image of an extension) and `pgbouncer` of `cnpg-pooler`, open nodes; `images` and `componentImages` of `cnpg-imagecatalog` and `cnpg-clusterimagecatalog`, open lists. |
 | `resource-maximum` | `resources.requests` and `resources.limits`, `cpu` and `memory`, of a container and of `postgresql`; the same four under `podResources`; `resources` of `cnpg-cluster` and `instanceSidecarConfiguration` of `cnpg-objectstore`, open nodes; `inline` and `url` of `manifests` and `object` of `passthrough`. |
 | `resource-default-limit` | `resources.requests.cpu` and `resources.requests.memory` of a container. |
-| `storage-maximum` | `volumes[].ephemeral`, an open node; `volumes[]` of `webservice` and `worker`, an open node, for the `size` of a `pvc` volume that generates its claim; `volumeClaimTemplates` of `statefulset`, an open node, for the storage request of each claim template; `size` of the `pvc` trait; `storageSize` of `postgresql`; `storage`, `walStorage`, `tablespaces` and `ephemeralVolumeSource` of `cnpg-cluster`, open nodes; `inline` and `url` of `manifests` and `object` of `passthrough`, for a claim, a PersistentVolume or a pod's ephemeral volume. |
-| `replica-maximum` | `replicas` of `deployment`, `webservice`, `worker`, `statefulset`, `replicaset`, `replicationcontroller` and `postgresql`; `instances` of `cnpg-cluster`; `maxReplicas` of the `scaler` trait; `inline` and `url` of `manifests` and `object` of `passthrough`, for a controller or an autoscaler in the document. |
+| `storage-maximum` | `volumes[].ephemeral`, an open node; `volumes[]` of `webservice` and `worker`, an open node, for the `size` of a `pvc` volume that generates its claim; `volumeClaimTemplates` of `statefulset`, an open node, for the storage request of each claim template; `size` of the `pvc` trait and of `persistentvolumeclaim`; `capacity` of `persistentvolume`, an open node, for its `storage` key; `storageSize` of `postgresql`; `storage`, `walStorage`, `tablespaces` and `ephemeralVolumeSource` of `cnpg-cluster`, open nodes; `inline` and `url` of `manifests` and `object` of `passthrough`, for a claim, a PersistentVolume or a pod's ephemeral volume. |
+| `replica-maximum` | `replicas` of `deployment`, `webservice`, `worker`, `statefulset`, `replicaset`, `replicationcontroller` and `postgresql`; `instances` of `cnpg-cluster`; `maxReplicas` of the `scaler` trait and of `horizontalpodautoscaler`; `inline` and `url` of `manifests` and `object` of `passthrough`, for a controller or an autoscaler in the document. |
 | `explicit-secret` | `inline` and `url` of `manifests` and `object` of `passthrough`: a core Secret the document carries; `secretValues` of `helmtemplate`; `address` of `fluxcd-provider`, where the address is itself a credential. |
 | `unreadable-object` | `inline` and `url` of `manifests` and `object` of `passthrough`: an object the policy check cannot read. |
 
@@ -298,6 +298,17 @@ two refusals that sit on one property; `helm` under template delivery raises the
 it, and its `source.url` row holds for that delivery. The classes of the objects a chart
 renders are declared on neither: the render comes from `source` and `values` together, which no
 property holds alone.
+
+Four kinds that project one object declare what their own check refuses. `crd` declares
+`registry` on `url`, a redirect to another host included; its `inline` source declares nothing,
+since a CustomResourceDefinition passes the check on the objects of a document and any other
+object is refused as no CRD, a plain error. `horizontalpodautoscaler` declares `replica-maximum`
+on `maxReplicas`. `persistentvolume` declares `host-path` on `hostPath` and on `local`, each a
+path on the node, and `storage-maximum` on `capacity`: an open object of which only the
+`storage` key is held to the maximum. A `csi` or `flexVolume` source is not checked and
+declares nothing. `persistentvolumeclaim` declares `storage-maximum` on `size`, which is also
+the property that decides the outcome when `size` is unauthored and the policy's storage default
+is over the maximum.
 
 `postgresql` lowers onto a `cnpg-cluster` and, with a pooler, a `cnpg-pooler`, so it declares what
 their policy check raises for the values it writes: `replica-maximum` on `replicas`, `registry` on

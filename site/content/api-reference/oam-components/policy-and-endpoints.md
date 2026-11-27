@@ -182,6 +182,7 @@ and the nine kinds that take a pod as the API
 type (`pod`, `podtemplate`, `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`, `replicaset`, `replicationcontroller`) publish, in `boundedBy`,
 the classes an authored value at a property can cause, and so do the Flux source family (`helm`, `gitrepository`, `helmrepository`, `ocirepository`, `oci`, `bucket`, `helmrelease`, `imagerepository` and `resourcesetinputprovider`) and `manifests`
 for where each is fetched from and, on `manifests`, the objects the source carries; `passthrough` for the object it emits; `helmtemplate` for the host of its chart and its `secretValues`; `fluxcd-provider`, which fetches nothing, for its `address`;
+`crd` for the host of its `url`; `horizontalpodautoscaler` for its `maxReplicas`; `persistentvolume` for a `hostPath` or `local` source and its `capacity`; `persistentvolumeclaim` for its `size`;
 and `postgresql` and the CloudNativePG kinds (`cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-imagecatalog` and `cnpg-clusterimagecatalog`) for what their policy check raises. The list of properties is in
 `site/content/api-reference/oam/policy-and-capability.md`, "Declared bounds". What is
 particular to this package:
@@ -235,6 +236,16 @@ particular to this package:
   two types declare `storage-maximum` on the volume itself, `volumes[]`, an open node
   (`roleBounds`). On the other five workload types a `pvc` volume must name an existing
   claim (`claimName`) and generates none, so the storage maximum has nothing to hold there.
+- **A `persistentvolume` is bounded on `hostPath`, `local` and `capacity`.** A `hostPath` or a
+  `local` source names a path on the node and is refused as `host-path` unless the policy allows
+  hostPath volumes; a `csi` or `flexVolume` source is not checked and declares nothing.
+  `capacity` is an open object, so the `storage-maximum` class sits on the node
+  (`persistentVolumeBounds`) and the bound applies to its `storage` key only: any other key is
+  not read. The `persistentvolumeclaim` kind declares the same class on `size`, the one property
+  that authors its storage, an unauthored `size` taking the policy's storage default and being
+  held to the maximum as an authored one is. `crd` declares `registry` on `url` only: a
+  CustomResourceDefinition passes the check on the objects of a document, so `inline` has no
+  class.
 
 ## Pod view of a monitoring workload object (`MonitoringPodSpec`)
 

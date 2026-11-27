@@ -109,7 +109,11 @@ func podBounds() map[string][]oam.RefusalClass {
 //     endpoint;
 //   - `image` of imagerepository;
 //   - `chart` of helmrelease, an open node: only a chart template of kind
-//     OCIRepository names a host, in its `spec.url`.
+//     OCIRepository names a host, in its `spec.url`;
+//   - the `url` of crd, a redirect to another host included. Its `inline` source
+//     declares nothing: a CustomResourceDefinition passes the check on the
+//     objects of a document, and any other object is refused as no CRD, a plain
+//     error.
 func registryBounds(paths ...string) map[string][]oam.RefusalClass {
 	b := map[string][]oam.RefusalClass{}
 	for _, path := range paths {
@@ -143,6 +147,21 @@ func manifestsBounds() map[string][]oam.RefusalClass {
 	return map[string][]oam.RefusalClass{
 		"inline": documentClasses(),
 		"url":    documentClasses(),
+	}
+}
+
+// persistentVolumeBounds are the bounds of persistentvolume
+// (enforcePersistentVolumePolicy): a hostPath or a local source, each a path on
+// the node, refused unless the policy allows hostPath volumes, and the storage a
+// volume's capacity gives, held to the storage maximum. `capacity` is an open
+// object and only its `storage` key is read, so the class sits on the node. A csi
+// or flexVolume source is not checked, and declares nothing.
+func persistentVolumeBounds() map[string][]oam.RefusalClass {
+	hostPath := []oam.RefusalClass{oam.RefusalHostPath}
+	return map[string][]oam.RefusalClass{
+		"hostPath": hostPath,
+		"local":    hostPath,
+		"capacity": {oam.RefusalStorageMaximum},
 	}
 }
 
