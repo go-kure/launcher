@@ -59,6 +59,8 @@
 #   pkg/oam/force_warnings.go              appliedObjects, which the collision, kind-policy and
 #                                          label-stamp checks call (the warnings beside it take the trailer)
 #   pkg/oam/handler.go                     exclusiveProperties, the key groups a handler refuses together
+#   pkg/oam/contained_path.go              ResolveInside, which decides which authored paths a loader
+#                                          refuses as leaving their document's directory (go-kure/launcher#1714)
 #   pkg/oam/image_reference.go             CheckImageReference and CheckSourceVersion, which decide which image
 #                                          references and oci versions a level accepts (go-kure/launcher#1644)
 #   pkg/oam/image_reference_level.go       the levels and the policy interfaces that select one
@@ -71,6 +73,8 @@
 #   pkg/oam/builtin/     every .go file below it (the per-kind property validators)
 #   pkg/oam/internal/      every .go file below it (the shared refusal tables and checks)
 #   pkg/oam/model/         every .go file below it (the Model document and its loader)
+#   pkg/oam/definition/    every .go file below it (the ComponentDefinition document and its loader,
+#                          go-kure/launcher#1714)
 # Under these prefixes a *_test.go file, a contract.go or doc.go file, and a file under
 # testdata/ never count. A *_test.go file never counts anywhere. The repository holds no
 # standalone schema files; the document schemas are the Go types above.
@@ -87,7 +91,7 @@
 #
 # Not caught: a change inside a counted file that does not alter what is accepted but is
 # not marked by the trailer, and acceptance code outside this set, such as a file in a
-# subdirectory of pkg/oam/ other than builtin/, internal/ and model/ (pkg/oam/netpol/ for one).
+# subdirectory of pkg/oam/ other than builtin/, internal/, model/ and definition/ (pkg/oam/netpol/ for one).
 # A new file directly under pkg/oam/ is caught by the self-test, not by the guard. Reviewers
 # remain the backstop.
 #
@@ -152,6 +156,7 @@ ACCEPT_PATHS=(
   pkg/oam/component_label.go
   pkg/oam/force_warnings.go
   pkg/oam/handler.go
+  pkg/oam/contained_path.go
   pkg/oam/image_reference.go
   pkg/oam/image_reference_level.go
   pkg/oam/naming_engine.go
@@ -178,9 +183,6 @@ LEFT_OUT_PATHS=(
   pkg/oam/policy_refusal.go
   pkg/oam/hook_group_name.go
   pkg/oam/lowering_targets.go
-  # A path helper the loaders call: each loader decides what its refusal means, and the helper
-  # reads no document (go-kure/launcher#1704).
-  pkg/oam/contained_path.go
   # No refusal of an authored document: the package comment, files that only pass on an
   # error they received, and a declaration that reads no document.
   pkg/oam/doc.go
@@ -198,7 +200,8 @@ LEFT_OUT_PATHS=(
 # counts too, except the file names below (contract metadata and the package comment).
 # pkg/oam/internal/ holds the shared refusal tables and checks the validators call.
 # pkg/oam/model/ is the Model document (a launcher.gokure.dev/v1alpha1 kind) and its loader.
-ACCEPT_PREFIXES=(pkg/oam/builtin/ pkg/oam/internal/ pkg/oam/model/)
+# pkg/oam/definition/ is the ComponentDefinition document (the same group and version) and its loader.
+ACCEPT_PREFIXES=(pkg/oam/builtin/ pkg/oam/internal/ pkg/oam/model/ pkg/oam/definition/)
 ACCEPT_SKIP_NAMES=(contract.go doc.go)
 
 RENOVATE_EMAIL="renovate@whitesourcesoftware.com"

@@ -201,6 +201,13 @@ expect "explicit secrets policy" 1 "pkg/oam/policy.go" $DEV pkg/oam/policy.go 'f
 expect "scaler target types" 1 "pkg/oam/scaler_targets.go" $DEV pkg/oam/scaler_targets.go 'fix(oam): x'
 expect "property schema type" 1 "pkg/oam/schema.go" $DEV pkg/oam/schema.go 'fix(oam): x'
 expect "generated name syntax check" 1 "pkg/oam/shorten_name.go" $DEV pkg/oam/shorten_name.go 'fix(oam): x'
+# Ruled in by go-kure/launcher#1714, on the same test: ResolveInside decides which authored
+# paths (an environment binding, a ComponentDefinition's CRD file) a loader refuses as leaving
+# their document's directory, though each loader raises the refusal.
+expect "contained path helper" 1 "pkg/oam/contained_path.go" $DEV pkg/oam/contained_path.go 'fix(oam): x'
+expect "contained path helper under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/contained_path.go 'fix(format): x'
+expect "contained path helper with a trailer reason" 0 "" $DEV pkg/oam/contained_path.go $'refactor(oam): x\n\nFormat-Scope: none (comment only)'
+expect "contained path helper test file" 0 "" $DEV pkg/oam/contained_path_test.go 'fix(oam): x'
 # The trailer is the way out for an edit that leaves the accepted format as it was: a comment in
 # schema.go, and the warnings in force_warnings.go that refuse nothing.
 expect "schema type with a trailer reason" 0 "" $DEV pkg/oam/schema.go $'docs(oam): x\n\nFormat-Scope: none (comment only)'
@@ -210,6 +217,15 @@ expect "transform with a trailer reason" 0 "" $DEV pkg/oam/transform.go $'refact
 expect "Model package comment" 0 "" $DEV pkg/oam/model/doc.go 'docs(oam): x'
 expect "Model testdata .go" 0 "" $DEV pkg/oam/model/testdata/x.go 'test(oam): x'
 expect "Model test file" 0 "" $DEV pkg/oam/model/load_test.go 'test(format): x'
+# The ComponentDefinition document (a launcher.gokure.dev/v1alpha1 kind) and its loader live in
+# pkg/oam/definition/ (go-kure/launcher#1714), so the loader counts like the Model loader does.
+expect "ComponentDefinition loader" 1 "pkg/oam/definition/definition.go" $DEV pkg/oam/definition/definition.go 'fix(oam): x'
+expect "ComponentDefinition loader under fix(format)" 0 "1 commit(s)" $DEV pkg/oam/definition/definition.go 'fix(format): x'
+expect "ComponentDefinition loader with a trailer reason" 0 "" $DEV pkg/oam/definition/definition.go $'refactor(oam): x\n\nFormat-Scope: none (comment only)'
+expect "ComponentDefinition package comment" 0 "" $DEV pkg/oam/definition/doc.go 'docs(oam): x'
+expect "ComponentDefinition testdata .go" 0 "" $DEV pkg/oam/definition/testdata/x.go 'test(oam): x'
+expect "ComponentDefinition test file" 0 "" $DEV pkg/oam/definition/definition_test.go 'test(oam): x'
+expect "ComponentDefinition README" 0 "" $DEV pkg/oam/definition/README.md 'docs(oam): x'
 # Not part of the rule: tests, contract metadata, the package comment, vendored input,
 # non-Go files, and a path that only contains the prefix.
 expect "builtin test file" 0 "" $DEV pkg/oam/builtin/components/typed_pod_rules_test.go 'fix(components): x'
