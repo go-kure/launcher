@@ -5,7 +5,7 @@
 A `ComponentDefinition` declares a component type for one custom resource kind, with no Go code.
 It names the kind it emits and a CustomResourceDefinition file, pinned by SHA-256. `kurel build`
 loads the documents of `<app dir>/definitions/` (see the
-[kurel CLI reference](../../cmd/kurel/README.md#component-definitions)); a library caller uses
+[kurel CLI reference](https://github.com/go-kure/launcher/blob/main/pkg/cmd/kurel/README.md#component-definitions)); a library caller uses
 this package directly.
 
 ```go
