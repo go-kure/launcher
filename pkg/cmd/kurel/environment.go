@@ -119,18 +119,17 @@ func resolveEnvironment(opts *buildOptions, appDir string, flags *pflag.FlagSet)
 	return nil
 }
 
-// containedPath joins rel onto baseDir (absolute, symlink-free), resolves symlinks,
-// and rejects a target outside baseDir. validateBindingPath only checks the text of
-// the path; a symlink such as profiles -> /elsewhere passes that check, so the
-// resolved target is what gets checked and returned for build to read.
+// containedPath resolves rel under baseDir (oam.ResolveInside) and rejects a target
+// outside it. validateBindingPath only checks the text of the path; a symlink such as
+// profiles -> /elsewhere passes that check, so the resolved target is what gets
+// checked and returned for build to read.
 func containedPath(baseDir, env, field, rel string) (string, error) {
-	target, err := filepath.EvalSymlinks(filepath.Join(baseDir, rel))
-	if err != nil {
-		return "", errors.Wrapf(err, "environment %q: resolving %s %q", env, field, rel)
-	}
-	inner, err := filepath.Rel(baseDir, target)
-	if err != nil || inner == ".." || strings.HasPrefix(inner, ".."+string(filepath.Separator)) {
+	target, err := oam.ResolveInside(baseDir, rel)
+	switch {
+	case stderrors.Is(err, oam.ErrPathOutsideDirectory):
 		return "", errors.Errorf("environment %q: %s %q resolves outside the environments file's directory", env, field, rel)
+	case err != nil:
+		return "", errors.Wrapf(err, "environment %q: resolving %s %q", env, field, rel)
 	}
 	return target, nil
 }

@@ -120,9 +120,13 @@ func build(doc *document, dir string) (*Handler, error) {
 		return nil, errors.Errorf("spec.schema.crd %q must be a relative path inside the definition's directory", doc.Spec.Schema.CRD)
 	}
 
-	crdPath, err := containedPath(dir, doc.Spec.Schema.CRD)
+	// The text is local; a symlink can still lead out of the directory.
+	crdPath, err := oam.ResolveInside(dir, doc.Spec.Schema.CRD)
+	if errors.Is(err, oam.ErrPathOutsideDirectory) {
+		return nil, errors.Errorf("spec.schema.crd %q resolves outside the definition's directory", doc.Spec.Schema.CRD)
+	}
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "reading the pinned CRD")
 	}
 	raw, err := os.ReadFile(crdPath)
 	if err != nil {
@@ -190,28 +194,6 @@ func build(doc *document, dir string) (*Handler, error) {
 		structural:    s,
 		validator:     validator,
 	}, nil
-}
-
-// containedPath resolves rel inside dir, symlinks included, and refuses a target
-// outside dir: the text of rel was checked local, and a symlink can still lead out.
-func containedPath(dir, rel string) (string, error) {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return "", errors.Wrap(err, "reading the pinned CRD")
-	}
-	base, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		return "", errors.Wrap(err, "reading the pinned CRD")
-	}
-	target, err := filepath.EvalSymlinks(filepath.Join(base, rel))
-	if err != nil {
-		return "", errors.Wrap(err, "reading the pinned CRD")
-	}
-	inner, err := filepath.Rel(base, target)
-	if err != nil || inner == ".." || strings.HasPrefix(inner, ".."+string(filepath.Separator)) {
-		return "", errors.Errorf("spec.schema.crd %q resolves outside the definition's directory", rel)
-	}
-	return target, nil
 }
 
 // topLevelProperties publishes the top level of the CRD's spec. The nested shape is

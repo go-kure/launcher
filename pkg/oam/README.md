@@ -103,6 +103,11 @@ instead of `RegisterComponent`, so that `ParseWithExtraTypes` with that transfor
 alone stays refused. The rule is under
 [Parsing and type identity](/site/content/api-reference/oam/parsing-and-types.md#parsing).
 
+A path that a document names, such as an environment binding's profile or a component
+definition's CRD file, is read through `ResolveInside(dir, rel)`. It resolves every symlink and
+returns `ErrPathOutsideDirectory` for a target outside `dir`, which the text of a relative path
+cannot show.
+
 ### Component type allowlist
 
 See [Parsing and type identity](/site/content/api-reference/oam/parsing-and-types.md#component-type-allowlist).
