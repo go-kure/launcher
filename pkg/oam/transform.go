@@ -930,6 +930,11 @@ type componentEntry struct {
 // objects two applications of the document generate, two traits of one
 // component included (go-kure/launcher#757): a caller runs GenerateApplications
 // and CheckInDocumentCollisions on the result.
+//
+// The properties of the application's components belong to the caller. The
+// caller must not change memory it handed over, a pointee inside the properties
+// included, until it has used the result: the objects generated from the
+// returned cluster.
 func (t *Transformer) Transform(app *Application, ctx TransformContext) (*stack.Cluster, error) {
 	cluster, _, err := t.TransformWithPolicy(app, ctx)
 	return cluster, err
@@ -938,6 +943,8 @@ func (t *Transformer) Transform(app *Application, ctx TransformContext) (*stack.
 // TransformWithPolicy converts an OAM Application to a kure Cluster and
 // returns the accumulated PolicyResult. ctx.Policy is normalized to NoopPolicy
 // if nil so that all pipeline stages always receive a non-nil Policy value.
+// What the caller hands over, and may not change until it has used the result,
+// is as for Transform.
 func (t *Transformer) TransformWithPolicy(app *Application, ctx TransformContext) (*stack.Cluster, *PolicyResult, error) {
 	return t.transform(app, ctx, nil)
 }

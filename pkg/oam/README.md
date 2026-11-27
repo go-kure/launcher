@@ -132,6 +132,15 @@ See [Parsing and type identity](/site/content/api-reference/oam/parsing-and-type
 
 See [Transform, extension and lowering](/site/content/api-reference/oam/transform-and-lowering.md#transform--extension).
 
+A library caller hands properties to `ComponentHandler.ToApplicationConfig`, `Transformer.Transform` and
+`Transformer.TransformWithPolicy`. It must not change memory it handed over, a pointee inside the properties
+included, until it has used the result. The `passthrough` component copies the maps and slices of its
+properties, and does not copy the target of a pointer, so its `Generate` emits what a pointee holds at that
+call. `RegisterComponent`, `RegisterAuthoredComponent` and `RegisterComponentLowering` panic when a declared
+type already claims the plain name as its short name, as their other collisions do
+(go-kure/launcher#1716; see
+[Declaring and resolving](/site/content/api-reference/oam/parsing-and-types.md#declaring-and-resolving)).
+
 ### Registering the builtins
 
 See [Transform, extension and lowering](/site/content/api-reference/oam/transform-and-lowering.md#registering-the-builtins).

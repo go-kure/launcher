@@ -34,6 +34,15 @@ Extend the system by implementing:
 | `LayoutAugmentationCoverage` | `GenerateCoversAugmentLayout() bool` — for a config that also implements kure's `layout.LayoutAugmenter`, declare whether `Generate` alone already produces every resource `AugmentLayout` places into the layout. `kurel build` (which never walks a `layout.ManifestLayout`) uses this to fail closed: an augmenter that doesn't implement this interface, or that implements it and returns `false`, is rejected outright rather than silently dropping layout-level resources from the output. |
 | `ConfigWrapper` | `WrappedApplicationConfig() stack.ApplicationConfig` — a config that wraps another one and says so. The ownership wrapper is one; `UnwrapConfig(cfg)` returns the config under every such wrapper. After `Transform` every application's config answers `ComponentNamed` through the ownership wrapper: the authored component, or `""` for an application the document as a whole owns ([Component label and ownership](labels-and-ownership.md#component-label-and-ownership)). |
 
+A library caller hands properties to `ComponentHandler.ToApplicationConfig`, `Transformer.Transform`
+and `Transformer.TransformWithPolicy`. It must not change memory it handed over, a pointee inside the
+properties included, until it has used the result: the objects generated from the returned cluster, or
+from the config `ToApplicationConfig` returned. The `passthrough` component copies the maps and slices of
+its properties, and does not copy the target of a pointer, so its `Generate` emits what a pointee holds at
+that call. `RegisterComponent`, `RegisterAuthoredComponent` and `RegisterComponentLowering` panic when a
+declared type already claims the plain name as its short name, as their other collisions do
+(go-kure/launcher#1716; see [Declaring and resolving](parsing-and-types.md#declaring-and-resolving)).
+
 `PolicyResult.Extensions` is a `map[string]any` a consumer's policy handler writes its own
 result into, under a key it owns (a domain-qualified name, as a label key is). Launcher
 neither reads nor changes it: `TransformWithPolicy` returns it as the handlers left it, and
