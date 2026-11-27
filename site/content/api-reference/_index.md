@@ -25,6 +25,7 @@ For the full Go API, see
 | [OAM Model](oam) | OAM data model, parser, and transform pipeline | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam) |
 | [Component Models](oam-models) | Configuration-defined component models: document format and loader | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/model) |
 | [Component Handlers](oam-components) | Built-in component types (webservice, worker, cronjob, helm, helmrelease, helmtemplate, …) | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components) |
+| [Component Definitions](oam-definitions) | Component types declared by a pinned CRD: document format and loader | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/definition) |
 | [Trait Handlers](oam-traits) | Built-in traits (ingress, certificate, scaler, externalsecret, …) | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits) |
 | [Policy Handlers](oam-policies) | Built-in application policies (dependency, placement) | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies) |
 | [Built-in Registry](oam-registry) | Every built-in handler and lowering rule, for registering the builtins | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/registry) |

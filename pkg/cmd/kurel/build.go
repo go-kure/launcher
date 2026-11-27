@@ -152,7 +152,11 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	}
 
 	transformer := newBuiltinTransformer()
-	// Before LowerableTypes is read below, so parse accepts a model's type.
+	// Before LowerableTypes is read below, so parse accepts a type a definition declares.
+	if err := loadComponentDefinitions(transformer, filepath.Join(appDir, "definitions")); err != nil {
+		return errors.Wrap(err, "loading component definitions")
+	}
+	// Likewise a model's type, after the definitions so that a model may name a defined type.
 	if err := loadModels(transformer, filepath.Join(appDir, modelsDirName), opts.modelPaths); err != nil {
 		return errors.Wrap(err, "loading component models")
 	}

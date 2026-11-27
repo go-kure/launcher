@@ -298,6 +298,45 @@ Alertmanager or ThanosRuler. The error names the object, the field and the name,
 is a violation of the component that owns the object. From 1.36 on, or with no version
 set, nothing is checked (go-kure/launcher#1230).
 
+### Component definitions
+
+`build` reads every `*.yaml` file of `<app dir>/definitions/` whose `kind` is
+`ComponentDefinition` (go-kure/launcher#1704), in file name order, and registers the component
+type each declares. A file of another kind there is left to its own loader, such as the
+`CapabilityDefinition` one. A definition adds a type for a custom resource with no Go code:
+
+```yaml
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: batch-job              # the type app.yaml authors
+spec:
+  emits:
+    apiVersion: example.gokure.dev/v1alpha1
+    kind: BatchJob
+  schema:
+    crd: crds/batchjob.yaml    # a path inside the definitions directory
+    sha256: cfb60f39a4e9a865e50e0e0a4d176aff45c02d69a7cb87318ef0041de243df36
+```
+
+The CRD file is pinned by its SHA-256, and a build refuses a file whose digest differs. A
+component of the type takes the custom resource's `spec` as its properties. `build` checks the
+whole object offline against the CRD's schema and refuses an unknown field, a value of the wrong
+type, a missing required field and a value outside an enum or a bound. It then emits the object
+as the `passthrough` component does. The document names no scope: the CRD's `spec.scope`
+decides whether the object gets a namespace. The type is also known by its identity,
+`<kind>.<group>@<version>` (`batchjob.example.gokure.dev@v1alpha1`). A type name that a
+built-in type or an earlier definition already holds refuses the build. The example is
+[`examples/custom-component`](https://github.com/go-kure/launcher/tree/main/examples/custom-component);
+the loader is [`pkg/oam/definition`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/definition).
+
+**The check is structural.** It is the API server's own schema check, run without a cluster. CEL
+rules in the CRD (`x-kubernetes-validations`) are not evaluated, and the API server's defaults
+are not applied, so an object that passes can still be refused by a cluster that runs those
+rules. Only the version `emits` names is read, from a local file. Nothing reads the pod settings
+a custom kind embeds (a privileged container, host networking), so a type that embeds a pod
+template builds with them (go-kure/launcher#1705).
+
 ### Platform key domain
 
 kurel derives its platform label/annotation keys under the **`launcher.gokure.dev`**
