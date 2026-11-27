@@ -234,8 +234,9 @@ particular to this package:
   `worker` a `pvc` volume with no `claimName` generates its claim from `size`, and that
   claim is held to the storage maximum. The schema declares no `size` on a volume, so the
   two types declare `storage-maximum` on the volume itself, `volumes[]`, an open node
-  (`roleBounds`). On the other five workload types a `pvc` volume must name an existing
-  claim (`claimName`) and generates none, so the storage maximum has nothing to hold there.
+  (`roleBounds`). On the kinds that take the pod as the API type a volume names an existing
+  claim, as `persistentVolumeClaim.claimName`, and generates none, so the storage maximum has
+  nothing to hold there.
 - **A `persistentvolume` is bounded on `hostPath`, `local` and `capacity`.** A `hostPath` or a
   `local` source names a path on the node and is refused as `host-path` unless the policy allows
   hostPath volumes; a `csi` or `flexVolume` source is not checked and declares nothing.
