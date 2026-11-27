@@ -245,6 +245,31 @@ func TestRegister_RefusesAnIdentityThatShadowsARegisteredName(t *testing.T) {
 	}
 }
 
+// The qualified name of an identity resolves before a plain name too: a definition whose
+// identity is the plain name of an earlier definition would take that type over, and the later
+// definition is refused (go-kure/launcher#1716).
+func TestRegister_RefusesAnIdentityWhoseQualifiedNameIsARegisteredName(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	first, err := definition.Load(variant(t, "widget.example.gokure.dev", "BatchJob"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := definition.Register(tr, first); err != nil {
+		t.Fatal(err)
+	}
+	second, err := definition.Load(variant(t, "widgets", "Widget"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = definition.Register(tr, second)
+	if err == nil || !strings.Contains(err.Error(), `"widget.example.gokure.dev"`) {
+		t.Fatalf("Register: %v, want the qualified name widget.example.gokure.dev refused", err)
+	}
+	if h, ok := tr.ComponentHandlerFor("widget.example.gokure.dev"); !ok || h != oam.ComponentHandler(first) {
+		t.Errorf("the name widget.example.gokure.dev is no longer the first definition's handler")
+	}
+}
+
 // A library transformer may hold a lowering rule with no declared identity;
 // the collision is an error, never a panic.
 func TestRegister_RefusesALoweringRuleName(t *testing.T) {
