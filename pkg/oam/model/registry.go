@@ -36,6 +36,19 @@ func (g *Registry) Register(m *Model) (err error) {
 	if _, err := g.t.ResolveComponentType(key); err == nil {
 		return errors.Errorf("model: the type %s is already declared", key)
 	}
+	// An identity resolves before a plain name, and a model is known by its qualified name and
+	// by its short name, so a model of the name of a plain key that no declared type claims
+	// would be built in the place of the type that holds the key (go-kure/launcher#1716).
+	ident := m.Identity()
+	names := []string{ident.Name}
+	if short := ident.ShortName(); short != ident.Name {
+		names = append(names, short)
+	}
+	for _, name := range names {
+		if g.holdsUnclaimedPlainKey(name) {
+			return errors.Errorf("model: %s: the name %q, which the model answers to, is the plain name of a registered component type, and an identity resolves before a plain name, so the model would be built in that type's place; rename one of them", key, name)
+		}
+	}
 	// The key is mandatory so that a model says what it publishes, even when it publishes
 	// nothing: a model written before the outputs existed is refused, not read as silent.
 	if m.Spec.Outputs == nil {
@@ -89,6 +102,19 @@ func (g *Registry) Register(m *Model) (err error) {
 	}
 	g.rules[key] = r
 	return nil
+}
+
+// holdsUnclaimedPlainKey reports whether a handler or a lowering rule is registered under name
+// and no declared type claims name, by its qualified name or its short name. A name a declared
+// type claims resolves to that type, or is reported ambiguous, and so never reads as another's.
+func (g *Registry) holdsUnclaimedPlainKey(name string) bool {
+	_, handler := g.t.ComponentHandlerFor(name)
+	_, rule := g.t.ComponentLoweringRuleFor(name)
+	if !handler && !rule {
+		return false
+	}
+	_, err := g.t.ResolveComponentType(name)
+	return errors.Is(err, oam.ErrTypeReferenceUnknown)
 }
 
 // Rule returns the rule registered under key, or nil.

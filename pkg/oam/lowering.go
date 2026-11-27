@@ -951,7 +951,9 @@ func (t *Transformer) RegisterRawDocumentLowering(r RawDocumentLoweringRule) {
 // RegisterComponentLowering registers a component-position lowering rule. Panics if
 // typeName is already registered at this position, or is already a dispatchable
 // component handler type — a lowerable type must never also be terminal, or the
-// handler would win the dispatch and the rule would never run.
+// handler would win the dispatch and the rule would never run. It also panics when a
+// declared type already claims typeName as its short name, since the identity would win
+// the resolution and the rule would never run.
 func (t *Transformer) RegisterComponentLowering(r ComponentLoweringRule) {
 	typeName := r.ComponentType()
 	if typeName == "" {
@@ -960,6 +962,7 @@ func (t *Transformer) RegisterComponentLowering(r ComponentLoweringRule) {
 	if _, exists := t.componentLoweringRules[typeName]; exists {
 		panic("oam: component lowering rule already registered for type " + typeName)
 	}
+	t.refuseClaimedComponentName(typeName)
 	if _, exists := t.componentHandlers[typeName]; exists {
 		panic("oam: type " + typeName + " is already a dispatchable component handler; a lowerable type must not also be terminal")
 	}

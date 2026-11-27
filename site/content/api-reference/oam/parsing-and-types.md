@@ -293,7 +293,11 @@ A plain name that no declared identity names, or that is not a valid identity at
 such as `custom_metrics`), behaves as before: it passes through to the allowlist or the "no handler"
 refusal. A name that a declared identity claims resolves first, so a short name that more than one
 type or version claims is refused as ambiguous even when a handler is registered under that plain
-name. A reference with a version that does not resolve is refused in the resolver's words, naming
+name. A plain name that no declared identity names would be taken over by a type declared later with
+that short name, so a model registry refuses such a model (`model.Registry.Register`), and a
+component handler or lowering rule registered under a plain name that a declared type already claims
+as its short name panics (`RegisterComponent`, `RegisterAuthoredComponent`,
+`RegisterComponentLowering`), as its other collisions do (go-kure/launcher#1716). A reference with a version that does not resolve is refused in the resolver's words, naming
 the versions that exist, before any handler runs. That refusal applies in a position (components,
 traits, policies) where a type is declared; where nothing is declared, a type is its registered
 name, `@` included, and the lookups and `Transform` dispatch on it as before. `Transform` returns
