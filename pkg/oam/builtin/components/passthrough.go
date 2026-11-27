@@ -64,9 +64,10 @@ func (h *PassthroughHandler) PropertySchema() map[string]oam.PropertySchema {
 //
 // The caller must not change memory it handed over, a pointee inside the
 // properties included, until it has used the result: the last Generate call of
-// the returned config. The maps and slices of the properties are copied here,
-// and again on each Generate call. The target of a pointer is not copied, so
-// Generate emits what a pointee holds at that call, which can differ from what
+// the returned config. The maps, slices and arrays of the properties are copied
+// here, and again on each Generate call. A struct is not copied through, and
+// neither is the target of a pointer, so Generate emits what a pointee, or a
+// map or slice inside a struct, holds at that call, which can differ from what
 // this call read (see deepCopyValue, which states the limit).
 func (h *PassthroughHandler) ToApplicationConfig(component *oam.Component, namespace string) (stack.ApplicationConfig, error) {
 	props := component.Properties
