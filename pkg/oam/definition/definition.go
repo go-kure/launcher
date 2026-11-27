@@ -95,7 +95,7 @@ func Load(path string) (*Handler, error) {
 	}
 	// One definition per file: a second document would be dropped unread.
 	var next any
-	if err := dec.Decode(&next); err != io.EOF {
+	if err := dec.Decode(&next); !errors.Is(err, io.EOF) {
 		return nil, errors.Errorf("component definition %q: the file holds more than one YAML document; one definition goes in each file", path)
 	}
 	h, err := build(&doc, filepath.Dir(path))
