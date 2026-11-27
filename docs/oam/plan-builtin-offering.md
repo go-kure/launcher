@@ -137,7 +137,7 @@ Source: the VictoriaMetrics operator's page on Prometheus integration, read on 2
 - Deleting a Prometheus object must not block Flux, so the CRDs and the operator outlive the objects that use them.
 - How launcher handles the conversion is out of scope.
 
-So a chart that sets only the convertible kinds (`ServiceMonitor`, `PodMonitor`, `PrometheusRule`, `Probe`, `ScrapeConfig`) gets VictoriaMetrics objects through the conversion, and a hand-written object of one of those kinds can be relied on in a cluster that follows this definition. A chart that sets an instance kind (`Prometheus`, `Alertmanager`, `ThanosRuler`) gets nothing from the conversion.
+So a chart that sets only the convertible kinds (`ServiceMonitor`, `PodMonitor`, `PrometheusRule`, `Probe`, `ScrapeConfig`) gets VictoriaMetrics objects through the conversion, and a hand-written object of one of those kinds can be relied on in a cluster that follows this definition. The instance objects themselves (`Prometheus`, `Alertmanager`, `ThanosRuler`) are not converted.
 
 ### What the existing Prometheus Operator types become
 
