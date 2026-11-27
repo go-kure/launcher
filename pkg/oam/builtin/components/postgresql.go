@@ -1096,6 +1096,7 @@ func schemaPostgresqlBootstrap() oam.PropertySchema {
 	return oam.PropertySchema{
 		Type:        oam.PropertyTypeObject,
 		Description: "How the Cluster is created: initdb or pg_basebackup, at most one, and not with recovery. A bootstrap is read only when the Cluster is created; set on a component whose Cluster exists already, it changes nothing. A key not listed here is refused.",
+		Exclusive:   []oam.ExclusiveGroup{{Keys: []string{"initdb", "pg_basebackup"}}},
 		Properties: map[string]oam.PropertySchema{
 			"initdb": {
 				Type:        oam.PropertyTypeObject,

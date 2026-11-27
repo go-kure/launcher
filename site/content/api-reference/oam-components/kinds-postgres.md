@@ -554,7 +554,13 @@ whose Cluster exists already, it changes nothing. Recovering by renaming the
 source component's Cluster instead (`clusterObjectName`) creates a new Cluster
 and prunes the original with its data unless it is protected. It is not combined
 with `bootstrap.pg_basebackup` (`recovery: not with bootstrap.pg_basebackup …`)
-or `bootstrap.initdb` (`recovery: not with bootstrap.initdb …`).
+or `bootstrap.initdb` (`recovery: not with bootstrap.initdb …`). The schema
+publishes the rules below that the parser enforces: `recovery.source` is
+required, `objectStoreName` and `objectStore` are an exactly-one group, and
+`recovery.target`'s selectors and `bootstrap`'s `initdb` and `pg_basebackup` are
+at-most-one groups. A document that breaks one is refused by the document check,
+in the schema's words (`"source" is required`, `"time" and "lsn" are mutually
+exclusive`), before the parser's.
 - `recovery.source` (required) is where the backups are read from: `serverName`
   (required, not empty), the folder the source cluster wrote within the store
   (its `backup.serverName`, else its Cluster's name), and exactly one of

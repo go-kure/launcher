@@ -22,8 +22,8 @@ import (
 // postgresql became a lowering rule, with the `poolerName`, `clusterObjectName`
 // and `objectStoreObjectName` the rule gained since, `pooler.image` in the
 // pooler's description, and the DNS-1123 label rule in `poolerName`'s
-// (go-kure/launcher#959), and the `boundedBy` it publishes
-// (go-kure/launcher#1711).
+// (go-kure/launcher#959), and the `boundedBy`, the required `recovery.source`
+// and the exclusive groups it publishes (go-kure/launcher#1711).
 func TestPostgresqlRule_PropertySchemaUnchanged(t *testing.T) {
 	want, err := os.ReadFile("testdata/postgresql-property-schema.json")
 	if err != nil {
