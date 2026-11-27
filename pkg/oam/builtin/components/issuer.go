@@ -29,7 +29,7 @@ func (h *IssuerHandler) CanHandle(componentType string) bool {
 // name: one per issuer type. Each is an open object whose content is checked
 // by the strict decode, not by this schema.
 func (h *IssuerHandler) PropertySchema() map[string]oam.PropertySchema {
-	return issuerSchema("Issuer")
+	return oam.DeclareBounds(issuerSchema("Issuer"), issuerBounds())
 }
 
 // issuerKind is the issuer kind: see policyHeldKind. The API requires no field

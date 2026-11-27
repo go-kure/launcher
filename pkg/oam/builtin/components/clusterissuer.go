@@ -32,7 +32,7 @@ func (h *ClusterIssuerHandler) CanHandle(componentType string) bool {
 // name: one per issuer type. Each is an open object whose content is checked
 // by the strict decode, not by this schema.
 func (h *ClusterIssuerHandler) PropertySchema() map[string]oam.PropertySchema {
-	return issuerSchema("ClusterIssuer")
+	return oam.DeclareBounds(issuerSchema("ClusterIssuer"), issuerBounds())
 }
 
 // clusterIssuerKind is the clusterissuer kind: issuerKind, building the

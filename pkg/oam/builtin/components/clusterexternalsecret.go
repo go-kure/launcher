@@ -31,7 +31,7 @@ func (h *ClusterExternalSecretHandler) CanHandle(componentType string) bool {
 // by its json name. Structured fields are open objects whose content is
 // checked by the strict decode, not by this schema.
 func (h *ClusterExternalSecretHandler) PropertySchema() map[string]oam.PropertySchema {
-	return clusterExternalSecretSchema()
+	return oam.DeclareBounds(clusterExternalSecretSchema(), targetManifestBounds("externalSecretSpec"))
 }
 
 // clusterExternalSecretKind is the clusterexternalsecret kind: see

@@ -182,7 +182,7 @@ and the nine kinds that take a pod as the API
 type (`pod`, `podtemplate`, `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`, `replicaset`, `replicationcontroller`) publish, in `boundedBy`,
 the classes an authored value at a property can cause, and so do the Flux source family (`helm`, `gitrepository`, `helmrepository`, `ocirepository`, `oci`, `bucket`, `helmrelease`, `imagerepository` and `resourcesetinputprovider`) and `manifests`
 for where each is fetched from and, on `manifests`, the objects the source carries; `passthrough` for the object it emits; `helmtemplate` for the host of its chart and its `secretValues`; `fluxcd-provider`, which fetches nothing, for its `address`;
-`crd` for the host of its `url`; `horizontalpodautoscaler` for its `maxReplicas`; `persistentvolume` for a `hostPath` or `local` source and its `capacity`; `persistentvolumeclaim` for its `size`;
+`crd` for the host of its `url`; `horizontalpodautoscaler` for its `maxReplicas`; `persistentvolume` for a `hostPath` or `local` source and its `capacity`; `persistentvolumeclaim` for its `size`; `metallb-bgppeer` for its `password` and `certificate` for its `keystores`; `issuer` and `clusterissuer` for the pod of an HTTP01 solver; `secretstore` and `clustersecretstore` for the credentials they hold in the clear; `externalsecret` and `clusterexternalsecret` for the object their `target.manifest` has the operator write;
 and `postgresql` and the CloudNativePG kinds (`cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-imagecatalog` and `cnpg-clusterimagecatalog`) for what their policy check raises. The list of properties is in
 `site/content/api-reference/oam/policy-and-capability.md`, "Declared bounds". What is
 particular to this package:
@@ -247,6 +247,17 @@ particular to this package:
   held to the maximum as an authored one is. `crd` declares `registry` on `url` only: a
   CustomResourceDefinition passes the check on the objects of a document, so `inline` has no
   class.
+- **The kinds that hold one decoded spec declare the property each refusal sits on.**
+  `metallb-bgppeer` declares `explicit-secret` on `password`, and `certificate` on its open
+  `keystores` node. `issuer` and `clusterissuer` declare `resource-maximum` on the open `acme`
+  node, for the cpu and memory of the pod an HTTP01 solver starts (`issuerBounds`).
+  `secretstore` and `clustersecretstore` declare `explicit-secret` on the open `provider` node
+  (`secretStoreBounds`): a credential written as the `value` of a union, or the data of the
+  `fake` provider. `externalsecret` and `clusterexternalsecret` declare `explicit-secret` and
+  `unreadable-object` on the open node that holds `target.manifest`, `target` and
+  `externalSecretSpec` (`targetManifestBounds`): a Secret is refused under a policy that forbids
+  explicit secrets, and a workload, a claim or an autoscaler is refused under any applied policy;
+  no limit lifts it. The other five MetalLB kinds raise no policy refusal and declare nothing.
 
 ## Pod view of a monitoring workload object (`MonitoringPodSpec`)
 

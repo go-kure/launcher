@@ -29,7 +29,7 @@ func (h *SecretStoreHandler) CanHandle(componentType string) bool {
 // json name. Structured fields are open objects whose content is checked by
 // the strict decode, not by this schema.
 func (h *SecretStoreHandler) PropertySchema() map[string]oam.PropertySchema {
-	return secretStoreSchema("SecretStore")
+	return oam.DeclareBounds(secretStoreSchema("SecretStore"), secretStoreBounds())
 }
 
 // secretStoreKind is the secretstore kind: see policyHeldKind. validate holds
