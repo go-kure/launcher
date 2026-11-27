@@ -178,6 +178,9 @@ LEFT_OUT_PATHS=(
   pkg/oam/policy_refusal.go
   pkg/oam/hook_group_name.go
   pkg/oam/lowering_targets.go
+  # A path helper the loaders call: each loader decides what its refusal means, and the helper
+  # reads no document (go-kure/launcher#1704).
+  pkg/oam/contained_path.go
   # No refusal of an authored document: the package comment, files that only pass on an
   # error they received, and a declaration that reads no document.
   pkg/oam/doc.go
