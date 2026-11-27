@@ -17,8 +17,9 @@ err = definition.Register(transformer, h)              // the type is now author
 `Load` refuses a document with a field it does not know, a `crd` path that leaves the definition's
 directory (by `..`, an absolute path or a symlink), a digest that differs, a CRD that does not define the emitted kind in a served
 version, and a schema that is not structural. `Register` refuses a type name the transformer
-already holds, and declares the type's identity, `<kind>.<group>@<version>`, so a model can name
-it. It uses `Transformer.RegisterAuthoredComponent`, so a document may author the type.
+already holds (the error names the declared type that holds it), and an identity whose qualified
+name or short name is the plain name of a registered type, which the identity would take over. It then declares the type's
+identity, `<kind>.<group>@<version>`, so a model can name it. It uses `Transformer.RegisterAuthoredComponent`, so a document may author the type.
 
 A component of the type takes the resource's `spec` as its properties. The object is checked
 against the CRD's schema, unknown fields included, and emitted by the `passthrough` handler,
