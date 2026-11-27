@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/components"
 	"github.com/go-kure/launcher/pkg/oam/definition"
 )
 
@@ -203,5 +204,105 @@ func TestRegister_RefusesTheSameTypeTwice(t *testing.T) {
 	}
 	if _, err := tr.ResolveComponentType("batchjob.example.gokure.dev@v1alpha1"); err != nil {
 		t.Errorf("the identity does not resolve: %v", err)
+	}
+}
+
+// variant copies the example under another type name and kind, in the same group.
+func variant(t *testing.T, typeName, kind string) string {
+	t.Helper()
+	def := copyExample(t)
+	crd, err := os.ReadFile(filepath.Join(filepath.Dir(def), "crds", "batchjob.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCRD(t, def, strings.NewReplacer("BatchJob", kind, "batchjob", strings.ToLower(kind)).Replace(string(crd)))
+	edit(t, def, "name: batch-job", "name: "+typeName)
+	edit(t, def, "kind: BatchJob", "kind: "+kind)
+	return def
+}
+
+// A type's identity is also known by its short name, so an identity whose short
+// name is a type already registered would take that type's name over.
+func TestRegister_RefusesAnIdentityThatShadowsARegisteredName(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	first, err := definition.Load(variant(t, "widget", "BatchJob"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := definition.Register(tr, first); err != nil {
+		t.Fatal(err)
+	}
+	second, err := definition.Load(variant(t, "jobs", "Widget"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = definition.Register(tr, second)
+	if err == nil || !strings.Contains(err.Error(), `"widget"`) {
+		t.Fatalf("Register: %v, want the short name widget refused", err)
+	}
+	if h, ok := tr.ComponentHandlerFor("widget"); !ok || h != oam.ComponentHandler(first) {
+		t.Errorf("type widget is no longer the first definition's handler")
+	}
+}
+
+// A library transformer may hold a lowering rule with no declared identity;
+// the collision is an error, never a panic.
+func TestRegister_RefusesALoweringRuleName(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(components.WebserviceRule{})
+	h, err := definition.Load(variant(t, "webservice", "BatchJob"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = definition.Register(tr, h)
+	if err == nil || !strings.Contains(err.Error(), `"webservice"`) {
+		t.Errorf("Register: %v, want the name refused", err)
+	}
+}
+
+func TestLoad_RefusesADocumentThatIsNotACRD(t *testing.T) {
+	def := copyExample(t)
+	crd, err := os.ReadFile(filepath.Join(filepath.Dir(def), "crds", "batchjob.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCRD(t, def, strings.Replace(string(crd), "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n", "apiVersion: v1\nkind: ConfigMap\n", 1))
+	_, err = definition.Load(def)
+	if err == nil || !strings.Contains(err.Error(), "CustomResourceDefinition") {
+		t.Errorf("Load: %v, want the pinned file refused as no CRD", err)
+	}
+}
+
+// The published top level is closed, so a spec that is open cannot be published.
+func TestLoad_RefusesAnOpenSpec(t *testing.T) {
+	cases := []struct{ name, line string }{
+		{"additionalProperties", "            additionalProperties: {type: string}\n"},
+		{"x-kubernetes-preserve-unknown-fields", "            x-kubernetes-preserve-unknown-fields: true\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			def := copyExample(t)
+			writeCRD(t, def, crdWithSchema("  - name: v1alpha1\n    served: true\n    storage: true\n    schema:\n      openAPIV3Schema:\n        type: object\n        properties:\n          spec:\n            type: object\n"+c.line))
+			_, err := definition.Load(def)
+			if err == nil || !strings.Contains(err.Error(), "spec is open") {
+				t.Errorf("Load: %v, want the open spec refused", err)
+			}
+		})
+	}
+}
+
+// One YAML document per definition file: a second is refused, never dropped.
+func TestLoad_RefusesASecondDocument(t *testing.T) {
+	def := copyExample(t)
+	data, err := os.ReadFile(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(def, append(append(data, "---\n"...), data...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = definition.Load(def)
+	if err == nil || !strings.Contains(err.Error(), "more than one YAML document") {
+		t.Errorf("Load: %v, want the second document refused", err)
 	}
 }

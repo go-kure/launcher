@@ -213,3 +213,74 @@ func TestBuildCommand_ComponentDefinitionOpenProperty(t *testing.T) {
 		t.Errorf("output does not hold the open property:\n%s", out)
 	}
 }
+
+// The API server enforces a list-type map or set apart from the schema check;
+// so does the build.
+func TestBuildCommand_ComponentDefinitionListMapKeysAreUnique(t *testing.T) {
+	_, err := buildComponentDefinitionExample(t, func(dir string) {
+		editCRD(t, "              env:\n                type: array\n", "              env:\n                type: array\n                x-kubernetes-list-type: map\n                x-kubernetes-list-map-keys:\n                - name\n")(dir)
+		editIn(t, "app.yaml", "        value: yesterday\n", "        value: yesterday\n      - name: REPORT_DATE\n        value: today\n")(dir)
+	})
+	if err == nil || !strings.Contains(err.Error(), "spec.env[1]") {
+		t.Errorf("got %v, want the duplicate key refused", err)
+	}
+}
+
+// The CRD decides the scope, whatever kure's own table says of the same kind.
+func TestBuildCommand_ComponentDefinitionNamespacedScopeIsKept(t *testing.T) {
+	out, err := buildComponentDefinitionExample(t, func(dir string) {
+		editIn(t, "definitions/batchjob.yaml", "apiVersion: example.gokure.dev/v1alpha1\n    kind: BatchJob", "apiVersion: cert-manager.io/v9\n    kind: ClusterIssuer")(dir)
+		editIn(t, "definitions/crds/batchjob.yaml", "group: example.gokure.dev", "group: cert-manager.io")(dir)
+		editIn(t, "definitions/crds/batchjob.yaml", "name: v1alpha1", "name: v9")(dir)
+		editCRD(t, "    kind: BatchJob\n", "    kind: ClusterIssuer\n")(dir)
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(out, "kind: ClusterIssuer\n") || !strings.Contains(out, "namespace: analytics\n") {
+		t.Errorf("a namespaced CRD's object carries no namespace:\n%s", out)
+	}
+}
+
+// A definition file is one YAML document, and a definition in a later document is
+// refused rather than skipped.
+func TestBuildCommand_ComponentDefinitionFileWithTwoDocuments(t *testing.T) {
+	cases := []struct {
+		name string
+		edit func(dir string)
+		want string
+	}{
+		{"a definition after another kind", func(dir string) {
+			def := filepath.Join(dir, "definitions/batchjob.yaml")
+			data, err := os.ReadFile(def)
+			if err != nil {
+				t.Fatal(err)
+			}
+			other := "apiVersion: launcher.gokure.dev/v1alpha1\nkind: SomethingElse\nmetadata:\n  name: x\n---\n"
+			if err := os.WriteFile(def, append([]byte(other), data...), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, "ComponentDefinition"},
+		{"two definitions", func(dir string) {
+			def := filepath.Join(dir, "definitions/batchjob.yaml")
+			data, err := os.ReadFile(def)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(def, append(append(data, "---\n"...), data...), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, "more than one YAML document"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, err := buildComponentDefinitionExample(t, c.edit)
+			if err == nil {
+				t.Fatalf("built:\n%s", out)
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("error %q does not hold %q", err, c.want)
+			}
+		})
+	}
+}
