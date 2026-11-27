@@ -41,8 +41,8 @@ A configuration model defines a **component** type. The model README says a trai
 
 ### Base kinds (built-in types)
 
-- **Proposal:** a kind type or a generic-route definition for each VictoriaMetrics kind the generic monitoring part lowers to: `VMServiceScrape`, `VMPodScrape`, `VMRule` and `VMProbe`. They have no built-in type today.
-- **Proposal:** the other VictoriaMetrics scrape and configuration kinds (`VMNodeScrape`, `VMStaticScrape`, `VMScrapeConfig`, `VMAlertmanagerConfig`) go by hand through the generic route, because no part lowers to them.
+- **Proposal:** a kind type or a generic-route definition for each VictoriaMetrics kind the generic monitoring part lowers to: `VMServiceScrape`, `VMPodScrape` and `VMRule`. They have no built-in type today.
+- **Proposal:** the other VictoriaMetrics scrape and configuration kinds (`VMProbe`, `VMNodeScrape`, `VMStaticScrape`, `VMScrapeConfig`, `VMAlertmanagerConfig`) go by hand through the generic route, because no part lowers to them.
 - **Proposal:** the VictoriaMetrics instance kinds (`VMAgent`, `VMAlert`, `VMAlertmanager`, `VMSingle`, `VMCluster`, `VMAuth` and the log and trace families) run pods from settings in the resource. They wait for the pod policy of go-kure/launcher#1705, or a Go type. They are not part of the generic monitoring part (see below).
 - Nothing is proposed as a built-in type for Grafana, Perses, Forecastle, Velero or the low-priority kinds of the survey's list. They are by hand.
 

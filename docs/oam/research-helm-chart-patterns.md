@@ -839,7 +839,7 @@ Serge set four rules for this page on 2026-11-27. VictoriaMetrics is the support
 
 ### Use cases and what serves them
 
-Five models and parts are named in words in the table, and the list after it defines each. The workload model is one workload with optional volume, exposure, database, monitoring and backup parts. The generic monitoring part is a scrape and a rule. The generic backup part says what to back up and lowers to CloudNativePG or VolSync. The data store model is a replicated stateful store. The operator install model is a workload with CRDs, RBAC and, for a webhook, a certificate.
+Six models and parts are named in words in the table, and the list after it defines each. The workload model is one workload with optional volume, exposure, database, monitoring and backup parts. The generic monitoring part is a scrape and a rule. The generic backup part says what to back up and lowers to CloudNativePG or VolSync. The data store model is a replicated stateful store. The operator install model is a workload with CRDs, RBAC and, for a webhook, a certificate. S3 storage is a bucket and the access to it.
 
 | Use case | Served by | Still lacks |
 |---|---|---|
