@@ -200,8 +200,9 @@ particular to this package:
   `version`, which is refused as an authored one is, and a pooler that names no image is refused too; under a
   storage maximum below 1Gi the default `storageSize` is refused. Each is declared where the author can
   change it: `imageName`, the open `pooler` node and `storageSize`. A `cnpg-cluster` that names neither
-  `imageName` nor `imageCatalogRef`, and a `cnpg-pooler` that names no image, are refused the same way, on
-  `imageName` and `pgbouncer`. The instance count of a `cnpg-pooler` is not policed, so it declares nothing.
+  `imageName` nor `imageCatalogRef`, and a `cnpg-pooler` that names its PgBouncer image by none of
+  `pgbouncer.image`, `pgbouncer.imageCatalogRef` and an image of a template container named `pgbouncer`,
+  are refused the same way, on `imageName` and `pgbouncer`. The instance count of a `cnpg-pooler` is not policed, so it declares nothing.
 - **The content of a `manifests` source is bounded by the document, not by one key.** `inline`
   is the document and `url` names it, so both list `explicit-secret` and `unreadable-object`
   (`enforceManifestPolicy`), and `url` also lists `registry`. The rendered-object classes of a

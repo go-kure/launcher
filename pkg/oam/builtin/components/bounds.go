@@ -182,8 +182,10 @@ func cnpgClusterBounds() map[string][]oam.RefusalClass {
 }
 
 // cnpgPoolerBounds are the bounds of cnpg-pooler (CnpgPoolerConfig.ApplyPolicy):
-// the image PgBouncer runs, which a Pooler that names none leaves to the
-// operator and is refused under an allowlist, and every class the pod template
+// the image PgBouncer runs (a Pooler that names it by none of `pgbouncer.image`,
+// `pgbouncer.imageCatalogRef` and an image of a template container named
+// "pgbouncer" leaves it to the operator, and is refused under an allowlist),
+// and every class the pod template
 // is held to (enforcePodTemplatePolicy), those of a pod on the one `template`
 // node. The instance count is deliberately not policed.
 func cnpgPoolerBounds() map[string][]oam.RefusalClass {
