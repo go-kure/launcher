@@ -26,7 +26,7 @@ A configuration model defines a **component** type. The model README says a trai
 | Candidate | Proposal | Shape | Reason |
 |---|---|---|---|
 | Workload model: a workload with optional volume, exposure, database, monitoring and backup | Include | Configuration model | It is the most frequent combination that no single type gives (survey, Candidate models). One model with parts switched off replaces a monitored-web-service model and a stateful-web-app model. |
-| Generic monitoring part: a scrape and a rule | Include | A part inside a model; as a trait, Go (see below) | It serves a use case 22 of the 27 application charts show. It lowers to VictoriaMetrics kinds only. |
+| Generic monitoring part: a scrape and a rule | Include | A part inside a model; as a trait, Go (see below) | It serves the most widespread use case in the survey's charts. It lowers to VictoriaMetrics kinds only. |
 | Generic backup part | Include | Lowers to `cnpg-scheduledbackup` for a database and to VolSync for a volume | Decided on 2026-11-27 (see Backups). It needs no new kind. |
 | S3 storage: a bucket and the access to it | Include, as a base offering, after research | Kind, model or trait: open | Serge asked for it as a base offering. Provider S3 is not researched yet. |
 | Data store model | Include, low priority | Configuration model | An operator type is the better route where one exists, so the value is where none does. |
@@ -121,5 +121,5 @@ None of these is decided here.
 3. **What a lowering can target.** Can a model or lowering rule write a kind that exists only as a generic-route definition, or does the generic monitoring part need built-in types for the VictoriaMetrics kinds first?
 4. **One S3 part or two.** Is S3 on a self-hosted server and S3 from a provider one generic part with two lowerings, or two parts?
 5. **Backup from a model.** Can a model part write the `volsync` trait onto a claim, or does the generic backup part need a Go lowering rule?
-6. **The workload model's shape.** Is it one part that a mode value turns into a service, a worker or a job, as 6 charts do? The survey leaves this open.
+6. **The workload model's shape.** Is it one part that a mode value turns into a service, a worker or a job, as some of the survey's charts do? The survey leaves this open.
 7. **Conversion on or off.** Does launcher state in the cluster profile that the VictoriaMetrics operator's Prometheus conversion is on, so a user can rely on a hand-written `ServiceMonitor`?
