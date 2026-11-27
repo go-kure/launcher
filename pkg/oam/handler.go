@@ -8,6 +8,10 @@ import (
 
 // ComponentHandler handles transformation of a specific OAM component type
 // into a kure ApplicationConfig.
+//
+// The component's properties belong to the caller. The caller must not change
+// memory it handed over, a pointee inside the properties included, until it has
+// used the result: the objects its ApplicationConfig generates.
 type ComponentHandler interface {
 	CanHandle(componentType string) bool
 	ToApplicationConfig(component *Component, namespace string) (stack.ApplicationConfig, error)
