@@ -180,8 +180,9 @@ constant; `TestBuiltinPolicyRefusalsCarryAClass` (`pkg/oam`) fails on one that d
 **Bounds in the schema.** The two reshaped workload types (`webservice`, `worker`)
 and the nine kinds that take a pod as the API
 type (`pod`, `podtemplate`, `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`, `replicaset`, `replicationcontroller`) publish, in `boundedBy`,
-the classes an authored value at a property can cause, and so do the Flux source family (`helm`, `gitrepository`, `helmrepository`, `ocirepository`, `oci`, `bucket`, `helmrelease`, `imagerepository`, `resourcesetinputprovider` and `fluxcd-provider`) and `manifests`
-for where each is fetched from and, on `manifests`, the objects the source carries. The list of properties is in
+the classes an authored value at a property can cause, and so do the Flux source family (`helm`, `gitrepository`, `helmrepository`, `ocirepository`, `oci`, `bucket`, `helmrelease`, `imagerepository` and `resourcesetinputprovider`) and `manifests`
+for where each is fetched from and, on `manifests`, the objects the source carries; `fluxcd-provider`, which fetches nothing, for its `address`;
+and `postgresql` and the CloudNativePG kinds (`cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-imagecatalog` and `cnpg-clusterimagecatalog`) for what their policy check raises. The list of properties is in
 `site/content/api-reference/oam/policy-and-capability.md`, "Declared bounds". What is
 particular to this package:
 
@@ -191,7 +192,16 @@ particular to this package:
   `oam.DeclareBounds` and one of `workloadBounds`, `roleBounds`, `podBounds`,
   `podTemplateBounds`, `registryBounds` (the properties that name where a source is
   fetched from) or `manifestsBounds` (`bounds.go`); `fluxcd-provider` states its one
-  `explicit-secret` bound, on `address`, in its own schema.
+  `explicit-secret` bound, on `address`, in its own schema. `postgresql` and the CloudNativePG kinds
+  use `postgresqlBounds`, `cnpgClusterBounds`, `cnpgPoolerBounds` (the pod classes of `podTemplateBounds`
+  on `template`, and `registry` on `pgbouncer`), `cnpgObjectStoreBounds` and `cnpgImageCatalogBounds`.
+- **A refusal with no authored value is declared on the property that changes the outcome.** Under a
+  registry allowlist a `postgresql` component that names no `imageName` composes the default image from
+  `version`, which is refused as an authored one is, and a pooler that names no image is refused too; under a
+  storage maximum below 1Gi the default `storageSize` is refused. Each is declared where the author can
+  change it: `imageName`, the open `pooler` node and `storageSize`. A `cnpg-cluster` that names neither
+  `imageName` nor `imageCatalogRef`, and a `cnpg-pooler` that names no image, are refused the same way, on
+  `imageName` and `pgbouncer`. The instance count of a `cnpg-pooler` is not policed, so it declares nothing.
 - **The content of a `manifests` source is bounded by the document, not by one key.** `inline`
   is the document and `url` names it, so both list `explicit-secret` and `unreadable-object`
   (`enforceManifestPolicy`), and `url` also lists `registry`. The rendered-object classes of a

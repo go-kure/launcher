@@ -188,7 +188,10 @@
   },
   "imageName": {
     "type": "string",
-    "description": "Override for the container image (defaults to the CloudNativePG image for the version)."
+    "description": "Override for the container image (defaults to the CloudNativePG image for the version).",
+    "boundedBy": [
+      "registry"
+    ]
   },
   "inheritedMetadata": {
     "type": "object",
@@ -212,7 +215,10 @@
   "pooler": {
     "type": "object",
     "description": "PgBouncer connection pooler settings (enabled, instances, type, poolMode, parameters, image). image is the PgBouncer image, by tag or digest; when omitted the operator chooses it, which a policy registry allowlist refuses.",
-    "additionalProperties": true
+    "additionalProperties": true,
+    "boundedBy": [
+      "registry"
+    ]
   },
   "poolerName": {
     "type": "string",
@@ -376,7 +382,10 @@
   "replicas": {
     "type": "integer",
     "description": "Number of PostgreSQL instances in the cluster.",
-    "default": 1
+    "default": 1,
+    "boundedBy": [
+      "replica-maximum"
+    ]
   },
   "replication": {
     "type": "object",
@@ -397,7 +406,10 @@
               "string",
               "number"
             ],
-            "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5)."
+            "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5).",
+            "boundedBy": [
+              "resource-maximum"
+            ]
           },
           "memory": {
             "type": "",
@@ -405,7 +417,10 @@
               "string",
               "number"
             ],
-            "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes."
+            "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes.",
+            "boundedBy": [
+              "resource-maximum"
+            ]
           }
         },
         "additionalProperties": true
@@ -420,7 +435,10 @@
               "string",
               "number"
             ],
-            "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5)."
+            "description": "CPU quantity as a string or bare number of cores (e.g. \"500m\", \"1\", or 0.5).",
+            "boundedBy": [
+              "resource-maximum"
+            ]
           },
           "memory": {
             "type": "",
@@ -428,7 +446,10 @@
               "string",
               "number"
             ],
-            "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes."
+            "description": "Memory quantity as a string (e.g. \"512Mi\", \"1Gi\") or a bare number of bytes.",
+            "boundedBy": [
+              "resource-maximum"
+            ]
           }
         },
         "additionalProperties": true
@@ -438,7 +459,10 @@
   "storageSize": {
     "type": "string",
     "description": "Persistent storage size requested for each instance.",
-    "default": "1Gi"
+    "default": "1Gi",
+    "boundedBy": [
+      "storage-maximum"
+    ]
   },
   "version": {
     "type": "string",

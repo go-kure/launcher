@@ -151,3 +151,78 @@ func podTemplateBoundsOn(key string, replicas bool) map[string][]oam.RefusalClas
 	}
 	return b
 }
+
+// The bounds of the CloudNativePG kinds and of postgresql, which lowers onto
+// them. Each is read from the kind's ApplyPolicy; the structured properties of a
+// kind are open nodes, so a class sits on the node and is raised by a value below
+// it.
+
+// cnpgClusterBounds are the bounds of cnpg-cluster (CnpgClusterConfig.ApplyPolicy):
+// the instance count, the cpu and memory requests and limits of `resources`, the
+// storage request of every volume the Cluster asks for (`storage`, `walStorage`,
+// each of `tablespaces` and the claim of `ephemeralVolumeSource`), the image
+// (`imageName`, and the image of each of the `postgresql.extensions`), and the
+// privilege of the two security contexts. A Cluster that names neither
+// `imageName` nor `imageCatalogRef` is refused under an allowlist, since the
+// operator then chooses the image: the class and the property of the authored form.
+func cnpgClusterBounds() map[string][]oam.RefusalClass {
+	storage := []oam.RefusalClass{oam.RefusalStorageMaximum}
+	return map[string][]oam.RefusalClass{
+		"instances":             {oam.RefusalReplicaMaximum},
+		"resources":             {oam.RefusalResourceMaximum},
+		"storage":               storage,
+		"walStorage":            storage,
+		"tablespaces":           storage,
+		"ephemeralVolumeSource": storage,
+		"imageName":             {oam.RefusalRegistry},
+		"postgresql":            {oam.RefusalRegistry},
+		"securityContext":       {oam.RefusalPrivileged, oam.RefusalContainerCapability},
+		"podSecurityContext":    {oam.RefusalPrivileged},
+	}
+}
+
+// cnpgPoolerBounds are the bounds of cnpg-pooler (CnpgPoolerConfig.ApplyPolicy):
+// the image PgBouncer runs, which a Pooler that names none leaves to the
+// operator and is refused under an allowlist, and every class the pod template
+// is held to (enforcePodTemplatePolicy), those of a pod on the one `template`
+// node. The instance count is deliberately not policed.
+func cnpgPoolerBounds() map[string][]oam.RefusalClass {
+	b := podTemplateBoundsOn("template", false)
+	b["pgbouncer"] = []oam.RefusalClass{oam.RefusalRegistry}
+	return b
+}
+
+// cnpgObjectStoreBounds are the bounds of cnpg-objectstore: the cpu and memory
+// of the plugin sidecar, in `instanceSidecarConfiguration.resources`, an open
+// node below an open node.
+func cnpgObjectStoreBounds() map[string][]oam.RefusalClass {
+	return map[string][]oam.RefusalClass{"instanceSidecarConfiguration": {oam.RefusalResourceMaximum}}
+}
+
+// cnpgImageCatalogBounds are the bounds of cnpg-imagecatalog and
+// cnpg-clusterimagecatalog (enforceCnpgImageCatalogPolicy): the registry of the
+// three fields that name an image, `images[].image`, the image volume of
+// `images[].extensions[]` and `componentImages[].image`, declared on the two lists.
+func cnpgImageCatalogBounds() map[string][]oam.RefusalClass {
+	return registryBounds("images", "componentImages")
+}
+
+// postgresqlBounds are the bounds of postgresql, from the Cluster and the Pooler
+// it lowers to: `replicas` is the Cluster's instance count, `imageName` its
+// image (the default composed from `version` is refused as an authored one is),
+// `resources` and `storageSize` its cpu and memory and its storage (the 1Gi
+// fallback included), and the open `pooler` node holds the PgBouncer image, which
+// a pooler that names none leaves to the operator.
+func postgresqlBounds() map[string][]oam.RefusalClass {
+	maximum := []oam.RefusalClass{oam.RefusalResourceMaximum}
+	return map[string][]oam.RefusalClass{
+		"replicas":                  {oam.RefusalReplicaMaximum},
+		"imageName":                 {oam.RefusalRegistry},
+		"pooler":                    {oam.RefusalRegistry},
+		"resources.requests.cpu":    maximum,
+		"resources.requests.memory": maximum,
+		"resources.limits.cpu":      maximum,
+		"resources.limits.memory":   maximum,
+		"storageSize":               {oam.RefusalStorageMaximum},
+	}
+}

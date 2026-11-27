@@ -70,7 +70,7 @@ func (h *CnpgImageCatalogHandler) ToApplicationConfig(component *oam.Component, 
 func cnpgImageCatalogSchema(kind string) map[string]oam.PropertySchema {
 	spec := kind + " spec."
 	const decoded = " Decoded strictly into the CloudNativePG API type: see "
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"images": {
 			Type: oam.PropertyTypeArray, Required: true,
 			Description: "Required. " + spec + "images: the PostgreSQL images of the catalog, one per major version; the API takes one to eight. Every image, and every extension image under it, is held to the EnvironmentPolicy allowed registries and, with or without a policy, to the tag rule (a tag or a digest, no :latest)." + decoded + "ImageCatalogSpec in its API reference.",
@@ -87,7 +87,7 @@ func cnpgImageCatalogSchema(kind string) map[string]oam.PropertySchema {
 				Description: "One component image: key (required: the name it is resolved by, once in the catalog) and image (required: the image reference).",
 			},
 		},
-	}
+	}, cnpgImageCatalogBounds())
 }
 
 // cnpgImageCatalogRequiredText is what the generated required paths of the

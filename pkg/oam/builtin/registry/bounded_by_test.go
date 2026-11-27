@@ -446,6 +446,91 @@ func fluxSourceRows() []boundRow {
 	}
 }
 
+// postgresqlRows are the bounds of postgresql, which lowers onto a cnpg-cluster
+// and, with a pooler, a cnpg-pooler: the instance count, the image the Cluster
+// runs (the composed default of `version` included, which is refused as an
+// authored one is), the Cluster's resources and storage, and the PgBouncer image.
+// The unset pooler image and the 1Gi storage fallback have the class and the
+// property of the authored form and no row of their own.
+func postgresqlRows() []boundRow {
+	row := func(path string, class oam.RefusalClass, relax knob, change ...set) boundRow {
+		return boundRow{typ: "postgresql", path: path, class: class, change: change, relax: relax}
+	}
+	// The pooler is an open node: the bound is on the image below it, and a
+	// pooler that names no image is refused under a list.
+	pooler := row("pooler", oam.RefusalRegistry, anyRegistry, set{at: "pooler.image", value: foreignImage})
+	pooler.with = []set{{at: "pooler.enabled", value: true}, {at: "pooler.image", value: boundImage}}
+	return []boundRow{
+		row("replicas", oam.RefusalReplicaMaximum, anyReplicas, set{at: "replicas", value: 9}),
+		row("imageName", oam.RefusalRegistry, anyRegistry, set{at: "imageName", value: foreignImage}),
+		pooler,
+		row("resources.requests.cpu", oam.RefusalResourceMaximum, anyCPU, set{at: "resources.requests.cpu", value: "8"}),
+		row("resources.requests.memory", oam.RefusalResourceMaximum, anyMemory, set{at: "resources.requests.memory", value: "8Gi"}),
+		row("resources.limits.cpu", oam.RefusalResourceMaximum, anyCPU, set{at: "resources.limits.cpu", value: "8"}),
+		row("resources.limits.memory", oam.RefusalResourceMaximum, anyMemory, set{at: "resources.limits.memory", value: "8Gi"}),
+		row("storageSize", oam.RefusalStorageMaximum, anyStorage, set{at: "storageSize", value: "1Ti"}),
+	}
+}
+
+// cnpgClusterRows are the bounds of cnpg-cluster. Its resources, the volumes it
+// asks for, the security contexts and the extensions are open nodes: each bound
+// is on the value below the declared path.
+func cnpgClusterRows() []boundRow {
+	row := func(path string, class oam.RefusalClass, relax knob, change ...set) boundRow {
+		return boundRow{typ: "cnpg-cluster", path: path, class: class, change: change, relax: relax}
+	}
+	return []boundRow{
+		row("instances", oam.RefusalReplicaMaximum, anyReplicas, set{at: "instances", value: 9}),
+		row("resources", oam.RefusalResourceMaximum, anyCPU, set{at: "resources.requests.cpu", value: "8"}),
+		row("resources", oam.RefusalResourceMaximum, anyMemory, set{at: "resources.requests.memory", value: "8Gi"}),
+		row("resources", oam.RefusalResourceMaximum, anyCPU, set{at: "resources.limits.cpu", value: "8"}),
+		row("resources", oam.RefusalResourceMaximum, anyMemory, set{at: "resources.limits.memory", value: "8Gi"}),
+		row("storage", oam.RefusalStorageMaximum, anyStorage, set{at: "storage.size", value: "1Ti"}),
+		row("walStorage", oam.RefusalStorageMaximum, anyStorage, set{at: "walStorage.size", value: "1Ti"}),
+		row("tablespaces", oam.RefusalStorageMaximum, anyStorage,
+			set{at: "tablespaces[].storage.size", value: "1Ti"}, set{at: "tablespaces[].name", value: "scratch"}),
+		row("ephemeralVolumeSource", oam.RefusalStorageMaximum, anyStorage, set{at: "ephemeralVolumeSource", value: overSizedClaim()}),
+		row("imageName", oam.RefusalRegistry, anyRegistry, set{at: "imageName", value: foreignImage}),
+		row("postgresql", oam.RefusalRegistry, anyRegistry,
+			set{at: "postgresql.extensions[].image.reference", value: foreignImage}, set{at: "postgresql.extensions[].name", value: "ext"}),
+		row("securityContext", oam.RefusalPrivileged, allowPrivileged, set{at: "securityContext.privileged", value: true}),
+		row("securityContext", oam.RefusalContainerCapability, anyCapability, set{at: "securityContext.capabilities.add", value: []any{"NET_ADMIN"}}),
+		row("podSecurityContext", oam.RefusalPrivileged, allowPrivileged, set{at: "podSecurityContext.windowsOptions.hostProcess", value: true}),
+	}
+}
+
+// cnpgOtherRows are the bounds of the Pooler, the ObjectStore and the two image
+// catalogs. The Pooler's pod template holds every class of a pod, on that one
+// node, as the pod template kinds do; its instance count is not policed.
+func cnpgOtherRows() []boundRow {
+	rows := []boundRow{
+		{typ: "cnpg-pooler", path: "pgbouncer", class: oam.RefusalRegistry, relax: anyRegistry,
+			change: []set{{at: "pgbouncer.image", value: foreignImage}}},
+	}
+	rows = append(rows, podRows("cnpg-pooler", "template", "template.spec.")...)
+	sidecar := func(at, value string, relax knob) boundRow {
+		return boundRow{typ: "cnpg-objectstore", path: "instanceSidecarConfiguration", class: oam.RefusalResourceMaximum, relax: relax,
+			change: []set{{at: "instanceSidecarConfiguration.resources." + at, value: value}}}
+	}
+	rows = append(rows,
+		sidecar("requests.cpu", "8", anyCPU), sidecar("requests.memory", "8Gi", anyMemory),
+		sidecar("limits.cpu", "8", anyCPU), sidecar("limits.memory", "8Gi", anyMemory),
+	)
+	// The three fields of a catalog that name an image: an image, the image
+	// volume of one of its extensions, and a component image.
+	for _, typ := range []string{"cnpg-imagecatalog", "cnpg-clusterimagecatalog"} {
+		rows = append(rows,
+			boundRow{typ: typ, path: "images", class: oam.RefusalRegistry, relax: anyRegistry,
+				change: []set{{at: "images[].image", value: foreignImage}}},
+			boundRow{typ: typ, path: "images", class: oam.RefusalRegistry, relax: anyRegistry,
+				change: []set{{at: "images[].extensions[].image.reference", value: foreignImage}, {at: "images[].extensions[].name", value: "ext"}}},
+			boundRow{typ: typ, path: "componentImages", class: oam.RefusalRegistry, relax: anyRegistry,
+				change: []set{{at: "componentImages[].image", value: foreignImage}, {at: "componentImages[].key", value: "pgbouncer"}}},
+		)
+	}
+	return rows
+}
+
 // boundRows lists every tested bound. TestBoundedBy_DeclaredAndTested holds it
 // to what the registered schemas declare, both ways.
 func boundRows() []boundRow {
@@ -469,6 +554,9 @@ func boundRows() []boundRow {
 		change: []set{{at: "volumeClaimTemplates[].spec.resources.requests.storage", value: "1Ti"}}, relax: anyStorage})
 	rows = append(rows, fluxAndManifestsRows()...)
 	rows = append(rows, fluxSourceRows()...)
+	rows = append(rows, postgresqlRows()...)
+	rows = append(rows, cnpgClusterRows()...)
+	rows = append(rows, cnpgOtherRows()...)
 	rows = append(rows,
 		boundRow{trait: true, typ: "scaler", path: "maxReplicas", class: oam.RefusalReplicaMaximum,
 			change: []set{{at: "maxReplicas", value: 9}}, relax: anyReplicas},
@@ -548,6 +636,15 @@ func boundDocument(t *testing.T, trait bool, typ string) (oam.Component, map[str
 		props = map[string]any{"type": "OCIArtifactTag", "url": "oci://registry.example/org/app"}
 	case "fluxcd-provider":
 		props = map[string]any{"type": "generic"}
+	case "postgresql", "cnpg-cluster":
+		props = map[string]any{"imageName": boundImage}
+	case "cnpg-pooler":
+		props = map[string]any{"cluster": map[string]any{"name": "db"}, "pgbouncer": map[string]any{"image": boundImage},
+			"template": map[string]any{"spec": pod()}}
+	case "cnpg-objectstore":
+		props = map[string]any{"configuration": map[string]any{"destinationPath": "s3://bucket/db/"}}
+	case "cnpg-imagecatalog", "cnpg-clusterimagecatalog":
+		props = map[string]any{"images": []any{map[string]any{"image": boundImage, "major": 16}}}
 	default:
 		i := slices.IndexFunc(sharedKinds, func(k sharedKind) bool { return k.typ == typ })
 		if i < 0 {

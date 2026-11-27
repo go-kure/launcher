@@ -101,7 +101,7 @@ func (h *CnpgPoolerHandler) PropertySchema() map[string]oam.PropertySchema {
 	template := obj("Pod template for the PgBouncer pods. Environment policy applies to it: host namespaces, hostPath volumes, privilege, capabilities, image registries and cpu/memory maxima.")
 	template.GatedPaths = podTemplateGatedPaths()
 	template.ValueGatedPaths = podTemplateValueGatedPaths()
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"cluster":            required(obj("Required. Reference to the CloudNativePG Cluster the pooler serves: {name: <cluster>}. The name must differ from this pooler's own.")),
 		"type":               {Type: oam.PropertyTypeString, Description: "Service the pooler forwards to: rw, ro or r. The operator's default (rw) applies when omitted."},
 		"instances":          {Type: oam.PropertyTypeInteger, Description: "Number of PgBouncer pods. The operator's default (1) applies when omitted. Not subject to the environment's replica policy."},
@@ -111,7 +111,7 @@ func (h *CnpgPoolerHandler) PropertySchema() map[string]oam.PropertySchema {
 		"monitoring":         obj("Monitoring configuration of the pooler."),
 		"serviceTemplate":    obj("Template for the Service created for the pooler."),
 		"serviceAccountName": {Type: oam.PropertyTypeString, Description: "Existing ServiceAccount for the pooler pods instead of a generated one."},
-	}
+	}, cnpgPoolerBounds())
 }
 
 // cnpgPoolerDefaultedZeroFields lists the PoolerSpec fields on which an

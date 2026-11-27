@@ -244,14 +244,14 @@ with no entry is not shown to be free of a bound.
 | Class | Declared on |
 |---|---|
 | `host-namespace` | `hostNetwork`, `hostPID`, `hostIPC`. |
-| `privileged` | `securityContext.privileged` and `securityContext.windowsOptions.hostProcess` of a container; `podSecurityContext.windowsOptions.hostProcess`. |
+| `privileged` | `securityContext.privileged` and `securityContext.windowsOptions.hostProcess` of a container; `podSecurityContext.windowsOptions.hostProcess`; `securityContext` and `podSecurityContext` of `cnpg-cluster`, open nodes. |
 | `host-path` | `volumes[].type`: the refusal is of a volume whose type is `hostPath`. |
-| `container-capability` | `securityContext.capabilities.add` of a container. |
-| `registry` | `image` of a container; `volumes[].image`, an open node; `url` of `gitrepository`, `helmrepository`, `ocirepository`, `resourcesetinputprovider` and `manifests`; `source.url`, `source.endpoint` and `source.provider` of `helm`; `source.url` of `oci`; `endpoint` and `provider` of `bucket`; `image` of `imagerepository`; `chart` of `helmrelease`, an open node. |
-| `resource-maximum` | `resources.requests` and `resources.limits`, `cpu` and `memory`, of a container; the same four under `podResources`. |
+| `container-capability` | `securityContext.capabilities.add` of a container; `securityContext` of `cnpg-cluster`, an open node. |
+| `registry` | `image` of a container; `volumes[].image`, an open node; `url` of `gitrepository`, `helmrepository`, `ocirepository`, `resourcesetinputprovider` and `manifests`; `source.url`, `source.endpoint` and `source.provider` of `helm`; `source.url` of `oci`; `endpoint` and `provider` of `bucket`; `image` of `imagerepository`; `chart` of `helmrelease`, an open node; `imageName` of `postgresql` and `cnpg-cluster`; `pooler` of `postgresql`, `postgresql` of `cnpg-cluster` (the image of an extension) and `pgbouncer` of `cnpg-pooler`, open nodes; `images` and `componentImages` of `cnpg-imagecatalog` and `cnpg-clusterimagecatalog`, open lists. |
+| `resource-maximum` | `resources.requests` and `resources.limits`, `cpu` and `memory`, of a container and of `postgresql`; the same four under `podResources`; `resources` of `cnpg-cluster` and `instanceSidecarConfiguration` of `cnpg-objectstore`, open nodes. |
 | `resource-default-limit` | `resources.requests.cpu` and `resources.requests.memory` of a container. |
-| `storage-maximum` | `volumes[].ephemeral`, an open node; `volumes[]` of `webservice` and `worker`, an open node, for the `size` of a `pvc` volume that generates its claim; `volumeClaimTemplates` of `statefulset`, an open node, for the storage request of each claim template; `size` of the `pvc` trait. |
-| `replica-maximum` | `replicas` of `deployment`, `webservice`, `worker`, `statefulset`, `replicaset` and `replicationcontroller`; `maxReplicas` of the `scaler` trait. |
+| `storage-maximum` | `volumes[].ephemeral`, an open node; `volumes[]` of `webservice` and `worker`, an open node, for the `size` of a `pvc` volume that generates its claim; `volumeClaimTemplates` of `statefulset`, an open node, for the storage request of each claim template; `size` of the `pvc` trait; `storageSize` of `postgresql`; `storage`, `walStorage`, `tablespaces` and `ephemeralVolumeSource` of `cnpg-cluster`, open nodes. |
+| `replica-maximum` | `replicas` of `deployment`, `webservice`, `worker`, `statefulset`, `replicaset`, `replicationcontroller` and `postgresql`; `instances` of `cnpg-cluster`; `maxReplicas` of the `scaler` trait. |
 | `explicit-secret` | `inline` and `url` of `manifests`: a core Secret the source carries; `address` of `fluxcd-provider`, where the address is itself a credential. |
 | `unreadable-object` | `inline` and `url` of `manifests`: an object the policy check cannot read. |
 
@@ -290,6 +290,24 @@ version the build does not know, an autoscaler whose `maxReplicas` is not an int
 The other classes the same check raises on a workload object of a `manifests` source (the
 image, pod security, resource, storage and replica rules) are shared with `passthrough` and
 `helmtemplate` and are declared on none of them yet.
+
+`postgresql` lowers onto a `cnpg-cluster` and, with a pooler, a `cnpg-pooler`, so it declares what
+their policy check raises for the values it writes: `replica-maximum` on `replicas`, `registry` on
+`imageName` and on the open `pooler` node, `resource-maximum` on the four `cpu` and `memory`
+entries of `resources`, and `storage-maximum` on `storageSize`. When the document names no image,
+the default composed from `version` is refused as an authored one is, and a pooler that names no
+image is refused under an allowlist; both sit on the property that changes the outcome. The
+1Gi storage default under a smaller maximum sits on `storageSize`. `cnpg-cluster` declares
+`replica-maximum` on `instances`, `resource-maximum` on `resources`, `storage-maximum` on `storage`,
+`walStorage`, `tablespaces` and `ephemeralVolumeSource`, `registry` on `imageName` and on
+`postgresql`, for the image of an extension, and `privileged` and `container-capability` on
+`securityContext` and `privileged` on `podSecurityContext`; a Cluster that names neither `imageName`
+nor `imageCatalogRef` is refused under an allowlist, on `imageName`. `cnpg-pooler` declares
+`registry` on `pgbouncer`, and on its one `template` node the seven classes of a pod, as the kinds
+that take a pod do; its instance count is not policed. `cnpg-objectstore` declares
+`resource-maximum` on `instanceSidecarConfiguration`, and the two image catalogs `registry` on
+`images` (an image and the image volume of an extension) and on `componentImages`. The other
+CloudNativePG kinds raise no policy refusal.
 
 `trait-capability` and `object-kind` are declared on no property: they are about a type as a
 whole, and the second is the transform's check on every application, whatever component
