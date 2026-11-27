@@ -333,7 +333,11 @@ the loader is [`pkg/oam/definition`](https://pkg.go.dev/github.com/go-kure/launc
 **The check is structural.** It is the API server's own schema check, run without a cluster. CEL
 rules in the CRD (`x-kubernetes-validations`) are not evaluated, and the API server's defaults
 are not applied, so an object that passes can still be refused by a cluster that runs those
-rules. Only the version `emits` names is read, from a local file. Nothing reads the pod settings
+rules. Only the version `emits` names is read, from a local file. A property is authored
+without `null`, which reads as absent, as for every property, so a CRD's `nullable` is not
+reachable. The type's properties are the CRD's declared `spec` fields: a CRD whose `spec` is
+open (`additionalProperties` or `x-kubernetes-preserve-unknown-fields` on `spec` itself) is
+refused at load. A file holds one definition. Nothing reads the pod settings
 a custom kind embeds (a privileged container, host networking), so a type that embeds a pod
 template builds with them (go-kure/launcher#1705).
 
