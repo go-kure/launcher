@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -136,6 +137,14 @@ func build(doc *document, dir string) (*Handler, error) {
 	if got := hex.EncodeToString(sum[:]); got != doc.Spec.Schema.SHA256 {
 		return nil, errors.Errorf("CRD %q has sha256 %s, the definition pins %q", doc.Spec.Schema.CRD, got, doc.Spec.Schema.SHA256)
 	}
+	// One document: the parse below reads the first and would leave a second unread.
+	crdStream := yaml.NewDecoder(bytes.NewReader(raw))
+	var first, second yaml.Node
+	if err := crdStream.Decode(&first); err == nil {
+		if err := crdStream.Decode(&second); !errors.Is(err, io.EOF) {
+			return nil, errors.Errorf("CRD %q holds more than one YAML document; pin a file with the one CustomResourceDefinition", doc.Spec.Schema.CRD)
+		}
+	}
 	var crd apiextv1.CustomResourceDefinition
 	if err := sigsyaml.Unmarshal(raw, &crd); err != nil {
 		return nil, errors.Wrapf(err, "parsing CRD %q", doc.Spec.Schema.CRD)
@@ -169,6 +178,11 @@ func build(doc *document, dir string) (*Handler, error) {
 	if errs := structural.ValidateStructural(nil, s); len(errs) > 0 {
 		return nil, errors.Wrap(errs.ToAggregate(), "the CRD schema is not structural")
 	}
+	// The API server checks the apiVersion, kind and metadata of such a field apart from
+	// the schema, a check this loader does not run, so the CRD is refused, not half checked.
+	if path, found := embeddedResource(s, ""); found {
+		return nil, errors.Errorf("the CRD schema marks %s x-kubernetes-embedded-resource, whose apiVersion, kind and metadata checks a component definition does not run", path)
+	}
 	validator, _, err := validation.NewSchemaValidator(internal)
 	if err != nil {
 		return nil, errors.Wrap(err, "building the CRD schema validator")
@@ -194,6 +208,36 @@ func build(doc *document, dir string) (*Handler, error) {
 		structural:    s,
 		validator:     validator,
 	}, nil
+}
+
+// embeddedResource finds a field marked x-kubernetes-embedded-resource and returns its
+// path (an array item is [], a map value {}); the root is "the schema root".
+func embeddedResource(s *structural.Structural, path string) (string, bool) {
+	if s.XEmbeddedResource {
+		if path == "" {
+			return "the schema root", true
+		}
+		return path, true
+	}
+	if s.Items != nil {
+		if p, ok := embeddedResource(s.Items, path+"[]"); ok {
+			return p, true
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(s.Properties)) {
+		prop := s.Properties[name]
+		child := name
+		if path != "" {
+			child = path + "." + name
+		}
+		if p, ok := embeddedResource(&prop, child); ok {
+			return p, true
+		}
+	}
+	if ap := s.AdditionalProperties; ap != nil && ap.Structural != nil {
+		return embeddedResource(ap.Structural, path+"{}")
+	}
+	return "", false
 }
 
 // topLevelProperties publishes the top level of the CRD's spec. The nested shape is
