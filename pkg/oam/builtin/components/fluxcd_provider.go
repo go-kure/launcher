@@ -59,7 +59,7 @@ func (h *FluxcdProviderHandler) ComponentObject() (schema.GroupKind, oam.ObjectS
 // field by its json name.
 func (h *FluxcdProviderHandler) PropertySchema() map[string]oam.PropertySchema {
 	const spec = "Provider spec."
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"type":               fluxSourceRequiredString("Required. " + spec + "type: the implementation that sends the events, such as `slack`, `generic`, `github` or `alertmanager`; the API lists the values it takes."),
 		"channel":            fluxSourceString(spec + "channel: the channel the events are posted to."),
 		"username":           fluxSourceString(spec + "username: the name the events are posted under."),
@@ -71,7 +71,9 @@ func (h *FluxcdProviderHandler) PropertySchema() map[string]oam.PropertySchema {
 		"certSecretRef":      fluxSourceObject(spec + "certSecretRef: the Secret (`name`) that holds a CA certificate (`ca.crt`), a client certificate (`tls.crt`, `tls.key`) or both, in the namespace the object lands in."),
 		"suspend":            fluxSourceBool(spec + "suspend: stop handling events for this Provider."),
 		"commitStatusExpr":   fluxSourceString(spec + "commitStatusExpr: a CEL expression the controller evaluates to the message of a commit status; launcher writes it as authored and does not parse it."),
-	}
+		// An address that is itself a credential is refused under a policy that
+		// forbids explicit secrets (enforceProviderPolicy).
+	}, map[string][]oam.RefusalClass{"address": {oam.RefusalExplicitSecret}})
 }
 
 // providerAddressRemedy completes refuseFieldUserinfo's message for a

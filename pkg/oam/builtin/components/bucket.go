@@ -36,7 +36,7 @@ func (h *BucketHandler) CanHandle(componentType string) bool {
 // PropertySchema declares every top-level key of sourcev1.BucketSpec. A test
 // ties this key set to the struct.
 func (h *BucketHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"provider":           fluxSourceString("Bucket spec.provider: generic (S3-compatible, Flux's default), aws, gcp or azure. Flux's gcp provider ignores endpoint and fetches from storage.googleapis.com, which is then the host the policy's allowed registries must list."),
 		"bucketName":         fluxSourceRequiredString("Bucket spec.bucketName: the object storage bucket."),
 		"endpoint":           fluxSourceRequiredString("Bucket spec.endpoint: the object storage address, host[:port] or a URL as the provider expects. Except under provider gcp, its host must be in the policy's allowed registries when that list is non-empty; such a list also refuses an Amazon S3 endpoint (any containing amazonaws) unless the provider is azure or gcp, since Flux's S3 client picks the host it contacts from region at runtime."),
@@ -52,7 +52,7 @@ func (h *BucketHandler) PropertySchema() map[string]oam.PropertySchema {
 		"timeout":            fluxSourceString("Bucket spec.timeout for fetch operations, as a Flux duration: unsigned, units ms, s, m (no h), e.g. 30s or 5m; 0s or at least 1ms. An hour or more is emitted in minutes, 90m as 90m0s."),
 		"ignore":             fluxSourceString("Bucket spec.ignore: exclusion patterns in .sourceignore format."),
 		"suspend":            fluxSourceBool("Bucket spec.suspend: stop reconciling the source."),
-	}
+	}, registryBounds("endpoint", "provider"))
 }
 
 // ToApplicationConfig decodes the component's properties strictly into a

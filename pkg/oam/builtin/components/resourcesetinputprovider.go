@@ -52,7 +52,7 @@ func (h *ResourceSetInputProviderHandler) ComponentObject() (schema.GroupKind, o
 // fluxoperatorv1.ResourceSetInputProviderSpec field by its json name.
 func (h *ResourceSetInputProviderHandler) PropertySchema() map[string]oam.PropertySchema {
 	const spec = "ResourceSetInputProvider spec."
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"type": fluxSourceRequiredString("Required. " + spec + "type: where the inputs come from, such as `Static`, `GitHubPullRequest`, `GitLabBranch`, `OCIArtifactTag`, `ExternalService` or `ExternalArtifact`; the API lists the values it takes."),
 		"url":  fluxSourceString(spec + "url: the `http://`, `https://` or `oci://` address of the provider's API: the repository of a Git provider, the OCI repository of an OCI provider. The API requires it for every type but `Static` and `ExternalArtifact`, which must not set it. Its host is held to the environment policy's allowed registries, whatever the type; a user or password in it is refused."),
 		"serviceAccountName": fluxSourceString(spec + "serviceAccountName: the ServiceAccount, of the namespace the object lands in, that authenticates to a cloud provider by workload identity, or that lists the ExternalArtifacts of an `ExternalArtifact` provider; " +
@@ -77,7 +77,7 @@ func (h *ResourceSetInputProviderHandler) PropertySchema() map[string]oam.Proper
 				Description: "One selector: `name`, or `matchLabels` and `matchExpressions`, and `namespace`, the namespace listed (`*` for every namespace; the object's own namespace when unset).",
 			},
 		},
-	}
+	}, registryBounds("url"))
 }
 
 // resourceSetInputProviderURLRemedy completes the refusal of a user or

@@ -51,7 +51,7 @@ func (h *ImageRepositoryHandler) ComponentObject() (schema.GroupKind, oam.Object
 // its json name.
 func (h *ImageRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 	const spec = "ImageRepository spec."
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"image": fluxSourceRequiredString("Required. " + spec + "image: the name of the image repository whose tags are scanned, such as `ghcr.io/org/app`. Its registry is held to the environment policy's allowed registries; a name with no registry is one of `docker.io`."),
 		"interval": {
 			Type: oam.PropertyTypeString, Required: true,
@@ -70,7 +70,7 @@ func (h *ImageRepositoryHandler) PropertySchema() map[string]oam.PropertySchema 
 		},
 		"provider": fluxSourceString(spec + "provider: how the scan authenticates: `generic` (the API's default), `aws`, `azure` or `gcp`."),
 		"insecure": fluxSourceBool(spec + "insecure: connect to a registry that serves plain HTTP, without TLS."),
-	}
+	}, registryBounds("image"))
 }
 
 // imageRepositoryKind is the imagerepository kind: see fluxKind. The API

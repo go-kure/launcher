@@ -400,6 +400,52 @@ func fluxAndManifestsRows() []boundRow {
 	}
 }
 
+// helmBucketSource makes the passing document of a helm row read its chart from
+// an inline Bucket on an allowed endpoint, in place of the HelmRepository url. A
+// Bucket source takes no version.
+var helmBucketSource = []set{
+	{at: "source.url", drop: true}, {at: "version", drop: true},
+	{at: "source.kind", value: "Bucket"}, {at: "source.endpoint", value: "registry.example"}, {at: "source.bucketName", value: "charts"},
+}
+
+// ociChartTemplate makes the passing document of a helmrelease row take its chart
+// from an OCIRepository on an allowed registry: the one chart template that
+// names a host.
+var ociChartTemplate = []set{
+	{at: "chart.kind", value: "OCIRepository"}, {at: "chart.spec.url", value: "oci://registry.example/charts/app"},
+}
+
+// fluxSourceRows are the bounds of the Flux source family: where a type is
+// fetched from (registry, on the property that holds the address; for a Bucket
+// on the endpoint and, for the gcp provider, on the provider, whose host Flux
+// does not read from the endpoint), and the one address that is a credential.
+// The refusals the same properties can also raise in another form (an oci:// url
+// that does not name its registry, an Amazon S3 endpoint) have the class and
+// the property of the host form and no row of their own.
+func fluxSourceRows() []boundRow {
+	registry := func(typ, path, value string, with ...set) boundRow {
+		return boundRow{typ: typ, path: path, class: oam.RefusalRegistry, relax: anyRegistry, with: with,
+			change: []set{{at: path, value: value}}}
+	}
+	foreignOCI := "oci://elsewhere.example/org/app"
+	return []boundRow{
+		registry("bucket", "endpoint", "elsewhere.example"),
+		registry("bucket", "provider", "gcp"),
+		registry("helmrepository", "url", "https://elsewhere.example/charts"),
+		registry("ocirepository", "url", foreignOCI),
+		registry("oci", "source.url", foreignOCI),
+		// The chart is an open node: the bound is on the url below it.
+		{typ: "helmrelease", path: "chart", class: oam.RefusalRegistry, relax: anyRegistry, with: ociChartTemplate,
+			change: []set{{at: "chart.spec.url", value: "oci://elsewhere.example/charts/app"}}},
+		registry("imagerepository", "image", "elsewhere.example/org/app"),
+		registry("resourcesetinputprovider", "url", foreignOCI),
+		registry("helm", "source.endpoint", "elsewhere.example", helmBucketSource...),
+		registry("helm", "source.provider", "gcp", helmBucketSource...),
+		{typ: "fluxcd-provider", path: "address", class: oam.RefusalExplicitSecret, strict: forbidSecrets, relax: allowSecrets,
+			change: []set{{at: "address", value: "https://hooks.example/services/credential"}}},
+	}
+}
+
 // boundRows lists every tested bound. TestBoundedBy_DeclaredAndTested holds it
 // to what the registered schemas declare, both ways.
 func boundRows() []boundRow {
@@ -422,6 +468,7 @@ func boundRows() []boundRow {
 	rows = append(rows, boundRow{typ: "statefulset", path: "volumeClaimTemplates", class: oam.RefusalStorageMaximum,
 		change: []set{{at: "volumeClaimTemplates[].spec.resources.requests.storage", value: "1Ti"}}, relax: anyStorage})
 	rows = append(rows, fluxAndManifestsRows()...)
+	rows = append(rows, fluxSourceRows()...)
 	rows = append(rows,
 		boundRow{trait: true, typ: "scaler", path: "maxReplicas", class: oam.RefusalReplicaMaximum,
 			change: []set{{at: "maxReplicas", value: 9}}, relax: anyReplicas},
@@ -484,6 +531,23 @@ func boundDocument(t *testing.T, trait bool, typ string) (oam.Component, map[str
 		props = map[string]any{"chart": "app", "version": "1.0.0", "source": map[string]any{"url": "https://registry.example/charts"}}
 	case "manifests":
 		props = map[string]any{"inline": manifestsConfigMap}
+	case "bucket":
+		props = map[string]any{"bucketName": "charts", "endpoint": "registry.example"}
+	case "helmrepository":
+		props = map[string]any{"url": "https://registry.example/charts"}
+	case "ocirepository":
+		props = map[string]any{"url": "oci://registry.example/org/app"}
+	case "oci":
+		props = map[string]any{"source": map[string]any{"url": "oci://registry.example/org/app"}, "version": "1.0.0"}
+	case "helmrelease":
+		// The chart is written by the row (ociChartTemplate).
+		props = map[string]any{}
+	case "imagerepository":
+		props = map[string]any{"image": "registry.example/org/app", "interval": "5m"}
+	case "resourcesetinputprovider":
+		props = map[string]any{"type": "OCIArtifactTag", "url": "oci://registry.example/org/app"}
+	case "fluxcd-provider":
+		props = map[string]any{"type": "generic"}
 	default:
 		i := slices.IndexFunc(sharedKinds, func(k sharedKind) bool { return k.typ == typ })
 		if i < 0 {

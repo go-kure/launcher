@@ -34,7 +34,7 @@ func (h *HelmRepositoryHandler) CanHandle(componentType string) bool {
 // PropertySchema declares every top-level key of sourcev1.HelmRepositorySpec. A
 // test ties this key set to the struct.
 func (h *HelmRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"url":             fluxSourceRequiredString("HelmRepository spec.url: an http://, https:// or oci:// URL, and oci:// when type is oci. Its host must be in the policy's allowed registries when that list is non-empty; an oci:// URL must then also name its registry explicitly, as localhost or a host containing . or : (Flux reads any other first segment as a Docker Hub namespace). A user or password in it is refused: put the credential in a Secret named by secretRef."),
 		"secretRef":       fluxSourceObject("HelmRepository spec.secretRef: the Secret holding the repository credentials, in the namespace the HelmRepository lands in."),
 		"certSecretRef":   fluxSourceObject("HelmRepository spec.certSecretRef: the Secret holding a client certificate and/or CA certificate."),
@@ -46,7 +46,7 @@ func (h *HelmRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 		"accessFrom":      fluxSourceObject("HelmRepository spec.accessFrom: a cross-namespace access control list. Projected as authored, but not enforced: Flux marks the field not implemented (provisional)."),
 		"type":            fluxSourceString("HelmRepository spec.type: default, or oci for an OCI registry of charts (a static object with no interval default)."),
 		"provider":        fluxSourceString("HelmRepository spec.provider for OCI authentication: generic, aws, azure or gcp (type oci only)."),
-	}
+	}, registryBounds("url"))
 }
 
 // ToApplicationConfig decodes the component's properties strictly into a
