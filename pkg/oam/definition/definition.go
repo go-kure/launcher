@@ -334,9 +334,13 @@ func (h *Handler) ToApplicationConfig(component *oam.Component, namespace string
 // that a model can name the type as a part. It refuses a type name t already holds.
 func Register(t *oam.Transformer, h *Handler) (err error) {
 	// A declared identity or a registered handler holds the name.
-	_, resolveErr := t.ResolveComponentType(h.typeName)
+	held, resolveErr := t.ResolveComponentType(h.typeName)
 	_, registered := t.ComponentHandlerFor(h.typeName)
-	if resolveErr == nil || registered {
+	if resolveErr == nil {
+		// A declared type answers to the name, a model's short name for one: say which.
+		return errors.Errorf("component definition: the type %q is already declared, as %s", h.typeName, held)
+	}
+	if registered {
 		return errors.Errorf("component definition: the type %q is already declared", h.typeName)
 	}
 	// The identity is also known by its short name, which would take over a type

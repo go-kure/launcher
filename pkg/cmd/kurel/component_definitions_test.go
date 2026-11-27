@@ -230,7 +230,8 @@ func TestBuildCommand_ComponentDefinitionKeepsALargeIntegerExact(t *testing.T) {
 }
 
 // A model whose short name is a defined type's name would take the type over, since
-// an identity resolves before a plain name: the build refuses it, naming both.
+// an identity resolves before a plain name: the model registry refuses it as the build
+// loads the models, naming the model and the defined type's name.
 func TestBuildCommand_ComponentDefinitionIsNotShadowedByAModel(t *testing.T) {
 	out, err := buildComponentDefinitionExample(t, func(dir string) {
 		if err := os.MkdirAll(filepath.Join(dir, "models"), 0o755); err != nil {
@@ -244,7 +245,7 @@ func TestBuildCommand_ComponentDefinitionIsNotShadowedByAModel(t *testing.T) {
 	if err == nil {
 		t.Fatalf("built:\n%s", out)
 	}
-	for _, want := range []string{`"batch-job"`, "batch-job.example.org@v1", "batchjob.example.gokure.dev@v1alpha1"} {
+	for _, want := range []string{`"batch-job"`, "batch-job.example.org@v1", "loading component models"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name %s", err, want)
 		}

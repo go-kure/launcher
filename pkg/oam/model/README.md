@@ -226,6 +226,13 @@ refuses it in these cases.
 
 - The type of the model is already declared, or the Transformer refuses to declare it. The error
   names the model.
+- The name of the model or its short name (the first label of its name) is a plain type name that a
+  handler or a lowering rule is registered under, and no declared type claims that name. An identity resolves
+  before a plain name, so the model would be built in that type's place. The error names the model
+  and the plain name. A short name that a declared type claims is not refused: the reference
+  resolves, or is reported ambiguous. The other order is refused too: `Transformer.RegisterComponent`,
+  `RegisterAuthoredComponent` and `RegisterComponentLowering` panic on a plain name that a declared
+  type already claims as its short name, and `definition.Register` returns an error.
 - The model has no `spec.outputs` (left out, or `null`). The error names the model. `outputs: {}`
   registers a model that publishes nothing.
 - A part type or a trait type is not declared on the Transformer. The error names the path of the

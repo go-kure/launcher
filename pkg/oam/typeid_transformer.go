@@ -188,6 +188,20 @@ func (t *Transformer) componentKey(ref string) (string, bool) {
 	return "", false
 }
 
+// refuseClaimedComponentName panics when typeName, the plain name a handler or a rule is about
+// to register under, already resolves to a declared type registered under another key: an
+// identity resolves before a plain name, so what registers under typeName would never be reached
+// by it (go-kure/launcher#1716). A name nobody declared, or the type's own key, passes.
+func (t *Transformer) refuseClaimedComponentName(typeName string) {
+	id, err := t.componentTypes.resolve(typeName)
+	if err != nil {
+		return
+	}
+	if key := t.componentTypes.keys[id]; key != typeName {
+		panic("oam: the plain name \"" + typeName + "\" is the short name of the declared type " + id.String() + ", and an identity resolves before a plain name, so what registers under it would never be reached; rename one of them")
+	}
+}
+
 // ComponentHandlerFor returns the handler of the component type ref names, an
 // authored plain name or identity (ResolveComponentType), and false when the
 // type has none: unknown, ambiguous, or one a lowering rule claims.

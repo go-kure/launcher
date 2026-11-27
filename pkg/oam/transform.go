@@ -374,11 +374,13 @@ func NewTransformer(componentHandlers map[string]ComponentHandler, traitHandlers
 }
 
 // RegisterComponent registers a component handler under the given type name.
-// Panics if typeName is already registered or if h.CanHandle(typeName) returns false.
+// Panics if typeName is already registered, if a declared type already claims it as its short
+// name, or if h.CanHandle(typeName) returns false.
 func (t *Transformer) RegisterComponent(typeName string, h ComponentHandler) {
 	if _, exists := t.componentHandlers[typeName]; exists {
 		panic("oam: component handler already registered for type " + typeName)
 	}
+	t.refuseClaimedComponentName(typeName)
 	if _, exists := t.componentLoweringRules[typeName]; exists {
 		panic("oam: type " + typeName + " is already registered via RegisterComponentLowering; a lowerable type must not also be a dispatchable component handler")
 	}
