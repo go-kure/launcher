@@ -331,7 +331,9 @@ func (h *Handler) ToApplicationConfig(component *oam.Component, namespace string
 }
 
 // Register makes the definition's type authorable on t and declares its identity, so
-// that a model can name the type as a part. It refuses a type name t already holds.
+// that a model can name the type as a part. It refuses a type name t already holds, and an
+// identity whose short or qualified name is a handler or a lowering rule registered under it
+// that no declared type claims.
 func Register(t *oam.Transformer, h *Handler) (err error) {
 	// A declared identity or a registered handler holds the name.
 	held, resolveErr := t.ResolveComponentType(h.typeName)
@@ -343,21 +345,16 @@ func Register(t *oam.Transformer, h *Handler) (err error) {
 	if registered {
 		return errors.Errorf("component definition: the type %q is already declared", h.typeName)
 	}
-	// The identity is also known by its short name, which would take over a type
-	// registered under that name.
+	// The identity is also known by its short name and by its qualified name, which would
+	// take over a plain key of that name, a handler or a lowering rule, that no declared
+	// type claims. A declared type that holds the name is another type or another version,
+	// and the resolver and CheckComponentTypes judge that.
 	short := h.identity.ShortName()
-	if _, registered := t.ComponentHandlerFor(short); registered {
+	if holdsUnclaimedPlainKey(t, short) {
 		return errors.Errorf("component definition %q: the short name %q of %s is a type that is already registered", h.typeName, short, h.identity)
 	}
-	// And by its qualified name, which would take over a plain key of that name that no
-	// declared type claims. A declared type that holds the name is another version of this
-	// one, and CheckComponentTypes judges that.
-	if name := h.identity.Name; name != short {
-		if _, err := t.ResolveComponentType(name); errors.Is(err, oam.ErrTypeReferenceUnknown) {
-			if _, registered := t.ComponentHandlerFor(name); registered {
-				return errors.Errorf("component definition %q: the qualified name %q of %s is a type that is already registered", h.typeName, name, h.identity)
-			}
-		}
+	if name := h.identity.Name; name != short && holdsUnclaimedPlainKey(t, name) {
+		return errors.Errorf("component definition %q: the qualified name %q of %s is a type that is already registered", h.typeName, name, h.identity)
 	}
 	ids := map[string]oam.TypeID{h.typeName: h.identity}
 	if err := t.CheckComponentTypes(ids); err != nil {
@@ -372,4 +369,17 @@ func Register(t *oam.Transformer, h *Handler) (err error) {
 	}()
 	t.RegisterAuthoredComponent(h.typeName, h)
 	return errors.Wrapf(t.DeclareComponentTypes(ids), "component definition %q", h.typeName)
+}
+
+// holdsUnclaimedPlainKey reports whether a handler or a lowering rule is registered under name
+// and no declared type claims name. A name a declared type claims resolves to that type, or is
+// reported ambiguous, and so never reads as another's (the same test as the model registry's).
+func holdsUnclaimedPlainKey(t *oam.Transformer, name string) bool {
+	_, handler := t.ComponentHandlerFor(name)
+	_, rule := t.ComponentLoweringRuleFor(name)
+	if !handler && !rule {
+		return false
+	}
+	_, err := t.ResolveComponentType(name)
+	return errors.Is(err, oam.ErrTypeReferenceUnknown)
 }
