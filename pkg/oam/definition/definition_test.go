@@ -270,6 +270,44 @@ func TestRegister_RefusesAnIdentityWhoseQualifiedNameIsARegisteredName(t *testin
 	}
 }
 
+// Two versions of one defined kind share a qualified name and keep their own plain names. The
+// second is no shadowing: the qualified name is a declared type's, not a plain key nobody claims.
+// The built-in webservice makes the short name ambiguous, as in a build, so only the qualified
+// name stands between the second definition and its registration (go-kure/launcher#1716).
+func TestRegister_AcceptsASecondVersionOfOneType(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterBuiltinComponentLowering(components.WebserviceRule{})
+	if err := tr.DeclareComponentTypes(map[string]oam.TypeID{"webservice": {Name: "webservice.launcher.gokure.dev", Version: "v1"}}); err != nil {
+		t.Fatal(err)
+	}
+	alpha, err := definition.Load(variant(t, "webservice-alpha", "Webservice"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := definition.Register(tr, alpha); err != nil {
+		t.Fatalf("first version: %v", err)
+	}
+	betaPath := variant(t, "webservice-beta", "Webservice")
+	crd, err := os.ReadFile(filepath.Join(filepath.Dir(betaPath), "crds", "batchjob.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCRD(t, betaPath, strings.Replace(string(crd), "name: v1alpha1", "name: v1beta1", 1))
+	edit(t, betaPath, "apiVersion: example.gokure.dev/v1alpha1", "apiVersion: example.gokure.dev/v1beta1")
+	beta, err := definition.Load(betaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := definition.Register(tr, beta); err != nil {
+		t.Fatalf("second version: %v", err)
+	}
+	for _, name := range []string{"webservice-alpha", "webservice-beta"} {
+		if _, ok := tr.ComponentHandlerFor(name); !ok {
+			t.Errorf("the plain name %s reaches no handler", name)
+		}
+	}
+}
+
 // A library transformer may hold a lowering rule with no declared identity;
 // the collision is an error, never a panic.
 func TestRegister_RefusesALoweringRuleName(t *testing.T) {
