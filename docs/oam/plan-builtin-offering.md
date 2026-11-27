@@ -21,7 +21,7 @@ A configuration model defines a **component** type. The model README says a trai
 
 ## What the page proposes, in one table
 
-"Include" means launcher ships it built in. "By hand" means a user writes the kind through the generic route, and launcher ships nothing for it.
+"Include" means launcher ships it built in. "By hand" means a user writes the object explicitly in the document, and launcher builds no higher-level part for it. The type that makes the kind available is either a built-in type that already exists, or a definition the user pins through the generic route.
 
 | Candidate | Proposal | Shape | Reason |
 |---|---|---|---|
@@ -137,7 +137,7 @@ Source: the VictoriaMetrics operator's page on Prometheus integration, read on 2
 - Deleting a Prometheus object must not block Flux, so the CRDs and the operator outlive the objects that use them.
 - How launcher handles the conversion is out of scope.
 
-So a chart that sets only Prometheus Operator kinds gets VictoriaMetrics objects through the conversion, and a hand-written `ServiceMonitor` can be relied on in a cluster that follows this definition.
+So a chart that sets only the convertible kinds (`ServiceMonitor`, `PodMonitor`, `PrometheusRule`, `Probe`, `ScrapeConfig`) gets VictoriaMetrics objects through the conversion, and a hand-written object of one of those kinds can be relied on in a cluster that follows this definition. A chart that sets an instance kind (`Prometheus`, `Alertmanager`, `ThanosRuler`) gets nothing from the conversion.
 
 ### What the existing Prometheus Operator types become
 
@@ -174,12 +174,12 @@ Do not confuse the `bucket` component with either. It is Flux's `source.toolkit.
 
 ### Create, self-hosted: Garage
 
-Garage (Deuxfleurs) is the self-hosting candidate. It has no official operator. Two community operators exist, and both manage a bucket and the access to it, as Serge supposed. The facts below were read on 2026-11-28 from each repository and its README. They are not a recommendation: both are single-maintainer projects, and the choice is Serge's.
+Garage (Deuxfleurs) is the self-hosting candidate. It has no official operator. Two community operators exist, and both manage a bucket and the access to it, as Serge supposed. The facts below were read on 2026-11-28 from each repository and its README. They are not a recommendation: each project has one main contributor (see the Contributors row), and the choice is Serge's.
 
 | | rajsinghtech/garage-operator | bmarinov/garage-storage-controller |
 |---|---|---|
 | Repository | [github.com/rajsinghtech/garage-operator](https://github.com/rajsinghtech/garage-operator) | [github.com/bmarinov/garage-storage-controller](https://github.com/bmarinov/garage-storage-controller) |
-| Maintainer | one person's account | one person's account |
+| Contributors | one main contributor, its owner (267 commits); no other person has more than 23 | one contributor (104 commits) |
 | Licence | Apache-2.0 | Apache-2.0 |
 | Last release | v0.9.3, 2026-11-25 | v0.5.4, 2026-10-20 |
 | Activity | created 2026-01-15; last push 2026-11-26; 280 stars; 3 open issues | created 2025-12-01; last push 2026-10-20; 14 stars; 21 open issues |
@@ -190,7 +190,7 @@ Garage (Deuxfleurs) is the self-hosting candidate. It has no official operator. 
 | Also does | the Garage cluster itself (`GarageCluster`, `GarageNode`), a management handle over an existing Garage, an optional COSI driver | nothing else: it needs a running Garage and its admin token |
 | Needs Garage | v2.0.0 or newer (it drives the admin API v2 only) | the admin API v2 (`/v2/CreateBucket`, `/v2/CreateKey`, `/v2/AllowBucketKey` and others) |
 
-Sources: both READMEs, and the GitHub API for licence, releases, stars and issues, read 2026-11-28.
+Sources: both READMEs, and the GitHub API for licence, releases, stars, issues and contributors (bots excluded), read 2026-11-28.
 
 **Fallback if no operator is usable.** Garage's own admin API, version v2 as of Garage v2.6.0 (released 2026-11-24), creates the bucket (`CreateBucket`), the key (`CreateKey`, `ImportKey`), the grant (`AllowBucketKey`, `DenyBucketKey`) and the quota and website settings (`UpdateBucket`). Source: the API specification at tag v2.6.0, `doc/api/garage-admin-v2.json`, read 2026-11-28. Calling it from a Job would need code that launcher does not have today.
 
@@ -233,7 +233,7 @@ None is proposed as a built-in type here. Each can go through the generic route 
 
 | `format` | Keys written |
 |---|---|
-| `plain` | `access-key-id`, `secret-access-key`, `endpoint`, `bucket-name`: the shape both Garage operators write |
+| `plain` | `access-key-id`, `secret-access-key`, `endpoint`, `bucket-name`. The two Garage operators agree only on the first two key names: the endpoint key is `endpoint` in one and `s3-endpoint` in the other, and only one of them writes the bucket name |
 | `aws-env` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_ENDPOINT_URL_S3` |
 | `credentials-file` | one key holding an AWS shared credentials file |
 | `restic` | `RESTIC_REPOSITORY` plus the AWS variables, for the `volsync` trait |
