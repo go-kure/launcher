@@ -34,7 +34,7 @@ func (h *GitRepositoryHandler) CanHandle(componentType string) bool {
 // PropertySchema declares every top-level key of sourcev1.GitRepositorySpec. A
 // test ties this key set to the struct.
 func (h *GitRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"url":                fluxSourceRequiredString("GitRepository spec.url: an http://, https:// or ssh:// URL. Its host (the user of an ssh:// URL dropped) must be in the policy's allowed registries when that list is non-empty. A user or password in an http(s):// URL, and a password in an ssh:// URL, is refused: put the credential in a Secret named by secretRef. The user of an ssh:// URL is the SSH login, which Flux reads from the URL alone, so it is kept."),
 		"secretRef":          fluxSourceObject("GitRepository spec.secretRef: the Secret holding the credentials, in the namespace the GitRepository lands in."),
 		"provider":           fluxSourceString("GitRepository spec.provider for authentication: generic, aws, azure or github."),
@@ -57,7 +57,7 @@ func (h *GitRepositoryHandler) PropertySchema() map[string]oam.PropertySchema {
 			Description: "GitRepository spec.sparseCheckout: the directories to check out.",
 			Items:       &oam.PropertySchema{Type: oam.PropertyTypeString, Description: "One directory."},
 		},
-	}
+	}, sourceURLBounds("url"))
 }
 
 // ToApplicationConfig decodes the component's properties strictly into a

@@ -740,9 +740,13 @@ The refusal of a Secret that an `externalsecret` or `clusterexternalsecret` woul
 `oam.RefusalExplicitSecret`, and `errors.As` finds the type. The refusal of a kind the policy reads
 there is a bare `PolicyRefusal` of class `oam.RefusalUnreadableObject`.
 
-The workload types that keep the reshaped form and the kinds that take a pod as the API type publish, in
+The workload types that keep the reshaped form, the kinds that take a pod as the API type, and the
+source types `helm`, `gitrepository` and `manifests` publish, in
 `boundedBy`, which classes an authored value at a property can cause (`bounds.go`,
-go-kure/launcher#1580). No schema fragment carries a bound: each type states its own.
+go-kure/launcher#1580, go-kure/launcher#1711). No schema fragment carries a bound: each type states its own.
+The source types declare `registry` on their url, and `manifests` declares `explicit-secret` and
+`unreadable-object` on `inline` and `url`; the classes the same check raises on a workload object
+(shared with `passthrough` and `helmtemplate`) and `object-kind` (the transform's) are declared on none.
 
 ## Pod view of a monitoring workload object (`MonitoringPodSpec`)
 

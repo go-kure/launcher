@@ -162,7 +162,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 	object := func(desc string) oam.PropertySchema {
 		return oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: desc}
 	}
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"chart":    str("Chart name within a HelmRepository source, or the chart's path within a GitRepository or Bucket source; required with those three. Refused with an OCIRepository or HelmChart source, which already name the chart."),
 		"version":  str("Chart version. For an inline oci:// source it is the OCIRepository's ref.tag, and required under delivery: template. Refused with a referenced OCIRepository or HelmChart source, which already pin it, and with a GitRepository or Bucket source, whose chart Flux reads at the fetched revision, ignoring any version."),
 		"delivery": {Type: oam.PropertyTypeString, Default: "flux", Enum: []any{"flux", "template"}, Description: "flux emits a HelmRelease (plus its source for an inline source); template renders the chart client-side at build time, from an inline HelmRepository or OCIRepository URL only."},
@@ -216,7 +216,7 @@ func (HelmRule) PropertySchema() map[string]oam.PropertySchema {
 		// Launcher's own, under either delivery: split off before the decode and never
 		// forwarded to the terminals, so the lowered output does not change.
 		chartEndpointsKey: chartEndpointsSchema(),
-	}
+	}, sourceURLBounds("source.url"))
 }
 
 // helmProperties is what the strict decode checks; helmOwnedKeys are split off

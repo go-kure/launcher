@@ -1,6 +1,7 @@
 package registry_test
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"sort"
@@ -28,7 +29,26 @@ type boundsPolicy struct {
 	registries, forbiddenCaps                       []string
 	cpuLimit, memoryLimit                           string
 	hostNetwork, hostPID, hostIPC, privileged, host bool
+	// forbidSecrets makes the policy forbid explicit secrets; content is the
+	// source of the bodies a manifests url names (boundsContent).
+	forbidSecrets bool
+	content       boundsContent
 }
+
+// boundsContent is a ContentSource that serves a manifests url from a stored
+// body, so a row needs no request: the body of the url it names, else the one
+// kept under "". Every body is recorded as fetched from registry.example.
+type boundsContent map[string]string
+
+func (c boundsContent) Lookup(_ context.Context, key oam.ContentKey) (oam.Content, bool, error) {
+	body, ok := c[key.URL]
+	if !ok {
+		body, ok = c[""]
+	}
+	return oam.Content{Data: []byte(body), Hosts: []string{"registry.example"}}, ok, nil
+}
+
+func (boundsContent) Store(context.Context, oam.ContentKey, oam.Content) error { return nil }
 
 func (p *boundsPolicy) MaxReplicas() *int32                      { return p.maxReplicas }
 func (p *boundsPolicy) MaxCPU() string                           { return p.maxCPU }
@@ -43,6 +63,8 @@ func (p *boundsPolicy) AllowHostPID() bool                       { return p.host
 func (p *boundsPolicy) AllowHostIPC() bool                       { return p.hostIPC }
 func (p *boundsPolicy) AllowPrivileged() bool                    { return p.privileged }
 func (p *boundsPolicy) AllowHostPathVolumes() bool               { return p.host }
+func (p *boundsPolicy) AllowExplicitSecrets() bool               { return !p.forbidSecrets }
+func (p *boundsPolicy) ContentSource() oam.ContentSource         { return p.content }
 
 // knob changes one setting of a policy.
 type knob func(*boundsPolicy)
@@ -64,6 +86,8 @@ var (
 	allowIPC        knob = func(p *boundsPolicy) { p.hostIPC = true }
 	allowPrivileged knob = func(p *boundsPolicy) { p.privileged = true }
 	allowHostPath   knob = func(p *boundsPolicy) { p.host = true }
+	forbidSecrets   knob = func(p *boundsPolicy) { p.forbidSecrets = true }
+	allowSecrets    knob = func(p *boundsPolicy) { p.forbidSecrets = false }
 )
 
 // boundsStrict is the policy every row starts from: each limit set, nothing
@@ -72,6 +96,9 @@ func boundsStrict(knobs ...knob) *boundsPolicy {
 	p := &boundsPolicy{
 		maxReplicas: i32(3), maxCPU: "2", maxMemory: "1Gi", maxStorage: "10Gi",
 		registries: []string{"registry.example"}, forbiddenCaps: []string{"NET_ADMIN"},
+		content: boundsContent{
+			"": manifestsConfigMap, secretURL: manifestsSecret, unreadableURL: manifestsUnreadable,
+		},
 	}
 	for _, k := range knobs {
 		if k != nil {
@@ -166,6 +193,28 @@ const (
 	boundImage   = "registry.example/team/app:1.2.3"
 	foreignImage = "elsewhere.example/team/app:1.2.3"
 )
+
+// The documents a manifests row works with. manifestsConfigMap is the one a
+// row starts from, inline or served at the url; the other two are what a row
+// changes it to: a core Secret, and an object the policy check cannot read, an
+// autoscaling/v1 HorizontalPodAutoscaler (a version kure's scheme does not
+// register) whose maxReplicas is no integer, which is refused only under a
+// replica maximum.
+const (
+	manifestsConfigMap  = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\ndata:\n  key: value\n"
+	manifestsSecret     = "apiVersion: v1\nkind: Secret\nmetadata:\n  name: creds\nstringData:\n  key: value\n"
+	manifestsUnreadable = "apiVersion: autoscaling/v1\nkind: HorizontalPodAutoscaler\nmetadata:\n  name: scale\n  namespace: demo\nspec:\n" +
+		"  scaleTargetRef:\n    apiVersion: apps/v1\n    kind: Deployment\n    name: web\n  maxReplicas: many\n"
+
+	// The urls of those two documents, under the one host the strict policy lists.
+	passingURL    = "https://registry.example/settings.yaml"
+	secretURL     = "https://registry.example/creds.yaml"
+	unreadableURL = "https://registry.example/scale.yaml"
+)
+
+// manifestsFromURL makes the passing document of a manifests row read its
+// source from passingURL, in place of the inline one.
+var manifestsFromURL = []set{{at: "inline", drop: true}, {at: "url", value: passingURL}}
 
 // onlyHostProcess is the rule a HostProcess container breaks in a pod whose
 // other containers are not HostProcess ones: the object is refused as invalid
@@ -320,6 +369,37 @@ func podRows(typ, node, prefix string) []boundRow {
 	)
 }
 
+// fluxAndManifestsRows are the bounds of the types that hold a source: the host
+// of the url of `helm`, `gitrepository` and `manifests`, and the objects a
+// `manifests` source carries, inline or at its url. The object classes are the
+// two the handler raises from the document itself and no other check does:
+// RefusalObjectKind is the transform's, on every application, and the classes
+// of a workload object are left to the types that share that check.
+func fluxAndManifestsRows() []boundRow {
+	secrets := func(change ...set) boundRow {
+		return boundRow{typ: "manifests", path: "inline", class: oam.RefusalExplicitSecret, change: change, strict: forbidSecrets, relax: allowSecrets}
+	}
+	unreadable := func(change ...set) boundRow {
+		return boundRow{typ: "manifests", path: "inline", class: oam.RefusalUnreadableObject, change: change, relax: anyReplicas}
+	}
+	fromURL := func(r boundRow) boundRow {
+		r.path, r.with = "url", manifestsFromURL
+		return r
+	}
+	return []boundRow{
+		{typ: "gitrepository", path: "url", class: oam.RefusalRegistry, relax: anyRegistry,
+			change: []set{{at: "url", value: "https://elsewhere.example/org/repo"}}},
+		{typ: "helm", path: "source.url", class: oam.RefusalRegistry, relax: anyRegistry,
+			change: []set{{at: "source.url", value: "https://elsewhere.example/charts"}}},
+		{typ: "manifests", path: "url", class: oam.RefusalRegistry, relax: anyRegistry, with: manifestsFromURL,
+			change: []set{{at: "url", value: "https://elsewhere.example/settings.yaml"}}},
+		secrets(set{at: "inline", value: manifestsSecret}),
+		fromURL(secrets(set{at: "url", value: secretURL})),
+		unreadable(set{at: "inline", value: manifestsUnreadable}),
+		fromURL(unreadable(set{at: "url", value: unreadableURL})),
+	}
+}
+
 // boundRows lists every tested bound. TestBoundedBy_DeclaredAndTested holds it
 // to what the registered schemas declare, both ways.
 func boundRows() []boundRow {
@@ -341,6 +421,7 @@ func boundRows() []boundRow {
 	// each one's storage request, below the declared path.
 	rows = append(rows, boundRow{typ: "statefulset", path: "volumeClaimTemplates", class: oam.RefusalStorageMaximum,
 		change: []set{{at: "volumeClaimTemplates[].spec.resources.requests.storage", value: "1Ti"}}, relax: anyStorage})
+	rows = append(rows, fluxAndManifestsRows()...)
 	rows = append(rows,
 		boundRow{trait: true, typ: "scaler", path: "maxReplicas", class: oam.RefusalReplicaMaximum,
 			change: []set{{at: "maxReplicas", value: 9}}, relax: anyReplicas},
@@ -397,6 +478,12 @@ func boundDocument(t *testing.T, trait bool, typ string) (oam.Component, map[str
 			}}}
 	case "replicationcontroller":
 		props = map[string]any{"selector": map[string]any{"tier": "web"}, "template": template()}
+	case "gitrepository":
+		props = map[string]any{"url": "https://registry.example/org/repo", "ref": map[string]any{"branch": "main"}}
+	case "helm":
+		props = map[string]any{"chart": "app", "version": "1.0.0", "source": map[string]any{"url": "https://registry.example/charts"}}
+	case "manifests":
+		props = map[string]any{"inline": manifestsConfigMap}
 	default:
 		i := slices.IndexFunc(sharedKinds, func(k sharedKind) bool { return k.typ == typ })
 		if i < 0 {
@@ -472,13 +559,11 @@ func TestBoundedBy_DeclaredAndTested(t *testing.T) {
 
 // boundedClasses are the classes the declaring types can cause from a property.
 // RefusalTraitCapability and RefusalObjectKind are about a type as a whole.
-// RefusalExplicitSecret and RefusalUnreadableObject are raised by types that
-// declare no bound yet: the first type to declare one adds it here, with its
-// row.
 var boundedClasses = []oam.RefusalClass{
 	oam.RefusalHostNamespace, oam.RefusalPrivileged, oam.RefusalHostPath, oam.RefusalContainerCapability,
 	oam.RefusalRegistry, oam.RefusalResourceMaximum, oam.RefusalResourceDefaultLimit,
 	oam.RefusalStorageMaximum, oam.RefusalReplicaMaximum,
+	oam.RefusalExplicitSecret, oam.RefusalUnreadableObject,
 }
 
 // TestBoundedBy_Classes: a declared class is one of boundedClasses, and a

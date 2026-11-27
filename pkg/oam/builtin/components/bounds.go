@@ -97,6 +97,31 @@ func podBounds() map[string][]oam.RefusalClass {
 	}
 }
 
+// sourceURLBounds are the bounds of a type whose url or source.url the policy
+// holds to the allowed registries: gitrepository, and helm, whose generated
+// HelmRepository, OCIRepository or GitRepository (and, under template delivery,
+// helmtemplate) raise the refusal. path is the property.
+func sourceURLBounds(path string) map[string][]oam.RefusalClass {
+	return map[string][]oam.RefusalClass{path: {oam.RefusalRegistry}}
+}
+
+// manifestsBounds are the bounds of the manifests type. The url is held to the
+// allowed registries, on every redirect hop too. The objects of the source,
+// written inline or fetched from the url, are held to the explicit-secret rule
+// and refused when they cannot be read (enforceManifestPolicy), so both
+// properties list those two classes: the document is the value of inline and is
+// what url names. The classes the same check raises on a workload object (the
+// image, pod security, resource, storage and replica rules) are shared with
+// passthrough and helmtemplate and are not declared yet, and RefusalObjectKind
+// is the transform's check on every application, which no property carries.
+func manifestsBounds() map[string][]oam.RefusalClass {
+	content := []oam.RefusalClass{oam.RefusalExplicitSecret, oam.RefusalUnreadableObject}
+	return map[string][]oam.RefusalClass{
+		"inline": content,
+		"url":    append([]oam.RefusalClass{oam.RefusalRegistry}, content...),
+	}
+}
+
 // podTemplateBounds are the bounds of a type that holds its pod below one open
 // `template` node: every class of podBounds, on that node. replicas says
 // whether the type has a `replicas` the policy holds.
