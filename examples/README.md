@@ -75,6 +75,28 @@ of the package's `models/` directory in name order, then each `--model <file>`, 
 names another sorts after it. [Component models](../pkg/cmd/kurel/README.md#component-models)
 describes the load order, the refusals and the limits a model is evaluated under.
 
+## Custom component example
+
+Directory: [`custom-component/`](custom-component/)
+
+A component type for a custom resource, declared by a `ComponentDefinition` and checked against a
+CRD pinned by digest. Unlike the example below, `kurel build` runs it:
+
+```bash
+bin/kurel build examples/custom-component --profile examples/custom-component/cluster.yaml
+```
+
+| File | Purpose |
+|------|---------|
+| [`app.yaml`](custom-component/app.yaml) | Application with one `batch-job` component; its properties are the `BatchJob` spec |
+| [`definitions/batchjob.yaml`](custom-component/definitions/batchjob.yaml) | ComponentDefinition: the type, the kind it emits, the CRD file and its SHA-256 |
+| [`definitions/crds/batchjob.yaml`](custom-component/definitions/crds/batchjob.yaml) | The pinned CRD, a small one written for this example |
+| [`cluster.yaml`](custom-component/cluster.yaml) | ClusterProfile with no capability bound |
+
+The check is structural: CRD CEL rules are not evaluated and API-server defaults are not applied.
+See [Component definitions](../pkg/cmd/kurel/README.md#component-definitions). This example is
+outside `make validate-manifests`, which builds the numbered examples only.
+
 ## Custom capability extension example
 
 Directory: [`custom-capability/`](custom-capability/)

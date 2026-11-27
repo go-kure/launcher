@@ -198,3 +198,18 @@ func TestBuildCommand_ComponentDefinitionClusterScope(t *testing.T) {
 		t.Errorf("a cluster-scoped object carries a namespace:\n%s", out)
 	}
 }
+
+// A spec property the CRD leaves to x-kubernetes-preserve-unknown-fields has no
+// type, and takes any value.
+func TestBuildCommand_ComponentDefinitionOpenProperty(t *testing.T) {
+	out, err := buildComponentDefinitionExample(t, func(dir string) {
+		editCRD(t, "              env:\n", "              extra:\n                x-kubernetes-preserve-unknown-fields: true\n              env:\n")(dir)
+		editIn(t, "app.yaml", "      env:\n", "      extra:\n        anything: [1, two]\n      env:\n")(dir)
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(out, "anything:\n") {
+		t.Errorf("output does not hold the open property:\n%s", out)
+	}
+}

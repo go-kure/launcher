@@ -45,6 +45,9 @@ packages:
   - path: pkg/oam/model
     readme: pkg/oam/model/README.md
     mount: {target: api-reference/oam-models.md, title: Component Models, weight: 21, group: OAM, desc: "Configuration-defined component models: document format and loader"}
+  - path: pkg/oam/definition
+    readme: pkg/oam/definition/README.md
+    mount: {target: api-reference/oam-definitions.md, title: Component Definitions, weight: 23, group: OAM, desc: "Component types declared by a pinned CRD: document format and loader"}
   - path: pkg/oam/builtin/components
     readme: pkg/oam/builtin/components/README.md
     mount: {target: api-reference/oam-components/_index.md, title: Component Handlers, weight: 22, group: OAM, desc: "Built-in component types (webservice, worker, cronjob, helm, helmrelease, helmtemplate, …)"}
