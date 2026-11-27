@@ -162,7 +162,15 @@
           }
         }
       }
-    }
+    },
+    "exclusive": [
+      {
+        "keys": [
+          "initdb",
+          "pg_basebackup"
+        ]
+      }
+    ]
   },
   "clusterObjectName": {
     "type": "string",
@@ -263,6 +271,7 @@
       "source": {
         "type": "object",
         "description": "Required. Where the backups and WAL are read from.",
+        "required": true,
         "properties": {
           "objectStore": {
             "type": "object",
@@ -337,7 +346,16 @@
             "description": "Required, not empty. The folder the source cluster wrote within the store's destinationPath: its backup.serverName, else its Cluster's name.",
             "required": true
           }
-        }
+        },
+        "exclusive": [
+          {
+            "keys": [
+              "objectStoreName",
+              "objectStore"
+            ],
+            "required": true
+          }
+        ]
       },
       "target": {
         "type": "object",
@@ -375,7 +393,18 @@
             "type": "string",
             "description": "Stop at this transaction ID, a 32-bit integer written as a string. Needs backupID."
           }
-        }
+        },
+        "exclusive": [
+          {
+            "keys": [
+              "time",
+              "lsn",
+              "xid",
+              "name",
+              "immediate"
+            ]
+          }
+        ]
       }
     }
   },

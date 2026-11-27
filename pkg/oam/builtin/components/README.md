@@ -928,6 +928,10 @@ Opening lines of an entry:
   `serverName`, `schedules`; see "Backup" below), `monitoring.enabled`,
   `pooler.enabled`, `poolerName`, `managedRoles`, `databases` (each with an
   optional `objectName`), `clusterObjectName`.
+  The schema publishes what the parser refuses: `recovery.source` is required,
+  its `objectStoreName` and `objectStore` are an exactly-one group, and
+  `recovery.target`'s five selectors and `bootstrap`'s `initdb` and
+  `pg_basebackup` are at-most-one groups.
   **`clusterObjectName` names the Cluster in place of the component name.
   CloudNativePG derives the Cluster's Services and Secrets from the Cluster's
   name, the default backup path moves with it, and renaming an existing

@@ -3,6 +3,7 @@ package components
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -79,7 +80,9 @@ func schemaPostgresqlRecovery() oam.PropertySchema {
 		Properties: map[string]oam.PropertySchema{
 			"source": {
 				Type:        oam.PropertyTypeObject,
+				Required:    true,
 				Description: "Required. Where the backups and WAL are read from.",
+				Exclusive:   []oam.ExclusiveGroup{{Keys: []string{"objectStoreName", "objectStore"}, Required: true}},
 				Properties: map[string]oam.PropertySchema{
 					"serverName":      {Type: oam.PropertyTypeString, Required: true, Description: "Required, not empty. The folder the source cluster wrote within the store's destinationPath: its backup.serverName, else its Cluster's name."},
 					"objectStoreName": str("The name of an existing ObjectStore in the namespace to read from. Exactly one of objectStoreName and objectStore."),
@@ -89,6 +92,7 @@ func schemaPostgresqlRecovery() oam.PropertySchema {
 			"target": {
 				Type:        oam.PropertyTypeObject,
 				Description: "Where the recovery stops. Unset, at the end of the WAL. At most one of time, lsn, xid, name and immediate.",
+				Exclusive:   []oam.ExclusiveGroup{{Keys: slices.Clone(postgresqlRecoverySelectors)}},
 				Properties: map[string]oam.PropertySchema{
 					"time":      str("Stop at this time, in RFC 3339 or a PostgreSQL timestamp; one without a time zone is UTC. The base backup is the latest one before it."),
 					"lsn":       str("Stop at this WAL location (for example 0/3000060)."),
