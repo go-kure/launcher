@@ -214,6 +214,24 @@ func TestBuildCommand_ComponentDefinitionOpenProperty(t *testing.T) {
 	}
 }
 
+// A CRD whose spec fields are all optional accepts a component with no properties:
+// its spec is the empty object, never null.
+func TestBuildCommand_ComponentDefinitionWithNoProperties(t *testing.T) {
+	out, err := buildComponentDefinitionExample(t, func(dir string) {
+		editCRD(t, "            required:\n            - image\n            - mode\n", "")(dir)
+		app := "apiVersion: launcher.gokure.dev/v1alpha1\nkind: Application\nmetadata:\n  name: reports\n  namespace: analytics\nspec:\n  components:\n  - name: nightly\n    type: batch-job\n"
+		if err := os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(app), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(out, "kind: BatchJob\n") {
+		t.Errorf("output holds no BatchJob:\n%s", out)
+	}
+}
+
 // The API server enforces a list-type map or set apart from the schema check;
 // so does the build.
 func TestBuildCommand_ComponentDefinitionListMapKeysAreUnique(t *testing.T) {

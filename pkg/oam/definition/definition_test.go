@@ -291,6 +291,58 @@ func TestLoad_RefusesAnOpenSpec(t *testing.T) {
 	}
 }
 
+// A relative crd path that a symlink carries out of the definition's directory is
+// refused, as an environment binding's path is; the digest of the file it reaches
+// would match, so only the containment check stops the read.
+func TestLoad_RefusesACRDPathThatASymlinkLeads_Outside(t *testing.T) {
+	cases := []struct {
+		name string
+		link func(t *testing.T, def, outside string)
+	}{
+		{"a symlinked file", func(t *testing.T, def, outside string) {
+			crds := filepath.Join(filepath.Dir(def), "crds")
+			if err := os.Rename(filepath.Join(crds, "batchjob.yaml"), filepath.Join(outside, "batchjob.yaml")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(outside, "batchjob.yaml"), filepath.Join(crds, "batchjob.yaml")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a symlinked directory", func(t *testing.T, def, outside string) {
+			dir := filepath.Dir(def)
+			if err := os.Rename(filepath.Join(dir, "crds"), filepath.Join(outside, "crds")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(outside, "crds"), filepath.Join(dir, "crds")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			def := copyExample(t)
+			c.link(t, def, t.TempDir())
+			_, err := definition.Load(def)
+			if err == nil || !strings.Contains(err.Error(), "resolves outside") {
+				t.Errorf("Load: %v, want the path refused as resolving outside the directory", err)
+			}
+		})
+	}
+}
+
+// A symlink that stays inside the definition's directory is read.
+func TestLoad_AcceptsACRDPathThatASymlinkLeadsInside(t *testing.T) {
+	def := copyExample(t)
+	crds := filepath.Join(filepath.Dir(def), "crds")
+	if err := os.Symlink("batchjob.yaml", filepath.Join(crds, "alias.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	edit(t, def, "crds/batchjob.yaml", "crds/alias.yaml")
+	if _, err := definition.Load(def); err != nil {
+		t.Errorf("Load: %v", err)
+	}
+}
+
 // One YAML document per definition file: a second is refused, never dropped.
 func TestLoad_RefusesASecondDocument(t *testing.T) {
 	def := copyExample(t)
