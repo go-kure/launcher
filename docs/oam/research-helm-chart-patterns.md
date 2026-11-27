@@ -13,7 +13,7 @@ Four patterns need Go, each in part:
 - **A config file serialised from structured settings.** At least 10 of 27 (template count).
 - **A grant into each watched namespace.** 5 of 27 charts (a template loops over namespaces and a render holds a RoleBinding). A model part has no namespace field, so a model grants in one namespace only (see below).
 
-The first two models worth writing are a monitored web service and a web app with a volume and a database (see [Candidate models](#candidate-models)).
+What to build, if anything, is in the [Conclusion](#conclusion): the models to consider, triaged by how generic they are, and a separate list of custom resource kinds that kure and launcher could support. The one candidate that stands out is a generic monitored web app or service with a volume and a database, each part optional (see [Candidate models](#candidate-models)). The [use cases](#use-cases) a user deploys, from stateless web apps to multi-service applications, come first and the models are triaged from them. Two sections read evidence beyond the 30 charts: a [many-service application](#a-many-service-application-owncloud-and-opencloud) (ownCloud Infinite Scale and OpenCloud) and [monitoring and backup](#monitoring-and-backup-generically).
 
 ## Method
 
@@ -24,6 +24,7 @@ The first two models worth writing are a monitored web service and a web app wit
 - Where a helper is picked by a computed name (charts 10, 12, 13 and 22), the script follows every helper named in a string.
 - A text detector shows that a chart contains a construct, not how much it matters. Each detector has a positive control on a chart read by hand, and a sample of its matches was read.
 - Library charts cannot be installed, so their code is read whole and counted apart. Charts 4 and 10 render libraries 2 and 1; a minimal consumer written for the survey renders library 3.
+- Three more chart sets and one compose set sit outside the sample, as a worked example. They are rendered and counted apart (see [A many-service application](#a-many-service-application-owncloud-and-opencloud)), and their counts are never added to the sample's.
 
 **Stop rule.** The sample stays at 30 unless charts 26 to 30 add a pattern to the catalogue. They add none: every pattern first appears in an application chart numbered 23 or lower. The catalogue grew during the analysis (rows marked *added* below), so this was also checked mechanically: charts 26 to 30 use one template function no earlier chart uses (`toPrettyJson`, chart 30), a serialiser, and no new `helm.sh/` annotation. That check sees functions and annotations only.
 
@@ -191,20 +192,83 @@ A model part has no namespace field (`pkg/oam/model/types.go`), and `role` and `
 
 A trait on a component of a model type is refused. A model that users must extend with `expose` or `scaler` has to take those settings as inputs, or be a Go rule.
 
+## A many-service application: ownCloud and OpenCloud
+
+ownCloud Infinite Scale (oCIS) and its fork OpenCloud are file-sharing platforms built from many services. They are a worked example of an application that a user must be able to build, and **not a candidate for a base model**: launcher would not ship one as a default. The evidence is outside the 30-chart sample, so its counts are not added to the sample's.
+
+| Source | Pinned at | State on 2026-11-27 |
+|---|---|---|
+| ownCloud chart `ocis` 0.8.0, app 8.2.0: https://github.com/owncloud/ocis-charts | `36a4490a94c033c610fcda0de7a62d25206bff02` (2026-10-12) | repository not archived |
+| OpenCloud community charts `opencloud` 0.2.3, `opencloud-dev` 0.1.0, `opencloud-microservices` 0.3.10: https://github.com/opencloud-eu/helm | `72de94b25a89bfb3cf467cdf312e4166c55ded55` (2025-11-26) | archived; its README points to a paid offer for production charts |
+| OpenCloud compose files: https://github.com/opencloud-eu/opencloud-compose | `6de23f8e55d12c9cbff4b816fd86478d93614e8b` (2026-11-25) | active |
+
+Each chart was rendered offline with `helm template demo <chart directory> --namespace demo --include-crds` (Helm v4.3.2), once, with its default values. `ocis` also needs `--set externalDomain=files.example.org`, because its values schema refuses a render without it. Counts of rendered objects:
+
+| Chart | Deployment | Service | Secret | ConfigMap | Other |
+|---|---|---|---|---|---|
+| `ocis` | 32 | 32 | 13 | 8 | none |
+| `opencloud` | 7 | 7 | 6 | 6 | 5 PersistentVolumeClaim, 1 Ingress |
+| `opencloud-microservices` | 38 | 38 | 14 | 10 | 3 HTTPRoute, 1 PersistentVolumeClaim |
+| `opencloud-dev` | 1 | 1 | 0 | 0 | 1 Job, 2 PersistentVolumeClaim |
+
+**What the services and shared pieces are** (read from the `ocis` templates and values, and from the compose files):
+
+- **Services.** The `ocis` values hold 39 `services.<name>` blocks; the default render has a Deployment and a Service for 32 of them (no Deployment for 7: `antivirus`, `authapp`, `collaboration`, `notifications`, `ocm`, `policies`, `storageusersvault`). They cover the proxy, the gateway, several storage services, the search, thumbnail, notification, sharing, user and group services, and the web client. `opencloud` runs one binary in one Deployment beside collaboration, keycloak, minio, onlyoffice, postgres and tika Deployments.
+- **Identity.** The `idp` and `idm` services are a built-in OIDC provider and directory. The compose overlays swap them for Keycloak with an LDAP server, or for an external identity provider.
+- **Messaging.** A `nats` service by default; `messagingSystem.external` points to an external NATS.
+- **Storage.** 10 templates hold a PersistentVolumeClaim (for example `storageusers`, `search`, `idm`, `nats`); the 32 default Deployments hold 32 `emptyDir` volumes. The compose set has a `storage/decomposeds3.yml` overlay for S3.
+- **Search, content extraction, office, extras.** `search` plus the compose overlays for OpenSearch and Tika; the `collaboration` service plus Collabora or `euro-office` and `yjs` overlays for web office; overlays for ClamAV, `imagor` thumbnails and a Radicale calendar.
+- **Entry.** Two templates write an Ingress, `proxy` and `collaboration`, and the default render holds none; the compose set puts Traefik in front, or an external proxy.
+- **Configuration.** A generated ConfigMap or Secret per service, replaceable by an existing one through `configRefs` and `secretRefs`. The compose set builds the application from a `COMPOSE_FILE` list of base file and overlays: the same optional-parts pattern as the catalogue, in another form.
+- **Patterns from the catalogue** (template counts in `ocis`): a SHA-256 in 1 template, a generated password or certificate function in 7, a CronJob in 3 (storage and thumbnail clean-up, a daily notification summary), a `ServiceMonitor` in 1, no `helm.sh/hook` annotation.
+
+**What a model could express today** (judgement; nothing was built):
+
+| Piece | Today | Missing kind | Needs Go |
+|---|---|---|---|
+| 32 to 39 services from one list of names | `forEach` over a list of service names, one `worker` or `webservice` part each. The services block in the values is a map, so the model takes a list input. One render gives at most 50 components (`MaxParts`, `pkg/oam/model/rule.go:12-14`, counted after `when` and `forEach`), which `ocis` fits; the 38-workload `opencloud-microservices` chart, with its claims and config parts, is close to it and was not tested | none | none |
+| A ConfigMap or Secret per service | `configmap` and `secret` parts; a config file the user writes as text | none | a file written from structured settings |
+| A claim per service, only where it keeps data | `pvc` parts with `when` | none | none |
+| One entry through the proxy | the `expose` trait on one part | none | none |
+| NATS or identity provider bundled, or an external one | `when` on the bundled parts and inputs for the external one | none | none |
+| Office suite, antivirus, search engine as options | parts with `when`; Collabora, OnlyOffice, ClamAV, OpenSearch and Tika run as ordinary workloads | none | none |
+| Restart on a config change | the text in the pod annotations, for a ConfigMap the model builds | none | the hash, and a Secret |
+| Generated passwords and certificates | out of scope (see the catalogue) | none | none |
+
+Every kind in these renders has a built-in type, so the example adds nothing to the list of kinds without one. What it asks of the model mechanism is size (tens of parts), one shared set of inputs reaching all of them, and optional parts. Judgement: a user who runs this application writes a model for it; launcher ships the mechanism and the generic parts.
+
+## Use cases
+
+Judgement, not measurement: what a user of launcher deploys, written from the charts read and the ownCloud example. Counts are charts out of the 27 application charts (the shape table and the catalogue); an overlap is not an addition. The only evidence of real use is the production tree on go-kure/launcher#1637, kept apart.
+
+| # | Use case | What the user deploys | Evidence |
+|---|---|---|---|
+| U1 | Web app or service without state | one workload, a Service, perhaps a route, scaling and a disruption budget | exposed service 14, autoscaled or disruption bounded 19, monitored 21; 12 of the 14 exposed are monitored |
+| U2 | Web app with state | U1 plus a volume and a database | 8 with a volume, 5 with a database; 6 of the 8 with a volume are monitored |
+| U3 | Background worker | a workload with no Service, such as a queue consumer | not counted by this survey |
+| U4 | Scheduled job | a CronJob or a setup job | 12 charts render a setup, upgrade or maintenance job; `ocis` has 3 CronJob templates |
+| U5 | Database | one store, replicated or not, with its credentials | 8 replicated stateful stores and 5 web apps with a database; 4 charts (7 to 10) are in both, because a chart bundles its own store; PostgreSQL has a type, MariaDB and MySQL have none |
+| U6 | Cache and queue | Redis, NATS, MinIO, or an operator-run broker | Redis (13), NATS (16) and MinIO (15) are store charts; Kafka (23), RabbitMQ (24) and EMQX (26) charts install operators only, so none of their resource kinds is counted |
+| U7 | Multi-service application | tens of workloads that share inputs, a message bus, an identity provider and one entry | the ownCloud and OpenCloud example: 32 to 39 services |
+| U8 | Monitoring attached to any of the above | a scrape, a rule, a dashboard | 22 charts render scrape or alert objects |
+| U9 | Backup attached to any of the above | a scheduled backup of a volume or a database | 5 charts show a workload with a scheduled backup; 4 of the 5 are also monitored and 2 have a volume |
+| U10 | Operator or controller install | CRDs, RBAC, a webhook with a certificate | 12 charts; 7 of the 8 webhook-server charts and 5 of 5 per-namespace-grant charts are inside it |
+
+The overlaps were computed from the shape table, with the table's own lists as the control (a list against itself gives its full count). The last row matters most: two earlier candidates, a webhook server with a certificate and role grants per watched namespace, are parts of one use case and not two models.
+
 ## Candidate models
 
 A chart counts for a candidate when one of its renders holds all the object kinds of that shape. The count says the shape occurs, not that the chart is that kind of application. *Restart* is how many of the counted charts also hash a config in a template (the *hash in a template* count).
 
-Ranked by what a model would save, then by count. The order is a judgement; the counts are not.
+Ranked by what a model would save, then by count. The order is a judgement; the counts are not. Rank 1 merges two earlier candidates, a monitored web service and a web app with a volume and a database: they overlap in 6 charts and are one shape with different parts present. More specific shapes can be built on top of the merged one, but a customer with a narrower pattern would probably write their own, so none is proposed as a default. The candidates are triaged for inclusion in the [Conclusion](#conclusion); none of the existing lowering rules they name is taken as settled.
 
 | Rank | Candidate | Charts | Restart | Parts | Missing kinds | Category | Why this rank |
 |---|---|---|---|---|---|---|---|
-| 1 | Monitored web service | 21 monitored; 6 with alerts | 11; 3 | `webservice`, `servicemonitor` or `podmonitor`, optional `prometheusrule` | VictoriaMetrics scrape and rule kinds | configuration model | The most frequent combination no single type gives today. |
-| 2 | Web app with volume and database | 8 with volume; 5 with database | 7; 5 | `webservice`, `pvc`, `expose`, `postgresql`, `external-secret` | none for PostgreSQL; there is no MariaDB or MySQL type | configuration model; restart on a config change by a pod annotation, Go for the hash | Joins the most parts by hand: workload, claim, route, database and its credentials. |
-| 3 | Webhook server with certificate | 8 | 0 | `deployment`, `service`, `certificate`, a webhook configuration kind | none | configuration model | Mostly operator installs, which `helm` already delivers. |
-| 4 | Replicated stateful store | 8 | 7 | `statefulset`, two `service` parts, `disruption` | none | configuration model; restart on a config change by a pod annotation, Go for the hash | An operator type such as `cnpg-cluster` is the better route where one exists. |
-| 5 | Workload with scheduled backup | 5 | 3 | `cnpg-scheduledbackup` or the `volsync` trait | Velero `Backup`, `Schedule` | covered, except Velero | A model adds little over the existing parts. |
-| 6 | Role grants per watched namespace | 5 | 0 | `serviceaccount`, `role` and `rolebinding` | none | **needs Go** | A chart writes a grant into each watched namespace. `role` and `rolebinding` always write into the application's namespace and a model part has no namespace field, so a `forEach` would grant in one namespace only. |
+| 1 | Monitored web app or service with volume and database, each part optional | 23 show at least one part: 21 monitored (6 with alerts), 8 with a volume, 5 with a database; 4 show all three | 13 of the 23 | `webservice`; optional `servicemonitor` or `podmonitor` and `prometheusrule`; optional `pvc`; optional `expose`; optional `postgresql` with `external-secret` | VictoriaMetrics scrape and rule kinds; no MariaDB or MySQL type | configuration model; restart on a config change by a pod annotation, Go for the hash | The most frequent combination no single type gives today, and the one that joins the most parts by hand. It replaces two earlier candidates, a monitored web service and a web app with a volume and a database: each is this model with parts switched off. |
+| 2 | Webhook server with certificate | 8 | 0 | `deployment`, `service`, `certificate`, a webhook configuration kind | none | configuration model | Mostly operator installs, which `helm` already delivers. |
+| 3 | Replicated stateful store | 8 | 7 | `statefulset`, two `service` parts, `disruption` | none | configuration model; restart on a config change by a pod annotation, Go for the hash | An operator type such as `cnpg-cluster` is the better route where one exists. |
+| 4 | Workload with scheduled backup | 5 | 3 | `cnpg-scheduledbackup` or the `volsync` trait | Velero `Backup`, `Schedule` | covered, except Velero | A model adds little over the existing parts. Which backup families to support by default is open (see [Monitoring and backup](#monitoring-and-backup-generically)). |
+| 5 | Role grants per watched namespace | 5 | 0 | `serviceaccount`, `role` and `rolebinding` | none | **needs Go** | A chart writes a grant into each watched namespace. `role` and `rolebinding` always write into the application's namespace and a model part has no namespace field, so a `forEach` would grant in one namespace only. |
 
 Frequent shapes that need no new model, because existing types already give them:
 
@@ -258,11 +322,10 @@ The renders hold 56 distinct group and kind pairs: 41 have a built-in type, 15 d
 | `velero.io/Schedule` | 30 |
 | `velero.io/VolumeSnapshotLocation` | 30 |
 
-Templates also declare kinds that no value set switched on. The 17 below have no built-in type. Only a literal `apiVersion` is read, so the list can be short. Removed and generic kinds (`Endpoints`, `List`, `OAuthRedirectReference`, `policy/PodSecurityPolicy`) are left out.
+Templates also declare kinds that no value set switched on. 17 have no built-in type: the 15 below, which may get one, and 2 OpenShift kinds that never will (next table). Only a literal `apiVersion` is read, so the list can be short. Removed and generic kinds (`Endpoints`, `List`, `OAuthRedirectReference`, `policy/PodSecurityPolicy`) are left out.
 
 | Kind | Charts |
 |---|---|
-| `route.openshift.io/Route` | 6, 8, 11 |
 | `autoscaling.k8s.io/VerticalPodAutoscaler` | 6, 19 |
 | `grafana.integreatly.org/GrafanaDashboard` | 6, 19 |
 | `grafana.integreatly.org/GrafanaDatasource` | 19, 22 |
@@ -278,13 +341,39 @@ Templates also declare kinds that no value set switched on. The 17 below have no
 | `operator.victoriametrics.com/VMAlertmanagerConfig` | 22 |
 | `operator.victoriametrics.com/VMDistributed` | 22 |
 | `operator.victoriametrics.com/VTCluster` | 22 |
-| `security.openshift.io/SecurityContextConstraints` | 15 |
+
+**Never supported:** OpenShift-only kinds. They exist on one distribution of Kubernetes, not on the platform launcher targets, so they stay out of every candidate list on this page.
+
+| Kind | Charts | Status |
+|---|---|---|
+| `route.openshift.io/Route` | 6, 8, 11 | never supported |
+| `security.openshift.io/SecurityContextConstraints` | 15 | never supported |
+
+Of the Prometheus Operator kinds, 7 have a built-in type (`alertmanager`, `podmonitor`, `prometheus`, `prometheus-probe`, `prometheusrule`, `servicemonitor`, `thanosruler`; `pkg/oam/builtin/components/README.md`). `AlertmanagerConfig` (chart 6) and `PrometheusAgent` (chart 19) have none, and nor has `ScrapeConfig`, which neither list on this page names.
+
+## Monitoring and backup, generically
+
+**What charts ship.** 22 of 27 application charts render scrape or alert objects (catalogue, render count). Chart 22 renders VictoriaMetrics kinds, and it is the one sampled chart that does; the others use the Prometheus Operator kinds. 2 charts ship dashboards as labelled ConfigMaps. The production tree on go-kure/launcher#1637 is the opposite case, 66 VictoriaMetrics objects in 2 units; it is separate evidence. Both families matter.
+
+**How far the two families are compatible.** From the VictoriaMetrics operator's own page on Prometheus ([source](https://docs.victoriametrics.com/operator/integrations/prometheus/), read 2026-11-27): the operator converts Prometheus Operator `ServiceMonitor`, `PodMonitor`, `PrometheusRule`, `Probe` and `ScrapeConfig` into `VMServiceScrape`, `VMPodScrape`, `VMRule`, `VMProbe` and `VMScrapeConfig`, and keeps them in sync. It does not ship the Prometheus Operator CRDs, so they must be installed. `AlertmanagerConfig` is named beside them as a familiar kind with `VMAlertmanagerConfig` as its counterpart, but is not in the list of what is converted. The page lists no conversion for the instance kinds (`Prometheus`, `Alertmanager`, `ThanosRuler`, `PrometheusAgent`), whose counterparts are `VMAgent`, `VMAlert`, `VMAlertmanager`, `VMSingle` and `VMCluster`. Judgement: the compatibility is one way and partial. A chart that emits only Prometheus Operator kinds can run on a VictoriaMetrics cluster, if the conversion is on and the CRDs are installed. A chart that emits VictoriaMetrics kinds cannot run on a Prometheus cluster.
+
+**Proposal** (judgement; nothing is built):
+
+- Support both families as kinds: a type or a route for each of the kinds in the [Conclusion](#conclusion) list, so a user can write either by hand.
+- Add one generic monitoring part: a scrape (selector, port, path, interval), a rule (an alert or recording expression) and a dashboard. It lowers to the Prometheus Operator kinds or to the VictoriaMetrics kinds, chosen by one input or by the cluster profile. A trait on a component of a model type is refused (see above), so the part would sit inside a model as well as be a trait on a plain workload.
+- A dashboard part has two routes, and the generic part names which it takes: the Grafana operator kinds (`GrafanaDashboard` and `GrafanaDatasource`, declared by charts 6, 19 and 22), or a ConfigMap that carries the label a Grafana sidecar is set to watch (2 charts; `configmap` has a type today).
+
+**Backup families seen.** Velero (`Backup`, `Schedule`, `BackupStorageLocation`, `VolumeSnapshotLocation`; charts 6 and 30; no type), CloudNativePG (`cnpg-scheduledbackup` and `cnpg-objectstore`, built in; the chart 14 backup values) and VolSync (the `volsync` trait and the `replicationsource` and `replicationdestination` types, built in). Velero and VolSync back up volumes; CloudNativePG backs up one database. A generic backup part would say what to back up (a claim or a database), how often, how long to keep it and where to, and lower to the family that fits. It is not written here, because the first question is not mine to answer.
+
+**Open question for Serge:** which backup families should launcher support by default: Velero, CloudNativePG, VolSync, or a subset? The page does not decide it. The candidate "workload with scheduled backup" and the Velero kinds in the CRD list wait on the answer.
 
 ## What this does not show
 
 - How often users set an option. A chart shows what its authors made configurable.
 - Anything about one real deployment. The running list on go-kure/launcher#1637 counts objects in a production GitOps tree. Those counts and these chart counts are separate evidence and are not added up.
 - Complete pattern counts. A text detector over Go templates can miss a construct written another way. Known cases: chart 8 configures an external database under its own config keys, which the *external one* detector does not match, and generators inside application subcharts are not counted.
+- Anything about what users deploy beyond the charts read. The use cases are judgement tied to chart counts and one worked example. The ownCloud and OpenCloud counts are counts of rendered objects and template files of three chart versions, and they are not added to the sample's.
+- Whether any proposed model works. None was built or rendered, and a model of the many-service example was not tested against the 50-part limit.
 - Behaviour at install time. Hooks are counted from rendered objects and, separately, from template text; `lookup` only from template text. Nothing was installed. No Helm 3 render was compared.
 
 ## Value sets
@@ -736,3 +825,56 @@ Add these flags to the chart's row command and the common flags.
 ```
 
 </details>
+
+## Conclusion
+
+Everything here is judgement. The counts are the page's own, and nothing is built or scheduled. No existing lowering rule (`webservice`, `worker`, `helm`, `postgresql`, `oci`) and no earlier proposal is taken as accepted as designed: where a model below relies on one, the text names the part of it and says its design is not settled.
+
+### Use cases and what serves them
+
+| Use case | Served by | Still lacks |
+|---|---|---|
+| U1 web app or service without state | M1 with the optional parts off | nothing for the workload; the monitoring part needs M2 |
+| U2 web app with state | M1 | a MariaDB or MySQL type; backup (M3) |
+| U3 background worker | M1 without the exposure part | nothing counted |
+| U4 scheduled job | the `cronjob` type; M1 only if it takes a schedule mode | nothing |
+| U5 database | M4, or an operator type where one exists (`postgresql`, `cnpg-*`) | MariaDB and MySQL |
+| U6 cache and queue | M4; for an operator-run broker, a CRD route | Kafka, RabbitMQ and EMQX operator kinds |
+| U7 multi-service application | no base model: M1 repeated by `forEach`, within the 50 parts of one render (`MaxParts`, `pkg/oam/model/rule.go:12-14`) | a list input for the services, a config file written from structured settings (Go) |
+| U8 monitoring | M2 | the VictoriaMetrics kinds, `AlertmanagerConfig`, `ScrapeConfig`, `PrometheusAgent`, the Grafana operator kinds |
+| U9 backup | M3, which waits on the open question | the Velero kinds |
+| U10 operator or controller install | `helm`, or M5 | a namespace field on a model part, for the per-namespace grant (Go) |
+
+### Models to consider
+
+Triaged from the use cases, most generic first.
+
+1. **M1: a workload with optional parts.** A workload part that is a service or a worker, with optional parts: a volume (`pvc`), exposure (`expose`), a database (`postgresql` with `external-secret`), monitoring (M2) and backup (M3). Serves U1 to U3, and U7 as a repeated part. Evidence: 23 charts show at least one part. It relies on the `webservice` and `worker` rules, the `expose` rule and the `postgresql` rule; none of them is settled. A trait on a component of a model type is refused, so exposure has to be an input of the model. Whether the workload is one part that a mode value turns into a service, a worker or a job (6 charts pick the shape by a mode) is open.
+2. **M2: a generic monitoring part.** A scrape, a rule and a dashboard that lower to the Prometheus Operator kinds or the VictoriaMetrics kinds (see [Monitoring and backup](#monitoring-and-backup-generically)). 22 charts. It relies on `servicemonitor`, `podmonitor` and `prometheusrule`. Whether it is a trait, a model part or both is a design question for go-kure/launcher#102.
+3. **M4: a data store.** `statefulset`, two `service` parts and `disruption`; 8 charts, 7 of which also hash a config in a template. Where an operator type exists it is the better route. It relies on the raw `statefulset` handling, which is not settled.
+4. **M3: a generic backup part.** Not proposed until the open question on backup families is answered.
+5. **M5: an operator install.** A workload, CRDs, RBAC and, for a webhook, a `certificate` part; 12 charts. `helm` delivers most of it today, so the value is low. The per-namespace grant needs Go.
+
+Not proposed as defaults: a monitored web service or a web app with a volume and a database (each is M1 with parts off, and a user with a narrower pattern writes their own), and the many-service application (an example of what the mechanism must build, never a base model).
+
+### Custom resource kinds to consider for kure and launcher
+
+Chart numbers name charts of the 27 that declare the kind. "Tree" counts are objects in the production tree on go-kure/launcher#1637 and are not added to them. Routes: **generic** is a `ComponentDefinition` over a pinned CRD (go-kure/launcher#1712). **Pods** means the operator runs pods from settings in the resource, so the generic route waits on go-kure/launcher#1705, and a Go type is the other way.
+
+| Kind | Family | Why | Route |
+|---|---|---|---|
+| `VMServiceScrape`, `VMPodScrape`, `VMRule`, `VMProbe`, `VMNodeScrape`, `VMStaticScrape` | VictoriaMetrics | chart 22 renders `VMServiceScrape` and `VMNodeScrape`; tree: 18, 11, 18, 2, 6 and 4; the operator converts the Prometheus equivalents | generic |
+| `VMScrapeConfig`, `VMAlertmanagerConfig` | VictoriaMetrics | `VMAlertmanagerConfig` in a chart 22 template; both named by the operator's conversion page | generic |
+| `AlertmanagerConfig`, `ScrapeConfig` | Prometheus Operator | `AlertmanagerConfig` in chart 6; `ScrapeConfig` in no chart, listed because the monitoring part (M2) needs the family complete | generic |
+| `Backup`, `Schedule`, `BackupStorageLocation`, `VolumeSnapshotLocation` | Velero | charts 6 and 30 | generic; waits on the open backup question |
+| `GrafanaDashboard`, `GrafanaDatasource` | Grafana operator | charts 6, 19 and 22, in templates only | generic |
+| `PersesDashboard`, `PersesGlobalDatasource` | Perses | tree: 34 and 2 | generic |
+| `ForecastleApp`, `EndpointMonitor` | Forecastle, Stakater | `ForecastleApp` in chart 6 and tree: 29, where a trait may fit better (go-kure/launcher#1641); `EndpointMonitor` in chart 6 | generic |
+| `VerticalPodAutoscaler`, `SecretProviderClass`, `SealedSecret`, `ClientSettingsPolicy`, `NodeFeatureRule` | several | charts 6 and 19, 6 and 19, 6, and 8; `NodeFeatureRule` only in the tree (2) | generic, low priority |
+| `VMAgent`, `VMCluster`, `VMSingle`, `VMAlert`, `VMAlertmanager`, `VMAuth`, `VLSingle`, `VLAgent`, `VTSingle`, and in templates `VLCluster`, `VLDistributed`, `VMDistributed`, `VTCluster` | VictoriaMetrics | chart 22; tree: one or two each of `VMAgent`, `VMCluster`, `VMAlert`, `VMAlertmanager`, `VLCluster` and `VLAgent` | pods |
+| `PrometheusAgent` | Prometheus Operator | chart 19; the built-in `prometheus` type already holds the operator's pod settings in Go | pods, or a Go type beside `prometheus` |
+| `Perses`, `Mattermost`, `EMQX` | Perses, Mattermost, EMQX operators | tree only: 2, 1 and 1 | pods |
+
+Never supported: `route.openshift.io/Route` and `security.openshift.io/SecurityContextConstraints`.
+
+**Changes to the split posted on go-kure/launcher#1637 on 2026-11-27:** the two OpenShift kinds are removed; `AlertmanagerConfig` and `ScrapeConfig` are named as gaps in the Prometheus Operator family, and `PrometheusAgent` joins the kinds that run pods; the monitored-web-service model is no longer a candidate of its own (it is M1 with parts off); ownCloud and OpenCloud add no kind. A MariaDB and MySQL type is a type, not a kind.
