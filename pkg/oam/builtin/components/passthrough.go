@@ -54,10 +54,10 @@ func (h *PassthroughHandler) CanHandle(componentType string) bool {
 // `clusterScoped` declares no default: left unset it is not read as false, the
 // object's kind decides (PassthroughConfig.resolveClusterScoped).
 func (h *PassthroughHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"object":        {Type: oam.PropertyTypeObject, Required: true, AdditionalProperties: true, Description: "The single Kubernetes object emitted verbatim (apiVersion, kind, metadata, and any body fields); a list is rejected."},
 		"clusterScoped": {Type: oam.PropertyTypeBoolean, Description: "Whether the emitted object is cluster-scoped, so that it gets no namespace. Unset, the object's kind decides where its scope is known, and the object is treated as namespaced otherwise. Refused when it contradicts a kind whose scope the Kubernetes API defines."},
-	}
+	}, passthroughBounds())
 }
 
 // ToApplicationConfig validates the passthrough properties and returns a PassthroughConfig.

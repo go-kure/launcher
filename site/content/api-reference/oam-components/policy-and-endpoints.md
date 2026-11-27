@@ -181,7 +181,7 @@ constant; `TestBuiltinPolicyRefusalsCarryAClass` (`pkg/oam`) fails on one that d
 and the nine kinds that take a pod as the API
 type (`pod`, `podtemplate`, `deployment`, `statefulset`, `daemonset`, `job`, `cronjob`, `replicaset`, `replicationcontroller`) publish, in `boundedBy`,
 the classes an authored value at a property can cause, and so do the Flux source family (`helm`, `gitrepository`, `helmrepository`, `ocirepository`, `oci`, `bucket`, `helmrelease`, `imagerepository` and `resourcesetinputprovider`) and `manifests`
-for where each is fetched from and, on `manifests`, the objects the source carries; `fluxcd-provider`, which fetches nothing, for its `address`;
+for where each is fetched from and, on `manifests`, the objects the source carries; `passthrough` for the object it emits; `helmtemplate` for the host of its chart and its `secretValues`; `fluxcd-provider`, which fetches nothing, for its `address`;
 and `postgresql` and the CloudNativePG kinds (`cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-imagecatalog` and `cnpg-clusterimagecatalog`) for what their policy check raises. The list of properties is in
 `site/content/api-reference/oam/policy-and-capability.md`, "Declared bounds". What is
 particular to this package:
@@ -191,7 +191,8 @@ particular to this package:
   declare none. A type states its own bounds in its `PropertySchema`, through
   `oam.DeclareBounds` and one of `workloadBounds`, `roleBounds`, `podBounds`,
   `podTemplateBounds`, `registryBounds` (the properties that name where a source is
-  fetched from) or `manifestsBounds` (`bounds.go`); `fluxcd-provider` states its one
+  fetched from), `manifestsBounds`, `passthroughBounds` or `helmTemplateBounds`
+  (`bounds.go`); `fluxcd-provider` states its one
   `explicit-secret` bound, on `address`, in its own schema. `postgresql` and the CloudNativePG kinds
   use `postgresqlBounds`, `cnpgClusterBounds`, `cnpgPoolerBounds` (the pod classes of `podTemplateBounds`
   on `template`, and `registry` on `pgbouncer`), `cnpgObjectStoreBounds` and `cnpgImageCatalogBounds`.
@@ -203,12 +204,18 @@ particular to this package:
   `imageName` nor `imageCatalogRef`, and a `cnpg-pooler` that names its PgBouncer image by none of
   `pgbouncer.image`, `pgbouncer.imageCatalogRef` and an image of a template container named `pgbouncer`,
   are refused the same way, on `imageName` and `pgbouncer`. The instance count of a `cnpg-pooler` is not policed, so it declares nothing.
-- **The content of a `manifests` source is bounded by the document, not by one key.** `inline`
-  is the document and `url` names it, so both list `explicit-secret` and `unreadable-object`
-  (`enforceManifestPolicy`), and `url` also lists `registry`. The rendered-object classes of a
-  workload (image, pod security, resource, storage, replica) are raised by the same check and
-  shared with `passthrough` and `helmtemplate`, and are declared on none of the three yet.
-  `object-kind` is the transform's check on every application, so no property declares it.
+- **A document is bounded by its objects, not by one key.** In a `manifests` source `inline`
+  is the document and `url` names it, and a `passthrough` `object` is one object, an open node.
+  Each lists the ten classes of `documentClasses` (`enforceManifestPolicy`,
+  `enforcePassthroughPolicy`): a core Secret, an object the check cannot read, and every
+  object `enforceRenderedObjectPolicy` holds (the registry, privilege, host namespace,
+  host path, capability and resource rules of a pod, the storage of a claim and of a
+  PersistentVolume, and the replica maximum). `url` lists `registry` for its own host too.
+  A `helmtemplate` declares only what sits on a property, `registry` on `source.url` and
+  `explicit-secret` on `secretValues`: the objects its chart renders come from `source` and
+  `values` together, so their classes are declared on neither `helmtemplate` nor `helm`
+  under template delivery. `object-kind` is the transform's check on every application, so
+  no property declares it.
 - **A declaration needs a row.** `TestBoundedBy_DeclaredAndTested`
   (`pkg/oam/builtin/registry`) fails for a declared class with no row in its table, and for
   a row no schema declares. A row changes the value at or below its path in a document that passes, with the keys that
