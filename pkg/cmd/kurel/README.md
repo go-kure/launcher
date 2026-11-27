@@ -326,7 +326,9 @@ type, a missing required field and a value outside an enum or a bound. It then e
 as the `passthrough` component does. The document names no scope: the CRD's `spec.scope`
 decides whether the object gets a namespace. The type is also known by its identity,
 `<kind>.<group>@<version>` (`batchjob.example.gokure.dev@v1alpha1`). A type name that a
-built-in type or an earlier definition already holds refuses the build. The example is
+built-in type or an earlier definition already holds refuses the build, and so does a model
+(loaded after the definitions, so that it may name a defined type) whose short name is a defined
+type's name, since it would take that type over. The example is
 [`examples/custom-component`](https://github.com/go-kure/launcher/tree/main/examples/custom-component);
 the loader is [`pkg/oam/definition`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/definition).
 
