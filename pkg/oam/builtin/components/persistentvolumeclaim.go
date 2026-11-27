@@ -65,7 +65,7 @@ func (h *PersistentVolumeClaimHandler) PropertySchema() map[string]oam.PropertyS
 		},
 	}
 	maps.Copy(schema, schemaClaimSpec())
-	return schema
+	return oam.DeclareBounds(schema, map[string][]oam.RefusalClass{"size": {oam.RefusalStorageMaximum}})
 }
 
 // ToApplicationConfig converts an OAM persistentvolumeclaim component to a

@@ -20,10 +20,10 @@ func (h *CRDHandler) CanHandle(componentType string) bool { return componentType
 // `inline` (raw CRD YAML) / `url` is required: ExclusiveProperties publishes the
 // rule, and parseManifestSource enforces it.
 func (h *CRDHandler) PropertySchema() map[string]oam.PropertySchema {
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"inline": {Type: oam.PropertyTypeString, Description: "Raw CRD YAML emitted inline (mutually exclusive with url)."},
-		"url":    {Type: oam.PropertyTypeString, Description: "URL of the CRD YAML source (mutually exclusive with inline)."},
-	}
+		"url":    {Type: oam.PropertyTypeString, Description: "URL of the CRD YAML source (mutually exclusive with inline). Its host, and that of every redirect, must be in the policy's allowed registries when that list is non-empty."},
+	}, registryBounds("url"))
 }
 
 // ExclusiveProperties declares exactly one of inline and url.

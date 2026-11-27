@@ -743,7 +743,7 @@ there is a bare `PolicyRefusal` of class `oam.RefusalUnreadableObject`.
 The workload types that keep the reshaped form, the kinds that take a pod as the API type, the
 source types `helm`, `gitrepository`, `helmrepository`, `ocirepository`, `oci`, `bucket`, `helmrelease`,
 `imagerepository`, `resourcesetinputprovider` and `manifests`, the `fluxcd-provider` type, `passthrough`,
-`helmtemplate`, `postgresql` and
+`helmtemplate`, `crd`, `horizontalpodautoscaler`, `persistentvolume`, `persistentvolumeclaim`, `postgresql` and
 the CloudNativePG kinds `cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-imagecatalog` and
 `cnpg-clusterimagecatalog` publish, in
 `boundedBy`, which classes an authored value at a property can cause (`bounds.go`,
@@ -753,7 +753,11 @@ also on `provider`, for the gcp host; `helmrelease` on its open `chart` node). A
 object by object declares the classes of the refusals of those objects (`documentClasses`): `manifests` on
 `inline` and `url`, and `passthrough` on its open `object` node. `helmtemplate` declares only what sits on a
 property, `registry` on `source.url` and `explicit-secret` on `secretValues`. `fluxcd-provider` is not a
-source: it declares `explicit-secret` on `address`. `postgresql` and the CloudNativePG kinds declare what their
+source: it declares `explicit-secret` on `address`. `crd` declares `registry` on `url` (its `inline` source
+declares nothing), `horizontalpodautoscaler` `replica-maximum` on `maxReplicas`, `persistentvolume`
+`host-path` on `hostPath` and `local` and `storage-maximum` on its open `capacity` node (the bound applies to
+its `storage` key), and `persistentvolumeclaim` `storage-maximum` on `size` (`persistentVolumeBounds`).
+`postgresql` and the CloudNativePG kinds declare what their
 policy check raises (`cnpg_cluster.go`, `cnpg_pooler.go`, `cnpg_common.go`): `replica-maximum`,
 `resource-maximum`, `storage-maximum` and `registry` on a Cluster's own properties, and the classes of a
 pod, on the one open `template` node, for a Pooler; their structured properties are open nodes, so a class

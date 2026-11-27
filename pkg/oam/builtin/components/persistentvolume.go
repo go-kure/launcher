@@ -108,7 +108,7 @@ func (h *PersistentVolumeHandler) PropertySchema() map[string]oam.PropertySchema
 				". Decoded strictly into the Kubernetes API type: see " + src.apiType + " in the Kubernetes API reference.",
 		}
 	}
-	return schema
+	return oam.DeclareBounds(schema, persistentVolumeBounds())
 }
 
 // ToApplicationConfig decodes an OAM persistentvolume component into a
