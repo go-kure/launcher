@@ -214,6 +214,21 @@ func TestBuildCommand_ComponentDefinitionOpenProperty(t *testing.T) {
 	}
 }
 
+// An integer above int64 in a field the CRD leaves open is emitted with its own digits:
+// the check runs on a JSON-converted copy, and what is emitted is what was authored.
+func TestBuildCommand_ComponentDefinitionKeepsALargeIntegerExact(t *testing.T) {
+	out, err := buildComponentDefinitionExample(t, func(dir string) {
+		editCRD(t, "              env:\n", "              extra:\n                x-kubernetes-preserve-unknown-fields: true\n              env:\n")(dir)
+		editIn(t, "app.yaml", "      env:\n", "      extra:\n        id: 9223372036854775809\n      env:\n")(dir)
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(out, "id: 9223372036854775809\n") {
+		t.Errorf("the emitted id is not the authored one:\n%s", out)
+	}
+}
+
 // A CRD whose spec fields are all optional accepts a component with no properties:
 // its spec is the empty object, never null.
 func TestBuildCommand_ComponentDefinitionWithNoProperties(t *testing.T) {

@@ -315,9 +315,17 @@ func (h *Handler) ToApplicationConfig(component *oam.Component, namespace string
 		return nil, errors.Wrapf(errs.ToAggregate(), "component %q (%s)", component.Name, h.kind)
 	}
 
+	// What is emitted is what was authored: the checks above ran on a JSON-converted
+	// copy, which rounds an integer beyond int64. Passthrough keeps every number exact.
+	emitted := map[string]any{
+		"apiVersion": h.apiVersion,
+		"kind":       h.kind,
+		"metadata":   map[string]any{"name": component.Name},
+		"spec":       spec,
+	}
 	// Always stated, false included: unset, passthrough would let its own table of
 	// kinds decide a scope the pinned CRD has already settled.
-	properties := map[string]any{"object": object, "clusterScoped": h.clusterScoped}
+	properties := map[string]any{"object": emitted, "clusterScoped": h.clusterScoped}
 	return (&components.PassthroughHandler{}).ToApplicationConfig(
 		&oam.Component{Name: component.Name, Type: "passthrough", Properties: properties}, namespace)
 }
