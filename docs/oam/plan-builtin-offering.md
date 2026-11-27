@@ -77,7 +77,7 @@ Read from the code and tried with a model in a local test on 2026-11-27.
 - **A kind that only a generic-route definition declares: yes.** A model part names its type, and that type must be declared when the model registers. Registering a definition declares the kind's identity (`<kind>.<group>@<version>`, such as `vmrule.operator.victoriametrics.com@v1beta1`) so that a model can name it. `kurel build` loads definitions before models. A model whose part named such a kind built the object in the test, and the same model with no definition was refused at registration. So the generic monitoring part needs no built-in type for `VMServiceScrape`, `VMPodScrape` or `VMRule`.
   - The test used the CRDs of the VictoriaMetrics operator as they stand on its default branch on 2026-11-27, not a release. The loader accepts the CRDs of all three kinds, and a model with a scrape part and a rule part built a `VMServiceScrape` and a `VMRule`. It refuses `VMAuth`, because that CRD leaves its `spec` open. That agrees with the proposal that the instance kinds wait.
   - Not tried: the CRDs' own CEL rules, which the loader does not evaluate, and a CRD pinned to a release.
-- **Not settled: how a definition and a model reach a user.** launcher loads definitions only from the application's `definitions/` directory, and models only from its `models/` directory and `--model` files. Nothing is embedded in the binary. So every "Include" row that is a model, and the pinned CRDs a monitoring part needs, wait for a delivery route. That is an open question (see the open questions).
+- **Decided 2026-11-28: a definition and a model reach a user shipped in the binary.** Serge, typed about 00:09 CET and relayed: "shipped in the binary, but ned to confirm / - the list of whet gets built / - what in golang and what as config model". Which items get built, and which of them are Go and which are configuration models, still waits for his confirmation. A follow-up records it. How loading works today: launcher loads definitions only from the application's `definitions/` directory, and models only from its `models/` directory and `--model` files. Nothing is embedded in the binary yet. So every "Include" row that is a model, and the pinned CRDs a monitoring part needs, wait for that embedding to be built.
 - **The `volsync` trait from a model part: yes.** See Backups.
 
 #### Sources for these answers
@@ -126,7 +126,18 @@ Source: the VictoriaMetrics operator's page on Prometheus integration, read on 2
 | Scrape and rule with an instance kind | Do not combine | An instance kind runs pods and needs the pod policy of go-kure/launcher#1705. A workload does not own the cluster's monitoring stack. |
 | The generic part with the alerting configuration | Do not combine | Alert routing is the cluster's policy, not application content. It stays a kind by hand. |
 | The generic part with dashboards | Do not combine | The content is too different to share a form. |
-| The generic part with the converted Prometheus Operator kinds | Do not choose between them | The part writes VictoriaMetrics kinds. A user who writes `ServiceMonitor` by hand gets conversion only if the conversion is on and the CRDs are installed. |
+| The generic part with the converted Prometheus Operator kinds | Do not choose between them | The part writes VictoriaMetrics kinds. A user who writes `ServiceMonitor` by hand gets conversion only if the conversion is on and the CRDs are installed; the infra component turns it on (decided 2026-11-28, see below). |
+
+### Conversion of Prometheus Operator kinds, decided
+
+**Decided 2026-11-28.** Serge's input, typed about 23:48 CET on 2026-11-27 and relayed: "How does that conversion work exactly? / note: for cases where helm charts only set prometheus kinds, the conversion would be helpful, and setting it by default would be recommended, though that setting is part of the infracomponent configuration, which should then not be (aloowed to be ) overruled". His answer, typed 2026-11-28 00:05:32 CET and relayed: "5 OK". The reading he accepted:
+
+- The conversion is a setting of the VictoriaMetrics infra component, in the infra component definition of the cluster. It is not launcher work, and nothing changes in launcher.
+- That component carries the Prometheus Operator CRDs, with conversion on and owner references on, and a user cannot override that setting.
+- Deleting a Prometheus object must not block Flux, so the CRDs and the operator outlive the objects that use them.
+- How launcher handles the conversion is out of scope.
+
+So a chart that sets only Prometheus Operator kinds gets VictoriaMetrics objects through the conversion, and a hand-written `ServiceMonitor` can be relied on in a cluster that follows this definition.
 
 ### What the existing Prometheus Operator types become
 
@@ -243,8 +254,6 @@ None of these is a fact on this page.
 
 ## Open questions
 
-None of these is decided here. Questions 1, 3 and 4 of the first draft were answered by Serge on 2026-11-27 and are recorded in the sections above (the Prometheus Operator types, S3, and the workload model). The numbers of the others are kept so that earlier references still point at the same question.
+None of these is decided here. Questions 1, 3, 4, 5 and 6 of the first draft were answered by Serge on 2026-11-27 and 2026-11-28 and are recorded in the sections above (the Prometheus Operator types, S3, the workload model, the conversion, and how definitions and models reach a user). One thing is still open besides question 2: which items get built, and which are Go and which are configuration models, waits for his confirmation (see "What a model part can write"). The number of question 2 is kept so that earlier references still point at the same question.
 
 - **Question 2: a trait defined without Go.** Serge's answer on where a generic part lives ("3. Both.", see Traits) settles the monitoring part. It does not address this: does launcher want a way to define a trait without Go? A trait is Go today. This is a design question for go-kure/launcher#102, and it is not among his answers.
-- **Question 5: conversion on or off.** Does launcher state in the cluster profile that the VictoriaMetrics operator's Prometheus conversion is on, so a user can rely on a hand-written `ServiceMonitor`?
-- **Question 6: how definitions and models reach a user.** launcher loads definitions only from the application's `definitions/` directory, and models only from its `models/` directory and `--model` files. Nothing is embedded (see "What a model part can write"). So how does a definition with its pinned CRD, or a model that launcher offers, reach a user? The choices: ship them with the binary, ship them as a separate package or OCI artifact, or leave them to each application.
