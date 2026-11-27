@@ -299,7 +299,8 @@ it, and its `source.url` row holds for that delivery. The classes of the objects
 renders are declared on neither: the render comes from `source` and `values` together, which no
 property holds alone.
 
-Four kinds that project one object declare what their own check refuses. `crd` declares
+Four kinds declare what their own check refuses; three project one object each, and a `crd`
+source may carry several CustomResourceDefinitions. `crd` declares
 `registry` on `url`, a redirect to another host included; its `inline` source declares nothing,
 since a CustomResourceDefinition passes the check on the objects of a document and any other
 object is refused as no CRD, a plain error. `horizontalpodautoscaler` declares `replica-maximum`
