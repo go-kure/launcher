@@ -19,11 +19,16 @@ import (
 // what it held at once (1,000 of the failed formats below allocated 2,886 MB with a largest sampled
 // heap of 41 MB). Before the charges, on the same 200 calls, each evaluation gave true: format
 // allocated 577 MB, sort 150 MB and reverse 98 MB.
+//
+// CI runs the rows under the race detector, which raises some figures (the reverse row gave 49 MB
+// without it and 82 MB with it, where the unstopped run gave 98 MB), so the megabyte bounds are
+// asserted only without it (raceEnabled). The refusal is asserted in both.
 func TestBudgetStopsTheThreeCalls(t *testing.T) {
 	// A format that reaches the budget on its own allocates about 2.9 GB in total, at any string
-	// length. So 9,000 reads of a string of 100,000 bytes, which allocate nothing, spend 873,000 of
-	// the 1,000,000 steps first. What is left pays for about 130 formats.
-	spend := fmt.Sprintf("cel.bind(s, %s, lists.range(9000).all(i, s.size() == 100000))", long100k)
+	// length. So 9,000 reads of a bytes value of 100,000 bytes spend 873,000 of the 1,000,000 steps
+	// first. What is left pays for about 130 formats. The value is bytes and not a string because the
+	// race detector makes the size of a string copy it, which allocated 3.4 GB over these reads.
+	spend := fmt.Sprintf("cel.bind(b, bytes(%s), lists.range(9000).all(i, b.size() == 100000))", long100k)
 	rows := []struct {
 		name, expr string
 		maxMB      uint64
@@ -44,7 +49,7 @@ func TestBudgetStopsTheThreeCalls(t *testing.T) {
 			mb := allocMB(func() { got, _, err = c.Eval("spec.values[0].expr", s) })
 			t.Logf("allocated %d MB in total", mb)
 			wantCostLimit(t, got, err)
-			if mb > tc.maxMB {
+			if !raceEnabled && mb > tc.maxMB {
 				t.Errorf("the refusal came after %d MB of allocation, want at most %d", mb, tc.maxMB)
 			}
 		})
@@ -135,7 +140,7 @@ func TestBudgetCoversEveryCallThatTakesAList(t *testing.T) {
 					t.Errorf("gave %v, %v, want true", got, err)
 				}
 				// the format of a list was refused before go-kure/launcher#1706 too, at 113 MB
-				if mb > 150 {
+				if !raceEnabled && mb > 150 {
 					t.Errorf("%s allocated %d MB in total, want at most 150", tc.call, mb)
 				}
 			})

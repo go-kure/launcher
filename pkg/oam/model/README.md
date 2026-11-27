@@ -430,8 +430,9 @@ or on operands that make it fail, and fails on a new one that has no row. The si
 **The budgets bound the work of an evaluation, not the memory it allocates in total.** A step pays for
 about 1,024 bytes, so an evaluation reads about 1 GB of strings before the budget stops it, and a call
 can allocate several times what it reads. These figures are totals over a whole evaluation, and not
-memory held at once. Three loops over a string of 999,990 bytes, each run until the budget refused it
-(a development host, the largest heap sampled every 2 ms):
+memory held at once, and the race detector raises some of them. Three loops over a string of 999,990
+bytes, each run until the budget refused it (a development host, without the race detector, the
+largest heap sampled every 2 ms):
 
 | Loop | Allocated in total | Largest sampled heap |
 |---|---|---|
