@@ -78,6 +78,26 @@ Read from the code and tried with a model in a local test on 2026-11-27.
 - **Not settled: how a definition and a model reach a user.** launcher loads definitions only from the application's `definitions/` directory, and models only from its `models/` directory and `--model` files. Nothing is embedded in the binary. So every "Include" row that is a model, and the pinned CRDs a monitoring part needs, wait for a delivery route. That is an open question (see the open questions).
 - **The `volsync` trait from a model part: yes.** See Backups.
 
+#### Sources for these answers
+
+Read at commit `ed8e2365` on 2026-11-27; the line numbers belong to that commit.
+
+- A part's type must be declared when the model registers: `pkg/oam/model/registry.go:66-69`.
+- A definition declares `<kind>.<group>@<version>` so a model can name it: `pkg/oam/definition/definition.go:203` and `:333-371`, and `pkg/oam/definition/README.md:24`.
+- Definitions load before models: `pkg/cmd/kurel/build.go:155-163`.
+- Where definitions and models load from: `pkg/cmd/kurel/definitions.go:45-49`, `pkg/cmd/kurel/models.go:34-40`, `pkg/cmd/kurel/README.md:303` and `:394-398`. No Go file in the repository has a `go:embed` or an `embed.FS` (searched on 2026-11-27).
+- A CRD with an open `spec` is refused: `pkg/oam/definition/definition.go:196-199`.
+- A part carries traits: `pkg/oam/model/types.go:62-77`, `pkg/oam/model/expand.go:420-425`, `pkg/oam/model/registry.go:77-81`, and `pkg/oam/model/rule.go:39-43` (the trait is checked like an authored one). A part reads only an earlier part: `pkg/oam/model/README.md:65`. A trait on a component of a model type is refused: `pkg/oam/model/traits.go:8-26`.
+- The `volsync` trait: `pkg/oam/builtin/traits/volsync.go:34-43` (properties), `:90-103` (`sourcePVC` and `schedule` required), `:114` (default Secret name), `:225-266` (the `ReplicationSource`). The Secret is referenced and never built: `pkg/oam/builtin/traits/README.md`, the `volsync` row of the name table.
+
+Local experiments, run with `go test` in `pkg/oam/model` and not committed:
+
+1. The definition `examples/custom-component/definitions/batchjob.yaml` and a model with one part of its type built a `BatchJob`. The same model with no definition was refused at registration with "no registered type is named".
+2. The operator's CRD bundle was split into one file per kind and each file was pinned by digest in a generated definition. The loader accepted 24 of the 27 kinds. It refused `VMAuth`, as stated above, and two more kinds that also leave their `spec` open. A model with a scrape part and a rule part over two of the definitions built a `VMServiceScrape` and a `VMRule`.
+3. A model with a `persistentvolumeclaim` part and a later `deployment.apps` part carrying `volsync` built the claim and its `ReplicationSource`. The same trait on the claim's own part was refused at registration. A claim part with its own `name` was built as `orders-orders-data`, so a `sourcePVC` of `orders-data` named no claim.
+
+No assumption is left except the source of the CRDs: the operator's default branch, not a release.
+
 ## Monitoring in particular
 
 ### The rule
