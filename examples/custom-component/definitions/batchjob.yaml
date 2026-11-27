@@ -1,0 +1,14 @@
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: ComponentDefinition
+metadata:
+  # The component type app.yaml authors.
+  name: batch-job
+spec:
+  emits:
+    apiVersion: example.gokure.dev/v1alpha1
+    kind: BatchJob
+  schema:
+    # A path inside this directory, and the SHA-256 of that file. A build refuses a CRD
+    # whose digest differs.
+    crd: crds/batchjob.yaml
+    sha256: cfb60f39a4e9a865e50e0e0a4d176aff45c02d69a7cb87318ef0041de243df36
