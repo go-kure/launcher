@@ -229,15 +229,15 @@ func TestBuildCommand_ComponentDefinitionListMapKeysAreUnique(t *testing.T) {
 // The CRD decides the scope, whatever kure's own table says of the same kind.
 func TestBuildCommand_ComponentDefinitionNamespacedScopeIsKept(t *testing.T) {
 	out, err := buildComponentDefinitionExample(t, func(dir string) {
-		editIn(t, "definitions/batchjob.yaml", "apiVersion: example.gokure.dev/v1alpha1\n    kind: BatchJob", "apiVersion: cert-manager.io/v9\n    kind: ClusterIssuer")(dir)
-		editIn(t, "definitions/crds/batchjob.yaml", "group: example.gokure.dev", "group: cert-manager.io")(dir)
+		editIn(t, "definitions/batchjob.yaml", "apiVersion: example.gokure.dev/v1alpha1\n    kind: BatchJob", "apiVersion: cilium.io/v9\n    kind: CiliumClusterwideNetworkPolicy")(dir)
+		editIn(t, "definitions/crds/batchjob.yaml", "group: example.gokure.dev", "group: cilium.io")(dir)
 		editIn(t, "definitions/crds/batchjob.yaml", "name: v1alpha1", "name: v9")(dir)
-		editCRD(t, "    kind: BatchJob\n", "    kind: ClusterIssuer\n")(dir)
+		editCRD(t, "    kind: BatchJob\n", "    kind: CiliumClusterwideNetworkPolicy\n")(dir)
 	})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if !strings.Contains(out, "kind: ClusterIssuer\n") || !strings.Contains(out, "namespace: analytics\n") {
+	if !strings.Contains(out, "kind: CiliumClusterwideNetworkPolicy\n") || !strings.Contains(out, "namespace: analytics\n") {
 		t.Errorf("a namespaced CRD's object carries no namespace:\n%s", out)
 	}
 }
@@ -260,7 +260,7 @@ func TestBuildCommand_ComponentDefinitionFileWithTwoDocuments(t *testing.T) {
 			if err := os.WriteFile(def, append([]byte(other), data...), 0o644); err != nil {
 				t.Fatal(err)
 			}
-		}, `and "SomethingElse"`},
+		}, "more than one YAML document"},
 		{"two definitions", func(dir string) {
 			def := filepath.Join(dir, "definitions/batchjob.yaml")
 			data, err := os.ReadFile(def)
