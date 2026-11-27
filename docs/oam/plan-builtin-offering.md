@@ -117,7 +117,7 @@ Decided on 2026-11-27 (KL-backup-default-1, answered 2026-11-27 18:24 CET): a ge
 **The volume backup can be written from a model, with no Go lowering rule.** A model part can carry traits, and a trait a model writes is checked like one written in a document. In a local test (2026-11-27), a model with a `persistentvolumeclaim` part, followed by a `deployment.apps` part that carries the `volsync` trait with `sourcePVC: ${ parts.claim.name }` and a `schedule`, built the claim and a `ReplicationSource` for it. Three rules for such a part:
 
 1. Put the trait on a part that comes after the claim's part. A part reads only an earlier part, so a trait on the claim's own part cannot read the claim's name. The model is refused when it registers.
-2. Read the claim's name from `parts.<id>.name`, never type it. The claim is named `<component>-<part name>`, so a typed name points at no claim.
+2. Read the claim's name from `parts.<id>.name`. The claim is named `<component>-<part name>`, so the bare part name (or a name the part sets itself) leaves out the component prefix and points at no claim. A full name typed by hand matches today and breaks with the naming.
 3. The restic repository Secret is referenced and never built. The part takes its name as an input, or the model builds the Secret as a part. Its default name comes from the component that carries the trait.
 
 The limit stated above still holds: a trait on a component of a model type is refused, so the backup is a part of the model and not a trait on the model's own component.
