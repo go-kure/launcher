@@ -343,6 +343,52 @@ func TestLoad_AcceptsACRDPathThatASymlinkLeadsInside(t *testing.T) {
 	}
 }
 
+// The API server checks the apiVersion, kind and metadata of a field marked
+// x-kubernetes-embedded-resource apart from the schema, which this check does not
+// run, so such a CRD is refused at load rather than half checked.
+func TestLoad_RefusesAnEmbeddedResource(t *testing.T) {
+	cases := []struct{ name, old, replacement, path string }{
+		{"in the spec", "              env:\n", "              template:\n                type: object\n                x-kubernetes-embedded-resource: true\n                x-kubernetes-preserve-unknown-fields: true\n              env:\n", "spec.template"},
+		{"in an array item", "                    value:\n                      type: string\n", "                    value:\n                      type: string\n                    embedded:\n                      type: object\n                      x-kubernetes-embedded-resource: true\n                      x-kubernetes-preserve-unknown-fields: true\n", "spec.env[].embedded"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			def := copyExample(t)
+			crd, err := os.ReadFile(filepath.Join(filepath.Dir(def), "crds", "batchjob.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(crd), c.old) {
+				t.Fatalf("the example CRD does not hold %q", c.old)
+			}
+			writeCRD(t, def, strings.Replace(string(crd), c.old, c.replacement, 1))
+			_, err = definition.Load(def)
+			if err == nil || !strings.Contains(err.Error(), "x-kubernetes-embedded-resource") || !strings.Contains(err.Error(), c.path) {
+				t.Errorf("Load: %v, want the embedded resource at %s refused", err, c.path)
+			}
+		})
+	}
+}
+
+// A pinned CRD file is one YAML document: a second, valid or not, is refused and
+// never left unread.
+func TestLoad_RefusesACRDFileWithASecondDocument(t *testing.T) {
+	for name, extra := range map[string]string{"a malformed one": "---\nspec: [\n", "a valid one": "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n"} {
+		t.Run(name, func(t *testing.T) {
+			def := copyExample(t)
+			crd, err := os.ReadFile(filepath.Join(filepath.Dir(def), "crds", "batchjob.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeCRD(t, def, string(crd)+extra)
+			_, err = definition.Load(def)
+			if err == nil || !strings.Contains(err.Error(), "more than one YAML document") {
+				t.Errorf("Load: %v, want the second document refused", err)
+			}
+		})
+	}
+}
+
 // One YAML document per definition file: a second is refused, never dropped.
 func TestLoad_RefusesASecondDocument(t *testing.T) {
 	def := copyExample(t)
