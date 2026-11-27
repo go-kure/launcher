@@ -3,6 +3,7 @@ package definition_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -320,6 +321,70 @@ func TestRegister_RefusesALoweringRuleName(t *testing.T) {
 	err = definition.Register(tr, h)
 	if err == nil || !strings.Contains(err.Error(), `"webservice"`) {
 		t.Errorf("Register: %v, want the name refused", err)
+	}
+}
+
+// plainKeyRule is a lowering rule a library caller registers under a plain type name and
+// declares no identity for.
+type plainKeyRule struct{ name string }
+
+func (r plainKeyRule) ComponentType() string { return r.name }
+
+func (plainKeyRule) LowerComponent(*oam.Component, oam.LoweringContext) (oam.LoweringResult, error) {
+	return oam.LoweringResult{}, nil
+}
+
+// An identity resolves before a plain name, and a definition is known by its short name and by its
+// qualified name, so a definition of the plain name of a lowering rule that no declared type claims
+// would be built in the rule's place. It is refused for the short name and for the qualified name,
+// and nothing is left behind (go-kure/launcher#1719).
+func TestRegister_RefusesAnIdentityThatShadowsAnUndeclaredLoweringRule(t *testing.T) {
+	cases := []struct{ name, key, want string }{
+		{"the short name", "widget", `"widget"`},
+		{"the qualified name", "widget.example.gokure.dev", `"widget.example.gokure.dev"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tr := oam.NewTransformer(nil, nil)
+			tr.RegisterComponentLowering(plainKeyRule{c.key})
+			h, err := definition.Load(variant(t, "gadgets", "Widget"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = definition.Register(tr, h)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("Register: %v, want %s refused", err, c.want)
+			}
+			if _, ok := tr.ComponentLoweringRuleFor(c.key); !ok {
+				t.Errorf("the plain name %s no longer reaches its rule", c.key)
+			}
+			if _, ok := tr.ComponentHandlerFor("gadgets"); ok {
+				t.Error("the refused definition left a handler under its type name")
+			}
+			if id, err := tr.ResolveComponentType(h.Identity().String()); err == nil {
+				t.Errorf("the refused definition left its identity declared as %s", id)
+			}
+		})
+	}
+}
+
+// A short name that a declared type claims is no plain key nobody claims: a definition of it
+// registers, and a reference to the short name is reported ambiguous, never shadowed.
+func TestRegister_AcceptsAShortNameADeclaredRuleClaims(t *testing.T) {
+	tr := oam.NewTransformer(nil, nil)
+	tr.RegisterComponentLowering(plainKeyRule{"gizmo"})
+	if err := tr.DeclareComponentTypes(map[string]oam.TypeID{"gizmo": {Name: "widget.acme.example", Version: "v1"}}); err != nil {
+		t.Fatal(err)
+	}
+	h, err := definition.Load(variant(t, "gadgets", "Widget"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := definition.Register(tr, h); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if _, err := tr.ResolveComponentType("widget"); !errors.Is(err, oam.ErrTypeReferenceAmbiguous) {
+		t.Errorf("widget resolves to %v, want it ambiguous", err)
 	}
 }
 

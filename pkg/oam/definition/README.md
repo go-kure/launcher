@@ -18,9 +18,10 @@ err = definition.Register(transformer, h)              // the type is now author
 directory (by `..`, an absolute path or a symlink), a digest that differs, a CRD that does not define the emitted kind in a served
 version, and a schema that is not structural. `Register` refuses a type name the transformer
 already holds (the error names the declared type that holds it), and an identity that would take
-over a registered type: its short name is that type's name, or its qualified name is a plain name
-that no declared type claims. A declared type of the same qualified name is another version, which
-is accepted. It then declares the type's identity, `<kind>.<group>@<version>`, so a model can name it. It uses `Transformer.RegisterAuthoredComponent`, so a document may author the type.
+over a registered type, a handler or a lowering rule: its short name or its qualified name is the
+plain name of one, and no declared type claims that name. A name a declared type claims is not
+refused here: it resolves to that type, or is reported ambiguous where a document uses it. A declared
+type of the same qualified name is another version, which is accepted. It then declares the type's identity, `<kind>.<group>@<version>`, so a model can name it. It uses `Transformer.RegisterAuthoredComponent`, so a document may author the type.
 
 A component of the type takes the resource's `spec` as its properties. The object is checked
 against the CRD's schema, unknown fields included, and emitted by the `passthrough` handler,
