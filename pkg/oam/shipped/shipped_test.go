@@ -7,9 +7,33 @@ import (
 	"testing/fstest"
 
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/registry"
 )
 
 const ruleIdentity = "vmrule.operator.victoriametrics.com@v1beta1"
+
+// builtinTransformer registers every built-in and declares its type identities, as a
+// consumer does. A shipped model names built-in kinds, so the embedded set loads on it only.
+func builtinTransformer(t *testing.T) *oam.Transformer {
+	t.Helper()
+	tr := oam.NewTransformer(registry.ComponentHandlers(), nil)
+	for _, r := range registry.ComponentLoweringRules() {
+		tr.RegisterBuiltinComponentLowering(r)
+	}
+	for name, h := range registry.TraitHandlers() {
+		tr.RegisterBuiltinTrait(name, h)
+	}
+	for name, h := range registry.PolicyHandlers() {
+		tr.RegisterPolicy(name, h)
+	}
+	for _, r := range registry.TraitLoweringRules() {
+		tr.RegisterBuiltinTraitLowering(r)
+	}
+	if err := registry.DeclareTypes(tr); err != nil {
+		t.Fatalf("DeclareTypes: %v", err)
+	}
+	return tr
+}
 
 // shippedModel is a model of one shipped kind, so it registers only after the definitions.
 const shippedModel = `apiVersion: launcher.gokure.dev/v1alpha1
@@ -72,11 +96,17 @@ func wantError(t *testing.T, err error, want ...string) {
 // TestEmbeddedContentLoads registers the embedded set on an empty Transformer: the three
 // kinds resolve by identity, and each is a shipped type by name and by identity.
 func TestEmbeddedContentLoads(t *testing.T) {
-	tr := oam.NewTransformer(nil, nil)
+	tr := builtinTransformer(t)
 	set, err := Load(tr)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The shipped model: its identity resolves and is a shipped type.
+	const s3 = "s3-access.launcher.gokure.dev@v1"
+	if _, err := tr.ResolveComponentType(s3); err != nil {
+		t.Errorf("%s: %v", s3, err)
+	}
+	wantError(t, set.Clash("", oam.TypeID{Name: "s3-access.launcher.gokure.dev", Version: "v1"}), `"s3-access.launcher.gokure.dev@v1.0.0"`, "model s3-access.yaml")
 	for _, c := range []struct{ name, identity string }{
 		{"vm-rule", ruleIdentity},
 		{"vm-pod-scrape", "vmpodscrape.operator.victoriametrics.com@v1beta1"},
@@ -96,7 +126,7 @@ func TestEmbeddedContentLoads(t *testing.T) {
 // names the shipped file; another name over another version, an unrelated type and a Set
 // that ships nothing are not.
 func TestShippedDefinitionClash(t *testing.T) {
-	set, err := Load(oam.NewTransformer(nil, nil))
+	set, err := Load(builtinTransformer(t))
 	if err != nil {
 		t.Fatal(err)
 	}

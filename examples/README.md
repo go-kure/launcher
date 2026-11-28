@@ -75,6 +75,21 @@ of the package's `models/` directory in name order, then each `--model <file>`, 
 names another sorts after it. [Component models](../pkg/cmd/kurel/README.md#component-models)
 describes the load order, the refusals and the limits a model is evaluated under.
 
+## S3 access example
+
+Directory: [`s3-access/`](s3-access/)
+
+```bash
+bin/kurel build examples/s3-access --profile examples/cluster-profiles/minimal.yaml
+```
+
+| File | Purpose |
+|------|---------|
+| [`app.yaml`](s3-access/app.yaml) | Application whose one component has the type of the model that ships in the binary, `s3-access.launcher.gokure.dev@v1`: a ConfigMap of the settings of an S3 bucket and an ExternalSecret that gives the credentials the keys VolSync's restic repository reads |
+
+The model needs no `models/` directory. Its inputs, the three credentials routes and the keys each
+`format` writes are in the [shipped definitions and models](../pkg/oam/shipped/README.md#the-s3-access-model).
+
 ## Custom component example
 
 Directory: [`custom-component/`](custom-component/)

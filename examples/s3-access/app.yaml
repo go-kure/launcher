@@ -1,0 +1,30 @@
+# How to reach an S3 bucket: the shipped model s3-access.launcher.gokure.dev@v1 writes a
+# ConfigMap of the settings and an ExternalSecret that gives the credentials the keys of the
+# format. No models/ directory is needed, the model is built into kurel. See
+# pkg/oam/shipped/README.md for the inputs and the keys each format writes.
+#
+# The credentials come from an External Secrets Operator store here, so the document holds none.
+# Two other routes exist: `existingSecret: <name>` names a Secret you made yourself (the model
+# writes the ConfigMap only), and `values: {accessKeyId, secretAccessKey}` writes the Secret
+# itself, which a policy that forbids explicit secrets refuses.
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: default
+spec:
+  components:
+    - name: backups
+      type: s3-access.launcher.gokure.dev@v1
+      properties:
+        endpoint: https://s3.example.internal:9000
+        bucket: backups
+        prefix: orders
+        credentials:
+          externalSecret:
+            storeRef: {name: vault}
+            accessKeyId: {key: s3/backups, property: access-key-id}
+            secretAccessKey: {key: s3/backups, property: secret-access-key}
+            # The keys the restic consumers of VolSync read; leave format out for the plain keys.
+            format: restic
+            resticPassword: {key: s3/backups, property: restic-password}
