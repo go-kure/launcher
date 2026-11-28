@@ -95,19 +95,25 @@ func LoadFS(t *oam.Transformer, definitions, models fs.FS) (*Set, error) {
 
 // decodedModels holds each model decoded so far by its text. Every build loads the shipped set,
 // decoding a model costs about 1 ms, and a decoded model is read-only (model.Rule), so a build
-// after the first reads the one the process already holds.
-var decodedModels sync.Map // text of the model -> *model.Model
+// after the first reads the one the process already holds. decodedMu is held across a decode,
+// so builds that start together decode a text once and share the result.
+var (
+	decodedMu     sync.Mutex
+	decodedModels = map[string]*model.Model{} // text of the model -> decoded model
+)
 
 // loadModel is model.Load through decodedModels. A refusal is not kept.
 func loadModel(data []byte) (*model.Model, error) {
-	if m, ok := decodedModels.Load(string(data)); ok {
-		return m.(*model.Model), nil
+	decodedMu.Lock()
+	defer decodedMu.Unlock()
+	if m, ok := decodedModels[string(data)]; ok {
+		return m, nil
 	}
 	m, err := model.Load(data)
 	if err != nil {
 		return nil, err
 	}
-	decodedModels.Store(string(data), m)
+	decodedModels[string(data)] = m
 	return m, nil
 }
 

@@ -3,6 +3,7 @@ package shipped
 import (
 	"io/fs"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -188,6 +189,36 @@ func TestLoadModelDecodesOnce(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		if _, err := loadModel([]byte("kind: Model\n")); err == nil {
 			t.Fatalf("load %d of a text that is no model was accepted", i+1)
+		}
+	}
+}
+
+// TestLoadModelDecodesOnceWhenLoadsStartTogether: loads of a text nobody has decoded, started at
+// once, all get one model. Run under -race it also proves the cache is safe to share.
+func TestLoadModelDecodesOnceWhenLoadsStartTogether(t *testing.T) {
+	// A text no other test decodes, so that it is a miss for every goroutine below.
+	text := []byte(strings.Replace(shippedModel, "alerts.acme.example", "together.acme.example", 1))
+	const n = 16
+	got := make([]*model.Model, n)
+	errs := make([]error, n)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range got {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			got[i], errs[i] = loadModel(text)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	for i := range got {
+		if errs[i] != nil {
+			t.Fatalf("load %d: %v", i, errs[i])
+		}
+		if got[i] != got[0] {
+			t.Errorf("load %d decoded the model again: %p, want %p", i, got[i], got[0])
 		}
 	}
 }
