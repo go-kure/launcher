@@ -200,8 +200,6 @@ func TestShippedWorkloadParts(t *testing.T) {
 			[]string{"Deployment", "ServiceAccount", "VMPodScrape"}, []string{"portNumber: 9090"}},
 		{"monitoring in job mode", "        mode: job\n        image: reg/orders:1\n        monitoring: {port: 9090}\n",
 			[]string{"Job", "VMPodScrape"}, []string{"portNumber: 9090"}},
-		{"monitoring in service mode by number", "        image: reg/orders:1\n        monitoring: {port: 8080}\n",
-			[]string{"Deployment", "Service", "ServiceAccount", "VMServiceScrape"}, []string{"targetPort: 8080"}},
 		{"monitoring rules", "        image: reg/orders:1\n        monitoring:\n          rules:\n            - name: availability\n              rules:\n                - {alert: Down, expr: \"up == 0\", for: 5m}\n",
 			[]string{"Deployment", "Service", "ServiceAccount", "VMServiceScrape", "VMRule"}, []string{"alert: Down"}},
 	}
@@ -216,6 +214,44 @@ func TestShippedWorkloadParts(t *testing.T) {
 			for _, want := range tt.text {
 				if !strings.Contains(all, want) {
 					t.Errorf("the output does not hold %q:\n%s", want, all)
+				}
+			}
+		})
+	}
+}
+
+// TestShippedWorkloadMonitoringPortInServiceMode: a monitoring port that is not the workload's
+// own port reaches the scrape object itself, as a name or as a number. The Service already
+// writes the workload port, so the scrape's endpoint is read, not the whole output.
+func TestShippedWorkloadMonitoringPortInServiceMode(t *testing.T) {
+	tests := []struct {
+		name, port string
+		want       map[string]any
+	}{
+		{"default", "", map[string]any{"port": "http"}},
+		{"name", ", port: metrics", map[string]any{"port": "metrics"}},
+		{"number", ", port: 9091", map[string]any{"targetPort": 9091}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			docs := mustBuildWorkload(t, workloadComponent("orders", "        image: reg/orders:1\n        port: 8080\n        monitoring: {path: /m"+tt.port+"}\n"))
+			scrapes := objectsOf(docs, "VMServiceScrape")
+			if len(scrapes) != 1 {
+				t.Fatalf("%d VMServiceScrape, want 1", len(scrapes))
+			}
+			endpoints, _ := scrapes[0]["spec"].(map[string]any)["endpoints"].([]any)
+			if len(endpoints) != 1 {
+				t.Fatalf("endpoints %v, want one", endpoints)
+			}
+			got := endpoints[0].(map[string]any)
+			for k, v := range tt.want {
+				if !reflect.DeepEqual(got[k], v) {
+					t.Errorf("endpoint %s = %v, want %v (endpoint %v)", k, got[k], v, got)
+				}
+			}
+			for _, k := range []string{"port", "targetPort"} {
+				if _, want := tt.want[k]; !want && got[k] != nil {
+					t.Errorf("endpoint holds %s = %v, want it absent (endpoint %v)", k, got[k], got)
 				}
 			}
 		})
