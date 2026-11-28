@@ -1,11 +1,14 @@
 package shipped
 
 import (
+	"fmt"
 	"io/fs"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/registry"
@@ -193,11 +196,25 @@ func TestLoadModelDecodesOnce(t *testing.T) {
 	}
 }
 
+// togetherRuns numbers the runs of the test below, so that each run decodes a text the cache
+// does not hold yet (a repeated run in one process would otherwise find it).
+var togetherRuns atomic.Int32
+
 // TestLoadModelDecodesOnceWhenLoadsStartTogether: loads of a text nobody has decoded, started at
-// once, all get one model. Run under -race it also proves the cache is safe to share.
+// once, decode it once and all get that model. The decode is slow and counted, so the loads
+// overlap on any number of CPUs: a cache that checks and then stores, without holding a lock
+// across the decode, decodes once for each load. Run under -race it also proves the cache is
+// safe to share.
 func TestLoadModelDecodesOnceWhenLoadsStartTogether(t *testing.T) {
-	// A text no other test decodes, so that it is a miss for every goroutine below.
-	text := []byte(strings.Replace(shippedModel, "alerts.acme.example", "together.acme.example", 1))
+	var decodes atomic.Int32
+	decodeModel = func(data []byte) (*model.Model, error) {
+		decodes.Add(1)
+		time.Sleep(20 * time.Millisecond) // the window in which another load can miss
+		return model.Load(data)
+	}
+	t.Cleanup(func() { decodeModel = model.Load })
+	name := fmt.Sprintf("together-%d.acme.example", togetherRuns.Add(1))
+	text := []byte(strings.Replace(shippedModel, "alerts.acme.example", name, 1))
 	const n = 16
 	got := make([]*model.Model, n)
 	errs := make([]error, n)
@@ -213,6 +230,9 @@ func TestLoadModelDecodesOnceWhenLoadsStartTogether(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
+	if d := decodes.Load(); d != 1 {
+		t.Errorf("%d loads started together decoded the text %d times, want 1", n, d)
+	}
 	for i := range got {
 		if errs[i] != nil {
 			t.Fatalf("load %d: %v", i, errs[i])

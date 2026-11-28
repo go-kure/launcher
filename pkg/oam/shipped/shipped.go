@@ -100,6 +100,10 @@ func LoadFS(t *oam.Transformer, definitions, models fs.FS) (*Set, error) {
 var (
 	decodedMu     sync.Mutex
 	decodedModels = map[string]*model.Model{} // text of the model -> decoded model
+
+	// decodeModel decodes a model that is not held yet. It is a variable so that a test can
+	// make the decode slow and count it; nothing else replaces it.
+	decodeModel = model.Load
 )
 
 // loadModel is model.Load through decodedModels. A refusal is not kept.
@@ -109,7 +113,7 @@ func loadModel(data []byte) (*model.Model, error) {
 	if m, ok := decodedModels[string(data)]; ok {
 		return m, nil
 	}
-	m, err := model.Load(data)
+	m, err := decodeModel(data)
 	if err != nil {
 		return nil, err
 	}
