@@ -1,0 +1,59 @@
+# The workload model that ships in the kurel binary, `workload@v1`, in each of its modes.
+# No models/ directory is needed. See pkg/oam/shipped/README.md, "The workload model".
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Application
+metadata:
+  name: shop
+  namespace: default
+spec:
+  components:
+    # A service with every optional part: a volume and its backup, an exposure, a database and
+    # its backup, and monitoring with an alert rule.
+    - name: orders
+      type: workload@v1
+      properties:
+        image: registry.example.org/orders:1.0.0
+        port: 8080
+        volume:
+          size: 1Gi
+          mountPath: /data
+          backup:
+            schedule: "0 3 * * *"
+            repository: orders-restic
+        exposure:
+          hostnames: [orders.example.org]
+        database:
+          storageSize: 5Gi
+          backup:
+            objectStore:
+              destinationPath: s3://backups/orders
+              s3Credentials:
+                accessKeyId: {name: orders-s3, key: ACCESS_KEY_ID}
+                secretAccessKey: {name: orders-s3, key: ACCESS_SECRET_KEY}
+            schedules:
+              - {name: daily, schedule: "0 0 3 * * *"}
+        monitoring:
+          path: /metrics
+          interval: 30s
+          rules:
+            - name: availability
+              rules:
+                - {alert: OrdersDown, expr: 'up{job="orders"} == 0', for: 5m}
+
+    # A worker. Its pods declare no port, so the monitoring port is a required input.
+    - name: ledger-sync
+      type: workload@v1
+      properties:
+        mode: worker
+        image: registry.example.org/ledger-sync:1.0.0
+        replicas: 2
+        monitoring: {port: metrics}
+
+    # A job that writes to a volume.
+    - name: nightly-report
+      type: workload@v1
+      properties:
+        mode: job
+        image: registry.example.org/report:1.0.0
+        command: [/report, --all]
+        volume: {size: 1Gi, mountPath: /out}

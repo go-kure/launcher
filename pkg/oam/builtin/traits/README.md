@@ -986,7 +986,10 @@ traits:
 - **Not covered.** One endpoint per trait. A `deployment` or
   `statefulset` with a separate `service` component does not admit the trait.
   The workload model's monitoring part (go-kure/launcher#1737) follows this
-  property shape. Instance kinds (`VMAgent` and the others), alerting
+  property shape, with three differences: it writes `path` and `interval` as
+  `/metrics` and `30s` when unset, `scrapeName` and `ruleName` are the suffix
+  of the object name, and `job` mode is scraped too (a `VMPodScrape`). A test
+  holds its scrape to this trait's. Instance kinds (`VMAgent` and the others), alerting
   configuration and dashboards are not written.
 
 ## Decorator forwarding for layout-augmenting components

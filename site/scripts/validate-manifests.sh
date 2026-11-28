@@ -5,8 +5,9 @@
 # schemas.fluxoperator.dev — network access required).
 #
 # Scope: 14 of the 15 numbered examples/*.yaml + examples/cluster-profiles/*.yaml
-# pairs (go-kure/launcher#292), and examples/custom-model, whose app.yaml uses the
-# component models beside it. Two are deliberately excluded, each echoed below:
+# pairs (go-kure/launcher#292), examples/custom-model, whose app.yaml uses the
+# component models beside it, and examples/workload-model, whose app.yaml uses the model
+# that ships in the binary. Two are deliberately excluded, each echoed below:
 #   - 12-daemonset.yaml: mounts a hostPath volume, which is default-deny. `kurel
 #     build` supplies no Policy, transform normalizes that to NoopPolicy
 #     (pkg/oam/transform.go:489), and NoopPolicy.AllowHostPathVolumes() is false
@@ -62,6 +63,7 @@ declare -A APP_PROFILE=(
   [14-full-stack.yaml]=nginx-certmanager-vault
   [15-passthrough-minimal.yaml]=minimal
   [custom-model/app.yaml]=minimal
+  [workload-model/app.yaml]=minimal
 )
 
 echo "Skipping 12-daemonset.yaml: mounts a hostPath volume, which is default-deny under NoopPolicy (by design — kurel build supplies no Policy)"

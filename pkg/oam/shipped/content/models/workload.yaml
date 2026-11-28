@@ -1,0 +1,261 @@
+# Shipped by launcher (go-kure/launcher#1737): one workload, in the mode `service`, `worker` or `job`,
+# with optional parts switched on by inputs. The inputs, the parts and the limits of the model
+# format that shape this file are in ../../../README.md ("The workload model").
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Model
+metadata:
+  name: workload.launcher.gokure.dev
+  version: v1
+spec:
+  celEnv: "1"
+  inputs:
+    mode: {type: string, default: service, enum: [service, worker, job]}
+    image: {type: string, required: true}
+    command: {type: array, items: {type: string}}
+    args: {type: array, items: {type: string}}
+    env:
+      type: array
+      items:
+        type: object
+        properties:
+          name: {type: string, required: true}
+          value: {type: string}
+          valueFrom:
+            type: object
+            properties:
+              secretKeyRef:
+                type: object
+                properties: {name: {type: string, required: true}, key: {type: string, required: true}}
+              configMapKeyRef:
+                type: object
+                properties: {name: {type: string, required: true}, key: {type: string, required: true}}
+    replicas: {type: integer, default: 1}
+    port: {type: integer, default: 8080}
+    volume:
+      type: object
+      properties:
+        size: {type: string, required: true}
+        mountPath: {type: string, required: true}
+        backup:
+          type: object
+          properties:
+            schedule: {type: string, required: true}
+            repository: {type: string, required: true}
+    exposure:
+      type: object
+      properties:
+        hostnames: {type: array, required: true, items: {type: string}}
+    database:
+      type: object
+      properties:
+        storageSize: {type: string}
+        backup:
+          type: object
+          properties:
+            objectStore:
+              type: object
+              required: true
+              properties:
+                destinationPath: {type: string, required: true}
+                endpointURL: {type: string}
+                s3Credentials:
+                  type: object
+                  required: true
+                  properties:
+                    accessKeyId:
+                      type: object
+                      required: true
+                      properties: {name: {type: string, required: true}, key: {type: string, required: true}}
+                    secretAccessKey:
+                      type: object
+                      required: true
+                      properties: {name: {type: string, required: true}, key: {type: string, required: true}}
+            retentionPolicy: {type: string}
+            schedules:
+              type: array
+              required: true
+              items:
+                type: object
+                properties: {name: {type: string, required: true}, schedule: {type: string, required: true}}
+    monitoring:
+      type: object
+      properties:
+        port: {types: [string, integer]}
+        path: {type: string}
+        interval: {type: string}
+        scrapeName: {type: string}
+        ruleName: {type: string}
+        rules:
+          type: array
+          items:
+            type: object
+            properties:
+              name: {type: string, required: true}
+              interval: {type: string}
+              rules:
+                type: array
+                required: true
+                items:
+                  type: object
+                  properties:
+                    alert: {type: string}
+                    record: {type: string}
+                    expr: {type: string, required: true}
+                    for: {type: string}
+                    labels: {type: object, additionalPropertiesSchema: {type: string}}
+                    annotations: {type: object, additionalPropertiesSchema: {type: string}}
+  outputs: {}
+  parts:
+    - id: claim
+      name: data
+      type: persistentvolumeclaim@v1
+      when: ${ inputs.volume != null }
+      properties:
+        size: "${ inputs.volume.size }"
+
+    - id: db
+      type: postgresql@v1
+      when: ${ inputs.database != null }
+      properties:
+        storageSize: "${ 'storageSize' in inputs.database ? inputs.database.storageSize : null }"
+        backup: "${ 'backup' in inputs.database ? inputs.database.backup : null }"
+
+    # The four workload parts share one property list. A part cannot choose its type from an
+    # input and a trait cannot be conditional, so the mode and the exposure each pick a part.
+    - id: svc
+      name: app
+      type: webservice@v1
+      when: ${ inputs.mode == 'service' && inputs.exposure == null }
+      properties:
+        image: "${ inputs.image }"
+        port: "${ inputs.port }"
+        replicas: "${ inputs.replicas }"
+        command: "${ inputs.command }"
+        args: "${ inputs.args }"
+        env: >-
+          ${ (inputs.env == null ? [] : inputs.env) + (inputs.database != null ?
+          [{'name': 'DATABASE_URI', 'valueFrom': {'secretKeyRef': {'name': parts.db.app_secret.name, 'key': 'uri'}}}] : []) }
+        volumes: >-
+          ${ inputs.volume != null ?
+          [{'name': 'data', 'type': 'pvc', 'mountPath': inputs.volume.mountPath, 'claimName': parts.claim.name}] : [] }
+
+    - id: svcx
+      name: app
+      type: webservice@v1
+      when: ${ inputs.mode == 'service' && inputs.exposure != null }
+      properties:
+        image: "${ inputs.image }"
+        port: "${ inputs.port }"
+        replicas: "${ inputs.replicas }"
+        command: "${ inputs.command }"
+        args: "${ inputs.args }"
+        env: >-
+          ${ (inputs.env == null ? [] : inputs.env) + (inputs.database != null ?
+          [{'name': 'DATABASE_URI', 'valueFrom': {'secretKeyRef': {'name': parts.db.app_secret.name, 'key': 'uri'}}}] : []) }
+        volumes: >-
+          ${ inputs.volume != null ?
+          [{'name': 'data', 'type': 'pvc', 'mountPath': inputs.volume.mountPath, 'claimName': parts.claim.name}] : [] }
+      traits:
+        - type: expose.launcher.gokure.dev@v1
+          properties:
+            hostnames: "${ inputs.exposure.hostnames }"
+
+    - id: wrk
+      name: app
+      type: worker@v1
+      when: ${ inputs.mode == 'worker' }
+      properties:
+        image: "${ inputs.image }"
+        replicas: "${ inputs.replicas }"
+        command: "${ inputs.command }"
+        args: "${ inputs.args }"
+        env: >-
+          ${ (inputs.env == null ? [] : inputs.env) + (inputs.database != null ?
+          [{'name': 'DATABASE_URI', 'valueFrom': {'secretKeyRef': {'name': parts.db.app_secret.name, 'key': 'uri'}}}] : []) }
+        volumes: >-
+          ${ inputs.volume != null ?
+          [{'name': 'data', 'type': 'pvc', 'mountPath': inputs.volume.mountPath, 'claimName': parts.claim.name}] : [] }
+
+    - id: job
+      name: app
+      type: job@v1
+      when: ${ inputs.mode == 'job' }
+      properties:
+        template:
+          spec:
+            restartPolicy: OnFailure
+            containers:
+              - name: app
+                image: "${ inputs.image }"
+                command: "${ inputs.command }"
+                args: "${ inputs.args }"
+                env: >-
+                  ${ (inputs.env == null ? [] : inputs.env) + (inputs.database != null ?
+                  [{'name': 'DATABASE_URI', 'valueFrom': {'secretKeyRef': {'name': parts.db.app_secret.name, 'key': 'uri'}}}] : []) }
+                volumeMounts: >-
+                  ${ inputs.volume != null ? [{'name': 'data', 'mountPath': inputs.volume.mountPath}] : [] }
+            volumes: >-
+              ${ inputs.volume != null ?
+              [{'name': 'data', 'persistentVolumeClaim': {'claimName': parts.claim.name}}] : [] }
+
+    # The volume backup is the `volsync` trait. A trait cannot be conditional, so a part of its
+    # own carries it; the carrier is a ServiceAccount, which the build writes beside the trait's
+    # ReplicationSource. The restic repository Secret is referenced and never built.
+    - id: backup
+      type: serviceaccount@v1
+      when: ${ inputs.volume != null && 'backup' in inputs.volume }
+      traits:
+        - type: volsync.launcher.gokure.dev@v1
+          properties:
+            sourcePVC: "${ inputs.volume != null ? parts.claim.name : null }"
+            schedule: "${ inputs.volume.backup.schedule }"
+            repository: "${ inputs.volume.backup.repository }"
+
+    # Monitoring follows the property shape of the `monitoring` trait. A model part is always
+    # named <component>-<part name>, so scrapeName and ruleName are suffixes.
+    - id: scrape
+      name: "${ 'scrapeName' in inputs.monitoring ? inputs.monitoring.scrapeName : 'scrape' }"
+      type: vmservicescrape.operator.victoriametrics.com@v1beta1
+      when: ${ inputs.monitoring != null && inputs.mode == 'service' }
+      properties:
+        selector:
+          matchLabels:
+            app: >-
+              ${ inputs.mode == 'service' && inputs.exposure == null ? parts.svc.deployment.name :
+              (inputs.mode == 'service' && inputs.exposure != null ? parts.svcx.deployment.name : null) }
+        endpoints:
+          - >-
+            ${ 'port' in inputs.monitoring && type(inputs.monitoring.port) == int ?
+            {'targetPort': inputs.monitoring.port,
+             'path': 'path' in inputs.monitoring ? inputs.monitoring.path : '/metrics',
+             'interval': 'interval' in inputs.monitoring ? inputs.monitoring.interval : '30s'} :
+            {'port': 'port' in inputs.monitoring ? inputs.monitoring.port : 'http',
+             'path': 'path' in inputs.monitoring ? inputs.monitoring.path : '/metrics',
+             'interval': 'interval' in inputs.monitoring ? inputs.monitoring.interval : '30s'} }
+
+    - id: podscrape
+      name: "${ 'scrapeName' in inputs.monitoring ? inputs.monitoring.scrapeName : 'scrape' }"
+      type: vmpodscrape.operator.victoriametrics.com@v1beta1
+      when: ${ inputs.monitoring != null && inputs.mode != 'service' }
+      properties:
+        selector:
+          matchLabels:
+            app: >-
+              ${ inputs.mode == 'worker' ? parts.wrk.deployment.name :
+              (inputs.mode == 'job' ? parts.job.name : null) }
+        podMetricsEndpoints:
+          - >-
+            ${ type(inputs.monitoring.port) == int ?
+            {'portNumber': inputs.monitoring.port,
+             'path': 'path' in inputs.monitoring ? inputs.monitoring.path : '/metrics',
+             'interval': 'interval' in inputs.monitoring ? inputs.monitoring.interval : '30s'} :
+            {'port': inputs.monitoring.port,
+             'path': 'path' in inputs.monitoring ? inputs.monitoring.path : '/metrics',
+             'interval': 'interval' in inputs.monitoring ? inputs.monitoring.interval : '30s'} }
+
+    - id: rules
+      name: "${ 'ruleName' in inputs.monitoring ? inputs.monitoring.ruleName : 'rules' }"
+      type: vmrule.operator.victoriametrics.com@v1beta1
+      when: ${ inputs.monitoring != null && 'rules' in inputs.monitoring }
+      properties:
+        groups: "${ inputs.monitoring.rules }"

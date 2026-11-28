@@ -69,14 +69,11 @@ func wantError(t *testing.T, err error, want ...string) {
 	}
 }
 
-// TestEmbeddedContentLoads registers the embedded set on an empty Transformer: the three
+// TestEmbeddedContentLoads registers the embedded definitions on an empty Transformer: the three
 // kinds resolve by identity, and each is a shipped type by name and by identity.
 func TestEmbeddedContentLoads(t *testing.T) {
 	tr := oam.NewTransformer(nil, nil)
-	set, err := Load(tr)
-	if err != nil {
-		t.Fatal(err)
-	}
+	set := loadDefinitions(t, tr)
 	for _, c := range []struct{ name, identity string }{
 		{"vm-rule", ruleIdentity},
 		{"vm-pod-scrape", "vmpodscrape.operator.victoriametrics.com@v1beta1"},
@@ -92,14 +89,23 @@ func TestEmbeddedContentLoads(t *testing.T) {
 	}
 }
 
+// loadDefinitions registers the embedded definitions only. The embedded models name built-in
+// component types, which a bare Transformer does not hold; they are loaded and tested in
+// pkg/cmd/kurel, where the built-in registry is (go-kure/launcher#1737).
+func loadDefinitions(t *testing.T, tr *oam.Transformer) *Set {
+	t.Helper()
+	set, err := LoadFS(tr, embeddedDefinitions(t), fstest.MapFS{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return set
+}
+
 // TestShippedDefinitionClash: the same authored name or the same identity is a clash and
 // names the shipped file; another name over another version, an unrelated type and a Set
 // that ships nothing are not.
 func TestShippedDefinitionClash(t *testing.T) {
-	set, err := Load(oam.NewTransformer(nil, nil))
-	if err != nil {
-		t.Fatal(err)
-	}
+	set := loadDefinitions(t, oam.NewTransformer(nil, nil))
 	wantError(t, set.Clash("vm-rule", oam.TypeID{Name: "other.example", Version: "v1"}), `"vm-rule"`, "definition vmrule.yaml")
 	wantError(t, set.Clash("my-rule", oam.TypeID{Name: "vmrule.operator.victoriametrics.com", Version: "v1beta1"}), `"`+ruleIdentity+`"`, "definition vmrule.yaml")
 	if err := set.Clash("my-rule", oam.TypeID{Name: "vmrule.operator.victoriametrics.com", Version: "v1"}); err != nil {

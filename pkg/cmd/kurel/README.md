@@ -338,7 +338,12 @@ the loader is [`pkg/oam/definition`](https://pkg.go.dev/github.com/go-kure/launc
 and `vm-pod-scrape`, which emit `VMRule`, `VMServiceScrape` and `VMPodScrape`
 (`operator.victoriametrics.com/v1beta1`), each checked against the CRD of the VictoriaMetrics operator
 release v0.76.0 that the binary carries. A model names such a kind by its identity, for example
-`vmrule.operator.victoriametrics.com@v1beta1`. A definition in `definitions/` that has a shipped
+`vmrule.operator.victoriametrics.com@v1beta1`. One model ships too, `workload@v1`: a service, a
+worker or a job with an optional volume, exposure, database, monitoring and backup
+(go-kure/launcher#1737; its inputs are in
+[`pkg/oam/shipped`](https://github.com/go-kure/launcher/blob/main/pkg/oam/shipped/README.md), and
+[`examples/workload-model`](https://github.com/go-kure/launcher/tree/main/examples/workload-model)
+builds it in each mode). A definition in `definitions/` that has a shipped
 type's name, or its identity, refuses the build, naming both files; a shipped type is never
 replaced. [`pkg/oam/shipped`](https://github.com/go-kure/launcher/blob/main/pkg/oam/shipped/README.md)
 lists what ships and where the CRDs come from.

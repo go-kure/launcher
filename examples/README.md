@@ -75,6 +75,21 @@ of the package's `models/` directory in name order, then each `--model <file>`, 
 names another sorts after it. [Component models](../pkg/cmd/kurel/README.md#component-models)
 describes the load order, the refusals and the limits a model is evaluated under.
 
+## Shipped workload model example
+
+Directory: [`workload-model/`](workload-model/)
+
+```bash
+bin/kurel build examples/workload-model --profile examples/cluster-profiles/minimal.yaml
+```
+
+| File | Purpose |
+|------|---------|
+| [`app.yaml`](workload-model/app.yaml) | Three components of the model that ships in the binary, `workload@v1`: a service with every optional part, a worker and a job |
+
+The package has no `models/` directory: the model is part of the binary. The inputs and the parts
+are in [Shipped definitions and models](../pkg/oam/shipped/README.md#the-workload-model).
+
 ## Custom component example
 
 Directory: [`custom-component/`](custom-component/)

@@ -144,9 +144,28 @@ spec:
 	requireRefused(t, err, filepath.Join("models", "rule.yaml"), `"vm-rule"`, "shipped", "vmrule.yaml")
 }
 
-// TestApplicationModelNamingAShippedModelIsRefused: no model ships yet, so the shipped set
-// is built over an in-memory one. The application's model file is a model of the same
-// identity, and the refusal names both files.
+// TestEmbeddedWorkloadModel: the whole embedded set registers on the built-in registry, the
+// workload model (go-kure/launcher#1737) answers to its short name and to its identity, and
+// both are a shipped type that an application's model cannot replace.
+func TestEmbeddedWorkloadModel(t *testing.T) {
+	tr := newBuiltinTransformer()
+	set, err := shipped.Load(tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"workload@v1", "workload.launcher.gokure.dev@v1"} {
+		id, err := tr.ResolveComponentType(ref)
+		if err != nil {
+			t.Errorf("%s: %v", ref, err)
+			continue
+		}
+		requireRefused(t, set.Clash("", id), `"workload.launcher.gokure.dev@v1.0.0"`, "model workload.yaml")
+	}
+}
+
+// TestApplicationModelNamingAShippedModelIsRefused: the shipped set is built over an in-memory
+// model, so the test does not depend on what ships. The application's model file is a model of
+// the same identity, and the refusal names both files.
 func TestApplicationModelNamingAShippedModelIsRefused(t *testing.T) {
 	transformer := newBuiltinTransformer()
 	ships, err := shipped.LoadFS(transformer, fstest.MapFS{}, fstest.MapFS{"settings.yaml": {Data: []byte(testBaseModel)}})
