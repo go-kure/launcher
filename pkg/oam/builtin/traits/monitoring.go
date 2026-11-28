@@ -58,7 +58,7 @@ func (h *MonitoringHandler) PropertySchema() map[string]oam.PropertySchema {
 	return map[string]oam.PropertySchema{
 		"port": {
 			Types:       []oam.PropertyType{oam.PropertyTypeInteger, oam.PropertyTypeString},
-			Description: "The port to scrape. A name is the Service's port name on a component with a Service (endpoints[].port), else a container port's name (podMetricsEndpoints[].port); a number from 1 to 65535 is the pod's port (targetPort, or portNumber without a Service). Default on a component with a Service: its Service port. Required on a component without one, which declares no port of its own.",
+			Description: "The port to scrape. A name is the Service's port name on a component with a Service (endpoints[].port; it must be the name of the Service's first port, the one the trait scrapes), else a container port's name (podMetricsEndpoints[].port); a number from 1 to 65535 is the pod's port (targetPort, or portNumber without a Service). Default on a component with a Service: its Service port. Required on a component without one, which declares no port of its own.",
 		},
 		"path": {
 			Type:        oam.PropertyTypeString,
@@ -103,7 +103,7 @@ func (h *MonitoringHandler) PropertySchema() map[string]oam.PropertySchema {
 		},
 		"ruleName": {
 			Type:        oam.PropertyTypeString,
-			Description: "Name of the VMRule, used as written or refused; defaults to <component>-rules.",
+			Description: "Name of the VMRule, used as written or refused; defaults to <component>-rules. Refused when rules lists no group, since no VMRule is then written.",
 		},
 	}
 }
@@ -190,6 +190,10 @@ func (h *MonitoringHandler) parseProperties(props map[string]any, app *stack.App
 			return nil, err
 		}
 		*name.into = s
+	}
+	// A name for an object the trait does not write would be dropped silently.
+	if config.authoredRuleName != "" && len(config.groups) == 0 {
+		return nil, errors.Errorf("monitoring: ruleName %q is set but rules lists no group, so no VMRule is written; add a group or remove ruleName", config.authoredRuleName)
 	}
 	return config, nil
 }
@@ -399,6 +403,11 @@ func (c *MonitoringConfig) readService(app *stack.Application) error {
 		}
 	}
 	switch {
+	case c.hasService && c.portName != "" && c.portName != c.servicePortName:
+		// The trait scrapes the Service's first port, as a routing trait's implicit
+		// backend does (checkImplicitPortName): a name the Service does not give it
+		// would match no port and scrape nothing.
+		return errors.Errorf("monitoring: port %q is not the name of the Service port of component %q (%q); the trait scrapes the Service's first port, so write that name or leave port out", c.portName, c.componentName, c.servicePortName)
 	case c.hasService && c.servicePortValue == 0 && c.portName == "" && c.portNumber == 0:
 		return errors.Errorf("monitoring: component %q has a Service with no port, so there is no port to scrape; set port", c.componentName)
 	case !c.hasService && c.portName == "" && c.portNumber == 0:

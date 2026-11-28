@@ -946,8 +946,11 @@ traits:
   component without a Service (a `worker`) gets a `VMPodScrape` that selects its
   pods by the same label. The selector is not a property.
 - **`port`** is a name or a number from 1 to 65535. On a Service a name is the
-  Service port's name (`port`) and a number the pod's port (`targetPort`); on
-  pods a name is a container port's name (`port`) and a number is `portNumber`.
+  Service port's name (`port`), which must be the name of the Service's first
+  port, the one the trait scrapes (any other name is refused, as a routing
+  trait refuses one for an implicit backend), and a number the pod's port
+  (`targetPort`); on pods a name is a container port's name (`port`) and a
+  number is `portNumber`.
   A worker declares no port of its own, so `port` is required there. A Service
   with no ports is refused unless `port` is set.
 - **`path` and `interval` are written only when set**, so VictoriaMetrics' own
@@ -962,7 +965,8 @@ traits:
 - **Names.** `scrapeName` and `ruleName` are used as written or refused, and
   resolve under the roles `monitoring-scrape` and `monitoring-rule`, so a
   `Naming` hook can rename them. Two components that name one object are refused
-  with both named.
+  with both named. A `ruleName` with no rule group is refused: no VMRule would
+  carry it.
 - **Written unstructured, held to the CRD.** The objects are built as
   unstructured objects, so launcher takes no dependency on the operator's Go
   API module. `monitoring_crd_test.go` holds every object the trait can write to
