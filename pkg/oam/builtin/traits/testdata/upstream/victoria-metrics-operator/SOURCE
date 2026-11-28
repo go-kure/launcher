@@ -1,0 +1,10 @@
+# Excerpt of VictoriaMetrics/operator, used only by the monitoring trait's tests (monitoring_crd_test.go).
+# Licensed under the Apache License, Version 2.0; LICENSE is the project's copy at the same tag.
+# The test checks each file below against the git blob id on its line. The tag is a lightweight tag, so its id is the commit's.
+tag v0.76.0 459199b62bd78c30a8bda6d826ca98a07b4cc25a
+licence LICENSE 261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64
+# crds.yaml holds the CustomResourceDefinitions VMServiceScrape, VMPodScrape and VMRule (v1beta1), in that order,
+# cut from config/crd/overlay/crd.descriptionless.yaml (git blob 2cceb160dfb7a385898a2508af3b254b50b97383 at the tag) with
+#   yq eval-all 'select(.spec.names.kind == "VMServiceScrape" or .spec.names.kind == "VMPodScrape" or .spec.names.kind == "VMRule")' crd.descriptionless.yaml
+# (yq 4.54.3). The bundle is the release's own descriptionless form (no field descriptions); no field was edited.
+file crds.yaml 189749f0bee42513ae03b07890358b06023e1870

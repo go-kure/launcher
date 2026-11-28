@@ -891,6 +891,9 @@ var traitLabelFixtures = map[string]traitLabelFixture{
 	"security-context": {props: map[string]any{"psaLevel": "restricted"}},
 	"topology-spread":  {host: "deployment", hostProps: rawDeploymentPropsWith(map[string]any{"replicas": 3}), selectors: 3},
 	"disruption":       {props: map[string]any{"minAvailable": 1}, selectors: 3},
+	// The scrape's selector is matched by the test's own check of the VM kinds
+	// (TestMonitoring_WebserviceWritesAServiceScrape), not as a pod selector here.
+	"monitoring": {},
 }
 
 // TestComponentLabelInvariant_FixturesCoverRegistry: every registered component

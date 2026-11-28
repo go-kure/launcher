@@ -73,6 +73,7 @@ import (
 //
 //   - `expose`, `ingress` and `httproute` to the service member: they route to
 //     the component's Service and read its port, port name and name;
+//     `monitoring` goes there too: it scrapes the Service, by its port name;
 //   - `prune-protection` and `force-replace` to every member: they cover
 //     every object a component generates, by a delivery intent on the
 //     application, and the group's one application takes the intent any member
@@ -175,7 +176,7 @@ func (WebserviceRule) PropertySchema() map[string]oam.PropertySchema {
 // webserviceServiceTraits are the authored trait types the rule forwards to the
 // service member; roleObjectTraits those it forwards to every member (see
 // WebserviceRule).
-var webserviceServiceTraits = map[string]bool{"expose": true, "ingress": true, "httproute": true}
+var webserviceServiceTraits = map[string]bool{"expose": true, "ingress": true, "httproute": true, "monitoring": true}
 
 // webservicePortName is the name of the main container's one port and of the
 // Service's one port.

@@ -35,6 +35,12 @@ const (
             sourcePVC: data
             schedule: "0 2 * * *"
 `
+	// claimMonitoringTrait scrapes the component's Service: its VMServiceScrape's
+	// default name is the component's own.
+	claimMonitoringTrait = `        - type: monitoring
+          properties:
+            interval: 30s
+`
 )
 
 // claimCiliumTrait is a cilium-networkpolicy trait, whose `name` is required.
@@ -100,6 +106,14 @@ func TestTraitObjectClaim_TwoTraitsNameOneObject(t *testing.T) {
 			want: `name collision: ReplicationSource.volsync.backube "default/data-backup" is named by ` +
 				`component "web" traits[0] "volsync" (role "volsync-replicationsource", its default) and by ` +
 				`component "api" traits[0] "volsync" (role "volsync-replicationsource", its default); give one of them another name`,
+		},
+		{
+			name: "monitoring",
+			web:  claimMonitoringTrait + "            scrapeName: api\n", api: claimMonitoringTrait,
+			off: claimMonitoringTrait,
+			want: `name collision: VMServiceScrape.operator.victoriametrics.com "default/api" is named by ` +
+				`component "web" traits[0] "monitoring" (role "monitoring-scrape", set by scrapeName) and by ` +
+				`component "api" traits[0] "monitoring" (role "monitoring-scrape", its default); give one of them another name`,
 		},
 		{
 			name: "cilium-networkpolicy",

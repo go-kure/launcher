@@ -202,6 +202,17 @@ const namingDBRecovery = namingDBStore + `        recovery:
                 inheritFromIAMRole: true
 `
 
+// namingMonitoringTrait is a monitoring trait with one rule group, so that it
+// writes both of its objects.
+const namingMonitoringTrait = `        - type: monitoring
+          properties:
+            rules:
+              - name: availability
+                rules:
+                  - alert: WebDown
+                    expr: up == 0
+`
+
 const (
 	poolerKindName      = "Pooler.postgresql.cnpg.io"
 	databaseKindName    = "Database.postgresql.cnpg.io"
@@ -218,7 +229,7 @@ func TestNamingHook_AskedForEveryNameOfEveryRole(t *testing.T) {
 	// httproute trait and a volsync trait as well: their objects, and the Secrets
 	// the first two make other controllers write, have roles of their own. The
 	// expose trait's ingress trait stands for the ingress role.
-	extra := namingSecretTraits + claimHTTPRouteTrait + claimVolSyncTrait
+	extra := namingSecretTraits + claimHTTPRouteTrait + claimVolSyncTrait + namingMonitoringTrait
 	doc := withWebVolume(namingApp(extra, namingDBRecovery+namingChart+jobs+artifact), "")
 	namingTransform(t, doc, withManagedTLS(namingContext(declineEveryName(&requests))))
 
@@ -314,6 +325,10 @@ func TestNamingHook_AskedForEveryNameOfEveryRole(t *testing.T) {
 		{Application: "shop", Component: "web", Role: subApp, Default: "web-httproute"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleVolSyncReplicationSource, Kind: "ReplicationSource.volsync.backube", Default: "data-backup"},
 		{Application: "shop", Component: "web", Role: subApp, Default: "data-backup"},
+		// The monitoring trait asks for its scrape, then its VMRule, then its sub-application.
+		{Application: "shop", Component: "web", Role: oam.NameRoleMonitoringScrape, Kind: "VMServiceScrape.operator.victoriametrics.com", Default: "web"},
+		{Application: "shop", Component: "web", Role: oam.NameRoleMonitoringRule, Kind: "VMRule.operator.victoriametrics.com", Default: "web-rules"},
+		{Application: "shop", Component: "web", Role: subApp, Default: "web-monitoring"},
 		{Application: "shop", Component: "web", Role: oam.NameRoleNetpolSynth, Kind: np, Default: synthNP},
 		{Application: "shop", Component: "web", Role: subApp, Default: synthNP},
 	}
