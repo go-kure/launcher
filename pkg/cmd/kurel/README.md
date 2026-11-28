@@ -427,7 +427,8 @@ A model may name only a model loaded before it, so order the file names, or the 
 that way. All of `models/` loads before the first `--model` file: a `--model` file may
 name a model of the directory, and not the reverse. The models that ship in the binary
 (go-kure/launcher#1735) load before all of these, after the shipped definitions, so any model may
-name them. A model of a shipped model's identity is refused, naming both files. The model's inputs are the schema of
+name them. A model of a shipped model's identity, or whose short name is a shipped type's name, is
+refused, naming both files. The model's inputs are the schema of
 the component's properties. A model file is read as written: `kurel.yaml` parameters are
 not substituted in it.
 

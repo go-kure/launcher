@@ -33,8 +33,9 @@ A missing `content/models` directory holds no model.
 
 ## A shipped type is never replaced
 
-`Set.Clash` refuses an application's definition or model that has the same authored type name as a
-shipped definition, or the same identity as a shipped definition or model. The refusal names the
+`Set.Clash` refuses an application's definition that has the same authored type name as a shipped
+definition, an application's model whose short name is one, and either that has the same identity as
+a shipped definition or model. The refusal names the
 type and the shipped file, and `kurel build` adds the application's file. Another version of a
 shipped kind is another type and is not a clash. There is no override.
 

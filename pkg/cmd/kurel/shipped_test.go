@@ -121,6 +121,29 @@ spec:
 	requireRefused(t, err, filepath.Join("definitions", "my-rule.yaml"), "vmrule.operator.victoriametrics.com@v1beta1", "shipped", "vmrule.yaml")
 }
 
+// TestApplicationModelOfAShippedShortNameIsRefused: a model that answers to a shipped
+// definition's type name would be built in that type's place. The refusal says the type is
+// shipped and names both files, not only the registry's plain-name refusal.
+func TestApplicationModelOfAShippedShortNameIsRefused(t *testing.T) {
+	model := `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Model
+metadata:
+  name: vm-rule.acme.example
+  version: v1
+spec:
+  celEnv: "1"
+  outputs: {}
+  parts:
+    - id: cm
+      type: configmap@v1
+      properties:
+        data: {k: v}
+`
+	dir := modelPackage(t, modelApp("vm-rule.acme.example@v1", "{}"), map[string]string{"models/rule.yaml": model})
+	_, err := buildModelPackage(t, dir)
+	requireRefused(t, err, filepath.Join("models", "rule.yaml"), `"vm-rule"`, "shipped", "vmrule.yaml")
+}
+
 // TestApplicationModelNamingAShippedModelIsRefused: no model ships yet, so the shipped set
 // is built over an in-memory one. The application's model file is a model of the same
 // identity, and the refusal names both files.

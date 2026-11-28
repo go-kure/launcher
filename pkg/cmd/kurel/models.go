@@ -43,7 +43,8 @@ func loadModels(t *oam.Transformer, dir string, paths []string, ships *shipped.S
 		if err != nil {
 			return errors.Wrapf(err, "model file %q", file)
 		}
-		if err := ships.Clash("", m.Identity()); err != nil {
+		// The short name too: a model answers to it, and it would take a shipped type's place.
+		if err := ships.Clash(m.Identity().ShortName(), m.Identity()); err != nil {
 			return errors.Wrapf(err, "model file %q", file)
 		}
 		if err := registry.Register(m); err != nil {

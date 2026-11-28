@@ -91,9 +91,9 @@ func LoadFS(t *oam.Transformer, definitions, models fs.FS) (*Set, error) {
 }
 
 // Clash returns the refusal for an application's type that is shipped: typeName is the
-// authored name a definition declares (empty for a model) and id the identity it declares.
-// It reports the first of the two that is shipped, and names the shipped file. A nil Set
-// ships nothing.
+// name the type is authored by (a definition's type name, or the short name a model answers
+// to) and id the identity it declares. It reports the first of the two that is shipped, and
+// names the shipped file. A nil Set ships nothing.
 func (s *Set) Clash(typeName string, id oam.TypeID) error {
 	if s == nil {
 		return nil
