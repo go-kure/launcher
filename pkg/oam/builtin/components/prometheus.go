@@ -104,7 +104,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		}
 	}
 	const secretKey = " A Secret key selector: name and key, in the Prometheus's namespace. Launcher emits no Secret for it." //nolint:gosec // G101: a description, not a credential
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"podMetadata":                     object("podMetadata: the labels and annotations the operator copies onto the Prometheus pods. A key the consumer reserves is refused here as on a workload's pod template. Nothing is added: the pods carry the component label only if it is written here with the component's own value, and without it the NetworkPolicies generated for the component do not select them. The operator sets seven labels and one annotation of its own: a value authored here replaces app.kubernetes.io/version and the annotation, but not the other six labels." + decoded + "EmbeddedObjectMetadata in its API reference."),
 		"serviceMonitorSelector":          object("serviceMonitorSelector: the ServiceMonitor objects scraped, by their labels. Unset, none; an empty selector, all." + unmanaged + selector),
 		"serviceMonitorNamespaceSelector": object("serviceMonitorNamespaceSelector: the namespaces ServiceMonitor objects are read from, by their labels. Unset, the Prometheus's own namespace only; an empty selector, all." + selector),
@@ -262,7 +262,7 @@ func (h *PrometheusHandler) PropertySchema() map[string]oam.PropertySchema {
 		"evaluationInterval":     text("evaluationInterval: the interval between two evaluations of the rules. Unset, the API fills 30s; an empty one is refused, since the API server would replace it." + duration),
 		"ruleQueryOffset":        text("ruleQueryOffset: how far into the past the evaluation timestamp of a rule group is moved. Requires Prometheus v2.53.0 or later." + duration),
 		"enableAdminAPI":         flag("enableAdminAPI: true turns on the admin API, whose endpoints delete data and shut Prometheus down. Launcher adds no authentication in front of it."),
-	}
+	}, prometheusBounds())
 }
 
 // prometheusKind is the prometheus kind: see policyHeldKind. The API requires

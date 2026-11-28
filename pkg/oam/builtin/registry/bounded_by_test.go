@@ -737,6 +737,106 @@ func providerKindRows() []boundRow {
 	return rows
 }
 
+// monitoringKindRows are the bounds of prometheus, alertmanager and thanosruler,
+// whose handlers map one decoded spec onto the workload the operator runs
+// (enforceMonitoringWorkloadPolicy). Their structured properties are open nodes,
+// so a class sits on the node and a value below it raises it. The passing
+// document names every image the operator would otherwise choose: the image, and
+// a patch of each container the operator generates (boundDocument).
+//
+// The operator-filled memory request (alertmanager and thanosruler, 200Mi where
+// `resources` names none) is a refusal with no authored value; it is declared on
+// `resources`, which decides it, and the row shows the authored form only.
+// A pod-level windowsOptions.hostProcess of a thanosruler is no row: it needs
+// hostNetwork, which a ThanosRuler has no field for, so the build refuses it as
+// invalid before the policy and no class is raised.
+func monitoringKindRows() []boundRow {
+	var rows []boundRow
+	for _, typ := range []string{"prometheus", "alertmanager", "thanosruler"} {
+		row := func(path string, class oam.RefusalClass, relax knob, change ...set) boundRow {
+			return boundRow{typ: typ, path: path, class: class, change: change, relax: relax}
+		}
+		rows = append(rows,
+			row("replicas", oam.RefusalReplicaMaximum, anyReplicas, set{at: "replicas", value: 4}),
+			row("image", oam.RefusalRegistry, anyRegistry, set{at: "image", value: foreignImage}),
+			// Unset, the operator chooses the image, which no allowlist can hold.
+			row("image", oam.RefusalRegistry, anyRegistry, set{at: "image", drop: true}),
+			row("storage", oam.RefusalStorageMaximum, anyStorage,
+				set{at: "storage.volumeClaimTemplate.spec.resources.requests.storage", value: "1Ti"}),
+			row("storage", oam.RefusalStorageMaximum, anyStorage,
+				set{at: "storage.ephemeral.volumeClaimTemplate.spec.resources.requests.storage", value: "1Ti"},
+				set{at: "storage.ephemeral.volumeClaimTemplate.spec.accessModes", value: []any{"ReadWriteOnce"}}),
+			row("resources", oam.RefusalResourceMaximum, anyCPU, set{at: "resources.limits.cpu", value: "8"}),
+			row("resources", oam.RefusalResourceMaximum, anyMemory, set{at: "resources.requests.memory", value: "8Gi"}),
+			row("volumes", oam.RefusalHostPath, allowHostPath,
+				set{at: "volumes[].hostPath", value: map[string]any{"path": "/data"}}, set{at: "volumes[].name", value: "host"}),
+			row("volumes", oam.RefusalRegistry, anyRegistry,
+				set{at: "volumes[].image", value: map[string]any{"reference": foreignImage}}, set{at: "volumes[].name", value: "img"}),
+			row("volumes", oam.RefusalStorageMaximum, anyStorage,
+				set{at: "volumes[].ephemeral", value: map[string]any{"volumeClaimTemplate": map[string]any{"spec": map[string]any{
+					"accessModes": []any{"ReadWriteOnce"}, "resources": map[string]any{"requests": map[string]any{"storage": "1Ti"}}}}}},
+				set{at: "volumes[].name", value: "scratch"}),
+		)
+		for _, list := range []string{"containers", "initContainers"} {
+			if typ == "thanosruler" && list == "initContainers" {
+				// No init container is generated: the row adds one, named so.
+				add := func(class oam.RefusalClass, relax knob, image string, change ...set) boundRow {
+					return row(list, class, relax, append(change, set{at: list + "[].name", value: "extra"}, set{at: list + "[].image", value: image})...)
+				}
+				rows = append(rows,
+					add(oam.RefusalRegistry, anyRegistry, foreignImage, set{at: list + "[].image", value: foreignImage}),
+					add(oam.RefusalResourceMaximum, anyCPU, boundImage, set{at: list + "[].resources.limits.cpu", value: "8"}),
+					add(oam.RefusalPrivileged, allowPrivileged, boundImage, set{at: list + "[].securityContext.privileged", value: true}),
+					add(oam.RefusalContainerCapability, anyCapability, boundImage,
+						set{at: list + "[].securityContext.capabilities.add", value: []any{"NET_ADMIN"}}),
+				)
+				continue
+			}
+			rows = append(rows,
+				row(list, oam.RefusalRegistry, anyRegistry, set{at: list + "[].image", value: foreignImage}),
+				// Unpatched, the operator's own reloader image runs, which no allowlist can hold.
+				row(list, oam.RefusalRegistry, anyRegistry, set{at: list, value: []any{}}),
+				row(list, oam.RefusalResourceMaximum, anyCPU, set{at: list + "[].resources.limits.cpu", value: "8"}),
+				row(list, oam.RefusalPrivileged, allowPrivileged, set{at: list + "[].securityContext.privileged", value: true}),
+				row(list, oam.RefusalContainerCapability, anyCapability,
+					set{at: list + "[].securityContext.capabilities.add", value: []any{"NET_ADMIN"}}),
+			)
+		}
+		if typ != "thanosruler" {
+			secContext := row("securityContext", oam.RefusalPrivileged, allowPrivileged,
+				set{at: "securityContext.windowsOptions.hostProcess", value: true})
+			// A HostProcess pod needs the host network, which the strict policy refuses first.
+			secContext.with = []set{{at: "hostNetwork", value: true}}
+			secContext.strict = allowNetwork
+			rows = append(rows, secContext, row("hostNetwork", oam.RefusalHostNamespace, allowNetwork, set{at: "hostNetwork", value: true}))
+		}
+		secret := func(path string, change ...set) boundRow {
+			r := row(path, oam.RefusalExplicitSecret, allowSecrets, change...)
+			r.strict = forbidSecrets
+			return r
+		}
+		if typ != "alertmanager" {
+			rows = append(rows, secret("remoteWrite",
+				set{at: "remoteWrite[].bearerToken", value: "hunter2"}, set{at: "remoteWrite[].url", value: "https://metrics.example/write"}))
+		}
+		if typ == "prometheus" {
+			rows = append(rows,
+				row("shards", oam.RefusalReplicaMaximum, anyReplicas, set{at: "shards", value: 4}),
+				secret("remoteRead", set{at: "remoteRead[].bearerToken", value: "hunter2"}, set{at: "remoteRead[].url", value: "https://metrics.example/read"}),
+				secret("apiserverConfig", set{at: "apiserverConfig.bearerToken", value: "hunter2"}, set{at: "apiserverConfig.host", value: "https://api.example"}),
+				// The Thanos sidecar is another container the operator generates.
+				boundRow{typ: typ, path: "thanos", class: oam.RefusalRegistry, relax: anyRegistry,
+					with:   []set{{at: "thanos.version", value: "v0.39.2"}, {at: "thanos.image", value: boundImage}},
+					change: []set{{at: "thanos.image", value: foreignImage}}},
+				boundRow{typ: typ, path: "thanos", class: oam.RefusalResourceMaximum, relax: anyCPU,
+					with:   []set{{at: "thanos.version", value: "v0.39.2"}, {at: "thanos.image", value: boundImage}},
+					change: []set{{at: "thanos.resources.limits.cpu", value: "8"}}},
+			)
+		}
+	}
+	return rows
+}
+
 // boundRows lists every tested bound. TestBoundedBy_DeclaredAndTested holds it
 // to what the registered schemas declare, both ways.
 func boundRows() []boundRow {
@@ -767,6 +867,7 @@ func boundRows() []boundRow {
 	rows = append(rows, cnpgOtherRows()...)
 	rows = append(rows, coreKindRows()...)
 	rows = append(rows, providerKindRows()...)
+	rows = append(rows, monitoringKindRows()...)
 	rows = append(rows,
 		boundRow{trait: true, typ: "scaler", path: "maxReplicas", class: oam.RefusalReplicaMaximum,
 			change: []set{{at: "maxReplicas", value: 9}}, relax: anyReplicas},
@@ -870,6 +971,18 @@ func boundDocument(t *testing.T, trait bool, typ string) (oam.Component, map[str
 		props = map[string]any{}
 	case "clusterexternalsecret":
 		props = map[string]any{"externalSecretSpec": map[string]any{}}
+	case "prometheus", "alertmanager", "thanosruler":
+		// Every image the operator would choose is named, so the strict policy passes:
+		// the image, and a patch of each generated container with one.
+		props = map[string]any{"image": boundImage, "containers": []any{container("config-reloader")}}
+		switch typ {
+		case "prometheus":
+			props["version"] = "v3.14.0"
+			props["initContainers"] = []any{container("init-config-reloader")}
+		case "alertmanager":
+			props["version"] = "v0.30.0"
+			props["initContainers"] = []any{container("init-config-reloader")}
+		}
 	case "postgresql", "cnpg-cluster":
 		props = map[string]any{"imageName": boundImage}
 	case "cnpg-pooler":

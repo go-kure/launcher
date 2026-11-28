@@ -189,6 +189,82 @@ func targetManifestBounds(node string) map[string][]oam.RefusalClass {
 	return map[string][]oam.RefusalClass{node: {oam.RefusalExplicitSecret, oam.RefusalUnreadableObject}}
 }
 
+// monitoringBounds are the bounds the three Prometheus operator workload kinds
+// share (enforceMonitoringWorkloadPolicy): the pod count, the main container's
+// image (also refused unset under an allowlist, the operator then choosing it),
+// the claim the storage block makes, and its cpu and memory, and the pod fields
+// the operator copies into its pods. Those are open nodes, so each lists the
+// classes of every value below it: the containers and init containers include
+// the patch of a container the operator generates, whose reloader image the
+// allowlist cannot hold unless a patch names one; the volumes, a hostPath, the
+// claim of an ephemeral volume and an image volume. The operator fills a memory
+// request of 200Mi where alertmanager's and thanosruler's `resources` names none:
+// that refusal sits on `resources`, which decides it.
+func monitoringBounds() map[string][]oam.RefusalClass {
+	pod := podBounds()
+	return map[string][]oam.RefusalClass{
+		"replicas":       {oam.RefusalReplicaMaximum},
+		"image":          {oam.RefusalRegistry},
+		"storage":        {oam.RefusalStorageMaximum},
+		"resources":      {oam.RefusalResourceMaximum},
+		"volumes":        pod["volumes"],
+		"containers":     pod["containers"],
+		"initContainers": pod["initContainers"],
+	}
+}
+
+// monitoringPodBounds are the bounds of the pod fields a Prometheus or an
+// Alertmanager has and a ThanosRuler has not: the host network, and the
+// pod-level hostProcess switch, which the API refuses without it.
+func monitoringPodBounds() map[string][]oam.RefusalClass {
+	pod := podBounds()
+	return map[string][]oam.RefusalClass{
+		"hostNetwork":     pod["hostNetwork"],
+		"securityContext": pod["securityContext"],
+	}
+}
+
+// secretBounds are the bounds of the properties that hold a credential in the
+// clear, refused under a policy that forbids explicit secrets.
+func secretBounds(paths ...string) map[string][]oam.RefusalClass {
+	b := map[string][]oam.RefusalClass{}
+	for _, path := range paths {
+		b[path] = []oam.RefusalClass{oam.RefusalExplicitSecret}
+	}
+	return b
+}
+
+// prometheusBounds are the bounds of prometheus: those of monitoringBounds and
+// monitoringPodBounds, the `shards` that multiply `replicas`, the Thanos sidecar
+// (`thanos`: its image and its resources), and the bearer token of the remote
+// write and remote read endpoints and of the API server.
+func prometheusBounds() map[string][]oam.RefusalClass {
+	b := monitoringBounds()
+	maps.Copy(b, monitoringPodBounds())
+	maps.Copy(b, secretBounds("remoteWrite", "remoteRead", "apiserverConfig"))
+	b["shards"] = []oam.RefusalClass{oam.RefusalReplicaMaximum}
+	b["thanos"] = []oam.RefusalClass{oam.RefusalRegistry, oam.RefusalResourceMaximum}
+	return b
+}
+
+// alertmanagerBounds are the bounds of alertmanager: monitoringBounds and
+// monitoringPodBounds. It holds no credential in the clear.
+func alertmanagerBounds() map[string][]oam.RefusalClass {
+	b := monitoringBounds()
+	maps.Copy(b, monitoringPodBounds())
+	return b
+}
+
+// thanosRulerBounds are the bounds of thanosruler: monitoringBounds and the
+// bearer token of its remote write endpoints. It has no host network, and its
+// pod-level hostProcess is refused as invalid before the policy (the API needs
+// the host network for it), so `securityContext` declares nothing.
+func thanosRulerBounds() map[string][]oam.RefusalClass {
+	b := monitoringBounds()
+	maps.Copy(b, secretBounds("remoteWrite"))
+	return b
+}
+
 // passthroughBounds are the bounds of the passthrough type: its `object`, an
 // open node, is the one object it emits, held to the checks of documentClasses
 // (enforcePassthroughPolicy).
