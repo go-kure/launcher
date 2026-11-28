@@ -5,8 +5,9 @@
 # schemas.fluxoperator.dev — network access required).
 #
 # Scope: 14 of the 15 numbered examples/*.yaml + examples/cluster-profiles/*.yaml
-# pairs (go-kure/launcher#292), and examples/custom-model, whose app.yaml uses the
-# component models beside it. Two are deliberately excluded, each echoed below:
+# pairs (go-kure/launcher#292), examples/custom-model, whose app.yaml uses the
+# component models beside it, and examples/workload-model, whose app.yaml uses the model
+# that ships in the binary. Two are deliberately excluded, each echoed below:
 #   - 12-daemonset.yaml: mounts a hostPath volume, which is default-deny. `kurel
 #     build` supplies no Policy, transform normalizes that to NoopPolicy
 #     (pkg/oam/transform.go:489), and NoopPolicy.AllowHostPathVolumes() is false
@@ -18,11 +19,15 @@
 #     "redis-sidecar" trait handler; a documented library-extension example, not a
 #     bug (examples/README.md, "Why this example cannot be run with `kurel build`").
 #
-# One resource is schema-skipped rather than excluded outright:
+# Two kinds are schema-skipped rather than excluded outright:
 #   - 15-passthrough-minimal.yaml's SparkApplication is deliberately minimal (it
 #     demonstrates the `passthrough` extension point, not a deployable resource) and
 #     fails schema validation by design. Skipped via --skip-kind, not silently
 #     dropped from the fixture set.
+#   - workload-model/app.yaml's VolSync ReplicationSource has no schema in the
+#     flux-schema catalogs ("no schema for kind ReplicationSource"), so the validator
+#     can say nothing about it. Skipped via --skip-kind, with the rest of the
+#     example validated.
 #
 # Usage: bash site/scripts/validate-manifests.sh
 # (invoked via `make validate-manifests`, which builds bin/kurel first)
@@ -62,6 +67,7 @@ declare -A APP_PROFILE=(
   [14-full-stack.yaml]=nginx-certmanager-vault
   [15-passthrough-minimal.yaml]=minimal
   [custom-model/app.yaml]=minimal
+  [workload-model/app.yaml]=minimal
 )
 
 echo "Skipping 12-daemonset.yaml: mounts a hostPath volume, which is default-deny under NoopPolicy (by design — kurel build supplies no Policy)"
@@ -115,6 +121,7 @@ if ! flux schema validate "$OUTDIR" \
   --schema-location default \
   --schema-location ecosystem \
   --skip-kind sparkoperator.k8s.io/v1beta2/SparkApplication \
+  --skip-kind volsync.backube/v1alpha1/ReplicationSource \
   --verbose; then
   echo "ERROR: flux schema validate reported one or more invalid resources" >&2
   exit 1
