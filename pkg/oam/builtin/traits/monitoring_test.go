@@ -323,6 +323,9 @@ func TestMonitoring_Refusals(t *testing.T) {
 		{"missing expr", "webservice", map[string]any{"rules": oneGroup(map[string]any{"alert": "A"})}, "expr"},
 		{"unknown rule key", "webservice", map[string]any{"rules": oneGroup(map[string]any{"alert": "A", "expr": "up", "debug": true})}, `unknown property "debug"`},
 		{"labels not strings", "webservice", map[string]any{"rules": oneGroup(map[string]any{"alert": "A", "expr": "up", "labels": map[string]any{"a": 1}})}, "labels"},
+		{"port name the Service lacks", "webservice", map[string]any{"port": "metrics"}, `port "metrics" is not the name of the Service port`},
+		{"ruleName without rules", "webservice", map[string]any{"ruleName": "web-alerts"}, "ruleName"},
+		{"ruleName with an empty rules list", "webservice", map[string]any{"ruleName": "web-alerts", "rules": []any{}}, "ruleName"},
 		{"empty scrapeName", "webservice", map[string]any{"scrapeName": ""}, "scrapeName"},
 		{"bad ruleName", "webservice", map[string]any{"ruleName": "Not Valid", "rules": oneGroup(map[string]any{"record": "r", "expr": "up"})}, "ruleName"},
 	}
