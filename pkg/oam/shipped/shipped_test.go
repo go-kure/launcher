@@ -171,6 +171,27 @@ spec:
           k: "${inputs.nosuch}"
 `
 
+// TestLoadModelDecodesOnce: a model decoded once is the one every later load reads, and a text
+// that does not load is refused every time, never kept.
+func TestLoadModelDecodesOnce(t *testing.T) {
+	first, err := loadModel([]byte(shippedModel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := loadModel([]byte(shippedModel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Error("the second load decoded the model again")
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := loadModel([]byte("kind: Model\n")); err == nil {
+			t.Fatalf("load %d of a text that is no model was accepted", i+1)
+		}
+	}
+}
+
 // TestShippedModelCompilesAtFirstUse: a shipped model registers without compiling, so a
 // compile error appears at the first build that uses it, and names the shipped file.
 func TestShippedModelCompilesAtFirstUse(t *testing.T) {

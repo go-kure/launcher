@@ -44,7 +44,8 @@ A missing `content/models` directory holds no model. A shipped model registers w
 `Registry.RegisterLazy`: its expressions compile at the first build that uses it, not at every load, because
 every `kurel build` loads this set and compiling one model cost about 4 ms in a loaded process and about 22 ms
 more in a fresh `kurel build` (measured on one host, go-kure/launcher#1748). A test compiles each embedded model, so a model that
-does not compile fails CI, and a first use that finds one names the shipped file.
+does not compile fails CI, and a first use that finds one names the shipped file. A shipped model's file is
+also decoded once for the process, because a decoded model is read-only.
 
 ## A shipped type is never replaced
 

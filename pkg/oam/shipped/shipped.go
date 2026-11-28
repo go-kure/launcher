@@ -15,6 +15,7 @@ import (
 	"embed"
 	"io/fs"
 	"path"
+	"sync"
 
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
@@ -78,7 +79,7 @@ func LoadFS(t *oam.Transformer, definitions, models fs.FS) (*Set, error) {
 		if err != nil {
 			return nil, errors.Wrapf(err, "shipped model %q", name)
 		}
-		m, err := model.Load(data)
+		m, err := loadModel(data)
 		if err != nil {
 			return nil, errors.Wrapf(err, "shipped model %q", name)
 		}
@@ -90,6 +91,24 @@ func LoadFS(t *oam.Transformer, definitions, models fs.FS) (*Set, error) {
 		s.origins[m.Key()] = "model " + name
 	}
 	return s, nil
+}
+
+// decodedModels holds each model decoded so far by its text. Every build loads the shipped set,
+// decoding a model costs about 1 ms, and a decoded model is read-only (model.Rule), so a build
+// after the first reads the one the process already holds.
+var decodedModels sync.Map // text of the model -> *model.Model
+
+// loadModel is model.Load through decodedModels. A refusal is not kept.
+func loadModel(data []byte) (*model.Model, error) {
+	if m, ok := decodedModels.Load(string(data)); ok {
+		return m.(*model.Model), nil
+	}
+	m, err := model.Load(data)
+	if err != nil {
+		return nil, err
+	}
+	decodedModels.Store(string(data), m)
+	return m, nil
 }
 
 // Clash returns the refusal for an application's type that is shipped: typeName is the
