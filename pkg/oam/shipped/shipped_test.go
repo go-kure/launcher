@@ -201,15 +201,22 @@ func TestLoadModelDecodesOnce(t *testing.T) {
 var togetherRuns atomic.Int32
 
 // TestLoadModelDecodesOnceWhenLoadsStartTogether: loads of a text nobody has decoded, started at
-// once, decode it once and all get that model. The decode is slow and counted, so the loads
-// overlap on any number of CPUs: a cache that checks and then stores, without holding a lock
-// across the decode, decodes once for each load. Run under -race it also proves the cache is
-// safe to share.
+// once, decode it once and all get that model. The first decode is held until a second one
+// starts, so on a cache that checks and then stores, without a lock held across the decode,
+// another load must miss meanwhile and decode too, on any number of CPUs and however the loads
+// are scheduled. On a cache that serializes the decodes no second one can start, and the wait
+// ends at its fallback. Run under -race it also proves the cache is safe to share.
 func TestLoadModelDecodesOnceWhenLoadsStartTogether(t *testing.T) {
 	var decodes atomic.Int32
+	overlapped := make(chan struct{})
 	decodeModel = func(data []byte) (*model.Model, error) {
-		decodes.Add(1)
-		time.Sleep(20 * time.Millisecond) // the window in which another load can miss
+		if decodes.Add(1) == 2 {
+			close(overlapped)
+		}
+		select {
+		case <-overlapped:
+		case <-time.After(200 * time.Millisecond):
+		}
 		return model.Load(data)
 	}
 	t.Cleanup(func() { decodeModel = model.Load })
