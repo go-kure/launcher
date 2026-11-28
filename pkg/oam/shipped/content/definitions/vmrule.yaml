@@ -1,0 +1,13 @@
+# Shipped by launcher. The CRD is one document of the VictoriaMetrics operator release v0.76.0
+# (see ../../README.md for the asset, its digest and the command that split it out).
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: vm-rule
+spec:
+  emits:
+    apiVersion: operator.victoriametrics.com/v1beta1
+    kind: VMRule
+  schema:
+    crd: crds/vmrules.yaml
+    sha256: f82638d6b6570daeca8707eb6007f1c1a657e4b223481521cd0679ecd3880991

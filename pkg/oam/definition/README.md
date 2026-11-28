@@ -14,6 +14,10 @@ if err != nil { /* refused: names the file and the reason */ }
 err = definition.Register(transformer, h)              // the type is now authorable
 ```
 
+`LoadFS(fsys, name)` is `Load` for a definition in a file system, with its CRD read from the same
+file system, relative to the definition's directory. It runs every check `Load` runs. It is how the
+definitions embedded in the binary load (see [shipped definitions](https://github.com/go-kure/launcher/blob/main/pkg/oam/shipped/README.md)).
+
 `Load` refuses a document with a field it does not know, a `crd` path that leaves the definition's
 directory (by `..`, an absolute path or a symlink), a digest that differs, a CRD that does not define the emitted kind in a served
 version, and a schema that is not structural. `Register` refuses a type name the transformer
@@ -36,7 +40,8 @@ patterns, formats, array items, `additionalProperties`, int-or-string values and
 
 - CEL rules (`x-kubernetes-validations`) are not evaluated.
 - Defaults are not applied.
-- Only the version the document names is read, from a local file.
+- Only the version the document names is read, from a local file or, for `LoadFS`, from the file
+  system it is given. Nothing is fetched.
 - An explicit `null` on a property is refused, so a CRD's `nullable` is not reachable.
 - A CRD whose `spec` is open (`additionalProperties` or `x-kubernetes-preserve-unknown-fields`
   on `spec` itself) is refused: the published properties are the declared ones. Open

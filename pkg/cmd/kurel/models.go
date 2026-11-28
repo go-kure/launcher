@@ -7,6 +7,7 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/model"
+	"github.com/go-kure/launcher/pkg/oam/shipped"
 )
 
 // modelsDirName is the directory next to app.yaml that `kurel build` reads
@@ -17,8 +18,9 @@ const modelsDirName = "models"
 // build (go-kure/launcher#1570): every *.yaml file of dir in file name order,
 // then the files of paths in the order given. A model may name only a model
 // registered before it. A dir that does not exist holds no model. Each refusal of
-// a model is the library's, with the file it is about.
-func loadModels(t *oam.Transformer, dir string, paths []string) error {
+// a model is the library's, with the file it is about. A model that names a type launcher
+// ships (go-kure/launcher#1735) is refused, naming both files.
+func loadModels(t *oam.Transformer, dir string, paths []string, ships *shipped.Set) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil && !os.IsNotExist(err) {
 		return errors.Wrapf(err, "reading models directory %q", dir)
@@ -39,6 +41,9 @@ func loadModels(t *oam.Transformer, dir string, paths []string) error {
 		}
 		m, err := model.Load(data)
 		if err != nil {
+			return errors.Wrapf(err, "model file %q", file)
+		}
+		if err := ships.Clash("", m.Identity()); err != nil {
 			return errors.Wrapf(err, "model file %q", file)
 		}
 		if err := registry.Register(m); err != nil {

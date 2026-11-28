@@ -24,8 +24,9 @@ Every directory under `pkg/` and `cmd/` that holds Go source has one row. A test
 | `pkg/cmd/shared/options` | The global flags (`--config`, `--verbose`, `--debug`, `--strict`, `--output-file`, `--namespace`, ...). | Be used as a standalone API. | [README](pkg/cmd/shared/options/README.md) |
 | `pkg/errors` | Structured error types and wrapping helpers. | | [README](pkg/errors/README.md) |
 | `pkg/oam` | The core: data model, parser, validator, lowering engine, `Transformer`, `Policy`. | Import the built-in handlers; write to stdout or stderr; exit. | [README](pkg/oam/README.md) |
-| `pkg/oam/model` | Component models defined in YAML and CEL: load, compile, expand. `kurel build` loads them from a package's `models/` directory and from `--model` files. | | [README](pkg/oam/model/README.md) |
-| `pkg/oam/definition` | Component types declared by a ComponentDefinition document and a CRD file it pins by digest: load, check against the CRD's structural schema, register. `kurel build` loads them from `definitions/`. | Evaluate CEL rules, apply defaults, read a CRD from anywhere but a local file. | [README](pkg/oam/definition/README.md) |
+| `pkg/oam/model` | Component models defined in YAML and CEL: load, compile, expand. `kurel build` loads them from a package's `models/` directory and from `--model` files, after the shipped ones. | | [README](pkg/oam/model/README.md) |
+| `pkg/oam/definition` | Component types declared by a ComponentDefinition document and a CRD file it pins by digest: load, check against the CRD's structural schema, register. `kurel build` loads them from `definitions/`, after the shipped ones. | Evaluate CEL rules, apply defaults, fetch a CRD: it reads one from a local file or the file system it is given. | [README](pkg/oam/definition/README.md) |
+| `pkg/oam/shipped` | The definitions and models that launcher ships in the binary (embedded, with their pinned CRDs): register them on a `Transformer`, and refuse an application's type that names one. `kurel build` loads them before an application's own. | Hold the loaders (they are `pkg/oam/definition` and `pkg/oam/model`); replace a shipped type. | [README](pkg/oam/shipped/README.md) |
 | `pkg/oam/netpol` | Shared NetworkPolicy types. They live outside `pkg/oam` so that the engine and the routing traits can both import them without a cycle. | | [README](pkg/oam/netpol/README.md) |
 | `pkg/oam/builtin` | Schema types for the built-in capabilities, and strict decoding of their properties. | | [README](pkg/oam/builtin/README.md) |
 | `pkg/oam/builtin/components` | The handlers of the built-in terminal component types, each building kure objects, and the lowering rules for `webservice`, `worker`, `helm`, `postgresql` and `oci`, which rewrite those types into terminal ones (the registry lists the two sets apart). | | [README](pkg/oam/builtin/components/README.md) |
@@ -110,7 +111,8 @@ Outside the code: `docs/` (design and OAM notes), `examples/` (runnable applicat
   (`pkg/oam/profile.go`), `EnvironmentSet` (`environments.yaml`, `pkg/cmd/kurel/environment.go`),
   `CapabilityDefinition` (`pkg/oam/capability.go`), `ComponentDefinition` (`pkg/oam/definition`,
   loaded by `kurel build` from `definitions/`), and `Model` (`pkg/oam/model`; `kurel build` loads
-  it through `pkg/cmd/kurel/models.go`).
+  it through `pkg/cmd/kurel/models.go`). The binary also ships definitions and models of its own
+  (`pkg/oam/shipped`), registered before an application's.
 - **What a consumer extends.** `ComponentHandler` and `TraitHandler` (`pkg/oam/handler.go`),
   `PolicyHandler` (`pkg/oam/pipeline.go`), the lowering rule interfaces (`pkg/oam/lowering.go`), the `Policy`
   interface (`pkg/oam/policy.go`) and `PolicyResult.Extensions`.

@@ -9,7 +9,7 @@
 //
 // The check is structural. The CRD's CEL rules (x-kubernetes-validations) are not
 // evaluated and the API server's defaults are not applied. Only the version the
-// document names is read, and only from a local file.
+// document names is read, and only from a local file or the file system LoadFS is given.
 package definition
 
 import (
@@ -18,8 +18,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -88,25 +90,76 @@ func Load(path string) (*Handler, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "reading component definition %q", path)
 	}
+	return parse(data, path, diskCRD(filepath.Dir(path)))
+}
+
+// LoadFS is Load for the definition at name in fsys, with the CRD read from fsys too, as a path
+// inside the definition's directory. It is how a definition embedded in the binary loads: every
+// check of Load runs, the pinned digest included.
+func LoadFS(fsys fs.FS, name string) (*Handler, error) {
+	data, err := fs.ReadFile(fsys, name)
+	if err != nil {
+		return nil, errors.Wrapf(err, "reading component definition %q", name)
+	}
+	return parse(data, name, fsCRD(fsys, path.Dir(name)))
+}
+
+// crdReader returns the bytes of the CRD file a definition names, a path relative to the
+// definition's directory.
+type crdReader func(rel string) ([]byte, error)
+
+// diskCRD reads a CRD from dir, and refuses a path that leaves it, a symlink included.
+func diskCRD(dir string) crdReader {
+	return func(rel string) ([]byte, error) {
+		// The text is local; a symlink can still lead out of the directory.
+		crdPath, err := oam.ResolveInside(dir, rel)
+		if errors.Is(err, oam.ErrPathOutsideDirectory) {
+			return nil, errors.Errorf("spec.schema.crd %q resolves outside the definition's directory", rel)
+		}
+		if err != nil {
+			return nil, errors.Wrap(err, "reading the pinned CRD")
+		}
+		raw, err := os.ReadFile(crdPath)
+		if err != nil {
+			return nil, errors.Wrap(err, "reading the pinned CRD")
+		}
+		return raw, nil
+	}
+}
+
+// fsCRD reads a CRD from dir of fsys. The path was already refused if it is not local.
+func fsCRD(fsys fs.FS, dir string) crdReader {
+	return func(rel string) ([]byte, error) {
+		raw, err := fs.ReadFile(fsys, path.Join(dir, rel))
+		if err != nil {
+			return nil, errors.Wrap(err, "reading the pinned CRD")
+		}
+		return raw, nil
+	}
+}
+
+// parse decodes the definition document data, which came from the file called name, and builds
+// its handler.
+func parse(data []byte, name string, readCRD crdReader) (*Handler, error) {
 	var doc document
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&doc); err != nil {
-		return nil, errors.Wrapf(err, "parsing component definition %q", path)
+		return nil, errors.Wrapf(err, "parsing component definition %q", name)
 	}
 	// One definition per file: a second document would be dropped unread.
 	var next any
 	if err := dec.Decode(&next); !errors.Is(err, io.EOF) {
-		return nil, errors.Errorf("component definition %q: the file holds more than one YAML document; one definition goes in each file", path)
+		return nil, errors.Errorf("component definition %q: the file holds more than one YAML document; one definition goes in each file", name)
 	}
-	h, err := build(&doc, filepath.Dir(path))
+	h, err := build(&doc, readCRD)
 	if err != nil {
-		return nil, errors.Wrapf(err, "component definition %q", path)
+		return nil, errors.Wrapf(err, "component definition %q", name)
 	}
 	return h, nil
 }
 
-func build(doc *document, dir string) (*Handler, error) {
+func build(doc *document, readCRD crdReader) (*Handler, error) {
 	if doc.APIVersion != APIVersion || doc.Kind != Kind {
 		return nil, errors.Errorf("want apiVersion %q and kind %q, got %q and %q", APIVersion, Kind, doc.APIVersion, doc.Kind)
 	}
@@ -121,17 +174,9 @@ func build(doc *document, dir string) (*Handler, error) {
 		return nil, errors.Errorf("spec.schema.crd %q must be a relative path inside the definition's directory", doc.Spec.Schema.CRD)
 	}
 
-	// The text is local; a symlink can still lead out of the directory.
-	crdPath, err := oam.ResolveInside(dir, doc.Spec.Schema.CRD)
-	if errors.Is(err, oam.ErrPathOutsideDirectory) {
-		return nil, errors.Errorf("spec.schema.crd %q resolves outside the definition's directory", doc.Spec.Schema.CRD)
-	}
+	raw, err := readCRD(doc.Spec.Schema.CRD)
 	if err != nil {
-		return nil, errors.Wrap(err, "reading the pinned CRD")
-	}
-	raw, err := os.ReadFile(crdPath)
-	if err != nil {
-		return nil, errors.Wrap(err, "reading the pinned CRD")
+		return nil, err
 	}
 	sum := sha256.Sum256(raw)
 	if got := hex.EncodeToString(sum[:]); got != doc.Spec.Schema.SHA256 {
