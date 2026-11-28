@@ -194,10 +194,14 @@ func TestShippedWorkloadParts(t *testing.T) {
 `, []string{"Deployment", "Service", "ServiceAccount", "Cluster", "ObjectStore", "ScheduledBackup"}, []string{"name: orders-db-daily", "method: plugin"}},
 		{"monitoring in service mode", "        image: reg/orders:1\n        monitoring: {path: /metrics}\n",
 			[]string{"Deployment", "Service", "ServiceAccount", "VMServiceScrape"}, nil},
-		{"monitoring in worker mode", "        mode: worker\n        image: reg/orders:1\n        monitoring: {port: metrics}\n",
-			[]string{"Deployment", "ServiceAccount", "VMPodScrape"}, []string{"port: metrics"}},
-		{"monitoring in job mode", "        mode: job\n        image: reg/orders:1\n        monitoring: {port: metrics}\n",
-			[]string{"Job", "VMPodScrape"}, []string{"port: metrics"}},
+		// A worker and a job write no container port, so only a number is a usable endpoint: the
+		// model writes it as portNumber.
+		{"monitoring in worker mode", "        mode: worker\n        image: reg/orders:1\n        monitoring: {port: 9090}\n",
+			[]string{"Deployment", "ServiceAccount", "VMPodScrape"}, []string{"portNumber: 9090"}},
+		{"monitoring in job mode", "        mode: job\n        image: reg/orders:1\n        monitoring: {port: 9090}\n",
+			[]string{"Job", "VMPodScrape"}, []string{"portNumber: 9090"}},
+		{"monitoring in service mode by number", "        image: reg/orders:1\n        monitoring: {port: 8080}\n",
+			[]string{"Deployment", "Service", "ServiceAccount", "VMServiceScrape"}, []string{"targetPort: 8080"}},
 		{"monitoring rules", "        image: reg/orders:1\n        monitoring:\n          rules:\n            - name: availability\n              rules:\n                - {alert: Down, expr: \"up == 0\", for: 5m}\n",
 			[]string{"Deployment", "Service", "ServiceAccount", "VMServiceScrape", "VMRule"}, []string{"alert: Down"}},
 	}

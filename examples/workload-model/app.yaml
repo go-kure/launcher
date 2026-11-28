@@ -40,14 +40,15 @@ spec:
               rules:
                 - {alert: OrdersDown, expr: 'up{job="orders"} == 0', for: 5m}
 
-    # A worker. Its pods declare no port, so the monitoring port is a required input.
+    # A worker. The model writes no container port for it, so the monitoring port is a required
+    # number, the port the process listens on.
     - name: ledger-sync
       type: workload@v1
       properties:
         mode: worker
         image: registry.example.org/ledger-sync:1.0.0
         replicas: 2
-        monitoring: {port: metrics}
+        monitoring: {port: 9090}
 
     # A job that writes to a volume.
     - name: nightly-report
