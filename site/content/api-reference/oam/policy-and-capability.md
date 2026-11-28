@@ -342,6 +342,14 @@ field for and is refused as invalid before the policy. The memory request the op
 maximum and sits on `resources`. `podmonitor`, `prometheus-probe`, `prometheusrule` and
 `servicemonitor` raise no policy refusal and declare nothing.
 
+`replicationsource` and `replicationdestination` declare the classes on each of their movers, which
+are open nodes. `storage-maximum` sits on a mover for the capacity of the volume it provisions
+(`capacity`, restic's `cacheCapacity`, and the `configCapacity` of a source's syncthing), and
+`resource-maximum` for the cpu and memory of `moverResources`. The `rsync` mover, over SSH, is run as
+root with seven added Linux capabilities whenever it is authored, so it declares `container-capability`
+and has no security context; `rsyncTLS`, `rclone`, `restic` and, on a source, `syncthing` declare
+`privileged` for `moverSecurityContext.windowsOptions.hostProcess`.
+
 `postgresql` lowers onto a `cnpg-cluster` and, with a pooler, a `cnpg-pooler`, so it declares what
 their policy check raises for the values it writes: `replica-maximum` on `replicas`, `registry` on
 `imageName` and on the open `pooler` node, `resource-maximum` on the four `cpu` and `memory`

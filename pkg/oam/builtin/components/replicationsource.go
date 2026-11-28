@@ -43,7 +43,7 @@ func (h *ReplicationSourceHandler) PropertySchema() map[string]oam.PropertySchem
 		Type: oam.PropertyTypeObject, AdditionalProperties: true,
 		Description: spec + "syncthing: synchronize with Syncthing peers; of each of peers, address, ID and introducer are required. configCapacity sizes the configuration volume and is held to the EnvironmentPolicy storage maximum, and the cpu and memory of moverResources to its maxima. moverSecurityContext.windowsOptions.hostProcess is refused unless the policy allows privileged workloads; of a moverVolumes entry, mountPath and volumeSource are required. Decoded strictly into VolSync's API type: see ReplicationSourceSyncthingSpec in its API reference.",
 	}
-	return schema
+	return oam.DeclareBounds(schema, volsyncBounds(true))
 }
 
 // replicationSourceKind is the replicationsource kind: see policyHeldKind.

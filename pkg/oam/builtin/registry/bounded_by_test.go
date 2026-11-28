@@ -87,6 +87,7 @@ var (
 	anyStorage      knob = func(p *boundsPolicy) { p.maxStorage = "" }
 	anyRegistry     knob = func(p *boundsPolicy) { p.registries = nil }
 	anyCapability   knob = func(p *boundsPolicy) { p.forbiddenCaps = nil }
+	forbidChown     knob = func(p *boundsPolicy) { p.forbiddenCaps = append(p.forbiddenCaps, "CHOWN") }
 	noCPULimit      knob = func(p *boundsPolicy) { p.cpuLimit = "" }
 	noMemoryLimit   knob = func(p *boundsPolicy) { p.memoryLimit = "" }
 	withCPULimit    knob = func(p *boundsPolicy) { p.cpuLimit = "1" }
@@ -837,6 +838,53 @@ func monitoringKindRows() []boundRow {
 	return rows
 }
 
+// volsyncKindRows are the bounds of replicationsource and replicationdestination,
+// whose movers are open nodes held by enforceVolsyncMovers: the capacity each
+// provisions, its cpu and memory, the capabilities an rsync-over-SSH mover is run
+// with (it adds seven whenever it is authored), and the HostProcess switch of the
+// movers that have a security context. A passing document authors no mover, so the
+// row authors the one it changes.
+func volsyncKindRows() []boundRow {
+	var rows []boundRow
+	for _, kind := range []struct {
+		typ    string
+		movers []string
+		// capacity is the key of each mover that holds the storage it provisions.
+		capacity map[string]string
+	}{
+		{"replicationsource", []string{"rsync", "rsyncTLS", "rclone", "restic", "syncthing"},
+			map[string]string{"rsync": "capacity", "rsyncTLS": "capacity", "rclone": "capacity", "restic": "capacity", "syncthing": "configCapacity"}},
+		{"replicationdestination", []string{"rsync", "rsyncTLS", "rclone", "restic"},
+			map[string]string{"rsync": "capacity", "rsyncTLS": "capacity", "rclone": "capacity", "restic": "capacity"}},
+	} {
+		for _, mover := range kind.movers {
+			row := func(class oam.RefusalClass, relax knob, change ...set) boundRow {
+				return boundRow{typ: kind.typ, path: mover, class: class, change: change, relax: relax}
+			}
+			rows = append(rows,
+				row(oam.RefusalStorageMaximum, anyStorage, set{at: mover + "." + kind.capacity[mover], value: "1Ti"}),
+				row(oam.RefusalResourceMaximum, anyCPU, set{at: mover + ".moverResources.limits.cpu", value: "8"}),
+			)
+			if mover == "restic" {
+				// The restic metadata cache is a second volume the operator provisions.
+				rows = append(rows, row(oam.RefusalStorageMaximum, anyStorage, set{at: "restic.cacheCapacity", value: "1Ti"}))
+			}
+			if mover == "rsync" {
+				// The mover as a whole is the change: authored, it adds the seven
+				// capabilities, and the policy forbids one of them. It has no
+				// security context to author.
+				r := row(oam.RefusalContainerCapability, anyCapability, set{at: "rsync.sshKeys", value: "keys"})
+				r.strict = forbidChown
+				rows = append(rows, r)
+				continue
+			}
+			rows = append(rows, row(oam.RefusalPrivileged, allowPrivileged,
+				set{at: mover + ".moverSecurityContext.windowsOptions.hostProcess", value: true}))
+		}
+	}
+	return rows
+}
+
 // boundRows lists every tested bound. TestBoundedBy_DeclaredAndTested holds it
 // to what the registered schemas declare, both ways.
 func boundRows() []boundRow {
@@ -868,6 +916,7 @@ func boundRows() []boundRow {
 	rows = append(rows, coreKindRows()...)
 	rows = append(rows, providerKindRows()...)
 	rows = append(rows, monitoringKindRows()...)
+	rows = append(rows, volsyncKindRows()...)
 	rows = append(rows,
 		boundRow{trait: true, typ: "scaler", path: "maxReplicas", class: oam.RefusalReplicaMaximum,
 			change: []set{{at: "maxReplicas", value: 9}}, relax: anyReplicas},
@@ -983,6 +1032,10 @@ func boundDocument(t *testing.T, trait bool, typ string) (oam.Component, map[str
 			props["version"] = "v0.30.0"
 			props["initContainers"] = []any{container("init-config-reloader")}
 		}
+	case "replicationsource":
+		props = map[string]any{"sourcePVC": "data"}
+	case "replicationdestination":
+		props = map[string]any{}
 	case "postgresql", "cnpg-cluster":
 		props = map[string]any{"imageName": boundImage}
 	case "cnpg-pooler":

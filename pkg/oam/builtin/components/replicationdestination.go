@@ -32,7 +32,7 @@ func (h *ReplicationDestinationHandler) CanHandle(componentType string) bool {
 // its json name. Each mover is an open object whose content is checked by the
 // strict decode, not by this schema.
 func (h *ReplicationDestinationHandler) PropertySchema() map[string]oam.PropertySchema {
-	return volsyncSchema("ReplicationDestination", "sizes the volume the data is received into")
+	return oam.DeclareBounds(volsyncSchema("ReplicationDestination", "sizes the volume the data is received into"), volsyncBounds(false))
 }
 
 // replicationDestinationKind is the replicationdestination kind: see
