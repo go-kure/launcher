@@ -63,6 +63,14 @@ const (
 	// NameRoleVolSyncReplicationSource is the volsync trait's ReplicationSource.
 	// Default: "<sourcePVC>-backup". Launcher writes no reference to it by name.
 	NameRoleVolSyncReplicationSource NameRole = "volsync-replicationsource"
+	// NameRoleMonitoringScrape is the monitoring trait's scrape object: a
+	// VMServiceScrape for a component with a Service, a VMPodScrape for one
+	// without. Default: the component's name. Launcher writes no reference to it
+	// by name.
+	NameRoleMonitoringScrape NameRole = "monitoring-scrape"
+	// NameRoleMonitoringRule is the monitoring trait's VMRule. Default:
+	// "<component>-rules". Launcher writes no reference to it by name.
+	NameRoleMonitoringRule NameRole = "monitoring-rule"
 	// NameRolePooler is the CloudNativePG Pooler the postgresql component
 	// generates. Default: "<component>-pooler". CloudNativePG names the pooler's
 	// Service after it, so a name that is not the default must be a valid
@@ -266,6 +274,8 @@ var nameRoles = []struct {
 	{NameRoleIngress, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleHTTPRoute, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleVolSyncReplicationSource, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleMonitoringScrape, nameClassObject, nameSyntaxSubdomain},
+	{NameRoleMonitoringRule, nameClassObject, nameSyntaxSubdomain},
 	{NameRolePooler, nameClassObject, nameSyntaxServiceName},
 	{NameRoleDatabase, nameClassObject, nameSyntaxSubdomain},
 	{NameRoleObject, nameClassObject, nameSyntaxSubdomain},

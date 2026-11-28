@@ -18,9 +18,9 @@ The implementation, history and tests of each section below are on the
 | `ParseWithExtraTypes` | Parse allowing custom trait types **and** a `LowerableTypes` set — the document kinds, component types, trait types and policy types claimed by a transformer's registered lowering rules, the policy types it has a handler for, and the component types it was given with `RegisterAuthoredComponent`. |
 
 Standalone parsing validates each trait's `type` against this package's own allowlist
-of built-in trait types (the `security-context`, `topology-spread`, `force-replace` and
-`disruption` traits are included, matching `SecurityContextHandler`,
-`TopologySpreadHandler`, `ForceReplaceHandler` and `DisruptionHandler`);
+of built-in trait types (the `security-context`, `topology-spread`, `force-replace`,
+`disruption` and `monitoring` traits are included, matching `SecurityContextHandler`,
+`TopologySpreadHandler`, `ForceReplaceHandler`, `DisruptionHandler` and `MonitoringHandler`);
 `ParseWithExtraTraitTypes` widens that allowlist with caller-supplied custom types.
 `ParseWithExtraTypes` widens it further with `Transformer.LowerableTypes()`, so a
 document authored in types that only a lowering rule understands parses ahead of the
@@ -68,7 +68,8 @@ One other per-type
 registry has the same shape and the same failure mode: `traitComponentRestrictions`
 (which traits a component type accepts; `scaler` is restricted to `webservice`, `worker`,
 `deployment`, `statefulset` and `role-deployment`, the member type the two roles lower into
-that no document authors, and `disruption` to the same five).
+that no document authors, and `disruption` to the same five; `monitoring` to `webservice`, `worker`,
+`role-deployment` and `service`, the member types the first two lower into).
 
 **A library caller's own component type** does not go on that list. The caller registers
 the handler with `Transformer.RegisterAuthoredComponent` in place of `RegisterComponent`,

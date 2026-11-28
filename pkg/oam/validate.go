@@ -173,6 +173,7 @@ var validTraitTypes = map[string]bool{
 	"topology-spread":      true,
 	"force-replace":        true,
 	"disruption":           true,
+	"monitoring":           true,
 }
 
 // validPolicyTypes is the set of policy types a document may name without any caller
@@ -201,6 +202,9 @@ var validPolicyTypes = map[string]bool{
 var traitComponentRestrictions = map[string]map[string]bool{
 	"scaler":     scalerAdmittedTypes(),
 	"disruption": {"webservice": true, "worker": true, "deployment": true, "role-deployment": true, "statefulset": true},
+	// monitoring reads the workload of a webservice or a worker: the Service
+	// member a webservice lowers to carries it, and a worker's deployment member.
+	"monitoring": {"webservice": true, "worker": true, "service": true, "role-deployment": true},
 }
 
 // validate performs semantic validation on a parsed Application.

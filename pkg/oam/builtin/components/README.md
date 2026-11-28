@@ -133,7 +133,10 @@ member's group is applied in. The rules of this package forward by what a trait 
   `oci` on a shared source, emit one component beside the source, and that component
   carries it.
 - **Any other trait** goes to the one member whose objects or contracts it acts on; each
-  rule's entry under "Per-type highlights" says which.
+  rule's entry under "Per-type highlights" says which. `webservice` forwards `monitoring`
+  to its `service` member with the routing traits, since the trait scrapes the Service by
+  its port name; `worker` has no Service, so the trait stays with its `role-deployment`
+  and scrapes the pods (go-kure/launcher#1736).
 
 **A rule whose members can land in different groups forwards a bundle trait only where
 it can tell the groups, and refuses the document where it cannot.** Groups are computed

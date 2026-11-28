@@ -209,7 +209,7 @@ func TestWebserviceRule_AffinityShorthandBecomesRaw(t *testing.T) {
 }
 
 // Each authored trait goes, by value and in authored order, to the member it
-// acts on: the routing traits to the service; prune-protection and
+// acts on: the routing traits and monitoring to the service; prune-protection and
 // force-replace to every member; everything else — the workload traits, the bundle
 // traits (fluxcd-*), and a type the rule does not know — to the deployment.
 // topologySpread (absent or true) puts a propertyless topology-spread in front
@@ -222,6 +222,7 @@ func TestWebserviceRule_RoutesTraits(t *testing.T) {
 		{Type: "expose"},
 		{Type: "fluxcd-patches"},
 		{Type: "httproute"},
+		{Type: "monitoring"},
 		{Type: "force-replace"},
 		{Type: "fluxcd-postbuild"},
 		{Type: "an-extension-trait"},
@@ -233,7 +234,7 @@ func TestWebserviceRule_RoutesTraits(t *testing.T) {
 		}
 		return out
 	}
-	wantSvc := []string{"prune-protection", "ingress", "expose", "httproute", "force-replace"}
+	wantSvc := []string{"prune-protection", "ingress", "expose", "httproute", "monitoring", "force-replace"}
 	wantDep := []string{"prune-protection", "scaler", "fluxcd-patches", "force-replace", "fluxcd-postbuild", "an-extension-trait"}
 
 	for name, ts := range map[string]any{"absent": "absent", "true": true, "false": false} {

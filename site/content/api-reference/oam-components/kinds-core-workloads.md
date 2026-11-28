@@ -95,7 +95,7 @@ the main container's one port `{name: http, containerPort: <port>}`; the
 `service` member gets one port `{name: http, port: <port>}` and the default
 selector `app: <component-name>`. Annotations go to both members. Each
 authored trait is forwarded unchanged, in authored order, to the member it
-acts on: `expose`, `ingress` and `httproute` go to the `service`;
+acts on: `expose`, `ingress`, `httproute` and `monitoring` go to the `service`;
 `prune-protection` and `force-replace` go to both; every other trait goes
 to the `role-deployment`. That includes `fluxcd-patches` and `fluxcd-postbuild`
 (not built in; a consumer that delivers through Flux registers them) and any

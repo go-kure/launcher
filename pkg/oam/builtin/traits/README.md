@@ -87,6 +87,7 @@ preflight reject every valid use of the trait.
 | `topology-spread` | (modifies the Deployment's PodSpec) | (no properties; an authored engine-owned `scope` is accepted; a capability rendering carries no keys). Stamps launcher's default topology spread constraints — the ones `webservice` and `worker` apply from `topologySpread` — onto every typed Deployment the component generates (one a launcher kind builds, or one decoded from a `manifests` source or a `helmtemplate` chart render), from its post-policy `spec.replicas`, or from the `minReplicas` of the `scaler` that scales the Deployment, wherever in the bundle that `scaler` sits (a launcher-built Deployment under a `scaler` has no `spec.replicas`; an adopted one keeps its own, which is then ignored): none at 1 replica, a hostname spread from 2, a zone spread added from 3. Refuses a Deployment that already carries constraints or whose selector is not `matchLabels` alone, and a component with no typed Deployment (a `pod` component, for one: the trait is Deployment-only); a Deployment passed through as raw, unstructured output (`passthrough`) is not inspected (see below). |
 | `scaler` | HorizontalPodAutoscaler (+ optional PDB) | `minReplicas`, `maxReplicas` (both optional; policy defaults `scalerMinReplicas`/`scalerMaxReplicas`, each reported to the provenance report as a `policy` entry at `minReplicas`/`maxReplicas`; policy cap `maxReplicas`), `cpuUtilization`, `memoryUtilization`, `enablePDB`, `hpaName` and `pdbName` (optional; the objects' names, default `<component>-hpa` and `<component>-pdb`; `pdbName` without `enablePDB: true` names no object and is refused). Admitted on `webservice`, `worker`, `deployment` and `statefulset` only; the HPA's `scaleTargetRef` takes its kind from the component's settled type (`Deployment`, or `StatefulSet` for a `statefulset`). On a `webservice` or `worker` with a non-RWX claim (the claims that cap the component at one replica, see the components README's "Non-RWX volumes"), an effective `maxReplicas` above 1 fails the build, naming the trait and the claim: the HPA would otherwise scale the Deployment past the one pod the claim allows. The raw `deployment` has none either: it has no `pvc` volume type and reports no claim. A `statefulset` has no such check: its `volumeClaimTemplates` give one claim per pod, and a claim shared through `template.spec.volumes` stays as unguarded under a `scaler` as it is under authored replicas. The HPA owns the replica count, so the Deployment or StatefulSet it scales is built without `spec.replicas`, and a component that authors `replicas` beside a `scaler` is refused (go-kure/launcher#1179); see the components README's "Replicas under a `scaler`". |
 | `disruption` | PodDisruptionBudget | `minAvailable` or `maxUnavailable` (exactly one, required, no default; a whole number from 0 or a percentage string from `"0%"` to `"100%"`), `unhealthyPodEvictionPolicy` (optional; `IfHealthyBudget` or `AlwaysAllow`), `pdbName` (optional; the object's name, default `<component>-pdb`). Any other key is refused. Admitted on `webservice`, `worker`, `deployment` and `statefulset` only. Selects the component's pods by the `app` label. Refused beside a `scaler` with `enablePDB: true` on the same component: see "The disruption trait" below (go-kure/launcher#1266). |
+| `monitoring` | VMServiceScrape (a component with a Service) or VMPodScrape (one without), and a VMRule when `rules` is given | `port` (a name or a number from 1 to 65535; default on a component with a Service: its Service port; required without one), `path` (starts with `/`), `interval`, `rules[]` (groups of `name`, optional `interval` and `rules[]` of `alert` or `record`, `expr`, `for`, `labels`, `annotations`), `scrapeName` and `ruleName` (optional; default `<component>` and `<component>-rules`). Any other key is refused. Admitted on `webservice` and `worker`. Selects the component's Service or pods by the `app` label. VictoriaMetrics operator kinds only: see "The monitoring trait" below (go-kure/launcher#1736). |
 
 ### Operational (FluxCD)
 | `type` | Effect | Key properties |
@@ -916,6 +917,74 @@ traits:
   one budget across several components is not expressible. The scaler's fixed
   50% budget is unchanged.
 
+## The monitoring trait
+
+`monitoring` writes the VictoriaMetrics objects of a workload from what the
+workload already states, so an author does not repeat its labels and port. It
+writes VictoriaMetrics operator (`operator.victoriametrics.com/v1beta1`) kinds
+only: launcher supports no native Prometheus backend. The Prometheus Operator
+kinds stay hand-written types (`servicemonitor`, `podmonitor`, `prometheusrule`).
+
+```yaml
+traits:
+  - type: monitoring
+    properties:
+      path: /metrics
+      interval: 30s
+      rules:
+        - name: availability
+          rules:
+            - alert: WebDown
+              expr: up{job="web"} == 0
+              for: 5m
+```
+
+- **The scrape follows the component.** A component with a Service (a
+  `webservice`, whose trait is routed to its Service member) gets a
+  `VMServiceScrape` that selects the Service by the component's `app` label and
+  scrapes its port: the Service port's name, else its number as `targetPort`. A
+  component without a Service (a `worker`) gets a `VMPodScrape` that selects its
+  pods by the same label. The selector is not a property.
+- **`port`** is a name or a number from 1 to 65535. On a Service a name is the
+  Service port's name (`port`) and a number the pod's port (`targetPort`); on
+  pods a name is a container port's name (`port`) and a number is `portNumber`.
+  A worker declares no port of its own, so `port` is required there. A Service
+  with no ports is refused unless `port` is set.
+- **`path` and `interval` are written only when set**, so VictoriaMetrics' own
+  defaults (`/metrics`, its global interval) apply otherwise. The trait writes
+  one endpoint: no `scheme`, `scrapeTimeout`, relabeling or client
+  authentication, which stay by hand through the generic route.
+- **`rules`** writes a `VMRule` named `<component>-rules`: groups with a
+  `name` (unique), an optional `interval` and at least one rule. A rule is an
+  `alert` or a `record` (exactly one), with an `expr`, and optionally `for`,
+  `labels` and `annotations`. No `rules`, or an empty list, writes no `VMRule`.
+  `expr` is not parsed: the operator refuses an invalid MetricsQL expression.
+- **Names.** `scrapeName` and `ruleName` are used as written or refused, and
+  resolve under the roles `monitoring-scrape` and `monitoring-rule`, so a
+  `Naming` hook can rename them. Two components that name one object are refused
+  with both named.
+- **Written unstructured, held to the CRD.** The objects are built as
+  unstructured objects, so launcher takes no dependency on the operator's Go
+  API module. `monitoring_crd_test.go` holds every object the trait can write to
+  the CustomResourceDefinitions of operator release v0.76.0
+  (`testdata/upstream/victoria-metrics-operator`): every field is one the CRD
+  declares, with its type, and every required field is written.
+- **No policy class.** The trait writes no image, resource, storage, capability,
+  host namespace or secret, so its schema declares no `boundedBy`.
+- **A limit: the object kind policy.** The base library does not know the scope
+  of the VictoriaMetrics kinds, so under a policy that has an object kind
+  check and does not allow cluster-scoped objects the build refuses these
+  objects as of unknown scope (class `object-kind`), as it refuses any custom
+  resource of a kind it does not know. A policy that allows cluster-scoped
+  objects, or sets no object kind policy, builds them. Tracked in
+  go-kure/launcher#1744; `TestMonitoring_ObjectKindPolicyRefusesUnknownScope`
+  pins it.
+- **Not covered.** One endpoint per trait. A `deployment` or
+  `statefulset` with a separate `service` component does not admit the trait.
+  The workload model's monitoring part (go-kure/launcher#1737) follows this
+  property shape. Instance kinds (`VMAgent` and the others), alerting
+  configuration and dashboards are not written.
+
 ## Decorator forwarding for layout-augmenting components
 
 A component config that also implements kure's `layout.LayoutAugmenter` (e.g. any `helmtemplate`)
@@ -1082,9 +1151,9 @@ wrapper, so a caller reaches a trait config's concrete type through `oam.UnwrapC
 
 ## Fills in the provenance report
 
-Twelve handlers report the values they fill when the properties they are handed
+Thirteen handlers report the values they fill when the properties they are handed
 hold none (`oam.BuiltinDefaultReporter`, go-kure/launcher#1580): `certificate`,
-`external-secret`, `volsync`, `scaler`, `disruption`, `rbac`, `networkpolicy`,
+`external-secret`, `volsync`, `scaler`, `disruption`, `monitoring` (its two object names), `rbac`, `networkpolicy`,
 `ingress`, `httproute`, `pvc`, `topology-spread` and `security-context`. The config of the sub-application the
 trait adds names each fill at the path the author would have written, with the ref
 `<trait>.<path>`, and the engine records it as a `builtin` entry under the trait once the
@@ -1465,6 +1534,7 @@ the transform (`site/content/api-reference/oam/names-and-overrides.md`, "Name ro
 | `volsync` | `repository`, `sourcePVC` | The repository Secret, which launcher only references and never generates (no role, by design), and the claim to back up (which also starts the default ReplicationSource name). |
 | `scaler` | `hpaName`, `pdbName` | The HorizontalPodAutoscaler, and the PodDisruptionBudget (`pdbName` needs `enablePDB: true`). Neither names the Deployment or StatefulSet the HPA scales: `scaleTargetRef` names the component's object, its `objectName` where it has one. |
 | `rbac` | `name` | The Role, the RoleBinding and, with `clusterWide`, the ClusterRole and the ClusterRoleBinding: one name for all four, and the `roleRef.name` of both bindings. The ClusterRole and the ClusterRoleBinding are claimed with no namespace (`oam.NameSpec.ClusterScoped`), so a lowering rule's cluster-scoped object of the same kind and name is refused with both named. |
+| `monitoring` | `scrapeName`, `ruleName` | The VMServiceScrape or VMPodScrape (roles `monitoring-scrape`), and the VMRule (`monitoring-rule`). The selector names no object: it is the component's `app` label. |
 | `networkpolicy` | `name` | The NetworkPolicy. |
 
 A kind component's `objectName` renames its object and nothing a trait names: every default

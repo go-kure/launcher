@@ -26,7 +26,8 @@ components themselves, each with what it emits and refuses, are listed in
 [`pkg/oam/builtin/components`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components),
 so a new kind changes nothing here but those two lines. A trait is the same: `disruption`,
 the PodDisruptionBudget trait (admitted on `webservice`, `worker`, `deployment` and
-`statefulset`), is one entry in `TraitHandlers()` and one line in the testdata file.
+`statefulset`), is one entry in `TraitHandlers()` and one line in the testdata file, and so is
+`monitoring`, the VictoriaMetrics scrape and rule trait (admitted on `webservice` and `worker`).
 
 A type that is a lowering rule is never also a handler of the same position, and
 `RegisterComponentLowering` and `RegisterTraitLowering` panic on that collision. A consumer
