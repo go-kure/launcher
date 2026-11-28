@@ -745,7 +745,8 @@ source types `helm`, `gitrepository`, `helmrepository`, `ocirepository`, `oci`, 
 `imagerepository`, `resourcesetinputprovider` and `manifests`, the `fluxcd-provider` type, `passthrough`,
 `helmtemplate`, `crd`, `horizontalpodautoscaler`, `persistentvolume`, `persistentvolumeclaim`, `metallb-bgppeer`,
 `certificate`, `issuer`, `clusterissuer`, `secretstore`, `clustersecretstore`, `externalsecret`,
-`clusterexternalsecret`, `prometheus`, `alertmanager`, `thanosruler`, `postgresql` and
+`clusterexternalsecret`, `prometheus`, `alertmanager`, `thanosruler`, `replicationsource`,
+`replicationdestination`, `postgresql` and
 the CloudNativePG kinds `cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-imagecatalog` and
 `cnpg-clusterimagecatalog` publish, in
 `boundedBy`, which classes an authored value at a property can cause (`bounds.go`,
@@ -783,6 +784,12 @@ so it is refused as invalid before the policy. The operator-filled memory reques
 thanosruler, where `resources` names none) is held to the memory maximum and sits on `resources`; the test row shows
 the authored form only. `podmonitor`, `prometheus-probe`, `prometheusrule` and `servicemonitor` raise no policy
 refusal and declare nothing.
+`replicationsource` and `replicationdestination` declare what `enforceVolsyncMovers` raises, on each mover, an
+open node (`volsyncBounds`): `storage-maximum` for the capacity of the volume it provisions (`capacity`, restic's
+`cacheCapacity`, and a source's syncthing `configCapacity`) and `resource-maximum` for `moverResources`. The
+`rsync` mover (over SSH) is run as root with seven added capabilities whenever it is authored, so it declares
+`container-capability` and has no security context; `rsyncTLS`, `rclone`, `restic` and, on a source,
+`syncthing` declare `privileged` for `moverSecurityContext.windowsOptions.hostProcess`.
 `postgresql` and the CloudNativePG kinds declare what their
 policy check raises (`cnpg_cluster.go`, `cnpg_pooler.go`, `cnpg_common.go`): `replica-maximum`,
 `resource-maximum`, `storage-maximum` and `registry` on a Cluster's own properties, and the classes of a

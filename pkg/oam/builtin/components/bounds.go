@@ -265,6 +265,31 @@ func thanosRulerBounds() map[string][]oam.RefusalClass {
 	return b
 }
 
+// volsyncBounds are the bounds of replicationsource and replicationdestination
+// (enforceVolsyncMovers): each mover is an open node, and a value below it, or
+// authoring it at all, raises its classes. Every mover holds the storage of the
+// volume it provisions (`capacity`, and for restic `cacheCapacity`, for a source's
+// syncthing `configCapacity`) to the storage maximum, and the cpu and memory of
+// `moverResources` to the maxima. The rsync-over-SSH mover is run as root with
+// seven added capabilities whenever it is authored, so it declares
+// `container-capability` and has no security context; every other mover declares
+// `privileged` for `moverSecurityContext.windowsOptions.hostProcess`. A
+// destination has no syncthing mover.
+func volsyncBounds(syncthing bool) map[string][]oam.RefusalClass {
+	held := []oam.RefusalClass{oam.RefusalStorageMaximum, oam.RefusalResourceMaximum}
+	withPrivileged := slices.Concat(held, []oam.RefusalClass{oam.RefusalPrivileged})
+	b := map[string][]oam.RefusalClass{
+		"rsync":    slices.Concat(held, []oam.RefusalClass{oam.RefusalContainerCapability}),
+		"rsyncTLS": withPrivileged,
+		"rclone":   withPrivileged,
+		"restic":   withPrivileged,
+	}
+	if syncthing {
+		b["syncthing"] = withPrivileged
+	}
+	return b
+}
+
 // passthroughBounds are the bounds of the passthrough type: its `object`, an
 // open node, is the one object it emits, held to the checks of documentClasses
 // (enforcePassthroughPolicy).

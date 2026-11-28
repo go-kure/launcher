@@ -273,6 +273,13 @@ particular to this package:
   `alertmanager` and a `thanosruler` whose `resources` names none) is held to the memory maximum and sits on
   `resources`; the row that holds `resources` shows the authored form only. `podmonitor`, `prometheus-probe`,
   `prometheusrule` and `servicemonitor` raise no policy refusal and declare nothing.
+- **The VolSync kinds declare the classes on each mover.** `replicationsource` and
+  `replicationdestination` hold each mover as an open node (`volsyncBounds`): `storage-maximum` for the
+  capacity of the volume it provisions (`capacity`, restic's `cacheCapacity` and a source's syncthing
+  `configCapacity`) and `resource-maximum` for `moverResources`. The `rsync` mover, over SSH, is run as root with
+  seven added Linux capabilities whenever it is authored, so it declares `container-capability` and has no
+  security context. `rsyncTLS`, `rclone`, `restic` and, on a source, `syncthing` declare `privileged`, for
+  `moverSecurityContext.windowsOptions.hostProcess`. A destination has no syncthing mover.
 
 ## Pod view of a monitoring workload object (`MonitoringPodSpec`)
 
