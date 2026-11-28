@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/registry"
+	"github.com/go-kure/launcher/pkg/oam/model"
 )
 
 const ruleIdentity = "vmrule.operator.victoriametrics.com@v1beta1"
@@ -120,6 +121,72 @@ func TestEmbeddedContentLoads(t *testing.T) {
 		wantError(t, set.Clash(c.name, oam.TypeID{}), `"`+c.name+`"`, "shipped by launcher")
 		wantError(t, set.Clash("", id), `"`+c.identity+`"`, "shipped by launcher")
 	}
+}
+
+// TestEmbeddedModelsCompile: Load registers the shipped models without compiling their
+// expressions, so a model that does not compile would fail a user's first build and not the
+// load. This is the proof that each embedded one compiles, with a control that one is embedded.
+func TestEmbeddedModelsCompile(t *testing.T) {
+	models, err := fs.Sub(content, "content/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := yamlFiles(models)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) == 0 {
+		t.Fatal("no model is embedded: the check below proves nothing")
+	}
+	for _, name := range names {
+		data, err := fs.ReadFile(models, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := model.Load(data)
+		if err != nil {
+			t.Errorf("shipped model %s does not load: %v", name, err)
+			continue
+		}
+		if _, err := model.Compile(m); err != nil {
+			t.Errorf("shipped model %s does not compile: %v", name, err)
+		}
+	}
+}
+
+// badExpressionModel loads and registers, and does not compile.
+const badExpressionModel = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Model
+metadata:
+  name: broken.acme.example
+  version: v1
+spec:
+  celEnv: "1"
+  outputs: {}
+  parts:
+    - id: cm
+      type: configmap@v1
+      properties:
+        data:
+          k: "${inputs.nosuch}"
+`
+
+// TestShippedModelCompilesAtFirstUse: a shipped model registers without compiling, so a
+// compile error appears at the first build that uses it, and names the shipped file.
+func TestShippedModelCompilesAtFirstUse(t *testing.T) {
+	tr := builtinTransformer(t)
+	if _, err := LoadFS(tr, fstest.MapFS{}, fstest.MapFS{"broken.yaml": {Data: []byte(badExpressionModel)}}); err != nil {
+		t.Fatalf("the model registers, it is the first use that compiles: %v", err)
+	}
+	app := &oam.Application{
+		APIVersion: oam.SupportedAPIVersion, Kind: "Application",
+		Metadata: oam.Metadata{Name: "shop", Namespace: "demo"},
+		Spec: oam.ApplicationSpec{Components: []oam.Component{
+			{Name: "orders", Type: "broken.acme.example@v1", Properties: map[string]any{}},
+		}},
+	}
+	_, err := tr.Transform(app, oam.TransformContext{Namespace: "demo"})
+	wantError(t, err, "shipped model broken.yaml", "nosuch")
 }
 
 // TestShippedDefinitionClash: the same authored name or the same identity is a clash and

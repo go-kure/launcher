@@ -481,6 +481,7 @@ identity names one definition: a changed model under the same identity must use 
 | `(*Compiled).Expand(tr, scope, naming, partName)` | Builds the components of the parts in document order and binds `parts.<id>.name` and `parts.<id>.<key>.name` from `Transformer.ComponentOutputsNamed`. It runs no transform. |
 | `model.NewRegistry(tr)` | Returns a registry for one Transformer. |
 | `(*Registry).Register(m)` | Compiles `m`, refuses it as the Lowering section says, then registers its rule and declares its type. |
+| `(*Registry).RegisterLazy(m, source)` | `Register` for a model that ships with the program: every check but the compile is made now, and the expressions compile once, at the first build that uses the model (`sync.Once`, safe for concurrent first use). A model that does not compile fails that build, and every later one, with `source` in the error. The caller proves the model compiles, as `pkg/oam/shipped` does with a test that compiles each embedded model. |
 | `(*Registry).Rule(key)` | Returns the rule registered under a `Key()`, or nil. |
 | `(*Rule).LowerComponent(comp, lctx)` | Lowers a component of the model type into the components of its parts. |
 | `(*Rule).Outputs(comp, lctx)` | Answers the records of `spec.outputs` as forwarded outputs (`oam.OutputProvider`). |

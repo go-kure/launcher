@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/go-kure/launcher/pkg/errors"
@@ -25,9 +26,30 @@ var ErrLimit = errors.New("model: limit exceeded")
 // model it was made from must not change.
 type Rule struct {
 	m     *Model
-	c     *Compiled
 	t     *oam.Transformer
 	depth int // 1 plus the depth of the deepest part that is a model
+
+	// c is the compiled model: set at registration, or at the first use for a lazy rule, which
+	// names its source (Registry.RegisterLazy). once makes that one compile, whoever uses the
+	// rule first.
+	once   sync.Once
+	c      *Compiled
+	cerr   error
+	source string
+}
+
+// compiled returns the compiled model, compiling it at the first use where registration did
+// not. A failure is kept, so every use reports it, and it names the lazy rule's source.
+func (r *Rule) compiled() (*Compiled, error) {
+	r.once.Do(func() {
+		if r.c == nil {
+			r.c, r.cerr = Compile(r.m)
+		}
+	})
+	if r.cerr != nil {
+		return nil, errors.Wrapf(r.cerr, "model: %s (%s)", r.m.Key(), r.source)
+	}
+	return r.c, nil
 }
 
 // ComponentType is the registry key of the model.
@@ -80,7 +102,11 @@ func (r *Rule) LowerComponent(comp *oam.Component, lctx oam.LoweringContext) (oa
 // the answer against the component each part emitted (oam.OutputDecl, ForwardOf). A model that
 // publishes nothing renders nothing here.
 func (r *Rule) Outputs(comp *oam.Component, lctx oam.LoweringContext) ([]oam.OutputDecl, error) {
-	if len(r.c.outputs) == 0 {
+	c, err := r.compiled()
+	if err != nil {
+		return nil, err
+	}
+	if len(c.outputs) == 0 {
 		return nil, nil
 	}
 	exp, budget, err := r.render(comp, lctx)
@@ -90,7 +116,7 @@ func (r *Rule) Outputs(comp *oam.Component, lctx oam.LoweringContext) ([]oam.Out
 	if err != nil {
 		return nil, errors.Wrapf(err, "model: %s", r.m.Key())
 	}
-	decls, err := r.c.publish(exp)
+	decls, err := c.publish(exp)
 	if err != nil {
 		return nil, errors.Wrapf(err, "model: %s", r.m.Key())
 	}
@@ -136,7 +162,11 @@ func (r *Rule) render(comp *oam.Component, lctx oam.LoweringContext) (*expansion
 	// The parts are components this rule emits, so ComponentOutputsWithin leaves the role object
 	// to the build (a kind part is never named by the hook for it) and gives the hook whole to a
 	// part that is itself a rule.
-	exp, err := r.c.expand(r.t, sc, lctx.NamingHook(), name)
+	c, err := r.compiled()
+	if err != nil {
+		return nil, nil, err
+	}
+	exp, err := c.expand(r.t, sc, lctx.NamingHook(), name)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "model: %s", r.m.Key())
 	}

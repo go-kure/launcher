@@ -82,7 +82,9 @@ func LoadFS(t *oam.Transformer, definitions, models fs.FS) (*Set, error) {
 		if err != nil {
 			return nil, errors.Wrapf(err, "shipped model %q", name)
 		}
-		if err := registry.Register(m); err != nil {
+		// Compiled at the first use, not here: every build runs this, and compiling a model's
+		// expressions costs most of the load. TestEmbeddedModelsCompile proves each one does.
+		if err := registry.RegisterLazy(m, "shipped model "+name); err != nil {
 			return nil, errors.Wrapf(err, "shipped model %q", name)
 		}
 		s.origins[m.Key()] = "model " + name
