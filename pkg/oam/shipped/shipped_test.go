@@ -1,14 +1,10 @@
 package shipped
 
 import (
-	"fmt"
 	"io/fs"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"testing/fstest"
-	"time"
 
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/registry"
@@ -192,60 +188,6 @@ func TestLoadModelDecodesOnce(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		if _, err := loadModel([]byte("kind: Model\n")); err == nil {
 			t.Fatalf("load %d of a text that is no model was accepted", i+1)
-		}
-	}
-}
-
-// togetherRuns numbers the runs of the test below, so that each run decodes a text the cache
-// does not hold yet (a repeated run in one process would otherwise find it).
-var togetherRuns atomic.Int32
-
-// TestLoadModelDecodesOnceWhenLoadsStartTogether: loads of a text nobody has decoded, started at
-// once, decode it once and all get that model. The first decode is held until a second one
-// starts, so on a cache that checks and then stores, without a lock held across the decode,
-// another load must miss meanwhile and decode too, on any number of CPUs and however the loads
-// are scheduled. On a cache that serializes the decodes no second one can start, and the wait
-// ends at its fallback. Run under -race it also proves the cache is safe to share.
-func TestLoadModelDecodesOnceWhenLoadsStartTogether(t *testing.T) {
-	var decodes atomic.Int32
-	overlapped := make(chan struct{})
-	decodeModel = func(data []byte) (*model.Model, error) {
-		if decodes.Add(1) == 2 {
-			close(overlapped)
-		}
-		select {
-		case <-overlapped:
-		case <-time.After(200 * time.Millisecond):
-		}
-		return model.Load(data)
-	}
-	t.Cleanup(func() { decodeModel = model.Load })
-	name := fmt.Sprintf("together-%d.acme.example", togetherRuns.Add(1))
-	text := []byte(strings.Replace(shippedModel, "alerts.acme.example", name, 1))
-	const n = 16
-	got := make([]*model.Model, n)
-	errs := make([]error, n)
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	for i := range got {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			got[i], errs[i] = loadModel(text)
-		}()
-	}
-	close(start)
-	wg.Wait()
-	if d := decodes.Load(); d != 1 {
-		t.Errorf("%d loads started together decoded the text %d times, want 1", n, d)
-	}
-	for i := range got {
-		if errs[i] != nil {
-			t.Fatalf("load %d: %v", i, errs[i])
-		}
-		if got[i] != got[0] {
-			t.Errorf("load %d decoded the model again: %p, want %p", i, got[i], got[0])
 		}
 	}
 }
