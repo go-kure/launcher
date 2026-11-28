@@ -11,14 +11,16 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/definition"
+	"github.com/go-kure/launcher/pkg/oam/shipped"
 )
 
 // loadComponentDefinitions registers on t the component types that the
 // ComponentDefinition documents in dir declare (go-kure/launcher#1704): every
 // *.yaml file of dir in file name order whose kind is ComponentDefinition. A file of
 // another kind is left to its own loader, and a dir that does not exist declares
-// nothing. Each refusal names the file it is about.
-func loadComponentDefinitions(t *oam.Transformer, dir string) error {
+// nothing. Each refusal names the file it is about. A definition that names a type ships
+// (go-kure/launcher#1735) is refused, naming both files.
+func loadComponentDefinitions(t *oam.Transformer, dir string, ships *shipped.Set) error {
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil
@@ -45,6 +47,9 @@ func loadComponentDefinitions(t *oam.Transformer, dir string) error {
 		h, err := definition.Load(path)
 		if err != nil {
 			return err
+		}
+		if err := ships.Clash(h.TypeName(), h.Identity()); err != nil {
+			return errors.Wrapf(err, "%q", path)
 		}
 		if err := definition.Register(t, h); err != nil {
 			return errors.Wrapf(err, "%q", path)

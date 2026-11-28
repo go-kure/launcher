@@ -1,0 +1,13 @@
+# Shipped by launcher. The CRD is one document of the VictoriaMetrics operator release v0.76.0
+# (see ../../README.md for the asset, its digest and the command that split it out).
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: ComponentDefinition
+metadata:
+  name: vm-pod-scrape
+spec:
+  emits:
+    apiVersion: operator.victoriametrics.com/v1beta1
+    kind: VMPodScrape
+  schema:
+    crd: crds/vmpodscrapes.yaml
+    sha256: 8b7916adbc85fa6435207fa855326e78859e1253c55533dbfa630782f05dd150

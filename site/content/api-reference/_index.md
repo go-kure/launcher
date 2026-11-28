@@ -27,6 +27,7 @@ For the full Go API, see
 | [Component Handlers](oam-components) | Built-in component types (webservice, worker, cronjob, helm, helmrelease, helmtemplate, …) | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/components) |
 | [Component Definitions](oam-definitions) | Component types declared by a pinned CRD: document format and loader | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/definition) |
 | [Trait Handlers](oam-traits) | Built-in traits (ingress, certificate, scaler, externalsecret, …) | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/traits) |
+| [Shipped Definitions](oam-shipped) | Definitions and models that launcher ships in the binary, and the refusal of a clash | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/shipped) |
 | [Policy Handlers](oam-policies) | Built-in application policies (dependency, placement) | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/policies) |
 | [Built-in Registry](oam-registry) | Every built-in handler and lowering rule, for registering the builtins | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/registry) |
 | [Fill Probes](oam-probe) | Probe documents and checks a consumer runs against its own transformer, for the fills the provenance report names | [pkg.go.dev](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/builtin/probe) |

@@ -17,6 +17,7 @@ import (
 	"github.com/go-kure/launcher/pkg/errors"
 	"github.com/go-kure/launcher/pkg/oam"
 	"github.com/go-kure/launcher/pkg/oam/builtin/registry"
+	"github.com/go-kure/launcher/pkg/oam/shipped"
 )
 
 // kurelDomain is the label/annotation domain the kurel CLI stamps into every transform.
@@ -152,13 +153,19 @@ func runBuild(cmd *cobra.Command, arg string, opts *buildOptions) error {
 	}
 
 	transformer := newBuiltinTransformer()
+	// What launcher ships in the binary (go-kure/launcher#1735) registers first, so an
+	// application's own definition or model that names a shipped type is refused.
+	ships, err := shipped.Load(transformer)
+	if err != nil {
+		return errors.Wrap(err, "loading shipped definitions and models")
+	}
 	// Before LowerableTypes is read below, so parse accepts a type a definition declares.
-	if err := loadComponentDefinitions(transformer, filepath.Join(appDir, "definitions")); err != nil {
+	if err := loadComponentDefinitions(transformer, filepath.Join(appDir, "definitions"), ships); err != nil {
 		return errors.Wrap(err, "loading component definitions")
 	}
 	// Likewise a model's type, after the definitions so that a model may name a defined type.
 	// The registry refuses a model whose short name is a defined type's name.
-	if err := loadModels(transformer, filepath.Join(appDir, modelsDirName), opts.modelPaths); err != nil {
+	if err := loadModels(transformer, filepath.Join(appDir, modelsDirName), opts.modelPaths, ships); err != nil {
 		return errors.Wrap(err, "loading component models")
 	}
 

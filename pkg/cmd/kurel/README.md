@@ -333,6 +333,16 @@ build and for any library caller. The example is
 [`examples/custom-component`](https://github.com/go-kure/launcher/tree/main/examples/custom-component);
 the loader is [`pkg/oam/definition`](https://pkg.go.dev/github.com/go-kure/launcher/pkg/oam/definition).
 
+**Definitions that ship in the binary** (go-kure/launcher#1735). `build` registers them before it reads
+`definitions/`, so an application authors them with no file of its own: `vm-rule`, `vm-service-scrape`
+and `vm-pod-scrape`, which emit `VMRule`, `VMServiceScrape` and `VMPodScrape`
+(`operator.victoriametrics.com/v1beta1`), each checked against the CRD of the VictoriaMetrics operator
+release v0.76.0 that the binary carries. A model names such a kind by its identity, for example
+`vmrule.operator.victoriametrics.com@v1beta1`. A definition in `definitions/` that has a shipped
+type's name, or its identity, refuses the build, naming both files; a shipped type is never
+replaced. [`pkg/oam/shipped`](https://github.com/go-kure/launcher/blob/main/pkg/oam/shipped/README.md)
+lists what ships and where the CRDs come from.
+
 **The check is structural.** It is the API server's own schema check, run without a cluster. CEL
 rules in the CRD (`x-kubernetes-validations`) are not evaluated, and the API server's defaults
 are not applied, so an object that passes can still be refused by a cluster that runs those
@@ -415,7 +425,9 @@ spec:
 
 A model may name only a model loaded before it, so order the file names, or the flags,
 that way. All of `models/` loads before the first `--model` file: a `--model` file may
-name a model of the directory, and not the reverse. The model's inputs are the schema of
+name a model of the directory, and not the reverse. The models that ship in the binary
+(go-kure/launcher#1735) load before all of these, after the shipped definitions, so any model may
+name them. A model of a shipped model's identity is refused, naming both files. The model's inputs are the schema of
 the component's properties. A model file is read as written: `kurel.yaml` parameters are
 not substituted in it.
 
