@@ -326,6 +326,22 @@ refused under any applied policy, because the operator renders the object and th
 it; no limit lifts that refusal, and the row that holds it asserts it under a policy that limits
 nothing.
 
+`prometheus`, `alertmanager` and `thanosruler` declare what the pods the operator runs would be held
+to. `replica-maximum` sits on `replicas`, and on `shards` of a `prometheus`, whose pods are replicas
+times shards; `registry` on `image`, refused unset under an allowlist because the operator then
+chooses the image; `storage-maximum` on `storage`; `resource-maximum` on `resources`. The open
+`volumes`, `containers` and `initContainers` nodes list the classes of every value below them, and
+the patch of a reloader container the operator generates is held to the allowlist, since unpatched it
+runs the operator's own image. A `prometheus` also declares `registry` and `resource-maximum` on
+`thanos` (the sidecar) and `explicit-secret` on `remoteWrite`, `remoteRead` and `apiserverConfig`;
+a `thanosruler` declares `explicit-secret` on `remoteWrite`. A `prometheus` and an `alertmanager`
+declare `host-namespace` on `hostNetwork` and `privileged` on `securityContext`; a `thanosruler`
+declares nothing on `securityContext`, since its HostProcess switch needs a host network it has no
+field for and is refused as invalid before the policy. The memory request the operator fills where
+`resources` names none (200Mi, for an `alertmanager` and a `thanosruler`) is held to the memory
+maximum and sits on `resources`. `podmonitor`, `prometheus-probe`, `prometheusrule` and
+`servicemonitor` raise no policy refusal and declare nothing.
+
 `postgresql` lowers onto a `cnpg-cluster` and, with a pooler, a `cnpg-pooler`, so it declares what
 their policy check raises for the values it writes: `replica-maximum` on `replicas`, `registry` on
 `imageName` and on the open `pooler` node, `resource-maximum` on the four `cpu` and `memory`
@@ -349,9 +365,9 @@ whole, and the second is the transform's check on every application, whatever co
 emitted the object. `unreadable-object` is declared only on `manifests`, `passthrough`,
 `externalsecret` and `clusterexternalsecret`, and `explicit-secret` only on `manifests`,
 `passthrough`, `helmtemplate`, `fluxcd-provider`, `metallb-bgppeer`, `certificate`, `secretstore`,
-`clustersecretstore`, `externalsecret` and `clusterexternalsecret`. Other built-in types do raise
-them, some from one property (a credential written into the object of a monitoring workload kind,
-for one) and some for the type as a whole (a
+`clustersecretstore`, `externalsecret`, `clusterexternalsecret`, `prometheus` and `thanosruler`.
+Other built-in types do raise them, some from one property (the `secretValues` of `helm`, for
+one) and some for the type as a whole (a
 `secret` component or trait, whatever its properties hold). Those types, like every built-in
 type not named above, declare no bound yet: that says nothing about whether the policy holds
 them.

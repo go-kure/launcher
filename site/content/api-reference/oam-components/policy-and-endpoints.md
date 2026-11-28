@@ -258,6 +258,21 @@ particular to this package:
   `externalSecretSpec` (`targetManifestBounds`): a Secret is refused under a policy that forbids
   explicit secrets, and a workload, a claim or an autoscaler is refused under any applied policy;
   no limit lifts it. The other five MetalLB kinds raise no policy refusal and declare nothing.
+- **The Prometheus Operator workload kinds declare what the operator's pods would be held to.**
+  `prometheus`, `alertmanager` and `thanosruler` declare `replica-maximum` on `replicas`, and a `prometheus`
+  also on `shards` (the pods are replicas times shards); `registry` on `image`, which is refused unset under an
+  allowlist because the operator then chooses it; `storage-maximum` on `storage`; and `resource-maximum` on
+  `resources`. Their `volumes`, `containers` and `initContainers` are open nodes and list the classes of every
+  value below them (`monitoringBounds`); the reloader the operator generates runs its own image unless a patch in
+  `containers` or `initContainers` names one, so that patch is held to the allowlist. A `prometheus` also
+  declares `registry` and `resource-maximum` on `thanos`, and `explicit-secret` on `remoteWrite`, `remoteRead`
+  and `apiserverConfig`; a `thanosruler`, `explicit-secret` on `remoteWrite`. A `prometheus` and an
+  `alertmanager` declare `host-namespace` on `hostNetwork` and `privileged` on `securityContext`. A
+  `thanosruler` declares nothing on `securityContext`: its HostProcess switch needs a host network it has no
+  field for, so it is refused as invalid before the policy. The memory request the operator fills (200Mi, for an
+  `alertmanager` and a `thanosruler` whose `resources` names none) is held to the memory maximum and sits on
+  `resources`; the row that holds `resources` shows the authored form only. `podmonitor`, `prometheus-probe`,
+  `prometheusrule` and `servicemonitor` raise no policy refusal and declare nothing.
 
 ## Pod view of a monitoring workload object (`MonitoringPodSpec`)
 

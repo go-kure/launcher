@@ -745,7 +745,7 @@ source types `helm`, `gitrepository`, `helmrepository`, `ocirepository`, `oci`, 
 `imagerepository`, `resourcesetinputprovider` and `manifests`, the `fluxcd-provider` type, `passthrough`,
 `helmtemplate`, `crd`, `horizontalpodautoscaler`, `persistentvolume`, `persistentvolumeclaim`, `metallb-bgppeer`,
 `certificate`, `issuer`, `clusterissuer`, `secretstore`, `clustersecretstore`, `externalsecret`,
-`clusterexternalsecret`, `postgresql` and
+`clusterexternalsecret`, `prometheus`, `alertmanager`, `thanosruler`, `postgresql` and
 the CloudNativePG kinds `cnpg-cluster`, `cnpg-pooler`, `cnpg-objectstore`, `cnpg-imagecatalog` and
 `cnpg-clusterimagecatalog` publish, in
 `boundedBy`, which classes an authored value at a property can cause (`bounds.go`,
@@ -768,6 +768,21 @@ its open `target` node, and `clusterexternalsecret` on `externalSecretSpec`, for
 the operator write (`targetManifestBounds`): a Secret is refused under a policy that forbids explicit secrets,
 and a kind the policy reads is refused under any applied policy, no limit lifting it. The other five MetalLB
 kinds raise no policy refusal and declare nothing.
+`prometheus`, `alertmanager` and `thanosruler` declare what their workload check raises
+(`enforceMonitoringWorkloadPolicy`; `monitoringBounds`): `replica-maximum` on `replicas` (and, for a
+Prometheus, on `shards`, since the pods are replicas times shards), `registry` on `image` (an unset image is
+refused under an allowlist, since the operator then chooses it), `storage-maximum` on `storage`,
+`resource-maximum` on `resources`, and, on the open `volumes`, `containers` and `initContainers` nodes, the classes of
+a pod's volumes and containers (a patch of the reloader the operator generates included: unpatched, its image is the
+operator's own, which an allowlist cannot hold). A Prometheus declares `registry` and `resource-maximum` on `thanos`
+(the sidecar's image and resources) and `explicit-secret` on `remoteWrite`, `remoteRead` and `apiserverConfig`
+(a `bearerToken`); a thanosruler declares `explicit-secret` on `remoteWrite`. A prometheus and an alertmanager
+declare `host-namespace` on `hostNetwork` and `privileged` on `securityContext` (`windowsOptions.hostProcess`).
+A thanosruler declares no `securityContext` class: its HostProcess switch needs a host network it has no field for,
+so it is refused as invalid before the policy. The operator-filled memory request of 200Mi (alertmanager and
+thanosruler, where `resources` names none) is held to the memory maximum and sits on `resources`; the test row shows
+the authored form only. `podmonitor`, `prometheus-probe`, `prometheusrule` and `servicemonitor` raise no policy
+refusal and declare nothing.
 `postgresql` and the CloudNativePG kinds declare what their
 policy check raises (`cnpg_cluster.go`, `cnpg_pooler.go`, `cnpg_common.go`): `replica-maximum`,
 `resource-maximum`, `storage-maximum` and `registry` on a Cluster's own properties, and the classes of a

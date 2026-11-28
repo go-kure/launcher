@@ -85,7 +85,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 			Items: &oam.PropertySchema{Type: oam.PropertyTypeObject, AdditionalProperties: true, Description: item},
 		}
 	}
-	return map[string]oam.PropertySchema{
+	return oam.DeclareBounds(map[string]oam.PropertySchema{
 		"podMetadata":     object("podMetadata: the labels and annotations the operator copies onto the Alertmanager pods. A key the consumer reserves is refused here as on a workload's pod template. Nothing is added: the pods carry the component label only if it is written here with the component's own value, and without it the NetworkPolicies generated for the component do not select them. The operator sets five labels and one annotation of its own; a value authored here replaces its app.kubernetes.io/version label, and not the other four labels or the annotation." + decoded + "EmbeddedObjectMetadata in its API reference."),
 		"image":           text("image: the full image reference of the alertmanager container, with a tag other than latest or a digest. Held to the EnvironmentPolicy's allowed registries. An image an entry of containers named alertmanager names replaces it: that one runs and is held, and this one is not. Unset or empty, the image is the one an entry of containers named alertmanager names, and where none does the operator chooses the one that runs: refused under a policy with allowed registries, which cannot hold that choice, and built under one without. Where this or an entry of containers named alertmanager names the image, version is required: the operator chooses the container's flags by it."),
 		"imagePullPolicy": text("imagePullPolicy: when the images of the alertmanager, config-reloader and init-config-reloader containers are pulled: Always, Never or IfNotPresent."),
@@ -166,7 +166,7 @@ func (h *AlertmanagerHandler) PropertySchema() map[string]oam.PropertySchema {
 			"One argument: name (required) and value."),
 		"terminationGracePeriodSeconds": number("terminationGracePeriodSeconds: how many seconds the pods are given to stop. Unset, the operator's default of 120. At least 0."),
 		"hostUsers":                     flag("hostUsers: false runs the pods in a user namespace of their own, not the host's."),
-	}
+	}, alertmanagerBounds())
 }
 
 // alertmanagerKind is the alertmanager kind: see policyHeldKind. The API
