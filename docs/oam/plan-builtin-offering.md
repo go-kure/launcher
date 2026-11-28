@@ -234,22 +234,25 @@ None is proposed as a built-in type here. Each can go through the generic route 
 
 **The two built-in users.** `cnpg-objectstore` references the credential keys of an existing Secret and never creates the bucket or the Secret ([PostgreSQL backup and recovery](https://github.com/go-kure/launcher/blob/main/docs/postgresql-backup-recovery.md), line 33 and the example at lines 70-72). The `volsync` trait references the restic Secret by name and never builds it (traits README, the `volsync` row). So today a user writes both Secrets by hand, in two different shapes. That is the gap a consume model closes.
 
-**Proposal: an S3 access model.** One configuration model, whatever S3 is behind it.
+**Built: the `s3-access` model** (go-kure/launcher#1738, shipped as `s3-access.launcher.gokure.dev@v1`). One configuration model, whatever S3 is behind it. Its inputs, routes and key names are in the [shipped definitions and models](https://github.com/go-kure/launcher/blob/main/pkg/oam/shipped/README.md#the-s3-access-model); this page keeps the reasoning.
 
-- Inputs: `endpoint`, `region`, `bucket`, `prefix`, `pathStyle`, an optional CA Secret, where the credentials come from (a reference to an existing Secret, an `external-secret` reference, or a value the model writes with the `secret` trait), and `format`.
-- Writes: a ConfigMap (the `configmap` trait) with the non-secret settings, and the credentials as an `external-secret` trait or a `secret` trait.
-- `format` is an optional switch that defaults to `plain`:
+- Inputs: `endpoint`, `region`, `bucket`, `prefix`, `pathStyle`, an optional CA Secret, where the credentials come from (an existing Secret, an ExternalSecret, or values the model writes as a Secret), and `format`.
+- Writes: a ConfigMap with the non-secret settings, and the credentials as an ExternalSecret or a Secret. The model's parts are the `configmap`, `externalsecret` and `secret` kinds.
+- **`format` sits inside the two routes that write the credentials, not at the top level as first proposed.** The model cannot re-key a Secret it did not write, and re-shaping one through the External Secrets Operator is on the list below as not confirmed. So the existing-Secret route has no `format`, and a `format` beside it is refused rather than ignored.
+- `format` defaults to `plain`:
 
 | `format` | Keys written |
 |---|---|
 | `plain` | `access-key-id`, `secret-access-key`, `endpoint`, `bucket-name`. The two Garage operators agree only on the first two key names: the endpoint key is `endpoint` in one and `s3-endpoint` in the other, and only one of them writes the bucket name |
-| `aws-env` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_ENDPOINT_URL_S3` |
-| `credentials-file` | one key holding an AWS shared credentials file |
-| `restic` | `RESTIC_REPOSITORY` plus the AWS variables, for the `volsync` trait |
-| `barman` | the keys a `cnpg-objectstore` `s3Credentials` reference names |
-| `custom` | the user names every key |
+| `aws-env` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_ENDPOINT_URL_S3` (the last derived from the AWS SDK's `AWS_ENDPOINT_URL_<SERVICE>` pattern, not printed there) |
+| `credentials-file` | one key, `credentials`, holding an AWS shared credentials file |
+| `restic` | `RESTIC_REPOSITORY`, `RESTIC_PASSWORD` and the AWS key variables, for the `volsync` trait (`RESTIC_PASSWORD` is an input, required for this format) |
+| `barman` | `ACCESS_KEY_ID` and `ACCESS_SECRET_KEY`, the names the Barman Cloud plugin's object store page uses for a `cnpg-objectstore` `s3Credentials` reference |
+| `custom` | the user names the two credential keys |
 
-**Policy.** An environment policy that forbids explicit secrets (`oam.ExplicitSecretPolicy`, `AllowExplicitSecrets() == false`) refuses the `secret` trait with the class `RefusalExplicitSecret` ([`pkg/oam/policy.go`](https://github.com/go-kure/launcher/blob/main/pkg/oam/policy.go), traits README, "The secret trait"). So the plain-key route is a choice a policy can close, and the `external-secret` route stays open. That policy does not touch `configmap` or `external-secret`.
+Not built: a session token, and the Velero format (see below).
+
+**Policy.** An environment policy that forbids explicit secrets (`oam.ExplicitSecretPolicy`, `AllowExplicitSecrets() == false`) refuses the Secret the `values` route writes with the class `RefusalExplicitSecret` ([`pkg/oam/policy.go`](https://github.com/go-kure/launcher/blob/main/pkg/oam/policy.go), traits README, "The secret trait"). So the plain-key route is a choice a policy can close, and the ExternalSecret and existing-Secret routes stay open. That policy does not touch `configmap` or `externalsecret`.
 
 ### Not confirmed
 

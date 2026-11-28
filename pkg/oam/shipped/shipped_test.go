@@ -7,9 +7,34 @@ import (
 	"testing/fstest"
 
 	"github.com/go-kure/launcher/pkg/oam"
+	"github.com/go-kure/launcher/pkg/oam/builtin/registry"
+	"github.com/go-kure/launcher/pkg/oam/model"
 )
 
 const ruleIdentity = "vmrule.operator.victoriametrics.com@v1beta1"
+
+// builtinTransformer registers every built-in and declares its type identities, as a
+// consumer does. A shipped model names built-in kinds, so the embedded set loads on it only.
+func builtinTransformer(t *testing.T) *oam.Transformer {
+	t.Helper()
+	tr := oam.NewTransformer(registry.ComponentHandlers(), nil)
+	for _, r := range registry.ComponentLoweringRules() {
+		tr.RegisterBuiltinComponentLowering(r)
+	}
+	for name, h := range registry.TraitHandlers() {
+		tr.RegisterBuiltinTrait(name, h)
+	}
+	for name, h := range registry.PolicyHandlers() {
+		tr.RegisterPolicy(name, h)
+	}
+	for _, r := range registry.TraitLoweringRules() {
+		tr.RegisterBuiltinTraitLowering(r)
+	}
+	if err := registry.DeclareTypes(tr); err != nil {
+		t.Fatalf("DeclareTypes: %v", err)
+	}
+	return tr
+}
 
 // shippedModel is a model of one shipped kind, so it registers only after the definitions.
 const shippedModel = `apiVersion: launcher.gokure.dev/v1alpha1
@@ -72,11 +97,17 @@ func wantError(t *testing.T, err error, want ...string) {
 // TestEmbeddedContentLoads registers the embedded set on an empty Transformer: the three
 // kinds resolve by identity, and each is a shipped type by name and by identity.
 func TestEmbeddedContentLoads(t *testing.T) {
-	tr := oam.NewTransformer(nil, nil)
+	tr := builtinTransformer(t)
 	set, err := Load(tr)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The shipped model: its identity resolves and is a shipped type.
+	const s3 = "s3-access.launcher.gokure.dev@v1"
+	if _, err := tr.ResolveComponentType(s3); err != nil {
+		t.Errorf("%s: %v", s3, err)
+	}
+	wantError(t, set.Clash("", oam.TypeID{Name: "s3-access.launcher.gokure.dev", Version: "v1"}), `"s3-access.launcher.gokure.dev@v1.0.0"`, "model s3-access.yaml")
 	for _, c := range []struct{ name, identity string }{
 		{"vm-rule", ruleIdentity},
 		{"vm-pod-scrape", "vmpodscrape.operator.victoriametrics.com@v1beta1"},
@@ -92,11 +123,98 @@ func TestEmbeddedContentLoads(t *testing.T) {
 	}
 }
 
+// TestEmbeddedModelsCompile: Load registers the shipped models without compiling their
+// expressions, so a model that does not compile would fail a user's first build and not the
+// load. This is the proof that each embedded one compiles, with a control that one is embedded.
+func TestEmbeddedModelsCompile(t *testing.T) {
+	models, err := fs.Sub(content, "content/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := yamlFiles(models)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) == 0 {
+		t.Fatal("no model is embedded: the check below proves nothing")
+	}
+	for _, name := range names {
+		data, err := fs.ReadFile(models, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := model.Load(data)
+		if err != nil {
+			t.Errorf("shipped model %s does not load: %v", name, err)
+			continue
+		}
+		if _, err := model.Compile(m); err != nil {
+			t.Errorf("shipped model %s does not compile: %v", name, err)
+		}
+	}
+}
+
+// badExpressionModel loads and registers, and does not compile.
+const badExpressionModel = `apiVersion: launcher.gokure.dev/v1alpha1
+kind: Model
+metadata:
+  name: broken.acme.example
+  version: v1
+spec:
+  celEnv: "1"
+  outputs: {}
+  parts:
+    - id: cm
+      type: configmap@v1
+      properties:
+        data:
+          k: "${inputs.nosuch}"
+`
+
+// TestLoadModelDecodesOnce: a model decoded once is the one every later load reads, and a text
+// that does not load is refused every time, never kept.
+func TestLoadModelDecodesOnce(t *testing.T) {
+	first, err := loadModel([]byte(shippedModel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := loadModel([]byte(shippedModel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Error("the second load decoded the model again")
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := loadModel([]byte("kind: Model\n")); err == nil {
+			t.Fatalf("load %d of a text that is no model was accepted", i+1)
+		}
+	}
+}
+
+// TestShippedModelCompilesAtFirstUse: a shipped model registers without compiling, so a
+// compile error appears at the first build that uses it, and names the shipped file.
+func TestShippedModelCompilesAtFirstUse(t *testing.T) {
+	tr := builtinTransformer(t)
+	if _, err := LoadFS(tr, fstest.MapFS{}, fstest.MapFS{"broken.yaml": {Data: []byte(badExpressionModel)}}); err != nil {
+		t.Fatalf("the model registers, it is the first use that compiles: %v", err)
+	}
+	app := &oam.Application{
+		APIVersion: oam.SupportedAPIVersion, Kind: "Application",
+		Metadata: oam.Metadata{Name: "shop", Namespace: "demo"},
+		Spec: oam.ApplicationSpec{Components: []oam.Component{
+			{Name: "orders", Type: "broken.acme.example@v1", Properties: map[string]any{}},
+		}},
+	}
+	_, err := tr.Transform(app, oam.TransformContext{Namespace: "demo"})
+	wantError(t, err, "shipped model broken.yaml", "nosuch")
+}
+
 // TestShippedDefinitionClash: the same authored name or the same identity is a clash and
 // names the shipped file; another name over another version, an unrelated type and a Set
 // that ships nothing are not.
 func TestShippedDefinitionClash(t *testing.T) {
-	set, err := Load(oam.NewTransformer(nil, nil))
+	set, err := Load(builtinTransformer(t))
 	if err != nil {
 		t.Fatal(err)
 	}

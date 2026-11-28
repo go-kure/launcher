@@ -26,7 +26,16 @@ func NewRegistry(t *oam.Transformer) *Registry {
 // type is declared (Load already pins each to a version), and that the models nest at most MaxNestingDepth deep.
 // It then registers the rule and declares the type. A failure names the path of the part, and
 // nothing is registered unless every check passed.
-func (g *Registry) Register(m *Model) (err error) {
+func (g *Registry) Register(m *Model) error { return g.register(m, true, "") }
+
+// RegisterLazy is Register for a model that ships with the program and is known to compile: it
+// makes every other check now and compiles the expressions at the first use of the model, so a
+// program that never builds a component of its type does not pay for them. source names where
+// the model comes from (a shipped file), and the failure of a compile at first use carries it.
+// The caller owns the proof that the model compiles: a test that compiles each one it ships.
+func (g *Registry) RegisterLazy(m *Model, source string) error { return g.register(m, false, source) }
+
+func (g *Registry) register(m *Model, eager bool, source string) (err error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	key := m.Key()
@@ -56,9 +65,11 @@ func (g *Registry) Register(m *Model) (err error) {
 	}
 	// A cache of its own for each model: a refused registration leaves no compiled site for a
 	// later definition of the same identity to read.
-	c, err := Compile(m)
-	if err != nil {
-		return err
+	var c *Compiled
+	if eager {
+		if c, err = Compile(m); err != nil {
+			return err
+		}
 	}
 	depth := 1
 	for i, p := range m.Spec.Parts {
@@ -89,7 +100,7 @@ func (g *Registry) Register(m *Model) (err error) {
 	if err := g.t.CheckComponentTypes(ids); err != nil {
 		return errors.Wrapf(err, "model: declare %s", key)
 	}
-	r := &Rule{m: m, c: c, t: g.t, depth: depth}
+	r := &Rule{m: m, c: c, t: g.t, depth: depth, source: source}
 	// The Transformer panics on a type it cannot take, before it holds any of it.
 	defer func() {
 		if p := recover(); p != nil {

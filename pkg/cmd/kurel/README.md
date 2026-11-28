@@ -343,6 +343,11 @@ type's name, or its identity, refuses the build, naming both files; a shipped ty
 replaced. [`pkg/oam/shipped`](https://github.com/go-kure/launcher/blob/main/pkg/oam/shipped/README.md)
 lists what ships and where the CRDs come from.
 
+**Models that ship in the binary.** `s3-access.launcher.gokure.dev@v1` (go-kure/launcher#1738) says how to
+reach an S3 bucket: a ConfigMap of the settings and, by the credentials route, a Secret or an ExternalSecret
+whose keys a `format` names. An application authors it by its identity with no `models/` directory
+(`examples/s3-access`); the shipped README lists its inputs and the keys of each format.
+
 **The check is structural.** It is the API server's own schema check, run without a cluster. CEL
 rules in the CRD (`x-kubernetes-validations`) are not evaluated, and the API server's defaults
 are not applied, so an object that passes can still be refused by a cluster that runs those

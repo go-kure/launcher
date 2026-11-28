@@ -1,0 +1,166 @@
+# How to reach an S3 bucket, whatever S3 is behind it (go-kure/launcher#1738). It writes a ConfigMap of the
+# settings and, by the credentials route the application picks, a Secret, an ExternalSecret or nothing.
+# `format` names the keys the credentials take (pkg/oam/shipped/README.md has the table and its sources).
+# It is an input of the two routes that write the credentials: the model cannot re-key a Secret it did not
+# write, so over `existingSecret` there is no format. A nested default is not applied, so it is read below.
+apiVersion: launcher.gokure.dev/v1alpha1
+kind: Model
+metadata:
+  name: s3-access.launcher.gokure.dev
+  version: v1
+spec:
+  celEnv: "1"
+  inputs:
+    endpoint: {type: string, required: true, description: "The endpoint URL, https://s3.example:9000"}
+    region: {type: string, default: us-east-1}
+    bucket: {type: string, required: true}
+    prefix: {type: string, default: "", description: "A path inside the bucket"}
+    pathStyle: {type: boolean, default: true, description: "Path-style addressing; a custom endpoint rarely has wildcard DNS"}
+    caSecret:
+      type: object
+      description: "A Secret that holds the CA of the endpoint. Only named in the ConfigMap, never read"
+      properties:
+        name: {type: string, required: true}
+        key: {type: string, default: ca.crt}
+    credentials:
+      type: object
+      required: true
+      description: "Exactly one of existingSecret, externalSecret and values"
+      exclusive:
+        - keys: [existingSecret, externalSecret, values]
+          required: true
+      properties:
+        existingSecret: {type: string, description: "The name of a Secret you made. The model writes the ConfigMap only"}
+        values:
+          type: object
+          description: "Writes a Secret from these values; a policy that forbids explicit secrets refuses it"
+          properties:
+            accessKeyId: {type: string, required: true}
+            secretAccessKey: {type: string, required: true}
+            format:
+              type: string
+              enum: [plain, aws-env, credentials-file, restic, barman, custom]
+              default: plain
+            resticPassword: {type: string, requiredWhen: {key: format, equals: restic}}
+            keys:
+              type: object
+              requiredWhen: {key: format, equals: custom}
+              properties:
+                accessKeyId: {type: string, required: true}
+                secretAccessKey: {type: string, required: true}
+        externalSecret:
+          type: object
+          description: "Writes an ExternalSecret that reads the credentials from a store"
+          properties:
+            storeRef:
+              type: object
+              required: true
+              properties:
+                name: {type: string, required: true}
+                kind: {type: string, default: ClusterSecretStore}
+            accessKeyId:
+              type: object
+              required: true
+              properties:
+                key: {type: string, required: true}
+                property: {type: string}
+            secretAccessKey:
+              type: object
+              required: true
+              properties:
+                key: {type: string, required: true}
+                property: {type: string}
+            format:
+              type: string
+              enum: [plain, aws-env, credentials-file, restic, barman, custom]
+              default: plain
+            resticPassword:
+              type: object
+              requiredWhen: {key: format, equals: restic}
+              properties:
+                key: {type: string, required: true}
+                property: {type: string}
+            keys:
+              type: object
+              requiredWhen: {key: format, equals: custom}
+              properties:
+                accessKeyId: {type: string, required: true}
+                secretAccessKey: {type: string, required: true}
+  values:
+    - name: route
+      expr: "${ 'existingSecret' in inputs.credentials ? 'existing' : 'values' in inputs.credentials ? 'secret' : 'external' }"
+    - name: format
+      expr: |-
+        ${ 'values' in inputs.credentials
+             ? ('format' in inputs.credentials.values ? inputs.credentials.values.format : 'plain')
+           : 'externalSecret' in inputs.credentials
+             ? ('format' in inputs.credentials.externalSecret ? inputs.credentials.externalSecret.format : 'plain')
+           : 'plain' }
+    # What each credential is in the Secret's text: the value itself on the secret route, and the
+    # template token of the ExternalSecret's data entry on the other.
+    - name: akid
+      expr: "${ values.route == 'secret' ? inputs.credentials.values.accessKeyId : '{{ .accessKeyId }}' }"
+    - name: sak
+      expr: "${ values.route == 'secret' ? inputs.credentials.values.secretAccessKey : '{{ .secretAccessKey }}' }"
+    - name: password
+      expr: "${ values.format != 'restic' ? '' : values.route == 'secret' ? inputs.credentials.values.resticPassword : '{{ .resticPassword }}' }"
+    - name: location
+      expr: "${ 's3:' + inputs.endpoint + '/' + inputs.bucket + (inputs.prefix == '' ? '' : '/' + inputs.prefix) }"
+    - name: entries
+      expr: |-
+        ${ values.format == 'aws-env'
+             ? {'AWS_ACCESS_KEY_ID': values.akid, 'AWS_SECRET_ACCESS_KEY': values.sak,
+                'AWS_REGION': inputs.region, 'AWS_ENDPOINT_URL_S3': inputs.endpoint}
+           : values.format == 'credentials-file'
+             ? {'credentials': '[default]\naws_access_key_id = ' + values.akid + '\naws_secret_access_key = ' + values.sak + '\n'}
+           : values.format == 'restic'
+             ? {'RESTIC_REPOSITORY': values.location, 'RESTIC_PASSWORD': values.password,
+                'AWS_ACCESS_KEY_ID': values.akid, 'AWS_SECRET_ACCESS_KEY': values.sak}
+           : values.format == 'barman'
+             ? {'ACCESS_KEY_ID': values.akid, 'ACCESS_SECRET_KEY': values.sak}
+           : values.format == 'custom'
+             ? {string(values.route == 'secret' ? inputs.credentials.values.keys.accessKeyId : inputs.credentials.externalSecret.keys.accessKeyId): values.akid,
+                string(values.route == 'secret' ? inputs.credentials.values.keys.secretAccessKey : inputs.credentials.externalSecret.keys.secretAccessKey): values.sak}
+           : {'access-key-id': values.akid, 'secret-access-key': values.sak,
+              'endpoint': inputs.endpoint, 'bucket-name': inputs.bucket} }
+  outputs:
+    settings: "${parts.settings.name}"
+  parts:
+    - id: explicit
+      when: "${ values.route == 'secret' }"
+      type: secret@v1
+      properties:
+        stringData: "${values.entries}"
+    - id: external
+      when: "${ values.route == 'external' }"
+      type: externalsecret.external-secrets.io@v1
+      properties:
+        secretStoreRef:
+          name: "${inputs.credentials.externalSecret.storeRef.name}"
+          kind: "${'kind' in inputs.credentials.externalSecret.storeRef ? inputs.credentials.externalSecret.storeRef.kind : 'ClusterSecretStore'}"
+        target:
+          template:
+            engineVersion: v2
+            data: "${values.entries}"
+        data: |-
+          ${ [{'secretKey': 'accessKeyId', 'remoteRef': inputs.credentials.externalSecret.accessKeyId},
+              {'secretKey': 'secretAccessKey', 'remoteRef': inputs.credentials.externalSecret.secretAccessKey}]
+             + (values.format == 'restic'
+                  ? [{'secretKey': 'resticPassword', 'remoteRef': inputs.credentials.externalSecret.resticPassword}]
+                  : []) }
+    - id: settings
+      type: configmap@v1
+      properties:
+        data:
+          endpoint: "${inputs.endpoint}"
+          region: "${inputs.region}"
+          bucket-name: "${inputs.bucket}"
+          prefix: "${inputs.prefix}"
+          path-style: "${string(inputs.pathStyle)}"
+          ca-secret-name: "${inputs.caSecret == null ? '' : inputs.caSecret.name}"
+          ca-secret-key: "${inputs.caSecret == null ? '' : ('key' in inputs.caSecret ? inputs.caSecret.key : 'ca.crt')}"
+          credentials-secret: |-
+            ${ values.route == 'existing' ? inputs.credentials.existingSecret
+               : values.route == 'secret' ? parts.explicit.name
+               : values.route == 'external' ? parts.external.name
+               : '' }
