@@ -19,11 +19,15 @@
 #     "redis-sidecar" trait handler; a documented library-extension example, not a
 #     bug (examples/README.md, "Why this example cannot be run with `kurel build`").
 #
-# One resource is schema-skipped rather than excluded outright:
+# Two kinds are schema-skipped rather than excluded outright:
 #   - 15-passthrough-minimal.yaml's SparkApplication is deliberately minimal (it
 #     demonstrates the `passthrough` extension point, not a deployable resource) and
 #     fails schema validation by design. Skipped via --skip-kind, not silently
 #     dropped from the fixture set.
+#   - workload-model/app.yaml's VolSync ReplicationSource has no schema in the
+#     flux-schema catalogs ("no schema for kind ReplicationSource"), so the validator
+#     can say nothing about it. Skipped via --skip-kind, with the rest of the
+#     example validated.
 #
 # Usage: bash site/scripts/validate-manifests.sh
 # (invoked via `make validate-manifests`, which builds bin/kurel first)
@@ -117,6 +121,7 @@ if ! flux schema validate "$OUTDIR" \
   --schema-location default \
   --schema-location ecosystem \
   --skip-kind sparkoperator.k8s.io/v1beta2/SparkApplication \
+  --skip-kind volsync.backube/v1alpha1/ReplicationSource \
   --verbose; then
   echo "ERROR: flux schema validate reported one or more invalid resources" >&2
   exit 1

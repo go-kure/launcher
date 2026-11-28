@@ -44,6 +44,13 @@ func buildWorkload(t *testing.T, components ...string) ([]map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
+	return decodeObjects(t, out), nil
+}
+
+// decodeObjects decodes the YAML documents a build printed. Any decode error other than the end
+// of the output fails the test.
+func decodeObjects(t *testing.T, out string) []map[string]any {
+	t.Helper()
 	dec := yaml.NewDecoder(bytes.NewReader([]byte(out)))
 	var docs []map[string]any
 	for {
@@ -57,7 +64,7 @@ func buildWorkload(t *testing.T, components ...string) ([]map[string]any, error)
 			docs = append(docs, d)
 		}
 	}
-	return docs, nil
+	return docs
 }
 
 func mustBuildWorkload(t *testing.T, components ...string) []map[string]any {
@@ -220,9 +227,9 @@ func TestShippedWorkloadParts(t *testing.T) {
 	}
 }
 
-// TestShippedWorkloadMonitoringPortInServiceMode: a monitoring port that is not the workload's
-// own port reaches the scrape object itself, as a name or as a number. The Service already
-// writes the workload port, so the scrape's endpoint is read, not the whole output.
+// TestShippedWorkloadMonitoringPortInServiceMode: the monitoring port reaches the scrape object
+// itself, as a name or as a number. The Service already writes the workload port, so the
+// scrape's endpoint is read, not the whole output.
 func TestShippedWorkloadMonitoringPortInServiceMode(t *testing.T) {
 	tests := []struct {
 		name, port string
@@ -230,7 +237,8 @@ func TestShippedWorkloadMonitoringPortInServiceMode(t *testing.T) {
 	}{
 		{"default", "", map[string]any{"port": "http"}},
 		{"name", ", port: metrics", map[string]any{"port": "metrics"}},
-		{"number", ", port: 9091", map[string]any{"targetPort": 9091}},
+		// A number is a pod port, and the model declares only the workload's own `port` on the pod.
+		{"number", ", port: 8080", map[string]any{"targetPort": 8080}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -290,20 +298,11 @@ func TestShippedWorkloadMonitoringMatchesTheTrait(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the trait build: %v", err)
 	}
-	var want map[string]any
-	dec := yaml.NewDecoder(strings.NewReader(traitOut))
-	for {
-		var d map[string]any
-		if err := dec.Decode(&d); err != nil {
-			break
-		}
-		if d["kind"] == "VMServiceScrape" {
-			want = d["spec"].(map[string]any)
-		}
+	traitScrapes := objectsOf(decodeObjects(t, traitOut), "VMServiceScrape")
+	if len(traitScrapes) != 1 {
+		t.Fatalf("the trait built %d VMServiceScrape, want 1", len(traitScrapes))
 	}
-	if want == nil {
-		t.Fatal("the trait built no VMServiceScrape")
-	}
+	want := traitScrapes[0]["spec"].(map[string]any)
 
 	t.Run("set", func(t *testing.T) {
 		docs := mustBuildWorkload(t, workloadComponent("orders", "        image: reg/orders:1\n        monitoring: {path: /metrics, interval: 30s}\n"))

@@ -77,7 +77,8 @@ components:
 Each optional input is a part of the model that is emitted only when the input is set; a build
 with `image` alone writes the workload and nothing else. `port` of `monitoring` is a port name or
 a number: in `service` mode it defaults to the Service's `http` port, a number is written as
-`targetPort`; in `worker` and `job` mode it is required and is a number, written as `portNumber`:
+`targetPort`, which names a port of the pod, and the model declares only `port` on the pod, so use
+the number of `port` (the build does not check it); in `worker` and `job` mode it is required and is a number, written as `portNumber`:
 the model writes no container port in those modes, so a port name would name nothing.
 
 **What the model format cannot express, and what the model does instead.**
